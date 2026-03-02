@@ -1,0 +1,28 @@
+import Link from 'next/link';
+import { createClient } from '@/lib/supabase/server';
+import { redirect } from 'next/navigation';
+import { SignOutButton } from './sign-out-button';
+
+export default async function DashboardPage() {
+  const supabase = await createClient();
+  const { data } = await supabase.auth.getClaims();
+  if (!data?.claims) {
+    redirect('/login?redirectTo=/dashboard');
+  }
+
+  const email = (data.claims as { email?: string }).email ?? '';
+
+  return (
+    <main className="min-h-screen p-6">
+      <div className="mx-auto max-w-2xl space-y-6">
+        <h1 className="text-2xl font-semibold">Dashboard</h1>
+        <p className="text-neutral-600">Signed in as {email}</p>
+        <nav className="flex flex-wrap gap-4">
+          <Link href="/dashboard/settings" className="rounded bg-neutral-100 px-4 py-2 text-sm font-medium text-neutral-800 hover:bg-neutral-200">Venue settings</Link>
+          <Link href="/dashboard/bookings/new" className="rounded bg-neutral-900 px-4 py-2 text-sm font-medium text-white hover:bg-neutral-800">New phone booking</Link>
+        </nav>
+        <SignOutButton />
+      </div>
+    </main>
+  );
+}

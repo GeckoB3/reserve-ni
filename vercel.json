@@ -1,0 +1,12 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/reminder-24h",
+      "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/cron/auto-cancel-bookings",
+      "schedule": "*/15 * * * *"
+    }
+  ]
+}
