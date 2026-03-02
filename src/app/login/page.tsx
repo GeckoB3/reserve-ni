@@ -21,7 +21,7 @@ export default async function LoginPage({
           Reserve NI — Staff sign in
         </h1>
         <p className="text-sm text-center text-neutral-500">
-          Enter your work email and we’ll send you a magic link to sign in.
+          Sign in with your venue staff email and password, or use a magic link.
         </p>
         <LoginForm redirectTo={(await searchParams).redirectTo} />
         {(await searchParams).error === 'auth_callback_error' && (

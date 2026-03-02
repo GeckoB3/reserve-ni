@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
 import { SignOutButton } from './sign-out-button';
+import { SetPasswordBannerWrapper } from './SetPasswordBannerWrapper';
 
 export default async function DashboardPage() {
   const supabase = await createClient();
@@ -10,11 +11,14 @@ export default async function DashboardPage() {
     redirect('/login?redirectTo=/dashboard');
   }
 
+  const { data: { user } } = await supabase.auth.getUser();
+  const showSetPasswordBanner = user && !(user.user_metadata as Record<string, unknown>)?.has_set_password;
   const email = (data.claims as { email?: string }).email ?? '';
 
   return (
     <main className="min-h-screen p-6">
       <div className="mx-auto max-w-2xl space-y-6">
+        {showSetPasswordBanner && <SetPasswordBannerWrapper showBanner={true} />}
         <h1 className="text-2xl font-semibold">Dashboard</h1>
         <p className="text-neutral-600">Signed in as {email}</p>
         <nav className="flex flex-wrap gap-4">

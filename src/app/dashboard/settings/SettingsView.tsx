@@ -2,6 +2,7 @@
 
 import { useCallback, useState } from 'react';
 import type { VenueSettings } from './types';
+import { ProfileSection } from './sections/ProfileSection';
 import { VenueProfileSection } from './sections/VenueProfileSection';
 import { OpeningHoursSection } from './sections/OpeningHoursSection';
 import { AvailabilityConfigSection } from './sections/AvailabilityConfigSection';
@@ -31,6 +32,7 @@ export function SettingsView({ initialVenue, isAdmin }: SettingsViewProps) {
 
   return (
     <div className="space-y-8">
+      <ProfileSection />
       <VenueProfileSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} />
       <OpeningHoursSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} />
       <AvailabilityConfigSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} />
