@@ -1,0 +1,52 @@
+---
+description: Core development rules for Reserve NI — always active
+alwaysApply: true
+---
+
+# Reserve NI — Core Rules
+
+## Project Overview
+Reserve NI is a booking and guest management platform for independent restaurants in Northern Ireland. It reduces no-shows through deposit collection and automates guest communications. This is an MVP targeting 10–20 founding venues.
+
+## Tech Stack
+- **Framework:** Next.js (App Router) with TypeScript (strict mode)
+- **Database:** Supabase (hosted PostgreSQL) with Row-Level Security
+- **Real-time:** Supabase Realtime (WebSocket) with polling fallback
+- **Payments:** Stripe Connect (direct charges to venue accounts — Reserve NI never holds funds)
+- **Email:** SendGrid (routed through communication abstraction layer)
+- **SMS:** Twilio (routed through communication abstraction layer)
+- **Styling:** Tailwind CSS
+- **Hosting:** Vercel
+- **Auth:** Supabase Auth (email + password, two roles: Admin and Staff)
+
+## Code Standards
+- Write TypeScript with strict types. Use interfaces for all data models. No `any` types unless absolutely unavoidable and commented.
+- Use functional and declarative patterns. No classes unless wrapping an external SDK that requires them.
+- Prefer `const` over `let`. Never use `var`.
+- Use async/await. Never use raw `.then()` chains.
+- Handle all errors explicitly. Never swallow errors silently. Log errors with context (what was being attempted, what failed, relevant IDs).
+- Use early returns to reduce nesting.
+- Keep functions small and focused. If a function exceeds 50 lines, consider splitting it.
+- Name things clearly. A function called `calculateAvailableCovers` is better than `calc` or `getAvail`.
+
+## File Organisation
+- All source code lives in `src/`.
+- API routes are namespaced: `app/api/venue/` (authenticated dashboard), `app/api/booking/` (public guest-facing), `app/api/webhooks/` (Stripe), `app/api/consumer/` (reserved for Phase 2 — do not implement).
+- Shared logic lives in `lib/`: `lib/supabase/`, `lib/stripe/`, `lib/communications/`, `lib/availability/`.
+- TypeScript types and interfaces live in `types/`.
+- React components live in `components/` with subdirectories by feature area.
+
+## Critical Safety Rules
+- **Never store card data.** All payment handling goes through Stripe. Reserve NI stores only Stripe payment intent IDs.
+- **Never hold deposit funds.** The MVP uses Stripe Connect direct charges. Funds go to the venue's connected Stripe account. Reserve NI never touches the money.
+- **Never call SendGrid or Twilio directly from business logic.** All communications go through the channel abstraction layer in `lib/communications/`.
+- **Webhook handlers must be idempotent.** Processing the same Stripe event twice must produce the same result. Check for existing processing before taking action.
+- **Never expose service role keys to the client.** `SUPABASE_SERVICE_ROLE_KEY` and `STRIPE_SECRET_KEY` are server-side only.
+- **All database access respects Row-Level Security.** Use the appropriate Supabase client (anon for client-side, service role for server-side admin operations only).
+
+## When Asked to Build Something
+1. Check if the feature is specified in the PRD (docs/PRD.md or referenced specification).
+2. Check existing code for related modules before creating new ones.
+3. Build incrementally — one working piece at a time, not the entire feature in one pass.
+4. Write the implementation, then suggest test cases.
+5. If a decision is ambiguous, ask before guessing.

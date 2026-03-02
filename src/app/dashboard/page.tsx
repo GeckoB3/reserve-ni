@@ -18,8 +18,10 @@ export default async function DashboardPage() {
         <h1 className="text-2xl font-semibold">Dashboard</h1>
         <p className="text-neutral-600">Signed in as {email}</p>
         <nav className="flex flex-wrap gap-4">
+          <Link href="/dashboard/bookings" className="rounded bg-neutral-900 px-4 py-2 text-sm font-medium text-white hover:bg-neutral-800">Reservations</Link>
+          <Link href="/dashboard/day-sheet" className="rounded bg-neutral-100 px-4 py-2 text-sm font-medium text-neutral-800 hover:bg-neutral-200">Day Sheet</Link>
           <Link href="/dashboard/settings" className="rounded bg-neutral-100 px-4 py-2 text-sm font-medium text-neutral-800 hover:bg-neutral-200">Venue settings</Link>
-          <Link href="/dashboard/bookings/new" className="rounded bg-neutral-900 px-4 py-2 text-sm font-medium text-white hover:bg-neutral-800">New phone booking</Link>
+          <Link href="/dashboard/bookings/new" className="rounded bg-neutral-100 px-4 py-2 text-sm font-medium text-neutral-800 hover:bg-neutral-200">New phone booking</Link>
         </nav>
         <SignOutButton />
       </div>

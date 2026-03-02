@@ -1,0 +1,73 @@
+---
+description: API route patterns and conventions
+globs:
+  - src/app/api/**
+---
+
+# API Route Rules
+
+## Namespacing
+- `/api/venue/` — Authenticated venue staff endpoints. Require valid session. Check role (Admin vs Staff) where relevant.
+- `/api/booking/` — Public guest-facing endpoints. No authentication. Used by booking page and iFrame widget.
+- `/api/webhooks/stripe/` — Stripe webhook receivers. Verify Stripe signature. No user authentication.
+- `/api/consumer/` — Reserved for Phase 2. Do not implement any routes here.
+
+## Request/Response Pattern
+```typescript
+import { NextRequest, NextResponse } from 'next/server';
+
+export async function POST(request: NextRequest) {
+  try {
+    const body = await request.json();
+
+    // Validate input with zod
+    const parsed = BookingCreateSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: 'Invalid request', details: parsed.error.flatten() },
+        { status: 400 }
+      );
+    }
+
+    // Business logic...
+    const result = await createBooking(parsed.data);
+
+    // Log event
+    await logEvent('booking_created', result);
+
+    return NextResponse.json(result, { status: 201 });
+  } catch (error) {
+    console.error('Failed to create booking:', error);
+    return NextResponse.json(
+      { error: 'Internal server error' },
+      { status: 500 }
+    );
+  }
+}
+```
+
+## Input Validation
+- Validate ALL inputs with zod schemas before processing.
+- Return 400 with descriptive error messages for invalid input.
+- Zod schemas live in `types/` alongside their TypeScript interfaces.
+
+## Authentication for Venue Endpoints
+- Extract the session from the request using Supabase Auth.
+- If no valid session, return 401.
+- For Admin-only operations, check the staff role and return 403 if insufficient.
+- Always scope queries to the authenticated user's venue_id.
+
+## Error Responses
+Use consistent error response format:
+```typescript
+{ error: string, details?: any }
+```
+- 400: Bad request (invalid input)
+- 401: Unauthorised (no session)
+- 403: Forbidden (insufficient role)
+- 404: Not found
+- 409: Conflict (e.g., slot no longer available)
+- 500: Internal server error (unexpected failures)
+
+## Rate Limiting
+For public booking endpoints, implement basic rate limiting to prevent abuse. At MVP scale, a simple in-memory rate limiter is sufficient. Do not over-engineer this.

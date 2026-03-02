@@ -1,0 +1,68 @@
+---
+description: Availability and capacity model rules
+globs:
+  - src/lib/availability/**
+  - src/app/api/booking/**/availability*
+  - src/app/api/venue/**/availability*
+---
+
+# Availability Engine Rules
+
+The availability engine is the foundation of the entire booking system. Every other feature depends on it. Build it as pure functions in `lib/availability/` that can be tested independently.
+
+## Slot Models
+Each venue uses one of two models, set in `availability_config`:
+
+### Fixed Intervals
+- Venue selects interval: 15 or 30 minutes.
+- Slots generated automatically from opening hours. E.g., open 5pm–10pm with 30-min intervals → slots at 17:00, 17:30, 18:00, etc.
+- Each slot has `max_covers` (can vary by day of week).
+
+### Named Sittings
+- Venue defines sittings with start/end times. E.g., "Early Bird" (17:00–18:45), "Main" (19:00–21:30).
+- Each sitting has `max_covers`.
+- Guests book into a sitting, not a specific time.
+
+## Turn-Time Logic (Fixed Intervals Only)
+Optional, venue-configurable. Not applicable to named sittings.
+
+- **Disabled (default):** Each slot has independent capacity. Booking at 19:00 only consumes capacity in the 19:00 slot.
+- **Enabled:** Venue sets `sitting_duration_minutes` (60–180, default 90). A booking at 19:00 with 90-minute duration consumes capacity in 19:00, 19:30, and 20:00 slots.
+
+## Capacity Calculation
+```typescript
+// Simple model (no turn time):
+available = max_covers_for_slot - sum(party_size) of Confirmed + Pending bookings in slot
+
+// Turn-time model:
+// Find all slots spanned by the sitting duration
+const slotsSpanned = getSlotsInRange(startTime, startTime + sittingDuration, intervalMinutes);
+// Available = minimum remaining capacity across ALL spanned slots
+available = Math.min(...slotsSpanned.map(slot => slot.max_covers - slot.booked_covers));
+```
+
+**Important:** Pending bookings (phone bookings awaiting deposit) consume capacity. If the booking auto-cancels after 24 hours, capacity is released immediately.
+
+## Blocking
+- Venues can block entire dates or specific time slots.
+- Blocked slots return as unavailable across all booking channels.
+- Blocking does NOT affect existing confirmed bookings — only prevents new ones.
+
+## Implementation Notes
+- All availability functions must be pure: given venue config + existing bookings + date → return available slots. No side effects.
+- Expose via API at `GET /api/booking/availability?venue_id=X&date=YYYY-MM-DD&party_size=N`.
+- The response should be an array of available slots/sittings with remaining capacity.
+- Cache aggressively but invalidate on any booking change (create, cancel, modify).
+- All time calculations use `Europe/London` timezone.
+
+## Testing Requirements
+This module requires comprehensive tests. Cover at minimum:
+- Fixed intervals with simple capacity (no turn time)
+- Fixed intervals with turn-time logic enabled
+- Named sittings capacity
+- Fully booked slots returning zero availability
+- Blocked dates and slots
+- Pending bookings consuming capacity
+- Capacity release on booking cancellation
+- Day-of-week varying capacity
+- Edge case: booking that spans the last slot of the day

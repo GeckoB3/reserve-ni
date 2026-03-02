@@ -1,0 +1,49 @@
+---
+description: Database schema, Supabase patterns, and data model rules
+globs:
+  - src/lib/supabase/**
+  - src/app/api/**
+  - supabase/**
+  - types/**
+---
+
+# Database & Supabase Rules
+
+## Schema
+The database schema is defined in `docs/schema.sql`. Always reference it before writing queries.
+
+### Key Tables
+- **venues** — Core venue profile. Contains JSONB config fields: `booking_rules`, `deposit_config`, `opening_hours`, `availability_config`, `communication_templates`. Each JSONB field has a defined schema — validate on write.
+- **bookings** — Individual booking record. Status enum: Pending, Confirmed, Arrived, NoShow, Cancelled. Source enum: Widget, BookingPage, Phone, WalkIn. Includes `cancellation_policy_snapshot` storing the policy in effect at time of booking.
+- **guests** — One record per unique guest per venue. Matched on normalised email or phone. Contains `global_guest_hash` (computed, not used in MVP but must be populated).
+- **events** — Immutable event log. Every booking action recorded: booking_created, booking_confirmed, guest_arrived, no_show_recorded, deposit_paid, refund_processed, booking_cancelled, booking_modified. Never update or delete events rows.
+- **staff** — Venue staff accounts. Role: Admin or Staff.
+- **communications** — Log of every message sent. Message type, channel, recipient, timestamp, delivery status.
+
+## Guest Identity Matching
+When creating a booking, match guests in this order:
+1. Email match: lowercase and trim the email, check for existing guest at the same venue.
+2. Phone match: normalise to E.164 format, check for existing guest at the same venue.
+3. No match: create new guest record. Compute `global_guest_hash` from normalised email (preferred) or phone.
+Always increment `visit_count` when linking to an existing guest.
+
+## Supabase Patterns
+- Use `createClient` from `@supabase/supabase-js` — separate clients for server (service role) and client (anon key).
+- Server-side API routes use the service role client when bypassing RLS is needed (e.g., cross-venue reconciliation). All other operations use the anon client with RLS.
+- Always use parameterised queries. Never interpolate user input into SQL strings.
+- For real-time subscriptions, always implement a connection status check and fallback to polling (30-second interval) on disconnection.
+
+## Events Table
+Every mutation to a booking must also insert an event. This is non-negotiable. The events table is the source of truth for reporting. Pattern:
+```typescript
+await supabase.from('events').insert({
+  event_type: 'booking_confirmed',
+  booking_id: booking.id,
+  venue_id: booking.venue_id,
+  payload: { /* event-specific details */ },
+  created_at: new Date().toISOString()
+});
+```
+
+## JSONB Config Validation
+All JSONB config fields must be validated against their schema before writing to the database. Use zod schemas defined in `types/config-schemas.ts`. Never write unvalidated JSONB.

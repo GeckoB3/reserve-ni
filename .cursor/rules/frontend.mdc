@@ -1,0 +1,64 @@
+---
+description: Frontend, UI components, and styling rules
+globs:
+  - src/app/**/*.tsx
+  - src/components/**
+  - src/app/dashboard/**
+  - src/app/book/**
+---
+
+# Frontend & UI Rules
+
+## General
+- Use React Server Components by default. Add `'use client'` only when the component needs interactivity (event handlers, hooks, browser APIs).
+- Use Tailwind CSS for all styling. No CSS modules, no styled-components, no inline style objects.
+- Mobile-first responsive design. Start with the mobile layout, then add `md:` and `lg:` breakpoints.
+- Keep components focused. One component, one job. If a component file exceeds 150 lines, split it.
+
+## Dashboard (Venue Staff)
+- Located in `src/app/dashboard/`.
+- Requires authentication. Use middleware to redirect unauthenticated users.
+- Real-time updates via Supabase Realtime subscriptions.
+- **Connection status indicator:** Always show a visible banner when the WebSocket drops. Auto-enable 30-second polling fallback. Banner clears on reconnection.
+- Day sheet is the priority view. Optimise for readability at arm's length on a tablet mounted at a host stand.
+- Dietary flags and allergy warnings must use colour coding that is impossible to miss. Red for severe allergies.
+
+## Booking Pages (Guest-Facing)
+- Located in `src/app/book/[venue-slug]/`.
+- Public — no authentication required.
+- Must be fast. Target < 2 second load time on mobile.
+- Booking flow: date → time slot/sitting → party size → guest details → dietary/occasion → deposit payment → confirmation.
+- Show cancellation policy clearly before payment.
+- Stripe payment uses Stripe Elements (Stripe's own iFrame) — never a custom card input.
+
+## iFrame Widget
+- Same booking flow as the hosted page, rendered for iFrame embedding.
+- Uses `postMessage` API for parent page communication with origin validation.
+- Accent colour customisable via URL parameter.
+- Must work inside third-party websites with varying CSP policies.
+
+## Confirm-or-Cancel Page
+- Located at a public URL like `/confirm/[booking-token]`.
+- Shows: venue name, booking date/time, party size, dietary notes.
+- Two clear buttons: "Confirm I'm Coming" (green/teal) and "Cancel My Booking" (red/muted).
+- Cancel flows to a secondary confirmation showing deposit implications.
+- Must be fully functional on mobile. Most guests will tap this from an SMS link.
+
+## Day Sheet Specific
+- Chronological order by booking time.
+- Each row: time, guest name, party size, table (if assigned), dietary flags, occasion, deposit status, confirmation status.
+- Allergy flags displayed prominently with colour coding.
+- One-tap check-in (mark as Arrived).
+- No-show button only available after the venue's configured grace period has elapsed.
+- If offline fallback is implemented: service worker caches last state, queues check-in actions, syncs on reconnection.
+
+## Accessibility
+- All interactive elements must be keyboard accessible.
+- Use semantic HTML: `<button>` for actions, `<a>` for navigation, `<form>` for forms.
+- Colour is not the only indicator — use icons or text alongside colour coding.
+- Form inputs must have associated labels.
+
+## Loading and Error States
+- Every data-fetching component must handle three states: loading, error, and success.
+- Use skeleton loaders, not spinners, for content areas.
+- Error states must be actionable: show what went wrong and offer a retry.

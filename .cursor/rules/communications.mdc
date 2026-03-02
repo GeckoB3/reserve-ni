@@ -1,0 +1,83 @@
+---
+description: Communication abstraction layer, email, and SMS rules
+globs:
+  - src/lib/communications/**
+  - src/app/api/**/notify*
+  - src/app/api/**/communicate*
+  - src/app/api/booking/**/confirm*
+  - src/app/api/booking/**/cancel*
+---
+
+# Communications Rules
+
+## Architecture: Channel Abstraction Layer
+All guest communications are routed through a unified service in `lib/communications/`. Business logic never calls SendGrid or Twilio directly.
+
+```typescript
+// Correct — use the abstraction
+import { sendCommunication } from '@/lib/communications';
+await sendCommunication({
+  type: 'booking_confirmation',
+  recipient: { email: guest.email, phone: guest.phone },
+  payload: { guestName, venueName, bookingDate, bookingTime, ... }
+});
+
+// WRONG — never do this from business logic
+import sgMail from '@sendgrid/mail';
+await sgMail.send({ ... }); // ❌
+```
+
+The service routes messages to the correct channel (email, SMS) based on message type. WhatsApp will be added as a third provider in Phase 2 without changing business logic.
+
+## Message Types and Channels
+| Message Type | Channel | Timing |
+|---|---|---|
+| booking_confirmation | Email | Immediately on confirmed |
+| deposit_payment_request | Email + SMS | Immediately on phone booking |
+| deposit_payment_reminder | SMS | 2 hours after unpaid request |
+| pre_visit_reminder | Email | 48 hours before reservation |
+| confirm_or_cancel_prompt | SMS | 24 hours before reservation |
+| dietary_digest | Email (kitchen) | Morning of reservation day |
+| post_visit_thankyou | Email | 3 hours after reservation end |
+| auto_cancel_notification | Email + SMS | 24h after unpaid deposit |
+| booking_modification | Email | Immediately on change |
+
+## Template Variables
+All templates support these merge variables:
+`{{guest_name}}`, `{{venue_name}}`, `{{booking_date}}`, `{{booking_time}}`, `{{party_size}}`, `{{deposit_amount}}`, `{{cancellation_deadline}}`, `{{venue_address}}`, `{{dietary_notes}}`, `{{occasion}}`, `{{confirm_link}}`, `{{cancel_link}}`, `{{payment_link}}`, `{{manage_booking_link}}`
+
+Templates are stored per venue in the `communication_templates` JSONB field on the venues table. Each venue gets sensible defaults which they can customise.
+
+## Confirm-or-Cancel Prompt
+This is the most important communication for no-show reduction.
+- Sent via SMS 24 hours before reservation.
+- Contains a short link to a web page (not two separate links in the SMS).
+- The web page shows booking details and two buttons: "Confirm I'm Coming" and "Cancel My Booking".
+- Cancel button leads to a secondary confirmation showing deposit implications.
+- **Not responding does NOT cancel the booking.** The booking stands.
+- The web page must be mobile-optimised and branded with the venue name.
+
+## SMS Cost Awareness
+UK SMS costs ~4–5p per message via Twilio. Keep SMS short and purposeful. Use email for content-rich messages. SMS is for time-sensitive, action-required messages only.
+
+## Communication Logging
+Every message sent must be logged in the `communications` table with: message type, channel, recipient, timestamp, delivery status, and template version. This is the audit trail and debugging tool.
+
+## Provider Implementation Pattern
+```typescript
+// lib/communications/providers/sendgrid.ts
+export async function sendEmail(to: string, template: CompiledTemplate): Promise<DeliveryResult> { ... }
+
+// lib/communications/providers/twilio.ts
+export async function sendSMS(to: string, body: string): Promise<DeliveryResult> { ... }
+
+// lib/communications/index.ts — the router
+export async function sendCommunication(message: CommunicationRequest): Promise<void> {
+  const channels = getChannelsForMessageType(message.type);
+  const template = compileTemplate(message.type, message.payload);
+  for (const channel of channels) {
+    const result = await providers[channel].send(message.recipient, template);
+    await logCommunication(message, channel, result);
+  }
+}
+```

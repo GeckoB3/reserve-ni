@@ -1,0 +1,45 @@
+---
+description: Testing patterns and requirements
+globs:
+  - src/**/*.test.ts
+  - src/**/*.test.tsx
+  - src/**/*.spec.ts
+  - __tests__/**
+---
+
+# Testing Rules
+
+## What Must Be Tested
+- **Availability engine:** All slot models, turn-time logic, capacity calculations, blocking, edge cases. This is the highest-priority test target.
+- **Deposit and refund logic:** Cancellation window calculations, refund eligibility, deposit amount calculations, timezone handling.
+- **Webhook handlers:** Idempotency (same event processed twice = same result), signature verification, all event types.
+- **Guest identity matching:** Email normalisation, phone normalisation, match priority, new guest creation, visit count increment.
+- **Communication routing:** Correct channel selection per message type, template variable interpolation.
+
+## Testing Approach
+- Use Jest for unit tests.
+- Availability engine and payment logic should have pure unit tests with no external dependencies.
+- For Supabase interactions, use a test database or mock the Supabase client.
+- For Stripe, use Stripe's test mode and test card numbers (4242424242424242 for success, 4000000000000002 for decline).
+- For communications, mock the provider layer and test the routing logic.
+
+## Test File Location
+- Tests live next to the code they test: `availability.ts` → `availability.test.ts`.
+- Integration tests that span multiple modules go in `__tests__/integration/`.
+
+## Test Naming
+Use descriptive names that read as sentences:
+```typescript
+describe('calculateAvailableCovers', () => {
+  it('returns full capacity when no bookings exist', () => { ... });
+  it('subtracts pending bookings from available capacity', () => { ... });
+  it('blocks overlapping slots when turn-time is enabled', () => { ... });
+  it('returns zero for fully booked slots', () => { ... });
+  it('ignores cancelled bookings in capacity calculation', () => { ... });
+});
+```
+
+## When Writing Tests
+- Test the happy path first, then edge cases, then error cases.
+- Each test should test one thing. If the test name has "and" in it, split it.
+- Use realistic test data that matches the actual venue configurations described in the PRD.

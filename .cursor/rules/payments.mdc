@@ -1,0 +1,96 @@
+---
+description: Stripe Connect, deposits, and payment handling rules
+globs:
+  - src/lib/stripe/**
+  - src/app/api/webhooks/**
+  - src/app/api/booking/**/deposit*
+  - src/app/api/booking/**/payment*
+  - src/app/api/venue/**/stripe*
+---
+
+# Payments & Stripe Rules
+
+## Architecture: Direct Charges (MVP)
+Reserve NI uses Stripe Connect with **direct charges**. This means:
+- Guest deposits are charged directly to the venue's connected Stripe account.
+- Reserve NI never holds, controls, or routes deposit funds.
+- Refunds are triggered by Reserve NI via the Stripe API on the venue's connected account.
+- Reserve NI is NOT providing a payment service under the Payment Services Regulations 2017.
+
+A platform hold model is planned for Phase 2. Do not build any platform hold logic.
+
+## Stripe Connect Patterns
+```typescript
+// Creating a direct charge on the venue's connected account
+const paymentIntent = await stripe.paymentIntents.create({
+  amount: depositAmountInPence,
+  currency: 'gbp',
+  // Direct charge: payment goes to connected account
+}, {
+  stripeAccount: venue.stripe_connected_account_id,
+});
+
+// Triggering a refund on the venue's connected account
+const refund = await stripe.refunds.create({
+  payment_intent: booking.stripe_payment_intent_id,
+}, {
+  stripeAccount: venue.stripe_connected_account_id,
+});
+```
+
+## Cancellation Policy (MVP)
+The MVP uses a single binary policy for all venues:
+- **Full refund:** Guest cancels 48+ hours before reservation time.
+- **No refund:** Guest cancels less than 48 hours before, or no-shows.
+- Timezone for all calculations: `Europe/London`.
+- The policy version in effect at booking time is stored on the booking record (`cancellation_policy_snapshot`). Policy changes never retroactively affect existing bookings.
+
+## Webhook Handlers — CRITICAL
+All webhook handlers in `/api/webhooks/stripe/` MUST be:
+
+1. **Idempotent:** Check if the event has already been processed before taking action. Use the Stripe event ID as the idempotency key.
+2. **Signature-verified:** Verify the webhook signature using `stripe.webhooks.constructEvent()` with the webhook secret. Reject unverified events.
+3. **Fault-tolerant:** If processing fails, return a 500 so Stripe retries. Do not return 200 for failed processing.
+
+```typescript
+// Idempotency check pattern
+const existingEvent = await supabase
+  .from('webhook_events')
+  .select('id')
+  .eq('stripe_event_id', event.id)
+  .single();
+
+if (existingEvent.data) {
+  return NextResponse.json({ received: true }); // Already processed
+}
+
+// Process the event...
+
+// Record that we processed it
+await supabase.from('webhook_events').insert({
+  stripe_event_id: event.id,
+  event_type: event.type,
+  processed_at: new Date().toISOString(),
+});
+```
+
+## Key Webhook Events to Handle
+- `payment_intent.succeeded` — Mark deposit as Paid, update booking to Confirmed, trigger confirmation communication.
+- `payment_intent.payment_failed` — Mark deposit as Failed, notify venue.
+- `charge.refunded` — Confirm refund completion, update deposit status to Refunded.
+- `charge.dispute.created` — Alert founding team (email notification). Log the dispute.
+
+## Phone Booking Deposit Flow
+1. Staff enters phone booking → booking created with status Pending.
+2. System immediately sends deposit payment link via email + SMS.
+3. After 2 hours unpaid → send one reminder SMS.
+4. After 24 hours unpaid → auto-cancel booking, release capacity, notify guest and venue.
+5. On payment → update to Confirmed, send confirmation.
+
+## Deposit Amount Calculation
+- Deposit = `deposit_per_head` × `party_size` (in pence for Stripe).
+- If party size increases after booking, send additional deposit request for the difference.
+- Party size decreases do NOT trigger partial refunds (documented in booking terms).
+
+## Daily Reconciliation
+A scheduled job runs daily comparing Reserve NI's internal deposit/booking state against Stripe's records via the API. Any discrepancies are logged and flagged. At pilot scale, the founding team reviews manually.

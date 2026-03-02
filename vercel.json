@@ -2,11 +2,11 @@
   "crons": [
     {
       "path": "/api/cron/reminder-24h",
-      "schedule": "*/15 * * * *"
+      "schedule": "0 8 * * *"
     },
     {
       "path": "/api/cron/auto-cancel-bookings",
-      "schedule": "*/15 * * * *"
+      "schedule": "0 9 * * *"
     }
   ]
 }
