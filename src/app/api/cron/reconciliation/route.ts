@@ -46,12 +46,13 @@ export async function POST(request: NextRequest) {
       if (!accountId) continue;
 
       try {
-        const pi = await stripe.paymentIntents.retrieve(b.stripe_payment_intent_id!, {
-          stripeAccount: accountId,
-          expand: ['charges.data'],
-        });
+        const pi = await stripe.paymentIntents.retrieve(
+          b.stripe_payment_intent_id!,
+          { expand: ['latest_charge'] },
+          { stripeAccount: accountId },
+        );
         const expectedStatus = b.deposit_status;
-        const charge = pi.charges?.data?.[0];
+        const charge = pi.latest_charge && typeof pi.latest_charge === 'object' ? pi.latest_charge : null;
         const refunded = charge?.refunded ?? false;
 
         if (expectedStatus === 'Paid' && pi.status !== 'succeeded') {
