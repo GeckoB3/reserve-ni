@@ -26,7 +26,7 @@ interface DetailsStepProps {
 }
 
 const detailsSchemaWithTerms = detailsSchema.and(
-  z.object({ acceptTerms: z.literal(true, { errorMap: () => ({ message: 'You must accept the booking terms' }) }) })
+  z.object({ acceptTerms: z.boolean().refine((v) => v === true, { message: 'You must accept the booking terms' }) })
 );
 type FormDataWithTerms = z.infer<typeof detailsSchemaWithTerms>;
 
