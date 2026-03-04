@@ -26,7 +26,7 @@ export async function PATCH(request: NextRequest) {
 
     const opening_hours = parsed.data ?? undefined;
 
-    const { data: venue, error } = await supabase
+    const { data: venue, error } = await staff.db
       .from('venues')
       .update({ opening_hours, updated_at: new Date().toISOString() })
       .eq('id', staff.venue_id)

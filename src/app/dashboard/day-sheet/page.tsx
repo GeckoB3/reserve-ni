@@ -2,17 +2,18 @@ import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { DaySheetView } from './DaySheetView';
+import { SwRegister } from './sw-register';
+import { getDashboardStaff } from '@/lib/venue-auth';
 
 export default async function DaySheetPage() {
   const supabase = await createClient();
-  const { data } = await supabase.auth.getClaims();
-  if (!data?.claims) {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) {
     redirect('/login?redirectTo=/dashboard/day-sheet');
   }
 
-  const email = (data.claims as { email?: string }).email ?? '';
-  const { data: staffRows } = await supabase.from('staff').select('venue_id').eq('email', email);
-  const venueId = staffRows?.[0]?.venue_id;
+  const staff = await getDashboardStaff(supabase);
+  const venueId = staff.venue_id;
 
   if (!venueId) {
     return (
@@ -26,6 +27,7 @@ export default async function DaySheetPage() {
   return (
     <main className="min-h-screen bg-neutral-100 p-2 md:p-4">
       <div className="mx-auto max-w-4xl">
+        <SwRegister />
         <div className="mb-2 flex flex-wrap items-center gap-2">
           <Link href="/dashboard" className="text-neutral-600 underline hover:text-neutral-900 text-sm">Dashboard</Link>
           <span className="text-neutral-400">/</span>

@@ -23,7 +23,7 @@ export async function GET(
 
     const { id } = await params;
 
-    const { data: booking, error: bookErr } = await supabase
+    const { data: booking, error: bookErr } = await staff.db
       .from('bookings')
       .select('*')
       .eq('id', id)
@@ -34,15 +34,21 @@ export async function GET(
       return NextResponse.json({ error: 'Booking not found' }, { status: 404 });
     }
 
-    const { data: guest } = await supabase
+    const { data: guest } = await staff.db
       .from('guests')
       .select('id, name, email, phone, visit_count')
       .eq('id', booking.guest_id)
       .single();
 
-    const { data: events } = await supabase
+    const { data: events } = await staff.db
       .from('events')
       .select('id, event_type, payload, created_at')
+      .eq('booking_id', id)
+      .order('created_at', { ascending: true });
+
+    const { data: communications } = await staff.db
+      .from('communications')
+      .select('id, message_type, channel, status, created_at')
       .eq('booking_id', id)
       .order('created_at', { ascending: true });
 
@@ -55,6 +61,7 @@ export async function GET(
       booking_time: bookingTimeStr,
       guest: guest ?? null,
       events: events ?? [],
+      communications: communications ?? [],
     });
   } catch (err) {
     console.error('GET /api/venue/bookings/[id] failed:', err);
@@ -77,7 +84,7 @@ export async function PATCH(
     const { id } = await params;
     const body = await request.json();
 
-    const { data: booking, error: fetchErr } = await supabase
+    const { data: booking, error: fetchErr } = await staff.db
       .from('bookings')
       .select('*')
       .eq('id', id)
@@ -131,7 +138,7 @@ export async function PATCH(
           }
         }
 
-        await supabase
+        await staff.db
           .from('bookings')
           .update({
             status: 'Cancelled',
@@ -141,13 +148,13 @@ export async function PATCH(
           .eq('id', id);
       } else if (newStatus === 'No-Show') {
         const depositStatus = booking.deposit_status === 'Paid' ? 'Forfeited' : booking.deposit_status;
-        await supabase
+        await staff.db
           .from('bookings')
           .update({ status: 'No-Show', deposit_status: depositStatus, updated_at: new Date().toISOString() })
           .eq('id', id);
         const { sendCommunication } = await import('@/lib/communications');
-        const { data: guestRow } = await supabase.from('guests').select('name, email').eq('id', booking.guest_id).single();
-        const { data: venueRow } = await supabase.from('venues').select('name').eq('id', staff.venue_id).single();
+        const { data: guestRow } = await staff.db.from('guests').select('name, email').eq('id', booking.guest_id).single();
+        const { data: venueRow } = await staff.db.from('venues').select('name').eq('id', staff.venue_id).single();
         if (guestRow?.email && venueRow?.name) {
           const depositAmount = booking.deposit_amount_pence != null ? (booking.deposit_amount_pence / 100).toFixed(2) : undefined;
           const bookingTime = typeof booking.booking_time === 'string' ? booking.booking_time.slice(0, 5) : '';
@@ -164,13 +171,37 @@ export async function PATCH(
           });
         }
       } else {
-        await supabase
+        await staff.db
           .from('bookings')
           .update({ status: newStatus, updated_at: new Date().toISOString() })
           .eq('id', id);
+
+        if (newStatus === 'Seated') {
+          const today = new Date().toISOString().slice(0, 10);
+          const { data: guestData } = await admin.from('guests').select('visit_count').eq('id', booking.guest_id).single();
+          await admin
+            .from('guests')
+            .update({
+              visit_count: (guestData?.visit_count ?? 0) + 1,
+              last_visit_date: today,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', booking.guest_id);
+        }
       }
 
-      const updated = await supabase.from('bookings').select('*').eq('id', id).single();
+      if (newStatus === 'No-Show') {
+        const { data: guestData } = await admin.from('guests').select('no_show_count').eq('id', booking.guest_id).single();
+        await admin
+          .from('guests')
+          .update({
+            no_show_count: (guestData?.no_show_count ?? 0) + 1,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', booking.guest_id);
+      }
+
+      const updated = await staff.db.from('bookings').select('*').eq('id', id).single();
       return NextResponse.json(updated.data);
     }
 
@@ -229,14 +260,50 @@ export async function PATCH(
         party_size: booking.party_size,
       };
 
-      await supabase
+      const bookingUpdate: Record<string, unknown> = {
+        booking_date: newDate,
+        booking_time: newTime,
+        party_size: newPartySize,
+        updated_at: new Date().toISOString(),
+      };
+
+      let additionalDepositClientSecret: string | null = null;
+
+      if (newPartySize > booking.party_size && booking.deposit_status === 'Paid' && booking.deposit_amount_pence) {
+        const { data: venueForDeposit } = await admin
+          .from('venues')
+          .select('deposit_config, stripe_connected_account_id')
+          .eq('id', staff.venue_id)
+          .single();
+
+        const depCfg = (venueForDeposit?.deposit_config as { amount_per_person_gbp?: number }) ?? {};
+        const perPersonGbp = depCfg.amount_per_person_gbp ?? 5;
+        const additionalCovers = newPartySize - booking.party_size;
+        const additionalPence = Math.round(perPersonGbp * additionalCovers * 100);
+
+        if (additionalPence > 0 && venueForDeposit?.stripe_connected_account_id) {
+          try {
+            const pi = await stripe.paymentIntents.create(
+              {
+                amount: additionalPence,
+                currency: 'gbp',
+                metadata: { booking_id: id, venue_id: staff.venue_id, type: 'additional_deposit' },
+                automatic_payment_methods: { enabled: true },
+              },
+              { stripeAccount: venueForDeposit.stripe_connected_account_id }
+            );
+            additionalDepositClientSecret = pi.client_secret;
+            bookingUpdate.deposit_amount_pence = booking.deposit_amount_pence + additionalPence;
+            bookingUpdate.deposit_status = 'Pending';
+          } catch (stripeErr) {
+            console.error('Additional deposit PI failed:', stripeErr);
+          }
+        }
+      }
+
+      await staff.db
         .from('bookings')
-        .update({
-          booking_date: newDate,
-          booking_time: newTime,
-          party_size: newPartySize,
-          updated_at: new Date().toISOString(),
-        })
+        .update(bookingUpdate)
         .eq('id', id);
 
       await admin.from('events').insert({
@@ -246,7 +313,31 @@ export async function PATCH(
         payload: { before, after: { booking_date: newDate, booking_time: timeStr, party_size: newPartySize } },
       });
 
-      const updated = await supabase.from('bookings').select('*').eq('id', id).single();
+      const { data: guestRow } = await staff.db.from('guests').select('name, email, phone').eq('id', booking.guest_id).single();
+      const { data: venueRow } = await staff.db.from('venues').select('name').eq('id', staff.venue_id).single();
+      if (guestRow?.email && venueRow?.name) {
+        const { sendCommunication } = await import('@/lib/communications');
+        const depositAmount = booking.deposit_amount_pence != null ? (booking.deposit_amount_pence / 100).toFixed(2) : undefined;
+        const baseUrl = request.nextUrl.origin;
+        const manageBookingLink = booking.confirm_token_hash
+          ? `${baseUrl}/manage/${id}/${encodeURIComponent(booking.confirm_token_hash)}`
+          : undefined;
+        await sendCommunication({
+          type: 'booking_modification',
+          recipient: { email: guestRow.email, phone: guestRow.phone ?? undefined },
+          payload: {
+            guest_name: guestRow.name ?? 'Guest',
+            venue_name: venueRow.name,
+            booking_date: newDate,
+            booking_time: timeStr,
+            party_size: newPartySize,
+            deposit_amount: depositAmount,
+            manage_booking_link: manageBookingLink,
+          },
+        });
+      }
+
+      const updated = await staff.db.from('bookings').select('*').eq('id', id).single();
       return NextResponse.json(updated.data);
     }
 

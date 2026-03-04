@@ -3,6 +3,7 @@ import Stripe from 'stripe';
 import { stripe } from '@/lib/stripe';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { sendCommunication } from '@/lib/communications';
+import { generateConfirmToken, hashConfirmToken } from '@/lib/confirm-token';
 
 const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
 if (!webhookSecret) {
@@ -71,10 +72,21 @@ export async function POST(request: NextRequest) {
         })
         .eq('id', bookingId);
 
+      const { data: bRow } = await supabase.from('bookings').select('confirm_token_hash, booking_date, booking_time, party_size, cancellation_deadline, deposit_amount_pence, dietary_notes, occasion').eq('id', bookingId).single();
+      let manageToken: string | undefined;
+      if (!bRow?.confirm_token_hash) {
+        manageToken = generateConfirmToken();
+        await supabase.from('bookings').update({
+          confirm_token_hash: hashConfirmToken(manageToken),
+          updated_at: new Date().toISOString(),
+        }).eq('id', bookingId);
+      }
       const { data: venue } = await supabase.from('venues').select('name').eq('id', booking.venue_id).single();
       const { data: guest } = await supabase.from('guests').select('name, email, phone').eq('id', booking.guest_id).single();
-      const { data: b } = await supabase.from('bookings').select('booking_date, booking_time, party_size, cancellation_deadline, deposit_amount_pence, dietary_notes, occasion').eq('id', bookingId).single();
-
+      const b = bRow;
+      const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'https://reserveni.com';
+      const manageBookingLink = manageToken ? `${baseUrl}/manage/${bookingId}/${encodeURIComponent(manageToken)}` : undefined;
+      const depositAmount = b?.deposit_amount_pence != null ? (b.deposit_amount_pence / 100).toFixed(2) : undefined;
       await sendCommunication({
         type: 'booking_confirmation',
         recipient: { email: guest?.email ?? undefined, phone: guest?.phone ?? undefined },
@@ -82,12 +94,13 @@ export async function POST(request: NextRequest) {
           guest_name: guest?.name,
           venue_name: venue?.name,
           booking_date: b?.booking_date,
-          booking_time: b?.booking_time,
+          booking_time: typeof b?.booking_time === 'string' ? b.booking_time.slice(0, 5) : b?.booking_time,
           party_size: b?.party_size,
           cancellation_deadline: b?.cancellation_deadline,
-          deposit_amount_pence: b?.deposit_amount_pence,
+          deposit_amount: depositAmount,
           dietary_notes: b?.dietary_notes ?? undefined,
           occasion: b?.occasion ?? undefined,
+          manage_booking_link: manageBookingLink,
         },
       });
     } else if (event.type === 'payment_intent.payment_failed') {

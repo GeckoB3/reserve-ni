@@ -13,5 +13,10 @@ import { communicationService } from './service';
 import type { CommunicationRequest } from './types';
 
 export async function sendCommunication(request: CommunicationRequest): Promise<void> {
-  await communicationService.send(request.type, request.recipient, request.payload);
+  await communicationService.send(
+    request.type,
+    request.recipient,
+    request.payload,
+    { venue_id: request.venue_id, booking_id: request.booking_id, guest_id: request.guest_id },
+  );
 }

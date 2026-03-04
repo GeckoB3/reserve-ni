@@ -17,6 +17,14 @@ interface EventRow {
   created_at: string;
 }
 
+interface CommRow {
+  id: string;
+  message_type: string;
+  channel: string;
+  status: string;
+  created_at: string;
+}
+
 interface BookingDetail {
   id: string;
   booking_date: string;
@@ -32,6 +40,7 @@ interface BookingDetail {
   cancellation_deadline: string | null;
   guest: Guest | null;
   events: EventRow[];
+  communications: CommRow[];
 }
 
 export function BookingDetailPanel({
@@ -244,6 +253,22 @@ export function BookingDetailPanel({
               )}
             </ul>
           </div>
+
+          {detail.communications && detail.communications.length > 0 && (
+            <div>
+              <p className="mb-2 text-sm font-medium text-neutral-700">Communications</p>
+              <ul className="space-y-2">
+                {detail.communications.map((c) => (
+                  <li key={c.id} className="flex gap-2 text-sm">
+                    <span className="text-neutral-400 shrink-0">{new Date(c.created_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</span>
+                    <span className={`inline-block rounded px-1.5 py-0.5 text-xs font-medium ${c.channel === 'email' ? 'bg-blue-100 text-blue-800' : 'bg-green-100 text-green-800'}`}>{c.channel}</span>
+                    <span className="font-medium">{c.message_type.replace(/_/g, ' ')}</span>
+                    <span className={`text-xs ${c.status === 'sent' ? 'text-green-700' : 'text-red-600'}`}>{c.status}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
       </div>
     </div>

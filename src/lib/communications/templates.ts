@@ -19,6 +19,9 @@ const VAR_NAMES = [
   'cancel_link',
   'payment_link',
   'manage_booking_link',
+  'booking_page_link',
+  'dietary_summary',
+  'dietary_count',
 ] as const;
 
 export function mergeVariables(template: string, variables: Record<string, string | number | undefined>): string {
@@ -59,6 +62,8 @@ Party size: {{party_size}}
 
 Cancellation policy: Full refund if you cancel by {{cancellation_deadline}}. No refund after that or for no-shows.
 
+{{#manage_booking_link}}View or cancel your booking: {{manage_booking_link}}{{/manage_booking_link}}
+
 We look forward to seeing you!
 {{venue_name}}`,
   },
@@ -91,6 +96,75 @@ If you need to rebook, we’d love to see you.
 Your reservation at {{venue_name}} for {{booking_date}} at {{booking_time}} (party of {{party_size}}) was cancelled because the deposit was not paid within 24 hours.
 
 You can make a new booking anytime.
+{{venue_name}}`,
+  },
+  pre_visit_reminder: {
+    subject: 'Reminder: Your reservation at {{venue_name}}',
+    body: `Hi {{guest_name}},
+
+This is a reminder that you have a reservation at {{venue_name}} on {{booking_date}} at {{booking_time}} for {{party_size}} guests.
+
+{{#dietary_notes}}Dietary notes on file: {{dietary_notes}}
+
+{{/dietary_notes}}{{#venue_address}}Address: {{venue_address}}
+
+{{/venue_address}}Cancellation policy: Full refund if cancelled 48+ hours before your reservation. No refund within 48 hours.
+
+{{#manage_booking_link}}Manage your booking: {{manage_booking_link}}
+
+{{/manage_booking_link}}We look forward to seeing you!
+{{venue_name}}`,
+  },
+  booking_modification: {
+    subject: 'Your reservation at {{venue_name}} has been updated',
+    body: `Hi {{guest_name}},
+
+Your reservation at {{venue_name}} has been updated.
+
+New details:
+Date: {{booking_date}}
+Time: {{booking_time}}
+Party size: {{party_size}}
+
+{{#deposit_amount}}Deposit: £{{deposit_amount}}
+
+{{/deposit_amount}}{{#manage_booking_link}}Manage your booking: {{manage_booking_link}}
+
+{{/manage_booking_link}}If you have any questions, please contact us.
+{{venue_name}}`,
+  },
+  dietary_digest: {
+    subject: 'Dietary requirements for today — {{venue_name}}',
+    body: `Here are today's dietary requirements and allergies for {{booking_date}}:
+
+{{dietary_summary}}
+
+Total covers with dietary notes: {{dietary_count}}`,
+  },
+  post_visit_thankyou: {
+    subject: 'Thank you for dining at {{venue_name}}',
+    body: `Hi {{guest_name}},
+
+Thank you for dining with us at {{venue_name}}. We hope you had a wonderful experience.
+
+We'd love to see you again soon. You can book your next visit at {{booking_page_link}}.
+
+{{venue_name}}`,
+  },
+  deposit_payment_request: {
+    subject: 'Deposit required for your reservation at {{venue_name}}',
+    body: `Hi {{guest_name}},
+
+Thank you for your reservation at {{venue_name}} on {{booking_date}} at {{booking_time}} for {{party_size}} guests.
+
+A deposit of £{{deposit_amount}} is required to confirm your booking.
+
+Pay your deposit here: {{payment_link}}
+
+Cancellation policy: Full refund if cancelled 48+ hours before your reservation. No refund within 48 hours.
+
+If the deposit is not paid within 24 hours, your booking will be automatically cancelled.
+
 {{venue_name}}`,
   },
 };

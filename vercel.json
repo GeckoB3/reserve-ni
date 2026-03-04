@@ -2,11 +2,31 @@
   "crons": [
     {
       "path": "/api/cron/reminder-24h",
-      "schedule": "0 8 * * *"
+      "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/cron/reminder-48h",
+      "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/cron/deposit-reminder-2h",
+      "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/cron/post-visit-thankyou",
+      "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/cron/dietary-digest",
+      "schedule": "0 7 * * *"
     },
     {
       "path": "/api/cron/auto-cancel-bookings",
-      "schedule": "0 9 * * *"
+      "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/cron/reconciliation",
+      "schedule": "0 6 * * *"
     }
   ]
 }

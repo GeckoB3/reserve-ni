@@ -1,15 +1,9 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useSearchParams } from 'next/navigation';
 import { BookingFlow } from '@/components/booking/BookingFlow';
 import type { VenuePublic } from '@/components/booking/types';
-
-const ALLOWED_ORIGINS = [
-  typeof window !== 'undefined' ? window.location.origin : '',
-  'https://reserveni.com',
-  'http://localhost:3000',
-];
 
 function sendHeight(height: number) {
   if (typeof window === 'undefined' || !window.parent) return;
@@ -21,7 +15,9 @@ function sendHeight(height: number) {
 
 export default function EmbedPage() {
   const params = useParams();
+  const searchParams = useSearchParams();
   const slug = params['venue-slug'] as string;
+  const accentColour = searchParams.get('accent') ?? null;
   const [venue, setVenue] = useState<VenuePublic | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -65,9 +61,11 @@ export default function EmbedPage() {
     );
   }
 
+  const accentStyle = accentColour ? { '--accent': `#${accentColour.replace(/^#/, '')}` } as React.CSSProperties : undefined;
+
   return (
-    <main className="min-h-screen bg-white">
-      <BookingFlow venue={venue} embed onHeightChange={onHeightChange} />
+    <main className="min-h-screen bg-white" style={accentStyle}>
+      <BookingFlow venue={venue} embed onHeightChange={onHeightChange} accentColour={accentColour ?? undefined} cancellationPolicy="Full refund if cancelled 48+ hours before your reservation. No refund within 48 hours or for no-shows." />
     </main>
   );
 }

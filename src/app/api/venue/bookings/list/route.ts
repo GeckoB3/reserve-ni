@@ -21,7 +21,7 @@ export async function GET(request: NextRequest) {
     }
     const statusFilter = request.nextUrl.searchParams.get('status');
 
-    const { data: rows, error } = await supabase
+    const { data: rows, error } = await staff.db
       .from('bookings')
       .select('id, booking_date, booking_time, party_size, status, source, deposit_status, deposit_amount_pence, dietary_notes, occasion, guest_id')
       .eq('venue_id', staff.venue_id)
@@ -35,7 +35,7 @@ export async function GET(request: NextRequest) {
 
     const guestIds = [...new Set((rows ?? []).map((r: { guest_id: string }) => r.guest_id))];
     const { data: guestsRows } = guestIds.length
-      ? await supabase.from('guests').select('id, name, email, phone').in('id', guestIds)
+      ? await staff.db.from('guests').select('id, name, email, phone').in('id', guestIds)
       : { data: [] };
     const guestsMap = new Map((guestsRows ?? []).map((g: { id: string; name: string | null; email: string | null; phone: string | null }) => [g.id, g]));
 

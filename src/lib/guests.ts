@@ -34,7 +34,7 @@ export interface GuestRecord {
 
 /**
  * Find or create a guest for the venue. Match by email first, then phone, else insert.
- * Increments visit_count when matching existing guest.
+ * visit_count is NOT incremented here — it's incremented when status changes to Seated.
  */
 export async function findOrCreateGuest(
   supabase: SupabaseClient,
@@ -57,7 +57,6 @@ export async function findOrCreateGuest(
       const { error: updErr } = await supabase
         .from('guests')
         .update({
-          visit_count: byEmail.visit_count + 1,
           name: name ?? byEmail.name,
           phone: phone ?? byEmail.phone,
           updated_at: new Date().toISOString(),
@@ -66,7 +65,7 @@ export async function findOrCreateGuest(
 
       if (!updErr) {
         return {
-          guest: { ...byEmail, visit_count: byEmail.visit_count + 1, name: name ?? byEmail.name, phone: phone ?? byEmail.phone },
+          guest: { ...byEmail, name: name ?? byEmail.name, phone: phone ?? byEmail.phone },
           created: false,
         };
       }
@@ -85,7 +84,6 @@ export async function findOrCreateGuest(
       const { error: updErr } = await supabase
         .from('guests')
         .update({
-          visit_count: byPhone.visit_count + 1,
           name: name ?? byPhone.name,
           email: email ?? byPhone.email,
           updated_at: new Date().toISOString(),
@@ -94,7 +92,7 @@ export async function findOrCreateGuest(
 
       if (!updErr) {
         return {
-          guest: { ...byPhone, visit_count: byPhone.visit_count + 1, name: name ?? byPhone.name, email: email ?? byPhone.email },
+          guest: { ...byPhone, name: name ?? byPhone.name, email: email ?? byPhone.email },
           created: false,
         };
       }
@@ -109,7 +107,7 @@ export async function findOrCreateGuest(
       email: email || null,
       phone: phone || null,
       global_guest_hash: null,
-      visit_count: 1,
+      visit_count: 0,
     })
     .select('id, venue_id, name, email, phone, visit_count')
     .single();

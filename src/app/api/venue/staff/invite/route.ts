@@ -33,7 +33,7 @@ export async function POST(request: NextRequest) {
     const { email, role } = parsed.data;
     const normalisedEmail = email.trim().toLowerCase();
 
-    const { data: existing } = await supabase
+    const { data: existing } = await staff.db
       .from('staff')
       .select('id')
       .eq('venue_id', staff.venue_id)
@@ -60,7 +60,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const { data: newStaff, error: insertError } = await supabase
+    const { data: newStaff, error: insertError } = await staff.db
       .from('staff')
       .insert({
         venue_id: staff.venue_id,

@@ -32,21 +32,21 @@ export async function middleware(request: NextRequest) {
   );
 
   // Refresh session; required so server and client stay in sync
-  const { data } = await supabase.auth.getClaims();
+  const { data: { user } } = await supabase.auth.getUser();
 
   const isAuthRoute =
     request.nextUrl.pathname.startsWith('/login') ||
     request.nextUrl.pathname.startsWith('/auth');
   const isDashboard = request.nextUrl.pathname.startsWith('/dashboard');
 
-  if (!data?.claims && isDashboard) {
+  if (!user && isDashboard) {
     const url = request.nextUrl.clone();
     url.pathname = '/login';
     url.searchParams.set('redirectTo', request.nextUrl.pathname);
     return NextResponse.redirect(url);
   }
 
-  if (data?.claims && request.nextUrl.pathname === '/login') {
+  if (user && request.nextUrl.pathname === '/login') {
     const redirectTo =
       request.nextUrl.searchParams.get('redirectTo') ?? '/dashboard';
     return NextResponse.redirect(new URL(redirectTo, request.url));

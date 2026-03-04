@@ -11,7 +11,7 @@ export async function GET() {
       return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
     }
 
-    const { data: rows, error } = await supabase
+    const { data: rows, error } = await staff.db
       .from('staff')
       .select('id, email, name, role, created_at')
       .eq('venue_id', staff.venue_id)

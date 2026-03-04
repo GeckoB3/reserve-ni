@@ -6,14 +6,13 @@ import { SetPasswordBannerWrapper } from './SetPasswordBannerWrapper';
 
 export default async function DashboardPage() {
   const supabase = await createClient();
-  const { data } = await supabase.auth.getClaims();
-  if (!data?.claims) {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) {
     redirect('/login?redirectTo=/dashboard');
   }
 
-  const { data: { user } } = await supabase.auth.getUser();
-  const showSetPasswordBanner = user && !(user.user_metadata as Record<string, unknown>)?.has_set_password;
-  const email = (data.claims as { email?: string }).email ?? '';
+  const showSetPasswordBanner = !(user.user_metadata as Record<string, unknown>)?.has_set_password;
+  const email = user.email ?? '';
 
   return (
     <main className="min-h-screen p-6">
@@ -24,6 +23,7 @@ export default async function DashboardPage() {
         <nav className="flex flex-wrap gap-4">
           <Link href="/dashboard/bookings" className="rounded bg-neutral-900 px-4 py-2 text-sm font-medium text-white hover:bg-neutral-800">Reservations</Link>
           <Link href="/dashboard/day-sheet" className="rounded bg-neutral-100 px-4 py-2 text-sm font-medium text-neutral-800 hover:bg-neutral-200">Day Sheet</Link>
+          <Link href="/dashboard/reports" className="rounded bg-neutral-100 px-4 py-2 text-sm font-medium text-neutral-800 hover:bg-neutral-200">Reports</Link>
           <Link href="/dashboard/settings" className="rounded bg-neutral-100 px-4 py-2 text-sm font-medium text-neutral-800 hover:bg-neutral-200">Venue settings</Link>
           <Link href="/dashboard/bookings/new" className="rounded bg-neutral-100 px-4 py-2 text-sm font-medium text-neutral-800 hover:bg-neutral-200">New phone booking</Link>
         </nav>

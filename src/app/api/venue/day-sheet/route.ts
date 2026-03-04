@@ -37,7 +37,7 @@ export async function GET() {
       return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
     }
 
-    const { data: venue, error: venueErr } = await supabase
+    const { data: venue, error: venueErr } = await staff.db
       .from('venues')
       .select('id, name, opening_hours, availability_config, timezone')
       .eq('id', staff.venue_id)
@@ -88,7 +88,7 @@ export async function GET() {
     const periodStartMin = timeToMinutes(period.start_time);
     const periodEndMin = timeToMinutes(period.end_time);
 
-    const { data: bookingRows, error: bookErr } = await supabase
+    const { data: bookingRows, error: bookErr } = await staff.db
       .from('bookings')
       .select('id, booking_date, booking_time, party_size, status, source, deposit_status, deposit_amount_pence, dietary_notes, occasion, guest_id')
       .eq('venue_id', staff.venue_id)
@@ -108,7 +108,7 @@ export async function GET() {
     const inPeriod = (bookingRows ?? []).filter(bookingInPeriod);
     const guestIds = [...new Set(inPeriod.map((r: { guest_id: string }) => r.guest_id))];
     const { data: guestsRows } = guestIds.length
-      ? await supabase.from('guests').select('id, name').in('id', guestIds)
+      ? await staff.db.from('guests').select('id, name').in('id', guestIds)
       : { data: [] };
     const guestsMap = new Map((guestsRows ?? []).map((g: { id: string; name: string | null }) => [g.id, g.name]));
 

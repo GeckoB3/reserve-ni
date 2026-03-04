@@ -12,11 +12,13 @@ export interface BookingFlowProps {
   venue: VenuePublic;
   embed?: boolean;
   onHeightChange?: (height: number) => void;
+  cancellationPolicy?: string;
+  accentColour?: string;
 }
 
 const steps: Array<'date' | 'slot' | 'details' | 'payment' | 'confirmation'> = ['date', 'slot', 'details', 'payment', 'confirmation'];
 
-export function BookingFlow({ venue, embed, onHeightChange }: BookingFlowProps) {
+export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, accentColour }: BookingFlowProps) {
   const [stepIndex, setStepIndex] = useState(0);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [slots, setSlots] = useState<AvailableSlot[]>([]);
@@ -97,11 +99,17 @@ export function BookingFlow({ venue, embed, onHeightChange }: BookingFlowProps) 
           phone: details.phone,
           dietary_notes: details.dietary_notes || undefined,
           occasion: details.occasion || undefined,
-          source: 'online',
+          source: embed ? 'widget' : 'booking_page',
         }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? 'Booking failed');
+      if (!res.ok) {
+        if (res.status === 409) {
+          setError(data.error ?? 'This time slot is no longer available');
+          return;
+        }
+        throw new Error(data.error ?? 'Booking failed');
+      }
       setCreateResult({
         booking_id: data.booking_id,
         client_secret: data.client_secret,
@@ -122,15 +130,13 @@ export function BookingFlow({ venue, embed, onHeightChange }: BookingFlowProps) 
     goNext();
   }, [goNext]);
 
+  const accentStyle = accentColour
+    ? { '--accent-color': `#${accentColour.replace(/^#/, '')}` } as React.CSSProperties
+    : undefined;
+
   return (
-    <div className="mx-auto max-w-lg px-4 py-6">
-      {venue.cover_photo_url && (
-        <div className="mb-6 overflow-hidden rounded-lg">
-          <img src={venue.cover_photo_url} alt="" className="h-40 w-full object-cover" />
-        </div>
-      )}
-      <h1 className="text-xl font-semibold text-neutral-900">{venue.name}</h1>
-      <p className="mt-1 text-sm text-neutral-600">Reservation</p>
+    <div className="mx-auto max-w-lg" style={accentStyle}>
+      {!embed && <p className="mt-1 text-sm text-neutral-600">Make a reservation</p>}
 
       {error && (
         <div className="mt-4 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-800">
@@ -164,6 +170,8 @@ export function BookingFlow({ venue, embed, onHeightChange }: BookingFlowProps) 
           partySize={partySize}
           onSubmit={handleDetailsSubmit}
           onBack={goBack}
+          cancellationPolicy={cancellationPolicy}
+          requiresDeposit={requiresDeposit}
         />
       )}
 
@@ -174,6 +182,7 @@ export function BookingFlow({ venue, embed, onHeightChange }: BookingFlowProps) 
           partySize={partySize}
           onComplete={handlePaymentComplete}
           onBack={goBack}
+          cancellationPolicy={cancellationPolicy}
         />
       )}
 

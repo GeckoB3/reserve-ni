@@ -8,8 +8,8 @@ export default async function LoginPage({
   searchParams: Promise<{ redirectTo?: string; error?: string }>;
 }) {
   const supabase = await createClient();
-  const { data } = await supabase.auth.getClaims();
-  if (data?.claims) {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (user) {
     const redirectTo = (await searchParams).redirectTo ?? '/dashboard';
     redirect(redirectTo);
   }

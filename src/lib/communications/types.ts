@@ -53,4 +53,7 @@ export interface CommunicationRequest {
   type: MessageType;
   recipient: Recipient;
   payload: TemplateVariables;
+  venue_id?: string;
+  booking_id?: string;
+  guest_id?: string;
 }

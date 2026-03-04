@@ -26,7 +26,7 @@ export async function PATCH(request: NextRequest) {
 
     const deposit_config = parsed.data;
 
-    const { data: venue, error } = await supabase
+    const { data: venue, error } = await staff.db
       .from('venues')
       .update({ deposit_config, updated_at: new Date().toISOString() })
       .eq('id', staff.venue_id)

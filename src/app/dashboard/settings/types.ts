@@ -7,10 +7,16 @@ export interface VenueSettings {
   phone: string | null;
   email: string | null;
   cover_photo_url: string | null;
+  cuisine_type: string | null;
+  price_band: string | null;
+  no_show_grace_minutes: number;
+  kitchen_email: string | null;
+  communication_templates: Record<string, { subject?: string; body?: string }> | null;
   opening_hours: OpeningHoursSettings | null;
   booking_rules: BookingRulesSettings | null;
   deposit_config: DepositConfigSettings | null;
   availability_config: AvailabilityConfigSettings | null;
+  stripe_connected_account_id: string | null;
   timezone: string;
 }
 
@@ -32,6 +38,8 @@ export interface DepositConfigSettings {
   amount_per_person_gbp: number;
   online_requires_deposit: boolean;
   phone_requires_deposit: boolean;
+  min_party_size_for_deposit?: number;
+  weekend_only?: boolean;
 }
 
 export interface FixedIntervalsSettings {

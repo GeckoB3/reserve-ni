@@ -2,11 +2,18 @@ import type { MessageType, Recipient, TemplateVariables, MessageChannel } from '
 import { compileEmailTemplate, compileSmsTemplate } from './templates';
 import { EmailChannel } from './channels/email';
 import { SMSChannel } from './channels/sms';
+import { getSupabaseAdminClient } from '@/lib/supabase';
+
+interface LogContext {
+  venue_id?: string;
+  booking_id?: string;
+  guest_id?: string;
+}
 
 /** Which channels each message type uses. Adding WhatsApp = add channel and add to this map. */
 const MESSAGE_CHANNELS: Record<MessageType, Array<'email' | 'sms'>> = {
   booking_confirmation: ['email'],
-  deposit_payment_request: ['sms'],
+  deposit_payment_request: ['email', 'sms'],
   deposit_payment_reminder: ['sms'],
   pre_visit_reminder: ['email'],
   confirm_or_cancel_prompt: ['sms'],
@@ -37,7 +44,32 @@ function normalisePayload(payload: TemplateVariables): Record<string, string | n
 }
 
 export class CommunicationService {
-  async send(type: MessageType, recipient: Recipient, payload: TemplateVariables): Promise<void> {
+  private async logCommunication(
+    type: MessageType,
+    channel: string,
+    recipient: Recipient,
+    status: 'sent' | 'failed',
+    ctx: LogContext,
+  ): Promise<void> {
+    try {
+      if (!ctx.venue_id) return;
+      const supabase = getSupabaseAdminClient();
+      await supabase.from('communications').insert({
+        venue_id: ctx.venue_id,
+        booking_id: ctx.booking_id ?? null,
+        guest_id: ctx.guest_id ?? null,
+        message_type: type,
+        channel,
+        recipient_email: recipient.email ?? null,
+        recipient_phone: recipient.phone ?? null,
+        status,
+      });
+    } catch (logErr) {
+      console.error('[CommunicationService] Failed to log communication:', logErr);
+    }
+  }
+
+  async send(type: MessageType, recipient: Recipient, payload: TemplateVariables, ctx: LogContext = {}): Promise<void> {
     const channels = MESSAGE_CHANNELS[type];
     if (!channels?.length) {
       console.warn('[CommunicationService] No channels for type', type);
@@ -52,15 +84,18 @@ export class CommunicationService {
           const compiled = compileEmailTemplate(type, vars);
           if (compiled && recipient.email) {
             await getChannel('email').send(recipient, { subject: compiled.subject, body: compiled.body }, payload);
+            await this.logCommunication(type, 'email', recipient, 'sent', ctx);
           }
         } else {
           const body = compileSmsTemplate(type, vars);
           if (body && recipient.phone) {
             await getChannel('sms').send(recipient, { body }, payload);
+            await this.logCommunication(type, 'sms', recipient, 'sent', ctx);
           }
         }
       } catch (err) {
         console.error(`[CommunicationService] ${ch} failed for ${type}:`, err);
+        await this.logCommunication(type, ch, recipient, 'failed', ctx);
         throw err;
       }
     }

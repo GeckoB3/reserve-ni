@@ -3,6 +3,9 @@ import { getSupabaseAdminClient } from '@/lib/supabase';
 import { stripe } from '@/lib/stripe';
 import { findOrCreateGuest } from '@/lib/guests';
 import { sendCommunication } from '@/lib/communications';
+import { getAvailableSlots } from '@/lib/availability';
+import type { VenueForAvailability, BookingForAvailability } from '@/types/availability';
+import { generateConfirmToken, hashConfirmToken } from '@/lib/confirm-token';
 import { z } from 'zod';
 
 const createBookingSchema = z.object({
@@ -15,7 +18,7 @@ const createBookingSchema = z.object({
   phone: z.string().min(1).max(30),
   dietary_notes: z.string().max(1000).optional(),
   occasion: z.string().max(200).optional(),
-  source: z.enum(['online', 'phone', 'walk-in']),
+  source: z.enum(['online', 'phone', 'walk-in', 'widget', 'booking_page']),
 });
 
 /** Compute cancellation_deadline: booking datetime minus 48 hours (Europe/London). */
@@ -60,7 +63,7 @@ export async function POST(request: NextRequest) {
 
     const { data: venue, error: venueErr } = await supabase
       .from('venues')
-      .select('id, name, stripe_connected_account_id, booking_rules, deposit_config')
+      .select('id, name, stripe_connected_account_id, booking_rules, deposit_config, opening_hours, availability_config, timezone')
       .eq('id', venue_id)
       .single();
 
@@ -78,15 +81,25 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const depositConfig = (venue.deposit_config as { enabled?: boolean; amount_per_person_gbp?: number; online_requires_deposit?: boolean; phone_requires_deposit?: boolean }) ?? {};
+    const depositConfig = (venue.deposit_config as { enabled?: boolean; amount_per_person_gbp?: number; online_requires_deposit?: boolean; phone_requires_deposit?: boolean; min_party_size_for_deposit?: number; weekend_only?: boolean }) ?? {};
     const depositEnabled = depositConfig.enabled ?? false;
     const amountPerPersonGbp = depositConfig.amount_per_person_gbp ?? 5;
     const onlineRequiresDeposit = depositConfig.online_requires_deposit !== false;
     const phoneRequiresDeposit = depositConfig.phone_requires_deposit ?? false;
+    const minPartySizeForDeposit = depositConfig.min_party_size_for_deposit;
+    const weekendOnly = depositConfig.weekend_only ?? false;
 
-    const requiresDeposit =
-      source === 'online' && depositEnabled && onlineRequiresDeposit ||
-      source === 'phone' && depositEnabled && phoneRequiresDeposit;
+    const isOnlineSource = source === 'online' || source === 'widget' || source === 'booking_page';
+    const channelRequires =
+      (isOnlineSource && onlineRequiresDeposit) ||
+      (source === 'phone' && phoneRequiresDeposit);
+
+    const partySizeMet = !minPartySizeForDeposit || party_size >= minPartySizeForDeposit;
+    const dayOfWeek = new Date(booking_date + 'T12:00:00').getDay();
+    const isWeekend = dayOfWeek === 0 || dayOfWeek === 5 || dayOfWeek === 6;
+    const weekendMet = !weekendOnly || isWeekend;
+
+    const requiresDeposit = depositEnabled && channelRequires && partySizeMet && weekendMet;
 
     const depositAmountPence = requiresDeposit ? Math.round(amountPerPersonGbp * party_size * 100) : null;
 
@@ -97,14 +110,49 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { guest, created: guestCreated } = await findOrCreateGuest(supabase, venue_id, {
+    const timeForDb = booking_time.length === 5 ? booking_time + ':00' : booking_time;
+    const timeStr = timeForDb.slice(0, 5);
+
+    const { data: existingBookings } = await supabase
+      .from('bookings')
+      .select('id, booking_date, booking_time, party_size, status')
+      .eq('venue_id', venue_id)
+      .eq('booking_date', booking_date);
+
+    const venueForAvail: VenueForAvailability = {
+      id: venue.id,
+      opening_hours: venue.opening_hours,
+      availability_config: venue.availability_config,
+      timezone: venue.timezone ?? 'Europe/London',
+    };
+    const bookingsForAvail: BookingForAvailability[] = (existingBookings ?? []).map((b: { id: string; booking_date: string; booking_time: string; party_size: number; status: string }) => ({
+      id: b.id,
+      booking_date: b.booking_date,
+      booking_time: typeof b.booking_time === 'string' ? b.booking_time.slice(0, 5) : '',
+      party_size: b.party_size,
+      status: b.status,
+    }));
+    const slots = getAvailableSlots(venueForAvail, booking_date, bookingsForAvail);
+    const slot = slots.find((s) => s.start_time === timeStr || s.key === timeStr);
+    if (!slot || slot.available_covers < party_size) {
+      return NextResponse.json(
+        { error: 'This time slot is no longer available' },
+        { status: 409 }
+      );
+    }
+
+    const { guest } = await findOrCreateGuest(supabase, venue_id, {
       name,
       email: email || null,
       phone,
     });
 
     const cancellation_deadline = cancellationDeadline(booking_date, booking_time);
-    const timeForDb = booking_time.length === 5 ? booking_time + ':00' : booking_time;
+
+    const cancellationPolicySnapshot = {
+      refund_window_hours: 48,
+      policy: 'Full refund if cancelled 48+ hours before reservation. No refund within 48 hours or for no-shows.',
+    };
 
     const bookingInsert: Record<string, unknown> = {
       venue_id,
@@ -119,6 +167,7 @@ export async function POST(request: NextRequest) {
       deposit_amount_pence: depositAmountPence,
       deposit_status: requiresDeposit ? 'Pending' : 'Not Required',
       cancellation_deadline,
+      cancellation_policy_snapshot: cancellationPolicySnapshot,
     };
 
     const { data: booking, error: bookErr } = await supabase
@@ -162,6 +211,17 @@ export async function POST(request: NextRequest) {
     }
 
     if (!requiresDeposit) {
+      const manageToken = generateConfirmToken();
+      await supabase
+        .from('bookings')
+        .update({
+          confirm_token_hash: hashConfirmToken(manageToken),
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', booking.id);
+      const baseUrl = request.nextUrl.origin;
+      const manageBookingLink = `${baseUrl}/manage/${booking.id}/${encodeURIComponent(manageToken)}`;
+      const depositAmount = depositAmountPence != null ? (depositAmountPence / 100).toFixed(2) : undefined;
       await sendCommunication({
         type: 'booking_confirmation',
         recipient: { email: guest.email ?? undefined, phone: guest.phone ?? undefined },
@@ -172,6 +232,8 @@ export async function POST(request: NextRequest) {
           booking_time,
           party_size,
           cancellation_deadline,
+          deposit_amount: depositAmount,
+          manage_booking_link: manageBookingLink,
         },
       });
     }

@@ -3,6 +3,8 @@ export interface VenuePublic {
   name: string;
   slug: string;
   cover_photo_url: string | null;
+  address: string | null;
+  phone: string | null;
   deposit_config: DepositConfigPublic | null;
   booking_rules: BookingRulesPublic | null;
   timezone: string;

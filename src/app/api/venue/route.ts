@@ -10,6 +10,10 @@ const venueProfileSchema = z.object({
   phone: z.string().max(30).optional(),
   email: z.string().email().max(255).optional().or(z.literal('')),
   cover_photo_url: z.string().url().max(2000).nullable().optional(),
+  cuisine_type: z.string().max(100).optional(),
+  price_band: z.string().max(50).optional(),
+  no_show_grace_minutes: z.number().int().min(10).max(60).optional(),
+  kitchen_email: z.string().email().max(255).optional().or(z.literal('')),
   timezone: z.string().max(50).optional(),
 }).refine((data) => Object.keys(data).filter((k) => data[k as keyof typeof data] !== undefined).length > 0, { message: 'At least one field required' });
 
@@ -22,13 +26,28 @@ export async function GET() {
       return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
     }
 
-    const { data: venue, error } = await supabase
+    let venue = null;
+    const { data: fullVenue, error } = await staff.db
       .from('venues')
-      .select('id, name, slug, address, phone, email, cover_photo_url, opening_hours, booking_rules, deposit_config, availability_config, timezone')
+      .select('id, name, slug, address, phone, email, cover_photo_url, cuisine_type, price_band, no_show_grace_minutes, kitchen_email, communication_templates, opening_hours, booking_rules, deposit_config, availability_config, stripe_connected_account_id, timezone')
       .eq('id', staff.venue_id)
       .single();
 
-    if (error || !venue) {
+    if (fullVenue) {
+      venue = fullVenue;
+    } else {
+      const { data: basicVenue } = await staff.db
+        .from('venues')
+        .select('id, name, slug, address, phone, email, cover_photo_url, opening_hours, booking_rules, deposit_config, availability_config, stripe_connected_account_id, timezone')
+        .eq('id', staff.venue_id)
+        .single();
+      if (basicVenue) {
+        venue = { ...basicVenue, cuisine_type: null, price_band: null, no_show_grace_minutes: 15, kitchen_email: null, communication_templates: null };
+      }
+    }
+
+    if (!venue) {
+      console.error('GET /api/venue: venue not found', error?.message);
       return NextResponse.json({ error: 'Venue not found' }, { status: 404 });
     }
 
@@ -68,13 +87,17 @@ export async function PATCH(request: NextRequest) {
     if (data.phone !== undefined) update.phone = data.phone;
     if (data.email !== undefined) update.email = data.email === '' ? null : data.email;
     if (data.cover_photo_url !== undefined) update.cover_photo_url = data.cover_photo_url;
+    if (data.cuisine_type !== undefined) update.cuisine_type = data.cuisine_type;
+    if (data.price_band !== undefined) update.price_band = data.price_band;
+    if (data.no_show_grace_minutes !== undefined) update.no_show_grace_minutes = data.no_show_grace_minutes;
+    if (data.kitchen_email !== undefined) update.kitchen_email = data.kitchen_email === '' ? null : data.kitchen_email;
     if (data.timezone !== undefined) update.timezone = data.timezone;
 
-    const { data: venue, error } = await supabase
+    const { data: venue, error } = await staff.db
       .from('venues')
       .update(update)
       .eq('id', staff.venue_id)
-      .select('id, name, slug, address, phone, email, cover_photo_url, timezone')
+      .select('id, name, slug, address, phone, email, cover_photo_url, cuisine_type, price_band, no_show_grace_minutes, kitchen_email, timezone')
       .single();
 
     if (error) {

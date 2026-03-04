@@ -1,0 +1,120 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { createClient } from '@/lib/supabase/server';
+import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
+import { stripe } from '@/lib/stripe';
+
+interface StripeConnectPostResponse {
+  url: string;
+}
+
+interface StripeConnectGetResponse {
+  connected: true;
+  charges_enabled: boolean;
+  details_submitted: boolean;
+}
+
+/** POST /api/venue/stripe-connect — create or resume Stripe Connect onboarding. */
+export async function POST(request: NextRequest) {
+  try {
+    const supabase = await createClient();
+    const staff = await getVenueStaff(supabase);
+    if (!staff) {
+      return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
+    }
+    if (!requireAdmin(staff)) {
+      return NextResponse.json({ error: 'Forbidden: admin only' }, { status: 403 });
+    }
+
+    const { data: venue, error: fetchError } = await staff.db
+      .from('venues')
+      .select('stripe_connected_account_id')
+      .eq('id', staff.venue_id)
+      .single();
+
+    if (fetchError || !venue) {
+      console.error('POST /api/venue/stripe-connect — venue lookup failed:', fetchError);
+      return NextResponse.json({ error: 'Venue not found' }, { status: 404 });
+    }
+
+    let accountId: string = venue.stripe_connected_account_id ?? '';
+
+    if (!accountId) {
+      const account = await stripe.accounts.create({
+        type: 'express',
+        country: 'GB',
+        email: staff.email,
+        capabilities: {
+          card_payments: { requested: true },
+          transfers: { requested: true },
+        },
+        business_type: 'company',
+      });
+
+      accountId = account.id;
+
+      const { error: updateError } = await staff.db
+        .from('venues')
+        .update({
+          stripe_connected_account_id: accountId,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', staff.venue_id);
+
+      if (updateError) {
+        console.error('POST /api/venue/stripe-connect — failed to store account ID:', updateError);
+        return NextResponse.json({ error: 'Failed to save Stripe account' }, { status: 500 });
+      }
+    }
+
+    const origin = request.nextUrl.origin;
+
+    const accountLink = await stripe.accountLinks.create({
+      account: accountId,
+      refresh_url: `${origin}/dashboard/settings?stripe=refresh`,
+      return_url: `${origin}/dashboard/settings?stripe=success`,
+      type: 'account_onboarding',
+    });
+
+    return NextResponse.json({ url: accountLink.url } satisfies StripeConnectPostResponse);
+  } catch (err) {
+    console.error('POST /api/venue/stripe-connect failed:', err);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
+}
+
+/** GET /api/venue/stripe-connect — check Stripe Connect account status. */
+export async function GET() {
+  try {
+    const supabase = await createClient();
+    const staff = await getVenueStaff(supabase);
+    if (!staff) {
+      return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
+    }
+
+    const { data: venue, error: fetchError } = await staff.db
+      .from('venues')
+      .select('stripe_connected_account_id')
+      .eq('id', staff.venue_id)
+      .single();
+
+    if (fetchError || !venue) {
+      console.error('GET /api/venue/stripe-connect — venue lookup failed:', fetchError);
+      return NextResponse.json({ error: 'Venue not found' }, { status: 404 });
+    }
+
+    if (!venue.stripe_connected_account_id) {
+      return NextResponse.json({ error: 'No Stripe account connected' }, { status: 404 });
+    }
+
+    const account = await stripe.accounts.retrieve(venue.stripe_connected_account_id);
+
+    return NextResponse.json({
+      connected: true,
+      charges_enabled: account.charges_enabled ?? false,
+      details_submitted: account.details_submitted ?? false,
+    } satisfies StripeConnectGetResponse);
+  } catch (err) {
+    console.error('GET /api/venue/stripe-connect failed:', err);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
+}

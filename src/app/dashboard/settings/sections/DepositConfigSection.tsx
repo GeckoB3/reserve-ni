@@ -11,6 +11,8 @@ const depositConfigSchema = z.object({
   amount_per_person_gbp: z.number().min(0).max(100),
   online_requires_deposit: z.boolean(),
   phone_requires_deposit: z.boolean(),
+  min_party_size_for_deposit: z.number().int().min(1).max(50).optional(),
+  weekend_only: z.boolean().optional(),
 });
 
 type FormData = z.infer<typeof depositConfigSchema>;
@@ -20,6 +22,8 @@ const defaultConfig: DepositConfigSettings = {
   amount_per_person_gbp: 5,
   online_requires_deposit: true,
   phone_requires_deposit: false,
+  min_party_size_for_deposit: undefined,
+  weekend_only: false,
 };
 
 interface DepositConfigSectionProps {
@@ -38,6 +42,8 @@ export function DepositConfigSection({ venue, onUpdate, isAdmin }: DepositConfig
       amount_per_person_gbp: config.amount_per_person_gbp,
       online_requires_deposit: config.online_requires_deposit,
       phone_requires_deposit: config.phone_requires_deposit,
+      min_party_size_for_deposit: config.min_party_size_for_deposit ?? undefined,
+      weekend_only: config.weekend_only ?? false,
     },
   });
 
@@ -87,6 +93,15 @@ export function DepositConfigSection({ venue, onUpdate, isAdmin }: DepositConfig
                 <input type="checkbox" {...register('phone_requires_deposit')} disabled={!isAdmin} className="rounded" />
                 <span className="text-sm">Phone bookings require deposit (optional)</span>
               </label>
+              <label className="flex items-center gap-2">
+                <input type="checkbox" {...register('weekend_only')} disabled={!isAdmin} className="rounded" />
+                <span className="text-sm">Weekends only (Fri–Sun)</span>
+              </label>
+            </div>
+            <div>
+              <label htmlFor="min_party_size_for_deposit" className="block text-sm font-medium text-neutral-700 mb-1">Minimum party size for deposit</label>
+              <input id="min_party_size_for_deposit" type="number" min={1} max={50} {...register('min_party_size_for_deposit', { valueAsNumber: true })} disabled={!isAdmin} placeholder="e.g. 4 (leave blank for all sizes)" className="w-full rounded border border-neutral-300 px-3 py-2 disabled:bg-neutral-50" />
+              <p className="mt-1 text-xs text-neutral-500">Only require deposits for groups of this size or larger. Leave blank for all bookings.</p>
             </div>
           </>
         )}

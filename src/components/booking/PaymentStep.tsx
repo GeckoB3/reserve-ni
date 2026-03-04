@@ -11,6 +11,7 @@ interface PaymentStepProps {
   partySize: number;
   onComplete: () => void;
   onBack: () => void;
+  cancellationPolicy?: string;
 }
 
 function PaymentForm({ clientSecret, onComplete, onBack }: { clientSecret: string; onComplete: () => void; onBack: () => void }) {
@@ -61,7 +62,7 @@ function PaymentForm({ clientSecret, onComplete, onBack }: { clientSecret: strin
   );
 }
 
-export function PaymentStep({ clientSecret, amountPence, partySize, onComplete, onBack }: PaymentStepProps) {
+export function PaymentStep({ clientSecret, amountPence, partySize, onComplete, onBack, cancellationPolicy }: PaymentStepProps) {
   const amount = (amountPence / 100).toFixed(2);
 
   return (
@@ -69,9 +70,11 @@ export function PaymentStep({ clientSecret, amountPence, partySize, onComplete, 
       <p className="text-sm text-neutral-600">
         Deposit: £{amount} ({partySize} × £{(amountPence / 100 / partySize).toFixed(2)} per person)
       </p>
-      <p className="mt-1 text-xs text-neutral-500">
-        Full refund if you cancel 48+ hours before your reservation.
-      </p>
+      {cancellationPolicy && (
+        <p className="mt-2 rounded border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+          {cancellationPolicy}
+        </p>
+      )}
       <Elements
         stripe={getStripe()}
         options={{

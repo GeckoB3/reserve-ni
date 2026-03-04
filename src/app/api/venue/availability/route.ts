@@ -1,31 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { getSupabaseAdminClient } from '@/lib/supabase';
+import { getVenueStaff } from '@/lib/venue-auth';
 import type { AvailabilityConfig, BlockedSlot } from '@/types/availability';
 
 /** GET /api/venue/availability — return blocked dates/slots for the authenticated venue. */
 export async function GET() {
   try {
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user?.email) {
+    const staff = await getVenueStaff(supabase);
+    if (!staff) {
       return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
     }
 
-    const { data: staffRows } = await supabase
-      .from('staff')
-      .select('venue_id')
-      .eq('email', user.email);
-    const venueId = staffRows?.[0]?.venue_id;
-    if (!venueId) {
-      return NextResponse.json({ error: 'No venue associated with your account' }, { status: 403 });
-    }
-
-    const admin = getSupabaseAdminClient();
-    const { data: venue, error } = await admin
+    const { data: venue, error } = await staff.db
       .from('venues')
       .select('id, availability_config')
-      .eq('id', venueId)
+      .eq('id', staff.venue_id)
       .single();
 
     if (error || !venue) {
@@ -37,7 +27,7 @@ export async function GET() {
     const blocked_slots = config?.blocked_slots ?? [];
 
     return NextResponse.json({
-      venue_id: venueId,
+      venue_id: staff.venue_id,
       blocked_dates,
       blocked_slots,
     });
@@ -51,18 +41,9 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   try {
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user?.email) {
+    const staff = await getVenueStaff(supabase);
+    if (!staff) {
       return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
-    }
-
-    const { data: staffRows } = await supabase
-      .from('staff')
-      .select('venue_id')
-      .eq('email', user.email);
-    const venueId = staffRows?.[0]?.venue_id;
-    if (!venueId) {
-      return NextResponse.json({ error: 'No venue associated with your account' }, { status: 403 });
     }
 
     const body = await request.json();
@@ -76,11 +57,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid action; use add or remove' }, { status: 400 });
     }
 
-    const admin = getSupabaseAdminClient();
-    const { data: venue, error: fetchError } = await admin
+    const { data: venue, error: fetchError } = await staff.db
       .from('venues')
       .select('id, availability_config')
-      .eq('id', venueId)
+      .eq('id', staff.venue_id)
       .single();
 
     if (fetchError || !venue) {
@@ -128,10 +108,10 @@ export async function POST(request: NextRequest) {
 
     const updated = { ...config, blocked_dates, blocked_slots };
 
-    const { error: updateError } = await admin
+    const { error: updateError } = await staff.db
       .from('venues')
       .update({ availability_config: updated, updated_at: new Date().toISOString() })
-      .eq('id', venueId);
+      .eq('id', staff.venue_id);
 
     if (updateError) {
       console.error('Update availability_config failed:', updateError);
@@ -139,7 +119,7 @@ export async function POST(request: NextRequest) {
     }
 
     return NextResponse.json({
-      venue_id: venueId,
+      venue_id: staff.venue_id,
       blocked_dates,
       blocked_slots,
     });

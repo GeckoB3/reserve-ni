@@ -2,17 +2,17 @@ import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { PhoneBookingForm } from './PhoneBookingForm';
+import { getDashboardStaff } from '@/lib/venue-auth';
 
 export default async function NewBookingPage() {
   const supabase = await createClient();
-  const { data } = await supabase.auth.getClaims();
-  if (!data?.claims) {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) {
     redirect('/login?redirectTo=/dashboard/bookings/new');
   }
 
-  const email = (data.claims as { email?: string }).email ?? '';
-  const { data: staffRows } = await supabase.from('staff').select('venue_id').eq('email', email);
-  const venueId = staffRows?.[0]?.venue_id;
+  const staff = await getDashboardStaff(supabase);
+  const venueId = staff.venue_id;
   if (!venueId) {
     return (
       <main className="min-h-screen p-6">

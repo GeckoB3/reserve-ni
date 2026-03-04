@@ -45,6 +45,10 @@ export const depositConfigSchema = z.object({
   online_requires_deposit: z.boolean().default(true),
   /** Phone bookings: optional per venue. */
   phone_requires_deposit: z.boolean().default(false),
+  /** Only require deposits for groups of this size or larger. */
+  min_party_size_for_deposit: z.number().int().min(1).max(50).optional(),
+  /** Only require deposits for Friday, Saturday, Sunday bookings. */
+  weekend_only: z.boolean().default(false),
 });
 
 /** Fixed intervals availability model. */
