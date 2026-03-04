@@ -48,7 +48,9 @@ export default function EmbedPage() {
   if (loading) {
     return (
       <main className="min-h-screen bg-white p-6">
-        <p className="text-neutral-500">Loading…</p>
+        <div className="flex justify-center py-12">
+          <div className="h-8 w-8 animate-spin rounded-full border-2 border-teal-600 border-t-transparent" />
+        </div>
       </main>
     );
   }
@@ -56,7 +58,7 @@ export default function EmbedPage() {
   if (error || !venue) {
     return (
       <main className="min-h-screen bg-white p-6">
-        <p className="text-red-600">{error ?? 'Venue not found'}</p>
+        <p className="text-sm text-red-600">{error ?? 'Venue not found'}</p>
       </main>
     );
   }

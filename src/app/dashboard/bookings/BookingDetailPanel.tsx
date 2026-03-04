@@ -63,10 +63,7 @@ export function BookingDetailPanel({
 
   const load = useCallback(async () => {
     const res = await fetch(`/api/venue/bookings/${bookingId}`);
-    if (!res.ok) {
-      setError('Failed to load');
-      return;
-    }
+    if (!res.ok) { setError('Failed to load'); return; }
     const data = await res.json();
     setDetail(data);
     setModifyDate(data.booking_date);
@@ -80,40 +77,33 @@ export function BookingDetailPanel({
     load().finally(() => setLoading(false));
   }, [load]);
 
-  const updateStatus = useCallback(
-    async (newStatus: string) => {
-      if (!detail) return;
-      const now = new Date();
-      const [y, m, d] = detail.booking_date.split('-').map(Number);
-      const [hh, mm] = (detail.booking_time?.slice(0, 5) ?? '12:00').split(':').map(Number);
-      const bookingDt = new Date(y, m - 1, d, hh, mm, 0);
-      const diffMin = (bookingDt.getTime() - now.getTime()) / (60 * 1000);
-
-      if (newStatus === 'No-Show' && diffMin > -15 && diffMin < 15) {
-        if (!confirm('Booking time is within 15 minutes. Are you sure you want to mark as No-Show?')) return;
+  const updateStatus = useCallback(async (newStatus: string) => {
+    if (!detail) return;
+    const now = new Date();
+    const [y, m, d] = detail.booking_date.split('-').map(Number);
+    const [hh, mm] = (detail.booking_time?.slice(0, 5) ?? '12:00').split(':').map(Number);
+    const bookingDt = new Date(y, m - 1, d, hh, mm, 0);
+    const diffMin = (bookingDt.getTime() - now.getTime()) / (60 * 1000);
+    if (newStatus === 'No-Show' && diffMin > -15 && diffMin < 15) {
+      if (!confirm('Booking time is within 15 minutes. Mark as No-Show?')) return;
+    }
+    setActionLoading(true);
+    try {
+      const res = await fetch(`/api/venue/bookings/${bookingId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        setError(j.error ?? 'Failed');
+        return;
       }
-
-      setActionLoading(true);
-      try {
-        const res = await fetch(`/api/venue/bookings/${bookingId}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ status: newStatus }),
-        });
-        if (!res.ok) {
-          const j = await res.json().catch(() => ({}));
-          setError(j.error ?? 'Failed');
-          return;
-        }
-        setError(null);
-        await load();
-        onUpdated();
-      } finally {
-        setActionLoading(false);
-      }
-    },
-    [bookingId, detail, load, onUpdated]
-  );
+      setError(null);
+      await load();
+      onUpdated();
+    } finally { setActionLoading(false); }
+  }, [bookingId, detail, load, onUpdated]);
 
   const submitModify = useCallback(async () => {
     setActionLoading(true);
@@ -121,11 +111,7 @@ export function BookingDetailPanel({
       const res = await fetch(`/api/venue/bookings/${bookingId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          booking_date: modifyDate,
-          booking_time: modifyTime,
-          party_size: modifyPartySize,
-        }),
+        body: JSON.stringify({ booking_date: modifyDate, booking_time: modifyTime, party_size: modifyPartySize }),
       });
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
@@ -136,17 +122,15 @@ export function BookingDetailPanel({
       setShowModify(false);
       await load();
       onUpdated();
-    } finally {
-      setActionLoading(false);
-    }
+    } finally { setActionLoading(false); }
   }, [bookingId, modifyDate, modifyTime, modifyPartySize, load, onUpdated]);
 
   if (loading || !detail) {
     return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
-        <div className="w-full max-w-lg rounded-lg bg-white p-6 shadow-xl">
-          <p className="text-neutral-500">{loading ? 'Loading…' : 'Booking not found.'}</p>
-          <button type="button" onClick={onClose} className="mt-4 text-sm text-blue-600 underline">Close</button>
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 backdrop-blur-sm p-4">
+        <div className="w-full max-w-lg rounded-2xl bg-white p-8 shadow-2xl">
+          <p className="text-slate-500">{loading ? 'Loading...' : 'Booking not found.'}</p>
+          <button type="button" onClick={onClose} className="mt-4 text-sm font-medium text-teal-600 hover:text-teal-700">Close</button>
         </div>
       </div>
     );
@@ -156,121 +140,219 @@ export function BookingDetailPanel({
   const canChangeStatus = ['Pending', 'Confirmed', 'Seated'].includes(detail.status);
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-black/30 p-0 md:p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex justify-end bg-black/20 backdrop-blur-sm" onClick={onClose}>
       <div
-        className="w-full max-w-md overflow-y-auto bg-white shadow-xl md:rounded-l-lg"
+        className="w-full max-w-md overflow-y-auto bg-white shadow-2xl lg:rounded-l-2xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="sticky top-0 flex items-center justify-between border-b border-neutral-200 bg-white px-4 py-3">
-          <h2 className="text-lg font-semibold">Booking details</h2>
-          <button type="button" onClick={onClose} className="rounded p-2 text-neutral-500 hover:bg-neutral-100">
-            ✕
+        {/* Header */}
+        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-100 bg-white/95 backdrop-blur px-5 py-4">
+          <h2 className="text-lg font-semibold text-slate-900">Booking Details</h2>
+          <button type="button" onClick={onClose} className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-600">
+            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+            </svg>
           </button>
         </div>
 
-        <div className="space-y-4 p-4">
+        <div className="space-y-6 p-5">
           {error && (
-            <div className="rounded border border-red-200 bg-red-50 p-2 text-sm text-red-800">{error}</div>
+            <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
           )}
 
-          <dl className="grid grid-cols-1 gap-2 text-sm">
-            <div><dt className="text-neutral-500">Guest</dt><dd className="font-medium">{detail.guest?.name ?? '—'}</dd></div>
-            <div><dt className="text-neutral-500">Email</dt><dd className="font-medium">{detail.guest?.email ?? '—'}</dd></div>
-            <div><dt className="text-neutral-500">Phone</dt><dd className="font-medium">{detail.guest?.phone ?? '—'}</dd></div>
-            <div><dt className="text-neutral-500">Visit count</dt><dd className="font-medium">{detail.guest?.visit_count ?? 0}</dd></div>
-            <div><dt className="text-neutral-500">Date & time</dt><dd className="font-medium">{detail.booking_date} {detail.booking_time}</dd></div>
-            <div><dt className="text-neutral-500">Party size</dt><dd className="font-medium">{detail.party_size}</dd></div>
-            <div><dt className="text-neutral-500">Source</dt><dd className="font-medium">{detail.source}</dd></div>
-            <div><dt className="text-neutral-500">Status</dt><dd className="font-medium">{detail.status}</dd></div>
-            <div><dt className="text-neutral-500">Deposit</dt><dd className="font-medium">{detail.deposit_status}{depositPaid ? ` £${(detail.deposit_amount_pence! / 100).toFixed(2)}` : ''}</dd></div>
-            {detail.dietary_notes && <div><dt className="text-neutral-500">Dietary</dt><dd className="font-medium">{detail.dietary_notes}</dd></div>}
-            {detail.occasion && <div><dt className="text-neutral-500">Occasion</dt><dd className="font-medium">{detail.occasion}</dd></div>}
-            {detail.special_requests && <div><dt className="text-neutral-500">Special requests</dt><dd className="font-medium">{detail.special_requests}</dd></div>}
-          </dl>
+          {/* Guest info card */}
+          <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-4">
+            <div className="flex items-center gap-3 mb-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-teal-100 text-sm font-bold text-teal-700">
+                {(detail.guest?.name ?? '?').charAt(0).toUpperCase()}
+              </div>
+              <div>
+                <p className="font-semibold text-slate-900">{detail.guest?.name ?? 'Unknown guest'}</p>
+                <p className="text-xs text-slate-500">{detail.guest?.visit_count ?? 0} previous visits</p>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 gap-1.5 text-sm">
+              {detail.guest?.email && (
+                <div className="flex items-center gap-2 text-slate-600">
+                  <svg className="h-3.5 w-3.5 text-slate-400" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 0 1-2.25 2.25h-15a2.25 2.25 0 0 1-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25m19.5 0v.243a2.25 2.25 0 0 1-1.07 1.916l-7.5 4.615a2.25 2.25 0 0 1-2.36 0L3.32 8.91a2.25 2.25 0 0 1-1.07-1.916V6.75" /></svg>
+                  {detail.guest.email}
+                </div>
+              )}
+              {detail.guest?.phone && (
+                <div className="flex items-center gap-2 text-slate-600">
+                  <svg className="h-3.5 w-3.5 text-slate-400" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 0 0 2.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 0 1-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 0 0-1.091-.852H4.5A2.25 2.25 0 0 0 2.25 4.5v2.25Z" /></svg>
+                  {detail.guest.phone}
+                </div>
+              )}
+            </div>
+          </div>
 
+          {/* Booking details grid */}
+          <div className="grid grid-cols-2 gap-3">
+            <InfoTile label="Date" value={detail.booking_date} />
+            <InfoTile label="Time" value={detail.booking_time?.slice(0, 5) ?? ''} />
+            <InfoTile label="Covers" value={String(detail.party_size)} />
+            <InfoTile label="Source" value={detail.source} />
+            <InfoTile label="Status" value={detail.status} />
+            <InfoTile label="Deposit" value={depositPaid ? `£${(detail.deposit_amount_pence! / 100).toFixed(2)} Paid` : detail.deposit_status} />
+          </div>
+
+          {/* Special notes */}
+          {(detail.dietary_notes || detail.occasion || detail.special_requests) && (
+            <div className="space-y-2">
+              {detail.dietary_notes && (
+                <div className="rounded-lg bg-amber-50 px-3 py-2 text-sm">
+                  <span className="font-medium text-amber-800">Dietary:</span>{' '}
+                  <span className="text-amber-700">{detail.dietary_notes}</span>
+                </div>
+              )}
+              {detail.occasion && (
+                <div className="rounded-lg bg-violet-50 px-3 py-2 text-sm">
+                  <span className="font-medium text-violet-800">Occasion:</span>{' '}
+                  <span className="text-violet-700">{detail.occasion}</span>
+                </div>
+              )}
+              {detail.special_requests && (
+                <div className="rounded-lg bg-sky-50 px-3 py-2 text-sm">
+                  <span className="font-medium text-sky-800">Requests:</span>{' '}
+                  <span className="text-sky-700">{detail.special_requests}</span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Status actions */}
           {canChangeStatus && (
-            <div>
-              <p className="mb-2 text-sm font-medium text-neutral-700">Change status</p>
+            <div className="space-y-2">
+              <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Actions</p>
               <div className="flex flex-wrap gap-2">
                 {detail.status === 'Confirmed' && (
                   <>
-                    <button type="button" onClick={() => updateStatus('Seated')} disabled={actionLoading} className="rounded bg-blue-600 px-3 py-1.5 text-sm text-white hover:bg-blue-700 disabled:opacity-50">Seated</button>
-                    <button type="button" onClick={() => updateStatus('No-Show')} disabled={actionLoading} className="rounded bg-red-600 px-3 py-1.5 text-sm text-white hover:bg-red-700 disabled:opacity-50">No-Show</button>
-                    <button type="button" onClick={() => updateStatus('Cancelled')} disabled={actionLoading} className="rounded border border-red-300 bg-white px-3 py-1.5 text-sm text-red-700 hover:bg-red-50 disabled:opacity-50">Cancel</button>
+                    <ActionButton onClick={() => updateStatus('Seated')} disabled={actionLoading} variant="primary">Seat Guest</ActionButton>
+                    <ActionButton onClick={() => updateStatus('No-Show')} disabled={actionLoading} variant="danger">No-Show</ActionButton>
+                    <ActionButton onClick={() => updateStatus('Cancelled')} disabled={actionLoading} variant="outline-danger">Cancel</ActionButton>
                   </>
                 )}
                 {detail.status === 'Pending' && (
-                  <button type="button" onClick={() => updateStatus('Cancelled')} disabled={actionLoading} className="rounded border border-red-300 bg-white px-3 py-1.5 text-sm text-red-700 hover:bg-red-50 disabled:opacity-50">Cancel</button>
+                  <ActionButton onClick={() => updateStatus('Cancelled')} disabled={actionLoading} variant="outline-danger">Cancel</ActionButton>
                 )}
                 {detail.status === 'Seated' && (
                   <>
-                    <button type="button" onClick={() => updateStatus('Completed')} disabled={actionLoading} className="rounded bg-green-600 px-3 py-1.5 text-sm text-white hover:bg-green-700 disabled:opacity-50">Complete</button>
-                    <button type="button" onClick={() => updateStatus('No-Show')} disabled={actionLoading} className="rounded bg-red-600 px-3 py-1.5 text-sm text-white hover:bg-red-700 disabled:opacity-50">No-Show</button>
+                    <ActionButton onClick={() => updateStatus('Completed')} disabled={actionLoading} variant="primary">Complete</ActionButton>
+                    <ActionButton onClick={() => updateStatus('No-Show')} disabled={actionLoading} variant="danger">No-Show</ActionButton>
                   </>
                 )}
               </div>
             </div>
           )}
 
+          {/* Modify section */}
           {!showModify ? (
-            <button type="button" onClick={() => setShowModify(true)} className="rounded border border-neutral-300 bg-white px-4 py-2 text-sm font-medium text-neutral-700 hover:bg-neutral-50">
-              Modify date / time / party size
+            <button type="button" onClick={() => setShowModify(true)} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50">
+              Modify Date / Time / Party Size
             </button>
           ) : (
-            <div className="rounded border border-neutral-200 bg-neutral-50 p-4 space-y-3">
-              <p className="text-sm font-medium text-neutral-700">Modify booking</p>
-              {depositPaid && <p className="text-xs text-amber-800">Changing party size will not adjust the deposit amount already paid.</p>}
-              <div className="grid grid-cols-3 gap-2">
-                <label className="text-xs text-neutral-500">Date</label>
-                <label className="text-xs text-neutral-500 col-span-2">Time</label>
-                <input type="date" value={modifyDate} onChange={(e) => setModifyDate(e.target.value)} className="rounded border border-neutral-300 px-2 py-1.5 text-sm" />
-                <input type="time" value={modifyTime} onChange={(e) => setModifyTime(e.target.value)} className="col-span-2 rounded border border-neutral-300 px-2 py-1.5 text-sm" />
-                <label className="text-xs text-neutral-500">Party size</label>
-                <input type="number" min={1} max={50} value={modifyPartySize} onChange={(e) => setModifyPartySize(Number(e.target.value))} className="col-span-2 rounded border border-neutral-300 px-2 py-1.5 text-sm" />
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-3">
+              <p className="text-sm font-semibold text-slate-700">Modify Booking</p>
+              {depositPaid && <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">Changing party size won&apos;t adjust the deposit already paid.</p>}
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-slate-500">Date</label>
+                  <input type="date" value={modifyDate} onChange={(e) => setModifyDate(e.target.value)} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-slate-500">Time</label>
+                  <input type="time" value={modifyTime} onChange={(e) => setModifyTime(e.target.value)} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-slate-500">Covers</label>
+                  <input type="number" min={1} max={50} value={modifyPartySize} onChange={(e) => setModifyPartySize(Number(e.target.value))} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" />
+                </div>
               </div>
               <div className="flex gap-2">
-                <button type="button" onClick={submitModify} disabled={actionLoading} className="rounded bg-neutral-900 px-3 py-1.5 text-sm text-white hover:bg-neutral-800 disabled:opacity-50">Save</button>
-                <button type="button" onClick={() => setShowModify(false)} className="rounded border border-neutral-300 px-3 py-1.5 text-sm text-neutral-700">Cancel</button>
+                <button type="button" onClick={submitModify} disabled={actionLoading} className="rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700 disabled:opacity-50">Save</button>
+                <button type="button" onClick={() => setShowModify(false)} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">Cancel</button>
               </div>
             </div>
           )}
 
+          {/* Timeline */}
           <div>
-            <p className="mb-2 text-sm font-medium text-neutral-700">Timeline</p>
-            <ul className="space-y-2">
-              {detail.events.length === 0 ? (
-                <li className="text-sm text-neutral-500">No events yet.</li>
-              ) : (
-                detail.events.map((ev) => (
-                  <li key={ev.id} className="flex gap-2 text-sm">
-                    <span className="text-neutral-400 shrink-0">{new Date(ev.created_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</span>
-                    <span className="font-medium">{ev.event_type.replace(/_/g, ' ')}</span>
-                    {ev.payload && Object.keys(ev.payload).length > 0 && (
-                      <span className="text-neutral-500 truncate">{JSON.stringify(ev.payload)}</span>
-                    )}
-                  </li>
-                ))
-              )}
-            </ul>
+            <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-400">Timeline</p>
+            {detail.events.length === 0 ? (
+              <p className="text-sm text-slate-400">No events yet.</p>
+            ) : (
+              <div className="space-y-2">
+                {detail.events.map((ev) => (
+                  <div key={ev.id} className="flex items-start gap-3 text-sm">
+                    <span className="mt-0.5 flex h-5 w-5 items-center justify-center rounded-full bg-slate-100">
+                      <span className="h-1.5 w-1.5 rounded-full bg-slate-400" />
+                    </span>
+                    <div className="flex-1">
+                      <span className="font-medium text-slate-700">{ev.event_type.replace(/_/g, ' ')}</span>
+                      <span className="ml-2 text-xs text-slate-400">
+                        {new Date(ev.created_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
+          {/* Communications */}
           {detail.communications && detail.communications.length > 0 && (
             <div>
-              <p className="mb-2 text-sm font-medium text-neutral-700">Communications</p>
-              <ul className="space-y-2">
+              <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-400">Communications</p>
+              <div className="space-y-2">
                 {detail.communications.map((c) => (
-                  <li key={c.id} className="flex gap-2 text-sm">
-                    <span className="text-neutral-400 shrink-0">{new Date(c.created_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</span>
-                    <span className={`inline-block rounded px-1.5 py-0.5 text-xs font-medium ${c.channel === 'email' ? 'bg-blue-100 text-blue-800' : 'bg-green-100 text-green-800'}`}>{c.channel}</span>
-                    <span className="font-medium">{c.message_type.replace(/_/g, ' ')}</span>
-                    <span className={`text-xs ${c.status === 'sent' ? 'text-green-700' : 'text-red-600'}`}>{c.status}</span>
-                  </li>
+                  <div key={c.id} className="flex items-center gap-2 text-sm">
+                    <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${c.channel === 'email' ? 'bg-blue-50 text-blue-700' : 'bg-green-50 text-green-700'}`}>
+                      {c.channel}
+                    </span>
+                    <span className="font-medium text-slate-700">{c.message_type.replace(/_/g, ' ')}</span>
+                    <span className={`ml-auto text-xs ${c.status === 'sent' ? 'text-emerald-600' : 'text-red-500'}`}>
+                      {c.status}
+                    </span>
+                  </div>
                 ))}
-              </ul>
+              </div>
             </div>
           )}
         </div>
       </div>
     </div>
+  );
+}
+
+function InfoTile({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-slate-100 bg-white px-3 py-2.5">
+      <p className="text-xs font-medium text-slate-400">{label}</p>
+      <p className="mt-0.5 text-sm font-semibold text-slate-800">{value}</p>
+    </div>
+  );
+}
+
+function ActionButton({ onClick, disabled, variant, children }: {
+  onClick: () => void;
+  disabled: boolean;
+  variant: 'primary' | 'danger' | 'outline-danger';
+  children: React.ReactNode;
+}) {
+  const styles = {
+    primary: 'bg-teal-600 text-white hover:bg-teal-700',
+    danger: 'bg-red-600 text-white hover:bg-red-700',
+    'outline-danger': 'border border-red-200 text-red-600 hover:bg-red-50',
+  };
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className={`rounded-lg px-4 py-2 text-sm font-medium disabled:opacity-50 ${styles[variant]}`}
+    >
+      {children}
+    </button>
   );
 }

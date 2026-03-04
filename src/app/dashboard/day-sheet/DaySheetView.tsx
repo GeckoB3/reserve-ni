@@ -37,19 +37,18 @@ type ConnectionStatus = 'green' | 'amber' | 'red';
 const POLL_INTERVAL_MS = 30_000;
 const ADVANCE_CHECK_MS = 45_000;
 
-function statusColor(s: string): string {
-  switch (s) {
-    case 'Confirmed': return 'bg-blue-100 text-blue-800 border-blue-200';
-    case 'Seated': return 'bg-green-100 text-green-800 border-green-200';
-    case 'No-Show': return 'bg-red-100 text-red-800 border-red-200';
-    case 'Completed': return 'bg-neutral-100 text-neutral-600 border-neutral-200';
-    case 'Cancelled': return 'bg-neutral-100 text-neutral-500 border-neutral-200';
-    case 'Pending': return 'bg-amber-100 text-amber-800 border-amber-200';
-    default: return 'bg-neutral-100 text-neutral-600 border-neutral-200';
-  }
+function statusStyle(s: string): { dot: string; bg: string; text: string } {
+  const map: Record<string, { dot: string; bg: string; text: string }> = {
+    Confirmed: { dot: 'bg-emerald-500', bg: 'bg-emerald-50', text: 'text-emerald-700' },
+    Seated: { dot: 'bg-blue-500', bg: 'bg-blue-50', text: 'text-blue-700' },
+    'No-Show': { dot: 'bg-red-600', bg: 'bg-red-50', text: 'text-red-700' },
+    Completed: { dot: 'bg-slate-400', bg: 'bg-slate-50', text: 'text-slate-600' },
+    Cancelled: { dot: 'bg-slate-300', bg: 'bg-slate-50', text: 'text-slate-500' },
+    Pending: { dot: 'bg-amber-500', bg: 'bg-amber-50', text: 'text-amber-700' },
+  };
+  return map[s] ?? { dot: 'bg-slate-400', bg: 'bg-slate-50', text: 'text-slate-600' };
 }
 
-/** True if current time (local) is at least 15 minutes after booking time. */
 function canMarkNoShow(bookingTime: string): boolean {
   const [h, m] = bookingTime.split(':').map(Number);
   const bookingMin = (h ?? 0) * 60 + (m ?? 0);
@@ -83,26 +82,17 @@ export function DaySheetView({ venueId }: { venueId: string }) {
     }
   }, []);
 
-  useEffect(() => {
-    fetchDaySheet();
-  }, [fetchDaySheet]);
+  useEffect(() => { fetchDaySheet(); }, [fetchDaySheet]);
 
   useEffect(() => {
     const supabase = createClient();
     const channel = supabase
       .channel('day-sheet-bookings')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'bookings', filter: `venue_id=eq.${venueId}` },
-        () => { fetchDaySheet(); }
-      )
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'bookings', filter: `venue_id=eq.${venueId}` }, () => { fetchDaySheet(); })
       .subscribe((status) => {
         if (status === 'SUBSCRIBED') {
           setConnection('green');
-          if (pollRef.current) {
-            clearInterval(pollRef.current);
-            pollRef.current = null;
-          }
+          if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
         } else {
           setConnection('amber');
         }
@@ -117,27 +107,15 @@ export function DaySheetView({ venueId }: { venueId: string }) {
   useEffect(() => {
     if (connection === 'amber' && !pollRef.current) {
       pollRef.current = setInterval(() => {
-        fetchDaySheet().then((ok) => {
-          if (!ok) setConnection('red');
-        });
+        fetchDaySheet().then((ok) => { if (!ok) setConnection('red'); });
       }, POLL_INTERVAL_MS);
     }
-    return () => {
-      if (pollRef.current) {
-        clearInterval(pollRef.current);
-        pollRef.current = null;
-      }
-    };
+    return () => { if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; } };
   }, [connection, fetchDaySheet]);
 
   useEffect(() => {
     advanceRef.current = setInterval(() => fetchDaySheet(), ADVANCE_CHECK_MS);
-    return () => {
-      if (advanceRef.current) {
-        clearInterval(advanceRef.current);
-        advanceRef.current = null;
-      }
-    };
+    return () => { if (advanceRef.current) { clearInterval(advanceRef.current); advanceRef.current = null; } };
   }, [fetchDaySheet]);
 
   const setStatus = useCallback(async (bookingId: string, status: 'Seated' | 'No-Show') => {
@@ -148,157 +126,162 @@ export function DaySheetView({ venueId }: { venueId: string }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status }),
       });
-      if (res.ok) {
-        setSelectedId(null);
-        await fetchDaySheet();
-      }
-    } finally {
-      setActioning(false);
-    }
+      if (res.ok) { setSelectedId(null); await fetchDaySheet(); }
+    } finally { setActioning(false); }
   }, [fetchDaySheet]);
 
   if (loading && !data) {
-    return <div className="rounded-lg bg-white p-8 text-center text-neutral-500">Loading…</div>;
-  }
-
-  if (!data) {
     return (
-      <div className="rounded-lg bg-white p-8 text-center">
-        <p className="text-neutral-600">Unable to load day sheet.</p>
-        <button type="button" onClick={() => fetchDaySheet()} className="mt-2 text-blue-600 underline">Retry</button>
+      <div className="space-y-4">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          {[...Array(4)].map((_, i) => (
+            <div key={i} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+              <div className="mb-2 h-3 w-16 animate-pulse rounded bg-slate-100" />
+              <div className="h-7 w-12 animate-pulse rounded bg-slate-100" />
+            </div>
+          ))}
+        </div>
+        {[...Array(3)].map((_, i) => (
+          <div key={i} className="h-16 animate-pulse rounded-xl bg-white shadow-sm" />
+        ))}
       </div>
     );
   }
 
-  const selectedBooking = selectedId
-    ? data.groups.flatMap((g) => g.bookings).find((b) => b.id === selectedId)
-    : null;
+  if (!data) {
+    return (
+      <div className="rounded-xl border border-slate-200 bg-white p-12 text-center">
+        <p className="text-slate-500">Unable to load day sheet.</p>
+        <button type="button" onClick={() => fetchDaySheet()} className="mt-3 text-sm font-medium text-teal-600 hover:text-teal-700">Retry</button>
+      </div>
+    );
+  }
 
   return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <span
-          className={`inline-block h-3 w-3 rounded-full ${
-            connection === 'green' ? 'bg-green-500' : connection === 'amber' ? 'bg-amber-500' : 'bg-red-500'
-          }`}
-          title={connection === 'green' ? 'Live' : connection === 'amber' ? 'Updates every 30s' : 'Offline'}
-        />
-        <span className="text-xs text-neutral-600">
-          {connection === 'green' ? 'Live' : connection === 'amber' ? 'Updates may be delayed' : 'Offline — data may not be current'}
+    <div className="space-y-4">
+      {/* Connection status */}
+      <div className="flex items-center gap-2">
+        <span className={`inline-block h-2.5 w-2.5 rounded-full ${
+          connection === 'green' ? 'bg-emerald-500' : connection === 'amber' ? 'bg-amber-400' : 'bg-red-500'
+        }`} />
+        <span className="text-xs text-slate-500">
+          {connection === 'green' ? 'Live updates' : connection === 'amber' ? 'Polling every 30s' : 'Offline'}
         </span>
       </div>
 
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-        <div className="rounded-lg bg-white p-3 shadow-sm">
-          <div className="text-xs font-medium text-neutral-500">Covers expected</div>
-          <div className="text-2xl font-bold text-neutral-900">{data.summary.coversExpected}</div>
-        </div>
-        <div className="rounded-lg bg-white p-3 shadow-sm">
-          <div className="text-xs font-medium text-neutral-500">Seated</div>
-          <div className="text-2xl font-bold text-green-700">{data.summary.seated}</div>
-        </div>
-        <div className="rounded-lg bg-white p-3 shadow-sm">
-          <div className="text-xs font-medium text-neutral-500">No-shows</div>
-          <div className="text-2xl font-bold text-red-700">{data.summary.noShows}</div>
-        </div>
-        <div className="rounded-lg bg-white p-3 shadow-sm">
-          <div className="text-xs font-medium text-neutral-500">Cancelled</div>
-          <div className="text-2xl font-bold text-neutral-500">{data.summary.cancellations}</div>
-        </div>
+      {/* Summary cards */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <SummaryCard label="Expected" value={data.summary.coversExpected} accent="teal" />
+        <SummaryCard label="Seated" value={data.summary.seated} accent="emerald" />
+        <SummaryCard label="No-shows" value={data.summary.noShows} accent="red" />
+        <SummaryCard label="Cancelled" value={data.summary.cancellations} accent="slate" />
       </div>
 
-      <div className="rounded-lg border border-neutral-200 bg-white">
+      {/* Dietary summary */}
+      <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
         <button
           type="button"
           onClick={() => setDietaryOpen((o) => !o)}
-          className="flex w-full items-center justify-between px-4 py-3 text-left text-sm font-medium text-neutral-800"
+          className="flex w-full items-center justify-between px-4 py-3 text-left text-sm font-medium text-slate-700"
         >
-          Dietary summary
-          <span className="text-neutral-400">{dietaryOpen ? '▼' : '▶'}</span>
+          <span className="flex items-center gap-2">
+            <svg className="h-4 w-4 text-amber-500" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" />
+            </svg>
+            Dietary &amp; Allergy Notes
+          </span>
+          <svg className={`h-4 w-4 text-slate-400 transition-transform ${dietaryOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
+          </svg>
         </button>
         {dietaryOpen && (
-          <div className="border-t border-neutral-100 px-4 py-3 text-sm text-neutral-600">
+          <div className="border-t border-slate-100 px-4 py-3">
             {data.dietarySummary.length === 0 ? (
-              <span className="text-neutral-400">None noted</span>
+              <p className="text-sm text-slate-400">No dietary notes for today</p>
             ) : (
-              <ul className="flex flex-wrap gap-x-4 gap-y-1">
+              <div className="flex flex-wrap gap-2">
                 {data.dietarySummary.map(({ label, count }) => (
-                  <li key={label}>{count}× {label}</li>
+                  <span key={label} className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-3 py-1 text-sm font-medium text-amber-800">
+                    <span className="flex h-5 w-5 items-center justify-center rounded-full bg-amber-200 text-xs font-bold text-amber-900">{count}</span>
+                    {label}
+                  </span>
                 ))}
-              </ul>
+              </div>
             )}
           </div>
         )}
       </div>
 
-      <div className="rounded-lg bg-white p-3 shadow-sm">
-        <h2 className="text-sm font-semibold text-neutral-700">
-          {data.periodLabel ?? 'Today'} — {data.date}
-        </h2>
+      {/* Period heading */}
+      <div className="flex items-center gap-3">
+        <h2 className="text-sm font-semibold text-slate-800">{data.periodLabel ?? 'Today'}</h2>
+        <span className="text-sm text-slate-400">{data.date}</span>
       </div>
 
+      {/* Booking groups */}
       {data.groups.length === 0 ? (
-        <div className="rounded-lg bg-white p-8 text-center text-neutral-500">No bookings in this period.</div>
+        <div className="flex flex-col items-center justify-center rounded-xl border border-slate-200 bg-white py-16 text-slate-400">
+          <svg className="mb-3 h-10 w-10" fill="none" viewBox="0 0 24 24" strokeWidth={1} stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5" />
+          </svg>
+          <p className="text-sm font-medium">No bookings in this period</p>
+        </div>
       ) : (
         <div className="space-y-4">
           {data.groups.map((group) => (
-            <div key={group.key} className="rounded-lg bg-white shadow-sm">
-              <div className="border-b border-neutral-100 px-3 py-2 text-sm font-medium text-neutral-600">
-                {group.label}
+            <div key={group.key} className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+              <div className="sticky top-0 z-10 border-b border-slate-100 bg-slate-50/80 backdrop-blur px-4 py-2.5">
+                <span className="text-sm font-semibold text-slate-600">{group.label}</span>
+                <span className="ml-2 text-xs text-slate-400">{group.bookings.length} booking{group.bookings.length !== 1 ? 's' : ''}</span>
               </div>
-              <ul className="divide-y divide-neutral-100">
+              <ul className="divide-y divide-slate-50">
                 {group.bookings.map((b) => {
                   const tags = parseDietaryNotes(b.dietary_notes, b.occasion);
                   const isSelected = selectedId === b.id;
                   const canNoShow = canMarkNoShow(b.booking_time);
+                  const sStyle = statusStyle(b.status);
                   return (
-                    <li key={b.id} className="flex flex-col">
+                    <li key={b.id}>
                       <button
                         type="button"
                         onClick={() => setSelectedId(isSelected ? null : b.id)}
-                        className="flex w-full items-center gap-2 px-3 py-3 text-left hover:bg-neutral-50"
+                        className={`flex w-full items-center gap-3 px-4 py-3.5 text-left transition-colors min-h-[56px] ${isSelected ? 'bg-teal-50/50' : 'hover:bg-slate-50'}`}
                       >
-                        <span className="flex-1 truncate font-medium text-neutral-900">{b.guest_name}</span>
-                        <span className="text-2xl font-bold tabular-nums text-neutral-900">{b.party_size}</span>
-                        <span className={`rounded border px-2 py-0.5 text-xs font-medium ${statusColor(b.status)}`}>
+                        <span className="flex-1 truncate font-medium text-slate-900">{b.guest_name}</span>
+                        <span className="text-xl font-bold tabular-nums text-slate-900">{b.party_size}</span>
+                        <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium ${sStyle.bg} ${sStyle.text}`}>
+                          <span className={`h-1.5 w-1.5 rounded-full ${sStyle.dot}`} />
                           {b.status}
                         </span>
-                        <span className="flex gap-0.5 text-lg">
-                          {tags.map((t) => (
-                            <span key={t.label} title={t.label}>{t.icon}</span>
-                          ))}
-                        </span>
+                        {tags.length > 0 && (
+                          <div className="flex gap-1">
+                            {tags.map((t) => (
+                              <span key={t.label} className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800" title={t.label}>
+                                {t.icon} {t.label}
+                              </span>
+                            ))}
+                          </div>
+                        )}
                       </button>
                       {isSelected && (b.status === 'Confirmed' || b.status === 'Seated') && (
-                        <div className="flex gap-2 border-t border-neutral-100 bg-neutral-50 px-3 py-3">
+                        <div className="flex gap-3 border-t border-slate-100 bg-slate-50/50 px-4 py-3">
                           {b.status === 'Confirmed' && (
                             <button
                               type="button"
                               disabled={actioning}
                               onClick={() => setStatus(b.id, 'Seated')}
-                              className="min-h-[48px] flex-1 rounded-lg bg-green-600 px-4 py-3 text-lg font-semibold text-white hover:bg-green-700 disabled:opacity-50"
+                              className="min-h-[52px] flex-1 rounded-xl bg-teal-600 px-4 py-3 text-base font-semibold text-white shadow-sm hover:bg-teal-700 disabled:opacity-50"
                             >
                               Check In
                             </button>
                           )}
-                          {b.status === 'Confirmed' && (
+                          {(b.status === 'Confirmed' || b.status === 'Seated') && (
                             <button
                               type="button"
                               disabled={actioning || !canNoShow}
                               title={!canNoShow ? 'Available 15 minutes after booking time' : undefined}
                               onClick={() => setStatus(b.id, 'No-Show')}
-                              className="min-h-[48px] flex-1 rounded-lg bg-red-600 px-4 py-3 text-lg font-semibold text-white hover:bg-red-700 disabled:opacity-50 disabled:bg-red-300"
-                            >
-                              No-Show
-                            </button>
-                          )}
-                          {b.status === 'Seated' && (
-                            <button
-                              type="button"
-                              disabled={actioning || !canNoShow}
-                              title={!canNoShow ? 'Available 15 minutes after booking time' : undefined}
-                              onClick={() => setStatus(b.id, 'No-Show')}
-                              className="min-h-[48px] flex-1 rounded-lg bg-red-600 px-4 py-3 text-lg font-semibold text-white hover:bg-red-700 disabled:opacity-50 disabled:bg-red-300"
+                              className="min-h-[52px] flex-1 rounded-xl bg-red-600 px-4 py-3 text-base font-semibold text-white shadow-sm hover:bg-red-700 disabled:opacity-50 disabled:bg-red-300"
                             >
                               No-Show
                             </button>
@@ -313,6 +296,22 @@ export function DaySheetView({ venueId }: { venueId: string }) {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+function SummaryCard({ label, value, accent }: { label: string; value: number; accent: string }) {
+  const accentMap: Record<string, { border: string; text: string }> = {
+    teal: { border: 'border-teal-200', text: 'text-teal-700' },
+    emerald: { border: 'border-emerald-200', text: 'text-emerald-700' },
+    red: { border: 'border-red-200', text: 'text-red-700' },
+    slate: { border: 'border-slate-200', text: 'text-slate-500' },
+  };
+  const a = accentMap[accent] ?? accentMap.slate;
+  return (
+    <div className={`rounded-xl border bg-white p-4 shadow-sm ${a.border}`}>
+      <p className="text-xs font-medium text-slate-500">{label}</p>
+      <p className={`mt-1 text-2xl font-bold ${a.text}`}>{value}</p>
     </div>
   );
 }

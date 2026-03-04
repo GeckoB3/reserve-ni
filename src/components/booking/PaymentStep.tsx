@@ -1,7 +1,6 @@
 'use client';
 
 import { useState } from 'react';
-import { loadStripe } from '@stripe/stripe-js';
 import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-stripe-js';
 import { getStripe } from '@/lib/stripe-client';
 
@@ -47,15 +46,30 @@ function PaymentForm({ clientSecret, onComplete, onBack }: { clientSecret: strin
   };
 
   return (
-    <form onSubmit={handleSubmit} className="mt-6 space-y-4">
-      <PaymentElement />
-      {error && <p className="text-sm text-red-600">{error}</p>}
-      <div className="flex gap-3 pt-2">
-        <button type="button" onClick={onBack} className="text-sm text-neutral-600 underline">
-          ← Back
+    <form onSubmit={handleSubmit} className="space-y-5">
+      <PaymentElement options={{ layout: 'tabs' }} />
+
+      {error && (
+        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
+      )}
+
+      <div className="flex gap-3">
+        <button type="button" onClick={onBack} className="flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 text-slate-400 hover:bg-slate-50 hover:text-slate-600">
+          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" />
+          </svg>
         </button>
-        <button type="submit" disabled={!stripe || loading} className="rounded bg-neutral-900 px-4 py-2 text-sm font-medium text-white hover:bg-neutral-800 disabled:opacity-50">
-          {loading ? 'Processing…' : 'Pay deposit'}
+        <button
+          type="submit"
+          disabled={!stripe || loading}
+          className="flex-1 rounded-xl bg-teal-600 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-teal-700 disabled:opacity-50"
+        >
+          <span className="flex items-center justify-center gap-2">
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25Z" />
+            </svg>
+            {loading ? 'Processing...' : 'Pay Deposit'}
+          </span>
         </button>
       </div>
     </form>
@@ -64,24 +78,45 @@ function PaymentForm({ clientSecret, onComplete, onBack }: { clientSecret: strin
 
 export function PaymentStep({ clientSecret, amountPence, partySize, onComplete, onBack, cancellationPolicy }: PaymentStepProps) {
   const amount = (amountPence / 100).toFixed(2);
+  const perPerson = (amountPence / 100 / partySize).toFixed(2);
 
   return (
-    <div className="mt-6">
-      <p className="text-sm text-neutral-600">
-        Deposit: £{amount} ({partySize} × £{(amountPence / 100 / partySize).toFixed(2)} per person)
-      </p>
+    <div className="space-y-5">
+      {/* Deposit breakdown card */}
+      <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-xs font-medium text-slate-500">Deposit required</p>
+            <p className="text-2xl font-bold text-slate-900">&pound;{amount}</p>
+          </div>
+          <div className="text-right">
+            <p className="text-xs text-slate-400">{partySize} &times; &pound;{perPerson}</p>
+            <p className="text-xs text-slate-400">per person</p>
+          </div>
+        </div>
+      </div>
+
       {cancellationPolicy && (
-        <p className="mt-2 rounded border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
-          {cancellationPolicy}
-        </p>
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800">{cancellationPolicy}</div>
       )}
-      <Elements
-        stripe={getStripe()}
-        options={{
-          clientSecret,
-          appearance: { theme: 'stripe' },
-        }}
-      >
+
+      {/* Trust indicators */}
+      <div className="flex items-center justify-center gap-4 text-xs text-slate-400">
+        <span className="flex items-center gap-1">
+          <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25Z" />
+          </svg>
+          Secure payment
+        </span>
+        <span className="flex items-center gap-1">
+          <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75m-3-7.036A11.959 11.959 0 0 1 3.598 6 11.99 11.99 0 0 0 3 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285Z" />
+          </svg>
+          Powered by Stripe
+        </span>
+      </div>
+
+      <Elements stripe={getStripe()} options={{ clientSecret, appearance: { theme: 'stripe', variables: { colorPrimary: '#0d9488', borderRadius: '12px' } } }}>
         <PaymentForm clientSecret={clientSecret} onComplete={onComplete} onBack={onBack} />
       </Elements>
     </div>

@@ -22,15 +22,9 @@ export function LoginForm({ redirectTo }: { redirectTo?: string }) {
     e.preventDefault();
     setError(null);
     setLoading(true);
-    const { error: err } = await supabase.auth.signInWithPassword({
-      email: email.trim(),
-      password,
-    });
+    const { error: err } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
     setLoading(false);
-    if (err) {
-      setError(err.message);
-      return;
-    }
+    if (err) { setError(err.message); return; }
     window.location.href = redirectTo ?? '/dashboard';
   }
 
@@ -39,17 +33,9 @@ export function LoginForm({ redirectTo }: { redirectTo?: string }) {
     setError(null);
     setSuccessMessage(null);
     setLoading(true);
-    const { error: err } = await supabase.auth.signInWithOtp({
-      email: email.trim(),
-      options: {
-        emailRedirectTo: callbackUrl,
-      },
-    });
+    const { error: err } = await supabase.auth.signInWithOtp({ email: email.trim(), options: { emailRedirectTo: callbackUrl } });
     setLoading(false);
-    if (err) {
-      setError(err.message);
-      return;
-    }
+    if (err) { setError(err.message); return; }
     setSent(true);
   }
 
@@ -58,169 +44,88 @@ export function LoginForm({ redirectTo }: { redirectTo?: string }) {
     setError(null);
     setSuccessMessage(null);
     setLoading(true);
-    const { error: err } = await supabase.auth.resetPasswordForEmail(email.trim(), {
-      redirectTo: callbackUrl,
-    });
+    const { error: err } = await supabase.auth.resetPasswordForEmail(email.trim(), { redirectTo: callbackUrl });
     setLoading(false);
-    if (err) {
-      setError(err.message);
-      return;
-    }
+    if (err) { setError(err.message); return; }
     setSuccessMessage('Check your inbox for a link to reset your password.');
   }
+
+  const inputClass = 'w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm placeholder:text-slate-300 focus:border-teal-500 focus:ring-1 focus:ring-teal-500';
+  const primaryBtn = 'w-full rounded-xl bg-teal-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-teal-700 disabled:opacity-50';
+  const secondaryLink = 'text-sm font-medium text-slate-500 hover:text-teal-600';
 
   if (forgotPassword) {
     return (
       <div className="space-y-4">
-        <p className="text-sm text-neutral-600">
-          Enter your email and we&apos;ll send you a link to reset your password.
-        </p>
+        <p className="text-sm text-slate-500">Enter your email and we&apos;ll send you a reset link.</p>
         <form onSubmit={handleForgotPasswordSubmit} className="space-y-4">
-          <label htmlFor="forgot-email" className="block text-sm font-medium">
-            Email
-          </label>
-          <input
-            id="forgot-email"
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-            autoComplete="email"
-            placeholder="you@venue.com"
-            className="w-full rounded border border-neutral-300 px-3 py-2 text-sm"
-          />
-          {error && <p className="text-sm text-red-600">{error}</p>}
-          {successMessage && <p className="text-sm text-green-600">{successMessage}</p>}
-          <div className="flex flex-col gap-2">
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full rounded bg-neutral-900 px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
-            >
-              {loading ? 'Sending…' : 'Send reset link'}
-            </button>
-            <button
-              type="button"
-              onClick={() => { setForgotPassword(false); setError(null); setSuccessMessage(null); }}
-              className="w-full text-sm text-neutral-600 underline hover:text-neutral-900"
-            >
-              Back to sign in
-            </button>
+          <div>
+            <label htmlFor="forgot-email" className="mb-1.5 block text-sm font-medium text-slate-700">Email</label>
+            <input id="forgot-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoComplete="email" placeholder="you@venue.com" className={inputClass} />
+          </div>
+          {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</p>}
+          {successMessage && <p className="rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{successMessage}</p>}
+          <button type="submit" disabled={loading} className={primaryBtn}>{loading ? 'Sending...' : 'Send Reset Link'}</button>
+          <div className="text-center">
+            <button type="button" onClick={() => { setForgotPassword(false); setError(null); setSuccessMessage(null); }} className={secondaryLink}>Back to sign in</button>
           </div>
         </form>
       </div>
     );
   }
 
-  if (mode === 'password') {
-    return (
-      <div className="space-y-4">
-        <form onSubmit={handlePasswordSubmit} className="space-y-4">
-          <label htmlFor="email" className="block text-sm font-medium">
-            Email
-          </label>
-          <input
-            id="email"
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-            autoComplete="email"
-            placeholder="you@venue.com"
-            className="w-full rounded border border-neutral-300 px-3 py-2 text-sm"
-          />
-          <label htmlFor="password" className="block text-sm font-medium">
-            Password
-          </label>
-          <input
-            id="password"
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-            autoComplete="current-password"
-            className="w-full rounded border border-neutral-300 px-3 py-2 text-sm"
-          />
-          {error && <p className="text-sm text-red-600">{error}</p>}
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full rounded bg-neutral-900 px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
-          >
-            {loading ? 'Signing in…' : 'Sign in'}
-          </button>
-        </form>
-        <div className="flex flex-col gap-1 text-center">
-          <button
-            type="button"
-            onClick={() => setForgotPassword(true)}
-            className="text-sm text-neutral-600 underline hover:text-neutral-900"
-          >
-            Forgot password?
-          </button>
-          <button
-            type="button"
-            onClick={() => { setMode('magic'); setError(null); }}
-            className="text-sm text-neutral-500 hover:text-neutral-700"
-          >
-            Sign in with magic link instead
-          </button>
-        </div>
-      </div>
-    );
-  }
-
   if (sent) {
     return (
-      <div className="space-y-4">
-        <p className="text-sm text-neutral-600 text-center">
-          Check your inbox for the sign-in link. It may take a minute to arrive.
-        </p>
-        <button
-          type="button"
-          onClick={() => { setSent(false); setMode('password'); }}
-          className="w-full text-sm text-neutral-600 underline hover:text-neutral-900"
-        >
-          Sign in with email and password instead
-        </button>
+      <div className="space-y-4 text-center">
+        <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-teal-50">
+          <svg className="h-6 w-6 text-teal-600" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 0 1-2.25 2.25h-15a2.25 2.25 0 0 1-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25m19.5 0v.243a2.25 2.25 0 0 1-1.07 1.916l-7.5 4.615a2.25 2.25 0 0 1-2.36 0L3.32 8.91a2.25 2.25 0 0 1-1.07-1.916V6.75" />
+          </svg>
+        </div>
+        <p className="text-sm text-slate-600">Check your inbox for the sign-in link.</p>
+        <button type="button" onClick={() => { setSent(false); setMode('password'); }} className={secondaryLink}>Sign in with password instead</button>
       </div>
     );
   }
 
   return (
     <div className="space-y-4">
-      <form onSubmit={handleMagicSubmit} className="space-y-4">
-        <label htmlFor="magic-email" className="block text-sm font-medium">
-          Email
-        </label>
-        <input
-          id="magic-email"
-          type="email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          required
-          autoComplete="email"
-          placeholder="you@venue.com"
-          className="w-full rounded border border-neutral-300 px-3 py-2 text-sm"
-        />
-        {error && <p className="text-sm text-red-600">{error}</p>}
-        <button
-          type="submit"
-          disabled={loading}
-          className="w-full rounded bg-neutral-900 px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
-        >
-          {loading ? 'Sending link…' : 'Send magic link'}
+      {/* Mode tabs */}
+      <div className="flex gap-1 rounded-xl bg-slate-100 p-1">
+        <button type="button" onClick={() => { setMode('password'); setError(null); }} className={`flex-1 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${mode === 'password' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+          Password
         </button>
-      </form>
-      <div className="text-center">
-        <button
-          type="button"
-          onClick={() => { setMode('password'); setError(null); }}
-          className="text-sm text-neutral-500 hover:text-neutral-700"
-        >
-          Sign in with email and password instead
+        <button type="button" onClick={() => { setMode('magic'); setError(null); }} className={`flex-1 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${mode === 'magic' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+          Magic Link
         </button>
       </div>
+
+      {mode === 'password' ? (
+        <form onSubmit={handlePasswordSubmit} className="space-y-4">
+          <div>
+            <label htmlFor="email" className="mb-1.5 block text-sm font-medium text-slate-700">Email</label>
+            <input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoComplete="email" placeholder="you@venue.com" className={inputClass} />
+          </div>
+          <div>
+            <label htmlFor="password" className="mb-1.5 block text-sm font-medium text-slate-700">Password</label>
+            <input id="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required autoComplete="current-password" className={inputClass} />
+          </div>
+          {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</p>}
+          <button type="submit" disabled={loading} className={primaryBtn}>{loading ? 'Signing in...' : 'Sign In'}</button>
+          <div className="text-center">
+            <button type="button" onClick={() => setForgotPassword(true)} className={secondaryLink}>Forgot password?</button>
+          </div>
+        </form>
+      ) : (
+        <form onSubmit={handleMagicSubmit} className="space-y-4">
+          <div>
+            <label htmlFor="magic-email" className="mb-1.5 block text-sm font-medium text-slate-700">Email</label>
+            <input id="magic-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoComplete="email" placeholder="you@venue.com" className={inputClass} />
+          </div>
+          {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</p>}
+          <button type="submit" disabled={loading} className={primaryBtn}>{loading ? 'Sending...' : 'Send Magic Link'}</button>
+        </form>
+      )}
     </div>
   );
 }

@@ -55,23 +55,13 @@ export function BookingsDashboard({ venueId }: { venueId: string }) {
       .channel('bookings')
       .on(
         'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'bookings',
-          filter: `venue_id=eq.${venueId}`,
-        },
-        () => {
-          fetchBookings();
-        }
+        { event: '*', schema: 'public', table: 'bookings', filter: `venue_id=eq.${venueId}` },
+        () => { fetchBookings(); }
       )
       .subscribe((status) => {
         setRealtimeConnected(status === 'SUBSCRIBED');
       });
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    return () => { supabase.removeChannel(channel); };
   }, [venueId, fetchBookings]);
 
   const handleWalkInCreated = useCallback(() => {
@@ -81,116 +71,145 @@ export function BookingsDashboard({ venueId }: { venueId: string }) {
 
   const timeStr = (t: string) => (t.length >= 5 ? t.slice(0, 5) : t);
 
-  const statusBadgeClass = (s: string) => {
-    switch (s) {
-      case 'Confirmed': return 'bg-green-100 text-green-800';
-      case 'Pending': return 'bg-amber-100 text-amber-800';
-      case 'Seated': return 'bg-blue-100 text-blue-800';
-      case 'Completed': return 'bg-neutral-100 text-neutral-700';
-      case 'Cancelled': return 'bg-red-100 text-red-800';
-      case 'No-Show': return 'bg-red-200 text-red-900';
-      default: return 'bg-neutral-100 text-neutral-700';
-    }
+  const statusBadge = (s: string) => {
+    const map: Record<string, { dot: string; bg: string; text: string }> = {
+      Confirmed: { dot: 'bg-emerald-500', bg: 'bg-emerald-50', text: 'text-emerald-700' },
+      Pending: { dot: 'bg-amber-500', bg: 'bg-amber-50', text: 'text-amber-700' },
+      Seated: { dot: 'bg-blue-500', bg: 'bg-blue-50', text: 'text-blue-700' },
+      Completed: { dot: 'bg-slate-400', bg: 'bg-slate-50', text: 'text-slate-600' },
+      Cancelled: { dot: 'bg-red-400', bg: 'bg-red-50', text: 'text-red-600' },
+      'No-Show': { dot: 'bg-red-600', bg: 'bg-red-50', text: 'text-red-700' },
+    };
+    const style = map[s] ?? { dot: 'bg-slate-400', bg: 'bg-slate-50', text: 'text-slate-600' };
+    return (
+      <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${style.bg} ${style.text}`}>
+        <span className={`h-1.5 w-1.5 rounded-full ${style.dot}`} />
+        {s}
+      </span>
+    );
   };
 
-  const sourceBadgeClass = (s: string) => {
-    switch (s) {
-      case 'online': return 'bg-violet-100 text-violet-800';
-      case 'phone': return 'bg-sky-100 text-sky-800';
-      case 'walk-in': return 'bg-amber-100 text-amber-800';
-      default: return 'bg-neutral-100 text-neutral-600';
-    }
+  const sourceBadge = (s: string) => {
+    const map: Record<string, string> = {
+      online: 'bg-violet-50 text-violet-700',
+      phone: 'bg-sky-50 text-sky-700',
+      'walk-in': 'bg-amber-50 text-amber-700',
+    };
+    return (
+      <span className={`inline-block rounded-full px-2.5 py-1 text-xs font-medium ${map[s] ?? 'bg-slate-50 text-slate-600'}`}>
+        {s}
+      </span>
+    );
   };
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       {realtimeConnected === false && (
-        <div className="rounded border border-amber-300 bg-amber-50 px-4 py-2 text-sm text-amber-800">
-          Updates may be delayed. Reconnecting…
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          Updates may be delayed. Reconnecting&hellip;
         </div>
       )}
 
-      <div className="flex flex-wrap items-center gap-4">
-        <label className="flex items-center gap-2">
-          <span className="text-sm font-medium text-neutral-700">Date</span>
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm">
+          <svg className="h-4 w-4 text-slate-400" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5" />
+          </svg>
           <input
             type="date"
             value={date}
             onChange={(e) => setDate(e.target.value)}
-            className="rounded border border-neutral-300 px-3 py-2 text-sm"
+            className="border-0 bg-transparent text-sm font-medium text-slate-700 focus:outline-none"
           />
-        </label>
-        <div className="flex flex-wrap gap-2">
+        </div>
+
+        <div className="flex flex-wrap gap-1.5">
           {STATUS_OPTIONS.map((s) => (
             <button
               key={s}
               type="button"
               onClick={() => setStatusFilter(s)}
-              className={`rounded-full px-3 py-1.5 text-sm font-medium ${statusFilter === s ? 'bg-neutral-900 text-white' : 'bg-white border border-neutral-300 text-neutral-700 hover:bg-neutral-50'}`}
+              className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
+                statusFilter === s
+                  ? 'bg-teal-600 text-white shadow-sm'
+                  : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
+              }`}
             >
               {s}
             </button>
           ))}
         </div>
+
         <button
           type="button"
           onClick={() => setWalkInOpen(true)}
-          className="ml-auto rounded bg-neutral-900 px-4 py-2 text-sm font-medium text-white hover:bg-neutral-800"
+          className="ml-auto flex items-center gap-2 rounded-xl bg-teal-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-teal-700"
         >
-          Add Walk-in
+          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+          </svg>
+          Walk-in
         </button>
       </div>
 
-      <div className="overflow-x-auto rounded-lg border border-neutral-200 bg-white shadow-sm">
+      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
         {loading ? (
-          <div className="p-8 text-center text-neutral-500">Loading…</div>
+          <div className="space-y-0 divide-y divide-slate-100">
+            {[...Array(5)].map((_, i) => (
+              <div key={i} className="flex items-center gap-4 px-5 py-4">
+                <div className="h-4 w-12 animate-pulse rounded bg-slate-100" />
+                <div className="h-4 w-28 animate-pulse rounded bg-slate-100" />
+                <div className="h-4 w-8 animate-pulse rounded bg-slate-100" />
+                <div className="h-5 w-16 animate-pulse rounded-full bg-slate-100" />
+                <div className="h-5 w-20 animate-pulse rounded-full bg-slate-100" />
+              </div>
+            ))}
+          </div>
         ) : bookings.length === 0 ? (
-          <div className="p-8 text-center text-neutral-500">No bookings for this date.</div>
+          <div className="flex flex-col items-center justify-center py-16 text-slate-400">
+            <svg className="mb-3 h-10 w-10" fill="none" viewBox="0 0 24 24" strokeWidth={1} stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5" />
+            </svg>
+            <p className="text-sm font-medium">No reservations for this date</p>
+          </div>
         ) : (
           <table className="w-full min-w-[640px] text-left text-sm">
             <thead>
-              <tr className="border-b border-neutral-200 bg-neutral-50">
-                <th className="px-4 py-3 font-medium text-neutral-700">Time</th>
-                <th className="px-4 py-3 font-medium text-neutral-700">Guest</th>
-                <th className="px-4 py-3 font-medium text-neutral-700">Party</th>
-                <th className="px-4 py-3 font-medium text-neutral-700">Source</th>
-                <th className="px-4 py-3 font-medium text-neutral-700">Status</th>
-                <th className="px-4 py-3 font-medium text-neutral-700">Deposit</th>
-                <th className="px-4 py-3 font-medium text-neutral-700">Dietary / Occasion</th>
+              <tr className="border-b border-slate-100 bg-slate-50/60">
+                <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wider text-slate-400">Time</th>
+                <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wider text-slate-400">Guest</th>
+                <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wider text-slate-400">Covers</th>
+                <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wider text-slate-400">Source</th>
+                <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wider text-slate-400">Status</th>
+                <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wider text-slate-400">Deposit</th>
+                <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wider text-slate-400">Notes</th>
               </tr>
             </thead>
-            <tbody>
+            <tbody className="divide-y divide-slate-50">
               {bookings.map((b) => (
                 <tr
                   key={b.id}
                   onClick={() => setSelectedId(b.id)}
-                  className="cursor-pointer border-b border-neutral-100 hover:bg-neutral-50"
+                  className="cursor-pointer transition-colors hover:bg-teal-50/40"
                 >
-                  <td className="px-4 py-3 font-medium">{timeStr(b.booking_time)}</td>
-                  <td className="px-4 py-3">{b.guest_name}</td>
-                  <td className="px-4 py-3">{b.party_size}</td>
-                  <td className="px-4 py-3">
-                    <span className={`inline rounded px-2 py-0.5 text-xs font-medium ${sourceBadgeClass(b.source)}`}>
-                      {b.source}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className={`inline rounded px-2 py-0.5 text-xs font-medium ${statusBadgeClass(b.status)}`}>
-                      {b.status}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3">
+                  <td className="px-5 py-3.5 font-medium tabular-nums text-slate-900">{timeStr(b.booking_time)}</td>
+                  <td className="px-5 py-3.5 font-medium text-slate-900">{b.guest_name}</td>
+                  <td className="px-5 py-3.5 text-slate-600">{b.party_size}</td>
+                  <td className="px-5 py-3.5">{sourceBadge(b.source)}</td>
+                  <td className="px-5 py-3.5">{statusBadge(b.status)}</td>
+                  <td className="px-5 py-3.5 text-slate-600">
                     {b.deposit_status === 'Paid' && b.deposit_amount_pence
                       ? `£${(b.deposit_amount_pence / 100).toFixed(2)}`
                       : b.deposit_status}
                   </td>
-                  <td className="px-4 py-3">
+                  <td className="px-5 py-3.5">
                     {[b.dietary_notes, b.occasion].filter(Boolean).length > 0 ? (
-                      <span className="text-amber-600" title={`Dietary: ${b.dietary_notes ?? '—'}\nOccasion: ${b.occasion ?? '—'}`}>
-                        ⋆
-                      </span>
+                      <span
+                        className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-amber-100 text-xs text-amber-700"
+                        title={`Dietary: ${b.dietary_notes ?? '—'}\nOccasion: ${b.occasion ?? '—'}`}
+                      >!</span>
                     ) : (
-                      '—'
+                      <span className="text-slate-300">&mdash;</span>
                     )}
                   </td>
                 </tr>

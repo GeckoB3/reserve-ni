@@ -2,19 +2,8 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  Tooltip,
-  ResponsiveContainer,
-  PieChart,
-  Pie,
-  Cell,
-  Legend,
-  LineChart,
-  Line,
-  CartesianGrid,
+  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
+  PieChart, Pie, Cell, Legend, LineChart, Line, CartesianGrid,
 } from 'recharts';
 
 interface Report1 {
@@ -54,16 +43,13 @@ interface ReportsData {
   report4_deposit: Report4 | null;
 }
 
-const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#6b7280'];
+const COLORS = ['#0d9488', '#059669', '#f59e0b', '#ef4444', '#8b5cf6', '#6b7280'];
 
 function last7Days(): { from: string; to: string } {
   const to = new Date();
   const from = new Date(to);
   from.setDate(from.getDate() - 7);
-  return {
-    from: from.toISOString().slice(0, 10),
-    to: to.toISOString().slice(0, 10),
-  };
+  return { from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10) };
 }
 
 function downloadCsv(filename: string, rows: string[][]) {
@@ -88,8 +74,7 @@ export function ReportsView() {
     try {
       const res = await fetch(`/api/venue/reports?from=${range.from}&to=${range.to}`);
       if (!res.ok) throw new Error('Failed to load');
-      const json = await res.json();
-      setData(json);
+      setData(await res.json());
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Error');
     } finally {
@@ -97,9 +82,7 @@ export function ReportsView() {
     }
   }, [range.from, range.to]);
 
-  useEffect(() => {
-    fetchReports();
-  }, [fetchReports]);
+  useEffect(() => { fetchReports(); }, [fetchReports]);
 
   const exportReport1 = useCallback(() => {
     if (!data?.report1_booking_summary) return;
@@ -120,12 +103,7 @@ export function ReportsView() {
     if (!data?.report2_no_show_series?.length) return;
     downloadCsv(`report2-no-show-rate-${data.from}-${data.to}.csv`, [
       ['Date', 'No-shows', 'Denominator', 'Rate %'],
-      ...data.report2_no_show_series.map((row) => [
-        row.period_start,
-        String(row.no_show_count),
-        String(row.confirmed_at_time_count),
-        String(row.rate_pct),
-      ]),
+      ...data.report2_no_show_series.map((row) => [row.period_start, String(row.no_show_count), String(row.confirmed_at_time_count), String(row.rate_pct)]),
     ]);
   }, [data]);
 
@@ -153,13 +131,20 @@ export function ReportsView() {
   }, [data]);
 
   if (loading && !data) {
-    return <div className="rounded-lg bg-white p-8 text-center text-neutral-500">Loading reports…</div>;
+    return (
+      <div className="space-y-5">
+        {[...Array(4)].map((_, i) => (
+          <div key={i} className="h-48 animate-pulse rounded-xl border border-slate-200 bg-white shadow-sm" />
+        ))}
+      </div>
+    );
   }
+
   if (error) {
     return (
-      <div className="rounded-lg bg-white p-8 text-center">
+      <div className="rounded-xl border border-slate-200 bg-white p-12 text-center">
         <p className="text-red-600">{error}</p>
-        <button type="button" onClick={fetchReports} className="mt-2 text-blue-600 underline">Retry</button>
+        <button type="button" onClick={fetchReports} className="mt-3 text-sm font-medium text-teal-600 hover:text-teal-700">Retry</button>
       </div>
     );
   }
@@ -171,118 +156,95 @@ export function ReportsView() {
 
   const sourcePieData = r1?.by_source ? Object.entries(r1.by_source).map(([name, value]) => ({ name, value })) : [];
   const statusBarData = r1?.by_status ? Object.entries(r1.by_status).map(([source, count]) => ({ source, count })) : [];
-
   const noShowRateOverall = r2.length > 0
     ? (r2.reduce((a, d) => a + d.no_show_count, 0) / Math.max(1, r2.reduce((a, d) => a + d.confirmed_at_time_count, 0))) * 100
     : 0;
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center gap-4 rounded-lg bg-white p-4 shadow-sm">
-        <label className="flex items-center gap-2">
-          <span className="text-sm font-medium text-neutral-700">From</span>
+      {/* Date range controls */}
+      <div className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+        <label className="flex items-center gap-2 text-sm">
+          <span className="font-medium text-slate-600">From</span>
           <input
             type="date"
             value={range.from}
             onChange={(e) => setRange((r) => ({ ...r, from: e.target.value }))}
-            className="rounded border border-neutral-300 px-2 py-1.5 text-sm"
+            className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm"
           />
         </label>
-        <label className="flex items-center gap-2">
-          <span className="text-sm font-medium text-neutral-700">To</span>
+        <label className="flex items-center gap-2 text-sm">
+          <span className="font-medium text-slate-600">To</span>
           <input
             type="date"
             value={range.to}
             onChange={(e) => setRange((r) => ({ ...r, to: e.target.value }))}
-            className="rounded border border-neutral-300 px-2 py-1.5 text-sm"
+            className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm"
           />
         </label>
         <button
           type="button"
           onClick={fetchReports}
           disabled={loading}
-          className="rounded bg-neutral-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-neutral-800 disabled:opacity-50"
+          className="rounded-lg bg-teal-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-teal-700 disabled:opacity-50"
         >
-          {loading ? 'Loading…' : 'Apply'}
+          {loading ? 'Loading...' : 'Apply'}
         </button>
       </div>
 
-      {/* Report 1 — Booking Summary */}
-      <section className="rounded-lg border border-neutral-200 bg-white p-6 shadow-sm">
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-neutral-900">Booking summary</h2>
-          <button type="button" onClick={exportReport1} className="text-sm text-blue-600 hover:underline">Export CSV</button>
-        </div>
+      {/* Report 1 */}
+      <ReportSection title="Booking Summary" onExport={exportReport1}>
         {r1 && (
           <>
-            <div className="mb-4 grid grid-cols-2 gap-4 sm:grid-cols-4">
-              <div className="rounded bg-neutral-50 p-3">
-                <div className="text-xs font-medium text-neutral-500">Total bookings created</div>
-                <div className="text-2xl font-bold text-neutral-900">{r1.total_bookings_created}</div>
-              </div>
-              <div className="rounded bg-neutral-50 p-3">
-                <div className="text-xs font-medium text-neutral-500">Covers booked</div>
-                <div className="text-2xl font-bold text-neutral-900">{r1.covers_booked}</div>
-              </div>
-              <div className="rounded bg-neutral-50 p-3">
-                <div className="text-xs font-medium text-neutral-500">Covers seated</div>
-                <div className="text-2xl font-bold text-neutral-900">{r1.covers_seated}</div>
-              </div>
+            <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-3">
+              <MetricCard label="Total bookings" value={String(r1.total_bookings_created)} accent="teal" />
+              <MetricCard label="Covers booked" value={String(r1.covers_booked)} accent="teal" />
+              <MetricCard label="Covers seated" value={String(r1.covers_seated)} accent="emerald" />
             </div>
             <div className="grid gap-6 md:grid-cols-2">
               <div className="h-64">
-                <p className="mb-2 text-sm font-medium text-neutral-600">By source</p>
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">By source</p>
                 {sourcePieData.length > 0 ? (
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
                       <Pie data={sourcePieData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} label={(e) => `${e.name}: ${e.value}`}>
-                        {sourcePieData.map((_, i) => (
-                          <Cell key={i} fill={COLORS[i % COLORS.length]} />
-                        ))}
+                        {sourcePieData.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
                       </Pie>
                       <Tooltip />
                       <Legend />
                     </PieChart>
                   </ResponsiveContainer>
-                ) : (
-                  <p className="text-sm text-neutral-400">No data</p>
-                )}
+                ) : <p className="text-sm text-slate-400">No data</p>}
               </div>
               <div className="h-64">
-                <p className="mb-2 text-sm font-medium text-neutral-600">By status</p>
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">By status</p>
                 {statusBarData.length > 0 ? (
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={statusBarData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-                      <CartesianGrid strokeDasharray="3 3" />
+                      <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
                       <XAxis dataKey="source" tick={{ fontSize: 12 }} />
                       <YAxis tick={{ fontSize: 12 }} />
                       <Tooltip />
-                      <Bar dataKey="count" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="count" fill="#0d9488" radius={[6, 6, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
-                ) : (
-                  <p className="text-sm text-neutral-400">No data</p>
-                )}
+                ) : <p className="text-sm text-slate-400">No data</p>}
               </div>
             </div>
           </>
         )}
-      </section>
+      </ReportSection>
 
-      {/* Report 2 — No-Show Rate */}
-      <section className="rounded-lg border border-neutral-200 bg-white p-6 shadow-sm">
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-neutral-900">No-show rate</h2>
-          <button type="button" onClick={exportReport2} className="text-sm text-blue-600 hover:underline">Export CSV</button>
-        </div>
-        <p className="mb-2 text-sm text-neutral-600">
-          No-shows / (No-shows + Seated + Completed). Walk-ins and cancellations excluded. Overall: <strong>{noShowRateOverall.toFixed(1)}%</strong>
+      {/* Report 2 */}
+      <ReportSection title="No-Show Rate" onExport={exportReport2}>
+        <p className="mb-3 text-sm text-slate-500">
+          Overall: <span className="font-semibold text-slate-900">{noShowRateOverall.toFixed(1)}%</span>
         </p>
         {r2.length > 0 ? (
           <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={r2} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" />
+                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
                 <XAxis dataKey="period_start" tick={{ fontSize: 11 }} />
                 <YAxis tick={{ fontSize: 11 }} domain={[0, 100]} tickFormatter={(v) => `${v}%`} />
                 <Tooltip formatter={(value: number) => [`${value}%`, 'Rate']} />
@@ -290,64 +252,63 @@ export function ReportsView() {
               </LineChart>
             </ResponsiveContainer>
           </div>
-        ) : (
-          <p className="text-sm text-neutral-400">No data for this period</p>
-        )}
-      </section>
+        ) : <p className="text-sm text-slate-400">No data for this period</p>}
+      </ReportSection>
 
-      {/* Report 3 — Cancellation Rate */}
-      <section className="rounded-lg border border-neutral-200 bg-white p-6 shadow-sm">
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-neutral-900">Cancellation rate</h2>
-          <button type="button" onClick={exportReport3} className="text-sm text-blue-600 hover:underline">Export CSV</button>
-        </div>
+      {/* Report 3 */}
+      <ReportSection title="Cancellation Rate" onExport={exportReport3}>
         {r3 && (
-          <div className="space-y-3">
-            <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-              <div className="rounded bg-neutral-50 p-3">
-                <div className="text-xs font-medium text-neutral-500">Total created</div>
-                <div className="text-xl font-bold text-neutral-900">{r3.total_bookings_created}</div>
-              </div>
-              <div className="rounded bg-neutral-50 p-3">
-                <div className="text-xs font-medium text-neutral-500">Guest-initiated</div>
-                <div className="text-xl font-bold text-neutral-900">{r3.cancelled_guest_initiated}</div>
-              </div>
-              <div className="rounded bg-neutral-50 p-3">
-                <div className="text-xs font-medium text-neutral-500">Auto (unpaid)</div>
-                <div className="text-xl font-bold text-neutral-900">{r3.cancelled_auto}</div>
-              </div>
-              <div className="rounded bg-neutral-50 p-3">
-                <div className="text-xs font-medium text-neutral-500">Cancellation rate</div>
-                <div className="text-xl font-bold text-neutral-900">{r3.cancellation_rate_pct}%</div>
-              </div>
-            </div>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <MetricCard label="Total created" value={String(r3.total_bookings_created)} />
+            <MetricCard label="Guest-initiated" value={String(r3.cancelled_guest_initiated)} />
+            <MetricCard label="Auto (unpaid)" value={String(r3.cancelled_auto)} />
+            <MetricCard label="Cancellation rate" value={`${r3.cancellation_rate_pct}%`} accent={r3.cancellation_rate_pct > 10 ? 'red' : 'emerald'} />
           </div>
         )}
-      </section>
+      </ReportSection>
 
-      {/* Report 4 — Deposit Summary */}
-      <section className="rounded-lg border border-neutral-200 bg-white p-6 shadow-sm">
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-neutral-900">Deposit summary</h2>
-          <button type="button" onClick={exportReport4} className="text-sm text-blue-600 hover:underline">Export CSV</button>
-        </div>
+      {/* Report 4 */}
+      <ReportSection title="Deposit Summary" onExport={exportReport4}>
         {r4 && (
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-            <div className="rounded bg-green-50 p-3">
-              <div className="text-xs font-medium text-green-800">Total collected (Paid + Forfeited)</div>
-              <div className="text-xl font-bold text-green-900">£{(r4.total_collected_pence / 100).toFixed(2)}</div>
-            </div>
-            <div className="rounded bg-amber-50 p-3">
-              <div className="text-xs font-medium text-amber-800">Total refunded</div>
-              <div className="text-xl font-bold text-amber-900">£{(r4.total_refunded_pence / 100).toFixed(2)}</div>
-            </div>
-            <div className="rounded bg-red-50 p-3">
-              <div className="text-xs font-medium text-red-800">Total forfeited</div>
-              <div className="text-xl font-bold text-red-900">£{(r4.total_forfeited_pence / 100).toFixed(2)}</div>
-            </div>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <MetricCard label="Total collected" value={`£${(r4.total_collected_pence / 100).toFixed(2)}`} accent="emerald" />
+            <MetricCard label="Total refunded" value={`£${(r4.total_refunded_pence / 100).toFixed(2)}`} accent="amber" />
+            <MetricCard label="Total forfeited" value={`£${(r4.total_forfeited_pence / 100).toFixed(2)}`} accent="red" />
           </div>
         )}
-      </section>
+      </ReportSection>
+    </div>
+  );
+}
+
+function ReportSection({ title, onExport, children }: { title: string; onExport: () => void; children: React.ReactNode }) {
+  return (
+    <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="mb-4 flex items-center justify-between">
+        <h2 className="text-lg font-semibold text-slate-900">{title}</h2>
+        <button type="button" onClick={onExport} className="flex items-center gap-1.5 text-sm font-medium text-teal-600 hover:text-teal-700">
+          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" />
+          </svg>
+          Export CSV
+        </button>
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function MetricCard({ label, value, accent }: { label: string; value: string; accent?: string }) {
+  const colorMap: Record<string, string> = {
+    teal: 'border-l-teal-500',
+    emerald: 'border-l-emerald-500',
+    red: 'border-l-red-500',
+    amber: 'border-l-amber-500',
+  };
+  return (
+    <div className={`rounded-lg border border-slate-100 bg-slate-50/50 p-3 ${accent ? `border-l-4 ${colorMap[accent] ?? ''}` : ''}`}>
+      <p className="text-xs font-medium text-slate-500">{label}</p>
+      <p className="mt-1 text-xl font-bold text-slate-900">{value}</p>
     </div>
   );
 }

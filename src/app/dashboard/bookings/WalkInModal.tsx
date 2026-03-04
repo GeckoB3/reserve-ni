@@ -39,15 +39,19 @@ export function WalkInModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
-      <div className="w-full max-w-sm rounded-lg bg-white p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold">Add Walk-in</h2>
-          <button type="button" onClick={onClose} className="rounded p-2 text-neutral-500 hover:bg-neutral-100">✕</button>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 backdrop-blur-sm p-4" onClick={onClose}>
+      <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-5">
+          <h2 className="text-lg font-semibold text-slate-900">Add Walk-in</h2>
+          <button type="button" onClick={onClose} className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-600">
+            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+            </svg>
+          </button>
         </div>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label htmlFor="walkin-party" className="block text-sm font-medium text-neutral-700 mb-1">Party size *</label>
+            <label htmlFor="walkin-party" className="mb-1.5 block text-sm font-medium text-slate-700">Party size</label>
             <input
               id="walkin-party"
               type="number"
@@ -55,27 +59,29 @@ export function WalkInModal({
               max={50}
               value={partySize}
               onChange={(e) => setPartySize(Number(e.target.value))}
-              className="w-full rounded border border-neutral-300 px-3 py-2"
+              className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm focus:border-teal-500 focus:ring-1 focus:ring-teal-500"
               required
             />
           </div>
           <div>
-            <label htmlFor="walkin-name" className="block text-sm font-medium text-neutral-700 mb-1">Guest name (optional)</label>
+            <label htmlFor="walkin-name" className="mb-1.5 block text-sm font-medium text-slate-700">Guest name <span className="text-slate-400">(optional)</span></label>
             <input
               id="walkin-name"
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="Walk-in"
-              className="w-full rounded border border-neutral-300 px-3 py-2"
+              placeholder="Walk-in guest"
+              className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm focus:border-teal-500 focus:ring-1 focus:ring-teal-500"
             />
           </div>
-          {error && <p className="text-sm text-red-600">{error}</p>}
-          <div className="flex gap-2">
-            <button type="submit" disabled={loading} className="rounded bg-neutral-900 px-4 py-2 text-sm font-medium text-white hover:bg-neutral-800 disabled:opacity-50">
-              {loading ? 'Adding…' : 'Add'}
+          {error && (
+            <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>
+          )}
+          <div className="flex gap-3 pt-2">
+            <button type="submit" disabled={loading} className="flex-1 rounded-xl bg-teal-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-teal-700 disabled:opacity-50">
+              {loading ? 'Adding...' : 'Add Walk-in'}
             </button>
-            <button type="button" onClick={onClose} className="rounded border border-neutral-300 px-4 py-2 text-sm font-medium text-neutral-700 hover:bg-neutral-50">
+            <button type="button" onClick={onClose} className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-50">
               Cancel
             </button>
           </div>

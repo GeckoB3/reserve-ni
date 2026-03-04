@@ -17,6 +17,7 @@ export interface BookingFlowProps {
 }
 
 const steps: Array<'date' | 'slot' | 'details' | 'payment' | 'confirmation'> = ['date', 'slot', 'details', 'payment', 'confirmation'];
+const STEP_LABELS = ['Date', 'Time', 'Details', 'Payment', 'Done'];
 
 export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, accentColour }: BookingFlowProps) {
   const [stepIndex, setStepIndex] = useState(0);
@@ -31,10 +32,7 @@ export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, 
 
   const step = steps[stepIndex];
   const rules: BookingRulesPublic = venue.booking_rules ?? { min_party_size: 1, max_party_size: 20 };
-  const requiresDeposit = Boolean(
-    venue.deposit_config?.enabled &&
-    venue.deposit_config?.online_requires_deposit !== false
-  );
+  const requiresDeposit = Boolean(venue.deposit_config?.enabled && venue.deposit_config?.online_requires_deposit !== false);
 
   useEffect(() => {
     if (!embed || !onHeightChange) return;
@@ -43,9 +41,7 @@ export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, 
 
   const goNext = useCallback(() => {
     setError(null);
-    if (step === 'details' && requiresDeposit) {
-      setStepIndex((i) => i + 1);
-    } else if (step === 'details' && !requiresDeposit) {
+    if (step === 'details' && !requiresDeposit) {
       setStepIndex(steps.indexOf('confirmation'));
     } else {
       setStepIndex((i) => Math.min(i + 1, steps.length - 1));
@@ -58,9 +54,7 @@ export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, 
   }, []);
 
   const fetchSlots = useCallback(async (date: string) => {
-    const res = await fetch(
-      `/api/booking/availability?venue_id=${encodeURIComponent(venue.id)}&date=${encodeURIComponent(date)}&party_size=${partySize}`
-    );
+    const res = await fetch(`/api/booking/availability?venue_id=${encodeURIComponent(venue.id)}&date=${encodeURIComponent(date)}&party_size=${partySize}`);
     if (!res.ok) {
       const j = await res.json().catch(() => ({}));
       throw new Error(j.error ?? 'Failed to load times');
@@ -104,17 +98,10 @@ export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, 
       });
       const data = await res.json();
       if (!res.ok) {
-        if (res.status === 409) {
-          setError(data.error ?? 'This time slot is no longer available');
-          return;
-        }
+        if (res.status === 409) { setError(data.error ?? 'This time slot is no longer available'); return; }
         throw new Error(data.error ?? 'Booking failed');
       }
-      setCreateResult({
-        booking_id: data.booking_id,
-        client_secret: data.client_secret,
-        requires_deposit: data.requires_deposit ?? false,
-      });
+      setCreateResult({ booking_id: data.booking_id, client_secret: data.client_secret, requires_deposit: data.requires_deposit ?? false });
       if (!data.requires_deposit) {
         setStepIndex(steps.indexOf('confirmation'));
       } else {
@@ -123,7 +110,7 @@ export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, 
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Booking failed');
     }
-  }, [venue.id, selectedDate, selectedSlot, partySize, goNext]);
+  }, [venue.id, selectedDate, selectedSlot, partySize, embed, goNext]);
 
   const handlePaymentComplete = useCallback(() => {
     setPaymentComplete(true);
@@ -134,67 +121,64 @@ export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, 
     ? { '--accent-color': `#${accentColour.replace(/^#/, '')}` } as React.CSSProperties
     : undefined;
 
+  const visibleSteps = requiresDeposit ? STEP_LABELS : STEP_LABELS.filter((_, i) => i !== 3);
+  const currentVisibleIndex = requiresDeposit ? stepIndex : (stepIndex >= 3 ? stepIndex - 1 : stepIndex);
+
   return (
     <div className="mx-auto max-w-lg" style={accentStyle}>
-      {!embed && <p className="mt-1 text-sm text-neutral-600">Make a reservation</p>}
-
-      {error && (
-        <div className="mt-4 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-800">
-          {error}
+      {/* Progress indicator */}
+      {step !== 'confirmation' && (
+        <div className="mb-8 mt-2">
+          <div className="flex items-center justify-between">
+            {visibleSteps.map((label, i) => {
+              const isActive = i === currentVisibleIndex;
+              const isDone = i < currentVisibleIndex;
+              return (
+                <div key={label} className="flex flex-1 items-center">
+                  <div className="flex flex-col items-center">
+                    <div className={`flex h-8 w-8 items-center justify-center rounded-full text-xs font-bold transition-all ${
+                      isActive ? 'bg-teal-600 text-white shadow-md shadow-teal-600/30' :
+                      isDone ? 'bg-teal-100 text-teal-700' :
+                      'bg-slate-100 text-slate-400'
+                    }`}>
+                      {isDone ? (
+                        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
+                        </svg>
+                      ) : (
+                        i + 1
+                      )}
+                    </div>
+                    <span className={`mt-1 text-xs font-medium ${isActive ? 'text-teal-700' : isDone ? 'text-teal-600' : 'text-slate-400'}`}>{label}</span>
+                  </div>
+                  {i < visibleSteps.length - 1 && (
+                    <div className={`mx-1 h-0.5 flex-1 rounded ${isDone ? 'bg-teal-300' : 'bg-slate-100'}`} />
+                  )}
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
 
+      {error && (
+        <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
+      )}
+
       {step === 'date' && (
-        <DateStep
-          minParty={rules.min_party_size}
-          maxParty={rules.max_party_size}
-          partySize={partySize}
-          onPartySizeChange={setPartySize}
-          onDateSelect={handleDateSelect}
-        />
+        <DateStep minParty={rules.min_party_size} maxParty={rules.max_party_size} partySize={partySize} onPartySizeChange={setPartySize} onDateSelect={handleDateSelect} />
       )}
-
       {step === 'slot' && (
-        <SlotStep
-          date={selectedDate!}
-          slots={slots}
-          onSelect={handleSlotSelect}
-          onBack={goBack}
-        />
+        <SlotStep date={selectedDate!} slots={slots} onSelect={handleSlotSelect} onBack={goBack} />
       )}
-
       {step === 'details' && selectedSlot && (
-        <DetailsStep
-          slot={selectedSlot}
-          date={selectedDate!}
-          partySize={partySize}
-          onSubmit={handleDetailsSubmit}
-          onBack={goBack}
-          cancellationPolicy={cancellationPolicy}
-          requiresDeposit={requiresDeposit}
-        />
+        <DetailsStep slot={selectedSlot} date={selectedDate!} partySize={partySize} onSubmit={handleDetailsSubmit} onBack={goBack} cancellationPolicy={cancellationPolicy} requiresDeposit={requiresDeposit} />
       )}
-
       {step === 'payment' && createResult?.client_secret && (
-        <PaymentStep
-          clientSecret={createResult.client_secret}
-          amountPence={(venue.deposit_config?.amount_per_person_gbp ?? 0) * partySize * 100}
-          partySize={partySize}
-          onComplete={handlePaymentComplete}
-          onBack={goBack}
-          cancellationPolicy={cancellationPolicy}
-        />
+        <PaymentStep clientSecret={createResult.client_secret} amountPence={(venue.deposit_config?.amount_per_person_gbp ?? 0) * partySize * 100} partySize={partySize} onComplete={handlePaymentComplete} onBack={goBack} cancellationPolicy={cancellationPolicy} />
       )}
-
       {step === 'confirmation' && (
-        <ConfirmationStep
-          venue={venue}
-          date={selectedDate!}
-          slot={selectedSlot!}
-          partySize={partySize}
-          guest={guestDetails!}
-          bookingId={createResult?.booking_id}
-        />
+        <ConfirmationStep venue={venue} date={selectedDate!} slot={selectedSlot!} partySize={partySize} guest={guestDetails!} bookingId={createResult?.booking_id} />
       )}
     </div>
   );
