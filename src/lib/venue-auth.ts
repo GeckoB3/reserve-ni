@@ -29,11 +29,17 @@ export async function getVenueStaff(supabase: SupabaseClient): Promise<VenueStaf
   if (!user?.email) return null;
 
   const admin = getSupabaseAdminClient();
-  const { data: rows } = await admin
+  const normalised = user.email.toLowerCase().trim();
+  const { data: rows, error } = await admin
     .from('staff')
     .select('venue_id, email, role')
-    .eq('email', user.email)
+    .ilike('email', normalised)
     .limit(1);
+
+  if (error) {
+    console.error('[getVenueStaff] staff lookup failed:', error.message, { email: normalised });
+    return null;
+  }
 
   const row = rows?.[0];
   if (!row) return null;
@@ -57,15 +63,21 @@ export async function getDashboardStaff(
   const { data: { user } } = await supabase.auth.getUser();
   if (!user?.email) return { email: '', venue_id: null, role: null, db: admin };
 
-  const { data: rows } = await admin
+  const normalised = user.email.toLowerCase().trim();
+  const { data: rows, error } = await admin
     .from('staff')
     .select('venue_id, role')
-    .eq('email', user.email)
+    .ilike('email', normalised)
     .limit(1);
+
+  if (error) {
+    console.error('[getDashboardStaff] staff lookup failed:', error.message, { email: normalised });
+    return { email: normalised, venue_id: null, role: null, db: admin };
+  }
 
   const row = rows?.[0];
   return {
-    email: user.email,
+    email: normalised,
     venue_id: row?.venue_id ?? null,
     role: (row?.role as 'admin' | 'staff') ?? null,
     db: admin,
