@@ -222,20 +222,24 @@ export async function POST(request: NextRequest) {
       const baseUrl = request.nextUrl.origin;
       const manageBookingLink = `${baseUrl}/manage/${booking.id}/${encodeURIComponent(manageToken)}`;
       const depositAmount = depositAmountPence != null ? (depositAmountPence / 100).toFixed(2) : undefined;
-      await sendCommunication({
-        type: 'booking_confirmation',
-        recipient: { email: guest.email ?? undefined, phone: guest.phone ?? undefined },
-        payload: {
-          guest_name: name,
-          venue_name: venue.name,
-          booking_date,
-          booking_time,
-          party_size,
-          cancellation_deadline,
-          deposit_amount: depositAmount,
-          manage_booking_link: manageBookingLink,
-        },
-      });
+      try {
+        await sendCommunication({
+          type: 'booking_confirmation',
+          recipient: { email: guest.email ?? undefined, phone: guest.phone ?? undefined },
+          payload: {
+            guest_name: name,
+            venue_name: venue.name,
+            booking_date,
+            booking_time,
+            party_size,
+            cancellation_deadline,
+            deposit_amount: depositAmount,
+            manage_booking_link: manageBookingLink,
+          },
+        });
+      } catch (commsErr) {
+        console.error('Confirmation comms failed (booking still created):', commsErr);
+      }
     }
 
     return NextResponse.json(

@@ -138,18 +138,22 @@ export async function POST(request: NextRequest) {
       const { data: guest } = await supabase.from('guests').select('name, email, phone').eq('id', booking.guest_id).single();
       const timeStr = typeof booking.booking_time === 'string' ? booking.booking_time.slice(0, 5) : '';
 
-      await sendCommunication({
-        type: 'cancellation_confirmation',
-        recipient: { email: guest?.email ?? undefined, phone: guest?.phone ?? undefined },
-        payload: {
-          guest_name: guest?.name,
-          venue_name: venue?.name,
-          booking_date: booking.booking_date,
-          booking_time: timeStr,
-          party_size: booking.party_size,
-          deposit_amount: canRefund && booking.deposit_amount_pence ? (booking.deposit_amount_pence / 100).toFixed(2) : undefined,
-        },
-      });
+      try {
+        await sendCommunication({
+          type: 'cancellation_confirmation',
+          recipient: { email: guest?.email ?? undefined, phone: guest?.phone ?? undefined },
+          payload: {
+            guest_name: guest?.name,
+            venue_name: venue?.name,
+            booking_date: booking.booking_date,
+            booking_time: timeStr,
+            party_size: booking.party_size,
+            deposit_amount: canRefund && booking.deposit_amount_pence ? (booking.deposit_amount_pence / 100).toFixed(2) : undefined,
+          },
+        });
+      } catch (commsErr) {
+        console.error('Cancellation confirmation comms failed:', commsErr);
+      }
 
       return NextResponse.json({
         success: true,

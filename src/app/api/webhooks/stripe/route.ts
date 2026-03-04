@@ -87,22 +87,26 @@ export async function POST(request: NextRequest) {
       const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'https://reserveni.com';
       const manageBookingLink = manageToken ? `${baseUrl}/manage/${bookingId}/${encodeURIComponent(manageToken)}` : undefined;
       const depositAmount = b?.deposit_amount_pence != null ? (b.deposit_amount_pence / 100).toFixed(2) : undefined;
-      await sendCommunication({
-        type: 'booking_confirmation',
-        recipient: { email: guest?.email ?? undefined, phone: guest?.phone ?? undefined },
-        payload: {
-          guest_name: guest?.name,
-          venue_name: venue?.name,
-          booking_date: b?.booking_date,
-          booking_time: typeof b?.booking_time === 'string' ? b.booking_time.slice(0, 5) : b?.booking_time,
-          party_size: b?.party_size,
-          cancellation_deadline: b?.cancellation_deadline,
-          deposit_amount: depositAmount,
-          dietary_notes: b?.dietary_notes ?? undefined,
-          occasion: b?.occasion ?? undefined,
-          manage_booking_link: manageBookingLink,
-        },
-      });
+      try {
+        await sendCommunication({
+          type: 'booking_confirmation',
+          recipient: { email: guest?.email ?? undefined, phone: guest?.phone ?? undefined },
+          payload: {
+            guest_name: guest?.name,
+            venue_name: venue?.name,
+            booking_date: b?.booking_date,
+            booking_time: typeof b?.booking_time === 'string' ? b.booking_time.slice(0, 5) : b?.booking_time,
+            party_size: b?.party_size,
+            cancellation_deadline: b?.cancellation_deadline,
+            deposit_amount: depositAmount,
+            dietary_notes: b?.dietary_notes ?? undefined,
+            occasion: b?.occasion ?? undefined,
+            manage_booking_link: manageBookingLink,
+          },
+        });
+      } catch (commsErr) {
+        console.error('Webhook confirmation comms failed (booking still confirmed):', commsErr);
+      }
     } else if (event.type === 'payment_intent.payment_failed') {
       const pi = event.data.object as Stripe.PaymentIntent;
       const bookingId = pi.metadata?.booking_id;

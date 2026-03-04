@@ -158,17 +158,21 @@ export async function PATCH(
         if (guestRow?.email && venueRow?.name) {
           const depositAmount = booking.deposit_amount_pence != null ? (booking.deposit_amount_pence / 100).toFixed(2) : undefined;
           const bookingTime = typeof booking.booking_time === 'string' ? booking.booking_time.slice(0, 5) : '';
-          await sendCommunication({
-            type: 'no_show_notification',
-            recipient: { email: guestRow.email },
-            payload: {
-              guest_name: guestRow.name ?? 'Guest',
-              venue_name: venueRow.name,
-              booking_date: booking.booking_date,
-              booking_time: bookingTime,
-              deposit_amount: depositStatus === 'Forfeited' ? depositAmount : undefined,
-            },
-          });
+          try {
+            await sendCommunication({
+              type: 'no_show_notification',
+              recipient: { email: guestRow.email },
+              payload: {
+                guest_name: guestRow.name ?? 'Guest',
+                venue_name: venueRow.name,
+                booking_date: booking.booking_date,
+                booking_time: bookingTime,
+                deposit_amount: depositStatus === 'Forfeited' ? depositAmount : undefined,
+              },
+            });
+          } catch (commsErr) {
+            console.error('No-show notification failed:', commsErr);
+          }
         }
       } else {
         await staff.db
@@ -322,19 +326,23 @@ export async function PATCH(
         const manageBookingLink = booking.confirm_token_hash
           ? `${baseUrl}/manage/${id}/${encodeURIComponent(booking.confirm_token_hash)}`
           : undefined;
-        await sendCommunication({
-          type: 'booking_modification',
-          recipient: { email: guestRow.email, phone: guestRow.phone ?? undefined },
-          payload: {
-            guest_name: guestRow.name ?? 'Guest',
-            venue_name: venueRow.name,
-            booking_date: newDate,
-            booking_time: timeStr,
-            party_size: newPartySize,
-            deposit_amount: depositAmount,
-            manage_booking_link: manageBookingLink,
-          },
-        });
+        try {
+          await sendCommunication({
+            type: 'booking_modification',
+            recipient: { email: guestRow.email, phone: guestRow.phone ?? undefined },
+            payload: {
+              guest_name: guestRow.name ?? 'Guest',
+              venue_name: venueRow.name,
+              booking_date: newDate,
+              booking_time: timeStr,
+              party_size: newPartySize,
+              deposit_amount: depositAmount,
+              manage_booking_link: manageBookingLink,
+            },
+          });
+        } catch (commsErr) {
+          console.error('Booking modification notification failed:', commsErr);
+        }
       }
 
       const updated = await staff.db.from('bookings').select('*').eq('id', id).single();
