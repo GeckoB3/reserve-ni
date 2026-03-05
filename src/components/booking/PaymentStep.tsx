@@ -27,18 +27,31 @@ function PaymentForm({ clientSecret, onComplete, onBack }: { clientSecret: strin
     setError(null);
     setLoading(true);
     try {
+      // Required by Stripe Payment Element: collect and validate the payment
+      // method details before calling confirmPayment.
+      const { error: submitError } = await elements.submit();
+      if (submitError) {
+        setError(submitError.message ?? 'Please check your payment details');
+        setLoading(false);
+        return;
+      }
+
       const { error: confirmError } = await stripe.confirmPayment({
         elements,
         clientSecret,
         confirmParams: {
           return_url: `${typeof window !== 'undefined' ? window.location.origin : ''}/pay/success`,
         },
+        // Stay on page for standard card payments; only redirect when required
+        // (e.g. 3D Secure bank authentication flows).
+        redirect: 'if_required',
       });
       if (confirmError) {
         setError(confirmError.message ?? 'Payment failed');
         setLoading(false);
         return;
       }
+      // Payment succeeded without a redirect — advance to confirmation step.
       onComplete();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Payment failed');

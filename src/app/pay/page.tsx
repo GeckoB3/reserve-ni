@@ -17,12 +17,20 @@ function PayForm({ clientSecret, onSuccess }: { clientSecret: string; onSuccess:
     setError(null);
     setLoading(true);
     try {
+      const { error: submitError } = await elements.submit();
+      if (submitError) {
+        setError(submitError.message ?? 'Please check your payment details');
+        setLoading(false);
+        return;
+      }
+
       const { error: confirmError } = await stripe.confirmPayment({
         elements,
         clientSecret,
         confirmParams: {
           return_url: `${typeof window !== 'undefined' ? window.location.origin : ''}/pay/success`,
         },
+        redirect: 'if_required',
       });
       if (confirmError) {
         setError(confirmError.message ?? 'Payment failed');
