@@ -117,6 +117,27 @@ export async function POST(request: NextRequest) {
           .eq('id', bookingId);
       }
       console.error('payment_intent.payment_failed', pi.id, pi.last_payment_error?.message);
+    } else if (event.type === 'account.updated') {
+      // Fired when a connected account's verification status changes.
+      const account = event.data.object as Stripe.Account;
+      if (account.id) {
+        const { data: venue } = await supabase
+          .from('venues')
+          .select('id')
+          .eq('stripe_connected_account_id', account.id)
+          .maybeSingle();
+        if (venue) {
+          await supabase
+            .from('venues')
+            .update({
+              stripe_charges_enabled: account.charges_enabled ?? false,
+              stripe_details_submitted: account.details_submitted ?? false,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', venue.id);
+          console.log(`[Stripe] account.updated for venue ${venue.id}: charges_enabled=${account.charges_enabled}`);
+        }
+      }
     } else if (event.type === 'charge.refunded' || event.type === 'charge.refund.updated') {
       let paymentIntentId: string | null = null;
       if (event.type === 'charge.refunded') {

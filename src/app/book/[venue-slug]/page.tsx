@@ -68,9 +68,15 @@ export default async function BookPage({ params }: { params: Promise<{ 'venue-sl
 
       {/* Footer */}
       <footer className="fixed bottom-0 left-0 right-0 border-t border-slate-200 bg-white/90 backdrop-blur py-3 text-center text-xs text-slate-400">
-        <a href="https://reserveni.com" target="_blank" rel="noopener noreferrer" className="hover:text-brand-600">
-          Powered by Reserve NI
-        </a>
+        <span>
+          <a href="/privacy" target="_blank" rel="noopener noreferrer" className="hover:text-brand-600">Privacy</a>
+          {' · '}
+          <a href="/terms" target="_blank" rel="noopener noreferrer" className="hover:text-brand-600">Terms</a>
+          {' · '}
+          <a href="https://reserveni.com" target="_blank" rel="noopener noreferrer" className="hover:text-brand-600">
+            Powered by Reserve NI
+          </a>
+        </span>
       </footer>
     </main>
   );

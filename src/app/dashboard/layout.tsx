@@ -12,21 +12,26 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   const email = user.email ?? '';
   let venueName: string | undefined;
+  let venueSlug: string | undefined;
+  let staffName: string | undefined;
   try {
     const admin = getSupabaseAdminClient();
     const { data: staffRows } = await admin
       .from('staff')
-      .select('venue_id')
+      .select('venue_id, name')
       .ilike('email', email.toLowerCase().trim())
       .limit(1);
-    const venueId = staffRows?.[0]?.venue_id;
+    const staffRow = staffRows?.[0];
+    staffName = staffRow?.name ?? undefined;
+    const venueId = staffRow?.venue_id;
     if (venueId) {
       const { data: venue } = await admin
         .from('venues')
-        .select('name')
+        .select('name, slug')
         .eq('id', venueId)
         .single();
       venueName = venue?.name ?? undefined;
+      venueSlug = venue?.slug ?? undefined;
     }
   } catch {
     // Non-critical; sidebar still renders without venue name
@@ -34,7 +39,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   return (
     <div className="flex h-screen overflow-hidden bg-slate-50">
-      <DashboardSidebar email={email} venueName={venueName} />
+      <DashboardSidebar email={email} staffName={staffName} venueName={venueName} venueSlug={venueSlug} />
       <main className="flex-1 overflow-y-auto pt-14 lg:pt-0">
         {children}
       </main>

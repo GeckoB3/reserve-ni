@@ -81,7 +81,12 @@ export function DetailsStep({ slot, date, partySize, onSubmit, onBack, cancellat
 
         <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 bg-slate-50/50 px-4 py-3">
           <input type="checkbox" {...register('acceptTerms')} className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500" />
-          <span className="text-sm text-slate-600">I accept the booking terms and cancellation policy.</span>
+          <span className="text-sm text-slate-600">
+            I accept the{' '}
+            <a href="/terms" target="_blank" rel="noopener noreferrer" className="text-brand-600 underline hover:text-brand-700">booking terms</a>
+            {' '}and{' '}
+            <a href="/privacy" target="_blank" rel="noopener noreferrer" className="text-brand-600 underline hover:text-brand-700">privacy policy</a>.
+          </span>
         </label>
         {errors.acceptTerms && <p className="text-xs text-red-600">{errors.acceptTerms.message}</p>}
 

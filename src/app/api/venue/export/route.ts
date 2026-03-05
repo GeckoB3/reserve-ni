@@ -1,0 +1,163 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { createClient } from '@/lib/supabase/server';
+import { getVenueStaff } from '@/lib/venue-auth';
+
+function escapeCsvCell(value: string | number | boolean | null | undefined): string {
+  const str = value == null ? '' : String(value);
+  if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+    return `"${str.replace(/"/g, '""')}"`;
+  }
+  return str;
+}
+
+function buildCsv(headers: string[], rows: (string | number | boolean | null | undefined)[][]): string {
+  const headerLine = headers.map(escapeCsvCell).join(',');
+  const dataLines = rows.map((row) => row.map(escapeCsvCell).join(','));
+  return [headerLine, ...dataLines].join('\r\n');
+}
+
+export async function GET(request: NextRequest) {
+  try {
+    const supabase = await createClient();
+    const staff = await getVenueStaff(supabase);
+    if (!staff) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
+
+    const { searchParams } = new URL(request.url);
+    const type = searchParams.get('type');
+
+    if (type === 'bookings') {
+      const { data: bookings, error } = await staff.db
+        .from('bookings')
+        .select(`
+          id,
+          booking_date,
+          start_time,
+          party_size,
+          status,
+          deposit_status,
+          deposit_amount,
+          stripe_payment_intent_id,
+          source,
+          dietary_notes,
+          occasion,
+          created_at,
+          guests (
+            name,
+            email,
+            phone
+          )
+        `)
+        .eq('venue_id', staff.venue_id)
+        .order('booking_date', { ascending: false });
+
+      if (error) {
+        console.error('Export bookings error:', error);
+        return NextResponse.json({ error: 'Failed to fetch bookings' }, { status: 500 });
+      }
+
+      const headers = [
+        'Booking ID',
+        'Date',
+        'Time',
+        'Party Size',
+        'Status',
+        'Deposit Status',
+        'Deposit Amount (£)',
+        'Stripe Payment Intent',
+        'Source',
+        'Guest Name',
+        'Guest Email',
+        'Guest Phone',
+        'Dietary Notes',
+        'Occasion',
+        'Created At',
+      ];
+
+      const rows = (bookings ?? []).map((b) => {
+        const guest = Array.isArray(b.guests) ? b.guests[0] : b.guests;
+        return [
+          b.id,
+          b.booking_date,
+          b.start_time,
+          b.party_size,
+          b.status,
+          b.deposit_status ?? '',
+          b.deposit_amount ?? '',
+          b.stripe_payment_intent_id ?? '',
+          b.source ?? '',
+          (guest as { name?: string } | null)?.name ?? '',
+          (guest as { email?: string } | null)?.email ?? '',
+          (guest as { phone?: string } | null)?.phone ?? '',
+          b.dietary_notes ?? '',
+          b.occasion ?? '',
+          b.created_at,
+        ];
+      });
+
+      const csv = buildCsv(headers, rows);
+      const today = new Date().toISOString().slice(0, 10);
+      return new NextResponse(csv, {
+        status: 200,
+        headers: {
+          'Content-Type': 'text/csv; charset=utf-8',
+          'Content-Disposition': `attachment; filename="bookings-${today}.csv"`,
+        },
+      });
+    }
+
+    if (type === 'guests') {
+      const { data: guests, error } = await staff.db
+        .from('guests')
+        .select(`
+          id,
+          name,
+          email,
+          phone,
+          created_at
+        `)
+        .eq('venue_id', staff.venue_id)
+        .order('name');
+
+      if (error) {
+        console.error('Export guests error:', error);
+        return NextResponse.json({ error: 'Failed to fetch guests' }, { status: 500 });
+      }
+
+      // Count bookings per guest
+      const { data: bookingCounts } = await staff.db
+        .from('bookings')
+        .select('guest_id')
+        .eq('venue_id', staff.venue_id);
+
+      const countMap: Record<string, number> = {};
+      for (const b of bookingCounts ?? []) {
+        if (b.guest_id) countMap[b.guest_id] = (countMap[b.guest_id] ?? 0) + 1;
+      }
+
+      const headers = ['Guest ID', 'Name', 'Email', 'Phone', 'Total Bookings', 'First Seen'];
+      const rows = (guests ?? []).map((g) => [
+        g.id,
+        g.name ?? '',
+        g.email ?? '',
+        g.phone ?? '',
+        countMap[g.id] ?? 0,
+        g.created_at,
+      ]);
+
+      const csv = buildCsv(headers, rows);
+      const today = new Date().toISOString().slice(0, 10);
+      return new NextResponse(csv, {
+        status: 200,
+        headers: {
+          'Content-Type': 'text/csv; charset=utf-8',
+          'Content-Disposition': `attachment; filename="guests-${today}.csv"`,
+        },
+      });
+    }
+
+    return NextResponse.json({ error: 'type must be "bookings" or "guests"' }, { status: 400 });
+  } catch (err) {
+    console.error('GET /api/venue/export failed:', err);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
+}

@@ -15,10 +15,12 @@ const NAV_ITEMS = [
 
 interface Props {
   email: string;
+  staffName?: string;
   venueName?: string;
+  venueSlug?: string;
 }
 
-export function DashboardSidebar({ email, venueName }: Props) {
+export function DashboardSidebar({ email, staffName, venueName, venueSlug }: Props) {
   const pathname = usePathname();
   const router = useRouter();
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -95,15 +97,32 @@ export function DashboardSidebar({ email, venueName }: Props) {
               </Link>
             );
           })}
+
+          {/* Your Booking Page — external link */}
+          {venueSlug && (
+            <a
+              href={`/book/${venueSlug}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={() => setMobileOpen(false)}
+              className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition-colors"
+            >
+              <ExternalLinkIcon className="h-5 w-5 flex-shrink-0 text-slate-400" />
+              Your Booking Page
+            </a>
+          )}
         </nav>
 
         {/* Footer */}
         <div className="border-t border-slate-100 px-4 py-4 space-y-3">
           <div className="flex items-center gap-3">
-            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-100 text-xs font-medium text-slate-600">
-              {email.charAt(0).toUpperCase()}
+            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-brand-100 text-xs font-medium text-brand-700">
+              {(staffName ?? email).charAt(0).toUpperCase()}
             </div>
-            <span className="text-xs text-slate-500 truncate flex-1">{email}</span>
+            <div className="min-w-0 flex-1">
+              {staffName && <p className="text-xs font-medium text-slate-700 truncate">{staffName}</p>}
+              <p className="text-xs text-slate-400 truncate">{email}</p>
+            </div>
           </div>
           <button
             onClick={handleSignOut}
@@ -170,6 +189,14 @@ function XIcon() {
   return (
     <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
       <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+    </svg>
+  );
+}
+
+function ExternalLinkIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
     </svg>
   );
 }

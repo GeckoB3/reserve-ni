@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
 import { BookingsDashboard } from './BookingsDashboard';
 import { getDashboardStaff } from '@/lib/venue-auth';
+import { SetupChecklist } from '@/app/dashboard/SetupChecklist';
 
 export default async function BookingsPage() {
   const supabase = await createClient();
@@ -25,6 +26,7 @@ export default async function BookingsPage() {
     <div className="p-4 md:p-6 lg:p-8">
       <div className="mx-auto max-w-6xl">
         <h1 className="mb-6 text-2xl font-semibold text-slate-900">Reservations</h1>
+        <SetupChecklist />
         <BookingsDashboard venueId={venueId} />
       </div>
     </div>

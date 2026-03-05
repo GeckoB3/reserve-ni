@@ -12,6 +12,7 @@ import { DepositConfigSection } from './sections/DepositConfigSection';
 import { StaffSection } from './sections/StaffSection';
 import { CommunicationTemplatesSection } from './sections/CommunicationTemplatesSection';
 import { StripeConnectSection } from './sections/StripeConnectSection';
+import { DataExportSection } from './sections/DataExportSection';
 
 interface SettingsViewProps {
   initialVenue: VenueSettings | null;
@@ -99,7 +100,10 @@ export function SettingsView({ initialVenue, isAdmin }: SettingsViewProps) {
           <CommunicationTemplatesSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} />
         )}
         {activeTab === 'staff' && (
-          <StaffSection venueId={venue.id} isAdmin={isAdmin} />
+          <>
+            <StaffSection venueId={venue.id} isAdmin={isAdmin} />
+            <DataExportSection />
+          </>
         )}
       </div>
     </div>
