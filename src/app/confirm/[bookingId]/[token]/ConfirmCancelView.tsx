@@ -132,9 +132,8 @@ export function ConfirmCancelView({ bookingId, token }: { bookingId: string; tok
   return (
     <div className="w-full max-w-md">
       {/* Brand */}
-      <div className="mb-6 flex items-center gap-2">
-        <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-teal-600 text-xs font-bold text-white">R</div>
-        <span className="text-sm font-semibold text-slate-900">Reserve NI</span>
+      <div className="mb-6">
+        <img src="/Logo.png" alt="Reserve NI" className="h-8 w-auto" />
       </div>
 
       <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">

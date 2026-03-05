@@ -42,7 +42,7 @@ export function DashboardSidebar({ email, venueName }: Props) {
       {/* Mobile top bar */}
       <div className="lg:hidden fixed top-0 left-0 right-0 z-40 flex items-center justify-between border-b border-slate-200 bg-white px-4 py-3">
         <div className="flex items-center gap-3">
-          <span className="text-lg font-bold tracking-tight text-teal-700">Reserve NI</span>
+          <img src="/Logo.png" alt="Reserve NI" className="h-7 w-auto" />
           {venueName && <span className="hidden sm:inline text-sm text-slate-400">·</span>}
           {venueName && <span className="hidden sm:inline text-sm text-slate-500 truncate max-w-[160px]">{venueName}</span>}
         </div>
@@ -68,12 +68,9 @@ export function DashboardSidebar({ email, venueName }: Props) {
         lg:translate-x-0 lg:static lg:z-auto
       `}>
         {/* Brand */}
-        <div className="flex items-center gap-2 border-b border-slate-100 px-5 py-5">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-teal-600 text-white text-sm font-bold">R</div>
-          <div className="flex flex-col">
-            <span className="text-sm font-bold tracking-tight text-slate-900">Reserve NI</span>
-            {venueName && <span className="text-xs text-slate-400 truncate max-w-[160px]">{venueName}</span>}
-          </div>
+        <div className="flex items-center gap-3 border-b border-slate-100 px-5 py-4">
+          <img src="/Logo.png" alt="Reserve NI" className="h-8 w-auto" />
+          {venueName && <span className="text-xs text-slate-400 truncate max-w-[140px]">{venueName}</span>}
         </div>
 
         {/* Nav links */}

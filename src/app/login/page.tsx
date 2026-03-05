@@ -20,9 +20,8 @@ export default async function LoginPage({
       <div className="relative w-full max-w-sm">
         {/* Brand */}
         <div className="mb-8 flex flex-col items-center">
-          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-teal-600 text-lg font-bold text-white shadow-lg shadow-teal-600/20">R</div>
-          <h1 className="mt-4 text-2xl font-bold text-slate-900">Reserve NI</h1>
-          <p className="mt-1 text-sm text-slate-500">Staff sign in</p>
+          <img src="/Logo.png" alt="Reserve NI" className="h-12 w-auto" />
+          <p className="mt-3 text-sm text-slate-500">Staff sign in</p>
         </div>
 
         {/* Card */}
