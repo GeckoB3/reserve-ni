@@ -3,12 +3,12 @@ import Link from "next/link";
 const features = [
   {
     title: "Deposit Collection",
-    description: "Reduce no-shows by 60%+ with per-head deposits via Stripe. Funds go directly to your account — Reserve NI never holds your money.",
+    description: "Reduce no-shows by 60%+ with per-head deposits via Stripe. Funds go directly to your account - Reserve NI never holds your money.",
     icon: CreditCardIcon,
   },
   {
     title: "Smart Communications",
-    description: "Automated confirmation emails, SMS reminders 24 hours before, and follow-ups — all handled for you.",
+    description: "Automated confirmation emails, SMS reminders 24 hours before, and follow-ups - all handled for you.",
     icon: ChatIcon,
   },
   {
@@ -54,7 +54,7 @@ export default function Home() {
             Booking and guest management for Northern Ireland&rsquo;s independent restaurants
           </p>
           <p className="mx-auto mt-6 max-w-2xl text-base leading-relaxed text-slate-500 sm:text-lg">
-            Reduce no-shows, collect deposits, and automate guest communications&nbsp;&mdash; all in one platform built for NI hospitality.
+            Reduce no-shows, collect deposits, and automate guest communications - all in one platform built for NI hospitality.
           </p>
           <div className="mt-10 flex flex-col items-center gap-4 sm:flex-row sm:justify-center">
             <Link href="/login" className="inline-flex h-12 items-center rounded-xl bg-brand-600 px-8 text-base font-semibold text-white shadow-lg shadow-brand-600/20 transition-all hover:bg-brand-700 hover:shadow-xl hover:shadow-brand-600/30">
@@ -71,7 +71,7 @@ export default function Home() {
       <section id="features" className="scroll-mt-16 bg-white py-20 sm:py-28">
         <div className="mx-auto max-w-6xl px-6">
           <h2 className="text-center text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">
-            Everything you need to fill seats&nbsp;&mdash; and keep them filled
+            Everything you need to fill seats - and keep them filled
           </h2>
           <p className="mx-auto mt-4 max-w-2xl text-center text-slate-500">
             Purpose-built for independent restaurants. No enterprise bloat, no commission on covers.
