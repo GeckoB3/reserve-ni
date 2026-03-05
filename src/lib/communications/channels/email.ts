@@ -18,11 +18,20 @@ export class EmailChannel implements MessageChannel {
       return;
     }
 
-    await sgMail.send({
-      to: email,
-      from: fromEmail,
-      subject: template.subject ?? 'Reserve NI',
-      text: template.body,
-    });
+    try {
+      await sgMail.send({
+        to: email,
+        from: fromEmail,
+        subject: template.subject ?? 'Reserve NI',
+        text: template.body,
+      });
+    } catch (err: unknown) {
+      // Extract SendGrid's detailed error body for easier diagnosis.
+      const sgErr = err as { code?: number; response?: { body?: unknown } };
+      if (sgErr?.response?.body) {
+        console.error('[EmailChannel] SendGrid error body:', JSON.stringify(sgErr.response.body));
+      }
+      throw err;
+    }
   }
 }
