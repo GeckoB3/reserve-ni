@@ -59,7 +59,7 @@ export function WalkInModal({
               max={50}
               value={partySize}
               onChange={(e) => setPartySize(Number(e.target.value))}
-              className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm focus:border-teal-500 focus:ring-1 focus:ring-teal-500"
+              className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
               required
             />
           </div>
@@ -71,14 +71,14 @@ export function WalkInModal({
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="Walk-in guest"
-              className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm focus:border-teal-500 focus:ring-1 focus:ring-teal-500"
+              className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
             />
           </div>
           {error && (
             <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>
           )}
           <div className="flex gap-3 pt-2">
-            <button type="submit" disabled={loading} className="flex-1 rounded-xl bg-teal-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-teal-700 disabled:opacity-50">
+            <button type="submit" disabled={loading} className="flex-1 rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-brand-700 disabled:opacity-50">
               {loading ? 'Adding...' : 'Add Walk-in'}
             </button>
             <button type="button" onClick={onClose} className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-50">

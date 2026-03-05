@@ -29,7 +29,7 @@ export function SlotStep({ date, slots, onSelect, onBack }: SlotStepProps) {
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
           </svg>
           <p className="text-sm text-slate-500">No availability on this date</p>
-          <button type="button" onClick={onBack} className="mt-3 text-sm font-medium text-teal-600 hover:text-teal-700">Choose another date</button>
+          <button type="button" onClick={onBack} className="mt-3 text-sm font-medium text-brand-600 hover:text-brand-700">Choose another date</button>
         </div>
       ) : (
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
@@ -38,7 +38,7 @@ export function SlotStep({ date, slots, onSelect, onBack }: SlotStepProps) {
               key={slot.key}
               type="button"
               onClick={() => onSelect(slot)}
-              className="flex flex-col items-center rounded-xl border border-slate-200 bg-white px-4 py-3.5 transition-all hover:border-teal-300 hover:bg-teal-50/50 hover:shadow-sm"
+              className="flex flex-col items-center rounded-xl border border-slate-200 bg-white px-4 py-3.5 transition-all hover:border-brand-300 hover:bg-brand-50/50 hover:shadow-sm"
             >
               <span className="text-base font-bold text-slate-900">{slot.start_time.slice(0, 5)}</span>
               <span className="mt-0.5 text-xs text-slate-400">{slot.label}</span>

@@ -151,8 +151,8 @@ export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, 
                 <div key={label} className="flex flex-1 items-center">
                   <div className="flex flex-col items-center">
                     <div className={`flex h-8 w-8 items-center justify-center rounded-full text-xs font-bold transition-all ${
-                      isActive ? 'bg-teal-600 text-white shadow-md shadow-teal-600/30' :
-                      isDone ? 'bg-teal-100 text-teal-700' :
+                      isActive ? 'bg-brand-600 text-white shadow-md shadow-brand-600/30' :
+                      isDone ? 'bg-brand-100 text-brand-700' :
                       'bg-slate-100 text-slate-400'
                     }`}>
                       {isDone ? (
@@ -163,10 +163,10 @@ export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, 
                         i + 1
                       )}
                     </div>
-                    <span className={`mt-1 text-xs font-medium ${isActive ? 'text-teal-700' : isDone ? 'text-teal-600' : 'text-slate-400'}`}>{label}</span>
+                    <span className={`mt-1 text-xs font-medium ${isActive ? 'text-brand-700' : isDone ? 'text-brand-600' : 'text-slate-400'}`}>{label}</span>
                   </div>
                   {i < visibleSteps.length - 1 && (
-                    <div className={`mx-1 h-0.5 flex-1 rounded ${isDone ? 'bg-teal-300' : 'bg-slate-100'}`} />
+                    <div className={`mx-1 h-0.5 flex-1 rounded ${isDone ? 'bg-brand-300' : 'bg-slate-100'}`} />
                   )}
                 </div>
               );

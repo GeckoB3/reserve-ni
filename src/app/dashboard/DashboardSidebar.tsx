@@ -85,12 +85,12 @@ export function DashboardSidebar({ email, venueName }: Props) {
                 className={`
                   flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors
                   ${active
-                    ? 'bg-teal-50 text-teal-700'
+                    ? 'bg-brand-50 text-brand-700'
                     : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
                   }
                 `}
               >
-                <item.icon className={`h-5 w-5 flex-shrink-0 ${active ? 'text-teal-600' : 'text-slate-400'}`} />
+                <item.icon className={`h-5 w-5 flex-shrink-0 ${active ? 'text-brand-600' : 'text-slate-400'}`} />
                 {item.label}
               </Link>
             );

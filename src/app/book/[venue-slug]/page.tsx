@@ -31,7 +31,7 @@ export default async function BookPage({ params }: { params: Promise<{ 'venue-sl
             <div className="absolute inset-0 bg-gradient-to-t from-slate-900/90 via-slate-900/50 to-transparent" />
           </>
         ) : (
-          <div className="h-32 bg-gradient-to-br from-teal-700 to-teal-900" />
+          <div className="h-32 bg-gradient-to-br from-brand-700 to-brand-900" />
         )}
         <div className="absolute inset-x-0 bottom-0 px-4 pb-6">
           <div className="mx-auto max-w-lg">
@@ -68,7 +68,7 @@ export default async function BookPage({ params }: { params: Promise<{ 'venue-sl
 
       {/* Footer */}
       <footer className="fixed bottom-0 left-0 right-0 border-t border-slate-200 bg-white/90 backdrop-blur py-3 text-center text-xs text-slate-400">
-        <a href="https://reserveni.com" target="_blank" rel="noopener noreferrer" className="hover:text-teal-600">
+        <a href="https://reserveni.com" target="_blank" rel="noopener noreferrer" className="hover:text-brand-600">
           Powered by Reserve NI
         </a>
       </footer>

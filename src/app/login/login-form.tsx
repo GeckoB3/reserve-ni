@@ -50,9 +50,9 @@ export function LoginForm({ redirectTo }: { redirectTo?: string }) {
     setSuccessMessage('Check your inbox for a link to reset your password.');
   }
 
-  const inputClass = 'w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm placeholder:text-slate-300 focus:border-teal-500 focus:ring-1 focus:ring-teal-500';
-  const primaryBtn = 'w-full rounded-xl bg-teal-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-teal-700 disabled:opacity-50';
-  const secondaryLink = 'text-sm font-medium text-slate-500 hover:text-teal-600';
+  const inputClass = 'w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm placeholder:text-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500';
+  const primaryBtn = 'w-full rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 disabled:opacity-50';
+  const secondaryLink = 'text-sm font-medium text-slate-500 hover:text-brand-600';
 
   if (forgotPassword) {
     return (
@@ -77,8 +77,8 @@ export function LoginForm({ redirectTo }: { redirectTo?: string }) {
   if (sent) {
     return (
       <div className="space-y-4 text-center">
-        <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-teal-50">
-          <svg className="h-6 w-6 text-teal-600" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+        <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-brand-50">
+          <svg className="h-6 w-6 text-brand-600" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 0 1-2.25 2.25h-15a2.25 2.25 0 0 1-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25m19.5 0v.243a2.25 2.25 0 0 1-1.07 1.916l-7.5 4.615a2.25 2.25 0 0 1-2.36 0L3.32 8.91a2.25 2.25 0 0 1-1.07-1.916V6.75" />
           </svg>
         </div>

@@ -36,7 +36,7 @@ export default function Home() {
       <nav className="sticky top-0 z-50 border-b border-slate-100 bg-white/80 backdrop-blur-md">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
           <img src="/Logo.png" alt="Reserve NI" className="h-9 w-auto" />
-          <Link href="/login" className="rounded-xl bg-teal-600 px-5 py-2.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-teal-700">
+          <Link href="/login" className="rounded-xl bg-brand-600 px-5 py-2.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-brand-700">
             Log in
           </Link>
         </div>
@@ -44,20 +44,20 @@ export default function Home() {
 
       {/* Hero */}
       <section className="relative overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-br from-teal-50 via-white to-emerald-50" />
+        <div className="absolute inset-0 bg-gradient-to-br from-brand-50 via-white to-emerald-50" />
         <div className="absolute inset-0 opacity-30" style={{ backgroundImage: 'radial-gradient(circle at 25% 25%, rgba(13,148,136,0.08) 0%, transparent 50%), radial-gradient(circle at 75% 75%, rgba(5,150,105,0.06) 0%, transparent 50%)' }} />
         <div className="relative mx-auto max-w-4xl px-6 py-24 text-center sm:py-32 lg:py-40">
           <h1 className="text-4xl font-extrabold tracking-tight text-slate-900 sm:text-5xl lg:text-6xl">
             Reserve&nbsp;NI
           </h1>
-          <p className="mt-4 text-lg font-medium text-teal-700 sm:text-xl">
+          <p className="mt-4 text-lg font-medium text-brand-700 sm:text-xl">
             Booking and guest management for Northern Ireland&rsquo;s independent restaurants
           </p>
           <p className="mx-auto mt-6 max-w-2xl text-base leading-relaxed text-slate-500 sm:text-lg">
             Reduce no-shows, collect deposits, and automate guest communications&nbsp;&mdash; all in one platform built for NI hospitality.
           </p>
           <div className="mt-10 flex flex-col items-center gap-4 sm:flex-row sm:justify-center">
-            <Link href="/login" className="inline-flex h-12 items-center rounded-xl bg-teal-600 px-8 text-base font-semibold text-white shadow-lg shadow-teal-600/20 transition-all hover:bg-teal-700 hover:shadow-xl hover:shadow-teal-600/30">
+            <Link href="/login" className="inline-flex h-12 items-center rounded-xl bg-brand-600 px-8 text-base font-semibold text-white shadow-lg shadow-brand-600/20 transition-all hover:bg-brand-700 hover:shadow-xl hover:shadow-brand-600/30">
               Get started
             </Link>
             <Link href="#features" className="inline-flex h-12 items-center rounded-xl border border-slate-200 bg-white px-8 text-base font-semibold text-slate-700 transition-colors hover:border-slate-300 hover:bg-slate-50">
@@ -78,8 +78,8 @@ export default function Home() {
           </p>
           <div className="mt-14 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
             {features.map((f) => (
-              <div key={f.title} className="group rounded-2xl border border-slate-100 bg-white p-6 transition-all hover:border-teal-200 hover:shadow-lg hover:shadow-teal-600/5">
-                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-teal-50 text-teal-600 transition-colors group-hover:bg-teal-100">
+              <div key={f.title} className="group rounded-2xl border border-slate-100 bg-white p-6 transition-all hover:border-brand-200 hover:shadow-lg hover:shadow-brand-600/5">
+                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-brand-50 text-brand-600 transition-colors group-hover:bg-brand-100">
                   <f.icon />
                 </div>
                 <h3 className="mt-4 text-lg font-semibold text-slate-900">{f.title}</h3>
@@ -98,7 +98,7 @@ export default function Home() {
           <ol className="mt-14 grid gap-10 sm:grid-cols-3">
             {steps.map((s) => (
               <li key={s.number} className="text-center">
-                <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-teal-600 text-lg font-bold text-white shadow-lg shadow-teal-600/20">{s.number}</span>
+                <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-brand-600 text-lg font-bold text-white shadow-lg shadow-brand-600/20">{s.number}</span>
                 <h3 className="mt-4 text-lg font-semibold text-slate-900">{s.title}</h3>
                 <p className="mt-2 text-sm leading-relaxed text-slate-500">{s.description}</p>
               </li>
@@ -112,30 +112,30 @@ export default function Home() {
         <div className="mx-auto max-w-3xl px-6 text-center">
           <h2 className="text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">Pricing</h2>
           <p className="mx-auto mt-4 max-w-xl text-slate-500">Simple and transparent&nbsp;&mdash; no commission, no hidden fees.</p>
-          <div className="mx-auto mt-12 max-w-md overflow-hidden rounded-2xl border border-teal-100 bg-gradient-to-br from-teal-50 to-white shadow-sm">
+          <div className="mx-auto mt-12 max-w-md overflow-hidden rounded-2xl border border-brand-100 bg-gradient-to-br from-brand-50 to-white shadow-sm">
             <div className="p-8">
               <span className="inline-block rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-emerald-700">Founding programme</span>
               <p className="mt-4 text-5xl font-extrabold text-slate-900">Free</p>
               <p className="mt-1 text-sm text-slate-500">for the first 10&ndash;20 venues</p>
               <ul className="mt-6 space-y-3 text-left text-sm text-slate-600">
                 <li className="flex items-start gap-2.5">
-                  <svg className="mt-0.5 h-5 w-5 flex-shrink-0 text-teal-600" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" /></svg>
+                  <svg className="mt-0.5 h-5 w-5 flex-shrink-0 text-brand-600" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" /></svg>
                   Full access to all features during founding programme
                 </li>
                 <li className="flex items-start gap-2.5">
-                  <svg className="mt-0.5 h-5 w-5 flex-shrink-0 text-teal-600" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" /></svg>
+                  <svg className="mt-0.5 h-5 w-5 flex-shrink-0 text-brand-600" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" /></svg>
                   Deposits go directly to your Stripe account
                 </li>
                 <li className="flex items-start gap-2.5">
-                  <svg className="mt-0.5 h-5 w-5 flex-shrink-0 text-teal-600" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" /></svg>
+                  <svg className="mt-0.5 h-5 w-5 flex-shrink-0 text-brand-600" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" /></svg>
                   Reserve NI never holds your funds
                 </li>
                 <li className="flex items-start gap-2.5">
-                  <svg className="mt-0.5 h-5 w-5 flex-shrink-0 text-teal-600" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" /></svg>
+                  <svg className="mt-0.5 h-5 w-5 flex-shrink-0 text-brand-600" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" /></svg>
                   Priority support and onboarding
                 </li>
               </ul>
-              <Link href="/login" className="mt-8 inline-flex h-12 w-full items-center justify-center rounded-xl bg-teal-600 text-base font-semibold text-white shadow-lg shadow-teal-600/20 transition-all hover:bg-teal-700 hover:shadow-xl">
+              <Link href="/login" className="mt-8 inline-flex h-12 w-full items-center justify-center rounded-xl bg-brand-600 text-base font-semibold text-white shadow-lg shadow-brand-600/20 transition-all hover:bg-brand-700 hover:shadow-xl">
                 Join the founding programme
               </Link>
             </div>

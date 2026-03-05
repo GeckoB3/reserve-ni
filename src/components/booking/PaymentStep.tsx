@@ -62,7 +62,7 @@ function PaymentForm({ clientSecret, onComplete, onBack }: { clientSecret: strin
         <button
           type="submit"
           disabled={!stripe || loading}
-          className="flex-1 rounded-xl bg-teal-600 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-teal-700 disabled:opacity-50"
+          className="flex-1 rounded-xl bg-brand-600 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 disabled:opacity-50"
         >
           <span className="flex items-center justify-center gap-2">
             <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
@@ -116,7 +116,7 @@ export function PaymentStep({ clientSecret, amountPence, partySize, onComplete, 
         </span>
       </div>
 
-      <Elements stripe={getStripe()} options={{ clientSecret, appearance: { theme: 'stripe', variables: { colorPrimary: '#0d9488', borderRadius: '12px' } } }}>
+      <Elements stripe={getStripe()} options={{ clientSecret, appearance: { theme: 'stripe', variables: { colorPrimary: '#4E6B78', borderRadius: '12px' } } }}>
         <PaymentForm clientSecret={clientSecret} onComplete={onComplete} onBack={onBack} />
       </Elements>
     </div>

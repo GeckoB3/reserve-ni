@@ -49,7 +49,7 @@ export default function EmbedPage() {
     return (
       <main className="min-h-screen bg-white p-6">
         <div className="flex justify-center py-12">
-          <div className="h-8 w-8 animate-spin rounded-full border-2 border-teal-600 border-t-transparent" />
+          <div className="h-8 w-8 animate-spin rounded-full border-2 border-brand-600 border-t-transparent" />
         </div>
       </main>
     );

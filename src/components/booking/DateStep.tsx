@@ -191,18 +191,18 @@ export function DateStep({ minParty, maxParty, partySize, onPartySizeChange, onD
                   className={`
                     relative mx-auto flex h-9 w-9 items-center justify-center rounded-full text-sm font-medium transition-all
                     ${isSelected
-                      ? 'bg-teal-600 text-white shadow-md shadow-teal-600/25'
+                      ? 'bg-brand-600 text-white shadow-md shadow-brand-600/25'
                       : isToday
-                      ? 'font-bold text-teal-700 ring-1 ring-teal-400'
+                      ? 'font-bold text-brand-700 ring-1 ring-brand-400'
                       : disabled
                       ? 'cursor-not-allowed text-slate-200'
-                      : 'text-slate-700 hover:bg-teal-50 hover:text-teal-700'
+                      : 'text-slate-700 hover:bg-brand-50 hover:text-brand-700'
                     }
                   `}
                 >
                   {day}
                   {isToday && !isSelected && (
-                    <span className="absolute bottom-1 left-1/2 h-0.5 w-3 -translate-x-1/2 rounded-full bg-teal-500" />
+                    <span className="absolute bottom-1 left-1/2 h-0.5 w-3 -translate-x-1/2 rounded-full bg-brand-500" />
                   )}
                 </button>
               );

@@ -152,7 +152,7 @@ export function DaySheetView({ venueId }: { venueId: string }) {
     return (
       <div className="rounded-xl border border-slate-200 bg-white p-12 text-center">
         <p className="text-slate-500">Unable to load day sheet.</p>
-        <button type="button" onClick={() => fetchDaySheet()} className="mt-3 text-sm font-medium text-teal-600 hover:text-teal-700">Retry</button>
+        <button type="button" onClick={() => fetchDaySheet()} className="mt-3 text-sm font-medium text-brand-600 hover:text-brand-700">Retry</button>
       </div>
     );
   }
@@ -245,7 +245,7 @@ export function DaySheetView({ venueId }: { venueId: string }) {
                       <button
                         type="button"
                         onClick={() => setSelectedId(isSelected ? null : b.id)}
-                        className={`flex w-full items-center gap-3 px-4 py-3.5 text-left transition-colors min-h-[56px] ${isSelected ? 'bg-teal-50/50' : 'hover:bg-slate-50'}`}
+                        className={`flex w-full items-center gap-3 px-4 py-3.5 text-left transition-colors min-h-[56px] ${isSelected ? 'bg-brand-50/50' : 'hover:bg-slate-50'}`}
                       >
                         <span className="flex-1 truncate font-medium text-slate-900">{b.guest_name}</span>
                         <span className="text-xl font-bold tabular-nums text-slate-900">{b.party_size}</span>
@@ -270,7 +270,7 @@ export function DaySheetView({ venueId }: { venueId: string }) {
                               type="button"
                               disabled={actioning}
                               onClick={() => setStatus(b.id, 'Seated')}
-                              className="min-h-[52px] flex-1 rounded-xl bg-teal-600 px-4 py-3 text-base font-semibold text-white shadow-sm hover:bg-teal-700 disabled:opacity-50"
+                              className="min-h-[52px] flex-1 rounded-xl bg-brand-600 px-4 py-3 text-base font-semibold text-white shadow-sm hover:bg-brand-700 disabled:opacity-50"
                             >
                               Check In
                             </button>
@@ -302,7 +302,7 @@ export function DaySheetView({ venueId }: { venueId: string }) {
 
 function SummaryCard({ label, value, accent }: { label: string; value: number; accent: string }) {
   const accentMap: Record<string, { border: string; text: string }> = {
-    teal: { border: 'border-teal-200', text: 'text-teal-700' },
+    teal: { border: 'border-brand-200', text: 'text-brand-700' },
     emerald: { border: 'border-emerald-200', text: 'text-emerald-700' },
     red: { border: 'border-red-200', text: 'text-red-700' },
     slate: { border: 'border-slate-200', text: 'text-slate-500' },

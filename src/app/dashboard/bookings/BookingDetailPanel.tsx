@@ -130,7 +130,7 @@ export function BookingDetailPanel({
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 backdrop-blur-sm p-4">
         <div className="w-full max-w-lg rounded-2xl bg-white p-8 shadow-2xl">
           <p className="text-slate-500">{loading ? 'Loading...' : 'Booking not found.'}</p>
-          <button type="button" onClick={onClose} className="mt-4 text-sm font-medium text-teal-600 hover:text-teal-700">Close</button>
+          <button type="button" onClick={onClose} className="mt-4 text-sm font-medium text-brand-600 hover:text-brand-700">Close</button>
         </div>
       </div>
     );
@@ -163,7 +163,7 @@ export function BookingDetailPanel({
           {/* Guest info card */}
           <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-4">
             <div className="flex items-center gap-3 mb-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-teal-100 text-sm font-bold text-teal-700">
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-brand-100 text-sm font-bold text-brand-700">
                 {(detail.guest?.name ?? '?').charAt(0).toUpperCase()}
               </div>
               <div>
@@ -270,7 +270,7 @@ export function BookingDetailPanel({
                 </div>
               </div>
               <div className="flex gap-2">
-                <button type="button" onClick={submitModify} disabled={actionLoading} className="rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700 disabled:opacity-50">Save</button>
+                <button type="button" onClick={submitModify} disabled={actionLoading} className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50">Save</button>
                 <button type="button" onClick={() => setShowModify(false)} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">Cancel</button>
               </div>
             </div>
@@ -341,7 +341,7 @@ function ActionButton({ onClick, disabled, variant, children }: {
   children: React.ReactNode;
 }) {
   const styles = {
-    primary: 'bg-teal-600 text-white hover:bg-teal-700',
+    primary: 'bg-brand-600 text-white hover:bg-brand-700',
     danger: 'bg-red-600 text-white hover:bg-red-700',
     'outline-danger': 'border border-red-200 text-red-600 hover:bg-red-50',
   };

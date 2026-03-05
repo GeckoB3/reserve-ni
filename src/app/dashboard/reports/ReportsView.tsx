@@ -43,7 +43,7 @@ interface ReportsData {
   report4_deposit: Report4 | null;
 }
 
-const COLORS = ['#0d9488', '#059669', '#f59e0b', '#ef4444', '#8b5cf6', '#6b7280'];
+const COLORS = ['#4E6B78', '#059669', '#f59e0b', '#ef4444', '#8b5cf6', '#6b7280'];
 
 function last7Days(): { from: string; to: string } {
   const to = new Date();
@@ -144,7 +144,7 @@ export function ReportsView() {
     return (
       <div className="rounded-xl border border-slate-200 bg-white p-12 text-center">
         <p className="text-red-600">{error}</p>
-        <button type="button" onClick={fetchReports} className="mt-3 text-sm font-medium text-teal-600 hover:text-teal-700">Retry</button>
+        <button type="button" onClick={fetchReports} className="mt-3 text-sm font-medium text-brand-600 hover:text-brand-700">Retry</button>
       </div>
     );
   }
@@ -186,7 +186,7 @@ export function ReportsView() {
           type="button"
           onClick={fetchReports}
           disabled={loading}
-          className="rounded-lg bg-teal-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-teal-700 disabled:opacity-50"
+          className="rounded-lg bg-brand-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
         >
           {loading ? 'Loading...' : 'Apply'}
         </button>
@@ -225,7 +225,7 @@ export function ReportsView() {
                       <XAxis dataKey="source" tick={{ fontSize: 12 }} />
                       <YAxis tick={{ fontSize: 12 }} />
                       <Tooltip />
-                      <Bar dataKey="count" fill="#0d9488" radius={[6, 6, 0, 0]} />
+                      <Bar dataKey="count" fill="#4E6B78" radius={[6, 6, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
                 ) : <p className="text-sm text-slate-400">No data</p>}
@@ -286,7 +286,7 @@ function ReportSection({ title, onExport, children }: { title: string; onExport:
     <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
       <div className="mb-4 flex items-center justify-between">
         <h2 className="text-lg font-semibold text-slate-900">{title}</h2>
-        <button type="button" onClick={onExport} className="flex items-center gap-1.5 text-sm font-medium text-teal-600 hover:text-teal-700">
+        <button type="button" onClick={onExport} className="flex items-center gap-1.5 text-sm font-medium text-brand-600 hover:text-brand-700">
           <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" />
           </svg>
@@ -300,7 +300,7 @@ function ReportSection({ title, onExport, children }: { title: string; onExport:
 
 function MetricCard({ label, value, accent }: { label: string; value: string; accent?: string }) {
   const colorMap: Record<string, string> = {
-    teal: 'border-l-teal-500',
+    teal: 'border-l-brand-500',
     emerald: 'border-l-emerald-500',
     red: 'border-l-red-500',
     amber: 'border-l-amber-500',

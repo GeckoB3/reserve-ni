@@ -61,7 +61,7 @@ export function ConfirmCancelView({ bookingId, token }: { bookingId: string; tok
     return (
       <div className="w-full max-w-md">
         <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm text-center">
-          <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-teal-600 border-t-transparent" />
+          <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-brand-600 border-t-transparent" />
         </div>
       </div>
     );
@@ -96,7 +96,7 @@ export function ConfirmCancelView({ bookingId, token }: { bookingId: string; tok
             </svg>
           </div>
           <h2 className="text-lg font-semibold text-slate-900">{doneMessage}</h2>
-          <Link href="/" className="mt-4 inline-block text-sm font-medium text-teal-600 hover:text-teal-700">Go home</Link>
+          <Link href="/" className="mt-4 inline-block text-sm font-medium text-brand-600 hover:text-brand-700">Go home</Link>
         </div>
       </div>
     );
@@ -138,9 +138,9 @@ export function ConfirmCancelView({ bookingId, token }: { bookingId: string; tok
 
       <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
         {/* Venue header */}
-        <div className="bg-gradient-to-r from-teal-600 to-teal-700 px-6 py-5">
+        <div className="bg-gradient-to-r from-brand-600 to-brand-700 px-6 py-5">
           <h2 className="text-lg font-semibold text-white">{details.venue_name}</h2>
-          {details.venue_address && <p className="mt-0.5 text-sm text-teal-100">{details.venue_address}</p>}
+          {details.venue_address && <p className="mt-0.5 text-sm text-brand-100">{details.venue_address}</p>}
         </div>
 
         <div className="p-6 space-y-5">
@@ -162,7 +162,7 @@ export function ConfirmCancelView({ bookingId, token }: { bookingId: string; tok
               type="button"
               onClick={() => doAction('confirm')}
               disabled={actionLoading}
-              className="w-full rounded-xl bg-teal-600 px-4 py-3.5 text-sm font-semibold text-white shadow-sm hover:bg-teal-700 disabled:opacity-50"
+              className="w-full rounded-xl bg-brand-600 px-4 py-3.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 disabled:opacity-50"
             >
               {actionLoading ? 'Updating...' : "Confirm I'm Coming"}
             </button>
@@ -179,7 +179,7 @@ export function ConfirmCancelView({ bookingId, token }: { bookingId: string; tok
       </div>
 
       <p className="mt-4 text-center text-xs text-slate-400">
-        <Link href="/" className="hover:text-teal-600">Powered by Reserve NI</Link>
+        <Link href="/" className="hover:text-brand-600">Powered by Reserve NI</Link>
       </p>
     </div>
   );

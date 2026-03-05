@@ -60,27 +60,27 @@ export function DetailsStep({ slot, date, partySize, onSubmit, onBack, cancellat
 
       <form onSubmit={handleSubmit((d) => onSubmit({ name: d.name, email: d.email || '', phone: d.phone, dietary_notes: d.dietary_notes, occasion: d.occasion }))} className="space-y-4">
         <FormField label="Name" required error={errors.name?.message}>
-          <input {...register('name')} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm placeholder:text-slate-300 focus:border-teal-500 focus:ring-1 focus:ring-teal-500" placeholder="Your full name" />
+          <input {...register('name')} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm placeholder:text-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500" placeholder="Your full name" />
         </FormField>
 
         <FormField label="Email" error={errors.email?.message}>
-          <input type="email" {...register('email')} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm placeholder:text-slate-300 focus:border-teal-500 focus:ring-1 focus:ring-teal-500" placeholder="you@example.com" />
+          <input type="email" {...register('email')} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm placeholder:text-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500" placeholder="you@example.com" />
         </FormField>
 
         <FormField label="Phone" required error={errors.phone?.message}>
-          <input type="tel" {...register('phone')} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm placeholder:text-slate-300 focus:border-teal-500 focus:ring-1 focus:ring-teal-500" placeholder="07..." />
+          <input type="tel" {...register('phone')} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm placeholder:text-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500" placeholder="07..." />
         </FormField>
 
         <FormField label="Dietary notes" error={errors.dietary_notes?.message}>
-          <textarea {...register('dietary_notes')} rows={2} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm placeholder:text-slate-300 focus:border-teal-500 focus:ring-1 focus:ring-teal-500" placeholder="Allergies, vegetarian, etc." />
+          <textarea {...register('dietary_notes')} rows={2} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm placeholder:text-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500" placeholder="Allergies, vegetarian, etc." />
         </FormField>
 
         <FormField label="Occasion" error={errors.occasion?.message}>
-          <input {...register('occasion')} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm placeholder:text-slate-300 focus:border-teal-500 focus:ring-1 focus:ring-teal-500" placeholder="e.g. Birthday, Anniversary" />
+          <input {...register('occasion')} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm placeholder:text-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500" placeholder="e.g. Birthday, Anniversary" />
         </FormField>
 
         <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 bg-slate-50/50 px-4 py-3">
-          <input type="checkbox" {...register('acceptTerms')} className="mt-0.5 h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500" />
+          <input type="checkbox" {...register('acceptTerms')} className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500" />
           <span className="text-sm text-slate-600">I accept the booking terms and cancellation policy.</span>
         </label>
         {errors.acceptTerms && <p className="text-xs text-red-600">{errors.acceptTerms.message}</p>}
@@ -88,7 +88,7 @@ export function DetailsStep({ slot, date, partySize, onSubmit, onBack, cancellat
         <button
           type="submit"
           disabled={isSubmitting}
-          className="w-full rounded-xl bg-teal-600 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-teal-700 disabled:opacity-50"
+          className="w-full rounded-xl bg-brand-600 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 disabled:opacity-50"
         >
           {isSubmitting ? 'Processing...' : requiresDeposit ? 'Continue to Payment' : 'Confirm Booking'}
         </button>

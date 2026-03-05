@@ -3,10 +3,10 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
-  --brand: #0d9488;
-  --brand-dark: #0f766e;
-  --brand-light: #ccfbf1;
-  --brand-50: #f0fdfa;
+  --brand: #4E6B78;
+  --brand-dark: #3D5662;
+  --brand-light: #D9E5E9;
+  --brand-50: #EFF3F5;
   --surface: #ffffff;
   --surface-secondary: #f8fafc;
   --border: #e2e8f0;
@@ -30,6 +30,18 @@
   --color-brand-light: var(--brand-light);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+
+  /* Brand colour palette — #4E6B78 as the 600 anchor */
+  --color-brand-50: #EFF3F5;
+  --color-brand-100: #D9E5E9;
+  --color-brand-200: #BAD0D8;
+  --color-brand-300: #94B4BF;
+  --color-brand-400: #6D97A6;
+  --color-brand-500: #5C818E;
+  --color-brand-600: #4E6B78;
+  --color-brand-700: #3D5662;
+  --color-brand-800: #2F424A;
+  --color-brand-900: #202F35;
 }
 
 body {

@@ -39,7 +39,7 @@ export function SettingsView({ initialVenue, isAdmin }: SettingsViewProps) {
   if (!venue) {
     return (
       <div className="flex items-center justify-center rounded-xl border border-slate-200 bg-white p-12">
-        <div className="h-6 w-6 animate-spin rounded-full border-2 border-teal-600 border-t-transparent" />
+        <div className="h-6 w-6 animate-spin rounded-full border-2 border-brand-600 border-t-transparent" />
       </div>
     );
   }
@@ -55,7 +55,7 @@ export function SettingsView({ initialVenue, isAdmin }: SettingsViewProps) {
             onClick={() => setActiveTab(tab.key)}
             className={`whitespace-nowrap rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
               activeTab === tab.key
-                ? 'bg-teal-600 text-white shadow-sm'
+                ? 'bg-brand-600 text-white shadow-sm'
                 : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
             }`}
           >
@@ -73,7 +73,7 @@ export function SettingsView({ initialVenue, isAdmin }: SettingsViewProps) {
             <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
               <h2 className="text-base font-semibold text-slate-900">Booking Widget & QR Code</h2>
               <p className="mt-1 text-sm text-slate-500">Get embed code and a printable QR code for your booking page.</p>
-              <Link href="/dashboard/settings/widget" className="mt-3 inline-flex items-center gap-2 rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700">
+              <Link href="/dashboard/settings/widget" className="mt-3 inline-flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700">
                 <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
                 </svg>

@@ -61,7 +61,7 @@ export function ManageBookingView({ bookingId, token }: { bookingId: string; tok
       <div className="w-full max-w-md">
         <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
           <div className="flex justify-center">
-            <div className="h-8 w-8 animate-spin rounded-full border-2 border-teal-600 border-t-transparent" />
+            <div className="h-8 w-8 animate-spin rounded-full border-2 border-brand-600 border-t-transparent" />
           </div>
         </div>
       </div>
@@ -76,7 +76,7 @@ export function ManageBookingView({ bookingId, token }: { bookingId: string; tok
             <svg className="h-6 w-6 text-red-500" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" /></svg>
           </div>
           <p className="text-sm text-red-600">{error}</p>
-          <Link href="/" className="mt-4 inline-block text-sm font-medium text-teal-600 hover:text-teal-700">Go home</Link>
+          <Link href="/" className="mt-4 inline-block text-sm font-medium text-brand-600 hover:text-brand-700">Go home</Link>
         </div>
       </div>
     );
@@ -91,7 +91,7 @@ export function ManageBookingView({ bookingId, token }: { bookingId: string; tok
           </div>
           <h2 className="text-lg font-semibold text-slate-900">Booking Cancelled</h2>
           <p className="mt-2 text-sm text-slate-500">Your reservation has been cancelled.</p>
-          <Link href="/" className="mt-4 inline-block text-sm font-medium text-teal-600 hover:text-teal-700">Go home</Link>
+          <Link href="/" className="mt-4 inline-block text-sm font-medium text-brand-600 hover:text-brand-700">Go home</Link>
         </div>
       </div>
     );
@@ -111,9 +111,9 @@ export function ManageBookingView({ bookingId, token }: { bookingId: string; tok
 
       <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
         {/* Venue header */}
-        <div className="bg-gradient-to-r from-teal-600 to-teal-700 px-6 py-5">
+        <div className="bg-gradient-to-r from-brand-600 to-brand-700 px-6 py-5">
           <h2 className="text-lg font-semibold text-white">{details.venue_name}</h2>
-          {details.venue_address && <p className="mt-0.5 text-sm text-teal-100">{details.venue_address}</p>}
+          {details.venue_address && <p className="mt-0.5 text-sm text-brand-100">{details.venue_address}</p>}
         </div>
 
         {/* Booking details */}
@@ -166,7 +166,7 @@ export function ManageBookingView({ bookingId, token }: { bookingId: string; tok
       </div>
 
       <p className="mt-4 text-center text-xs text-slate-400">
-        <Link href="/" className="hover:text-teal-600">Powered by Reserve NI</Link>
+        <Link href="/" className="hover:text-brand-600">Powered by Reserve NI</Link>
       </p>
     </div>
   );

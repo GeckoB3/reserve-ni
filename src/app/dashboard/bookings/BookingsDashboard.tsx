@@ -131,7 +131,7 @@ export function BookingsDashboard({ venueId }: { venueId: string }) {
               onClick={() => setStatusFilter(s)}
               className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
                 statusFilter === s
-                  ? 'bg-teal-600 text-white shadow-sm'
+                  ? 'bg-brand-600 text-white shadow-sm'
                   : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
               }`}
             >
@@ -143,7 +143,7 @@ export function BookingsDashboard({ venueId }: { venueId: string }) {
         <button
           type="button"
           onClick={() => setWalkInOpen(true)}
-          className="ml-auto flex items-center gap-2 rounded-xl bg-teal-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-teal-700"
+          className="ml-auto flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-brand-700"
         >
           <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
@@ -190,7 +190,7 @@ export function BookingsDashboard({ venueId }: { venueId: string }) {
                 <tr
                   key={b.id}
                   onClick={() => setSelectedId(b.id)}
-                  className="cursor-pointer transition-colors hover:bg-teal-50/40"
+                  className="cursor-pointer transition-colors hover:bg-brand-50/40"
                 >
                   <td className="px-5 py-3.5 font-medium tabular-nums text-slate-900">{timeStr(b.booking_time)}</td>
                   <td className="px-5 py-3.5 font-medium text-slate-900">{b.guest_name}</td>

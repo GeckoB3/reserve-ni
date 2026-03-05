@@ -77,7 +77,7 @@ export function PhoneBookingForm({ venueId }: { venueId: string }) {
         {result.payment_url && (
           <div className="rounded-lg bg-slate-50 px-4 py-3">
             <p className="mb-1 text-xs font-medium text-slate-500">Payment link</p>
-            <a href={result.payment_url} target="_blank" rel="noreferrer" className="text-sm font-medium text-teal-600 hover:text-teal-700 break-all">{result.payment_url}</a>
+            <a href={result.payment_url} target="_blank" rel="noreferrer" className="text-sm font-medium text-brand-600 hover:text-brand-700 break-all">{result.payment_url}</a>
           </div>
         )}
         <p className="text-xs text-slate-400">If deposit is not paid within 24 hours, the booking will be auto-cancelled.</p>
@@ -97,7 +97,7 @@ export function PhoneBookingForm({ venueId }: { venueId: string }) {
               value={date}
               onChange={(e) => { setDate(e.target.value); setSlots([]); }}
               min={new Date().toISOString().slice(0, 10)}
-              className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm focus:border-teal-500 focus:ring-1 focus:ring-teal-500"
+              className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
               required
             />
           </div>
@@ -109,7 +109,7 @@ export function PhoneBookingForm({ venueId }: { venueId: string }) {
               max={50}
               value={partySize}
               onChange={(e) => setPartySize(Number(e.target.value))}
-              className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm focus:border-teal-500 focus:ring-1 focus:ring-teal-500"
+              className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
             />
           </div>
         </div>
@@ -129,7 +129,7 @@ export function PhoneBookingForm({ venueId }: { venueId: string }) {
             <select
               value={selectedTime}
               onChange={(e) => setSelectedTime(e.target.value)}
-              className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm focus:border-teal-500 focus:ring-1 focus:ring-teal-500"
+              className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
               required
             >
               <option value="">Select a time...</option>
@@ -143,15 +143,15 @@ export function PhoneBookingForm({ venueId }: { venueId: string }) {
         <div className="border-t border-slate-100 pt-4 space-y-4">
           <div>
             <label htmlFor="name" className="mb-1.5 block text-sm font-medium text-slate-700">Guest name</label>
-            <input id="name" type="text" value={name} onChange={(e) => setName(e.target.value)} className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm focus:border-teal-500 focus:ring-1 focus:ring-teal-500" required />
+            <input id="name" type="text" value={name} onChange={(e) => setName(e.target.value)} className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500" required />
           </div>
           <div>
             <label htmlFor="phone" className="mb-1.5 block text-sm font-medium text-slate-700">Phone</label>
-            <input id="phone" type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm focus:border-teal-500 focus:ring-1 focus:ring-teal-500" required />
+            <input id="phone" type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500" required />
           </div>
           <div>
             <label htmlFor="email" className="mb-1.5 block text-sm font-medium text-slate-700">Email <span className="text-slate-400">(optional)</span></label>
-            <input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm focus:border-teal-500 focus:ring-1 focus:ring-teal-500" />
+            <input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
           </div>
         </div>
 
@@ -162,7 +162,7 @@ export function PhoneBookingForm({ venueId }: { venueId: string }) {
         <button
           type="submit"
           disabled={!date || !selectedTime || !name.trim() || !phone.trim() || submitting}
-          className="w-full rounded-xl bg-teal-600 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-teal-700 disabled:opacity-50"
+          className="w-full rounded-xl bg-brand-600 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 disabled:opacity-50"
         >
           {submitting ? 'Creating Booking...' : 'Create Booking'}
         </button>
