@@ -58,10 +58,10 @@ Party size: {{party_size}}
 {{#dietary_notes}}Dietary notes: {{dietary_notes}}{{/dietary_notes}}
 {{#occasion}}Occasion: {{occasion}}{{/occasion}}
 
-{{#deposit_amount}}Deposit paid: £{{deposit_amount}}{{/deposit_amount}}
+{{#deposit_amount}}Deposit paid: £{{deposit_amount}}
 
 Cancellation policy: Full refund if you cancel by {{cancellation_deadline}}. No refund after that or for no-shows.
-
+{{/deposit_amount}}
 {{#manage_booking_link}}View or cancel your booking: {{manage_booking_link}}{{/manage_booking_link}}
 
 We look forward to seeing you!
@@ -108,9 +108,9 @@ This is a reminder that you have a reservation at {{venue_name}} on {{booking_da
 
 {{/dietary_notes}}{{#venue_address}}Address: {{venue_address}}
 
-{{/venue_address}}Cancellation policy: Full refund if cancelled 48+ hours before your reservation. No refund within 48 hours.
+{{/venue_address}}{{#deposit_amount}}Cancellation policy: Full refund if cancelled 48+ hours before your reservation. No refund within 48 hours. Your deposit of £{{deposit_amount}} will be refunded if you cancel in time.
 
-{{#manage_booking_link}}Manage your booking: {{manage_booking_link}}
+{{/deposit_amount}}{{#manage_booking_link}}Manage your booking: {{manage_booking_link}}
 
 {{/manage_booking_link}}We look forward to seeing you!
 {{venue_name}}`,
