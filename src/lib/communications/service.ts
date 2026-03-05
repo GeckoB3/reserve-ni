@@ -40,6 +40,25 @@ function normalisePayload(payload: TemplateVariables): Record<string, string | n
   if (p.booking_time != null && typeof p.booking_time === 'string' && p.booking_time.length > 5) {
     p.booking_time = p.booking_time.slice(0, 5);
   }
+  // Convert YYYY-MM-DD dates to DD/MM/YYYY for human-readable messages.
+  if (typeof p.booking_date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(p.booking_date)) {
+    const [y, m, d] = p.booking_date.split('-');
+    p.booking_date = `${d}/${m}/${y}`;
+  }
+  // Format the cancellation deadline as DD/MM/YYYY at HH:MM for readability.
+  if (typeof p.cancellation_deadline === 'string' && p.cancellation_deadline.includes('T')) {
+    try {
+      const dt = new Date(p.cancellation_deadline);
+      const dd = String(dt.getDate()).padStart(2, '0');
+      const mm = String(dt.getMonth() + 1).padStart(2, '0');
+      const yyyy = dt.getFullYear();
+      const hh = String(dt.getHours()).padStart(2, '0');
+      const min = String(dt.getMinutes()).padStart(2, '0');
+      p.cancellation_deadline = `${dd}/${mm}/${yyyy} at ${hh}:${min}`;
+    } catch {
+      // leave as-is if parsing fails
+    }
+  }
   return p;
 }
 

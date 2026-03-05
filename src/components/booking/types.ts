@@ -14,6 +14,8 @@ export interface DepositConfigPublic {
   enabled: boolean;
   amount_per_person_gbp: number;
   online_requires_deposit?: boolean;
+  min_party_size_for_deposit?: number;
+  weekend_only?: boolean;
 }
 
 export interface BookingRulesPublic {

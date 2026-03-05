@@ -11,9 +11,10 @@ interface ConfirmationStepProps {
   partySize: number;
   guest: GuestDetails;
   bookingId: string | undefined;
+  requiresDeposit?: boolean;
 }
 
-export function ConfirmationStep({ venue, date, slot, partySize, guest, bookingId }: ConfirmationStepProps) {
+export function ConfirmationStep({ venue, date, slot, partySize, guest, bookingId, requiresDeposit }: ConfirmationStepProps) {
   const dateStr = new Date(date + 'T12:00:00').toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
   const [showCheck, setShowCheck] = useState(false);
 
@@ -77,11 +78,13 @@ export function ConfirmationStep({ venue, date, slot, partySize, guest, bookingI
         Add to Calendar
       </button>
 
-      {/* Cancellation policy */}
-      <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
-        <p className="font-medium">Cancellation Policy</p>
-        <p className="mt-1 text-xs">Full refund if cancelled 48+ hours before your reservation. No refund if cancelled within 48 hours or for no-shows.</p>
-      </div>
+      {/* Cancellation policy — only relevant when a deposit was taken */}
+      {requiresDeposit && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+          <p className="font-medium">Cancellation Policy</p>
+          <p className="mt-1 text-xs">Full refund if cancelled 48+ hours before your reservation. No refund if cancelled within 48 hours or for no-shows.</p>
+        </div>
+      )}
     </div>
   );
 }

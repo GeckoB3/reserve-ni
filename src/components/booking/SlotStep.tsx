@@ -42,7 +42,6 @@ export function SlotStep({ date, slots, onSelect, onBack }: SlotStepProps) {
             >
               <span className="text-base font-bold text-slate-900">{slot.start_time.slice(0, 5)}</span>
               <span className="mt-0.5 text-xs text-slate-400">{slot.label}</span>
-              <span className="mt-1 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-500">{slot.available_covers} left</span>
             </button>
           ))}
         </div>

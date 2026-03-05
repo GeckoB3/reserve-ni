@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { AvailableSlot, BookingRulesPublic, GuestDetails, VenuePublic } from './types';
 import { DateStep } from './DateStep';
 import { SlotStep } from './SlotStep';
@@ -32,7 +32,21 @@ export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, 
 
   const step = steps[stepIndex];
   const rules: BookingRulesPublic = venue.booking_rules ?? { min_party_size: 1, max_party_size: 20 };
-  const requiresDeposit = Boolean(venue.deposit_config?.enabled && venue.deposit_config?.online_requires_deposit !== false);
+
+  // Recompute whenever partySize or selectedDate changes so the cancellation policy
+  // and payment step only appear when a deposit actually applies.
+  const requiresDeposit = useMemo(() => {
+    const cfg = venue.deposit_config;
+    if (!cfg?.enabled) return false;
+    if (cfg.online_requires_deposit === false) return false;
+    if (cfg.min_party_size_for_deposit && partySize < cfg.min_party_size_for_deposit) return false;
+    if (cfg.weekend_only && selectedDate) {
+      const dow = new Date(selectedDate + 'T12:00:00').getDay();
+      const isWeekend = dow === 0 || dow === 5 || dow === 6;
+      if (!isWeekend) return false;
+    }
+    return true;
+  }, [venue.deposit_config, partySize, selectedDate]);
 
   useEffect(() => {
     if (!embed || !onHeightChange) return;
@@ -178,7 +192,7 @@ export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, 
         <PaymentStep clientSecret={createResult.client_secret} amountPence={(venue.deposit_config?.amount_per_person_gbp ?? 0) * partySize * 100} partySize={partySize} onComplete={handlePaymentComplete} onBack={goBack} cancellationPolicy={cancellationPolicy} />
       )}
       {step === 'confirmation' && (
-        <ConfirmationStep venue={venue} date={selectedDate!} slot={selectedSlot!} partySize={partySize} guest={guestDetails!} bookingId={createResult?.booking_id} />
+        <ConfirmationStep venue={venue} date={selectedDate!} slot={selectedSlot!} partySize={partySize} guest={guestDetails!} bookingId={createResult?.booking_id} requiresDeposit={requiresDeposit} />
       )}
     </div>
   );

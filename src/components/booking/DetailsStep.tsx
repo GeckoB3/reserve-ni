@@ -52,7 +52,7 @@ export function DetailsStep({ slot, date, partySize, onSubmit, onBack, cancellat
         </div>
       </div>
 
-      {cancellationPolicy && (
+      {cancellationPolicy && requiresDeposit && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800">
           {cancellationPolicy}
         </div>
