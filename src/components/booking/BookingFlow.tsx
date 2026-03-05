@@ -133,19 +133,26 @@ export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, 
       return;
     }
     // Verify the payment server-side and confirm the booking + send comms.
-    // This is the primary confirmation path — the webhook is a backup.
-    try {
-      const res = await fetch('/api/booking/confirm-payment', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ booking_id: createResult.booking_id }),
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        console.error('confirm-payment failed:', data.error);
+    // Retry up to 3 times with a short delay to handle transient network issues.
+    let confirmed = false;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const res = await fetch('/api/booking/confirm-payment', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ booking_id: createResult.booking_id }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.confirmed) { confirmed = true; break; }
+        }
+      } catch {
+        // Network error — retry
       }
-    } catch (e) {
-      console.error('confirm-payment call failed:', e);
+      if (attempt < 3) await new Promise((r) => setTimeout(r, 1500 * attempt));
+    }
+    if (!confirmed) {
+      console.warn('confirm-payment: all attempts failed — webhook will handle confirmation');
     }
     setPaymentComplete(true);
     goNext();

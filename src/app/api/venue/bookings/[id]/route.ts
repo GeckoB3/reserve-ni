@@ -124,6 +124,7 @@ export async function PATCH(
         const deadline = booking.cancellation_deadline ? new Date(booking.cancellation_deadline) : null;
         const canRefund = deadline && new Date() <= deadline && booking.deposit_status === 'Paid' && booking.stripe_payment_intent_id;
 
+        let refundSucceeded = false;
         if (canRefund) {
           const { data: venue } = await admin.from('venues').select('stripe_connected_account_id').eq('id', staff.venue_id).single();
           if (venue?.stripe_connected_account_id) {
@@ -132,6 +133,7 @@ export async function PATCH(
                 { payment_intent: booking.stripe_payment_intent_id },
                 { stripeAccount: venue.stripe_connected_account_id }
               );
+              refundSucceeded = true;
             } catch (refundErr) {
               console.error('Refund failed:', refundErr);
             }
@@ -142,7 +144,7 @@ export async function PATCH(
           .from('bookings')
           .update({
             status: 'Cancelled',
-            deposit_status: canRefund ? 'Refunded' : booking.deposit_status,
+            deposit_status: refundSucceeded ? 'Refunded' : booking.deposit_status,
             updated_at: new Date().toISOString(),
           })
           .eq('id', id);
@@ -322,10 +324,6 @@ export async function PATCH(
       if (guestRow?.email && venueRow?.name) {
         const { sendCommunication } = await import('@/lib/communications');
         const depositAmount = booking.deposit_amount_pence != null ? (booking.deposit_amount_pence / 100).toFixed(2) : undefined;
-        const baseUrl = request.nextUrl.origin;
-        const manageBookingLink = booking.confirm_token_hash
-          ? `${baseUrl}/manage/${id}/${encodeURIComponent(booking.confirm_token_hash)}`
-          : undefined;
         try {
           await sendCommunication({
             type: 'booking_modification',
@@ -337,7 +335,6 @@ export async function PATCH(
               booking_time: timeStr,
               party_size: newPartySize,
               deposit_amount: depositAmount,
-              manage_booking_link: manageBookingLink,
             },
           });
         } catch (commsErr) {

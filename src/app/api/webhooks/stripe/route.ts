@@ -88,7 +88,7 @@ export async function POST(request: NextRequest) {
       const { data: venue } = await supabase.from('venues').select('name').eq('id', booking.venue_id).single();
       const { data: guest } = await supabase.from('guests').select('name, email, phone').eq('id', booking.guest_id).single();
       const b = bRow;
-      const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'https://reserveni.com';
+      const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'https://reserveni.com');
       const manageBookingLink = manageToken ? `${baseUrl}/manage/${bookingId}/${encodeURIComponent(manageToken)}` : undefined;
       const depositAmount = b?.deposit_amount_pence != null ? (b.deposit_amount_pence / 100).toFixed(2) : undefined;
       try {
@@ -122,7 +122,6 @@ export async function POST(request: NextRequest) {
       }
       console.error('payment_intent.payment_failed', pi.id, pi.last_payment_error?.message);
     } else if (event.type === 'account.updated') {
-      // Fired when a connected account's verification status changes.
       const account = event.data.object as Stripe.Account;
       if (account.id) {
         const { data: venue } = await supabase
@@ -131,15 +130,9 @@ export async function POST(request: NextRequest) {
           .eq('stripe_connected_account_id', account.id)
           .maybeSingle();
         if (venue) {
-          await supabase
-            .from('venues')
-            .update({
-              stripe_charges_enabled: account.charges_enabled ?? false,
-              stripe_details_submitted: account.details_submitted ?? false,
-              updated_at: new Date().toISOString(),
-            })
-            .eq('id', venue.id);
-          console.log(`[Stripe] account.updated for venue ${venue.id}: charges_enabled=${account.charges_enabled}`);
+          // Log the status change. The StripeConnectSection UI fetches live
+          // status from Stripe on each load, so no DB columns needed here.
+          console.log(`[Stripe] account.updated for venue ${venue.id}: charges_enabled=${account.charges_enabled}, details_submitted=${account.details_submitted}`);
         }
       }
     } else if (event.type === 'charge.refunded' || event.type === 'charge.refund.updated') {

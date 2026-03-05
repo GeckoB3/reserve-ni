@@ -110,6 +110,7 @@ export async function POST(request: NextRequest) {
       const deadline = booking.cancellation_deadline ? new Date(booking.cancellation_deadline) : null;
       const canRefund = deadline && new Date() <= deadline && booking.deposit_status === 'Paid' && booking.stripe_payment_intent_id;
 
+      let refundSucceeded = false;
       if (canRefund) {
         const { data: venue } = await supabase.from('venues').select('stripe_connected_account_id').eq('id', booking.venue_id).single();
         if (venue?.stripe_connected_account_id) {
@@ -118,6 +119,7 @@ export async function POST(request: NextRequest) {
               { payment_intent: booking.stripe_payment_intent_id },
               { stripeAccount: venue.stripe_connected_account_id }
             );
+            refundSucceeded = true;
           } catch (refundErr) {
             console.error('Refund failed:', refundErr);
           }
@@ -128,7 +130,7 @@ export async function POST(request: NextRequest) {
         .from('bookings')
         .update({
           status: 'Cancelled',
-          deposit_status: canRefund ? 'Refunded' : booking.deposit_status,
+          deposit_status: refundSucceeded ? 'Refunded' : booking.deposit_status,
           confirm_token_used_at: usedAt,
           updated_at: now,
         })
@@ -148,7 +150,7 @@ export async function POST(request: NextRequest) {
             booking_date: booking.booking_date,
             booking_time: timeStr,
             party_size: booking.party_size,
-            deposit_amount: canRefund && booking.deposit_amount_pence ? (booking.deposit_amount_pence / 100).toFixed(2) : undefined,
+            deposit_amount: refundSucceeded && booking.deposit_amount_pence ? (booking.deposit_amount_pence / 100).toFixed(2) : undefined,
           },
         });
       } catch (commsErr) {
@@ -157,7 +159,7 @@ export async function POST(request: NextRequest) {
 
       return NextResponse.json({
         success: true,
-        message: canRefund ? 'Booking cancelled. Your deposit will be refunded.' : 'Booking cancelled.',
+        message: refundSucceeded ? 'Booking cancelled. Your deposit will be refunded.' : 'Booking cancelled.',
       });
     }
 

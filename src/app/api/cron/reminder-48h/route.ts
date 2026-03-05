@@ -43,14 +43,15 @@ export async function POST(request: NextRequest) {
       const { data: guest } = await supabase.from('guests').select('name, email, phone').eq('id', b.guest_id).single();
       if (!guest?.email && !guest?.phone) continue;
 
-      let manageLink: string | undefined;
-      if (b.confirm_token_hash) {
-        manageLink = `${origin}/manage/${b.id}/${encodeURIComponent(b.confirm_token_hash)}`;
-      } else {
-        const token = generateConfirmToken();
-        await supabase.from('bookings').update({ confirm_token_hash: hashConfirmToken(token), updated_at: now.toISOString() }).eq('id', b.id);
-        manageLink = `${origin}/manage/${b.id}/${encodeURIComponent(token)}`;
-      }
+      // Always generate a fresh token for the manage link. This replaces any
+      // previous token, ensuring the link in this reminder is valid.
+      const token = generateConfirmToken();
+      await supabase.from('bookings').update({
+        confirm_token_hash: hashConfirmToken(token),
+        confirm_token_used_at: null,
+        updated_at: now.toISOString(),
+      }).eq('id', b.id);
+      const manageLink = `${origin}/manage/${b.id}/${encodeURIComponent(token)}`;
 
       await sendCommunication({
         type: 'pre_visit_reminder',
