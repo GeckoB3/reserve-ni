@@ -12,16 +12,16 @@ interface LogContext {
 
 /** Which channels each message type uses. Adding WhatsApp = add channel and add to this map. */
 const MESSAGE_CHANNELS: Record<MessageType, Array<'email' | 'sms'>> = {
-  booking_confirmation: ['email'],
+  booking_confirmation: ['email', 'sms'],
   deposit_payment_request: ['email', 'sms'],
   deposit_payment_reminder: ['sms'],
-  pre_visit_reminder: ['email'],
+  pre_visit_reminder: ['email', 'sms'],
   confirm_or_cancel_prompt: ['sms'],
   dietary_digest: ['email'],
   post_visit_thankyou: ['email'],
   auto_cancel_notification: ['email', 'sms'],
-  booking_modification: ['email'],
-  cancellation_confirmation: ['email'],
+  booking_modification: ['email', 'sms'],
+  cancellation_confirmation: ['email', 'sms'],
   no_show_notification: ['email'],
 };
 

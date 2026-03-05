@@ -170,9 +170,13 @@ If the deposit is not paid within 24 hours, your booking will be automatically c
 };
 
 const SMS_TEMPLATES: Partial<Record<MessageType, string>> = {
+  booking_confirmation: `{{venue_name}}: Your booking is confirmed for {{booking_date}} at {{booking_time}} ({{party_size}} guests). See you there!`,
   deposit_payment_request: `{{venue_name}}: Pay your deposit for {{booking_date}} at {{booking_time}} ({{party_size}} guests). {{payment_link}}`,
   confirm_or_cancel_prompt: `{{venue_name}}: Confirm your booking for {{booking_date}} at {{booking_time}}. Confirm: {{confirm_link}} Cancel: {{cancel_link}}`,
   deposit_payment_reminder: `{{venue_name}}: Reminder – please pay your deposit for {{booking_date}}. {{payment_link}}`,
+  pre_visit_reminder: `{{venue_name}}: Reminder – your table for {{party_size}} is booked for {{booking_date}} at {{booking_time}}. We look forward to seeing you!`,
+  booking_modification: `{{venue_name}}: Your booking has been updated to {{booking_date}} at {{booking_time}} ({{party_size}} guests).`,
+  cancellation_confirmation: `{{venue_name}}: Your booking for {{booking_date}} at {{booking_time}} has been cancelled. We hope to see you another time.`,
   auto_cancel_notification: `{{venue_name}}: Your booking for {{booking_date}} at {{booking_time}} was cancelled (deposit not paid in time).`,
 };
 

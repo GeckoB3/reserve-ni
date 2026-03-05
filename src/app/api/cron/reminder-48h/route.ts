@@ -40,8 +40,8 @@ export async function POST(request: NextRequest) {
       if (bookingDt < windowStart || bookingDt > windowEnd) continue;
 
       const { data: venue } = await supabase.from('venues').select('name, address').eq('id', b.venue_id).single();
-      const { data: guest } = await supabase.from('guests').select('name, email').eq('id', b.guest_id).single();
-      if (!guest?.email) continue;
+      const { data: guest } = await supabase.from('guests').select('name, email, phone').eq('id', b.guest_id).single();
+      if (!guest?.email && !guest?.phone) continue;
 
       let manageLink: string | undefined;
       if (b.confirm_token_hash) {
@@ -54,7 +54,7 @@ export async function POST(request: NextRequest) {
 
       await sendCommunication({
         type: 'pre_visit_reminder',
-        recipient: { email: guest.email },
+        recipient: { email: guest.email ?? undefined, phone: guest.phone ?? undefined },
         payload: {
           guest_name: guest.name ?? 'Guest',
           venue_name: venue?.name ?? 'Venue',

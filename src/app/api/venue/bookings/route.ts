@@ -126,11 +126,18 @@ export async function POST(request: NextRequest) {
         const token = createPaymentToken(booking.id);
         const origin = request.nextUrl.origin;
         payment_url = `${origin}/pay?t=${token}`;
+      } catch (stripeErr) {
+        console.error('PaymentIntent create failed for phone booking:', stripeErr);
+        await admin.from('bookings').delete().eq('id', booking.id);
+        return NextResponse.json({ error: 'Payment setup failed' }, { status: 500 });
+      }
 
+      try {
         await sendCommunication({
           type: 'deposit_payment_request',
-          recipient: { phone: guest.phone ?? undefined },
+          recipient: { email: guest.email ?? undefined, phone: guest.phone ?? undefined },
           payload: {
+            guest_name: name,
             payment_link: payment_url,
             venue_name: venue.name,
             booking_date,
@@ -138,10 +145,8 @@ export async function POST(request: NextRequest) {
             party_size,
           },
         });
-      } catch (stripeErr) {
-        console.error('PaymentIntent create failed for phone booking:', stripeErr);
-        await admin.from('bookings').delete().eq('id', booking.id);
-        return NextResponse.json({ error: 'Payment setup failed' }, { status: 500 });
+      } catch (commsErr) {
+        console.error('Deposit payment request comms failed (booking still created):', commsErr);
       }
     }
 
