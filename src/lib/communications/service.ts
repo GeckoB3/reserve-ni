@@ -94,9 +94,10 @@ export class CommunicationService {
           }
         }
       } catch (err) {
+        // Log the failure but continue to the next channel so one failing channel
+        // (e.g. SendGrid not yet activated) does not prevent SMS from being sent.
         console.error(`[CommunicationService] ${ch} failed for ${type}:`, err);
         await this.logCommunication(type, ch, recipient, 'failed', ctx);
-        throw err;
       }
     }
   }
