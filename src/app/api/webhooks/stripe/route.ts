@@ -42,6 +42,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ received: true });
   }
 
+  const connectedAccountId = (event as Stripe.Event & { account?: string }).account;
+  console.log(`[Stripe webhook] ${event.type} (event: ${event.id})${connectedAccountId ? ` connected_account: ${connectedAccountId}` : ''}`);
+
   try {
     if (event.type === 'payment_intent.succeeded') {
       const pi = event.data.object as Stripe.PaymentIntent;
@@ -59,6 +62,7 @@ export async function POST(request: NextRequest) {
         .single();
 
       if (!booking || booking.status === 'Confirmed') {
+        console.log(`[Stripe webhook] Booking ${bookingId} already ${booking?.status ?? 'not found'} — skipping`);
         await recordProcessed(supabase, event.id, event.type);
         return NextResponse.json({ received: true });
       }

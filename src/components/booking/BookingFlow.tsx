@@ -126,10 +126,30 @@ export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, 
     }
   }, [venue.id, selectedDate, selectedSlot, partySize, embed, goNext]);
 
-  const handlePaymentComplete = useCallback(() => {
+  const handlePaymentComplete = useCallback(async () => {
+    if (!createResult?.booking_id) {
+      setPaymentComplete(true);
+      goNext();
+      return;
+    }
+    // Verify the payment server-side and confirm the booking + send comms.
+    // This is the primary confirmation path — the webhook is a backup.
+    try {
+      const res = await fetch('/api/booking/confirm-payment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ booking_id: createResult.booking_id }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        console.error('confirm-payment failed:', data.error);
+      }
+    } catch (e) {
+      console.error('confirm-payment call failed:', e);
+    }
     setPaymentComplete(true);
     goNext();
-  }, [goNext]);
+  }, [goNext, createResult?.booking_id]);
 
   const accentStyle = accentColour
     ? { '--accent-color': `#${accentColour.replace(/^#/, '')}` } as React.CSSProperties

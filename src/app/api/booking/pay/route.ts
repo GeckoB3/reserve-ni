@@ -63,7 +63,11 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Payment not available' }, { status: 500 });
     }
 
-    return NextResponse.json({ client_secret: paymentIntent.client_secret });
+    return NextResponse.json({
+      client_secret: paymentIntent.client_secret,
+      stripe_account_id: venue.stripe_connected_account_id,
+      booking_id: booking.id,
+    });
   } catch (err) {
     console.error('GET /api/booking/pay failed:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
