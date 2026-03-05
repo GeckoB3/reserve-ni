@@ -45,7 +45,7 @@ export async function POST(request: NextRequest) {
     }
 
     const admin = getSupabaseAdminClient();
-    const redirectTo = request.nextUrl.origin + '/dashboard';
+    const redirectTo = (process.env.NEXT_PUBLIC_BASE_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : request.nextUrl.origin)) + '/dashboard';
     const { data: inviteData, error: inviteError } = await admin.auth.admin.inviteUserByEmail(normalisedEmail, {
       redirectTo,
       data: { venue_id: staff.venue_id },

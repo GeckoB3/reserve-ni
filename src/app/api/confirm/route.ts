@@ -140,6 +140,21 @@ export async function POST(request: NextRequest) {
       const { data: guest } = await supabase.from('guests').select('name, email, phone').eq('id', booking.guest_id).single();
       const timeStr = typeof booking.booking_time === 'string' ? booking.booking_time.slice(0, 5) : '';
 
+      const depositAmountStr = booking.deposit_amount_pence
+        ? `£${(booking.deposit_amount_pence / 100).toFixed(2)}`
+        : null;
+
+      let refund_message: string;
+      if (refundSucceeded) {
+        refund_message = `Your deposit of ${depositAmountStr} will be refunded to your original payment method within 5–10 business days.`;
+      } else if (booking.deposit_status === 'Paid' && !canRefund) {
+        refund_message = `Your deposit of ${depositAmountStr} is non-refundable as the cancellation was made less than 48 hours before the reservation.`;
+      } else if (booking.deposit_status === 'Paid' && canRefund && !refundSucceeded) {
+        refund_message = `We were unable to process your refund automatically. Please contact the venue directly to arrange your refund of ${depositAmountStr}.`;
+      } else {
+        refund_message = '';
+      }
+
       try {
         await sendCommunication({
           type: 'cancellation_confirmation',
@@ -150,7 +165,7 @@ export async function POST(request: NextRequest) {
             booking_date: booking.booking_date,
             booking_time: timeStr,
             party_size: booking.party_size,
-            deposit_amount: refundSucceeded && booking.deposit_amount_pence ? (booking.deposit_amount_pence / 100).toFixed(2) : undefined,
+            refund_message: refund_message || undefined,
           },
         });
       } catch (commsErr) {
@@ -160,6 +175,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({
         success: true,
         message: refundSucceeded ? 'Booking cancelled. Your deposit will be refunded.' : 'Booking cancelled.',
+        refund_message,
+        refund_eligible: refundSucceeded,
+        deposit_amount_str: depositAmountStr,
       });
     }
 

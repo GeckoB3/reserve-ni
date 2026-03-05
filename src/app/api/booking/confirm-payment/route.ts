@@ -3,6 +3,7 @@ import { getSupabaseAdminClient } from '@/lib/supabase';
 import { stripe } from '@/lib/stripe';
 import { sendCommunication } from '@/lib/communications';
 import { generateConfirmToken, hashConfirmToken } from '@/lib/confirm-token';
+import { createShortManageLink } from '@/lib/short-manage-link';
 
 /**
  * POST /api/booking/confirm-payment
@@ -126,6 +127,7 @@ export async function POST(request: NextRequest) {
           dietary_notes: booking.dietary_notes ?? undefined,
           occasion: booking.occasion ?? undefined,
           manage_booking_link: manageBookingLink,
+          short_manage_link: createShortManageLink(bookingId),
         },
       });
     } catch (commsErr) {

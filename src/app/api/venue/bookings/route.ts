@@ -15,6 +15,7 @@ const phoneBookingSchema = z.object({
   name: z.string().min(1).max(200),
   phone: z.string().min(1).max(30),
   email: z.string().email().optional().or(z.literal('')),
+  require_deposit: z.boolean().optional(),
 });
 
 function cancellationDeadline(bookingDate: string, bookingTime: string): string {
@@ -55,7 +56,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { booking_date, booking_time, party_size, name, phone, email } = parsed.data;
+    const { booking_date, booking_time, party_size, name, phone, email, require_deposit } = parsed.data;
     const venueId = staff.venue_id;
     const admin = getSupabaseAdminClient();
 
@@ -70,7 +71,8 @@ export async function POST(request: NextRequest) {
     }
 
     const depositConfig = (venue.deposit_config as { enabled?: boolean; amount_per_person_gbp?: number; phone_requires_deposit?: boolean }) ?? {};
-    const requiresDeposit = depositConfig.enabled && depositConfig.phone_requires_deposit;
+    // Staff can override via the require_deposit toggle. If not provided, fall back to venue config.
+    const requiresDeposit = require_deposit ?? (depositConfig.enabled && depositConfig.phone_requires_deposit);
     const amountPerPersonGbp = depositConfig.amount_per_person_gbp ?? 5;
     const depositAmountPence = requiresDeposit ? Math.round(amountPerPersonGbp * party_size * 100) : null;
 
@@ -83,10 +85,10 @@ export async function POST(request: NextRequest) {
       booking_date,
       booking_time: timeForDb,
       party_size,
-      status: 'Pending',
+      status: requiresDeposit ? 'Pending' : 'Confirmed',
       source: 'phone',
       deposit_amount_pence: depositAmountPence,
-      deposit_status: 'Pending' as const,
+      deposit_status: requiresDeposit ? ('Pending' as const) : ('Not Required' as const),
       cancellation_deadline: cancellationDeadline(booking_date, booking_time),
     };
 
@@ -124,8 +126,8 @@ export async function POST(request: NextRequest) {
           .eq('id', booking.id);
 
         const token = createPaymentToken(booking.id);
-        const origin = request.nextUrl.origin;
-        payment_url = `${origin}/pay?t=${token}`;
+        const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : request.nextUrl.origin);
+        payment_url = `${baseUrl}/pay?t=${token}`;
       } catch (stripeErr) {
         console.error('PaymentIntent create failed for phone booking:', stripeErr);
         await admin.from('bookings').delete().eq('id', booking.id);
@@ -143,6 +145,7 @@ export async function POST(request: NextRequest) {
             booking_date,
             booking_time,
             party_size,
+            deposit_amount: depositAmountPence != null ? (depositAmountPence / 100).toFixed(2) : undefined,
           },
         });
       } catch (commsErr) {

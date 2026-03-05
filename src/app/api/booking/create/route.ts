@@ -7,6 +7,7 @@ import { getAvailableSlots } from '@/lib/availability';
 import type { VenueForAvailability, BookingForAvailability } from '@/types/availability';
 import { generateConfirmToken, hashConfirmToken } from '@/lib/confirm-token';
 import { z } from 'zod';
+import { createShortManageLink } from '@/lib/short-manage-link';
 
 const createBookingSchema = z.object({
   venue_id: z.string().uuid(),
@@ -219,8 +220,9 @@ export async function POST(request: NextRequest) {
           updated_at: new Date().toISOString(),
         })
         .eq('id', booking.id);
-      const baseUrl = request.nextUrl.origin;
+      const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : request.nextUrl.origin);
       const manageBookingLink = `${baseUrl}/manage/${booking.id}/${encodeURIComponent(manageToken)}`;
+      const shortManageLink = createShortManageLink(booking.id);
       const depositAmount = depositAmountPence != null ? (depositAmountPence / 100).toFixed(2) : undefined;
       try {
         await sendCommunication({
@@ -235,6 +237,7 @@ export async function POST(request: NextRequest) {
             cancellation_deadline,
             deposit_amount: depositAmount,
             manage_booking_link: manageBookingLink,
+            short_manage_link: shortManageLink,
           },
         });
       } catch (commsErr) {

@@ -4,8 +4,9 @@ import { getVenueStaff } from '@/lib/venue-auth';
 
 /**
  * GET /api/venue/bookings/list?date=YYYY-MM-DD&status=Confirmed|Pending|...
- * Returns bookings for the authenticated venue for the given date, with guest name.
- * Optional status filter. Sorted by time.
+ * or  /api/venue/bookings/list?from=YYYY-MM-DD&to=YYYY-MM-DD&status=...
+ * Returns bookings for the authenticated venue, with guest name.
+ * Sorted by date then time.
  */
 export async function GET(request: NextRequest) {
   try {
@@ -16,17 +17,27 @@ export async function GET(request: NextRequest) {
     }
 
     const date = request.nextUrl.searchParams.get('date');
-    if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-      return NextResponse.json({ error: 'Valid date (YYYY-MM-DD) required' }, { status: 400 });
-    }
+    const from = request.nextUrl.searchParams.get('from');
+    const to = request.nextUrl.searchParams.get('to');
     const statusFilter = request.nextUrl.searchParams.get('status');
+    const isoRe = /^\d{4}-\d{2}-\d{2}$/;
 
-    const { data: rows, error } = await staff.db
+    let query = staff.db
       .from('bookings')
       .select('id, booking_date, booking_time, party_size, status, source, deposit_status, deposit_amount_pence, dietary_notes, occasion, guest_id')
       .eq('venue_id', staff.venue_id)
-      .eq('booking_date', date)
+      .order('booking_date', { ascending: true })
       .order('booking_time', { ascending: true });
+
+    if (date && isoRe.test(date)) {
+      query = query.eq('booking_date', date);
+    } else if (from && to && isoRe.test(from) && isoRe.test(to)) {
+      query = query.gte('booking_date', from).lte('booking_date', to);
+    } else {
+      return NextResponse.json({ error: 'Provide date=YYYY-MM-DD or from=...&to=...' }, { status: 400 });
+    }
+
+    const { data: rows, error } = await query;
 
     if (error) {
       console.error('GET /api/venue/bookings/list failed:', error);

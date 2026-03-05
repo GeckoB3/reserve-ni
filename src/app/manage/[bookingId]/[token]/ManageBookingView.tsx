@@ -22,6 +22,7 @@ export function ManageBookingView({ bookingId, token }: { bookingId: string; tok
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [cancelled, setCancelled] = useState(false);
+  const [refundMessage, setRefundMessage] = useState<string | null>(null);
 
   const fetchDetails = useCallback(async () => {
     const base = typeof window !== 'undefined' ? window.location.origin : '';
@@ -49,6 +50,7 @@ export function ManageBookingView({ bookingId, token }: { bookingId: string; tok
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? 'Failed');
       setCancelled(true);
+      if (data.refund_message) setRefundMessage(data.refund_message);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Something went wrong');
     } finally {
@@ -85,13 +87,19 @@ export function ManageBookingView({ bookingId, token }: { bookingId: string; tok
   if (cancelled) {
     return (
       <div className="w-full max-w-md text-center">
-        <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
-          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-slate-100">
+        <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm space-y-4">
+          <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-full bg-slate-100">
             <svg className="h-6 w-6 text-slate-500" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" /></svg>
           </div>
           <h2 className="text-lg font-semibold text-slate-900">Booking Cancelled</h2>
-          <p className="mt-2 text-sm text-slate-500">Your reservation has been cancelled.</p>
-          <Link href="/" className="mt-4 inline-block text-sm font-medium text-brand-600 hover:text-brand-700">Go home</Link>
+          <p className="text-sm text-slate-500">Your reservation has been cancelled.</p>
+          {refundMessage && (
+            <div className="rounded-xl bg-blue-50 border border-blue-200 px-4 py-3 text-left">
+              <p className="text-sm font-medium text-blue-800">Deposit refund</p>
+              <p className="mt-1 text-sm text-blue-700">{refundMessage}</p>
+            </div>
+          )}
+          <Link href="/" className="mt-2 inline-block text-sm font-medium text-brand-600 hover:text-brand-700">Go home</Link>
         </div>
       </div>
     );

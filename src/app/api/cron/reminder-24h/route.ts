@@ -39,7 +39,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Fetch failed' }, { status: 500 });
     }
 
-    const origin = request.nextUrl.origin;
+    const origin = process.env.NEXT_PUBLIC_BASE_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : request.nextUrl.origin);
     let sent = 0;
 
     for (const b of bookings ?? []) {

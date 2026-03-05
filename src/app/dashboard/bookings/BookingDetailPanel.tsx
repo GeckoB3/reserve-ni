@@ -137,6 +137,7 @@ export function BookingDetailPanel({
   }
 
   const depositPaid = detail.deposit_status === 'Paid' && detail.deposit_amount_pence;
+  const depositAmountStr = detail.deposit_amount_pence ? `£${(detail.deposit_amount_pence / 100).toFixed(2)}` : null;
   const canChangeStatus = ['Pending', 'Confirmed', 'Seated'].includes(detail.status);
 
   return (
@@ -194,8 +195,13 @@ export function BookingDetailPanel({
             <InfoTile label="Covers" value={String(detail.party_size)} />
             <InfoTile label="Source" value={detail.source} />
             <InfoTile label="Status" value={detail.status} />
-            <InfoTile label="Deposit" value={depositPaid ? `£${(detail.deposit_amount_pence! / 100).toFixed(2)} Paid` : detail.deposit_status} />
+            <InfoTile label="Deposit" value={depositPaid ? `${depositAmountStr} Paid` : detail.deposit_status} />
           </div>
+
+          {/* Deposit refund status banner */}
+          {detail.status === 'Cancelled' && detail.deposit_amount_pence != null && detail.deposit_amount_pence > 0 && (
+            <DepositRefundBanner depositStatus={detail.deposit_status} depositAmount={depositAmountStr!} cancellationDeadline={detail.cancellation_deadline} />
+          )}
 
           {/* Special notes */}
           {(detail.dietary_notes || detail.occasion || detail.special_requests) && (
@@ -332,6 +338,44 @@ function InfoTile({ label, value }: { label: string; value: string }) {
       <p className="mt-0.5 text-sm font-semibold text-slate-800">{value}</p>
     </div>
   );
+}
+
+function DepositRefundBanner({ depositStatus, depositAmount, cancellationDeadline }: {
+  depositStatus: string;
+  depositAmount: string;
+  cancellationDeadline: string | null;
+}) {
+  if (depositStatus === 'Refunded') {
+    return (
+      <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3">
+        <div className="flex items-center gap-2">
+          <svg className="h-4 w-4 text-emerald-600" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" /></svg>
+          <p className="text-sm font-medium text-emerald-800">Deposit refunded</p>
+        </div>
+        <p className="mt-1 text-xs text-emerald-700">{depositAmount} has been refunded to the customer&apos;s payment method. Allow 5–10 business days for processing.</p>
+      </div>
+    );
+  }
+
+  if (depositStatus === 'Paid') {
+    const wasEligible = cancellationDeadline && new Date() <= new Date(cancellationDeadline);
+    return (
+      <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+        <div className="flex items-center gap-2">
+          <svg className="h-4 w-4 text-amber-600" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126Z" /></svg>
+          <p className="text-sm font-medium text-amber-800">Deposit not refunded</p>
+        </div>
+        <p className="mt-1 text-xs text-amber-700">
+          {wasEligible
+            ? `${depositAmount} — refund was eligible but failed to process. Please refund manually via Stripe.`
+            : `${depositAmount} — cancelled after the 48-hour refund window. Deposit retained per cancellation policy.`
+          }
+        </p>
+      </div>
+    );
+  }
+
+  return null;
 }
 
 function ActionButton({ onClick, disabled, variant, children }: {

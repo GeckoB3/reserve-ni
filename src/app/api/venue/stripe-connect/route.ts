@@ -66,7 +66,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const origin = request.nextUrl.origin;
+    const origin = process.env.NEXT_PUBLIC_BASE_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : request.nextUrl.origin);
 
     const accountLink = await stripe.accountLinks.create({
       account: accountId,

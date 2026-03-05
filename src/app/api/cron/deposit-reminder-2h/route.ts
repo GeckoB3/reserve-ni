@@ -28,7 +28,7 @@ export async function POST(request: NextRequest) {
       .gte('created_at', twoAndHalfHoursAgo.toISOString())
       .lte('created_at', twoHoursAgo.toISOString());
 
-    const origin = request.nextUrl.origin;
+    const origin = process.env.NEXT_PUBLIC_BASE_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : request.nextUrl.origin);
     let sent = 0;
 
     for (const b of bookings ?? []) {

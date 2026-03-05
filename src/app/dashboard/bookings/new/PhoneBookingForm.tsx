@@ -19,6 +19,7 @@ export function PhoneBookingForm({ venueId }: { venueId: string }) {
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
+  const [requireDeposit, setRequireDeposit] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<{ booking_id: string; payment_url?: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -49,6 +50,7 @@ export function PhoneBookingForm({ venueId }: { venueId: string }) {
         name: name.trim(),
         phone: phone.trim(),
         email: email.trim() || undefined,
+        require_deposit: requireDeposit,
       }),
     })
       .then((r) => {
@@ -153,6 +155,23 @@ export function PhoneBookingForm({ venueId }: { venueId: string }) {
             <label htmlFor="email" className="mb-1.5 block text-sm font-medium text-slate-700">Email <span className="text-slate-400">(optional)</span></label>
             <input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
           </div>
+        </div>
+
+        {/* Deposit toggle */}
+        <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50/50 px-4 py-3">
+          <div>
+            <p className="text-sm font-medium text-slate-700">Require deposit</p>
+            <p className="text-xs text-slate-500">Send a payment link to the guest</p>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={requireDeposit}
+            onClick={() => setRequireDeposit(!requireDeposit)}
+            className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ${requireDeposit ? 'bg-brand-600' : 'bg-slate-200'}`}
+          >
+            <span className={`pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow ring-0 transition-transform duration-200 ${requireDeposit ? 'translate-x-5' : 'translate-x-0'}`} />
+          </button>
         </div>
 
         {error && (

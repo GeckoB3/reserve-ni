@@ -36,6 +36,7 @@ export interface TemplateVariables {
   cancel_link?: string;
   payment_link?: string;
   manage_booking_link?: string;
+  short_manage_link?: string;
   [key: string]: string | number | undefined;
 }
 
