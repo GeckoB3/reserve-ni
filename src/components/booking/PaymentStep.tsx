@@ -1,11 +1,13 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-stripe-js';
-import { getStripe } from '@/lib/stripe-client';
+import { loadStripe } from '@stripe/stripe-js';
+import type { Stripe } from '@stripe/stripe-js';
 
 interface PaymentStepProps {
   clientSecret: string;
+  stripeAccountId?: string;
   amountPence: number;
   partySize: number;
   onComplete: () => void;
@@ -76,9 +78,25 @@ function PaymentForm({ clientSecret, onComplete, onBack }: { clientSecret: strin
   );
 }
 
-export function PaymentStep({ clientSecret, amountPence, partySize, onComplete, onBack, cancellationPolicy }: PaymentStepProps) {
+// Cache per-account Stripe instances to avoid re-loading on each render.
+const stripeInstanceCache = new Map<string, Promise<Stripe | null>>();
+
+function getStripeForAccount(stripeAccountId?: string): Promise<Stripe | null> {
+  const publishableKey = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY ?? '';
+  const cacheKey = stripeAccountId ?? '__platform__';
+  if (!stripeInstanceCache.has(cacheKey)) {
+    stripeInstanceCache.set(
+      cacheKey,
+      loadStripe(publishableKey, stripeAccountId ? { stripeAccount: stripeAccountId } : undefined),
+    );
+  }
+  return stripeInstanceCache.get(cacheKey)!;
+}
+
+export function PaymentStep({ clientSecret, stripeAccountId, amountPence, partySize, onComplete, onBack, cancellationPolicy }: PaymentStepProps) {
   const amount = (amountPence / 100).toFixed(2);
   const perPerson = (amountPence / 100 / partySize).toFixed(2);
+  const stripePromise = useMemo(() => getStripeForAccount(stripeAccountId), [stripeAccountId]);
 
   return (
     <div className="space-y-5">
@@ -116,7 +134,7 @@ export function PaymentStep({ clientSecret, amountPence, partySize, onComplete, 
         </span>
       </div>
 
-      <Elements stripe={getStripe()} options={{ clientSecret, appearance: { theme: 'stripe', variables: { colorPrimary: '#4E6B78', borderRadius: '12px' } } }}>
+      <Elements stripe={stripePromise} options={{ clientSecret, appearance: { theme: 'stripe', variables: { colorPrimary: '#4E6B78', borderRadius: '12px' } } }}>
         <PaymentForm clientSecret={clientSecret} onComplete={onComplete} onBack={onBack} />
       </Elements>
     </div>

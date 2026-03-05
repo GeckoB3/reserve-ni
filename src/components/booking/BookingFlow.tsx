@@ -26,7 +26,7 @@ export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, 
   const [selectedSlot, setSelectedSlot] = useState<AvailableSlot | null>(null);
   const [partySize, setPartySize] = useState(venue.booking_rules?.min_party_size ?? 2);
   const [guestDetails, setGuestDetails] = useState<GuestDetails | null>(null);
-  const [createResult, setCreateResult] = useState<{ booking_id: string; client_secret?: string; requires_deposit: boolean } | null>(null);
+  const [createResult, setCreateResult] = useState<{ booking_id: string; client_secret?: string; stripe_account_id?: string; requires_deposit: boolean } | null>(null);
   const [paymentComplete, setPaymentComplete] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -115,7 +115,7 @@ export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, 
         if (res.status === 409) { setError(data.error ?? 'This time slot is no longer available'); return; }
         throw new Error(data.error ?? 'Booking failed');
       }
-      setCreateResult({ booking_id: data.booking_id, client_secret: data.client_secret, requires_deposit: data.requires_deposit ?? false });
+      setCreateResult({ booking_id: data.booking_id, client_secret: data.client_secret, stripe_account_id: data.stripe_account_id, requires_deposit: data.requires_deposit ?? false });
       if (!data.requires_deposit) {
         setStepIndex(steps.indexOf('confirmation'));
       } else {
@@ -189,7 +189,7 @@ export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, 
         <DetailsStep slot={selectedSlot} date={selectedDate!} partySize={partySize} onSubmit={handleDetailsSubmit} onBack={goBack} cancellationPolicy={cancellationPolicy} requiresDeposit={requiresDeposit} />
       )}
       {step === 'payment' && createResult?.client_secret && (
-        <PaymentStep clientSecret={createResult.client_secret} amountPence={(venue.deposit_config?.amount_per_person_gbp ?? 0) * partySize * 100} partySize={partySize} onComplete={handlePaymentComplete} onBack={goBack} cancellationPolicy={cancellationPolicy} />
+        <PaymentStep clientSecret={createResult.client_secret} stripeAccountId={createResult.stripe_account_id} amountPence={(venue.deposit_config?.amount_per_person_gbp ?? 0) * partySize * 100} partySize={partySize} onComplete={handlePaymentComplete} onBack={goBack} cancellationPolicy={cancellationPolicy} />
       )}
       {step === 'confirmation' && (
         <ConfirmationStep venue={venue} date={selectedDate!} slot={selectedSlot!} partySize={partySize} guest={guestDetails!} bookingId={createResult?.booking_id} requiresDeposit={requiresDeposit} />

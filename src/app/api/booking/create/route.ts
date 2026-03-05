@@ -247,6 +247,7 @@ export async function POST(request: NextRequest) {
         booking_id: booking.id,
         requires_deposit: requiresDeposit,
         client_secret: client_secret ?? undefined,
+        stripe_account_id: requiresDeposit ? venue.stripe_connected_account_id : undefined,
         status: booking.status,
       },
       { status: 201 }
