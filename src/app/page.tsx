@@ -114,7 +114,7 @@ export default function Home() {
           <p className="mx-auto mt-4 max-w-xl text-slate-500">Simple and transparent&nbsp;&mdash; no commission, no hidden fees.</p>
           <div className="mx-auto mt-12 max-w-md overflow-hidden rounded-2xl border border-brand-100 bg-gradient-to-br from-brand-50 to-white shadow-sm">
             <div className="p-8">
-              <span className="inline-block rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-emerald-700">Founding programme</span>
+              <span className="inline-block rounded-full bg-brand-100 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-brand-700">Founding programme</span>
               <p className="mt-4 text-5xl font-extrabold text-slate-900">Free</p>
               <p className="mt-1 text-sm text-slate-500">for the first 10&ndash;20 venues</p>
               <ul className="mt-6 space-y-3 text-left text-sm text-slate-600">
