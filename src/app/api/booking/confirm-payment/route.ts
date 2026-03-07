@@ -81,17 +81,28 @@ export async function POST(request: NextRequest) {
       })
       .eq('id', bookingId);
 
-    // Generate a manage-booking token if one doesn't exist yet.
+    // Generate a manage-booking token. Use an atomic WHERE clause so that if
+    // the webhook fires simultaneously, only the first writer wins.
     let manageToken: string | undefined;
-    if (!booking.confirm_token_hash) {
-      manageToken = generateConfirmToken();
-      await supabase
-        .from('bookings')
-        .update({
-          confirm_token_hash: hashConfirmToken(manageToken),
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', bookingId);
+    const candidateToken = generateConfirmToken();
+    const { data: tokenRows } = await supabase
+      .from('bookings')
+      .update({
+        confirm_token_hash: hashConfirmToken(candidateToken),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', bookingId)
+      .is('confirm_token_hash', null)
+      .select('id');
+
+    if (tokenRows && tokenRows.length > 0) {
+      manageToken = candidateToken;
+    } else {
+      // Another process (webhook) already set the token — we can't build a
+      // manage link because we don't have the raw token, but the other process
+      // will have sent an email with the correct link. Still send our email
+      // (it just won't have the manage button, which is acceptable as a fallback).
+      console.log('confirm-payment: token already set by another process, skipping manage link');
     }
 
     const { data: guest } = await supabase

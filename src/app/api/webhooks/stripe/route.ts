@@ -67,29 +67,43 @@ export async function POST(request: NextRequest) {
         .eq('id', bookingId)
         .single();
 
-      if (!booking || booking.status === 'Confirmed') {
-        console.log(`[Stripe webhook] Booking ${bookingId} already ${booking?.status ?? 'not found'} — skipping`);
+      if (!booking) {
+        console.log(`[Stripe webhook] Booking ${bookingId} not found — skipping`);
         await recordProcessed(supabase, event.id, event.type);
         return NextResponse.json({ received: true });
       }
 
-      await supabase
+      // Atomically update only if not yet confirmed, so the confirm-payment
+      // route and webhook don't both process the same booking.
+      const { data: updatedRows } = await supabase
         .from('bookings')
         .update({
           status: 'Confirmed',
           deposit_status: 'Paid',
           updated_at: new Date().toISOString(),
         })
-        .eq('id', bookingId);
+        .eq('id', bookingId)
+        .neq('status', 'Confirmed')
+        .select('id');
+
+      if (!updatedRows?.length) {
+        console.log(`[Stripe webhook] Booking ${bookingId} already confirmed — skipping`);
+        await recordProcessed(supabase, event.id, event.type);
+        return NextResponse.json({ received: true });
+      }
 
       const { data: bRow } = await supabase.from('bookings').select('confirm_token_hash, booking_date, booking_time, party_size, cancellation_deadline, deposit_amount_pence, dietary_notes, occasion').eq('id', bookingId).single();
+
+      // Atomically set the token only if one doesn't already exist (prevents
+      // race condition with the confirm-payment route).
       let manageToken: string | undefined;
-      if (!bRow?.confirm_token_hash) {
-        manageToken = generateConfirmToken();
-        await supabase.from('bookings').update({
-          confirm_token_hash: hashConfirmToken(manageToken),
-          updated_at: new Date().toISOString(),
-        }).eq('id', bookingId);
+      const candidateToken = generateConfirmToken();
+      const { data: tokenRows } = await supabase.from('bookings').update({
+        confirm_token_hash: hashConfirmToken(candidateToken),
+        updated_at: new Date().toISOString(),
+      }).eq('id', bookingId).is('confirm_token_hash', null).select('id');
+      if (tokenRows && tokenRows.length > 0) {
+        manageToken = candidateToken;
       }
       const { data: venue } = await supabase.from('venues').select('name').eq('id', booking.venue_id).single();
       const { data: guest } = await supabase.from('guests').select('name, email, phone').eq('id', booking.guest_id).single();
