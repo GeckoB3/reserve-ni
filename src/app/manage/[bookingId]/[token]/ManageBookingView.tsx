@@ -15,7 +15,7 @@ interface BookingDetails {
   status: string;
 }
 
-export function ManageBookingView({ bookingId, token }: { bookingId: string; token: string }) {
+export function ManageBookingView({ bookingId, token, hmac }: { bookingId: string; token?: string; hmac?: string }) {
   const [details, setDetails] = useState<BookingDetails | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -24,15 +24,19 @@ export function ManageBookingView({ bookingId, token }: { bookingId: string; tok
   const [cancelled, setCancelled] = useState(false);
   const [refundMessage, setRefundMessage] = useState<string | null>(null);
 
+  const authParam = hmac
+    ? `hmac=${encodeURIComponent(hmac)}`
+    : `token=${encodeURIComponent(token ?? '')}`;
+
   const fetchDetails = useCallback(async () => {
     const base = typeof window !== 'undefined' ? window.location.origin : '';
-    const res = await fetch(`${base}/api/confirm?booking_id=${encodeURIComponent(bookingId)}&token=${encodeURIComponent(token)}`);
+    const res = await fetch(`${base}/api/confirm?booking_id=${encodeURIComponent(bookingId)}&${authParam}`);
     if (!res.ok) {
       const j = await res.json().catch(() => ({}));
       throw new Error(j.error ?? 'Invalid link');
     }
     setDetails(await res.json());
-  }, [bookingId, token]);
+  }, [bookingId, authParam]);
 
   useEffect(() => {
     fetchDetails().catch((e) => setError(e instanceof Error ? e.message : 'Invalid link')).finally(() => setLoading(false));
@@ -42,10 +46,11 @@ export function ManageBookingView({ bookingId, token }: { bookingId: string; tok
     setCancelling(true);
     const base = typeof window !== 'undefined' ? window.location.origin : '';
     try {
+      const authPayload = hmac ? { hmac } : { token };
       const res = await fetch(`${base}/api/confirm`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ booking_id: bookingId, token, action: 'cancel' }),
+        body: JSON.stringify({ booking_id: bookingId, ...authPayload, action: 'cancel' }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? 'Failed');
@@ -56,7 +61,7 @@ export function ManageBookingView({ bookingId, token }: { bookingId: string; tok
     } finally {
       setCancelling(false);
     }
-  }, [bookingId, token]);
+  }, [bookingId, token, hmac]);
 
   if (loading) {
     return (

@@ -71,15 +71,23 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // Payment verified — confirm the booking.
-    await supabase
+    // Payment verified — atomically confirm the booking (only if not already
+    // confirmed by the webhook). This prevents duplicate processing.
+    const { data: statusRows } = await supabase
       .from('bookings')
       .update({
         status: 'Confirmed',
         deposit_status: 'Paid',
         updated_at: new Date().toISOString(),
       })
-      .eq('id', bookingId);
+      .eq('id', bookingId)
+      .neq('status', 'Confirmed')
+      .select('id');
+
+    if (!statusRows?.length) {
+      console.log('confirm-payment: booking already confirmed by webhook');
+      return NextResponse.json({ confirmed: true, already_confirmed: true });
+    }
 
     // Generate a manage-booking token. Use an atomic WHERE clause so that if
     // the webhook fires simultaneously, only the first writer wins.
@@ -98,10 +106,6 @@ export async function POST(request: NextRequest) {
     if (tokenRows && tokenRows.length > 0) {
       manageToken = candidateToken;
     } else {
-      // Another process (webhook) already set the token — we can't build a
-      // manage link because we don't have the raw token, but the other process
-      // will have sent an email with the correct link. Still send our email
-      // (it just won't have the manage button, which is acceptable as a fallback).
       console.log('confirm-payment: token already set by another process, skipping manage link');
     }
 

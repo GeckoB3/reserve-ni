@@ -3,17 +3,20 @@ import { getSupabaseAdminClient } from '@/lib/supabase';
 import { stripe } from '@/lib/stripe';
 import { sendCommunication } from '@/lib/communications';
 import { verifyConfirmToken } from '@/lib/confirm-token';
+import { verifyBookingHmac } from '@/lib/short-manage-link';
 
 /**
- * GET /api/confirm?booking_id=uuid&token=xxx
- * Returns booking details for confirm-or-cancel page if token is valid and not used.
+ * GET /api/confirm?booking_id=uuid&token=xxx  (token-based)
+ * GET /api/confirm?booking_id=uuid&hmac=xxx   (HMAC-based, used by /m/ short links)
+ * Returns booking details for confirm-or-cancel page if auth is valid.
  */
 export async function GET(request: NextRequest) {
   try {
     const bookingId = request.nextUrl.searchParams.get('booking_id');
     const token = request.nextUrl.searchParams.get('token');
-    if (!bookingId || !token) {
-      return NextResponse.json({ error: 'Missing booking_id or token' }, { status: 400 });
+    const hmac = request.nextUrl.searchParams.get('hmac');
+    if (!bookingId || (!token && !hmac)) {
+      return NextResponse.json({ error: 'Missing booking_id or auth' }, { status: 400 });
     }
 
     const supabase = getSupabaseAdminClient();
@@ -27,12 +30,17 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Booking not found' }, { status: 404 });
     }
 
-    if (booking.confirm_token_used_at) {
-      return NextResponse.json({ error: 'This link has already been used' }, { status: 410 });
-    }
-
-    if (!verifyConfirmToken(token, booking.confirm_token_hash)) {
-      return NextResponse.json({ error: 'Invalid link' }, { status: 400 });
+    if (hmac) {
+      if (!verifyBookingHmac(bookingId, hmac)) {
+        return NextResponse.json({ error: 'Invalid link' }, { status: 400 });
+      }
+    } else if (token) {
+      if (booking.confirm_token_used_at) {
+        return NextResponse.json({ error: 'This link has already been used' }, { status: 410 });
+      }
+      if (!verifyConfirmToken(token, booking.confirm_token_hash)) {
+        return NextResponse.json({ error: 'Invalid link' }, { status: 400 });
+      }
     }
 
     const { data: venue } = await supabase.from('venues').select('name, address').eq('id', booking.venue_id).single();
@@ -65,9 +73,9 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { booking_id: bookingId, token, action } = body as { booking_id?: string; token?: string; action?: string };
+    const { booking_id: bookingId, token, hmac, action } = body as { booking_id?: string; token?: string; hmac?: string; action?: string };
 
-    if (!bookingId || !token || (action !== 'confirm' && action !== 'cancel')) {
+    if (!bookingId || (!token && !hmac) || (action !== 'confirm' && action !== 'cancel')) {
       return NextResponse.json({ error: 'Missing or invalid body' }, { status: 400 });
     }
 
@@ -82,12 +90,17 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Booking not found' }, { status: 404 });
     }
 
-    if (booking.confirm_token_used_at) {
-      return NextResponse.json({ error: 'This link has already been used' }, { status: 410 });
-    }
-
-    if (!verifyConfirmToken(token, booking.confirm_token_hash)) {
-      return NextResponse.json({ error: 'Invalid link' }, { status: 400 });
+    if (hmac) {
+      if (!verifyBookingHmac(bookingId, hmac)) {
+        return NextResponse.json({ error: 'Invalid link' }, { status: 400 });
+      }
+    } else if (token) {
+      if (booking.confirm_token_used_at) {
+        return NextResponse.json({ error: 'This link has already been used' }, { status: 410 });
+      }
+      if (!verifyConfirmToken(token, booking.confirm_token_hash)) {
+        return NextResponse.json({ error: 'Invalid link' }, { status: 400 });
+      }
     }
 
     const now = new Date().toISOString();

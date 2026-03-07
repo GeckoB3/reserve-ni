@@ -1,13 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
-import { generateConfirmToken, hashConfirmToken } from '@/lib/confirm-token';
+import { createBookingHmac } from '@/lib/short-manage-link';
 import { createHmac } from 'crypto';
 
 const SECRET = () => process.env.PAYMENT_TOKEN_SECRET || process.env.STRIPE_SECRET_KEY || 'dev-secret';
 
-/**
- * Verify a signed short manage code: base64url(uuid_bytes).hmac_12chars
- */
 function parseShortCode(code: string): string | null {
   const dotIdx = code.lastIndexOf('.');
   if (dotIdx < 1) return null;
@@ -28,8 +25,9 @@ function parseShortCode(code: string): string | null {
 }
 
 /**
- * GET /m/:signedCode — Generate a fresh manage token and redirect.
- * This allows short URLs in SMS without storing raw tokens in the DB.
+ * GET /m/:signedCode — Verify the short-link HMAC and redirect to the manage
+ * page using HMAC-based auth. This avoids overwriting the token hash in the
+ * database (which would invalidate email manage links).
  */
 export async function GET(
   _request: NextRequest,
@@ -54,12 +52,8 @@ export async function GET(
     return NextResponse.redirect(new URL('/', baseUrl));
   }
 
-  const token = generateConfirmToken();
-  await supabase.from('bookings').update({
-    confirm_token_hash: hashConfirmToken(token),
-    confirm_token_used_at: null,
-    updated_at: new Date().toISOString(),
-  }).eq('id', booking.id);
-
-  return NextResponse.redirect(`${baseUrl}/manage/${booking.id}/${encodeURIComponent(token)}`);
+  const hmac = createBookingHmac(booking.id);
+  return NextResponse.redirect(
+    `${baseUrl}/manage/${booking.id}?hmac=${encodeURIComponent(hmac)}`
+  );
 }
