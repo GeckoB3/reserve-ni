@@ -4,6 +4,7 @@ import { stripe } from '@/lib/stripe';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { sendCommunication } from '@/lib/communications';
 import { generateConfirmToken, hashConfirmToken } from '@/lib/confirm-token';
+import { createShortManageLink } from '@/lib/short-manage-link';
 
 const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
 if (!webhookSecret) {
@@ -20,13 +21,18 @@ export async function POST(request: NextRequest) {
   try {
     const rawBody = await request.text();
     const sig = request.headers.get('stripe-signature');
-    if (!sig || !webhookSecret) {
-      return NextResponse.json({ error: 'Missing signature or secret' }, { status: 400 });
+    if (!sig) {
+      console.error('[Stripe webhook] No stripe-signature header');
+      return NextResponse.json({ error: 'Missing signature' }, { status: 400 });
     }
-    event = stripe.webhooks.constructEvent(rawBody, sig, webhookSecret);
+    if (!webhookSecret) {
+      console.error('[Stripe webhook] STRIPE_WEBHOOK_SECRET is not configured');
+      return NextResponse.json({ error: 'Webhook secret not configured' }, { status: 500 });
+    }
+    event = Stripe.webhooks.constructEvent(rawBody, sig, webhookSecret);
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error';
-    console.error('Stripe webhook signature verification failed:', message);
+    console.error('[Stripe webhook] Signature verification failed:', message);
     return NextResponse.json({ error: 'Invalid signature' }, { status: 400 });
   }
 
@@ -106,6 +112,7 @@ export async function POST(request: NextRequest) {
             dietary_notes: b?.dietary_notes ?? undefined,
             occasion: b?.occasion ?? undefined,
             manage_booking_link: manageBookingLink,
+            short_manage_link: createShortManageLink(bookingId),
           },
         });
       } catch (commsErr) {
@@ -142,11 +149,17 @@ export async function POST(request: NextRequest) {
         paymentIntentId = typeof charge.payment_intent === 'string' ? charge.payment_intent : charge.payment_intent?.id ?? null;
       } else {
         const refund = event.data.object as Stripe.Refund;
-        const account = (event as Stripe.Event & { account?: string }).account;
+        const accountId = connectedAccountId;
         if (refund.charge) {
           const chargeId = typeof refund.charge === 'string' ? refund.charge : refund.charge.id;
-          const charge = await stripe.charges.retrieve(chargeId, account ? { stripeAccount: account } : undefined);
-          paymentIntentId = typeof charge.payment_intent === 'string' ? charge.payment_intent : charge.payment_intent?.id ?? null;
+          try {
+            const charge = accountId
+              ? await stripe.charges.retrieve(chargeId, { stripeAccount: accountId })
+              : await stripe.charges.retrieve(chargeId);
+            paymentIntentId = typeof charge.payment_intent === 'string' ? charge.payment_intent : charge.payment_intent?.id ?? null;
+          } catch (chargeErr) {
+            console.error('[Stripe webhook] Failed to retrieve charge for refund:', chargeErr);
+          }
         }
       }
       if (paymentIntentId) {
