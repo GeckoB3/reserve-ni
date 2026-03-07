@@ -36,7 +36,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id: code } = await params;
-  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'https://reserveni.com';
+  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'https://www.reserveni.com';
 
   const bookingId = parseShortCode(code);
   if (!bookingId) {

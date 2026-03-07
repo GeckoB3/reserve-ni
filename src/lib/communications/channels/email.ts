@@ -8,33 +8,78 @@ if (apiKey) {
   sgMail.setApiKey(apiKey);
 }
 
-/** Convert plain-text email body to simple branded HTML, with links turned into buttons. */
+function getBaseUrl(): string {
+  return process.env.NEXT_PUBLIC_BASE_URL || 'https://www.reserveni.com';
+}
+
+/**
+ * Convert plain-text email body to a proper table-based HTML email.
+ * Uses tables for layout (industry standard for email client compatibility).
+ * Converts action links (manage booking, pay deposit) into styled CTA buttons.
+ */
 function textToHtml(text: string): string {
+  const base = getBaseUrl();
+
   const escaped = text
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
 
-  // Collect URLs that get turned into buttons so we don't double-link them.
   const buttonUrls = new Set<string>();
 
-  // Turn "View or cancel your booking: URL" or "Manage your booking: URL" or "Pay your deposit here: URL" into a button.
+  // Convert action phrases into CTA buttons using table-based layout (most reliable across email clients).
   const withButtons = escaped.replace(
     /((?:View or cancel your booking|Manage your booking|Pay your deposit here):\s*)(https?:\/\/[^\s]+)/gi,
-    (_match, label, url) => {
+    (_match, _label, url) => {
       buttonUrls.add(url as string);
-      const cleanLabel = (label as string).replace(/:\s*$/, '');
-      return `<a href="${url}" style="display:inline-block;background-color:#4E6B78;color:#ffffff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:600;font-size:14px;margin:8px 0">${cleanLabel}</a>`;
+      const cleanLabel = (_label as string).replace(/:\s*$/, '');
+      return [
+        '<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:16px 0">',
+        '<tr><td style="background-color:#4E6B78;border-radius:8px;text-align:center">',
+        `<a href="${url}" target="_blank" style="display:inline-block;padding:14px 28px;color:#ffffff;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Roboto,sans-serif;font-size:14px;font-weight:600;text-decoration:none">${cleanLabel}</a>`,
+        '</td></tr></table>',
+      ].join('');
     },
   );
 
-  // Turn remaining bare URLs into clickable links, skipping any already converted to buttons.
+  // Convert remaining bare URLs into clickable text links.
   const withLinks = withButtons.replace(
     /(?<!=["'])(https?:\/\/[^\s<>"']+)/g,
-    (url) => buttonUrls.has(url) ? url : `<a href="${url}" style="color:#4E6B78">${url}</a>`,
+    (url) => buttonUrls.has(url) ? url : `<a href="${url}" target="_blank" style="color:#4E6B78;text-decoration:underline">${url}</a>`,
   );
 
-  return `<!DOCTYPE html><html><body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#1e293b;line-height:1.6;padding:24px;max-width:560px;margin:0 auto"><div style="border-bottom:3px solid #4E6B78;padding-bottom:16px;margin-bottom:24px"><img src="https://reserveni.com/Logo.png" alt="Reserve NI" style="height:32px" /></div>${withLinks.replace(/\n/g, '<br>')}<div style="margin-top:32px;padding-top:16px;border-top:1px solid #e2e8f0;font-size:12px;color:#94a3b8"><a href="https://reserveni.com/privacy" style="color:#94a3b8">Privacy</a> &middot; <a href="https://reserveni.com/terms" style="color:#94a3b8">Terms</a></div></body></html>`;
+  const bodyHtml = withLinks.replace(/\n/g, '<br>\n');
+
+  return [
+    '<!DOCTYPE html>',
+    '<html lang="en">',
+    '<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>',
+    '<body style="margin:0;padding:0;background-color:#f8fafc">',
+    '<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color:#f8fafc">',
+    '<tr><td align="center" style="padding:24px 16px">',
+    '<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="560" style="max-width:560px;width:100%">',
+
+    // Logo
+    '<tr><td style="padding:0 0 20px 0;border-bottom:3px solid #4E6B78">',
+    `<img src="${base}/Logo.png" alt="Reserve NI" width="120" style="height:auto;display:block" />`,
+    '</td></tr>',
+
+    // Body
+    '<tr><td style="padding:24px 0;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Roboto,sans-serif;font-size:15px;line-height:1.6;color:#1e293b">',
+    bodyHtml,
+    '</td></tr>',
+
+    // Footer
+    '<tr><td style="padding:20px 0 0 0;border-top:1px solid #e2e8f0;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Roboto,sans-serif;font-size:12px;color:#94a3b8">',
+    `<a href="${base}/privacy" target="_blank" style="color:#94a3b8;text-decoration:underline">Privacy</a>`,
+    ' &middot; ',
+    `<a href="${base}/terms" target="_blank" style="color:#94a3b8;text-decoration:underline">Terms</a>`,
+    '</td></tr>',
+
+    '</table>',
+    '</td></tr></table>',
+    '</body></html>',
+  ].join('\n');
 }
 
 export class EmailChannel implements MessageChannel {
@@ -56,7 +101,6 @@ export class EmailChannel implements MessageChannel {
         html: textToHtml(template.body),
       });
     } catch (err: unknown) {
-      // Extract SendGrid's detailed error body for easier diagnosis.
       const sgErr = err as { code?: number; response?: { body?: unknown } };
       if (sgErr?.response?.body) {
         console.error('[EmailChannel] SendGrid error body:', JSON.stringify(sgErr.response.body));

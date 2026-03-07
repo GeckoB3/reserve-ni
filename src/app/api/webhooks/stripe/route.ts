@@ -94,7 +94,7 @@ export async function POST(request: NextRequest) {
       const { data: venue } = await supabase.from('venues').select('name').eq('id', booking.venue_id).single();
       const { data: guest } = await supabase.from('guests').select('name, email, phone').eq('id', booking.guest_id).single();
       const b = bRow;
-      const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'https://reserveni.com');
+      const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'https://www.reserveni.com');
       const manageBookingLink = manageToken ? `${baseUrl}/manage/${bookingId}/${encodeURIComponent(manageToken)}` : undefined;
       const depositAmount = b?.deposit_amount_pence != null ? (b.deposit_amount_pence / 100).toFixed(2) : undefined;
       try {

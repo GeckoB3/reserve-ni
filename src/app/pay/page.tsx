@@ -180,7 +180,7 @@ function PayContent() {
           </Elements>
         </div>
         <p className="mt-4 text-center text-xs text-slate-400">
-          Powered by <a href="https://reserveni.com" className="hover:text-brand-600">Reserve NI</a>
+          Powered by <a href="https://www.reserveni.com" className="hover:text-brand-600">Reserve NI</a>
         </p>
       </div>
     </div>

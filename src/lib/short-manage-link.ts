@@ -11,6 +11,6 @@ export function createShortManageLink(bookingId: string): string {
   const hex = bookingId.replace(/-/g, '');
   const payload = Buffer.from(hex, 'hex').toString('base64url');
   const sig = createHmac('sha256', SECRET()).update(payload).digest('base64url').slice(0, 12);
-  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'https://reserveni.com';
+  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'https://www.reserveni.com';
   return `${baseUrl}/m/${payload}.${sig}`;
 }

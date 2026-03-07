@@ -37,7 +37,7 @@ export default async function WidgetPage() {
     );
   }
 
-  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'https://reserveni.com';
+  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'https://www.reserveni.com';
 
   return (
     <div className="p-4 md:p-6 lg:p-8">

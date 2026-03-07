@@ -96,7 +96,7 @@ function SuccessContent() {
 
         <p className="mt-6 text-center text-xs text-slate-400">
           Powered by{' '}
-          <a href="https://reserveni.com" className="hover:text-brand-600">Reserve NI</a>
+          <a href="https://www.reserveni.com" className="hover:text-brand-600">Reserve NI</a>
         </p>
       </div>
     </div>

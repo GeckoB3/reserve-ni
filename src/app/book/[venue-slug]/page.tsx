@@ -73,7 +73,7 @@ export default async function BookPage({ params }: { params: Promise<{ 'venue-sl
           {' · '}
           <a href="/terms" target="_blank" rel="noopener noreferrer" className="hover:text-brand-600">Terms</a>
           {' · '}
-          <a href="https://reserveni.com" target="_blank" rel="noopener noreferrer" className="hover:text-brand-600">
+          <a href="https://www.reserveni.com" target="_blank" rel="noopener noreferrer" className="hover:text-brand-600">
             Powered by Reserve NI
           </a>
         </span>
