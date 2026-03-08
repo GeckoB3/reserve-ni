@@ -28,6 +28,7 @@ export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, 
   const [guestDetails, setGuestDetails] = useState<GuestDetails | null>(null);
   const [createResult, setCreateResult] = useState<{ booking_id: string; client_secret?: string; stripe_account_id?: string; requires_deposit: boolean } | null>(null);
   const [paymentComplete, setPaymentComplete] = useState(false);
+  const [slotsLoading, setSlotsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const step = steps[stepIndex];
@@ -68,13 +69,18 @@ export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, 
   }, []);
 
   const fetchSlots = useCallback(async (date: string) => {
-    const res = await fetch(`/api/booking/availability?venue_id=${encodeURIComponent(venue.id)}&date=${encodeURIComponent(date)}&party_size=${partySize}`);
-    if (!res.ok) {
-      const j = await res.json().catch(() => ({}));
-      throw new Error(j.error ?? 'Failed to load times');
+    setSlotsLoading(true);
+    try {
+      const res = await fetch(`/api/booking/availability?venue_id=${encodeURIComponent(venue.id)}&date=${encodeURIComponent(date)}&party_size=${partySize}`);
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j.error ?? 'Failed to load times');
+      }
+      const data = await res.json();
+      setSlots(data.slots ?? []);
+    } finally {
+      setSlotsLoading(false);
     }
-    const data = await res.json();
-    setSlots(data.slots ?? []);
   }, [venue.id, partySize]);
 
   const handleDateSelect = useCallback((date: string) => {
@@ -210,7 +216,7 @@ export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, 
         <DateStep minParty={rules.min_party_size} maxParty={rules.max_party_size} partySize={partySize} onPartySizeChange={setPartySize} onDateSelect={handleDateSelect} />
       )}
       {step === 'slot' && (
-        <SlotStep date={selectedDate!} slots={slots} onSelect={handleSlotSelect} onBack={goBack} />
+        <SlotStep date={selectedDate!} slots={slots} loading={slotsLoading} onSelect={handleSlotSelect} onBack={goBack} />
       )}
       {step === 'details' && selectedSlot && (
         <DetailsStep slot={selectedSlot} date={selectedDate!} partySize={partySize} onSubmit={handleDetailsSubmit} onBack={goBack} cancellationPolicy={cancellationPolicy} requiresDeposit={requiresDeposit} />

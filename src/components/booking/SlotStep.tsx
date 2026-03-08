@@ -5,11 +5,12 @@ import type { AvailableSlot } from './types';
 interface SlotStepProps {
   date: string;
   slots: AvailableSlot[];
+  loading?: boolean;
   onSelect: (slot: AvailableSlot) => void;
   onBack: () => void;
 }
 
-export function SlotStep({ date, slots, onSelect, onBack }: SlotStepProps) {
+export function SlotStep({ date, slots, loading, onSelect, onBack }: SlotStepProps) {
   const dateStr = new Date(date + 'T12:00:00').toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
 
   return (
@@ -23,7 +24,12 @@ export function SlotStep({ date, slots, onSelect, onBack }: SlotStepProps) {
         <p className="text-sm font-medium text-slate-600">{dateStr}</p>
       </div>
 
-      {slots.length === 0 ? (
+      {loading ? (
+        <div className="flex flex-col items-center py-12">
+          <div className="h-8 w-8 animate-spin rounded-full border-2 border-brand-600 border-t-transparent" />
+          <p className="mt-3 text-sm text-slate-500">Loading available times&hellip;</p>
+        </div>
+      ) : slots.length === 0 ? (
         <div className="flex flex-col items-center rounded-xl border border-slate-200 bg-slate-50 py-12 text-center">
           <svg className="mb-3 h-8 w-8 text-slate-300" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />

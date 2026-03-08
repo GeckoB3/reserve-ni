@@ -1,4 +1,5 @@
 import Link from "next/link";
+import ContactForm from "@/components/ContactForm";
 
 const features = [
   {
@@ -35,7 +36,9 @@ export default function Home() {
       {/* Nav */}
       <nav className="sticky top-0 z-50 border-b border-slate-100 bg-white/80 backdrop-blur-md">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
-          <img src="/Logo.png" alt="Reserve NI" className="h-9 w-auto" />
+          <Link href="/" className="flex-shrink-0">
+            <img src="/Logo.png" alt="Reserve NI" className="h-9 w-auto" />
+          </Link>
           <Link href="/login" className="rounded-xl bg-brand-600 px-5 py-2.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-brand-700">
             Log in
           </Link>
@@ -57,7 +60,7 @@ export default function Home() {
             Reduce no-shows, collect deposits, and automate guest communications - all in one platform built for NI hospitality.
           </p>
           <div className="mt-10 flex flex-col items-center gap-4 sm:flex-row sm:justify-center">
-            <Link href="/login" className="inline-flex h-12 items-center rounded-xl bg-brand-600 px-8 text-base font-semibold text-white shadow-lg shadow-brand-600/20 transition-all hover:bg-brand-700 hover:shadow-xl hover:shadow-brand-600/30">
+            <Link href="#contact" className="inline-flex h-12 items-center rounded-xl bg-brand-600 px-8 text-base font-semibold text-white shadow-lg shadow-brand-600/20 transition-all hover:bg-brand-700 hover:shadow-xl hover:shadow-brand-600/30">
               Get started
             </Link>
             <Link href="#features" className="inline-flex h-12 items-center rounded-xl border border-slate-200 bg-white px-8 text-base font-semibold text-slate-700 transition-colors hover:border-slate-300 hover:bg-slate-50">
@@ -135,10 +138,25 @@ export default function Home() {
                   Priority support and onboarding
                 </li>
               </ul>
-              <Link href="/login" className="mt-8 inline-flex h-12 w-full items-center justify-center rounded-xl bg-brand-600 text-base font-semibold text-white shadow-lg shadow-brand-600/20 transition-all hover:bg-brand-700 hover:shadow-xl">
+              <Link href="#contact" className="mt-8 inline-flex h-12 w-full items-center justify-center rounded-xl bg-brand-600 text-base font-semibold text-white shadow-lg shadow-brand-600/20 transition-all hover:bg-brand-700 hover:shadow-xl">
                 Join the founding programme
               </Link>
             </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Contact */}
+      <section id="contact" className="scroll-mt-16 bg-slate-50 py-20 sm:py-28">
+        <div className="mx-auto max-w-6xl px-6">
+          <h2 className="text-center text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">
+            Get in Touch
+          </h2>
+          <p className="mx-auto mt-4 max-w-xl text-center text-slate-500">
+            Whether you&rsquo;re ready to get started or just want to learn more, we&rsquo;d love to hear from you.
+          </p>
+          <div className="mt-10">
+            <ContactForm />
           </div>
         </div>
       </section>

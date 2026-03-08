@@ -1,4 +1,5 @@
 import { redirect } from 'next/navigation';
+import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
 import { LoginForm } from './login-form';
 
@@ -20,7 +21,9 @@ export default async function LoginPage({
       <div className="relative w-full max-w-sm">
         {/* Brand */}
         <div className="mb-8 flex flex-col items-center">
-          <img src="/Logo.png" alt="Reserve NI" className="h-12 w-auto" />
+          <Link href="/">
+            <img src="/Logo.png" alt="Reserve NI" className="h-12 w-auto" />
+          </Link>
           <p className="mt-3 text-sm text-slate-500">Staff sign in</p>
         </div>
 
