@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff } from '@/lib/venue-auth';
 import { getAvailableSlots } from '@/lib/availability';
@@ -25,11 +25,11 @@ export interface DaySheetGroup {
 }
 
 /**
- * GET /api/venue/day-sheet
- * Returns today's current or next service period for the venue: groups, summary, dietary.
- * Uses venue timezone for "today" and current time.
+ * GET /api/venue/day-sheet?date=YYYY-MM-DD
+ * Returns a day's service periods for the venue: groups, summary, dietary.
+ * If no date is provided, uses the current date in the venue's timezone.
  */
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
     const supabase = await createClient();
     const staff = await getVenueStaff(supabase);
@@ -48,7 +48,12 @@ export async function GET() {
     }
 
     const tz = (venue.timezone as string) ?? 'Europe/London';
-    const { dateStr, minutesSinceMidnight } = nowInVenueTz(tz);
+    const now = nowInVenueTz(tz);
+
+    const requestedDate = request.nextUrl.searchParams.get('date');
+    const dateStr = requestedDate && /^\d{4}-\d{2}-\d{2}$/.test(requestedDate) ? requestedDate : now.dateStr;
+    const isToday = dateStr === now.dateStr;
+    const minutesSinceMidnight = isToday ? now.minutesSinceMidnight : 0;
 
     const venueForAvail: VenueForAvailability = {
       id: venue.id,
@@ -58,35 +63,6 @@ export async function GET() {
     };
 
     const slots = getAvailableSlots(venueForAvail, dateStr, []);
-    if (slots.length === 0) {
-      return NextResponse.json({
-        date: dateStr,
-        periodKey: null,
-        periodLabel: null,
-        periodEndsAt: null,
-        groups: [],
-        summary: { coversExpected: 0, seated: 0, noShows: 0, cancellations: 0 },
-        dietarySummary: [],
-      });
-    }
-
-    const slotStarts = slots.map((s) => timeToMinutes(s.start_time));
-    const slotEnds = slots.map((s) => timeToMinutes(s.end_time));
-    let periodIndex = 0;
-    for (let i = 0; i < slots.length; i++) {
-      if (minutesSinceMidnight >= slotStarts[i]! && minutesSinceMidnight < slotEnds[i]!) {
-        periodIndex = i;
-        break;
-      }
-      if (minutesSinceMidnight < slotStarts[i]!) {
-        periodIndex = i;
-        break;
-      }
-      periodIndex = i;
-    }
-    const period = slots[periodIndex]!;
-    const periodStartMin = timeToMinutes(period.start_time);
-    const periodEndMin = timeToMinutes(period.end_time);
 
     const { data: bookingRows, error: bookErr } = await staff.db
       .from('bookings')
@@ -100,20 +76,16 @@ export async function GET() {
     }
 
     const timeStr = (t: string) => (typeof t === 'string' ? t.slice(0, 5) : '12:00');
-    const bookingInPeriod = (b: { booking_time: string }) => {
-      const m = timeToMinutes(timeStr(b.booking_time));
-      return m >= periodStartMin && m < periodEndMin;
-    };
+    const allBookings = bookingRows ?? [];
 
-    const inPeriod = (bookingRows ?? []).filter(bookingInPeriod);
-    const guestIds = [...new Set(inPeriod.map((r: { guest_id: string }) => r.guest_id))];
+    const guestIds = [...new Set(allBookings.map((r: { guest_id: string }) => r.guest_id))];
     const { data: guestsRows } = guestIds.length
       ? await staff.db.from('guests').select('id, name').in('id', guestIds)
       : { data: [] };
     const guestsMap = new Map((guestsRows ?? []).map((g: { id: string; name: string | null }) => [g.id, g.name]));
 
-    const bookingsForGroup: DaySheetBooking[] = inPeriod
-      .map((r: Record<string, unknown> & { guest_id: string }) => ({
+    function toSheetBooking(r: Record<string, unknown> & { guest_id: string }): DaySheetBooking {
+      return {
         id: r.id as string,
         booking_time: timeStr(r.booking_time as string),
         party_size: r.party_size as number,
@@ -123,30 +95,84 @@ export async function GET() {
         dietary_notes: (r.dietary_notes as string | null) ?? null,
         occasion: (r.occasion as string | null) ?? null,
         guest_name: (guestsMap.get(r.guest_id) || '').trim() || 'Walk-in',
-      }))
-      .sort((a, b) => b.party_size - a.party_size);
+      };
+    }
 
-    const groups: DaySheetGroup[] = [
-      { key: period.key, label: period.label, bookings: bookingsForGroup },
-    ];
+    let groups: DaySheetGroup[];
+    let periodKey: string | null = null;
+    let periodLabel: string | null = null;
+    let periodEndsAt: string | null = null;
 
-    const allInPeriod = inPeriod as Array<{ party_size: number; status: string }>;
-    const coversExpected = allInPeriod
+    if (slots.length === 0) {
+      const mapped = allBookings
+        .map((r: Record<string, unknown> & { guest_id: string }) => toSheetBooking(r))
+        .sort((a, b) => a.booking_time.localeCompare(b.booking_time));
+      groups = mapped.length > 0 ? [{ key: 'all', label: 'All Bookings', bookings: mapped }] : [];
+    } else if (isToday) {
+      const slotStarts = slots.map((s) => timeToMinutes(s.start_time));
+      const slotEnds = slots.map((s) => timeToMinutes(s.end_time));
+      let periodIndex = 0;
+      for (let i = 0; i < slots.length; i++) {
+        if (minutesSinceMidnight >= slotStarts[i]! && minutesSinceMidnight < slotEnds[i]!) {
+          periodIndex = i;
+          break;
+        }
+        if (minutesSinceMidnight < slotStarts[i]!) {
+          periodIndex = i;
+          break;
+        }
+        periodIndex = i;
+      }
+      const period = slots[periodIndex]!;
+      periodKey = period.key;
+      periodLabel = period.label;
+      periodEndsAt = `${dateStr}T${period.end_time}:00`;
+
+      const periodStartMin = timeToMinutes(period.start_time);
+      const periodEndMin = timeToMinutes(period.end_time);
+      const inPeriod = allBookings.filter((b: { booking_time: string }) => {
+        const m = timeToMinutes(timeStr(b.booking_time));
+        return m >= periodStartMin && m < periodEndMin;
+      });
+      const mapped = inPeriod
+        .map((r: Record<string, unknown> & { guest_id: string }) => toSheetBooking(r))
+        .sort((a, b) => b.party_size - a.party_size);
+      groups = [{ key: period.key, label: period.label, bookings: mapped }];
+    } else {
+      groups = slots.map((period) => {
+        const periodStartMin = timeToMinutes(period.start_time);
+        const periodEndMin = timeToMinutes(period.end_time);
+        const inPeriod = allBookings.filter((b: { booking_time: string }) => {
+          const m = timeToMinutes(timeStr(b.booking_time));
+          return m >= periodStartMin && m < periodEndMin;
+        });
+        return {
+          key: period.key,
+          label: period.label,
+          bookings: inPeriod
+            .map((r: Record<string, unknown> & { guest_id: string }) => toSheetBooking(r))
+            .sort((a, b) => a.booking_time.localeCompare(b.booking_time)),
+        };
+      }).filter((g) => g.bookings.length > 0);
+      periodLabel = `${slots.length} service period${slots.length !== 1 ? 's' : ''}`;
+    }
+
+    const allForStats = allBookings as Array<{ party_size: number; status: string }>;
+    const coversExpected = allForStats
       .filter((b) => ['Confirmed', 'Pending', 'Seated'].includes(b.status))
       .reduce((s, b) => s + b.party_size, 0);
-    const seated = allInPeriod
+    const seated = allForStats
       .filter((b) => ['Seated', 'Completed'].includes(b.status))
       .reduce((s, b) => s + b.party_size, 0);
-    const noShows = allInPeriod
+    const noShows = allForStats
       .filter((b) => b.status === 'No-Show')
       .reduce((s, b) => s + b.party_size, 0);
-    const cancellations = allInPeriod
+    const cancellations = allForStats
       .filter((b) => b.status === 'Cancelled')
       .reduce((s, b) => s + b.party_size, 0);
 
-    const periodEndsAt = `${dateStr}T${period.end_time}:00`;
     const dietary = dietarySummary(
-      inPeriod.map((b: { dietary_notes: string | null; occasion: string | null }) => ({
+      allBookings.map((b: { dietary_notes: string | null; occasion: string | null }) => ({
         dietary_notes: b.dietary_notes,
         occasion: b.occasion,
       }))
@@ -154,8 +180,8 @@ export async function GET() {
 
     return NextResponse.json({
       date: dateStr,
-      periodKey: period.key,
-      periodLabel: period.label,
+      periodKey,
+      periodLabel,
       periodEndsAt,
       groups,
       summary: { coversExpected, seated, noShows, cancellations },

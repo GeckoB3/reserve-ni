@@ -65,7 +65,7 @@ function formatDateLabel(date: string, mode: ViewMode): string {
     return `${WEEKDAYS_LONG[d.getDay()]} ${d.getDate()} ${MONTHS_LONG[d.getMonth()]} ${d.getFullYear()}`;
   }
   if (mode === 'week') {
-    const end = new Date(endOfWeek(date) + 'T12:00:00');
+    const end = new Date(addDays(date, 6) + 'T12:00:00');
     return `${d.getDate()} ${MONTHS_SHORT[d.getMonth()]} – ${end.getDate()} ${MONTHS_SHORT[end.getMonth()]} ${end.getFullYear()}`;
   }
   if (mode === 'month') return `${MONTHS_LONG[d.getMonth()]} ${d.getFullYear()}`;
@@ -91,7 +91,7 @@ export function BookingsDashboard({ venueId }: { venueId: string }) {
 
   const { from, to } = useMemo(() => {
     if (viewMode === 'day') return { from: anchorDate, to: anchorDate };
-    if (viewMode === 'week') return { from: startOfWeek(anchorDate), to: endOfWeek(anchorDate) };
+    if (viewMode === 'week') return { from: anchorDate, to: addDays(anchorDate, 6) };
     if (viewMode === 'month') return { from: startOfMonth(anchorDate), to: endOfMonth(anchorDate) };
     return { from: customFrom, to: customTo };
   }, [viewMode, anchorDate, customFrom, customTo]);
@@ -174,7 +174,7 @@ export function BookingsDashboard({ venueId }: { venueId: string }) {
             <button
               key={mode}
               type="button"
-              onClick={() => setViewMode(mode)}
+              onClick={() => { setViewMode(mode); if (mode !== 'custom') setAnchorDate(todayISO()); }}
               className={`rounded-lg px-4 py-2 text-sm font-medium capitalize transition-all ${
                 viewMode === mode
                   ? 'bg-brand-600 text-white shadow-sm'

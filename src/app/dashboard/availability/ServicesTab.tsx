@@ -99,6 +99,19 @@ export function ServicesTab({ services, setServices, showToast }: Props) {
     await handleUpdate(updated);
   }
 
+  function handleDuplicate(service: Service) {
+    setDraft({
+      name: `${service.name} (copy)`,
+      days_of_week: [...service.days_of_week],
+      start_time: service.start_time,
+      end_time: service.end_time,
+      last_booking_time: service.last_booking_time,
+      is_active: service.is_active,
+      sort_order: services.length,
+    });
+    setCreating(true);
+  }
+
   function toggleDay(days: number[], day: number): number[] {
     return days.includes(day) ? days.filter((d) => d !== day) : [...days, day].sort();
   }
@@ -195,6 +208,11 @@ export function ServicesTab({ services, setServices, showToast }: Props) {
                     ) : (
                       <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 0 1 0-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178Z" />
                     )}
+                  </svg>
+                </button>
+                <button onClick={() => handleDuplicate(service)} className="rounded-lg p-2 text-slate-400 hover:bg-slate-50 hover:text-slate-700" title="Duplicate">
+                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 17.25v3.375c0 .621-.504 1.125-1.125 1.125h-9.75a1.125 1.125 0 0 1-1.125-1.125V7.875c0-.621.504-1.125 1.125-1.125H6.75a9.06 9.06 0 0 1 1.5.124m7.5 10.376h3.375c.621 0 1.125-.504 1.125-1.125V11.25c0-4.46-3.243-8.161-7.5-8.876a9.06 9.06 0 0 0-1.5-.124H9.375c-.621 0-1.125.504-1.125 1.125v3.5m7.5 10.375H9.375a1.125 1.125 0 0 1-1.125-1.125v-9.25m12 6.625v-1.875a3.375 3.375 0 0 0-3.375-3.375h-1.5a1.125 1.125 0 0 1-1.125-1.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H9.75" />
                   </svg>
                 </button>
                 <button onClick={() => setEditing(service)} className="rounded-lg p-2 text-slate-400 hover:bg-slate-50 hover:text-slate-700" title="Edit">

@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
 import { ServicesTab } from './ServicesTab';
 import { CapacityRulesTab } from './CapacityRulesTab';
 import { DiningDurationTab } from './DiningDurationTab';
@@ -64,8 +65,18 @@ export default function AvailabilitySettingsPage() {
 
   return (
     <div className="p-6 lg:p-8">
-      <h1 className="mb-1 text-xl font-bold text-slate-900">Availability Settings</h1>
-      <p className="mb-6 text-sm text-slate-500">Manage your services, capacity, dining durations, booking rules, and closures.</p>
+      <div className="mb-6 flex items-start justify-between">
+        <div>
+          <h1 className="mb-1 text-xl font-bold text-slate-900">Availability Settings</h1>
+          <p className="text-sm text-slate-500">Manage your services, capacity, dining durations, booking rules, and closures.</p>
+        </div>
+        <Link
+          href="/dashboard/onboarding"
+          className="flex-shrink-0 rounded-lg border border-brand-200 bg-brand-50 px-4 py-2 text-sm font-medium text-brand-700 hover:bg-brand-100 transition-colors"
+        >
+          Setup Wizard
+        </Link>
+      </div>
 
       {/* Tab bar */}
       <div className="mb-6 flex gap-1 overflow-x-auto rounded-xl border border-slate-200 bg-slate-100 p-1">

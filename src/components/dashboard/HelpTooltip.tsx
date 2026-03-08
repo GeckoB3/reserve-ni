@@ -36,8 +36,8 @@ export function HelpTooltip({ content, maxWidth = 280 }: HelpTooltipProps) {
       </button>
       {open && (
         <div
-          className="absolute bottom-full left-1/2 z-50 mb-2 -translate-x-1/2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600 shadow-lg"
-          style={{ maxWidth }}
+          className="absolute bottom-full left-1/2 z-50 mb-2 -translate-x-1/2 rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-xs leading-relaxed text-slate-600 shadow-lg"
+          style={{ maxWidth, minWidth: 200, width: 'max-content' }}
         >
           {content}
           <div className="absolute left-1/2 top-full -translate-x-1/2 border-4 border-transparent border-t-white" />

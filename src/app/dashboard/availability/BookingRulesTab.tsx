@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { HelpTooltip } from '@/components/dashboard/HelpTooltip';
+import { helpContent } from '@/lib/help-content';
 
 interface Service { id: string; name: string; }
 interface Restriction {
@@ -118,34 +120,84 @@ export function BookingRulesTab({ services, showToast }: Props) {
               <div className="space-y-4">
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="mb-1 block text-xs font-medium text-slate-600">Min advance (minutes)</label>
+                    <label className="mb-1 flex items-center gap-1.5 text-xs font-medium text-slate-600">
+                      Min advance (minutes) <HelpTooltip content={helpContent.bookingRules.minAdvance} />
+                    </label>
                     <input type="number" min={0} value={draft.min_advance_minutes} onChange={(e) => setEditDraft({ ...draft, min_advance_minutes: parseInt(e.target.value) || 0 })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
                   </div>
                   <div>
-                    <label className="mb-1 block text-xs font-medium text-slate-600">Max advance (days)</label>
+                    <label className="mb-1 flex items-center gap-1.5 text-xs font-medium text-slate-600">
+                      Max advance (days) <HelpTooltip content={helpContent.bookingRules.maxAdvance} />
+                    </label>
                     <input type="number" min={1} max={365} value={draft.max_advance_days} onChange={(e) => setEditDraft({ ...draft, max_advance_days: parseInt(e.target.value) || 1 })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
                   </div>
                   <div>
-                    <label className="mb-1 block text-xs font-medium text-slate-600">Min party size online</label>
+                    <label className="mb-1 flex items-center gap-1.5 text-xs font-medium text-slate-600">
+                      Min party size online <HelpTooltip content={helpContent.bookingRules.partySize} />
+                    </label>
                     <input type="number" min={1} value={draft.min_party_size_online} onChange={(e) => setEditDraft({ ...draft, min_party_size_online: parseInt(e.target.value) || 1 })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
                   </div>
                   <div>
                     <label className="mb-1 block text-xs font-medium text-slate-600">Max party size online</label>
                     <input type="number" min={1} value={draft.max_party_size_online} onChange={(e) => setEditDraft({ ...draft, max_party_size_online: parseInt(e.target.value) || 1 })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
                   </div>
-                  <div>
-                    <label className="mb-1 block text-xs font-medium text-slate-600">Large party threshold</label>
-                    <input type="number" min={1} value={draft.large_party_threshold ?? ''} onChange={(e) => setEditDraft({ ...draft, large_party_threshold: e.target.value ? parseInt(e.target.value) : null })} placeholder="e.g. 8" className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-xs font-medium text-slate-600">Deposit from party size</label>
-                    <input type="number" min={1} value={draft.deposit_required_from_party_size ?? ''} onChange={(e) => setEditDraft({ ...draft, deposit_required_from_party_size: e.target.value ? parseInt(e.target.value) : null })} placeholder="e.g. 6" className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
-                  </div>
                 </div>
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-slate-600">Large party message</label>
-                  <input type="text" value={draft.large_party_message ?? ''} onChange={(e) => setEditDraft({ ...draft, large_party_message: e.target.value || null })} placeholder="e.g. Please call us for parties of 8+" className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+
+                {/* Large party redirect */}
+                <div className="rounded-lg border border-slate-200 p-3 space-y-3">
+                  <label className="flex cursor-pointer items-center gap-3">
+                    <input
+                      type="checkbox"
+                      checked={draft.large_party_threshold != null}
+                      onChange={(e) => setEditDraft({
+                        ...draft,
+                        large_party_threshold: e.target.checked ? 8 : null,
+                        large_party_message: e.target.checked ? (draft.large_party_message || 'For parties of 8 or more, please call us directly.') : null,
+                      })}
+                      className="h-4 w-4 rounded border-slate-300 text-brand-600"
+                    />
+                    <span className="flex items-center gap-1.5 text-xs font-medium text-slate-600">
+                      Enable large party redirect <HelpTooltip content={helpContent.bookingRules.largePartyThreshold} />
+                    </span>
+                  </label>
+                  {draft.large_party_threshold != null && (
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="mb-1 block text-xs font-medium text-slate-600">Redirect from party size</label>
+                        <input type="number" min={2} value={draft.large_party_threshold} onChange={(e) => setEditDraft({ ...draft, large_party_threshold: parseInt(e.target.value) || 8 })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+                      </div>
+                      <div className="col-span-2">
+                        <label className="mb-1 block text-xs font-medium text-slate-600">Message shown to guests</label>
+                        <input type="text" value={draft.large_party_message ?? ''} onChange={(e) => setEditDraft({ ...draft, large_party_message: e.target.value || null })} placeholder="e.g. Please call us for parties of 8+" className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+                      </div>
+                    </div>
+                  )}
                 </div>
+
+                {/* Deposit threshold */}
+                <div className="rounded-lg border border-slate-200 p-3 space-y-3">
+                  <label className="flex cursor-pointer items-center gap-3">
+                    <input
+                      type="checkbox"
+                      checked={draft.deposit_required_from_party_size != null}
+                      onChange={(e) => setEditDraft({
+                        ...draft,
+                        deposit_required_from_party_size: e.target.checked ? 6 : null,
+                      })}
+                      className="h-4 w-4 rounded border-slate-300 text-brand-600"
+                    />
+                    <span className="flex items-center gap-1.5 text-xs font-medium text-slate-600">
+                      Require deposits for larger parties <HelpTooltip content={helpContent.bookingRules.depositThreshold} />
+                    </span>
+                  </label>
+                  {draft.deposit_required_from_party_size != null && (
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-slate-600">Deposit from party size</label>
+                      <input type="number" min={1} value={draft.deposit_required_from_party_size} onChange={(e) => setEditDraft({ ...draft, deposit_required_from_party_size: parseInt(e.target.value) || 1 })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+                    </div>
+                  )}
+                </div>
+
                 <div className="flex gap-2">
                   <button onClick={() => handleSave(service.id, draft)} disabled={saving} className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50">
                     {saving ? 'Saving...' : 'Save'}
@@ -158,12 +210,18 @@ export function BookingRulesTab({ services, showToast }: Props) {
                 <div><span className="text-slate-500">Min advance:</span> <span className="font-medium text-slate-700">{restriction.min_advance_minutes} min</span></div>
                 <div><span className="text-slate-500">Max advance:</span> <span className="font-medium text-slate-700">{restriction.max_advance_days} days</span></div>
                 <div><span className="text-slate-500">Party size:</span> <span className="font-medium text-slate-700">{restriction.min_party_size_online}–{restriction.max_party_size_online}</span></div>
-                {restriction.large_party_threshold && (
-                  <div><span className="text-slate-500">Large party:</span> <span className="font-medium text-slate-700">{restriction.large_party_threshold}+</span></div>
-                )}
-                {restriction.deposit_required_from_party_size && (
-                  <div><span className="text-slate-500">Deposit from:</span> <span className="font-medium text-slate-700">{restriction.deposit_required_from_party_size}+ guests</span></div>
-                )}
+                <div>
+                  <span className="text-slate-500">Large party redirect:</span>{' '}
+                  <span className="font-medium text-slate-700">
+                    {restriction.large_party_threshold ? `${restriction.large_party_threshold}+` : 'Off'}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-slate-500">Deposit required:</span>{' '}
+                  <span className="font-medium text-slate-700">
+                    {restriction.deposit_required_from_party_size ? `${restriction.deposit_required_from_party_size}+ guests` : 'Off'}
+                  </span>
+                </div>
               </div>
             ) : (
               <p className="text-sm text-slate-400">No booking rules configured. Default rules will apply.</p>

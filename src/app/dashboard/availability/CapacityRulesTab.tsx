@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { HelpTooltip } from '@/components/dashboard/HelpTooltip';
+import { helpContent } from '@/lib/help-content';
 
 interface Service { id: string; name: string; }
 interface CapacityRule {
@@ -120,15 +122,21 @@ export function CapacityRulesTab({ services, showToast }: Props) {
     return (
       <div className="grid grid-cols-2 gap-3">
         <div>
-          <label className="mb-1 block text-xs font-medium text-slate-600">Max covers/slot</label>
+          <label className="mb-1 flex items-center gap-1.5 text-xs font-medium text-slate-600">
+            Max covers/slot <HelpTooltip content={helpContent.capacityRules.maxCoversPerSlot} />
+          </label>
           <input type="number" min={1} value={data.max_covers_per_slot} onChange={(e) => onChange({ ...data, max_covers_per_slot: parseInt(e.target.value) || 1 })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
         </div>
         <div>
-          <label className="mb-1 block text-xs font-medium text-slate-600">Max bookings/slot</label>
+          <label className="mb-1 flex items-center gap-1.5 text-xs font-medium text-slate-600">
+            Max bookings/slot <HelpTooltip content={helpContent.capacityRules.maxBookingsPerSlot} />
+          </label>
           <input type="number" min={1} value={data.max_bookings_per_slot} onChange={(e) => onChange({ ...data, max_bookings_per_slot: parseInt(e.target.value) || 1 })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
         </div>
         <div>
-          <label className="mb-1 block text-xs font-medium text-slate-600">Slot interval (min)</label>
+          <label className="mb-1 flex items-center gap-1.5 text-xs font-medium text-slate-600">
+            Slot interval (min) <HelpTooltip content={helpContent.capacityRules.slotInterval} />
+          </label>
           <select value={data.slot_interval_minutes} onChange={(e) => onChange({ ...data, slot_interval_minutes: parseInt(e.target.value) })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm">
             <option value={15}>15 min</option>
             <option value={30}>30 min</option>
@@ -136,22 +144,28 @@ export function CapacityRulesTab({ services, showToast }: Props) {
           </select>
         </div>
         <div>
-          <label className="mb-1 block text-xs font-medium text-slate-600">Buffer (min)</label>
+          <label className="mb-1 flex items-center gap-1.5 text-xs font-medium text-slate-600">
+            Buffer (min) <HelpTooltip content={helpContent.capacityRules.bufferMinutes} />
+          </label>
           <input type="number" min={0} max={120} value={data.buffer_minutes} onChange={(e) => onChange({ ...data, buffer_minutes: parseInt(e.target.value) || 0 })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
         </div>
         <div>
-          <label className="mb-1 block text-xs font-medium text-slate-600">Day override</label>
+          <label className="mb-1 flex items-center gap-1.5 text-xs font-medium text-slate-600">
+            Day override <HelpTooltip content={helpContent.capacityRules.dayOverride} />
+          </label>
           <select value={data.day_of_week ?? ''} onChange={(e) => onChange({ ...data, day_of_week: e.target.value ? parseInt(e.target.value) : null })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm">
             <option value="">All days (default)</option>
             {DAY_LABELS.map((d, i) => <option key={i} value={i}>{d}</option>)}
           </select>
         </div>
         <div>
-          <label className="mb-1 block text-xs font-medium text-slate-600">Time range (optional)</label>
+          <label className="mb-1 flex items-center gap-1.5 text-xs font-medium text-slate-600">
+            Time range <HelpTooltip content={helpContent.capacityRules.timeOverride} />
+          </label>
           <div className="flex items-center gap-1">
-            <input type="time" value={data.time_range_start ?? ''} onChange={(e) => onChange({ ...data, time_range_start: e.target.value || null })} className="w-full rounded-lg border border-slate-200 px-2 py-2 text-sm" />
+            <input type="time" value={data.time_range_start ?? ''} onChange={(e) => onChange({ ...data, time_range_start: e.target.value || null })} className="w-full rounded-lg border border-slate-200 px-2 py-2 text-sm" placeholder="Start" />
             <span className="text-xs text-slate-400">–</span>
-            <input type="time" value={data.time_range_end ?? ''} onChange={(e) => onChange({ ...data, time_range_end: e.target.value || null })} className="w-full rounded-lg border border-slate-200 px-2 py-2 text-sm" />
+            <input type="time" value={data.time_range_end ?? ''} onChange={(e) => onChange({ ...data, time_range_end: e.target.value || null })} className="w-full rounded-lg border border-slate-200 px-2 py-2 text-sm" placeholder="End" />
           </div>
         </div>
       </div>

@@ -1,8 +1,26 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createClient } from '@/lib/supabase/browser';
 import { parseDietaryNotes } from '@/lib/day-sheet';
+
+const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
+function todayISO(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function addDays(date: string, days: number): string {
+  const d = new Date(date + 'T12:00:00');
+  d.setDate(d.getDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+function formatDateLabel(date: string): string {
+  const d = new Date(date + 'T12:00:00');
+  return `${WEEKDAYS[d.getDay()]} ${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
+}
 
 interface DaySheetBooking {
   id: string;
@@ -58,6 +76,7 @@ function canMarkNoShow(bookingTime: string): boolean {
 }
 
 export function DaySheetView({ venueId }: { venueId: string }) {
+  const [date, setDate] = useState(todayISO);
   const [data, setData] = useState<DaySheetData | null>(null);
   const [loading, setLoading] = useState(true);
   const [connection, setConnection] = useState<ConnectionStatus>('amber');
@@ -67,9 +86,12 @@ export function DaySheetView({ venueId }: { venueId: string }) {
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const advanceRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  const isToday = useMemo(() => date === todayISO(), [date]);
+
   const fetchDaySheet = useCallback(async (): Promise<boolean> => {
     try {
-      const res = await fetch('/api/venue/day-sheet');
+      const params = new URLSearchParams({ date });
+      const res = await fetch(`/api/venue/day-sheet?${params}`);
       if (!res.ok) return false;
       const json = await res.json();
       setData(json);
@@ -80,7 +102,7 @@ export function DaySheetView({ venueId }: { venueId: string }) {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [date]);
 
   useEffect(() => { fetchDaySheet(); }, [fetchDaySheet]);
 
@@ -159,6 +181,27 @@ export function DaySheetView({ venueId }: { venueId: string }) {
 
   return (
     <div className="space-y-4">
+      {/* Date navigation */}
+      <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+        <button type="button" onClick={() => { setLoading(true); setDate(addDays(date, -1)); }} className="rounded-lg p-2 text-slate-400 hover:bg-slate-50 hover:text-slate-600">
+          <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" /></svg>
+        </button>
+        <div className="text-center">
+          <h2 className="text-base font-semibold text-slate-900">{formatDateLabel(date)}</h2>
+          {isToday && <span className="text-xs font-medium text-brand-600">Today</span>}
+        </div>
+        <div className="flex items-center gap-1">
+          {!isToday && (
+            <button type="button" onClick={() => { setLoading(true); setDate(todayISO()); }} className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50">
+              Today
+            </button>
+          )}
+          <button type="button" onClick={() => { setLoading(true); setDate(addDays(date, 1)); }} className="rounded-lg p-2 text-slate-400 hover:bg-slate-50 hover:text-slate-600">
+            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" /></svg>
+          </button>
+        </div>
+      </div>
+
       {/* Connection status */}
       <div className="flex items-center gap-2">
         <span className={`inline-block h-2.5 w-2.5 rounded-full ${
@@ -213,10 +256,11 @@ export function DaySheetView({ venueId }: { venueId: string }) {
       </div>
 
       {/* Period heading */}
-      <div className="flex items-center gap-3">
-        <h2 className="text-sm font-semibold text-slate-800">{data.periodLabel ?? 'Today'}</h2>
-        <span className="text-sm text-slate-400">{data.date}</span>
-      </div>
+      {data.periodLabel && (
+        <div className="flex items-center gap-3">
+          <h2 className="text-sm font-semibold text-slate-800">{data.periodLabel}</h2>
+        </div>
+      )}
 
       {/* Booking groups */}
       {data.groups.length === 0 ? (

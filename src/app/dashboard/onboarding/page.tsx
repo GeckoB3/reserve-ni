@@ -100,27 +100,33 @@ export default function OnboardingPage() {
     setError(null);
     try {
       const defaults = DEFAULTS[venueType];
+      const validServices = services.filter((s) => s.name.trim());
+      if (validServices.length === 0) {
+        setError('Please add at least one service with a name.');
+        setSaving(false);
+        return;
+      }
 
-      for (let i = 0; i < services.length; i++) {
-        const s = services[i]!;
-        if (!s.name.trim()) continue;
+      for (let i = 0; i < validServices.length; i++) {
+        const s = validServices[i]!;
 
         const sRes = await fetch('/api/venue/services', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ ...s, sort_order: i }),
         });
-        if (!sRes.ok) throw new Error('Failed to create service');
+        if (!sRes.ok) throw new Error(`Failed to create service "${s.name}"`);
         const { service } = await sRes.json();
 
-        await fetch('/api/venue/capacity-rules', {
+        const capRes = await fetch('/api/venue/capacity-rules', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ service_id: service.id, ...capacity }),
         });
+        if (!capRes.ok) throw new Error(`Failed to create capacity rule for "${s.name}"`);
 
         for (const dur of defaults.durations) {
-          await fetch('/api/venue/party-size-durations', {
+          const durRes = await fetch('/api/venue/party-size-durations', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -130,9 +136,10 @@ export default function OnboardingPage() {
               duration_minutes: dur.dur,
             }),
           });
+          if (!durRes.ok) throw new Error(`Failed to create dining duration for "${s.name}"`);
         }
 
-        await fetch('/api/venue/booking-restrictions', {
+        const resRes = await fetch('/api/venue/booking-restrictions', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -146,6 +153,7 @@ export default function OnboardingPage() {
             deposit_required_from_party_size: deposit.enabled ? deposit.deposit_from_party_size : null,
           }),
         });
+        if (!resRes.ok) throw new Error(`Failed to create booking rules for "${s.name}"`);
       }
 
       router.push('/dashboard/availability');
