@@ -7,7 +7,8 @@ if (apiKey) {
 }
 
 const CONTACT_TO = 'andrew@reserveni.com';
-const FROM = { email: 'hello@reserveni.com', name: 'ReserveNI' };
+const fromEmail = process.env.SENDGRID_FROM_EMAIL ?? 'bookings@reserveni.com';
+const FROM = { email: fromEmail, name: 'ReserveNI' };
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PHONE_REGEX = /^[\d\s+\-()]{7,20}$/;
@@ -134,7 +135,11 @@ export async function POST(request: Request) {
         subject: subjectNotification,
         html: buildNotificationHtml(data),
       });
-    } catch (err) {
+    } catch (err: unknown) {
+      const sgErr = err as { response?: { body?: unknown } };
+      if (sgErr?.response?.body) {
+        console.error('[contact] SendGrid error body:', JSON.stringify(sgErr.response.body));
+      }
       console.error('[contact] Failed to send notification email:', err);
       return NextResponse.json(
         { success: false, error: 'Failed to send your message. Please try again later.' },
