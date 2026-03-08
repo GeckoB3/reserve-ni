@@ -38,13 +38,14 @@ export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, 
   const rules: BookingRulesPublic = venue.booking_rules ?? { min_party_size: 1, max_party_size: 20 };
 
   const requiresDeposit = useMemo(() => {
+    if (!selectedSlot) return false;
     const cfg = venue.deposit_config;
     if (!cfg?.enabled) return false;
     if (cfg.online_requires_deposit === false) return false;
     if (cfg.min_party_size_for_deposit && partySize < cfg.min_party_size_for_deposit) return false;
-    if (selectedSlot?.deposit_required === false) return false;
+    if (selectedSlot.deposit_required === false) return false;
     return true;
-  }, [venue.deposit_config, partySize, selectedSlot?.deposit_required]);
+  }, [venue.deposit_config, partySize, selectedSlot]);
 
   useEffect(() => {
     if (!embed || !onHeightChange) return;
@@ -245,7 +246,7 @@ export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, 
         />
       )}
       {step === 'details' && selectedSlot && (
-        <DetailsStep slot={selectedSlot} date={selectedDate!} partySize={partySize} onSubmit={handleDetailsSubmit} onBack={goBack} cancellationPolicy={cancellationPolicy} requiresDeposit={requiresDeposit} />
+        <DetailsStep slot={selectedSlot} date={selectedDate!} partySize={partySize} onSubmit={handleDetailsSubmit} onBack={goBack} requiresDeposit={requiresDeposit} depositPerPerson={venue.deposit_config?.amount_per_person_gbp} />
       )}
       {step === 'payment' && createResult?.client_secret && (
         <PaymentStep clientSecret={createResult.client_secret} stripeAccountId={createResult.stripe_account_id} amountPence={(venue.deposit_config?.amount_per_person_gbp ?? 0) * partySize * 100} partySize={partySize} onComplete={handlePaymentComplete} onBack={goBack} cancellationPolicy={cancellationPolicy} />

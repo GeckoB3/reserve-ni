@@ -32,11 +32,11 @@ interface DetailsStepProps {
   partySize: number;
   onSubmit: (details: GuestDetails) => void;
   onBack: () => void;
-  cancellationPolicy?: string;
   requiresDeposit?: boolean;
+  depositPerPerson?: number;
 }
 
-export function DetailsStep({ slot, date, partySize, onSubmit, onBack, cancellationPolicy, requiresDeposit }: DetailsStepProps) {
+export function DetailsStep({ slot, date, partySize, onSubmit, onBack, requiresDeposit, depositPerPerson }: DetailsStepProps) {
   const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm<FormDataWithTerms>({
     resolver: zodResolver(detailsSchemaWithTerms),
     defaultValues: { name: '', email: '', phone: '', dietary_notes: '', occasion: '', acceptTerms: false },
@@ -60,9 +60,21 @@ export function DetailsStep({ slot, date, partySize, onSubmit, onBack, cancellat
         </div>
       </div>
 
-      {cancellationPolicy && requiresDeposit && (
-        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800">
-          {cancellationPolicy}
+      {requiresDeposit && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+          <div className="flex items-start gap-2.5">
+            <svg className="mt-0.5 h-4 w-4 flex-shrink-0 text-amber-500" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" />
+            </svg>
+            <div className="space-y-1">
+              <p className="text-sm font-medium text-amber-800">
+                Deposit of &pound;{depositPerPerson?.toFixed(2) ?? '5.00'} per person required
+              </p>
+              <p className="text-xs text-amber-700">
+                Full refund if cancelled 48+ hours before your reservation. No refund within 48 hours or for no-shows.
+              </p>
+            </div>
+          </div>
         </div>
       )}
 
