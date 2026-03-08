@@ -14,9 +14,11 @@ export function LoginForm({ redirectTo }: { redirectTo?: string }) {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   const supabase = createClient();
+  const siteOrigin = process.env.NEXT_PUBLIC_BASE_URL
+    || (typeof window !== 'undefined' ? window.location.origin : '');
   const callbackUrl = redirectTo
-    ? `${typeof window !== 'undefined' ? window.location.origin : ''}/auth/callback?next=${encodeURIComponent(redirectTo)}`
-    : `${typeof window !== 'undefined' ? window.location.origin : ''}/auth/callback`;
+    ? `${siteOrigin}/auth/callback?next=${encodeURIComponent(redirectTo)}`
+    : `${siteOrigin}/auth/callback`;
 
   async function handlePasswordSubmit(e: React.FormEvent) {
     e.preventDefault();
