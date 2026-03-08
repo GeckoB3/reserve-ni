@@ -9,6 +9,8 @@ const NAV_ITEMS = [
   { href: '/dashboard/bookings', label: 'Reservations', icon: CalendarIcon },
   { href: '/dashboard/day-sheet', label: 'Day Sheet', icon: ClipboardIcon },
   { href: '/dashboard/bookings/new', label: 'New Booking', icon: PlusIcon },
+  { href: '/dashboard/availability', label: 'Availability', icon: ClockIcon },
+  { href: '/dashboard/waitlist', label: 'Waitlist', icon: QueueIcon },
   { href: '/dashboard/reports', label: 'Reports', icon: ChartIcon },
   { href: '/dashboard/settings', label: 'Settings', icon: CogIcon },
 ];
@@ -34,7 +36,7 @@ export function DashboardSidebar({ email, staffName, venueName, venueSlug }: Pro
 
   const isActive = (href: string) => {
     if (href === '/dashboard/bookings') {
-      return pathname === '/dashboard/bookings' || pathname === '/dashboard';
+      return pathname === '/dashboard/bookings';
     }
     return pathname.startsWith(href);
   };
@@ -189,6 +191,22 @@ function XIcon() {
   return (
     <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
       <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+    </svg>
+  );
+}
+
+function QueueIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M8.625 12a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H8.25m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H12m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 0 1-2.555-.337A5.972 5.972 0 0 1 5.41 20.97a5.969 5.969 0 0 1-.474-.065 4.48 4.48 0 0 0 .978-2.025c.09-.457-.133-.901-.467-1.226C3.93 16.178 3 14.189 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25Z" />
+    </svg>
+  );
+}
+
+function ClockIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
     </svg>
   );
 }

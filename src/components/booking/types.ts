@@ -30,6 +30,30 @@ export interface AvailableSlot {
   end_time: string;
   available_covers: number;
   sitting_id?: string;
+  service_name?: string;
+  service_id?: string;
+  estimated_duration?: number;
+  deposit_required?: boolean;
+  deposit_amount?: number | null;
+  limited?: boolean;
+  available_bookings?: number;
+}
+
+export interface ServiceGroup {
+  id: string;
+  name: string;
+  slots: AvailableSlot[];
+  large_party_redirect?: boolean;
+  large_party_message?: string | null;
+}
+
+export interface AvailabilityResponse {
+  date: string;
+  venue_id: string;
+  slots: AvailableSlot[];
+  services?: ServiceGroup[];
+  large_party_redirect?: boolean;
+  large_party_message?: string | null;
 }
 
 export interface GuestDetails {

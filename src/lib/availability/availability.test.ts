@@ -9,6 +9,7 @@ import {
   isSlotBlocked,
 } from './index';
 import type {
+  AvailabilityConfig,
   VenueForAvailability,
   BookingForAvailability,
   FixedIntervalsConfig,
@@ -26,7 +27,7 @@ const openingHours5to10: VenueForAvailability['opening_hours'] = {
 };
 
 function venueFixed(
-  overrides: Partial<{ opening_hours: VenueForAvailability['opening_hours']; availability_config: FixedIntervalsConfig }> = {}
+  overrides: Partial<{ opening_hours: VenueForAvailability['opening_hours']; availability_config: AvailabilityConfig }> = {}
 ): VenueForAvailability {
   return {
     id: 'v1',
@@ -168,7 +169,7 @@ describe('getAvailableSlots — fixed intervals, no turn time', () => {
       availability_config: {
         ...(venueFixed().availability_config as FixedIntervalsConfig),
         blocked_dates: [date],
-      },
+      } as AvailabilityConfig,
     });
     const slots = getAvailableSlots(venue, date, []);
     expect(slots).toHaveLength(0);
@@ -179,7 +180,7 @@ describe('getAvailableSlots — fixed intervals, no turn time', () => {
       availability_config: {
         ...(venueFixed().availability_config as FixedIntervalsConfig),
         blocked_slots: [{ date, start_time: '19:00', end_time: '19:30' }],
-      },
+      } as AvailabilityConfig,
     });
     const slots = getAvailableSlots(venue, date, []);
     const slot19 = slots.find((s) => s.start_time === '19:00');
@@ -298,7 +299,7 @@ describe('getAvailableCoversForSlotWithTurnTime', () => {
         turn_time_enabled: true,
         sitting_duration_minutes: 90,
         blocked_slots: [{ date, start_time: '19:00', end_time: '19:30' }],
-      },
+      } as AvailabilityConfig,
     });
     expect(getAvailableCoversForSlotWithTurnTime(venue, date, [], '19:00')).toBe(0);
   });

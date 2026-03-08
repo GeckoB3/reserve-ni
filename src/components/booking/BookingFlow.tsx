@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { AvailableSlot, BookingRulesPublic, GuestDetails, VenuePublic } from './types';
+import type { AvailabilityResponse, AvailableSlot, BookingRulesPublic, GuestDetails, ServiceGroup, VenuePublic } from './types';
 import { DateStep } from './DateStep';
 import { SlotStep } from './SlotStep';
 import { DetailsStep } from './DetailsStep';
@@ -23,6 +23,7 @@ export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, 
   const [stepIndex, setStepIndex] = useState(0);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [slots, setSlots] = useState<AvailableSlot[]>([]);
+  const [serviceGroups, setServiceGroups] = useState<ServiceGroup[]>([]);
   const [selectedSlot, setSelectedSlot] = useState<AvailableSlot | null>(null);
   const [partySize, setPartySize] = useState(venue.booking_rules?.min_party_size ?? 2);
   const [guestDetails, setGuestDetails] = useState<GuestDetails | null>(null);
@@ -30,13 +31,14 @@ export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, 
   const [paymentComplete, setPaymentComplete] = useState(false);
   const [slotsLoading, setSlotsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [largePartyRedirect, setLargePartyRedirect] = useState(false);
+  const [largePartyMessage, setLargePartyMessage] = useState<string | null>(null);
 
   const step = steps[stepIndex];
   const rules: BookingRulesPublic = venue.booking_rules ?? { min_party_size: 1, max_party_size: 20 };
 
-  // Recompute whenever partySize or selectedDate changes so the cancellation policy
-  // and payment step only appear when a deposit actually applies.
   const requiresDeposit = useMemo(() => {
+    if (selectedSlot?.deposit_required) return true;
     const cfg = venue.deposit_config;
     if (!cfg?.enabled) return false;
     if (cfg.online_requires_deposit === false) return false;
@@ -47,7 +49,7 @@ export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, 
       if (!isWeekend) return false;
     }
     return true;
-  }, [venue.deposit_config, partySize, selectedDate]);
+  }, [venue.deposit_config, partySize, selectedDate, selectedSlot?.deposit_required]);
 
   useEffect(() => {
     if (!embed || !onHeightChange) return;
@@ -70,14 +72,22 @@ export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, 
 
   const fetchSlots = useCallback(async (date: string) => {
     setSlotsLoading(true);
+    setLargePartyRedirect(false);
+    setLargePartyMessage(null);
     try {
       const res = await fetch(`/api/booking/availability?venue_id=${encodeURIComponent(venue.id)}&date=${encodeURIComponent(date)}&party_size=${partySize}`);
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
         throw new Error(j.error ?? 'Failed to load times');
       }
-      const data = await res.json();
+      const data: AvailabilityResponse = await res.json();
       setSlots(data.slots ?? []);
+      setServiceGroups(data.services ?? []);
+
+      if (data.large_party_redirect) {
+        setLargePartyRedirect(true);
+        setLargePartyMessage(data.large_party_message ?? null);
+      }
     } finally {
       setSlotsLoading(false);
     }
@@ -114,11 +124,18 @@ export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, 
           dietary_notes: details.dietary_notes || undefined,
           occasion: details.occasion || undefined,
           source: embed ? 'widget' : 'booking_page',
+          service_id: selectedSlot.service_id || undefined,
         }),
       });
       const data = await res.json();
       if (!res.ok) {
-        if (res.status === 409) { setError(data.error ?? 'This time slot is no longer available'); return; }
+        if (res.status === 409) {
+          const altMsg = data.alternatives?.length
+            ? `This time is no longer available. Try: ${data.alternatives.map((a: { time: string; service: string }) => `${a.time} (${a.service})`).join(', ')}`
+            : data.error ?? 'This time slot is no longer available';
+          setError(altMsg);
+          return;
+        }
         throw new Error(data.error ?? 'Booking failed');
       }
       setCreateResult({ booking_id: data.booking_id, client_secret: data.client_secret, stripe_account_id: data.stripe_account_id, requires_deposit: data.requires_deposit ?? false });
@@ -138,8 +155,6 @@ export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, 
       goNext();
       return;
     }
-    // Verify the payment server-side and confirm the booking + send comms.
-    // Retry up to 3 times with a short delay to handle transient network issues.
     let confirmed = false;
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
@@ -216,7 +231,23 @@ export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, 
         <DateStep minParty={rules.min_party_size} maxParty={rules.max_party_size} partySize={partySize} onPartySizeChange={setPartySize} onDateSelect={handleDateSelect} />
       )}
       {step === 'slot' && (
-        <SlotStep date={selectedDate!} slots={slots} loading={slotsLoading} onSelect={handleSlotSelect} onBack={goBack} />
+        <SlotStep
+          date={selectedDate!}
+          slots={slots}
+          serviceGroups={serviceGroups.length > 0 ? serviceGroups : undefined}
+          loading={slotsLoading}
+          largePartyRedirect={largePartyRedirect}
+          largePartyMessage={largePartyMessage}
+          venueId={venue.id}
+          partySize={partySize}
+          onSelect={handleSlotSelect}
+          onBack={goBack}
+          onDateChange={(newDate) => {
+            setSelectedDate(newDate);
+            setSelectedSlot(null);
+            fetchSlots(newDate).catch((e) => setError(e instanceof Error ? e.message : 'Failed to load'));
+          }}
+        />
       )}
       {step === 'details' && selectedSlot && (
         <DetailsStep slot={selectedSlot} date={selectedDate!} partySize={partySize} onSubmit={handleDetailsSubmit} onBack={goBack} cancellationPolicy={cancellationPolicy} requiresDeposit={requiresDeposit} />

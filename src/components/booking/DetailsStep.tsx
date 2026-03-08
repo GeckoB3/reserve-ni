@@ -49,6 +49,12 @@ export function DetailsStep({ slot, date, partySize, onSubmit, onBack, cancellat
           <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">{dateStr}</span>
           <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">{slot.start_time.slice(0, 5)}</span>
           <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">{partySize} {partySize === 1 ? 'guest' : 'guests'}</span>
+          {slot.estimated_duration && (
+            <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">~{slot.estimated_duration} min</span>
+          )}
+          {slot.service_name && (
+            <span className="rounded-full bg-brand-50 px-3 py-1 text-xs font-medium text-brand-700">{slot.service_name}</span>
+          )}
         </div>
       </div>
 

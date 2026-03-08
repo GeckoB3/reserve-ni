@@ -3,8 +3,9 @@ import { getSupabaseAdminClient } from '@/lib/supabase';
 import { stripe } from '@/lib/stripe';
 import { findOrCreateGuest } from '@/lib/guests';
 import { sendCommunication } from '@/lib/communications';
-import { getAvailableSlots } from '@/lib/availability';
+import { getAvailableSlots, computeAvailability, hasServiceConfig, fetchEngineInput } from '@/lib/availability';
 import type { VenueForAvailability, BookingForAvailability } from '@/types/availability';
+import { resolveDuration, getDayOfWeek } from '@/lib/availability/engine';
 import { generateConfirmToken, hashConfirmToken } from '@/lib/confirm-token';
 import { z } from 'zod';
 import { createShortManageLink } from '@/lib/short-manage-link';
@@ -20,6 +21,7 @@ const createBookingSchema = z.object({
   dietary_notes: z.string().max(1000).optional(),
   occasion: z.string().max(200).optional(),
   source: z.enum(['online', 'phone', 'walk-in', 'widget', 'booking_page']),
+  service_id: z.string().uuid().optional(),
 });
 
 /** Compute cancellation_deadline: booking datetime minus 48 hours (Europe/London). */
@@ -58,6 +60,7 @@ export async function POST(request: NextRequest) {
       dietary_notes,
       occasion,
       source,
+      service_id: requestServiceId,
     } = parsed.data;
 
     const supabase = getSupabaseAdminClient();
@@ -114,32 +117,70 @@ export async function POST(request: NextRequest) {
     const timeForDb = booking_time.length === 5 ? booking_time + ':00' : booking_time;
     const timeStr = timeForDb.slice(0, 5);
 
-    const { data: existingBookings } = await supabase
-      .from('bookings')
-      .select('id, booking_date, booking_time, party_size, status')
-      .eq('venue_id', venue_id)
-      .eq('booking_date', booking_date);
+    const useServiceEngine = await hasServiceConfig(supabase, venue_id);
+    let resolvedServiceId: string | null = requestServiceId ?? null;
+    let estimatedEndTime: string | null = null;
 
-    const venueForAvail: VenueForAvailability = {
-      id: venue.id,
-      opening_hours: venue.opening_hours,
-      availability_config: venue.availability_config,
-      timezone: venue.timezone ?? 'Europe/London',
-    };
-    const bookingsForAvail: BookingForAvailability[] = (existingBookings ?? []).map((b: { id: string; booking_date: string; booking_time: string; party_size: number; status: string }) => ({
-      id: b.id,
-      booking_date: b.booking_date,
-      booking_time: typeof b.booking_time === 'string' ? b.booking_time.slice(0, 5) : '',
-      party_size: b.party_size,
-      status: b.status,
-    }));
-    const slots = getAvailableSlots(venueForAvail, booking_date, bookingsForAvail);
-    const slot = slots.find((s) => s.start_time === timeStr || s.key === timeStr);
-    if (!slot || slot.available_covers < party_size) {
-      return NextResponse.json(
-        { error: 'This time slot is no longer available' },
-        { status: 409 }
-      );
+    if (useServiceEngine) {
+      const engineInput = await fetchEngineInput({
+        supabase,
+        venueId: venue_id,
+        date: booking_date,
+        partySize: party_size,
+      });
+
+      const results = computeAvailability(engineInput);
+      const allSlots = results.flatMap((r) => r.slots);
+      const slot = allSlots.find((s) => s.start_time === timeStr && (!requestServiceId || s.service_id === requestServiceId));
+
+      if (!slot || slot.available_covers < party_size) {
+        const alternatives = allSlots
+          .filter((s) => s.available_covers >= party_size)
+          .slice(0, 3)
+          .map((s) => ({ time: s.start_time, service: s.service_name, service_id: s.service_id }));
+
+        return NextResponse.json(
+          { error: 'This time slot is no longer available', alternatives },
+          { status: 409 }
+        );
+      }
+
+      resolvedServiceId = slot.service_id;
+      const dayOfWeek = getDayOfWeek(booking_date);
+      const duration = resolveDuration(engineInput.durations, slot.service_id, party_size, dayOfWeek);
+      const [y, mo, d] = booking_date.split('-').map(Number);
+      const [hh, mm] = timeStr.split(':').map(Number);
+      const endDate = new Date(Date.UTC(y!, mo! - 1, d!, hh!, mm!, 0));
+      endDate.setMinutes(endDate.getMinutes() + duration);
+      estimatedEndTime = endDate.toISOString();
+    } else {
+      const { data: existingBookings } = await supabase
+        .from('bookings')
+        .select('id, booking_date, booking_time, party_size, status')
+        .eq('venue_id', venue_id)
+        .eq('booking_date', booking_date);
+
+      const venueForAvail: VenueForAvailability = {
+        id: venue.id,
+        opening_hours: venue.opening_hours,
+        availability_config: venue.availability_config,
+        timezone: venue.timezone ?? 'Europe/London',
+      };
+      const bookingsForAvail: BookingForAvailability[] = (existingBookings ?? []).map((b: { id: string; booking_date: string; booking_time: string; party_size: number; status: string }) => ({
+        id: b.id,
+        booking_date: b.booking_date,
+        booking_time: typeof b.booking_time === 'string' ? b.booking_time.slice(0, 5) : '',
+        party_size: b.party_size,
+        status: b.status,
+      }));
+      const slots = getAvailableSlots(venueForAvail, booking_date, bookingsForAvail);
+      const slot = slots.find((s) => s.start_time === timeStr || s.key === timeStr);
+      if (!slot || slot.available_covers < party_size) {
+        return NextResponse.json(
+          { error: 'This time slot is no longer available' },
+          { status: 409 }
+        );
+      }
     }
 
     const { guest } = await findOrCreateGuest(supabase, venue_id, {
@@ -169,6 +210,8 @@ export async function POST(request: NextRequest) {
       deposit_status: requiresDeposit ? 'Pending' : 'Not Required',
       cancellation_deadline,
       cancellation_policy_snapshot: cancellationPolicySnapshot,
+      service_id: resolvedServiceId,
+      estimated_end_time: estimatedEndTime,
     };
 
     const { data: booking, error: bookErr } = await supabase

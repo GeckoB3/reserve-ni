@@ -1,17 +1,80 @@
 'use client';
 
-import type { AvailableSlot } from './types';
+import { useCallback, useEffect, useState } from 'react';
+import type { AvailableSlot, ServiceGroup } from './types';
 
 interface SlotStepProps {
   date: string;
   slots: AvailableSlot[];
+  serviceGroups?: ServiceGroup[];
   loading?: boolean;
+  largePartyRedirect?: boolean;
+  largePartyMessage?: string | null;
+  venueId?: string;
+  partySize?: number;
   onSelect: (slot: AvailableSlot) => void;
   onBack: () => void;
+  onDateChange?: (date: string) => void;
 }
 
-export function SlotStep({ date, slots, loading, onSelect, onBack }: SlotStepProps) {
-  const dateStr = new Date(date + 'T12:00:00').toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
+const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
+function formatDateStr(date: string): string {
+  const d = new Date(date + 'T12:00:00');
+  return `${WEEKDAYS[d.getDay()]} ${d.getDate()} ${MONTHS[d.getMonth()]}`;
+}
+
+export function SlotStep({ date, slots, serviceGroups, loading, largePartyRedirect, largePartyMessage, venueId, partySize, onSelect, onBack, onDateChange }: SlotStepProps) {
+  const dateStr = formatDateStr(date);
+  const hasServices = serviceGroups && serviceGroups.length > 0;
+  const [nearbyDates, setNearbyDates] = useState<Array<{ date: string; label: string; slotCount: number }>>([]);
+  const [nearbyLoading, setNearbyLoading] = useState(false);
+
+  const noAvailability = !loading && !largePartyRedirect && slots.length === 0;
+
+  const fetchNearbyDates = useCallback(async () => {
+    if (!venueId || !partySize || !noAvailability) return;
+    setNearbyLoading(true);
+    try {
+      const results: Array<{ date: string; label: string; slotCount: number }> = [];
+      const baseDate = new Date(date + 'T12:00:00');
+      const offsets = [-1, 1, -2, 2, -3, 3];
+
+      for (const offset of offsets) {
+        if (results.length >= 3) break;
+        const checkDate = new Date(baseDate);
+        checkDate.setDate(checkDate.getDate() + offset);
+        if (checkDate < new Date()) continue;
+
+        const checkStr = `${checkDate.getFullYear()}-${String(checkDate.getMonth() + 1).padStart(2, '0')}-${String(checkDate.getDate()).padStart(2, '0')}`;
+        try {
+          const res = await fetch(`/api/booking/availability?venue_id=${encodeURIComponent(venueId)}&date=${encodeURIComponent(checkStr)}&party_size=${partySize}`);
+          if (res.ok) {
+            const data = await res.json();
+            const slotCount = (data.slots ?? []).length;
+            if (slotCount > 0) {
+              results.push({ date: checkStr, label: formatDateStr(checkStr), slotCount });
+            }
+          }
+        } catch {
+          // skip this date
+        }
+      }
+
+      setNearbyDates(results);
+    } finally {
+      setNearbyLoading(false);
+    }
+  }, [venueId, partySize, date, noAvailability]);
+
+  useEffect(() => {
+    if (noAvailability && venueId && partySize) {
+      fetchNearbyDates();
+    } else {
+      setNearbyDates([]);
+    }
+  }, [noAvailability, venueId, partySize, fetchNearbyDates]);
 
   return (
     <div className="space-y-5">
@@ -29,13 +92,85 @@ export function SlotStep({ date, slots, loading, onSelect, onBack }: SlotStepPro
           <div className="h-8 w-8 animate-spin rounded-full border-2 border-brand-600 border-t-transparent" />
           <p className="mt-3 text-sm text-slate-500">Loading available times&hellip;</p>
         </div>
+      ) : largePartyRedirect ? (
+        <div className="flex flex-col items-center rounded-xl border border-amber-200 bg-amber-50 py-10 px-6 text-center">
+          <svg className="mb-3 h-8 w-8 text-amber-400" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 0 0 2.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 0 1-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 0 0-1.091-.852H4.5A2.25 2.25 0 0 0 2.25 4.5v2.25Z" />
+          </svg>
+          <p className="text-sm font-medium text-amber-800">{largePartyMessage ?? 'Please call us to book for large parties.'}</p>
+          <button type="button" onClick={onBack} className="mt-4 text-sm font-medium text-brand-600 hover:text-brand-700">Choose a smaller party size</button>
+        </div>
+      ) : hasServices ? (
+        <div className="space-y-6">
+          {serviceGroups.map((group) => (
+            <div key={group.id}>
+              {serviceGroups.length > 1 && (
+                <h3 className="mb-3 text-sm font-semibold text-slate-700">{group.name}</h3>
+              )}
+              {group.large_party_redirect ? (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                  {group.large_party_message ?? 'Please call us to book for large parties.'}
+                </div>
+              ) : group.slots.length === 0 ? (
+                <p className="text-sm text-slate-400">No availability for this service</p>
+              ) : (
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                  {group.slots.map((slot) => (
+                    <button
+                      key={slot.key}
+                      type="button"
+                      onClick={() => onSelect(slot)}
+                      className="group relative flex flex-col items-center rounded-xl border border-slate-200 bg-white px-4 py-3.5 transition-all hover:border-brand-300 hover:bg-brand-50/50 hover:shadow-sm"
+                    >
+                      <span className="text-base font-bold text-slate-900">{slot.start_time.slice(0, 5)}</span>
+                      {slot.estimated_duration && (
+                        <span className="mt-0.5 text-xs text-slate-400">{slot.estimated_duration} min</span>
+                      )}
+                      {slot.limited && (
+                        <span className="absolute -top-1.5 -right-1.5 flex h-5 items-center rounded-full bg-amber-100 px-1.5 text-[10px] font-semibold text-amber-700">
+                          Limited
+                        </span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
       ) : slots.length === 0 ? (
-        <div className="flex flex-col items-center rounded-xl border border-slate-200 bg-slate-50 py-12 text-center">
+        <div className="flex flex-col items-center rounded-xl border border-slate-200 bg-slate-50 py-10 px-6 text-center">
           <svg className="mb-3 h-8 w-8 text-slate-300" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
           </svg>
           <p className="text-sm text-slate-500">No availability on this date</p>
-          <button type="button" onClick={onBack} className="mt-3 text-sm font-medium text-brand-600 hover:text-brand-700">Choose another date</button>
+
+          {nearbyLoading && (
+            <p className="mt-3 text-xs text-slate-400">Checking nearby dates&hellip;</p>
+          )}
+
+          {!nearbyLoading && nearbyDates.length > 0 && (
+            <div className="mt-4 w-full space-y-2">
+              <p className="text-xs font-medium text-slate-500">Try a nearby date:</p>
+              {nearbyDates.map((nd) => (
+                <button
+                  key={nd.date}
+                  type="button"
+                  onClick={() => onDateChange?.(nd.date)}
+                  className="flex w-full items-center justify-between rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm transition-colors hover:border-brand-300 hover:bg-brand-50"
+                >
+                  <span className="font-medium text-slate-700">{nd.label}</span>
+                  <span className="text-xs text-slate-400">{nd.slotCount} {nd.slotCount === 1 ? 'time' : 'times'} available</span>
+                </button>
+              ))}
+            </div>
+          )}
+
+          {venueId && partySize && (
+            <WaitlistForm venueId={venueId} date={date} partySize={partySize} />
+          )}
+
+          <button type="button" onClick={onBack} className="mt-4 text-sm font-medium text-brand-600 hover:text-brand-700">Choose another date</button>
         </div>
       ) : (
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
@@ -53,5 +188,83 @@ export function SlotStep({ date, slots, loading, onSelect, onBack }: SlotStepPro
         </div>
       )}
     </div>
+  );
+}
+
+function WaitlistForm({ venueId, date, partySize }: { venueId: string; date: string; partySize: number }) {
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState('');
+  const [phone, setPhone] = useState('');
+  const [email, setEmail] = useState('');
+  const [status, setStatus] = useState<'idle' | 'submitting' | 'success' | 'error'>('idle');
+  const [message, setMessage] = useState('');
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!name.trim() || !phone.trim()) return;
+    setStatus('submitting');
+    try {
+      const res = await fetch('/api/booking/waitlist', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          venue_id: venueId,
+          desired_date: date,
+          party_size: partySize,
+          guest_name: name,
+          guest_phone: phone,
+          guest_email: email || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setStatus('success');
+        setMessage(data.message ?? 'Added to standby list!');
+      } else {
+        setStatus('error');
+        setMessage(data.error ?? 'Failed to join waitlist');
+      }
+    } catch {
+      setStatus('error');
+      setMessage('Something went wrong. Please try again.');
+    }
+  }
+
+  if (status === 'success') {
+    return (
+      <div className="mt-4 rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-center text-sm text-green-700">
+        {message}
+      </div>
+    );
+  }
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="mt-4 w-full rounded-xl border border-brand-200 bg-brand-50 px-4 py-2.5 text-sm font-medium text-brand-700 transition-colors hover:bg-brand-100"
+      >
+        Join Standby List
+      </button>
+    );
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="mt-4 space-y-3 rounded-xl border border-slate-200 bg-white p-4">
+      <p className="text-xs font-medium text-slate-600">We&apos;ll notify you if a spot opens up.</p>
+      {status === 'error' && (
+        <p className="text-xs text-red-600">{message}</p>
+      )}
+      <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="Your name" required className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm placeholder:text-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
+      <input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Phone number" required className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm placeholder:text-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
+      <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email (optional)" className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm placeholder:text-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
+      <div className="flex gap-2">
+        <button type="submit" disabled={status === 'submitting' || !name.trim() || !phone.trim()} className="flex-1 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50">
+          {status === 'submitting' ? 'Adding...' : 'Join Standby'}
+        </button>
+        <button type="button" onClick={() => setOpen(false)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-500 hover:bg-slate-50">Cancel</button>
+      </div>
+    </form>
   );
 }

@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
-import { getAvailableSlots } from '@/lib/availability';
+import { getAvailableSlots, computeAvailability, hasServiceConfig, fetchEngineInput } from '@/lib/availability';
 import type { VenueForAvailability, BookingForAvailability } from '@/types/availability';
 
-/** GET /api/booking/availability?venue_id=uuid&date=YYYY-MM-DD&party_size=N (optional) */
+/** GET /api/booking/availability?venue_id=uuid&date=YYYY-MM-DD&party_size=N */
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
@@ -26,20 +26,47 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    let partySize: number | null = null;
-    if (partySizeParam != null) {
-      const n = parseInt(partySizeParam, 10);
-      if (Number.isNaN(n) || n < 1) {
-        return NextResponse.json(
-          { error: 'party_size must be a positive integer' },
-          { status: 400 }
-        );
-      }
-      partySize = n;
+    const partySize = partySizeParam ? parseInt(partySizeParam, 10) : null;
+    if (partySize != null && (Number.isNaN(partySize) || partySize < 1)) {
+      return NextResponse.json(
+        { error: 'party_size must be a positive integer' },
+        { status: 400 }
+      );
     }
 
     const supabase = getSupabaseAdminClient();
+    const useServiceEngine = await hasServiceConfig(supabase, venueId);
 
+    if (useServiceEngine) {
+      const engineInput = await fetchEngineInput({
+        supabase,
+        venueId,
+        date: dateStr,
+        partySize: partySize ?? 2,
+      });
+
+      const results = computeAvailability(engineInput);
+
+      const allSlots = results.flatMap((r) => r.slots);
+      const largePartyRedirect = results.find((r) => r.large_party_redirect);
+
+      return NextResponse.json({
+        date: dateStr,
+        venue_id: venueId,
+        slots: allSlots,
+        services: results.map((r) => ({
+          id: r.service.id,
+          name: r.service.name,
+          slots: r.slots,
+          large_party_redirect: r.large_party_redirect,
+          large_party_message: r.large_party_message,
+        })),
+        large_party_redirect: largePartyRedirect?.large_party_redirect ?? false,
+        large_party_message: largePartyRedirect?.large_party_message ?? null,
+      });
+    }
+
+    // Legacy JSONB-based engine
     const [venueRes, bookingsRes] = await Promise.all([
       supabase.from('venues').select('id, opening_hours, availability_config, timezone').eq('id', venueId).single(),
       supabase

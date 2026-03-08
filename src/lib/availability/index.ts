@@ -1,6 +1,8 @@
 /**
- * Reserve NI availability engine. Pure functions: given venue config + date + bookings,
- * return available slots/sittings with remaining capacity.
+ * Reserve NI availability engine — LEGACY mode.
+ *
+ * Pure functions for the old JSONB-based availability_config model.
+ * New venues should use the service-based engine in ./engine.ts.
  */
 
 import type {
@@ -16,6 +18,9 @@ import type {
   OpeningHoursPeriod,
   VenueForAvailability,
 } from '@/types/availability';
+
+export { computeAvailability } from './engine';
+export { fetchEngineInput, hasServiceConfig } from './fetch';
 
 const DEFAULT_SITTING_DURATION_MINUTES = 90;
 const CAPACITY_CONSUMING_STATUSES = ['Confirmed', 'Pending'];
