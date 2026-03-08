@@ -80,19 +80,26 @@ export default function OnboardingPage() {
     setCapacity(DEFAULTS[type].capacity);
   }, []);
 
-  function toggleDay(service: ServiceDraft, day: number): ServiceDraft {
-    const days = service.days_of_week.includes(day)
-      ? service.days_of_week.filter((d) => d !== day)
-      : [...service.days_of_week, day].sort();
-    return { ...service, days_of_week: days };
+  function updateService(index: number, patch: Partial<ServiceDraft>) {
+    setServices(prev => prev.map((s, i) => i === index ? { ...s, ...patch } : s));
+  }
+
+  function toggleDay(index: number, day: number) {
+    setServices(prev => prev.map((s, i) => {
+      if (i !== index) return s;
+      const days = s.days_of_week.includes(day)
+        ? s.days_of_week.filter((d) => d !== day)
+        : [...s.days_of_week, day].sort();
+      return { ...s, days_of_week: days };
+    }));
   }
 
   function addService() {
-    setServices([...services, { name: '', days_of_week: [1, 2, 3, 4, 5, 6], start_time: '12:00', end_time: '22:00', last_booking_time: '21:00' }]);
+    setServices(prev => [...prev, { name: '', days_of_week: [1, 2, 3, 4, 5, 6], start_time: '12:00', end_time: '22:00', last_booking_time: '21:00' }]);
   }
 
   function removeService(index: number) {
-    setServices(services.filter((_, i) => i !== index));
+    setServices(prev => prev.filter((_, i) => i !== index));
   }
 
   async function handleFinish() {
@@ -221,18 +228,14 @@ export default function OnboardingPage() {
               <p className="mb-6 text-sm text-slate-500">Define when guests can book (e.g. Lunch, Dinner, Brunch).</p>
               <div className="space-y-4">
                 {services.map((s, i) => (
-                  <div key={i} className="rounded-xl border border-slate-200 p-4 space-y-3">
+                  <div key={i} className={`rounded-xl border p-4 space-y-3 ${!s.name.trim() ? 'border-amber-300 bg-amber-50/30' : 'border-slate-200'}`}>
                     <div className="flex items-center justify-between">
                       <input
                         type="text"
                         value={s.name}
-                        onChange={(e) => {
-                          const updated = [...services];
-                          updated[i] = { ...s, name: e.target.value };
-                          setServices(updated);
-                        }}
-                        placeholder="Service name"
-                        className="text-sm font-medium text-slate-900 border-0 bg-transparent p-0 focus:ring-0 placeholder:text-slate-300"
+                        onChange={(e) => updateService(i, { name: e.target.value })}
+                        placeholder="Service name (required)"
+                        className={`text-sm font-medium border-0 bg-transparent p-0 focus:ring-0 ${s.name.trim() ? 'text-slate-900 placeholder:text-slate-300' : 'text-slate-900 placeholder:text-amber-400'}`}
                       />
                       {services.length > 1 && (
                         <button onClick={() => removeService(i)} className="text-xs text-slate-400 hover:text-red-500">Remove</button>
@@ -243,11 +246,7 @@ export default function OnboardingPage() {
                         <button
                           key={d}
                           type="button"
-                          onClick={() => {
-                            const updated = [...services];
-                            updated[i] = toggleDay(s, d);
-                            setServices(updated);
-                          }}
+                          onClick={() => toggleDay(i, d)}
                           className={`rounded-lg px-2 py-1 text-[10px] font-medium ${
                             s.days_of_week.includes(d) ? 'bg-brand-600 text-white' : 'bg-slate-100 text-slate-400'
                           }`}
@@ -259,15 +258,15 @@ export default function OnboardingPage() {
                     <div className="grid grid-cols-3 gap-2">
                       <div>
                         <label className="block text-[10px] font-medium text-slate-500">Start</label>
-                        <input type="time" value={s.start_time} onChange={(e) => { const u = [...services]; u[i] = { ...s, start_time: e.target.value }; setServices(u); }} className="w-full rounded border border-slate-200 px-2 py-1.5 text-xs" />
+                        <input type="time" value={s.start_time} onChange={(e) => updateService(i, { start_time: e.target.value })} className="w-full rounded border border-slate-200 px-2 py-1.5 text-xs" />
                       </div>
                       <div>
                         <label className="block text-[10px] font-medium text-slate-500">End</label>
-                        <input type="time" value={s.end_time} onChange={(e) => { const u = [...services]; u[i] = { ...s, end_time: e.target.value }; setServices(u); }} className="w-full rounded border border-slate-200 px-2 py-1.5 text-xs" />
+                        <input type="time" value={s.end_time} onChange={(e) => updateService(i, { end_time: e.target.value })} className="w-full rounded border border-slate-200 px-2 py-1.5 text-xs" />
                       </div>
                       <div>
                         <label className="block text-[10px] font-medium text-slate-500">Last booking</label>
-                        <input type="time" value={s.last_booking_time} onChange={(e) => { const u = [...services]; u[i] = { ...s, last_booking_time: e.target.value }; setServices(u); }} className="w-full rounded border border-slate-200 px-2 py-1.5 text-xs" />
+                        <input type="time" value={s.last_booking_time} onChange={(e) => updateService(i, { last_booking_time: e.target.value })} className="w-full rounded border border-slate-200 px-2 py-1.5 text-xs" />
                       </div>
                     </div>
                   </div>
@@ -388,7 +387,24 @@ export default function OnboardingPage() {
               </button>
             ) : <div />}
             {step < 5 ? (
-              <button onClick={() => setStep(step + 1)} className="rounded-lg bg-brand-600 px-6 py-2 text-sm font-medium text-white hover:bg-brand-700">
+              <button
+                onClick={() => {
+                  if (step === 1) {
+                    const unnamed = services.filter(s => !s.name.trim());
+                    if (unnamed.length > 0) {
+                      setError(`${unnamed.length} service${unnamed.length > 1 ? 's have' : ' has'} no name. Please name all services or remove unused ones.`);
+                      return;
+                    }
+                    if (services.some(s => s.days_of_week.length === 0)) {
+                      setError('Each service must have at least one active day.');
+                      return;
+                    }
+                    setError(null);
+                  }
+                  setStep(step + 1);
+                }}
+                className="rounded-lg bg-brand-600 px-6 py-2 text-sm font-medium text-white hover:bg-brand-700"
+              >
                 Continue
               </button>
             ) : (
