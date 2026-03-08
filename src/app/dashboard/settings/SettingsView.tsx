@@ -5,7 +5,6 @@ import Link from 'next/link';
 import type { VenueSettings } from './types';
 import { ProfileSection } from './sections/ProfileSection';
 import { VenueProfileSection } from './sections/VenueProfileSection';
-import { DepositConfigSection } from './sections/DepositConfigSection';
 import { StaffSection } from './sections/StaffSection';
 import { CommunicationTemplatesSection } from './sections/CommunicationTemplatesSection';
 import { StripeConnectSection } from './sections/StripeConnectSection';
@@ -83,10 +82,7 @@ export function SettingsView({ initialVenue, isAdmin }: SettingsViewProps) {
           </>
         )}
         {activeTab === 'payments' && (
-          <>
-            <StripeConnectSection stripeAccountId={venue.stripe_connected_account_id} isAdmin={isAdmin} />
-            <DepositConfigSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} />
-          </>
+          <StripeConnectSection stripeAccountId={venue.stripe_connected_account_id} isAdmin={isAdmin} />
         )}
         {activeTab === 'comms' && (
           <CommunicationTemplatesSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} />

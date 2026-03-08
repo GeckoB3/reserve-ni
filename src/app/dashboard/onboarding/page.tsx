@@ -166,6 +166,20 @@ export default function OnboardingPage() {
         if (!resRes.ok) throw new Error(`Failed to create booking rules for "${s.name}"`);
       }
 
+      if (deposit.enabled) {
+        const depRes = await fetch('/api/venue/deposit-config', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            enabled: true,
+            amount_per_person_gbp: 5,
+            online_requires_deposit: true,
+            phone_requires_deposit: false,
+          }),
+        });
+        if (!depRes.ok) throw new Error('Failed to save deposit settings');
+      }
+
       router.push('/dashboard/availability');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Setup failed');

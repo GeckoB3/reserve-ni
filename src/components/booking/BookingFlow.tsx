@@ -38,18 +38,13 @@ export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, 
   const rules: BookingRulesPublic = venue.booking_rules ?? { min_party_size: 1, max_party_size: 20 };
 
   const requiresDeposit = useMemo(() => {
-    if (selectedSlot?.deposit_required) return true;
+    if (selectedSlot?.deposit_required != null) return selectedSlot.deposit_required;
     const cfg = venue.deposit_config;
     if (!cfg?.enabled) return false;
     if (cfg.online_requires_deposit === false) return false;
     if (cfg.min_party_size_for_deposit && partySize < cfg.min_party_size_for_deposit) return false;
-    if (cfg.weekend_only && selectedDate) {
-      const dow = new Date(selectedDate + 'T12:00:00').getDay();
-      const isWeekend = dow === 0 || dow === 5 || dow === 6;
-      if (!isWeekend) return false;
-    }
     return true;
-  }, [venue.deposit_config, partySize, selectedDate, selectedSlot?.deposit_required]);
+  }, [venue.deposit_config, partySize, selectedSlot?.deposit_required]);
 
   useEffect(() => {
     if (!embed || !onHeightChange) return;

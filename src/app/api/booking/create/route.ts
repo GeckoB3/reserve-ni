@@ -106,39 +106,14 @@ export async function POST(request: NextRequest) {
     }
 
     const depositConfig = (venue.deposit_config as { enabled?: boolean; amount_per_person_gbp?: number; online_requires_deposit?: boolean; phone_requires_deposit?: boolean; min_party_size_for_deposit?: number; weekend_only?: boolean }) ?? {};
-    const depositEnabled = depositConfig.enabled ?? false;
-    const amountPerPersonGbp = depositConfig.amount_per_person_gbp ?? 5;
-    const onlineRequiresDeposit = depositConfig.online_requires_deposit !== false;
-    const phoneRequiresDeposit = depositConfig.phone_requires_deposit ?? false;
-    const minPartySizeForDeposit = depositConfig.min_party_size_for_deposit;
-    const weekendOnly = depositConfig.weekend_only ?? false;
-
-    const isOnlineSource = source === 'online' || source === 'widget' || source === 'booking_page';
-    const channelRequires =
-      (isOnlineSource && onlineRequiresDeposit) ||
-      (source === 'phone' && phoneRequiresDeposit);
-
-    const partySizeMet = !minPartySizeForDeposit || party_size >= minPartySizeForDeposit;
-    const dayOfWeek = new Date(booking_date + 'T12:00:00').getDay();
-    const isWeekend = dayOfWeek === 0 || dayOfWeek === 5 || dayOfWeek === 6;
-    const weekendMet = !weekendOnly || isWeekend;
-
-    const requiresDeposit = depositEnabled && channelRequires && partySizeMet && weekendMet;
-
-    const depositAmountPence = requiresDeposit ? Math.round(amountPerPersonGbp * party_size * 100) : null;
-
-    if (requiresDeposit && !venue.stripe_connected_account_id) {
-      return NextResponse.json(
-        { error: 'Venue has not set up payments; deposits are required for this booking type.' },
-        { status: 400 }
-      );
-    }
 
     const timeForDb = booking_time.length === 5 ? booking_time + ':00' : booking_time;
     const timeStr = timeForDb.slice(0, 5);
 
     let resolvedServiceId: string | null = requestServiceId ?? null;
     let estimatedEndTime: string | null = null;
+    let requiresDeposit = false;
+    let depositAmountPence: number | null = null;
 
     if (useServiceEngine) {
       const engineInput = await fetchEngineInput({
@@ -165,14 +140,54 @@ export async function POST(request: NextRequest) {
       }
 
       resolvedServiceId = slot.service_id;
-      const dayOfWeek = getDayOfWeek(booking_date);
-      const duration = resolveDuration(engineInput.durations, slot.service_id, party_size, dayOfWeek);
+      const engineDow = getDayOfWeek(booking_date);
+      const duration = resolveDuration(engineInput.durations, slot.service_id, party_size, engineDow);
       const [y, mo, d] = booking_date.split('-').map(Number);
       const [hh, mm] = timeStr.split(':').map(Number);
       const endDate = new Date(Date.UTC(y!, mo! - 1, d!, hh!, mm!, 0));
       endDate.setMinutes(endDate.getMinutes() + duration);
       estimatedEndTime = endDate.toISOString();
+
+      const isOnlineSource = source === 'online' || source === 'widget' || source === 'booking_page';
+      const channelRequires =
+        (isOnlineSource && (depositConfig.online_requires_deposit !== false)) ||
+        (source === 'phone' && (depositConfig.phone_requires_deposit ?? false));
+
+      if (slot.deposit_required && channelRequires) {
+        requiresDeposit = true;
+        const amountPerPerson = depositConfig.amount_per_person_gbp ?? 5;
+        depositAmountPence = Math.round(amountPerPerson * party_size * 100);
+      }
     } else {
+      const depositEnabled = depositConfig.enabled ?? false;
+      const amountPerPersonGbp = depositConfig.amount_per_person_gbp ?? 5;
+      const onlineRequiresDeposit = depositConfig.online_requires_deposit !== false;
+      const phoneRequiresDeposit = depositConfig.phone_requires_deposit ?? false;
+      const minPartySizeForDeposit = depositConfig.min_party_size_for_deposit;
+      const weekendOnly = depositConfig.weekend_only ?? false;
+
+      const isOnlineSource = source === 'online' || source === 'widget' || source === 'booking_page';
+      const channelRequires =
+        (isOnlineSource && onlineRequiresDeposit) ||
+        (source === 'phone' && phoneRequiresDeposit);
+
+      const partySizeMet = !minPartySizeForDeposit || party_size >= minPartySizeForDeposit;
+      const dayOfWeek = new Date(booking_date + 'T12:00:00').getDay();
+      const isWeekend = dayOfWeek === 0 || dayOfWeek === 5 || dayOfWeek === 6;
+      const weekendMet = !weekendOnly || isWeekend;
+
+      requiresDeposit = depositEnabled && channelRequires && partySizeMet && weekendMet;
+      depositAmountPence = requiresDeposit ? Math.round(amountPerPersonGbp * party_size * 100) : null;
+    }
+
+    if (requiresDeposit && !venue.stripe_connected_account_id) {
+      return NextResponse.json(
+        { error: 'Venue has not set up payments; deposits are required for this booking type.' },
+        { status: 400 }
+      );
+    }
+
+    if (!useServiceEngine) {
       const { data: existingBookings } = await supabase
         .from('bookings')
         .select('id, booking_date, booking_time, party_size, status')
