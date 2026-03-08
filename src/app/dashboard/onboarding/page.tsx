@@ -187,9 +187,9 @@ export default function OnboardingPage() {
           {step === 0 && (
             <div>
               <h2 className="mb-1 text-lg font-bold text-slate-900">What type of venue are you?</h2>
-              <p className="mb-6 flex items-center gap-2 text-sm text-slate-500">
+              <div className="mb-6 flex items-center gap-2 text-sm text-slate-500">
                 This helps us set smart defaults <HelpTooltip content={helpContent.onboarding.venueType} />
-              </p>
+              </div>
               <div className="space-y-2">
                 {VENUE_TYPES.map((vt) => (
                   <button

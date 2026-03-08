@@ -9,7 +9,7 @@ interface HelpTooltipProps {
 
 export function HelpTooltip({ content, maxWidth = 280 }: HelpTooltipProps) {
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
+  const ref = useRef<HTMLSpanElement>(null);
 
   const handleClickOutside = useCallback((e: MouseEvent) => {
     if (ref.current && !ref.current.contains(e.target as Node)) {
@@ -25,7 +25,7 @@ export function HelpTooltip({ content, maxWidth = 280 }: HelpTooltipProps) {
   }, [open, handleClickOutside]);
 
   return (
-    <div ref={ref} className="relative inline-flex">
+    <span ref={ref} className="relative inline-flex">
       <button
         type="button"
         onClick={() => setOpen(!open)}
@@ -35,14 +35,14 @@ export function HelpTooltip({ content, maxWidth = 280 }: HelpTooltipProps) {
         i
       </button>
       {open && (
-        <div
+        <span
           className="absolute bottom-full left-1/2 z-50 mb-2 -translate-x-1/2 rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-xs leading-relaxed text-slate-600 shadow-lg"
-          style={{ maxWidth, minWidth: 200, width: 'max-content' }}
+          style={{ maxWidth, minWidth: 200, width: 'max-content', display: 'block' }}
         >
           {content}
-          <div className="absolute left-1/2 top-full -translate-x-1/2 border-4 border-transparent border-t-white" />
-        </div>
+          <span className="absolute left-1/2 top-full -translate-x-1/2 border-4 border-transparent border-t-white" />
+        </span>
       )}
-    </div>
+    </span>
   );
 }
