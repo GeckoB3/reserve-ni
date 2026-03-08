@@ -110,12 +110,9 @@ export function SlotStep({ date, slots, serviceGroups, loading, largePartyRedire
                 key={slot.key}
                 type="button"
                 onClick={() => onSelect(slot)}
-                className="group relative flex flex-col items-center rounded-xl border border-slate-200 bg-white px-3 py-3.5 transition-all hover:border-brand-300 hover:bg-brand-50/50 hover:shadow-sm active:scale-[0.97]"
+                className="group relative flex items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-3.5 transition-all hover:border-brand-300 hover:bg-brand-50/50 hover:shadow-sm active:scale-[0.97]"
               >
                 <span className="text-base font-semibold text-slate-900 group-hover:text-brand-700">{slot.start_time.slice(0, 5)}</span>
-                {slot.estimated_duration && (
-                  <span className="mt-0.5 text-[11px] text-slate-400">{slot.estimated_duration} min</span>
-                )}
                 {slot.limited && (
                   <span className="absolute -top-1.5 -right-1.5 flex h-5 items-center rounded-full bg-amber-100 px-1.5 text-[10px] font-semibold text-amber-700">
                     Limited

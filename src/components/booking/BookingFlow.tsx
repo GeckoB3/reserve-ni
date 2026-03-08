@@ -38,11 +38,11 @@ export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, 
   const rules: BookingRulesPublic = venue.booking_rules ?? { min_party_size: 1, max_party_size: 20 };
 
   const requiresDeposit = useMemo(() => {
-    if (selectedSlot?.deposit_required != null) return selectedSlot.deposit_required;
     const cfg = venue.deposit_config;
     if (!cfg?.enabled) return false;
     if (cfg.online_requires_deposit === false) return false;
     if (cfg.min_party_size_for_deposit && partySize < cfg.min_party_size_for_deposit) return false;
+    if (selectedSlot?.deposit_required === false) return false;
     return true;
   }, [venue.deposit_config, partySize, selectedSlot?.deposit_required]);
 
@@ -126,7 +126,7 @@ export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, 
       if (!res.ok) {
         if (res.status === 409) {
           const altMsg = data.alternatives?.length
-            ? `This time is no longer available. Try: ${data.alternatives.map((a: { time: string; service: string }) => `${a.time} (${a.service})`).join(', ')}`
+            ? `This time is no longer available. Try: ${data.alternatives.map((a: { time: string }) => a.time).join(', ')}`
             : data.error ?? 'This time slot is no longer available';
           setError(altMsg);
           return;
@@ -134,15 +134,15 @@ export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, 
         throw new Error(data.error ?? 'Booking failed');
       }
       setCreateResult({ booking_id: data.booking_id, client_secret: data.client_secret, stripe_account_id: data.stripe_account_id, requires_deposit: data.requires_deposit ?? false });
-      if (!data.requires_deposit) {
-        setStepIndex(steps.indexOf('confirmation'));
+      if (data.requires_deposit && data.client_secret) {
+        setStepIndex(steps.indexOf('payment'));
       } else {
-        goNext();
+        setStepIndex(steps.indexOf('confirmation'));
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Booking failed');
     }
-  }, [venue.id, selectedDate, selectedSlot, partySize, embed, goNext]);
+  }, [venue.id, selectedDate, selectedSlot, partySize, embed]);
 
   const handlePaymentComplete = useCallback(async () => {
     if (!createResult?.booking_id) {
