@@ -36,8 +36,8 @@ export default function PrivacyPage() {
               </p>
               <p className="mt-3">
                 If you have questions about this policy, contact us at{' '}
-                <a href="mailto:hello@reserveni.com" className="text-brand-600 hover:underline">
-                  hello@reserveni.com
+                <a href="mailto:support@reserveni.com" className="text-brand-600 hover:underline">
+                  support@reserveni.com
                 </a>.
               </p>
             </section>
@@ -136,8 +136,8 @@ export default function PrivacyPage() {
               </ul>
               <p className="mt-3">
                 To exercise any of these rights, contact us at{' '}
-                <a href="mailto:hello@reserveni.com" className="text-brand-600 hover:underline">
-                  hello@reserveni.com
+                <a href="mailto:support@reserveni.com" className="text-brand-600 hover:underline">
+                  support@reserveni.com
                 </a>.
               </p>
             </section>

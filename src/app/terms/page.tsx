@@ -145,8 +145,8 @@ export default function TermsPage() {
               <h2 className="text-lg font-semibold text-slate-900 mb-3">9. Contact</h2>
               <p>
                 For questions about these terms, contact us at{' '}
-                <a href="mailto:hello@reserveni.com" className="text-brand-600 hover:underline">
-                  hello@reserveni.com
+                <a href="mailto:support@reserveni.com" className="text-brand-600 hover:underline">
+                  support@reserveni.com
                 </a>.
               </p>
             </section>

@@ -2,7 +2,7 @@ import sgMail from '@sendgrid/mail';
 import type { MessageChannel, Recipient, CompiledTemplate, TemplateVariables } from '../types';
 
 const apiKey = process.env.SENDGRID_API_KEY;
-const fromEmail = process.env.SENDGRID_FROM_EMAIL ?? 'bookings@reserveni.com';
+const fromEmail = process.env.SENDGRID_FROM_EMAIL ?? 'hello@reserveni.com';
 
 if (apiKey) {
   sgMail.setApiKey(apiKey);

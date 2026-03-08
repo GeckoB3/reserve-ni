@@ -6,9 +6,8 @@ if (apiKey) {
   sgMail.setApiKey(apiKey);
 }
 
-const CONTACT_TO = 'andrew@reserveni.com';
-const fromEmail = process.env.SENDGRID_FROM_EMAIL ?? 'bookings@reserveni.com';
-const FROM = { email: fromEmail, name: 'ReserveNI' };
+const CONTACT_TO = 'hello@reserveni.com';
+const FROM = { email: 'hello@reserveni.com', name: 'Reserve NI' };
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PHONE_REGEX = /^[\d\s+\-()]{7,20}$/;

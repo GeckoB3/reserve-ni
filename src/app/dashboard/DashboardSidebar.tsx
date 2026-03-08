@@ -119,6 +119,22 @@ export function DashboardSidebar({ email, staffName, venueName, venueSlug }: Pro
           )}
         </nav>
 
+        {/* Support link */}
+        <div className="px-3 pb-1">
+          <Link
+            href="/dashboard/support"
+            onClick={() => setMobileOpen(false)}
+            className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
+              pathname.startsWith('/dashboard/support')
+                ? 'bg-brand-50 text-brand-700'
+                : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+            }`}
+          >
+            <SupportIcon className={`h-5 w-5 flex-shrink-0 ${pathname.startsWith('/dashboard/support') ? 'text-brand-600' : 'text-slate-400'}`} />
+            Support
+          </Link>
+        </div>
+
         {/* Footer */}
         <div className="border-t border-slate-100 px-4 py-4 space-y-3">
           <div className="flex items-center gap-3">
@@ -227,6 +243,14 @@ function ExternalLinkIcon({ className }: { className?: string }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
       <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+    </svg>
+  );
+}
+
+function SupportIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 5.25h.008v.008H12v-.008Z" />
     </svg>
   );
 }
