@@ -47,14 +47,17 @@ export async function GET(request: NextRequest) {
 
       const results = computeAvailability(engineInput);
 
-      const allSlots = results.flatMap((r) => r.slots);
-      const largePartyRedirect = results.find((r) => r.large_party_redirect);
+      const activeResults = results.filter((r) => r.slots.length > 0 || r.large_party_redirect);
+      const allSlots = activeResults.flatMap((r) => r.slots);
+      allSlots.sort((a, b) => a.start_time.localeCompare(b.start_time));
+
+      const largePartyRedirect = activeResults.find((r) => r.large_party_redirect);
 
       return NextResponse.json({
         date: dateStr,
         venue_id: venueId,
         slots: allSlots,
-        services: results.map((r) => ({
+        services: activeResults.map((r) => ({
           id: r.service.id,
           name: r.service.name,
           slots: r.slots,

@@ -27,11 +27,12 @@ function formatDateStr(date: string): string {
 
 export function SlotStep({ date, slots, serviceGroups, loading, largePartyRedirect, largePartyMessage, venueId, partySize, onSelect, onBack, onDateChange }: SlotStepProps) {
   const dateStr = formatDateStr(date);
-  const hasServices = serviceGroups && serviceGroups.length > 0;
   const [nearbyDates, setNearbyDates] = useState<Array<{ date: string; label: string; slotCount: number }>>([]);
   const [nearbyLoading, setNearbyLoading] = useState(false);
 
-  const noAvailability = !loading && !largePartyRedirect && slots.length === 0;
+  const mergedSlots = getMergedSlots(slots, serviceGroups);
+  const hasLargePartyService = serviceGroups?.some((g) => g.large_party_redirect) ?? false;
+  const noAvailability = !loading && !largePartyRedirect && mergedSlots.length === 0 && !hasLargePartyService;
 
   const fetchNearbyDates = useCallback(async () => {
     if (!venueId || !partySize || !noAvailability) return;
@@ -79,7 +80,7 @@ export function SlotStep({ date, slots, serviceGroups, loading, largePartyRedire
   return (
     <div className="space-y-5">
       <div className="flex items-center gap-3">
-        <button type="button" onClick={onBack} className="flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 text-slate-400 hover:bg-slate-50 hover:text-slate-600">
+        <button type="button" onClick={onBack} className="flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 text-slate-400 transition-colors hover:bg-slate-50 hover:text-slate-600" aria-label="Go back">
           <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" />
           </svg>
@@ -100,67 +101,62 @@ export function SlotStep({ date, slots, serviceGroups, loading, largePartyRedire
           <p className="text-sm font-medium text-amber-800">{largePartyMessage ?? 'Please call us to book for large parties.'}</p>
           <button type="button" onClick={onBack} className="mt-4 text-sm font-medium text-brand-600 hover:text-brand-700">Choose a smaller party size</button>
         </div>
-      ) : hasServices ? (
-        <div className="space-y-6">
-          {serviceGroups.map((group) => (
-            <div key={group.id}>
-              {serviceGroups.length > 1 && (
-                <h3 className="mb-3 text-sm font-semibold text-slate-700">{group.name}</h3>
-              )}
-              {group.large_party_redirect ? (
-                <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-                  {group.large_party_message ?? 'Please call us to book for large parties.'}
-                </div>
-              ) : group.slots.length === 0 ? (
-                <p className="text-sm text-slate-400">No availability for this service</p>
-              ) : (
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                  {group.slots.map((slot) => (
-                    <button
-                      key={slot.key}
-                      type="button"
-                      onClick={() => onSelect(slot)}
-                      className="group relative flex flex-col items-center rounded-xl border border-slate-200 bg-white px-4 py-3.5 transition-all hover:border-brand-300 hover:bg-brand-50/50 hover:shadow-sm"
-                    >
-                      <span className="text-base font-bold text-slate-900">{slot.start_time.slice(0, 5)}</span>
-                      {slot.estimated_duration && (
-                        <span className="mt-0.5 text-xs text-slate-400">{slot.estimated_duration} min</span>
-                      )}
-                      {slot.limited && (
-                        <span className="absolute -top-1.5 -right-1.5 flex h-5 items-center rounded-full bg-amber-100 px-1.5 text-[10px] font-semibold text-amber-700">
-                          Limited
-                        </span>
-                      )}
-                    </button>
-                  ))}
-                </div>
-              )}
+      ) : mergedSlots.length > 0 ? (
+        <div className="space-y-4">
+          <p className="text-sm text-slate-500">Select a time for your reservation</p>
+          <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+            {mergedSlots.map((slot) => (
+              <button
+                key={slot.key}
+                type="button"
+                onClick={() => onSelect(slot)}
+                className="group relative flex flex-col items-center rounded-xl border border-slate-200 bg-white px-3 py-3.5 transition-all hover:border-brand-300 hover:bg-brand-50/50 hover:shadow-sm active:scale-[0.97]"
+              >
+                <span className="text-base font-semibold text-slate-900 group-hover:text-brand-700">{slot.start_time.slice(0, 5)}</span>
+                {slot.estimated_duration && (
+                  <span className="mt-0.5 text-[11px] text-slate-400">{slot.estimated_duration} min</span>
+                )}
+                {slot.limited && (
+                  <span className="absolute -top-1.5 -right-1.5 flex h-5 items-center rounded-full bg-amber-100 px-1.5 text-[10px] font-semibold text-amber-700">
+                    Limited
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+          {hasLargePartyService && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-center text-sm text-amber-800">
+              {serviceGroups?.find((g) => g.large_party_redirect)?.large_party_message ?? 'Some services require you to call for large party bookings.'}
             </div>
-          ))}
+          )}
         </div>
-      ) : slots.length === 0 ? (
+      ) : (
         <div className="flex flex-col items-center rounded-xl border border-slate-200 bg-slate-50 py-10 px-6 text-center">
           <svg className="mb-3 h-8 w-8 text-slate-300" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
           </svg>
-          <p className="text-sm text-slate-500">No availability on this date</p>
+          <p className="text-sm font-medium text-slate-500">No availability on this date</p>
+          <p className="mt-1 text-xs text-slate-400">Try a different date or party size</p>
 
           {nearbyLoading && (
-            <p className="mt-3 text-xs text-slate-400">Checking nearby dates&hellip;</p>
+            <div className="mt-4 flex items-center gap-2 text-xs text-slate-400">
+              <div className="h-3.5 w-3.5 animate-spin rounded-full border border-slate-300 border-t-transparent" />
+              Checking nearby dates&hellip;
+            </div>
           )}
 
           {!nearbyLoading && nearbyDates.length > 0 && (
-            <div className="mt-4 w-full space-y-2">
-              <p className="text-xs font-medium text-slate-500">Try a nearby date:</p>
+            <div className="mt-5 w-full space-y-2">
+              <p className="text-xs font-medium text-slate-500">Available nearby</p>
               {nearbyDates.map((nd) => (
                 <button
                   key={nd.date}
                   type="button"
                   onClick={() => onDateChange?.(nd.date)}
-                  className="flex w-full items-center justify-between rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm transition-colors hover:border-brand-300 hover:bg-brand-50"
+                  className="flex w-full items-center justify-between rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm transition-all hover:border-brand-300 hover:bg-brand-50 hover:shadow-sm"
                 >
                   <span className="font-medium text-slate-700">{nd.label}</span>
-                  <span className="text-xs text-slate-400">{nd.slotCount} {nd.slotCount === 1 ? 'time' : 'times'} available</span>
+                  <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-600">{nd.slotCount} {nd.slotCount === 1 ? 'time' : 'times'}</span>
                 </button>
               ))}
             </div>
@@ -172,23 +168,20 @@ export function SlotStep({ date, slots, serviceGroups, loading, largePartyRedire
 
           <button type="button" onClick={onBack} className="mt-4 text-sm font-medium text-brand-600 hover:text-brand-700">Choose another date</button>
         </div>
-      ) : (
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-          {slots.map((slot) => (
-            <button
-              key={slot.key}
-              type="button"
-              onClick={() => onSelect(slot)}
-              className="flex flex-col items-center rounded-xl border border-slate-200 bg-white px-4 py-3.5 transition-all hover:border-brand-300 hover:bg-brand-50/50 hover:shadow-sm"
-            >
-              <span className="text-base font-bold text-slate-900">{slot.start_time.slice(0, 5)}</span>
-              <span className="mt-0.5 text-xs text-slate-400">{slot.label}</span>
-            </button>
-          ))}
-        </div>
       )}
     </div>
   );
+}
+
+function getMergedSlots(slots: AvailableSlot[], serviceGroups?: ServiceGroup[]): AvailableSlot[] {
+  if (serviceGroups && serviceGroups.length > 0) {
+    const allSlots = serviceGroups
+      .filter((g) => !g.large_party_redirect)
+      .flatMap((g) => g.slots);
+    allSlots.sort((a, b) => a.start_time.localeCompare(b.start_time));
+    return allSlots;
+  }
+  return [...slots].sort((a, b) => a.start_time.localeCompare(b.start_time));
 }
 
 function WaitlistForm({ venueId, date, partySize }: { venueId: string; date: string; partySize: number }) {
@@ -232,7 +225,7 @@ function WaitlistForm({ venueId, date, partySize }: { venueId: string; date: str
 
   if (status === 'success') {
     return (
-      <div className="mt-4 rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-center text-sm text-green-700">
+      <div className="mt-4 w-full rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-center text-sm text-green-700">
         {message}
       </div>
     );
@@ -251,7 +244,7 @@ function WaitlistForm({ venueId, date, partySize }: { venueId: string; date: str
   }
 
   return (
-    <form onSubmit={handleSubmit} className="mt-4 space-y-3 rounded-xl border border-slate-200 bg-white p-4">
+    <form onSubmit={handleSubmit} className="mt-4 w-full space-y-3 rounded-xl border border-slate-200 bg-white p-4 text-left">
       <p className="text-xs font-medium text-slate-600">We&apos;ll notify you if a spot opens up.</p>
       {status === 'error' && (
         <p className="text-xs text-red-600">{message}</p>

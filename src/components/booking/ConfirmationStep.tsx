@@ -4,6 +4,14 @@ import { useCallback, useEffect, useState } from 'react';
 import { buildIcsContent } from '@/lib/ics';
 import type { GuestDetails, VenuePublic } from './types';
 
+const WEEKDAYS_LONG = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const MONTHS_LONG = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
+function formatDateLong(dateStr: string): string {
+  const d = new Date(dateStr + 'T12:00:00');
+  return `${WEEKDAYS_LONG[d.getDay()]} ${d.getDate()} ${MONTHS_LONG[d.getMonth()]}`;
+}
+
 interface ConfirmationStepProps {
   venue: VenuePublic;
   date: string;
@@ -15,7 +23,7 @@ interface ConfirmationStepProps {
 }
 
 export function ConfirmationStep({ venue, date, slot, partySize, guest, bookingId, requiresDeposit }: ConfirmationStepProps) {
-  const dateStr = new Date(date + 'T12:00:00').toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
+  const dateStr = formatDateLong(date);
   const [showCheck, setShowCheck] = useState(false);
 
   useEffect(() => {
@@ -58,7 +66,7 @@ export function ConfirmationStep({ venue, date, slot, partySize, guest, bookingI
         <div className="space-y-3">
           <DetailRow icon={<VenueIcon />} label="Venue" value={venue.name} />
           <DetailRow icon={<CalendarIcon />} label="Date" value={dateStr} />
-          <DetailRow icon={<ClockIcon />} label="Time" value={`${slot.label} (${slot.start_time.slice(0, 5)})`} />
+          <DetailRow icon={<ClockIcon />} label="Time" value={slot.start_time.slice(0, 5)} />
           <DetailRow icon={<UsersIcon />} label="Guests" value={`${partySize} ${partySize === 1 ? 'guest' : 'guests'}`} />
           <DetailRow icon={<UserIcon />} label="Name" value={guest.name} />
           {guest.email && <DetailRow icon={<MailIcon />} label="Email" value={guest.email} />}

@@ -5,6 +5,14 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import type { AvailableSlot, GuestDetails } from './types';
 
+const SHORT_WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const SHORT_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+function formatDate(dateStr: string): string {
+  const d = new Date(dateStr + 'T12:00:00');
+  return `${SHORT_WEEKDAYS[d.getDay()]} ${d.getDate()} ${SHORT_MONTHS[d.getMonth()]}`;
+}
+
 const detailsSchema = z.object({
   name: z.string().min(1, 'Name is required').max(200),
   email: z.string().email('Valid email required').optional().or(z.literal('')),
@@ -34,13 +42,13 @@ export function DetailsStep({ slot, date, partySize, onSubmit, onBack, cancellat
     defaultValues: { name: '', email: '', phone: '', dietary_notes: '', occasion: '', acceptTerms: false },
   });
 
-  const dateStr = new Date(date + 'T12:00:00').toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+  const dateStr = formatDate(date);
 
   return (
     <div className="space-y-5">
-      {/* Summary bar */}
+      {/* Booking summary card */}
       <div className="flex items-center gap-3">
-        <button type="button" onClick={onBack} className="flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 text-slate-400 hover:bg-slate-50 hover:text-slate-600">
+        <button type="button" onClick={onBack} className="flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 text-slate-400 transition-colors hover:bg-slate-50 hover:text-slate-600" aria-label="Go back">
           <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" />
           </svg>
@@ -51,9 +59,6 @@ export function DetailsStep({ slot, date, partySize, onSubmit, onBack, cancellat
           <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">{partySize} {partySize === 1 ? 'guest' : 'guests'}</span>
           {slot.estimated_duration && (
             <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">~{slot.estimated_duration} min</span>
-          )}
-          {slot.service_name && (
-            <span className="rounded-full bg-brand-50 px-3 py-1 text-xs font-medium text-brand-700">{slot.service_name}</span>
           )}
         </div>
       </div>
