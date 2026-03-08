@@ -397,21 +397,33 @@ export default function OnboardingPage() {
           {/* Step 5: Complete */}
           {step === 5 && (
             <div className="text-center">
-              <div className="mb-4 flex justify-center">
-                <div className="flex h-16 w-16 items-center justify-center rounded-full bg-green-100">
-                  <svg className="h-8 w-8 text-green-600" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
-                  </svg>
-                </div>
-              </div>
-              <h2 className="mb-2 text-lg font-bold text-slate-900">Ready to go!</h2>
-              <p className="mb-6 text-sm text-slate-500">Click &quot;Complete Setup&quot; to create your services and start accepting bookings.</p>
+              {saving ? (
+                <>
+                  <div className="mb-4 flex justify-center">
+                    <div className="h-16 w-16 animate-spin rounded-full border-4 border-brand-200 border-t-brand-600" />
+                  </div>
+                  <h2 className="mb-2 text-lg font-bold text-slate-900">Setting up your venue&hellip;</h2>
+                  <p className="mb-6 text-sm text-slate-500">Creating services, capacity rules, and booking settings. This will only take a moment.</p>
+                </>
+              ) : (
+                <>
+                  <div className="mb-4 flex justify-center">
+                    <div className="flex h-16 w-16 items-center justify-center rounded-full bg-green-100">
+                      <svg className="h-8 w-8 text-green-600" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
+                      </svg>
+                    </div>
+                  </div>
+                  <h2 className="mb-2 text-lg font-bold text-slate-900">Ready to go!</h2>
+                  <p className="mb-6 text-sm text-slate-500">Click &quot;Complete Setup&quot; to create your services and start accepting bookings.</p>
+                </>
+              )}
             </div>
           )}
 
           {/* Navigation */}
           <div className="mt-8 flex justify-between">
-            {step > 0 ? (
+            {step > 0 && !saving ? (
               <button onClick={() => setStep(step - 1)} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">
                 Back
               </button>

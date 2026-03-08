@@ -21,7 +21,7 @@ export async function GET(request: NextRequest) {
     const supabase = getSupabaseAdminClient();
     const { data: venue, error } = await supabase
       .from('venues')
-      .select('id, name, slug, cover_photo_url, address, phone, deposit_config, booking_rules, timezone')
+      .select('id, name, slug, cover_photo_url, address, phone, deposit_config, booking_rules, opening_hours, timezone')
       .eq('slug', slug.trim())
       .single();
 

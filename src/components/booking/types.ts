@@ -1,3 +1,9 @@
+export type OpeningHourDay =
+  | { closed: true }
+  | { periods: { open: string; close: string }[] };
+
+export type OpeningHours = Record<string, OpeningHourDay>;
+
 export interface VenuePublic {
   id: string;
   name: string;
@@ -7,6 +13,7 @@ export interface VenuePublic {
   phone: string | null;
   deposit_config: DepositConfigPublic | null;
   booking_rules: BookingRulesPublic | null;
+  opening_hours: OpeningHours | null;
   timezone: string;
 }
 

@@ -5,7 +5,7 @@ import Link from 'next/link';
 import type { SetupStatus } from '@/app/api/venue/setup-status/route';
 
 interface Step {
-  key: keyof SetupStatus;
+  key: keyof Omit<SetupStatus, 'is_admin'>;
   label: string;
   description: string;
   href: string;
@@ -16,35 +16,28 @@ const STEPS: Step[] = [
   {
     key: 'profile_complete',
     label: 'Venue profile',
-    description: 'Add your venue name, address, and phone number.',
+    description: 'Add your venue name, address, phone number, and cover photo.',
     href: '/dashboard/settings',
     actionLabel: 'Complete profile',
   },
   {
-    key: 'opening_hours_set',
-    label: 'Opening hours',
-    description: 'Set the days and times you are open for bookings.',
-    href: '/dashboard/settings',
-    actionLabel: 'Set opening hours',
-  },
-  {
     key: 'availability_set',
-    label: 'Availability configured',
-    description: 'Configure your booking slots or sittings.',
-    href: '/dashboard/settings',
-    actionLabel: 'Configure availability',
+    label: 'Services & availability',
+    description: 'Run the setup wizard to configure your service periods, capacity, and booking rules.',
+    href: '/dashboard/onboarding',
+    actionLabel: 'Run setup wizard',
   },
   {
     key: 'stripe_connected',
-    label: 'Stripe connected',
-    description: 'Connect Stripe to start collecting guest deposits.',
-    href: '/dashboard/settings',
+    label: 'Stripe payments',
+    description: 'Connect Stripe to collect guest deposits directly into your bank account.',
+    href: '/dashboard/settings?tab=payments',
     actionLabel: 'Connect Stripe',
   },
   {
     key: 'first_booking_made',
     label: 'First test booking',
-    description: 'Make a test booking to confirm everything is working.',
+    description: 'Make a test booking to confirm everything is working end-to-end.',
     href: '/dashboard/bookings/new',
     actionLabel: 'Create booking',
   },
@@ -63,19 +56,22 @@ export function SetupChecklist() {
     fetch('/api/venue/setup-status')
       .then((r) => r.ok ? r.json() : null)
       .then((data: SetupStatus | null) => {
-        if (data) {
-          setStatus(data);
-          if (isComplete(data)) {
-            sessionStorage.setItem(key, '1');
-            setDismissed(true);
-          }
+        if (!data) return;
+        if (!data.is_admin) {
+          setDismissed(true);
+          return;
+        }
+        setStatus(data);
+        if (isComplete(data)) {
+          sessionStorage.setItem(key, '1');
+          setDismissed(true);
         }
       })
       .catch(() => {});
   }, []);
 
   function isComplete(s: SetupStatus) {
-    return Object.values(s).every(Boolean);
+    return s.profile_complete && s.availability_set && s.stripe_connected && s.first_booking_made;
   }
 
   function dismiss() {
@@ -85,16 +81,14 @@ export function SetupChecklist() {
 
   if (dismissed || !status) return null;
 
-  const completedCount = Object.values(status).filter(Boolean).length;
+  const completedCount = STEPS.filter((s) => status[s.key]).length;
   const totalCount = STEPS.length;
-  const allDone = completedCount === totalCount;
-  if (allDone) return null;
+  if (completedCount === totalCount) return null;
 
   const progressPct = Math.round((completedCount / totalCount) * 100);
 
   return (
     <div className="mb-6 overflow-hidden rounded-xl border border-brand-100 bg-white shadow-sm">
-      {/* Header */}
       <div className="flex items-center justify-between gap-4 border-b border-slate-100 px-5 py-4">
         <div className="flex-1">
           <div className="flex items-center gap-2">
@@ -123,7 +117,6 @@ export function SetupChecklist() {
         </button>
       </div>
 
-      {/* Steps */}
       <ul className="divide-y divide-slate-50">
         {STEPS.map((step) => {
           const done = status[step.key];

@@ -3,7 +3,7 @@ import { redirect } from 'next/navigation';
 import { SettingsView } from './SettingsView';
 import { getDashboardStaff } from '@/lib/venue-auth';
 
-export default async function SettingsPage() {
+export default async function SettingsPage({ searchParams }: { searchParams: Promise<{ tab?: string }> }) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) {
@@ -52,12 +52,13 @@ export default async function SettingsPage() {
   }
 
   const isAdmin = staff.role === 'admin';
+  const { tab } = await searchParams;
 
   return (
     <div className="p-4 md:p-6 lg:p-8">
       <div className="mx-auto max-w-3xl">
         <h1 className="mb-6 text-2xl font-semibold text-slate-900">Settings</h1>
-        <SettingsView initialVenue={venue ?? null} isAdmin={isAdmin} />
+        <SettingsView initialVenue={venue ?? null} isAdmin={isAdmin} initialTab={tab} />
       </div>
     </div>
   );

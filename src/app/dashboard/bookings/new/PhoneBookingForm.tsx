@@ -63,18 +63,25 @@ export function PhoneBookingForm({ venueId }: { venueId: string }) {
   };
 
   if (result) {
+    const hasDeposit = Boolean(result.payment_url);
     return (
       <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm space-y-4">
-        <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-5">
+        <div className={`rounded-xl border p-5 ${hasDeposit ? 'border-amber-200 bg-amber-50' : 'border-emerald-200 bg-emerald-50'}`}>
           <div className="flex items-center gap-3 mb-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-emerald-100">
-              <svg className="h-5 w-5 text-emerald-600" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+            <div className={`flex h-8 w-8 items-center justify-center rounded-full ${hasDeposit ? 'bg-amber-100' : 'bg-emerald-100'}`}>
+              <svg className={`h-5 w-5 ${hasDeposit ? 'text-amber-600' : 'text-emerald-600'}`} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
               </svg>
             </div>
-            <p className="font-semibold text-emerald-800">Booking Created</p>
+            <p className={`font-semibold ${hasDeposit ? 'text-amber-800' : 'text-emerald-800'}`}>
+              {hasDeposit ? 'Booking Created — Deposit Requested' : 'Booking Confirmed'}
+            </p>
           </div>
-          <p className="text-sm text-emerald-700">Deposit link has been sent to the guest.</p>
+          <p className={`text-sm ${hasDeposit ? 'text-amber-700' : 'text-emerald-700'}`}>
+            {hasDeposit
+              ? 'A deposit payment link has been sent to the guest via SMS and email.'
+              : 'A confirmation has been sent to the guest via SMS and email.'}
+          </p>
         </div>
         {result.payment_url && (
           <div className="rounded-lg bg-slate-50 px-4 py-3">
@@ -82,7 +89,27 @@ export function PhoneBookingForm({ venueId }: { venueId: string }) {
             <a href={result.payment_url} target="_blank" rel="noreferrer" className="text-sm font-medium text-brand-600 hover:text-brand-700 break-all">{result.payment_url}</a>
           </div>
         )}
-        <p className="text-xs text-slate-400">If deposit is not paid within 24 hours, the booking will be auto-cancelled.</p>
+        {hasDeposit && (
+          <p className="text-xs text-slate-400">If deposit is not paid within 24 hours, the booking will be auto-cancelled.</p>
+        )}
+        <button
+          type="button"
+          onClick={() => {
+            setResult(null);
+            setDate('');
+            setSlots([]);
+            setSelectedTime('');
+            setPartySize(2);
+            setName('');
+            setPhone('');
+            setEmail('');
+            setRequireDeposit(false);
+            setError(null);
+          }}
+          className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-100"
+        >
+          Create Another Booking
+        </button>
       </div>
     );
   }

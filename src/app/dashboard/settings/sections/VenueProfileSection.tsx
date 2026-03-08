@@ -9,7 +9,10 @@ import type { VenueSettings } from '../types';
 const profileSchema = z.object({
   name: z.string().min(1, 'Name is required').max(200),
   slug: z.string().min(1).max(100).regex(/^[a-z0-9-]+$/, 'Lowercase letters, numbers and hyphens only'),
-  address: z.string().max(500).optional(),
+  address_name: z.string().max(200).optional(),
+  address_street: z.string().max(200).optional(),
+  address_town: z.string().max(100).optional(),
+  address_postcode: z.string().max(20).optional(),
   phone: z.string().max(30).optional(),
   email: z.string().email().optional().or(z.literal('')),
   cuisine_type: z.string().max(100).optional(),
@@ -20,6 +23,30 @@ const profileSchema = z.object({
 });
 
 type ProfileForm = z.infer<typeof profileSchema>;
+
+function parseAddress(address: string | null): { name: string; street: string; town: string; postcode: string } {
+  if (!address) return { name: '', street: '', town: '', postcode: '' };
+  const parts = address.split(',').map(p => p.trim());
+  const postcodeMatch = parts[parts.length - 1]?.match(/^[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}$/i);
+  if (postcodeMatch && parts.length >= 2) {
+    const postcode = parts.pop()!;
+    const town = parts.pop() ?? '';
+    const name = parts.shift() ?? '';
+    const street = parts.join(', ');
+    return { name, street, town, postcode };
+  }
+  if (parts.length >= 4) return { name: parts[0]!, street: parts[1]!, town: parts[2]!, postcode: parts.slice(3).join(', ') };
+  if (parts.length === 3) return { name: '', street: parts[0]!, town: parts[1]!, postcode: parts[2]! };
+  if (parts.length === 2) return { name: '', street: parts[0]!, town: parts[1]!, postcode: '' };
+  return { name: '', street: address, town: '', postcode: '' };
+}
+
+function buildAddress(fields: { name: string; street: string; town: string; postcode: string }): string {
+  return [fields.name, fields.street, fields.town, fields.postcode]
+    .map(s => s.trim())
+    .filter(Boolean)
+    .join(', ');
+}
 
 interface VenueProfileSectionProps {
   venue: VenueSettings;
@@ -40,12 +67,17 @@ export function VenueProfileSection({ venue, onUpdate, isAdmin }: VenueProfileSe
   const [coverSaving, setCoverSaving] = useState(false);
   const [coverError, setCoverError] = useState<string | null>(null);
 
+  const parsedAddr = parseAddress(venue.address);
+
   const { register, handleSubmit, formState: { errors, isSubmitting }, setValue, watch } = useForm<ProfileForm>({
     resolver: zodResolver(profileSchema),
     defaultValues: {
       name: venue.name ?? '',
       slug: venue.slug ?? '',
-      address: venue.address ?? '',
+      address_name: parsedAddr.name,
+      address_street: parsedAddr.street,
+      address_town: parsedAddr.town,
+      address_postcode: parsedAddr.postcode,
       phone: venue.phone ?? '',
       email: venue.email ?? '',
       cuisine_type: venue.cuisine_type ?? '',
@@ -64,13 +96,19 @@ export function VenueProfileSection({ venue, onUpdate, isAdmin }: VenueProfileSe
   }, [nameValue, setValue]);
 
   const onProfileSubmit = useCallback(async (data: ProfileForm) => {
+    const combinedAddress = buildAddress({
+      name: data.address_name ?? '',
+      street: data.address_street ?? '',
+      town: data.address_town ?? '',
+      postcode: data.address_postcode ?? '',
+    });
     const res = await fetch('/api/venue', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         name: data.name,
         slug: data.slug,
-        address: data.address || undefined,
+        address: combinedAddress || undefined,
         phone: data.phone || undefined,
         email: data.email || undefined,
         cuisine_type: data.cuisine_type || undefined,
@@ -141,9 +179,15 @@ export function VenueProfileSection({ venue, onUpdate, isAdmin }: VenueProfileSe
         )}
         {isAdmin && (
           <>
-            <input type="file" accept="image/jpeg,image/png,image/webp" onChange={onCoverChange} disabled={coverSaving} className="block text-sm text-neutral-600" />
-            {coverSaving && <p className="mt-1 text-sm text-amber-600">Uploading…</p>}
-            {coverError && <p className="mt-1 text-sm text-red-600">{coverError}</p>}
+            <label className={`inline-flex cursor-pointer items-center gap-2 rounded-lg border border-neutral-300 bg-white px-4 py-2 text-sm font-medium text-neutral-700 shadow-sm transition-colors hover:bg-neutral-50 hover:border-neutral-400 ${coverSaving ? 'opacity-50 pointer-events-none' : ''}`}>
+              <svg className="h-4 w-4 text-neutral-500" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5" />
+              </svg>
+              {venue.cover_photo_url ? 'Change photo' : 'Upload photo'}
+              <input type="file" accept="image/jpeg,image/png,image/webp" onChange={onCoverChange} disabled={coverSaving} className="sr-only" />
+            </label>
+            {coverSaving && <p className="mt-2 text-sm text-amber-600">Uploading…</p>}
+            {coverError && <p className="mt-2 text-sm text-red-600">{coverError}</p>}
           </>
         )}
       </div>
@@ -160,10 +204,29 @@ export function VenueProfileSection({ venue, onUpdate, isAdmin }: VenueProfileSe
           <p className="mt-1 text-xs text-neutral-500">Used in booking URL: /book/[slug]</p>
           {errors.slug && <p className="mt-1 text-sm text-red-600">{errors.slug.message}</p>}
         </div>
-        <div>
-          <label htmlFor="address" className="block text-sm font-medium text-neutral-700 mb-1">Address</label>
-          <textarea id="address" {...register('address')} rows={2} disabled={!isAdmin} className="w-full rounded border border-neutral-300 px-3 py-2 disabled:bg-neutral-50" />
-        </div>
+        <fieldset>
+          <legend className="block text-sm font-medium text-neutral-700 mb-2">Address</legend>
+          <div className="space-y-3">
+            <div>
+              <label htmlFor="address_name" className="block text-xs text-neutral-500 mb-0.5">Building / venue name</label>
+              <input id="address_name" {...register('address_name')} disabled={!isAdmin} placeholder="e.g. The Old Mill" className="w-full rounded border border-neutral-300 px-3 py-2 text-sm disabled:bg-neutral-50" />
+            </div>
+            <div>
+              <label htmlFor="address_street" className="block text-xs text-neutral-500 mb-0.5">Street</label>
+              <input id="address_street" {...register('address_street')} disabled={!isAdmin} placeholder="e.g. 12 Main Street" className="w-full rounded border border-neutral-300 px-3 py-2 text-sm disabled:bg-neutral-50" />
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label htmlFor="address_town" className="block text-xs text-neutral-500 mb-0.5">Town / city</label>
+                <input id="address_town" {...register('address_town')} disabled={!isAdmin} placeholder="e.g. Belfast" className="w-full rounded border border-neutral-300 px-3 py-2 text-sm disabled:bg-neutral-50" />
+              </div>
+              <div>
+                <label htmlFor="address_postcode" className="block text-xs text-neutral-500 mb-0.5">Postcode</label>
+                <input id="address_postcode" {...register('address_postcode')} disabled={!isAdmin} placeholder="e.g. BT1 1AA" className="w-full rounded border border-neutral-300 px-3 py-2 text-sm disabled:bg-neutral-50" />
+              </div>
+            </div>
+          </div>
+        </fieldset>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label htmlFor="phone" className="block text-sm font-medium text-neutral-700 mb-1">Phone</label>

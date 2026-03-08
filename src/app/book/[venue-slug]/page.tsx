@@ -2,13 +2,13 @@ import { notFound } from 'next/navigation';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { BookingFlow } from '@/components/booking/BookingFlow';
 import { hasServiceConfig } from '@/lib/availability';
-import type { VenuePublic } from '@/components/booking/types';
+import type { VenuePublic, OpeningHours } from '@/components/booking/types';
 
 async function getVenue(slug: string): Promise<VenuePublic | null> {
   const supabase = getSupabaseAdminClient();
   const { data, error } = await supabase
     .from('venues')
-    .select('id, name, slug, cover_photo_url, address, phone, deposit_config, booking_rules, timezone')
+    .select('id, name, slug, cover_photo_url, address, phone, deposit_config, booking_rules, opening_hours, timezone')
     .eq('slug', slug)
     .single();
   if (error || !data) return null;
@@ -34,6 +34,70 @@ async function getVenue(slug: string): Promise<VenuePublic | null> {
 }
 
 const CANCELLATION_POLICY = 'Full refund if cancelled 48+ hours before your reservation. No refund within 48 hours or for no-shows.';
+
+const DAY_LABELS: Record<string, string> = {
+  '0': 'Sunday', '1': 'Monday', '2': 'Tuesday', '3': 'Wednesday',
+  '4': 'Thursday', '5': 'Friday', '6': 'Saturday',
+};
+const DAY_ORDER = ['1', '2', '3', '4', '5', '6', '0'];
+
+function formatTime(t: string): string {
+  const [h, m] = t.split(':').map(Number);
+  const ampm = (h ?? 0) >= 12 ? 'pm' : 'am';
+  const h12 = (h ?? 0) % 12 || 12;
+  return m ? `${h12}:${String(m).padStart(2, '0')}${ampm}` : `${h12}${ampm}`;
+}
+
+function OpeningHoursDisplay({ hours }: { hours: OpeningHours }) {
+  const hasAnyOpen = DAY_ORDER.some(d => {
+    const day = hours[d];
+    return day && !('closed' in day && day.closed);
+  });
+  if (!hasAnyOpen) return null;
+
+  return (
+    <div className="mx-auto max-w-lg px-4 pt-6">
+      <details className="group rounded-xl border border-slate-200 bg-white shadow-sm">
+        <summary className="flex cursor-pointer items-center justify-between px-4 py-3 text-sm font-medium text-slate-700">
+          <span className="flex items-center gap-2">
+            <svg className="h-4 w-4 text-slate-400" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+            </svg>
+            Opening hours
+          </span>
+          <svg className="h-4 w-4 text-slate-400 transition-transform group-open:rotate-180" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
+          </svg>
+        </summary>
+        <div className="border-t border-slate-100 px-4 py-3">
+          <dl className="space-y-1.5">
+            {DAY_ORDER.map(d => {
+              const day = hours[d];
+              const label = DAY_LABELS[d]!;
+              const closed = !day || ('closed' in day && day.closed);
+              const periods = !closed && 'periods' in day ? day.periods : [];
+              return (
+                <div key={d} className="flex justify-between text-sm">
+                  <dt className="font-medium text-slate-600">{label}</dt>
+                  <dd className={closed ? 'text-slate-400' : 'text-slate-700'}>
+                    {closed
+                      ? 'Closed'
+                      : periods.map((p, i) => (
+                          <span key={i}>
+                            {i > 0 && <span className="text-slate-300"> &middot; </span>}
+                            {formatTime(p.open)}&ndash;{formatTime(p.close)}
+                          </span>
+                        ))}
+                  </dd>
+                </div>
+              );
+            })}
+          </dl>
+        </div>
+      </details>
+    </div>
+  );
+}
 
 export default async function BookPage({ params }: { params: Promise<{ 'venue-slug': string }> }) {
   const { 'venue-slug': slug } = await params;
@@ -79,6 +143,8 @@ export default async function BookPage({ params }: { params: Promise<{ 'venue-sl
           </div>
         </div>
       </header>
+
+      {venue.opening_hours && <OpeningHoursDisplay hours={venue.opening_hours} />}
 
       {/* Booking flow */}
       <div className="mx-auto max-w-lg px-4 py-8 pb-24">

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { SetupChecklist } from './SetupChecklist';
 
 interface DashboardData {
   today: {
@@ -58,6 +59,8 @@ export default function DashboardHomePage() {
   return (
     <div className="p-6 lg:p-8 space-y-6">
       <h1 className="text-xl font-bold text-slate-900">Dashboard</h1>
+
+      <SetupChecklist />
 
       {/* Summary Cards */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">

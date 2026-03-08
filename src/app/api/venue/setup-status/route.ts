@@ -1,14 +1,15 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff } from '@/lib/venue-auth';
+import { getSupabaseAdminClient } from '@/lib/supabase';
 import { stripe } from '@/lib/stripe';
 
 export interface SetupStatus {
   profile_complete: boolean;
-  opening_hours_set: boolean;
   availability_set: boolean;
   stripe_connected: boolean;
   first_booking_made: boolean;
+  is_admin: boolean;
 }
 
 export async function GET() {
@@ -19,7 +20,7 @@ export async function GET() {
 
     const { data: venue } = await staff.db
       .from('venues')
-      .select('name, address, phone, opening_hours, availability_config, stripe_connected_account_id')
+      .select('name, address, phone, stripe_connected_account_id')
       .eq('id', staff.venue_id)
       .single();
 
@@ -27,11 +28,13 @@ export async function GET() {
 
     const profileComplete = Boolean(venue.name && venue.address && venue.phone);
 
-    const openingHours = venue.opening_hours as Record<string, { closed?: boolean }> | null;
-    const openingHoursSet = openingHours != null
-      && Object.values(openingHours).some((day) => !day.closed);
+    const admin = getSupabaseAdminClient();
+    const { count: serviceCount } = await admin
+      .from('venue_services')
+      .select('id', { count: 'exact', head: true })
+      .eq('venue_id', staff.venue_id);
 
-    const availabilitySet = venue.availability_config != null;
+    const availabilitySet = (serviceCount ?? 0) > 0;
 
     let stripeConnected = false;
     if (venue.stripe_connected_account_id) {
@@ -39,7 +42,7 @@ export async function GET() {
         const account = await stripe.accounts.retrieve(venue.stripe_connected_account_id);
         stripeConnected = account.charges_enabled === true && account.details_submitted === true;
       } catch {
-        // Stripe fetch failed — treat as not connected
+        // Stripe fetch failed
       }
     }
 
@@ -52,10 +55,10 @@ export async function GET() {
 
     const status: SetupStatus = {
       profile_complete: profileComplete,
-      opening_hours_set: openingHoursSet,
       availability_set: availabilitySet,
       stripe_connected: stripeConnected,
       first_booking_made: firstBookingMade,
+      is_admin: staff.role === 'admin',
     };
 
     return NextResponse.json(status);

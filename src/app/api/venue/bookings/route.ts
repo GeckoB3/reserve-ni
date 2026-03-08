@@ -5,6 +5,8 @@ import { getSupabaseAdminClient } from '@/lib/supabase';
 import { stripe } from '@/lib/stripe';
 import { findOrCreateGuest } from '@/lib/guests';
 import { sendCommunication } from '@/lib/communications';
+import { generateConfirmToken, hashConfirmToken } from '@/lib/confirm-token';
+import { createShortManageLink } from '@/lib/short-manage-link';
 import { z } from 'zod';
 import { createHmac } from 'crypto';
 
@@ -150,6 +152,38 @@ export async function POST(request: NextRequest) {
         });
       } catch (commsErr) {
         console.error('Deposit payment request comms failed (booking still created):', commsErr);
+      }
+    } else {
+      const manageToken = generateConfirmToken();
+      await admin
+        .from('bookings')
+        .update({
+          confirm_token_hash: hashConfirmToken(manageToken),
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', booking.id);
+
+      const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : request.nextUrl.origin);
+      const manageBookingLink = `${baseUrl}/manage/${booking.id}/${encodeURIComponent(manageToken)}`;
+      const shortManageLink = createShortManageLink(booking.id);
+
+      try {
+        await sendCommunication({
+          type: 'booking_confirmation',
+          recipient: { email: guest.email ?? undefined, phone: guest.phone ?? undefined },
+          payload: {
+            guest_name: name,
+            venue_name: venue.name,
+            booking_date,
+            booking_time,
+            party_size,
+            cancellation_deadline: bookingInsert.cancellation_deadline,
+            manage_booking_link: manageBookingLink,
+            short_manage_link: shortManageLink,
+          },
+        });
+      } catch (commsErr) {
+        console.error('Booking confirmation comms failed (booking still created):', commsErr);
       }
     }
 

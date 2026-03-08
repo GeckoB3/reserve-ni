@@ -5,17 +5,16 @@ import Link from 'next/link';
 import type { VenueSettings } from './types';
 import { ProfileSection } from './sections/ProfileSection';
 import { VenueProfileSection } from './sections/VenueProfileSection';
+import { OpeningHoursSection } from './sections/OpeningHoursSection';
 import { StaffSection } from './sections/StaffSection';
 import { CommunicationTemplatesSection } from './sections/CommunicationTemplatesSection';
 import { StripeConnectSection } from './sections/StripeConnectSection';
 import { DataExportSection } from './sections/DataExportSection';
 
-/* OpeningHoursSection, AvailabilityConfigSection, BookingRulesSection removed —
-   these are now managed from /dashboard/availability. */
-
 interface SettingsViewProps {
   initialVenue: VenueSettings | null;
   isAdmin: boolean;
+  initialTab?: string;
 }
 
 const TABS = [
@@ -27,9 +26,12 @@ const TABS = [
 
 type TabKey = typeof TABS[number]['key'];
 
-export function SettingsView({ initialVenue, isAdmin }: SettingsViewProps) {
+export function SettingsView({ initialVenue, isAdmin, initialTab }: SettingsViewProps) {
   const [venue, setVenue] = useState<VenueSettings | null>(initialVenue);
-  const [activeTab, setActiveTab] = useState<TabKey>('profile');
+  const validTabs = TABS.map(t => t.key) as readonly string[];
+  const [activeTab, setActiveTab] = useState<TabKey>(
+    initialTab && validTabs.includes(initialTab) ? initialTab as TabKey : 'profile'
+  );
 
   const onUpdate = useCallback((patch: Partial<VenueSettings>) => {
     setVenue((v) => (v ? { ...v, ...patch } : null));
@@ -69,6 +71,7 @@ export function SettingsView({ initialVenue, isAdmin }: SettingsViewProps) {
           <>
             <ProfileSection />
             <VenueProfileSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} />
+            <OpeningHoursSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} />
             <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
               <h2 className="text-base font-semibold text-slate-900">Booking Widget & QR Code</h2>
               <p className="mt-1 text-sm text-slate-500">Get embed code and a printable QR code for your booking page.</p>
