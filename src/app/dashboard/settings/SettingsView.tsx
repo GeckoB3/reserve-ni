@@ -5,14 +5,14 @@ import Link from 'next/link';
 import type { VenueSettings } from './types';
 import { ProfileSection } from './sections/ProfileSection';
 import { VenueProfileSection } from './sections/VenueProfileSection';
-import { OpeningHoursSection } from './sections/OpeningHoursSection';
-import { AvailabilityConfigSection } from './sections/AvailabilityConfigSection';
-import { BookingRulesSection } from './sections/BookingRulesSection';
 import { DepositConfigSection } from './sections/DepositConfigSection';
 import { StaffSection } from './sections/StaffSection';
 import { CommunicationTemplatesSection } from './sections/CommunicationTemplatesSection';
 import { StripeConnectSection } from './sections/StripeConnectSection';
 import { DataExportSection } from './sections/DataExportSection';
+
+/* OpeningHoursSection, AvailabilityConfigSection, BookingRulesSection removed —
+   these are now managed from /dashboard/availability. */
 
 interface SettingsViewProps {
   initialVenue: VenueSettings | null;
@@ -21,7 +21,6 @@ interface SettingsViewProps {
 
 const TABS = [
   { key: 'profile', label: 'Profile' },
-  { key: 'booking', label: 'Booking' },
   { key: 'payments', label: 'Payments' },
   { key: 'comms', label: 'Communications' },
   { key: 'staff', label: 'Staff' },
@@ -81,13 +80,6 @@ export function SettingsView({ initialVenue, isAdmin }: SettingsViewProps) {
                 Open Widget Settings
               </Link>
             </div>
-          </>
-        )}
-        {activeTab === 'booking' && (
-          <>
-            <OpeningHoursSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} />
-            <AvailabilityConfigSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} />
-            <BookingRulesSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} />
           </>
         )}
         {activeTab === 'payments' && (

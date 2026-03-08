@@ -75,14 +75,34 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Venue not found' }, { status: 404 });
     }
 
-    const rules = (venue.booking_rules as { min_party_size?: number; max_party_size?: number }) ?? {};
-    const minParty = rules.min_party_size ?? 1;
-    const maxParty = rules.max_party_size ?? 50;
-    if (party_size < minParty || party_size > maxParty) {
-      return NextResponse.json(
-        { error: `Party size must be between ${minParty} and ${maxParty}` },
-        { status: 400 }
-      );
+    const useServiceEngine = await hasServiceConfig(supabase, venue_id);
+
+    if (useServiceEngine) {
+      const { data: restrictions } = await supabase
+        .from('booking_restrictions')
+        .select('min_party_size_online, max_party_size_online')
+        .eq('venue_id', venue_id)
+        .limit(1)
+        .maybeSingle();
+
+      const minParty = restrictions?.min_party_size_online ?? 1;
+      const maxParty = restrictions?.max_party_size_online ?? 50;
+      if (party_size < minParty || party_size > maxParty) {
+        return NextResponse.json(
+          { error: `Party size must be between ${minParty} and ${maxParty}` },
+          { status: 400 }
+        );
+      }
+    } else {
+      const rules = (venue.booking_rules as { min_party_size?: number; max_party_size?: number }) ?? {};
+      const minParty = rules.min_party_size ?? 1;
+      const maxParty = rules.max_party_size ?? 50;
+      if (party_size < minParty || party_size > maxParty) {
+        return NextResponse.json(
+          { error: `Party size must be between ${minParty} and ${maxParty}` },
+          { status: 400 }
+        );
+      }
     }
 
     const depositConfig = (venue.deposit_config as { enabled?: boolean; amount_per_person_gbp?: number; online_requires_deposit?: boolean; phone_requires_deposit?: boolean; min_party_size_for_deposit?: number; weekend_only?: boolean }) ?? {};
@@ -117,7 +137,6 @@ export async function POST(request: NextRequest) {
     const timeForDb = booking_time.length === 5 ? booking_time + ':00' : booking_time;
     const timeStr = timeForDb.slice(0, 5);
 
-    const useServiceEngine = await hasServiceConfig(supabase, venue_id);
     let resolvedServiceId: string | null = requestServiceId ?? null;
     let estimatedEndTime: string | null = null;
 

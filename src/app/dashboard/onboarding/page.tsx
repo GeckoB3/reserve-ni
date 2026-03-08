@@ -1,9 +1,10 @@
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { HelpTooltip } from '@/components/dashboard/HelpTooltip';
 import { helpContent } from '@/lib/help-content';
+import { detectOverlaps, formatOverlapWarning } from '@/lib/service-overlap';
 
 type VenueType = 'casual_dining' | 'fine_dining' | 'cafe' | 'pub' | 'fast_casual';
 
@@ -101,6 +102,8 @@ export default function OnboardingPage() {
   function removeService(index: number) {
     setServices(prev => prev.filter((_, i) => i !== index));
   }
+
+  const overlapWarnings = useMemo(() => detectOverlaps(services), [services]);
 
   async function handleFinish() {
     setSaving(true);
@@ -275,6 +278,19 @@ export default function OnboardingPage() {
                   + Add another service
                 </button>
               </div>
+              {overlapWarnings.length > 0 && (
+                <div className="mt-4 rounded-xl border border-amber-300 bg-amber-50 p-4">
+                  <p className="mb-2 text-sm font-semibold text-amber-800">⚠ Overlapping services detected</p>
+                  <ul className="space-y-1 text-xs text-amber-700">
+                    {overlapWarnings.map((w, i) => (
+                      <li key={i}>{formatOverlapWarning(w)}</li>
+                    ))}
+                  </ul>
+                  <p className="mt-2 text-[11px] text-amber-600">
+                    Overlapping services can cause duplicate time slots and capacity issues. Consider adjusting times or active days unless this is intentional.
+                  </p>
+                </div>
+              )}
             </div>
           )}
 

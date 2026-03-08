@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { z } from 'zod';
+import { detectOverlaps, formatOverlapWarning } from '@/lib/service-overlap';
 
 const serviceSchema = z.object({
   name: z.string().min(1).max(100),
@@ -13,6 +14,16 @@ const serviceSchema = z.object({
   is_active: z.boolean().optional(),
   sort_order: z.number().int().optional(),
 });
+
+async function getOverlapWarnings(venueId: string): Promise<string[]> {
+  const admin = getSupabaseAdminClient();
+  const { data } = await admin
+    .from('venue_services')
+    .select('name, days_of_week, start_time, end_time, is_active')
+    .eq('venue_id', venueId);
+  if (!data || data.length < 2) return [];
+  return detectOverlaps(data).map(formatOverlapWarning);
+}
 
 /** GET /api/venue/services — list services for the authenticated user's venue. */
 export async function GET() {
@@ -66,7 +77,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to create service' }, { status: 500 });
     }
 
-    return NextResponse.json({ service: data }, { status: 201 });
+    const overlapWarnings = await getOverlapWarnings(staff.venue_id);
+    return NextResponse.json({ service: data, overlapWarnings }, { status: 201 });
   } catch (err) {
     console.error('POST /api/venue/services failed:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
@@ -99,7 +111,8 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to update service' }, { status: 500 });
     }
 
-    return NextResponse.json({ service: data });
+    const overlapWarnings = await getOverlapWarnings(staff.venue_id);
+    return NextResponse.json({ service: data, overlapWarnings });
   } catch (err) {
     console.error('PATCH /api/venue/services failed:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

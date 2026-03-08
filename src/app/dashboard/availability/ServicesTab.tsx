@@ -1,6 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
+import { detectOverlaps, formatOverlapWarning } from '@/lib/service-overlap';
 
 interface Service {
   id: string;
@@ -50,7 +51,11 @@ export function ServicesTab({ services, setServices, showToast }: Props) {
       setServices([...services, data.service]);
       setCreating(false);
       setDraft(emptyService());
-      showToast('Service created');
+      if (data.overlapWarnings?.length > 0) {
+        showToast(`Service created — Warning: ${data.overlapWarnings[0]}`);
+      } else {
+        showToast('Service created');
+      }
     } catch {
       showToast('Failed to create service');
     } finally {
@@ -70,7 +75,11 @@ export function ServicesTab({ services, setServices, showToast }: Props) {
       const data = await res.json();
       setServices(services.map((s) => (s.id === service.id ? data.service : s)));
       setEditing(null);
-      showToast('Service updated');
+      if (data.overlapWarnings?.length > 0) {
+        showToast(`Service updated — Warning: ${data.overlapWarnings[0]}`);
+      } else {
+        showToast('Service updated');
+      }
     } catch {
       showToast('Failed to update service');
     } finally {
@@ -111,6 +120,17 @@ export function ServicesTab({ services, setServices, showToast }: Props) {
     });
     setCreating(true);
   }
+
+  const overlapWarnings = useMemo(() => {
+    let effective = [...services];
+    if (editing) {
+      effective = effective.map(s => s.id === editing.id ? editing : s);
+    }
+    if (creating && draft.name.trim()) {
+      effective = [...effective, { ...draft, id: '__draft__' } as Service];
+    }
+    return detectOverlaps(effective);
+  }, [services, editing, creating, draft]);
 
   function toggleDay(days: number[], day: number): number[] {
     return days.includes(day) ? days.filter((d) => d !== day) : [...days, day].sort();
@@ -252,6 +272,20 @@ export function ServicesTab({ services, setServices, showToast }: Props) {
           </svg>
           Add Service
         </button>
+      )}
+
+      {overlapWarnings.length > 0 && (
+        <div className="rounded-xl border border-amber-300 bg-amber-50 p-4">
+          <p className="mb-2 text-sm font-semibold text-amber-800">Overlapping services detected</p>
+          <ul className="space-y-1 text-xs text-amber-700">
+            {overlapWarnings.map((w, i) => (
+              <li key={i}>{formatOverlapWarning(w)}</li>
+            ))}
+          </ul>
+          <p className="mt-2 text-[11px] text-amber-600">
+            Overlapping services can cause duplicate time slots and capacity issues. Consider adjusting times or active days unless this is intentional.
+          </p>
+        </div>
       )}
     </div>
   );
