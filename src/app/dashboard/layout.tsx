@@ -14,6 +14,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   let venueName: string | undefined;
   let venueSlug: string | undefined;
   let staffName: string | undefined;
+  let tableManagementEnabled = false;
   try {
     const admin = getSupabaseAdminClient();
     const { data: staffRows } = await admin
@@ -27,11 +28,12 @@ export default async function DashboardLayout({ children }: { children: React.Re
     if (venueId) {
       const { data: venue } = await admin
         .from('venues')
-        .select('name, slug')
+        .select('name, slug, table_management_enabled')
         .eq('id', venueId)
         .single();
       venueName = venue?.name ?? undefined;
       venueSlug = venue?.slug ?? undefined;
+      tableManagementEnabled = venue?.table_management_enabled ?? false;
     }
   } catch {
     // Non-critical; sidebar still renders without venue name
@@ -39,7 +41,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   return (
     <div className="flex h-screen overflow-hidden bg-slate-50">
-      <DashboardSidebar email={email} staffName={staffName} venueName={venueName} venueSlug={venueSlug} />
+      <DashboardSidebar email={email} staffName={staffName} venueName={venueName} venueSlug={venueSlug} tableManagementEnabled={tableManagementEnabled} />
       <main className="flex-1 overflow-y-auto pt-14 lg:pt-0">
         {children}
       </main>

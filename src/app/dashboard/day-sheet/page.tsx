@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation';
 import { DaySheetView } from './DaySheetView';
 import { SwRegister } from './sw-register';
 import { getDashboardStaff } from '@/lib/venue-auth';
+import { ToastProvider } from '@/components/ui/Toast';
 
 export default async function DaySheetPage() {
   const supabase = await createClient();
@@ -22,12 +23,23 @@ export default async function DaySheetPage() {
     );
   }
 
+  const { data: venue } = await staff.db
+    .from('venues')
+    .select('table_management_enabled')
+    .eq('id', venueId)
+    .single();
+
+  if (venue?.table_management_enabled) {
+    redirect('/dashboard/floor-plan');
+  }
+
   return (
     <div className="p-3 md:p-6 lg:p-8">
-      <div className="mx-auto max-w-4xl">
+      <div className="mx-auto max-w-5xl">
         <SwRegister />
-        <h1 className="mb-4 text-2xl font-semibold text-slate-900">Day Sheet</h1>
-        <DaySheetView venueId={venueId} />
+        <ToastProvider>
+          <DaySheetView venueId={venueId} />
+        </ToastProvider>
       </div>
     </div>
   );

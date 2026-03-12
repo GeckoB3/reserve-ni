@@ -20,6 +20,16 @@ async function verifyServiceOwnership(admin: ReturnType<typeof getSupabaseAdminC
   return (count ?? 0) > 0;
 }
 
+async function verifyRuleOwnership(admin: ReturnType<typeof getSupabaseAdminClient>, ruleId: string, venueId: string): Promise<boolean> {
+  const { data: rule } = await admin
+    .from('service_capacity_rules')
+    .select('service_id')
+    .eq('id', ruleId)
+    .maybeSingle();
+  if (!rule?.service_id) return false;
+  return verifyServiceOwnership(admin, rule.service_id, venueId);
+}
+
 /** GET /api/venue/capacity-rules — list all capacity rules for the venue's services. */
 export async function GET() {
   try {
@@ -100,6 +110,9 @@ export async function PATCH(request: NextRequest) {
     if (!id) return NextResponse.json({ error: 'Missing rule id' }, { status: 400 });
 
     const admin = getSupabaseAdminClient();
+    if (!(await verifyRuleOwnership(admin, id, staff.venue_id))) {
+      return NextResponse.json({ error: 'Rule not found' }, { status: 404 });
+    }
     const { data, error } = await admin
       .from('service_capacity_rules')
       .update(fields)
@@ -131,6 +144,9 @@ export async function DELETE(request: NextRequest) {
     if (!body.id) return NextResponse.json({ error: 'Missing rule id' }, { status: 400 });
 
     const admin = getSupabaseAdminClient();
+    if (!(await verifyRuleOwnership(admin, body.id, staff.venue_id))) {
+      return NextResponse.json({ error: 'Rule not found' }, { status: 404 });
+    }
     const { error } = await admin.from('service_capacity_rules').delete().eq('id', body.id);
 
     if (error) {

@@ -7,6 +7,11 @@ import { findOrCreateGuest } from '@/lib/guests';
 import { sendCommunication } from '@/lib/communications';
 import { generateConfirmToken, hashConfirmToken } from '@/lib/confirm-token';
 import { createShortManageLink } from '@/lib/short-manage-link';
+import { autoAssignTable } from '@/lib/table-availability';
+import { computeAvailability, fetchEngineInput, getAvailableSlots } from '@/lib/availability';
+import type { BookingForAvailability, VenueForAvailability } from '@/types/availability';
+import { resolveVenueMode } from '@/lib/venue-mode';
+import { syncTableStatusesForBooking } from '@/lib/table-management/lifecycle';
 import { z } from 'zod';
 import { createHmac } from 'crypto';
 
@@ -64,7 +69,7 @@ export async function POST(request: NextRequest) {
 
     const { data: venue } = await admin
       .from('venues')
-      .select('id, name, stripe_connected_account_id, booking_rules, deposit_config')
+      .select('id, name, stripe_connected_account_id, booking_rules, deposit_config, table_management_enabled, show_table_in_confirmation, opening_hours, availability_config, timezone')
       .eq('id', venueId)
       .single();
 
@@ -80,6 +85,54 @@ export async function POST(request: NextRequest) {
 
     const { guest } = await findOrCreateGuest(admin, venueId, { name, email: email || null, phone });
     const timeForDb = booking_time.length === 5 ? booking_time + ':00' : booking_time;
+    const timeStr = timeForDb.slice(0, 5);
+    const venueMode = await resolveVenueMode(admin, venueId);
+
+    if (venueMode.availabilityEngine === 'service') {
+      const engineInput = await fetchEngineInput({
+        supabase: admin,
+        venueId,
+        date: booking_date,
+        partySize: party_size,
+      });
+      const slots = computeAvailability(engineInput).flatMap((result) => result.slots);
+      const slot = slots.find((s) => s.start_time === timeStr);
+      if (!slot || slot.available_covers < party_size) {
+        return NextResponse.json({ error: 'Selected time is not available' }, { status: 409 });
+      }
+    } else {
+      const { data: existingBookings } = await admin
+        .from('bookings')
+        .select('id, booking_date, booking_time, party_size, status')
+        .eq('venue_id', venueId)
+        .eq('booking_date', booking_date);
+
+      const venueForAvail: VenueForAvailability = {
+        id: venue.id,
+        opening_hours: venue.opening_hours,
+        availability_config: venue.availability_config,
+        timezone: venue.timezone ?? 'Europe/London',
+      };
+      const bookingsForAvail: BookingForAvailability[] = (existingBookings ?? []).map((b) => ({
+        id: b.id,
+        booking_date: b.booking_date,
+        booking_time: typeof b.booking_time === 'string' ? b.booking_time.slice(0, 5) : '00:00',
+        party_size: b.party_size,
+        status: b.status,
+      }));
+      const slots = getAvailableSlots(venueForAvail, booking_date, bookingsForAvail);
+      const slot = slots.find((s) => s.start_time === timeStr || s.key === timeStr);
+      if (!slot || slot.available_covers < party_size) {
+        return NextResponse.json({ error: 'Selected time is not available' }, { status: 409 });
+      }
+    }
+
+    if (requiresDeposit && !venue.stripe_connected_account_id) {
+      return NextResponse.json(
+        { error: 'Venue has not set up payments; deposits are required for this booking type.' },
+        { status: 400 }
+      );
+    }
 
     const bookingInsert = {
       venue_id: venueId,
@@ -103,6 +156,60 @@ export async function POST(request: NextRequest) {
     if (bookErr) {
       console.error('Phone booking insert failed:', bookErr);
       return NextResponse.json({ error: 'Failed to create booking' }, { status: 500 });
+    }
+
+    let assignedTableLabel: string | null = null;
+    if (venueMode.tableManagementEnabled && venueMode.availabilityEngine === 'service') {
+      let durationMins = 90;
+      let bufferMins = 15;
+      try {
+        const timeStr = booking_time.slice(0, 5);
+        const dayOfWeek = new Date(booking_date).getDay();
+        const { data: svcRules } = await admin
+          .from('venue_services')
+          .select('id, service_capacity_rules(buffer_minutes), party_size_durations(min_party_size, max_party_size, duration_minutes)')
+          .eq('venue_id', venueId)
+          .eq('is_active', true)
+          .lte('start_time', timeStr + ':00')
+          .gte('end_time', timeStr + ':00');
+
+        const matchingSvc = (svcRules ?? []).find((s: Record<string, unknown>) => {
+          const days = (s as Record<string, unknown>).active_days as number[] | undefined;
+          return !days || days.includes(dayOfWeek);
+        }) ?? (svcRules ?? [])[0];
+
+        if (matchingSvc) {
+          const durations = (matchingSvc as Record<string, unknown>).party_size_durations as Array<{ min_party_size: number; max_party_size: number; duration_minutes: number }> | undefined;
+          const match = durations?.find((d) => party_size >= d.min_party_size && party_size <= d.max_party_size);
+          if (match) durationMins = match.duration_minutes;
+
+          const capRules = (matchingSvc as Record<string, unknown>).service_capacity_rules as Array<{ buffer_minutes?: number }> | undefined;
+          if (capRules?.[0]?.buffer_minutes) bufferMins = capRules[0].buffer_minutes;
+        }
+      } catch (err) {
+        console.error('Duration lookup failed, using defaults:', err);
+      }
+
+      const assigned = await autoAssignTable(
+        admin,
+        venueId,
+        booking.id,
+        booking_date,
+        booking_time.slice(0, 5),
+        durationMins,
+        bufferMins,
+        party_size,
+      );
+      if (assigned) {
+        assignedTableLabel = assigned.table_names.join(' + ');
+        await syncTableStatusesForBooking(
+          admin,
+          booking.id,
+          assigned.table_ids,
+          bookingInsert.status,
+          staff.id
+        );
+      }
     }
 
     let payment_url: string | undefined;
@@ -178,6 +285,7 @@ export async function POST(request: NextRequest) {
             booking_time,
             party_size,
             cancellation_deadline: bookingInsert.cancellation_deadline,
+              assigned_table: venue.show_table_in_confirmation ? assignedTableLabel : undefined,
             manage_booking_link: manageBookingLink,
             short_manage_link: shortManageLink,
           },

@@ -4,6 +4,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { createHash } from 'crypto';
 
 function normaliseEmail(email: string): string {
   return email.trim().toLowerCase();
@@ -15,6 +16,12 @@ function normalisePhone(phone: string): string {
   if (digits.startsWith('44')) return '+' + digits;
   if (digits.length >= 10) return '+44' + digits.replace(/^0/, '');
   return '+' + digits;
+}
+
+function computeGlobalGuestHash(email: string | null, phone: string | null): string | null {
+  if (!email && !phone) return null;
+  const base = `${email ?? ''}|${phone ?? ''}`;
+  return createHash('sha256').update(base).digest('hex');
 }
 
 export interface GuestInput {
@@ -106,7 +113,7 @@ export async function findOrCreateGuest(
       name,
       email: email || null,
       phone: phone || null,
-      global_guest_hash: null,
+      global_guest_hash: computeGlobalGuestHash(email, phone),
       visit_count: 0,
     })
     .select('id, venue_id, name, email, phone, visit_count')

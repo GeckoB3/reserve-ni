@@ -3,12 +3,15 @@ import { getSupabaseAdminClient } from '@/lib/supabase';
 import { stripe } from '@/lib/stripe';
 import { findOrCreateGuest } from '@/lib/guests';
 import { sendCommunication } from '@/lib/communications';
-import { getAvailableSlots, computeAvailability, hasServiceConfig, fetchEngineInput } from '@/lib/availability';
+import { getAvailableSlots, computeAvailability, fetchEngineInput } from '@/lib/availability';
 import type { VenueForAvailability, BookingForAvailability } from '@/types/availability';
 import { resolveDuration, getDayOfWeek } from '@/lib/availability/engine';
 import { generateConfirmToken, hashConfirmToken } from '@/lib/confirm-token';
 import { z } from 'zod';
 import { createShortManageLink } from '@/lib/short-manage-link';
+import { autoAssignTable } from '@/lib/table-availability';
+import { resolveVenueMode } from '@/lib/venue-mode';
+import { syncTableStatusesForBooking } from '@/lib/table-management/lifecycle';
 
 const createBookingSchema = z.object({
   venue_id: z.string().uuid(),
@@ -67,7 +70,7 @@ export async function POST(request: NextRequest) {
 
     const { data: venue, error: venueErr } = await supabase
       .from('venues')
-      .select('id, name, stripe_connected_account_id, booking_rules, deposit_config, opening_hours, availability_config, timezone')
+      .select('id, name, stripe_connected_account_id, booking_rules, deposit_config, opening_hours, availability_config, timezone, table_management_enabled, show_table_in_confirmation')
       .eq('id', venue_id)
       .single();
 
@@ -75,7 +78,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Venue not found' }, { status: 404 });
     }
 
-    const useServiceEngine = await hasServiceConfig(supabase, venue_id);
+    const venueMode = await resolveVenueMode(supabase, venue_id);
+    const useServiceEngine = venueMode.availabilityEngine === 'service';
 
     if (useServiceEngine) {
       const { data: restrictions } = await supabase
@@ -259,6 +263,43 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to create booking' }, { status: 500 });
     }
 
+    let assignedTableLabel: string | null = null;
+    if (venueMode.tableManagementEnabled && useServiceEngine && estimatedEndTime) {
+      const durationMs = new Date(estimatedEndTime).getTime() - new Date(`${booking_date}T${timeForDb}`).getTime();
+      const durationMins = Math.round(durationMs / 60000);
+      const defaultRule = await supabase
+        .from('service_capacity_rules')
+        .select('buffer_minutes')
+        .eq('service_id', resolvedServiceId!)
+        .is('day_of_week', null)
+        .is('time_range_start', null)
+        .limit(1)
+        .maybeSingle();
+
+      const bufferMins = defaultRule?.data?.buffer_minutes ?? 15;
+
+      const assigned = await autoAssignTable(
+        supabase,
+        venue_id,
+        booking.id,
+        booking_date,
+        timeStr,
+        durationMins,
+        bufferMins,
+        party_size,
+      );
+      if (assigned) {
+        assignedTableLabel = assigned.table_names.join(' + ');
+        await syncTableStatusesForBooking(
+          supabase,
+          booking.id,
+          assigned.table_ids,
+          booking.status,
+          null
+        );
+      }
+    }
+
     let client_secret: string | null = null;
 
     if (requiresDeposit && depositAmountPence != null && depositAmountPence > 0 && venue.stripe_connected_account_id) {
@@ -313,6 +354,7 @@ export async function POST(request: NextRequest) {
             party_size,
             cancellation_deadline,
             deposit_amount: depositAmount,
+            assigned_table: venue.show_table_in_confirmation ? assignedTableLabel : undefined,
             manage_booking_link: manageBookingLink,
             short_manage_link: shortManageLink,
           },

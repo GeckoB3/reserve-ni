@@ -2,12 +2,49 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
+import { replaceBookingAssignments, syncTableStatusesForBooking } from '@/lib/table-management/lifecycle';
 import { z } from 'zod';
 
 const walkInSchema = z.object({
   party_size: z.number().int().min(1).max(50),
   name: z.string().max(200).optional(),
+  phone: z.string().max(30).optional(),
+  table_id: z.string().uuid().optional(),
+  booking_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  booking_time: z.string().regex(/^([01]?[0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9])?$/).optional(),
 });
+
+function venueLocalDateTime(timezone: string): { date: string; hours: number; minutes: number } {
+  const now = new Date();
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: timezone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(now);
+
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? '00';
+  return {
+    date: `${get('year')}-${get('month')}-${get('day')}`,
+    hours: Number(get('hour')),
+    minutes: Number(get('minute')),
+  };
+}
+
+function timeToMinutes(time: string): number {
+  const [hours, minutes] = time.slice(0, 5).split(':').map(Number);
+  return (hours ?? 0) * 60 + (minutes ?? 0);
+}
+
+function extractTime(value: string): string {
+  if (value.includes('T')) {
+    return (value.split('T')[1] ?? '').slice(0, 5);
+  }
+  return value.slice(0, 5);
+}
 
 /**
  * POST /api/venue/bookings/walk-in
@@ -31,15 +68,84 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { party_size, name } = parsed.data;
-
-    const now = new Date();
-    const today = now.toISOString().slice(0, 10);
-    const min = now.getHours() * 60 + now.getMinutes();
-    const nextSlot = Math.ceil(min / 15) * 15;
-    const bookingTime = `${Math.floor(nextSlot / 60).toString().padStart(2, '0')}:${(nextSlot % 60).toString().padStart(2, '0')}:00`;
+    const { party_size, name, phone, table_id, booking_date, booking_time } = parsed.data;
 
     const admin = getSupabaseAdminClient();
+    const { data: venueSettings } = await admin
+      .from('venues')
+      .select('timezone')
+      .eq('id', staff.venue_id)
+      .single();
+    const timezone = venueSettings?.timezone ?? 'Europe/London';
+    const localNow = venueLocalDateTime(timezone);
+    const today = booking_date ?? localNow.date;
+    const min = localNow.hours * 60 + localNow.minutes;
+    const nextSlot = Math.ceil(min / 15) * 15;
+    const roundedTime = `${Math.floor(nextSlot / 60).toString().padStart(2, '0')}:${(nextSlot % 60).toString().padStart(2, '0')}:00`;
+    const bookingTime = booking_time ? (booking_time.length === 5 ? `${booking_time}:00` : booking_time) : roundedTime;
+
+    if (table_id) {
+      const { data: tableCheck } = await admin
+        .from('venue_tables')
+        .select('id, max_covers')
+        .eq('id', table_id)
+        .eq('venue_id', staff.venue_id)
+        .single();
+
+      if (!tableCheck) {
+        return NextResponse.json({ error: 'Table not found or does not belong to this venue' }, { status: 400 });
+      }
+
+      if (party_size > tableCheck.max_covers) {
+        return NextResponse.json({ error: `Party of ${party_size} exceeds table capacity (max ${tableCheck.max_covers})` }, { status: 400 });
+      }
+
+      const bookingStartMinutes = timeToMinutes(bookingTime);
+      const bookingEndMinutes = bookingStartMinutes + 90;
+
+      const { data: existingAssignments } = await admin
+        .from('booking_table_assignments')
+        .select('booking_id, bookings!inner(booking_date, booking_time, estimated_end_time, status)')
+        .eq('table_id', table_id)
+        .eq('bookings.booking_date', today);
+      const hasBookingConflict = (existingAssignments ?? []).some((assignment: {
+        bookings: {
+          booking_date: string | null;
+          booking_time: string | null;
+          estimated_end_time: string | null;
+          status: string | null;
+        };
+      }) => {
+        const details = assignment.bookings;
+        if (!details || !details.booking_time || !details.status) return false;
+        if (!['Pending', 'Confirmed', 'Seated'].includes(details.status)) return false;
+        const existingStart = timeToMinutes(extractTime(details.booking_time));
+        const existingEnd = details.estimated_end_time
+          ? timeToMinutes(extractTime(details.estimated_end_time))
+          : existingStart + 90;
+        return bookingStartMinutes < existingEnd && bookingEndMinutes > existingStart;
+      });
+      if (hasBookingConflict) {
+        return NextResponse.json({ error: 'Selected table is already occupied at that time' }, { status: 409 });
+      }
+
+      const dayStart = `${today}T00:00:00.000Z`;
+      const dayEnd = `${today}T23:59:59.999Z`;
+      const { data: existingBlocks } = await admin
+        .from('table_blocks')
+        .select('start_at, end_at')
+        .eq('table_id', table_id)
+        .lt('start_at', dayEnd)
+        .gt('end_at', dayStart);
+      const hasBlockConflict = (existingBlocks ?? []).some((block: { start_at: string; end_at: string }) => {
+        const existingStart = timeToMinutes(new Date(block.start_at).toISOString().slice(11, 16));
+        const existingEnd = timeToMinutes(new Date(block.end_at).toISOString().slice(11, 16));
+        return bookingStartMinutes < existingEnd && bookingEndMinutes > existingStart;
+      });
+      if (hasBlockConflict) {
+        return NextResponse.json({ error: 'Selected table is blocked at that time' }, { status: 409 });
+      }
+    }
 
     const { data: guest, error: guestErr } = await admin
       .from('guests')
@@ -47,7 +153,7 @@ export async function POST(request: NextRequest) {
         venue_id: staff.venue_id,
         name: name?.trim() || 'Walk-in',
         email: null,
-        phone: null,
+        phone: phone?.trim() || null,
         visit_count: 1,
       })
       .select('id')
@@ -76,6 +182,11 @@ export async function POST(request: NextRequest) {
     if (bookErr) {
       console.error('Walk-in booking insert failed:', bookErr);
       return NextResponse.json({ error: 'Failed to create booking' }, { status: 500 });
+    }
+
+    if (table_id) {
+      await replaceBookingAssignments(admin, booking.id, [table_id], staff.id);
+      await syncTableStatusesForBooking(admin, booking.id, [table_id], 'Seated', staff.id);
     }
 
     return NextResponse.json(booking, { status: 201 });

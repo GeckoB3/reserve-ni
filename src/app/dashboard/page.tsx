@@ -56,6 +56,8 @@ export default function DashboardHomePage() {
     return <p className="p-8 text-sm text-slate-500">Failed to load dashboard data.</p>;
   }
 
+  const todayUtilisation = data.heatmap.find((d) => d.date === new Date().toISOString().slice(0, 10))?.fillPercent ?? null;
+
   return (
     <div className="p-6 lg:p-8 space-y-6">
       <h1 className="text-xl font-bold text-slate-900">Dashboard</h1>
@@ -80,6 +82,16 @@ export default function DashboardHomePage() {
             <svg className="h-5 w-5 text-amber-500" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" /></svg>
           }
         />
+      </div>
+
+      <div className="rounded-xl border border-slate-200 bg-white p-4">
+        <p className="text-xs font-medium text-slate-500">Today&apos;s Capacity Utilisation</p>
+        <p className="mt-1 text-2xl font-bold text-slate-900">
+          {todayUtilisation != null ? `${todayUtilisation}%` : '—'}
+        </p>
+        <p className="mt-1 text-xs text-slate-500">
+          {todayUtilisation != null ? 'Booked covers vs available covers for today.' : 'No utilisation data available for today.'}
+        </p>
       </div>
 
       {/* Alerts */}

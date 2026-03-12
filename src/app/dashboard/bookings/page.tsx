@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
 import { BookingsDashboard } from './BookingsDashboard';
 import { getDashboardStaff } from '@/lib/venue-auth';
+import { ToastProvider } from '@/components/ui/Toast';
 
 export default async function BookingsPage() {
   const supabase = await createClient();
@@ -25,7 +26,9 @@ export default async function BookingsPage() {
     <div className="p-4 md:p-6 lg:p-8">
       <div className="mx-auto max-w-6xl">
         <h1 className="mb-6 text-2xl font-semibold text-slate-900">Reservations</h1>
-        <BookingsDashboard venueId={venueId} />
+        <ToastProvider>
+          <BookingsDashboard venueId={venueId} />
+        </ToastProvider>
       </div>
     </div>
   );

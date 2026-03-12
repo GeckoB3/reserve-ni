@@ -20,14 +20,14 @@ function isDaySheetPage(url) {
   return url.pathname.includes('/dashboard/day-sheet');
 }
 
-function isBookingsApi(url) {
-  return url.pathname.startsWith('/api/venue/bookings');
+function isDaySheetApi(url) {
+  return url.pathname.startsWith('/api/venue/day-sheet') || url.pathname.startsWith('/api/venue/bookings');
 }
 
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
-  if (!isDaySheetPage(url) && !isBookingsApi(url)) {
+  if (!isDaySheetPage(url) && !isDaySheetApi(url)) {
     return;
   }
 

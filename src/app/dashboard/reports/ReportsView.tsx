@@ -37,10 +37,18 @@ interface Report4 {
 interface ReportsData {
   from: string;
   to: string;
+  table_management_enabled?: boolean;
   report1_booking_summary: Report1 | null;
   report2_no_show_series: Report2Row[];
   report3_cancellation: Report3 | null;
   report4_deposit: Report4 | null;
+  report5_table_utilisation?: Array<{
+    table_id: string;
+    table_name: string;
+    utilisation_pct: number;
+    occupied_hours: number;
+    available_hours: number;
+  }>;
 }
 
 const COLORS = ['#4E6B78', '#059669', '#f59e0b', '#ef4444', '#8b5cf6', '#6b7280'];
@@ -130,6 +138,19 @@ export function ReportsView() {
     ]);
   }, [data]);
 
+  const exportReport5 = useCallback(() => {
+    if (!data?.report5_table_utilisation?.length) return;
+    downloadCsv(`report5-table-utilisation-${data.from}-${data.to}.csv`, [
+      ['Table', 'Utilisation %', 'Occupied hours', 'Available hours'],
+      ...data.report5_table_utilisation.map((row) => [
+        row.table_name,
+        String(row.utilisation_pct),
+        String(row.occupied_hours),
+        String(row.available_hours),
+      ]),
+    ]);
+  }, [data]);
+
   if (loading && !data) {
     return (
       <div className="space-y-5">
@@ -153,6 +174,7 @@ export function ReportsView() {
   const r2 = data?.report2_no_show_series ?? [];
   const r3 = data?.report3_cancellation;
   const r4 = data?.report4_deposit;
+  const r5 = data?.report5_table_utilisation ?? [];
 
   const sourcePieData = r1?.by_source ? Object.entries(r1.by_source).map(([name, value]) => ({ name, value })) : [];
   const statusBarData = r1?.by_status ? Object.entries(r1.by_status).map(([source, count]) => ({ source, count })) : [];
@@ -277,6 +299,40 @@ export function ReportsView() {
           </div>
         )}
       </ReportSection>
+
+      {data?.table_management_enabled && (
+        <ReportSection title="Table Utilisation" onExport={exportReport5}>
+          {r5.length > 0 ? (
+            <div className="space-y-2">
+              {r5.map((row) => (
+                <div key={row.table_id} className="rounded-lg border border-slate-100 bg-slate-50/50 p-3">
+                  <div className="mb-1 flex items-center justify-between">
+                    <p className="text-sm font-medium text-slate-800">{row.table_name}</p>
+                    <p className={`text-sm font-semibold ${
+                      row.utilisation_pct < 50 ? 'text-amber-700' : row.utilisation_pct > 90 ? 'text-emerald-700' : 'text-slate-700'
+                    }`}>
+                      {row.utilisation_pct}%
+                    </p>
+                  </div>
+                  <div className="h-2 rounded-full bg-slate-200">
+                    <div
+                      className={`h-2 rounded-full ${
+                        row.utilisation_pct < 50 ? 'bg-amber-500' : row.utilisation_pct > 90 ? 'bg-emerald-500' : 'bg-brand-500'
+                      }`}
+                      style={{ width: `${Math.min(100, row.utilisation_pct)}%` }}
+                    />
+                  </div>
+                  <p className="mt-1 text-[11px] text-slate-500">
+                    {row.occupied_hours}h occupied / {row.available_hours}h available
+                  </p>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-slate-400">No table utilisation data for this range.</p>
+          )}
+        </ReportSection>
+      )}
     </div>
   );
 }

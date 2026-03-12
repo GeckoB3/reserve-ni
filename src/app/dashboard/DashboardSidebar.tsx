@@ -8,12 +8,11 @@ import { createClient } from '@/lib/supabase/browser';
 const NAV_ITEMS = [
   { href: '/dashboard', label: 'Home', icon: HomeIcon },
   { href: '/dashboard/bookings', label: 'Reservations', icon: CalendarIcon },
-  { href: '/dashboard/day-sheet', label: 'Day Sheet', icon: ClipboardIcon },
   { href: '/dashboard/bookings/new', label: 'New Booking', icon: PlusIcon },
-  { href: '/dashboard/availability', label: 'Availability', icon: ClockIcon },
   { href: '/dashboard/waitlist', label: 'Waitlist', icon: QueueIcon },
   { href: '/dashboard/reports', label: 'Reports', icon: ChartIcon },
   { href: '/dashboard/settings', label: 'Settings', icon: CogIcon },
+  { href: '/dashboard/availability', label: 'Availability', icon: ClockIcon },
 ];
 
 interface Props {
@@ -21,9 +20,10 @@ interface Props {
   staffName?: string;
   venueName?: string;
   venueSlug?: string;
+  tableManagementEnabled?: boolean;
 }
 
-export function DashboardSidebar({ email, staffName, venueName, venueSlug }: Props) {
+export function DashboardSidebar({ email, staffName, venueName, venueSlug, tableManagementEnabled }: Props) {
   const pathname = usePathname();
   const router = useRouter();
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -84,6 +84,40 @@ export function DashboardSidebar({ email, staffName, venueName, venueSlug }: Pro
         {/* Nav links */}
         <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-1">
           {NAV_ITEMS.map((item) => {
+            if (item.href === '/dashboard/bookings' && !tableManagementEnabled) {
+              const daySheetActive = pathname.startsWith('/dashboard/day-sheet');
+              return (
+                <div key="reservations-with-day-sheet" className="space-y-1">
+                  <Link
+                    href="/dashboard/day-sheet"
+                    onClick={() => setMobileOpen(false)}
+                    className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
+                      daySheetActive
+                        ? 'bg-brand-50 text-brand-700'
+                        : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                    }`}
+                  >
+                    <ClipboardIcon className={`h-5 w-5 flex-shrink-0 ${daySheetActive ? 'text-brand-600' : 'text-slate-400'}`} />
+                    Day Sheet
+                  </Link>
+                  <Link
+                    href={item.href}
+                    onClick={() => setMobileOpen(false)}
+                    className={`
+                      flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors
+                      ${isActive(item.href)
+                        ? 'bg-brand-50 text-brand-700'
+                        : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                      }
+                    `}
+                  >
+                    <item.icon className={`h-5 w-5 flex-shrink-0 ${isActive(item.href) ? 'text-brand-600' : 'text-slate-400'}`} />
+                    {item.label}
+                  </Link>
+                </div>
+              );
+            }
+
             const active = isActive(item.href);
             return (
               <Link
@@ -103,6 +137,35 @@ export function DashboardSidebar({ email, staffName, venueName, venueSlug }: Pro
               </Link>
             );
           })}
+
+          {tableManagementEnabled && (
+            <>
+              <Link
+                href="/dashboard/table-grid"
+                onClick={() => setMobileOpen(false)}
+                className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
+                  pathname.startsWith('/dashboard/table-grid')
+                    ? 'bg-brand-50 text-brand-700'
+                    : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                }`}
+              >
+                <TableGridIcon className={`h-5 w-5 flex-shrink-0 ${pathname.startsWith('/dashboard/table-grid') ? 'text-brand-600' : 'text-slate-400'}`} />
+                Table Grid
+              </Link>
+              <Link
+                href="/dashboard/floor-plan"
+                onClick={() => setMobileOpen(false)}
+                className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
+                  pathname.startsWith('/dashboard/floor-plan')
+                    ? 'bg-brand-50 text-brand-700'
+                    : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                }`}
+              >
+                <MapIcon className={`h-5 w-5 flex-shrink-0 ${pathname.startsWith('/dashboard/floor-plan') ? 'text-brand-600' : 'text-slate-400'}`} />
+                Floor Plan
+              </Link>
+            </>
+          )}
 
           {/* Your Booking Page — external link */}
           {venueSlug && (
@@ -243,6 +306,30 @@ function ExternalLinkIcon({ className }: { className?: string }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
       <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+    </svg>
+  );
+}
+
+function GridIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" />
+    </svg>
+  );
+}
+
+function TableGridIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M3.375 19.5h17.25m-17.25 0a1.125 1.125 0 0 1-1.125-1.125M3.375 19.5h7.5c.621 0 1.125-.504 1.125-1.125m-9.75 0V5.625m0 12.75v-1.5c0-.621.504-1.125 1.125-1.125m18.375 2.625V5.625m0 12.75c0 .621-.504 1.125-1.125 1.125m1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125m0 3.75h-7.5A1.125 1.125 0 0 1 12 18.375m9.75-12.75c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125m19.5 0v1.5c0 .621-.504 1.125-1.125 1.125M2.25 5.625v1.5c0 .621.504 1.125 1.125 1.125m0 0h17.25m-17.25 0h7.5c.621 0 1.125.504 1.125 1.125M3.375 8.25c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125m17.25-3.75h-7.5c-.621 0-1.125.504-1.125 1.125m8.625-1.125c.621 0 1.125.504 1.125 1.125v1.5c0 .621-.504 1.125-1.125 1.125m-17.25 0h7.5m-7.5 0c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125M12 10.875v-1.5m0 1.5c0 .621-.504 1.125-1.125 1.125M12 10.875c0 .621.504 1.125 1.125 1.125m-2.25 0c.621 0 1.125.504 1.125 1.125M10.875 12c-.621 0-1.125.504-1.125 1.125M12 12c.621 0 1.125.504 1.125 1.125m-2.25 0c.621 0 1.125.504 1.125 1.125m0 0v1.5c0 .621-.504 1.125-1.125 1.125" />
+    </svg>
+  );
+}
+
+function MapIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M9 6.75V15m6-6v8.25m.503 3.498l4.875-2.437c.381-.19.622-.58.622-1.006V4.82c0-.836-.88-1.38-1.628-1.006l-3.869 1.934c-.317.159-.69.159-1.006 0L9.503 3.252a1.125 1.125 0 00-1.006 0L3.622 5.689C3.24 5.88 3 6.27 3 6.695V19.18c0 .836.88 1.38 1.628 1.006l3.869-1.934c.317-.159.69-.159 1.006 0l4.994 2.497c.317.158.69.158 1.006 0z" />
     </svg>
   );
 }

@@ -3,11 +3,20 @@ import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { stripe } from '@/lib/stripe';
-import { getAvailableSlots } from '@/lib/availability';
+import { computeAvailability, fetchEngineInput, getAvailableSlots } from '@/lib/availability';
+import { autoAssignTable } from '@/lib/table-availability';
+import { BOOKING_MUTABLE_STATUSES } from '@/lib/table-management/constants';
+import {
+  clearTableStatusesForBooking,
+  getAssignedTableIds,
+  replaceBookingAssignments,
+  syncTableStatusesForBooking,
+} from '@/lib/table-management/lifecycle';
 import type { VenueForAvailability, BookingForAvailability } from '@/types/availability';
+import { resolveVenueMode } from '@/lib/venue-mode';
 import { z } from 'zod';
 
-const statusSchema = z.enum(['Pending', 'Confirmed', 'Cancelled', 'No-Show', 'Completed', 'Seated']);
+const statusSchema = z.enum(BOOKING_MUTABLE_STATUSES);
 
 /** GET /api/venue/bookings/[id] — full booking detail with guest and events timeline. */
 export async function GET(
@@ -56,12 +65,23 @@ export async function GET(
       ? booking.booking_time.slice(0, 5)
       : '';
 
+    const { data: tableAssignments } = await staff.db
+      .from('booking_table_assignments')
+      .select('table_id, table:venue_tables(id, name)')
+      .eq('booking_id', id);
+
+    const assignedTables = (tableAssignments ?? []).map((a: { table_id: string; table: unknown }) => {
+      const tbl = a.table as { id: string; name: string } | null;
+      return { id: tbl?.id ?? a.table_id, name: tbl?.name ?? 'Unknown' };
+    });
+
     return NextResponse.json({
       ...booking,
       booking_time: bookingTimeStr,
       guest: guest ?? null,
       events: events ?? [],
       communications: communications ?? [],
+      table_assignments: assignedTables,
     });
   } catch (err) {
     console.error('GET /api/venue/bookings/[id] failed:', err);
@@ -69,7 +89,7 @@ export async function GET(
   }
 }
 
-/** PATCH /api/venue/bookings/[id] — status change or modify date/time/party_size. */
+/** PATCH /api/venue/bookings/[id] — status change or modify booking fields. */
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -107,7 +127,7 @@ export async function PATCH(
       const validTransitions: Record<string, string[]> = {
         Pending: ['Confirmed', 'Cancelled'],
         Confirmed: ['Seated', 'No-Show', 'Cancelled'],
-        Seated: ['Completed', 'No-Show'],
+        Seated: ['Completed', 'Cancelled'],
         Completed: [],
         'No-Show': [],
         Cancelled: [],
@@ -178,6 +198,9 @@ export async function PATCH(
                 party_size: booking.party_size,
                 refund_message,
               },
+              venue_id: staff.venue_id,
+              booking_id: id,
+              guest_id: booking.guest_id,
             });
           } catch (commsErr) {
             console.error('Staff cancellation notification failed:', commsErr);
@@ -189,33 +212,48 @@ export async function PATCH(
           .from('bookings')
           .update({ status: 'No-Show', deposit_status: depositStatus, updated_at: new Date().toISOString() })
           .eq('id', id);
-        const { sendCommunication } = await import('@/lib/communications');
-        const { data: guestRow } = await staff.db.from('guests').select('name, email').eq('id', booking.guest_id).single();
-        const { data: venueRow } = await staff.db.from('venues').select('name').eq('id', staff.venue_id).single();
-        if (guestRow?.email && venueRow?.name) {
-          const depositAmount = booking.deposit_amount_pence != null ? (booking.deposit_amount_pence / 100).toFixed(2) : undefined;
-          const bookingTime = typeof booking.booking_time === 'string' ? booking.booking_time.slice(0, 5) : '';
-          try {
-            await sendCommunication({
-              type: 'no_show_notification',
-              recipient: { email: guestRow.email },
-              payload: {
-                guest_name: guestRow.name ?? 'Guest',
-                venue_name: venueRow.name,
-                booking_date: booking.booking_date,
-                booking_time: bookingTime,
-                deposit_amount: depositStatus === 'Forfeited' ? depositAmount : undefined,
-              },
-            });
-          } catch (commsErr) {
-            console.error('No-show notification failed:', commsErr);
-          }
-        }
       } else {
         await staff.db
           .from('bookings')
           .update({ status: newStatus, updated_at: new Date().toISOString() })
           .eq('id', id);
+
+        if (booking.status === 'Pending' && newStatus === 'Confirmed') {
+          const { data: existingConfirmation } = await staff.db
+            .from('communications')
+            .select('id')
+            .eq('booking_id', id)
+            .eq('message_type', 'booking_confirmation')
+            .limit(1)
+            .maybeSingle();
+          if (!existingConfirmation) {
+            const { sendCommunication } = await import('@/lib/communications');
+            const { data: guestRow } = await staff.db.from('guests').select('name, email, phone').eq('id', booking.guest_id).single();
+            const { data: venueRow } = await staff.db.from('venues').select('name').eq('id', staff.venue_id).single();
+            if (guestRow && venueRow?.name) {
+              const bookingTime = typeof booking.booking_time === 'string' ? booking.booking_time.slice(0, 5) : '';
+              try {
+                await sendCommunication({
+                  type: 'booking_confirmation',
+                  recipient: { email: guestRow.email ?? undefined, phone: guestRow.phone ?? undefined },
+                  payload: {
+                    guest_name: guestRow.name ?? 'Guest',
+                    venue_name: venueRow.name,
+                    booking_date: booking.booking_date,
+                    booking_time: bookingTime,
+                    party_size: booking.party_size,
+                    cancellation_deadline: booking.cancellation_deadline ?? undefined,
+                  },
+                  venue_id: staff.venue_id,
+                  booking_id: id,
+                  guest_id: booking.guest_id,
+                });
+              } catch (commsErr) {
+                console.error('Booking confirmation on status confirm failed:', commsErr);
+              }
+            }
+          }
+        }
 
         if (newStatus === 'Seated') {
           const today = new Date().toISOString().slice(0, 10);
@@ -242,6 +280,70 @@ export async function PATCH(
           .eq('id', booking.guest_id);
       }
 
+      const assignedTableIds = await getAssignedTableIds(staff.db, id);
+      if (newStatus === 'Cancelled' || newStatus === 'No-Show' || newStatus === 'Completed') {
+        await clearTableStatusesForBooking(staff.db, id, staff.id);
+      } else if (newStatus === 'Seated' || newStatus === 'Confirmed' || newStatus === 'Pending') {
+        await syncTableStatusesForBooking(staff.db, id, assignedTableIds, newStatus, staff.id);
+      }
+
+      const updated = await staff.db.from('bookings').select('*').eq('id', id).single();
+      return NextResponse.json(updated.data);
+    }
+
+    if (
+      body.special_requests !== undefined ||
+      body.internal_notes !== undefined ||
+      body.dietary_notes !== undefined ||
+      body.occasion !== undefined ||
+      body.guest_name !== undefined ||
+      body.guest_phone !== undefined ||
+      body.guest_email !== undefined
+    ) {
+      const bookingUpdatePayload: Record<string, unknown> = {
+        updated_at: new Date().toISOString(),
+      };
+      let hasBookingUpdate = false;
+      if (body.special_requests !== undefined) {
+        bookingUpdatePayload.special_requests = typeof body.special_requests === 'string' ? body.special_requests : null;
+        hasBookingUpdate = true;
+      }
+      if (body.internal_notes !== undefined) {
+        bookingUpdatePayload.internal_notes = typeof body.internal_notes === 'string' ? body.internal_notes : null;
+        hasBookingUpdate = true;
+      }
+      if (body.dietary_notes !== undefined) {
+        bookingUpdatePayload.dietary_notes = typeof body.dietary_notes === 'string' ? body.dietary_notes : null;
+        hasBookingUpdate = true;
+      }
+      if (body.occasion !== undefined) {
+        bookingUpdatePayload.occasion = typeof body.occasion === 'string' ? body.occasion : null;
+        hasBookingUpdate = true;
+      }
+      if (hasBookingUpdate) {
+        await staff.db
+          .from('bookings')
+          .update(bookingUpdatePayload)
+          .eq('id', id)
+          .eq('venue_id', staff.venue_id);
+      }
+
+      if (body.guest_name !== undefined || body.guest_phone !== undefined || body.guest_email !== undefined) {
+        const guestUpdatePayload: Record<string, unknown> = {
+          updated_at: new Date().toISOString(),
+        };
+        if (body.guest_name !== undefined) {
+          guestUpdatePayload.name = typeof body.guest_name === 'string' && body.guest_name.trim() ? body.guest_name.trim() : null;
+        }
+        if (body.guest_phone !== undefined) {
+          guestUpdatePayload.phone = typeof body.guest_phone === 'string' && body.guest_phone.trim() ? body.guest_phone.trim() : null;
+        }
+        if (body.guest_email !== undefined) {
+          guestUpdatePayload.email = typeof body.guest_email === 'string' && body.guest_email.trim() ? body.guest_email.trim() : null;
+        }
+        await staff.db.from('guests').update(guestUpdatePayload).eq('id', booking.guest_id);
+      }
+
       const updated = await staff.db.from('bookings').select('*').eq('id', id).single();
       return NextResponse.json(updated.data);
     }
@@ -260,39 +362,57 @@ export async function PATCH(
       if (!venue) {
         return NextResponse.json({ error: 'Venue not found' }, { status: 500 });
       }
-
-      const { data: allBookings } = await admin
-        .from('bookings')
-        .select('id, booking_date, booking_time, party_size, status')
-        .eq('venue_id', staff.venue_id)
-        .eq('booking_date', newDate);
-
-      const bookingsForAvail: BookingForAvailability[] = (allBookings ?? [])
-        .filter((b: { id: string }) => b.id !== id)
-        .filter((b: { status: string }) => ['Confirmed', 'Pending'].includes(b.status))
-        .map((b: { id: string; booking_date: string; booking_time: string; party_size: number; status: string }) => ({
-          id: b.id,
-          booking_date: b.booking_date,
-          booking_time: typeof b.booking_time === 'string' ? b.booking_time.slice(0, 5) : '00:00',
-          party_size: b.party_size,
-          status: b.status,
-        }));
-
-      const venueForAvail: VenueForAvailability = {
-        id: venue.id,
-        opening_hours: venue.opening_hours,
-        availability_config: venue.availability_config,
-        timezone: venue.timezone ?? 'Europe/London',
-      };
-
-      const slots = getAvailableSlots(venueForAvail, newDate, bookingsForAvail);
       const timeStr = newTime.slice(0, 5);
-      const slot = slots.find((s) => s.start_time === timeStr || s.key === timeStr);
-      if (!slot || slot.available_covers < newPartySize) {
-        return NextResponse.json(
-          { error: 'Selected date/time is not available or has insufficient capacity' },
-          { status: 409 }
-        );
+      const venueMode = await resolveVenueMode(admin, staff.venue_id);
+      if (venueMode.availabilityEngine === 'service') {
+        const engineInput = await fetchEngineInput({
+          supabase: admin,
+          venueId: staff.venue_id,
+          date: newDate,
+          partySize: newPartySize,
+        });
+        engineInput.bookings = engineInput.bookings.filter((b) => b.id !== id);
+        const slots = computeAvailability(engineInput).flatMap((result) => result.slots);
+        const slot = slots.find((s) => s.start_time === timeStr && (!booking.service_id || s.service_id === booking.service_id));
+        if (!slot || slot.available_covers < newPartySize) {
+          return NextResponse.json(
+            { error: 'Selected date/time is not available or has insufficient capacity' },
+            { status: 409 }
+          );
+        }
+      } else {
+        const { data: allBookings } = await admin
+          .from('bookings')
+          .select('id, booking_date, booking_time, party_size, status')
+          .eq('venue_id', staff.venue_id)
+          .eq('booking_date', newDate);
+
+        const bookingsForAvail: BookingForAvailability[] = (allBookings ?? [])
+          .filter((b: { id: string }) => b.id !== id)
+          .filter((b: { status: string }) => ['Confirmed', 'Pending'].includes(b.status))
+          .map((b: { id: string; booking_date: string; booking_time: string; party_size: number; status: string }) => ({
+            id: b.id,
+            booking_date: b.booking_date,
+            booking_time: typeof b.booking_time === 'string' ? b.booking_time.slice(0, 5) : '00:00',
+            party_size: b.party_size,
+            status: b.status,
+          }));
+
+        const venueForAvail: VenueForAvailability = {
+          id: venue.id,
+          opening_hours: venue.opening_hours,
+          availability_config: venue.availability_config,
+          timezone: venue.timezone ?? 'Europe/London',
+        };
+
+        const slots = getAvailableSlots(venueForAvail, newDate, bookingsForAvail);
+        const slot = slots.find((s) => s.start_time === timeStr || s.key === timeStr);
+        if (!slot || slot.available_covers < newPartySize) {
+          return NextResponse.json(
+            { error: 'Selected date/time is not available or has insufficient capacity' },
+            { status: 409 }
+          );
+        }
       }
 
       const before = {
@@ -308,8 +428,6 @@ export async function PATCH(
         updated_at: new Date().toISOString(),
       };
 
-      let additionalDepositClientSecret: string | null = null;
-
       if (newPartySize > booking.party_size && booking.deposit_status === 'Paid' && booking.deposit_amount_pence) {
         const { data: venueForDeposit } = await admin
           .from('venues')
@@ -324,7 +442,7 @@ export async function PATCH(
 
         if (additionalPence > 0 && venueForDeposit?.stripe_connected_account_id) {
           try {
-            const pi = await stripe.paymentIntents.create(
+            await stripe.paymentIntents.create(
               {
                 amount: additionalPence,
                 currency: 'gbp',
@@ -333,7 +451,6 @@ export async function PATCH(
               },
               { stripeAccount: venueForDeposit.stripe_connected_account_id }
             );
-            additionalDepositClientSecret = pi.client_secret;
             bookingUpdate.deposit_amount_pence = booking.deposit_amount_pence + additionalPence;
             bookingUpdate.deposit_status = 'Pending';
           } catch (stripeErr) {
@@ -354,6 +471,27 @@ export async function PATCH(
         payload: { before, after: { booking_date: newDate, booking_time: timeStr, party_size: newPartySize } },
       });
 
+      const dateChanged = newDate !== booking.booking_date;
+      const timeChanged = timeStr !== before.booking_time;
+      const partySizeChanged = newPartySize !== booking.party_size;
+
+      if (dateChanged || timeChanged || partySizeChanged) {
+        const { data: venueForTables } = await admin
+          .from('venues')
+          .select('table_management_enabled')
+          .eq('id', staff.venue_id)
+          .single();
+
+        if (venueForTables?.table_management_enabled) {
+          await replaceBookingAssignments(admin, id, [], staff.id);
+          await clearTableStatusesForBooking(admin, id, staff.id);
+
+          await autoAssignTable(admin, staff.venue_id, id, newDate, timeStr, 90, 15, newPartySize);
+          const nextAssigned = await getAssignedTableIds(admin, id);
+          await syncTableStatusesForBooking(admin, id, nextAssigned, booking.status, staff.id);
+        }
+      }
+
       const { data: guestRow } = await staff.db.from('guests').select('name, email, phone').eq('id', booking.guest_id).single();
       const { data: venueRow } = await staff.db.from('venues').select('name').eq('id', staff.venue_id).single();
       if (guestRow?.email && venueRow?.name) {
@@ -371,6 +509,9 @@ export async function PATCH(
               party_size: newPartySize,
               deposit_amount: depositAmount,
             },
+            venue_id: staff.venue_id,
+            booking_id: id,
+            guest_id: booking.guest_id,
           });
         } catch (commsErr) {
           console.error('Booking modification notification failed:', commsErr);

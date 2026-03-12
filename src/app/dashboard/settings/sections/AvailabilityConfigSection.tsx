@@ -45,6 +45,7 @@ export function AvailabilityConfigSection({ venue, onUpdate, isAdmin }: Availabi
 
   const config = venue.availability_config ?? defaultFixed;
   const [local, setLocal] = useState<AvailabilityConfigSettings>(config);
+  const [blockedDateInput, setBlockedDateInput] = useState('');
 
   const save = useCallback(async () => {
     setError(null);
@@ -79,6 +80,10 @@ export function AvailabilityConfigSection({ venue, onUpdate, isAdmin }: Availabi
 
   const updateNamedSittings = useCallback((sittings: NamedSittingSettings[]) => {
     setLocal((prev) => (prev.model === 'named_sittings' ? { ...prev, sittings } : { ...defaultNamed, sittings }));
+  }, []);
+
+  const updateBlockedDates = useCallback((blocked_dates: string[]) => {
+    setLocal((prev) => ({ ...prev, blocked_dates }));
   }, []);
 
   const addSitting = useCallback(() => {
@@ -214,6 +219,50 @@ export function AvailabilityConfigSection({ venue, onUpdate, isAdmin }: Availabi
           )}
         </div>
       )}
+
+      <div className="mt-4 rounded border border-neutral-200 bg-neutral-50 p-3">
+        <p className="mb-2 text-sm font-medium text-neutral-700">Blocked dates</p>
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            type="date"
+            value={blockedDateInput}
+            onChange={(e) => setBlockedDateInput(e.target.value)}
+            disabled={!isAdmin}
+            className="rounded border border-neutral-300 px-3 py-1.5 text-sm disabled:bg-neutral-100"
+          />
+          <button
+            type="button"
+            disabled={!isAdmin || !blockedDateInput}
+            onClick={() => {
+              if (!blockedDateInput) return;
+              const next = new Set(local.blocked_dates ?? []);
+              next.add(blockedDateInput);
+              updateBlockedDates([...next].sort());
+              setBlockedDateInput('');
+            }}
+            className="rounded bg-neutral-900 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
+          >
+            Add blocked date
+          </button>
+        </div>
+        {(local.blocked_dates ?? []).length > 0 ? (
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {(local.blocked_dates ?? []).map((dateValue) => (
+              <button
+                key={dateValue}
+                type="button"
+                disabled={!isAdmin}
+                onClick={() => updateBlockedDates((local.blocked_dates ?? []).filter((d) => d !== dateValue))}
+                className="rounded-full border border-neutral-300 bg-white px-2.5 py-1 text-xs text-neutral-700 hover:bg-neutral-100 disabled:opacity-60"
+              >
+                {dateValue} ×
+              </button>
+            ))}
+          </div>
+        ) : (
+          <p className="mt-2 text-xs text-neutral-500">No blocked dates configured.</p>
+        )}
+      </div>
 
       {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
       {isAdmin && (

@@ -46,6 +46,23 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Update failed' }, { status: 500 });
     }
 
+    const eventRows = (bookings ?? []).map((b) => ({
+      venue_id: b.venue_id,
+      booking_id: b.id,
+      event_type: 'auto_cancelled',
+      payload: {
+        reason: 'deposit_unpaid_timeout',
+        source: 'auto-cancel-bookings-cron',
+        cutoff,
+      },
+    }));
+    if (eventRows.length > 0) {
+      const { error: eventErr } = await supabase.from('events').insert(eventRows);
+      if (eventErr) {
+        console.error('auto-cancel events insert failed:', eventErr);
+      }
+    }
+
     for (const b of bookings ?? []) {
       const { data: guest } = await supabase.from('guests').select('name, email, phone').eq('id', b.guest_id).single();
       const { data: venue } = await supabase.from('venues').select('name').eq('id', b.venue_id).single();

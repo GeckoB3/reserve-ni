@@ -91,6 +91,14 @@ You had a reservation at {{venue_name}} for {{booking_date}} at {{booking_time}}
 If you need to rebook, we’d love to see you.
 {{venue_name}}`,
   },
+  custom_message: {
+    subject: 'Message from {{venue_name}}',
+    body: `Hi {{guest_name}},
+
+{{message}}
+
+{{venue_name}}`,
+  },
   auto_cancel_notification: {
     subject: 'Booking cancelled – {{venue_name}}',
     body: `Hi {{guest_name}},
@@ -180,6 +188,7 @@ const SMS_TEMPLATES: Partial<Record<MessageType, string>> = {
   booking_modification: `{{venue_name}}: Your booking has been updated to {{booking_date}} at {{booking_time}} ({{party_size}} guests).`,
   cancellation_confirmation: `{{venue_name}}: Your booking for {{booking_date}} at {{booking_time}} has been cancelled.{{#refund_message}} {{refund_message}}{{/refund_message}} We hope to see you another time.`,
   auto_cancel_notification: `{{venue_name}}: Your booking for {{booking_date}} at {{booking_time}} was cancelled (deposit not paid in time).`,
+  custom_message: `{{venue_name}}: {{message}}`,
 };
 
 function stripOptionalBlocks(text: string, variables: Record<string, string | number | undefined>): string {

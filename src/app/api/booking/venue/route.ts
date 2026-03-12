@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
-import { hasServiceConfig } from '@/lib/availability';
+import { resolveVenueMode } from '@/lib/venue-mode';
 
 /**
  * GET /api/booking/venue?slug=venue-slug
@@ -29,7 +29,8 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Venue not found' }, { status: 404 });
     }
 
-    const usesNewEngine = await hasServiceConfig(supabase, venue.id);
+    const venueMode = await resolveVenueMode(supabase, venue.id);
+    const usesNewEngine = venueMode.availabilityEngine === 'service';
     if (usesNewEngine) {
       const { data: restriction } = await supabase
         .from('booking_restrictions')

@@ -88,6 +88,9 @@ export function BookingsDashboard({ venueId }: { venueId: string }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [walkInOpen, setWalkInOpen] = useState(false);
   const [realtimeConnected, setRealtimeConnected] = useState<boolean | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [bulkLoading, setBulkLoading] = useState(false);
 
   const { from, to } = useMemo(() => {
     if (viewMode === 'day') return { from: anchorDate, to: anchorDate };
@@ -95,19 +98,36 @@ export function BookingsDashboard({ venueId }: { venueId: string }) {
     if (viewMode === 'month') return { from: startOfMonth(anchorDate), to: endOfMonth(anchorDate) };
     return { from: customFrom, to: customTo };
   }, [viewMode, anchorDate, customFrom, customTo]);
+  const invalidCustomRange = viewMode === 'custom' && customFrom > customTo;
 
   const fetchBookings = useCallback(async () => {
+    if (invalidCustomRange) {
+      setError('Custom date range is invalid. "From" must be before or equal to "To".');
+      setLoading(false);
+      return;
+    }
     setLoading(true);
-    const params = viewMode === 'day'
-      ? new URLSearchParams({ date: from })
-      : new URLSearchParams({ from, to });
-    if (statusFilter !== 'All') params.set('status', statusFilter);
-    const res = await fetch(`/api/venue/bookings/list?${params}`);
-    if (!res.ok) { setLoading(false); return; }
-    const data = await res.json();
-    setBookings(data.bookings ?? []);
-    setLoading(false);
-  }, [from, to, statusFilter, viewMode]);
+    setError(null);
+    try {
+      const params = viewMode === 'day'
+        ? new URLSearchParams({ date: from })
+        : new URLSearchParams({ from, to });
+      if (statusFilter !== 'All') params.set('status', statusFilter);
+      const res = await fetch(`/api/venue/bookings/list?${params}`);
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        setError(json.error ?? 'Failed to load reservations');
+        return;
+      }
+      const data = await res.json();
+      setBookings(data.bookings ?? []);
+      setSelectedIds((prev) => prev.filter((id) => (data.bookings ?? []).some((b: BookingRow) => b.id === id)));
+    } catch {
+      setError('Network error loading reservations');
+    } finally {
+      setLoading(false);
+    }
+  }, [from, invalidCustomRange, statusFilter, to, viewMode]);
 
   useEffect(() => { fetchBookings(); }, [fetchBookings]);
 
@@ -128,6 +148,83 @@ export function BookingsDashboard({ venueId }: { venueId: string }) {
     setWalkInOpen(false);
     fetchBookings();
   }, [fetchBookings]);
+
+  const exportCsv = useCallback(() => {
+    const esc = (value: string) => `"${value.replace(/"/g, '""')}"`;
+    const rows = bookings.map((b) => [
+      b.booking_date,
+      b.booking_time?.slice(0, 5) ?? '',
+      b.guest_name,
+      String(b.party_size),
+      b.status,
+      b.source,
+      b.deposit_status,
+      b.deposit_amount_pence != null ? (b.deposit_amount_pence / 100).toFixed(2) : '',
+      b.dietary_notes ?? '',
+      b.occasion ?? '',
+    ]);
+    const header = ['Date', 'Time', 'Guest', 'Party Size', 'Status', 'Source', 'Deposit Status', 'Deposit Amount GBP', 'Dietary Notes', 'Occasion'];
+    const csv = [header, ...rows].map((row) => row.map((cell) => esc(String(cell))).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `reservations_${from}_to_${to}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }, [bookings, from, to]);
+
+  const runBulkNoShow = useCallback(async () => {
+    if (selectedIds.length === 0) return;
+    setBulkLoading(true);
+    setError(null);
+    try {
+      const outcomes = await Promise.all(selectedIds.map(async (bookingId) => {
+        const res = await fetch(`/api/venue/bookings/${bookingId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: 'No-Show' }),
+        });
+        return res.ok;
+      }));
+      const okCount = outcomes.filter(Boolean).length;
+      if (okCount !== selectedIds.length) {
+        setError(`Updated ${okCount}/${selectedIds.length} bookings as no-show.`);
+      }
+      setSelectedIds([]);
+      await fetchBookings();
+    } finally {
+      setBulkLoading(false);
+    }
+  }, [fetchBookings, selectedIds]);
+
+  const runBulkMessage = useCallback(async () => {
+    if (selectedIds.length === 0) return;
+    const message = window.prompt('Message to send to selected guests:');
+    if (!message || message.trim().length === 0) return;
+    setBulkLoading(true);
+    setError(null);
+    try {
+      const outcomes = await Promise.all(selectedIds.map(async (bookingId) => {
+        const res = await fetch(`/api/venue/bookings/${bookingId}/message`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: message.trim() }),
+        });
+        return res.ok;
+      }));
+      const okCount = outcomes.filter(Boolean).length;
+      if (okCount !== selectedIds.length) {
+        setError(`Sent messages to ${okCount}/${selectedIds.length} bookings.`);
+      }
+      setSelectedIds([]);
+      await fetchBookings();
+    } finally {
+      setBulkLoading(false);
+    }
+  }, [fetchBookings, selectedIds]);
 
   const navigate = (direction: -1 | 1) => {
     if (viewMode === 'day') setAnchorDate(addDays(anchorDate, direction));
@@ -165,6 +262,11 @@ export function BookingsDashboard({ venueId }: { venueId: string }) {
           Updates may be delayed. Reconnecting&hellip;
         </div>
       )}
+      {error && (
+        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {error}
+        </div>
+      )}
 
       {/* Top bar: view mode + navigation */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -189,6 +291,13 @@ export function BookingsDashboard({ venueId }: { venueId: string }) {
         <div className="flex items-center gap-2">
           <button type="button" onClick={goToToday} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 shadow-sm">
             Today
+          </button>
+          <button
+            type="button"
+            onClick={exportCsv}
+            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 shadow-sm"
+          >
+            Export CSV
           </button>
           <button type="button" onClick={() => setWalkInOpen(true)} className="flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-brand-700">
             <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
@@ -221,6 +330,9 @@ export function BookingsDashboard({ venueId }: { venueId: string }) {
             <label className="text-sm font-medium text-slate-600">To</label>
             <input type="date" value={customTo} onChange={(e) => setCustomTo(e.target.value)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
           </div>
+          {invalidCustomRange && (
+            <p className="text-sm font-medium text-red-600">From date must be before or equal to To date.</p>
+          )}
         </div>
       )}
 
@@ -249,6 +361,25 @@ export function BookingsDashboard({ venueId }: { venueId: string }) {
           </button>
         ))}
       </div>
+      <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 shadow-sm">
+        <span className="text-xs font-medium text-slate-600">{selectedIds.length} selected</span>
+        <button
+          type="button"
+          disabled={bulkLoading || selectedIds.length === 0}
+          onClick={() => void runBulkNoShow()}
+          className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
+        >
+          Mark No-Show
+        </button>
+        <button
+          type="button"
+          disabled={bulkLoading || selectedIds.length === 0}
+          onClick={() => void runBulkMessage()}
+          className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+        >
+          Send Batch Message
+        </button>
+      </div>
 
       {/* Bookings table / grouped view */}
       {loading ? (
@@ -256,7 +387,7 @@ export function BookingsDashboard({ venueId }: { venueId: string }) {
       ) : bookings.length === 0 ? (
         <EmptyState />
       ) : viewMode === 'day' ? (
-        <BookingsTable bookings={bookings} onSelect={setSelectedId} />
+        <BookingsTable bookings={bookings} onSelect={setSelectedId} selectedIds={selectedIds} setSelectedIds={setSelectedIds} />
       ) : (
         <div className="space-y-4">
           {Object.entries(groupedByDate ?? {}).sort(([a], [b]) => a.localeCompare(b)).map(([date, dayBookings]) => (
@@ -268,7 +399,7 @@ export function BookingsDashboard({ venueId }: { venueId: string }) {
                   <span>{dayBookings.reduce((s, b) => s + b.party_size, 0)} covers</span>
                 </div>
               </div>
-              <BookingsTableBody bookings={dayBookings} onSelect={setSelectedId} />
+              <BookingsTableBody bookings={dayBookings} onSelect={setSelectedId} selectedIds={selectedIds} setSelectedIds={setSelectedIds} />
             </div>
           ))}
         </div>
@@ -347,20 +478,55 @@ function depositBadge(status: string, amountPence: number | null) {
   );
 }
 
-function BookingsTable({ bookings, onSelect }: { bookings: BookingRow[]; onSelect: (id: string) => void }) {
+function BookingsTable({
+  bookings,
+  onSelect,
+  selectedIds,
+  setSelectedIds,
+}: {
+  bookings: BookingRow[];
+  onSelect: (id: string) => void;
+  selectedIds: string[];
+  setSelectedIds: React.Dispatch<React.SetStateAction<string[]>>;
+}) {
   return (
     <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-      <BookingsTableBody bookings={bookings} onSelect={onSelect} />
+      <BookingsTableBody bookings={bookings} onSelect={onSelect} selectedIds={selectedIds} setSelectedIds={setSelectedIds} />
     </div>
   );
 }
 
-function BookingsTableBody({ bookings, onSelect }: { bookings: BookingRow[]; onSelect: (id: string) => void }) {
+function BookingsTableBody({
+  bookings,
+  onSelect,
+  selectedIds,
+  setSelectedIds,
+}: {
+  bookings: BookingRow[];
+  onSelect: (id: string) => void;
+  selectedIds: string[];
+  setSelectedIds: React.Dispatch<React.SetStateAction<string[]>>;
+}) {
+  const allSelected = bookings.length > 0 && bookings.every((b) => selectedIds.includes(b.id));
   return (
     <div className="overflow-x-auto">
       <table className="w-full min-w-[640px] text-left text-sm">
         <thead>
           <tr className="border-b border-slate-100 bg-slate-50/60">
+            <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wider text-slate-400">
+              <input
+                type="checkbox"
+                checked={allSelected}
+                onChange={(e) => {
+                  if (e.target.checked) {
+                    setSelectedIds((prev) => Array.from(new Set([...prev, ...bookings.map((b) => b.id)])));
+                  } else {
+                    setSelectedIds((prev) => prev.filter((id) => !bookings.some((b) => b.id === id)));
+                  }
+                }}
+                onClick={(e) => e.stopPropagation()}
+              />
+            </th>
             <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wider text-slate-400">Time</th>
             <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wider text-slate-400">Guest</th>
             <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wider text-slate-400">Covers</th>
@@ -373,6 +539,16 @@ function BookingsTableBody({ bookings, onSelect }: { bookings: BookingRow[]; onS
         <tbody className="divide-y divide-slate-50">
           {bookings.map((b) => (
             <tr key={b.id} onClick={() => onSelect(b.id)} className="cursor-pointer transition-colors hover:bg-brand-50/40">
+              <td className="px-5 py-3.5">
+                <input
+                  type="checkbox"
+                  checked={selectedIds.includes(b.id)}
+                  onChange={(e) => {
+                    setSelectedIds((prev) => e.target.checked ? [...prev, b.id] : prev.filter((id) => id !== b.id));
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                />
+              </td>
               <td className="px-5 py-3.5 font-medium tabular-nums text-slate-900">{b.booking_time.length >= 5 ? b.booking_time.slice(0, 5) : b.booking_time}</td>
               <td className="px-5 py-3.5 font-medium text-slate-900">{b.guest_name}</td>
               <td className="px-5 py-3.5 text-slate-600">{b.party_size}</td>

@@ -19,22 +19,29 @@ export async function GET(request: NextRequest) {
     const date = request.nextUrl.searchParams.get('date');
     const from = request.nextUrl.searchParams.get('from');
     const to = request.nextUrl.searchParams.get('to');
+    const ids = request.nextUrl.searchParams.get('ids');
     const statusFilter = request.nextUrl.searchParams.get('status');
     const isoRe = /^\d{4}-\d{2}-\d{2}$/;
 
     let query = staff.db
       .from('bookings')
-      .select('id, booking_date, booking_time, party_size, status, source, deposit_status, deposit_amount_pence, dietary_notes, occasion, guest_id')
+      .select('id, booking_date, booking_time, party_size, status, source, deposit_status, deposit_amount_pence, dietary_notes, occasion, estimated_end_time, created_at, guest_id')
       .eq('venue_id', staff.venue_id)
       .order('booking_date', { ascending: true })
       .order('booking_time', { ascending: true });
 
-    if (date && isoRe.test(date)) {
+    if (ids) {
+      const idList = ids.split(',').filter(Boolean);
+      if (idList.length === 0) {
+        return NextResponse.json({ bookings: [] });
+      }
+      query = query.in('id', idList);
+    } else if (date && isoRe.test(date)) {
       query = query.eq('booking_date', date);
     } else if (from && to && isoRe.test(from) && isoRe.test(to)) {
       query = query.gte('booking_date', from).lte('booking_date', to);
     } else {
-      return NextResponse.json({ error: 'Provide date=YYYY-MM-DD or from=...&to=...' }, { status: 400 });
+      return NextResponse.json({ error: 'Provide date=YYYY-MM-DD or from=...&to=... or ids=...' }, { status: 400 });
     }
 
     const { data: rows, error } = await query;
@@ -52,9 +59,19 @@ export async function GET(request: NextRequest) {
 
     let bookings = (rows ?? []).map((r: Record<string, unknown> & { guest_id: string }) => {
       const guest = guestsMap.get(r.guest_id);
-      const { guest_id, ...rest } = r;
       return {
-        ...rest,
+        id: r.id,
+        booking_date: r.booking_date,
+        booking_time: r.booking_time,
+        party_size: r.party_size,
+        status: r.status,
+        source: r.source,
+        deposit_status: r.deposit_status,
+        deposit_amount_pence: r.deposit_amount_pence,
+        dietary_notes: r.dietary_notes,
+        occasion: r.occasion,
+        estimated_end_time: r.estimated_end_time,
+        created_at: r.created_at,
         guest_name: guest?.name ?? '—',
         guest_email: guest?.email ?? null,
         guest_phone: guest?.phone ?? null,

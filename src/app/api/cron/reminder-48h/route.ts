@@ -26,11 +26,13 @@ export async function POST(request: NextRequest) {
       .from('bookings')
       .select('id, venue_id, guest_id, booking_date, booking_time, party_size, status, confirm_token_hash, deposit_amount_pence, dietary_notes')
       .in('status', ['Confirmed', 'Pending'])
+      .is('reminder_48h_sent_at', null)
       .gte('booking_date', dateStart)
       .lte('booking_date', dateEnd);
 
     const origin = process.env.NEXT_PUBLIC_BASE_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : request.nextUrl.origin);
     let sent = 0;
+    const sentAt = now.toISOString();
 
     for (const b of bookings ?? []) {
       const [y, m, d] = (b.booking_date as string).split('-').map(Number);
@@ -46,11 +48,13 @@ export async function POST(request: NextRequest) {
       // Always generate a fresh token for the manage link. This replaces any
       // previous token, ensuring the link in this reminder is valid.
       const token = generateConfirmToken();
-      await supabase.from('bookings').update({
+      const { data: marked } = await supabase.from('bookings').update({
         confirm_token_hash: hashConfirmToken(token),
         confirm_token_used_at: null,
-        updated_at: now.toISOString(),
-      }).eq('id', b.id);
+        reminder_48h_sent_at: sentAt,
+        updated_at: sentAt,
+      }).eq('id', b.id).is('reminder_48h_sent_at', null).select('id').maybeSingle();
+      if (!marked) continue;
       const manageLink = `${origin}/manage/${b.id}/${encodeURIComponent(token)}`;
 
       await sendCommunication({

@@ -136,10 +136,39 @@ export async function POST(request: NextRequest) {
       const pi = event.data.object as Stripe.PaymentIntent;
       const bookingId = pi.metadata?.booking_id;
       if (bookingId) {
+        const { data: booking } = await supabase
+          .from('bookings')
+          .select('id, venue_id')
+          .eq('id', bookingId)
+          .maybeSingle();
         await supabase
           .from('bookings')
           .update({ updated_at: new Date().toISOString() })
           .eq('id', bookingId);
+
+        if (booking?.venue_id) {
+          const { data: venue } = await supabase
+            .from('venues')
+            .select('name, kitchen_email')
+            .eq('id', booking.venue_id)
+            .maybeSingle();
+          if (venue?.kitchen_email) {
+            try {
+              await sendCommunication({
+                type: 'custom_message',
+                recipient: { email: venue.kitchen_email },
+                payload: {
+                  venue_name: venue.name ?? 'Venue',
+                  message: `Deposit payment failed for booking ${bookingId}. Please follow up with the guest.`,
+                },
+                venue_id: booking.venue_id,
+                booking_id: bookingId,
+              });
+            } catch (commsErr) {
+              console.error('Webhook payment failure alert send failed:', commsErr);
+            }
+          }
+        }
       }
       console.error('payment_intent.payment_failed', pi.id, pi.last_payment_error?.message);
     } else if (event.type === 'account.updated') {

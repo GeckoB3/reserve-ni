@@ -12,6 +12,25 @@ const durationSchema = z.object({
   day_of_week: z.number().int().min(0).max(6).nullable().optional(),
 });
 
+async function verifyServiceOwnership(admin: ReturnType<typeof getSupabaseAdminClient>, serviceId: string, venueId: string): Promise<boolean> {
+  const { count } = await admin
+    .from('venue_services')
+    .select('id', { count: 'exact', head: true })
+    .eq('id', serviceId)
+    .eq('venue_id', venueId);
+  return (count ?? 0) > 0;
+}
+
+async function verifyDurationOwnership(admin: ReturnType<typeof getSupabaseAdminClient>, durationId: string, venueId: string): Promise<boolean> {
+  const { data: duration } = await admin
+    .from('party_size_durations')
+    .select('service_id')
+    .eq('id', durationId)
+    .maybeSingle();
+  if (!duration?.service_id) return false;
+  return verifyServiceOwnership(admin, duration.service_id, venueId);
+}
+
 /** GET /api/venue/party-size-durations */
 export async function GET() {
   try {
@@ -52,6 +71,9 @@ export async function POST(request: NextRequest) {
     }
 
     const admin = getSupabaseAdminClient();
+    if (!(await verifyServiceOwnership(admin, parsed.data.service_id, staff.venue_id))) {
+      return NextResponse.json({ error: 'Service not found' }, { status: 404 });
+    }
     const { data, error } = await admin.from('party_size_durations').insert(parsed.data).select('*').single();
     if (error) {
       console.error('POST /api/venue/party-size-durations failed:', error);
@@ -78,6 +100,9 @@ export async function PATCH(request: NextRequest) {
     if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 });
 
     const admin = getSupabaseAdminClient();
+    if (!(await verifyDurationOwnership(admin, id, staff.venue_id))) {
+      return NextResponse.json({ error: 'Duration not found' }, { status: 404 });
+    }
     const { data, error } = await admin.from('party_size_durations').update(fields).eq('id', id).select('*').single();
     if (error) {
       console.error('PATCH /api/venue/party-size-durations failed:', error);
@@ -103,6 +128,9 @@ export async function DELETE(request: NextRequest) {
     if (!body.id) return NextResponse.json({ error: 'Missing id' }, { status: 400 });
 
     const admin = getSupabaseAdminClient();
+    if (!(await verifyDurationOwnership(admin, body.id, staff.venue_id))) {
+      return NextResponse.json({ error: 'Duration not found' }, { status: 404 });
+    }
     const { error } = await admin.from('party_size_durations').delete().eq('id', body.id);
     if (error) {
       console.error('DELETE /api/venue/party-size-durations failed:', error);

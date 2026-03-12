@@ -25,11 +25,13 @@ export async function POST(request: NextRequest) {
       .from('bookings')
       .select('id, venue_id, guest_id, booking_date, booking_time, party_size')
       .in('status', ['Seated', 'Completed'])
+      .is('thankyou_sent_at', null)
       .gte('booking_date', dateStart)
       .lte('booking_date', dateEnd);
 
     const origin = process.env.NEXT_PUBLIC_BASE_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : request.nextUrl.origin);
     let sent = 0;
+    const sentAt = now.toISOString();
 
     for (const b of bookings ?? []) {
       const [y, m, d] = (b.booking_date as string).split('-').map(Number);
@@ -41,6 +43,15 @@ export async function POST(request: NextRequest) {
       const { data: venue } = await supabase.from('venues').select('name, slug').eq('id', b.venue_id).single();
       const { data: guest } = await supabase.from('guests').select('name, email').eq('id', b.guest_id).single();
       if (!guest?.email) continue;
+
+      const { data: marked } = await supabase
+        .from('bookings')
+        .update({ thankyou_sent_at: sentAt, updated_at: sentAt })
+        .eq('id', b.id)
+        .is('thankyou_sent_at', null)
+        .select('id')
+        .maybeSingle();
+      if (!marked) continue;
 
       const bookingPageLink = `${origin}/book/${venue?.slug ?? 'venue'}`;
 

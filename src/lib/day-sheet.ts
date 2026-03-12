@@ -1,52 +1,69 @@
 /**
- * Day-sheet helpers: dietary parsing, period selection.
+ * Day-sheet helpers: dietary parsing with allergy flagging, period selection.
  */
 
-/** Keyword → display label and icon. */
-const DIETARY_KEYWORDS: Array<{ pattern: RegExp; label: string; icon: string }> = [
-  { pattern: /\b(gluten[- ]?free|coeliac|celiac)\b/i, label: 'Gluten Free', icon: '🌾' },
-  { pattern: /\b(vegetarian|vegan|veg)\b/i, label: 'Vegetarian/Vegan', icon: '🌱' },
-  { pattern: /\b(nut|peanut|tree nut|nuts)\s*(allergy|free)?\b/i, label: 'Nut Allergy', icon: '🥜' },
-  { pattern: /\b(dairy[- ]?free|lactose)\b/i, label: 'Dairy Free', icon: '🥛' },
-  { pattern: /\b(halal)\b/i, label: 'Halal', icon: '☪' },
-  { pattern: /\b(kosher)\b/i, label: 'Kosher', icon: '✡' },
-  { pattern: /\b(celebration|birthday|anniversary|occasion)\b/i, label: 'Celebration', icon: '🎂' },
-  { pattern: /\b(allerg(y|ies)|allergic)\b/i, label: 'Allergies', icon: '⚠️' },
+const ALLERGY_KEYWORDS = /\b(allerg(y|ies|ic)|anaphyla(ctic|xis)|intoleran(t|ce)|coeliac|celiac|nut|peanut|tree\s*nut|gluten|dairy|shellfish|egg\s*free)\b/i;
+
+/** Keyword → display label, icon, and allergy flag. */
+const DIETARY_KEYWORDS: Array<{ pattern: RegExp; label: string; icon: string; isAllergy: boolean }> = [
+  { pattern: /\b(gluten[- ]?free|coeliac|celiac)\b/i, label: 'Gluten Free', icon: '🌾', isAllergy: true },
+  { pattern: /\b(vegetarian|vegan|veg)\b/i, label: 'Vegetarian/Vegan', icon: '🌱', isAllergy: false },
+  { pattern: /\b(nut|peanut|tree nut|nuts)\s*(allergy|free)?\b/i, label: 'Nut Allergy', icon: '🥜', isAllergy: true },
+  { pattern: /\b(dairy[- ]?free|lactose)\b/i, label: 'Dairy Free', icon: '🥛', isAllergy: true },
+  { pattern: /\b(shellfish)\b/i, label: 'Shellfish Allergy', icon: '🦐', isAllergy: true },
+  { pattern: /\b(halal)\b/i, label: 'Halal', icon: '☪', isAllergy: false },
+  { pattern: /\b(kosher)\b/i, label: 'Kosher', icon: '✡', isAllergy: false },
+  { pattern: /\b(celebration|birthday|anniversary|occasion)\b/i, label: 'Celebration', icon: '🎂', isAllergy: false },
+  { pattern: /\b(allerg(y|ies)|allergic|anaphyla(ctic|xis)|intoleran(t|ce))\b/i, label: 'Allergies', icon: '⚠️', isAllergy: true },
 ];
 
 export interface DietaryTag {
   label: string;
   icon: string;
+  isAllergy: boolean;
 }
 
-/** Parse dietary_notes (and occasion) into tags with labels and icons. */
-export function parseDietaryNotes(dietaryNotes: string | null, occasion: string | null): DietaryTag[] {
-  const text = [dietaryNotes, occasion].filter(Boolean).join(' ').trim();
+/**
+ * Parse dietary_notes, special_requests, and occasion into tags with labels, icons, and allergy flags.
+ * Allergy-flagged tags require visual distinction (red warning) in the UI.
+ */
+export function parseDietaryNotes(
+  dietaryNotes: string | null,
+  occasion: string | null,
+  specialRequests?: string | null,
+): DietaryTag[] {
+  const text = [dietaryNotes, specialRequests, occasion].filter(Boolean).join(' ').trim();
   if (!text) return [];
   const seen = new Set<string>();
   const tags: DietaryTag[] = [];
-  for (const { pattern, label, icon } of DIETARY_KEYWORDS) {
+  for (const { pattern, label, icon, isAllergy } of DIETARY_KEYWORDS) {
     if (pattern.test(text) && !seen.has(label)) {
       seen.add(label);
-      tags.push({ label, icon });
+      tags.push({ label, icon, isAllergy });
     }
   }
   return tags;
 }
 
-/** Group and count dietary requirements from multiple bookings. Returns e.g. [{ label: 'Gluten Free', count: 3 }]. */
+/** Quick check: does the combined text contain any allergy-related keywords? */
+export function hasAllergyKeywords(text: string): boolean {
+  return ALLERGY_KEYWORDS.test(text);
+}
+
+/** Group and count dietary requirements from multiple bookings. Returns e.g. [{ label: 'Gluten Free', count: 3, isAllergy: true }]. */
 export function dietarySummary(
-  bookings: Array<{ dietary_notes: string | null; occasion: string | null }>
-): Array<{ label: string; count: number }> {
-  const counts: Record<string, number> = {};
+  bookings: Array<{ dietary_notes: string | null; occasion: string | null; special_requests?: string | null }>
+): Array<{ label: string; count: number; isAllergy: boolean }> {
+  const counts: Record<string, { count: number; isAllergy: boolean }> = {};
   for (const b of bookings) {
-    const tags = parseDietaryNotes(b.dietary_notes, b.occasion);
-    for (const { label } of tags) {
-      counts[label] = (counts[label] ?? 0) + 1;
+    const tags = parseDietaryNotes(b.dietary_notes, b.occasion, b.special_requests);
+    for (const { label, isAllergy } of tags) {
+      if (!counts[label]) counts[label] = { count: 0, isAllergy };
+      counts[label]!.count += 1;
     }
   }
   return Object.entries(counts)
-    .map(([label, count]) => ({ label, count }))
+    .map(([label, { count, isAllergy }]) => ({ label, count, isAllergy }))
     .sort((a, b) => b.count - a.count);
 }
 

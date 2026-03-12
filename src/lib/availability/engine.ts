@@ -137,7 +137,9 @@ export function isSlotBlocked(
       if (slotMinutes < bStart || slotMinutes >= bEnd) continue;
     }
 
-    if (block.block_type === 'closed') return { blocked: true, overrideMaxCovers: null };
+    if (block.block_type === 'closed' || block.block_type === 'special_event') {
+      return { blocked: true, overrideMaxCovers: null };
+    }
     if (block.block_type === 'reduced_capacity') {
       return { blocked: false, overrideMaxCovers: block.override_max_covers };
     }
@@ -185,25 +187,25 @@ export function countOverlapping(
 function generateServiceSlots(
   input: EngineInput,
   service: VenueService,
-): { slots: ServiceAvailableSlot[]; restriction: BookingRestriction | null; largePary: boolean; largePartyMsg: string | null } {
+): { slots: ServiceAvailableSlot[]; restriction: BookingRestriction | null; largeParty: boolean; largePartyMsg: string | null } {
   const dayOfWeek = getDayOfWeek(input.date);
 
   if (!service.days_of_week.includes(dayOfWeek)) {
-    return { slots: [], restriction: null, largePary: false, largePartyMsg: null };
+    return { slots: [], restriction: null, largeParty: false, largePartyMsg: null };
   }
 
   const restriction = resolveRestriction(input.restrictions, service.id);
 
   if (restriction) {
     if (input.party_size < restriction.min_party_size_online || input.party_size > restriction.max_party_size_online) {
-      return { slots: [], restriction, largePary: false, largePartyMsg: null };
+      return { slots: [], restriction, largeParty: false, largePartyMsg: null };
     }
 
     if (restriction.large_party_threshold && input.party_size >= restriction.large_party_threshold) {
       return {
         slots: [],
         restriction,
-        largePary: true,
+        largeParty: true,
         largePartyMsg: restriction.large_party_message ?? 'Please call us to book for large parties.',
       };
     }
@@ -214,7 +216,7 @@ function generateServiceSlots(
     const daysDiff = Math.floor((bookingDateMs - nowMs) / (1000 * 60 * 60 * 24));
 
     if (daysDiff > restriction.max_advance_days) {
-      return { slots: [], restriction, largePary: false, largePartyMsg: null };
+      return { slots: [], restriction, largeParty: false, largePartyMsg: null };
     }
   }
 
@@ -241,9 +243,6 @@ function generateServiceSlots(
     const slotEndStr = minutesToTime(Math.min(slotEnd, timeToMinutes(service.end_time)));
 
     if (restriction) {
-      const slotDateTimeMs = new Date(
-        ...input.date.split('-').map(Number) as [number, number, number],
-      ).getTime() - (1000 * 60 * 60 * 24 * 30) + slotMin * 60 * 1000;
       const minAdvanceMs = restriction.min_advance_minutes * 60 * 1000;
       const [sy, smo, sd] = input.date.split('-').map(Number);
       const slotDateTime = new Date(sy!, smo! - 1, sd!, Math.floor(slotMin / 60), slotMin % 60);
@@ -298,7 +297,7 @@ function generateServiceSlots(
     });
   }
 
-  return { slots, restriction, largePary: false, largePartyMsg: null };
+  return { slots, restriction, largeParty: false, largePartyMsg: null };
 }
 
 /**
@@ -313,13 +312,13 @@ export function computeAvailability(input: EngineInput): EngineServiceResult[] {
   for (const service of sortedServices) {
     if (!service.is_active) continue;
 
-    const { slots, restriction, largePary, largePartyMsg } = generateServiceSlots(input, service);
+    const { slots, restriction, largeParty, largePartyMsg } = generateServiceSlots(input, service);
 
     results.push({
       service,
       slots,
       restriction,
-      large_party_redirect: largePary,
+      large_party_redirect: largeParty,
       large_party_message: largePartyMsg,
     });
   }

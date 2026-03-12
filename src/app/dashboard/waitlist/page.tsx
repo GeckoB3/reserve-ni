@@ -29,6 +29,7 @@ export default function WaitlistPage() {
   const [entries, setEntries] = useState<WaitlistEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<'active' | 'all'>('active');
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     async function load() {
@@ -37,6 +38,10 @@ export default function WaitlistPage() {
         if (res.ok) {
           const data = await res.json();
           setEntries(data.entries ?? []);
+          setError(null);
+        } else {
+          const data = await res.json().catch(() => ({}));
+          setError(data.error ?? 'Failed to load waitlist entries');
         }
       } finally {
         setLoading(false);
@@ -55,9 +60,11 @@ export default function WaitlistPage() {
       if (res.ok) {
         const data = await res.json();
         setEntries(entries.map((e) => (e.id === entry.id ? data.entry : e)));
+      } else {
+        setError('Failed to update waitlist entry');
       }
     } catch {
-      // handled silently
+      setError('Failed to update waitlist entry');
     }
   }
 
@@ -71,9 +78,11 @@ export default function WaitlistPage() {
       if (res.ok) {
         const data = await res.json();
         setEntries(entries.map((e) => (e.id === entry.id ? data.entry : e)));
+      } else {
+        setError('Failed to confirm waitlist entry');
       }
     } catch {
-      // handled silently
+      setError('Failed to confirm waitlist entry');
     }
   }
 
@@ -87,23 +96,29 @@ export default function WaitlistPage() {
       if (res.ok) {
         const data = await res.json();
         setEntries(entries.map((e) => (e.id === entry.id ? data.entry : e)));
+      } else {
+        setError('Failed to cancel waitlist entry');
       }
     } catch {
-      // handled silently
+      setError('Failed to cancel waitlist entry');
     }
   }
 
   async function handleDelete(id: string) {
     if (!confirm('Remove this entry permanently?')) return;
     try {
-      await fetch('/api/venue/waitlist', {
+      const res = await fetch('/api/venue/waitlist', {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id }),
       });
-      setEntries(entries.filter((e) => e.id !== id));
+      if (res.ok) {
+        setEntries(entries.filter((e) => e.id !== id));
+      } else {
+        setError('Failed to delete waitlist entry');
+      }
     } catch {
-      // handled silently
+      setError('Failed to delete waitlist entry');
     }
   }
 
@@ -141,6 +156,12 @@ export default function WaitlistPage() {
           </button>
         </div>
       </div>
+
+      {error && (
+        <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">
+          {error}
+        </div>
+      )}
 
       {filteredEntries.length === 0 ? (
         <div className="flex flex-col items-center rounded-xl border border-slate-200 bg-white py-12 text-center">

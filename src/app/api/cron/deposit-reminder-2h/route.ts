@@ -1,6 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { sendCommunication } from '@/lib/communications';
+import { createHmac } from 'crypto';
+
+function createPaymentToken(bookingId: string): string {
+  const secret = process.env.PAYMENT_TOKEN_SECRET || process.env.STRIPE_SECRET_KEY || 'dev-secret';
+  const exp = Date.now() + 24 * 60 * 60 * 1000;
+  const payload = `${bookingId}:${exp}`;
+  const sig = createHmac('sha256', secret).update(payload).digest('base64url');
+  return Buffer.from(payload).toString('base64url') + '.' + sig;
+}
 
 /**
  * POST /api/cron/deposit-reminder-2h
@@ -38,7 +47,8 @@ export async function POST(request: NextRequest) {
 
       const timeStr = typeof b.booking_time === 'string' ? b.booking_time.slice(0, 5) : '00:00';
       const depositAmount = b.deposit_amount_pence ? (b.deposit_amount_pence / 100).toFixed(2) : '5.00';
-      const paymentLink = `${origin}/pay?booking_id=${b.id}`;
+      const paymentToken = createPaymentToken(b.id);
+      const paymentLink = `${origin}/pay?t=${paymentToken}`;
 
       await sendCommunication({
         type: 'deposit_payment_reminder',

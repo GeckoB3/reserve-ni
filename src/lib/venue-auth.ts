@@ -9,6 +9,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 
 export interface VenueStaff {
+  id: string;
   venue_id: string;
   email: string;
   role: 'admin' | 'staff';
@@ -32,7 +33,7 @@ export async function getVenueStaff(supabase: SupabaseClient): Promise<VenueStaf
   const normalised = user.email.toLowerCase().trim();
   const { data: rows, error } = await admin
     .from('staff')
-    .select('venue_id, email, role')
+    .select('id, venue_id, email, role')
     .ilike('email', normalised)
     .limit(1);
 
@@ -45,6 +46,7 @@ export async function getVenueStaff(supabase: SupabaseClient): Promise<VenueStaf
   if (!row) return null;
 
   return {
+    id: row.id,
     venue_id: row.venue_id,
     email: row.email,
     role: row.role as 'admin' | 'staff',
@@ -58,25 +60,26 @@ export async function getVenueStaff(supabase: SupabaseClient): Promise<VenueStaf
  */
 export async function getDashboardStaff(
   supabase: SupabaseClient
-): Promise<{ email: string; venue_id: string | null; role: 'admin' | 'staff' | null; db: SupabaseClient }> {
+): Promise<{ id: string | null; email: string; venue_id: string | null; role: 'admin' | 'staff' | null; db: SupabaseClient }> {
   const admin = getSupabaseAdminClient();
   const { data: { user } } = await supabase.auth.getUser();
-  if (!user?.email) return { email: '', venue_id: null, role: null, db: admin };
+  if (!user?.email) return { id: null, email: '', venue_id: null, role: null, db: admin };
 
   const normalised = user.email.toLowerCase().trim();
   const { data: rows, error } = await admin
     .from('staff')
-    .select('venue_id, role')
+    .select('id, venue_id, role')
     .ilike('email', normalised)
     .limit(1);
 
   if (error) {
     console.error('[getDashboardStaff] staff lookup failed:', error.message, { email: normalised });
-    return { email: normalised, venue_id: null, role: null, db: admin };
+    return { id: null, email: normalised, venue_id: null, role: null, db: admin };
   }
 
   const row = rows?.[0];
   return {
+    id: row?.id ?? null,
     email: normalised,
     venue_id: row?.venue_id ?? null,
     role: (row?.role as 'admin' | 'staff') ?? null,

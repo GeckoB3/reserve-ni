@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useToast } from '@/components/ui/Toast';
 
 interface Slot {
   key: string;
@@ -11,6 +12,7 @@ interface Slot {
 }
 
 export function PhoneBookingForm({ venueId }: { venueId: string }) {
+  const { addToast } = useToast();
   const [date, setDate] = useState('');
   const [slots, setSlots] = useState<Slot[]>([]);
   const [loadingSlots, setLoadingSlots] = useState(false);
@@ -23,43 +25,74 @@ export function PhoneBookingForm({ venueId }: { venueId: string }) {
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<{ booking_id: string; payment_url?: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [validationError, setValidationError] = useState<string | null>(null);
 
-  const fetchSlots = useCallback(() => {
-    if (!date) return;
+  // Auto-fetch available slots when date or party size changes
+  useEffect(() => {
+    if (!date) { setSlots([]); return; }
+    let cancelled = false;
     setLoadingSlots(true);
     setError(null);
-    fetch(`/api/booking/availability?venue_id=${encodeURIComponent(venueId)}&date=${encodeURIComponent(date)}&party_size=${partySize}`)
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error('Failed to load'))))
-      .then((data) => { setSlots(data.slots ?? []); setSelectedTime(''); })
-      .catch(() => setError('Failed to load times'))
-      .finally(() => setLoadingSlots(false));
-  }, [venueId, date, partySize]);
+    setValidationError(null);
+    setSelectedTime('');
+    (async () => {
+      try {
+        const response = await fetch(`/api/booking/availability?venue_id=${encodeURIComponent(venueId)}&date=${encodeURIComponent(date)}&party_size=${partySize}`);
+        if (cancelled) return;
+        if (!response.ok) throw new Error('Failed to load times');
+        const data = await response.json();
+        if (!cancelled) setSlots(data.slots ?? []);
+      } catch {
+        if (!cancelled) {
+          setError('Failed to load times');
+          addToast('Failed to load available times', 'error');
+        }
+      } finally {
+        if (!cancelled) setLoadingSlots(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [addToast, venueId, date, partySize]);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!date || !selectedTime || !name.trim() || !phone.trim()) return;
+    if (!date || !selectedTime || !name.trim() || !phone.trim()) {
+      const message = 'Date, time, guest name, and phone are required.';
+      setValidationError(message);
+      addToast(message, 'error');
+      return;
+    }
+    setValidationError(null);
     setError(null);
     setSubmitting(true);
-    fetch('/api/venue/bookings', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        booking_date: date,
-        booking_time: selectedTime,
-        party_size: partySize,
-        name: name.trim(),
-        phone: phone.trim(),
-        email: email.trim() || undefined,
-        require_deposit: requireDeposit,
-      }),
-    })
-      .then((r) => {
-        if (!r.ok) return r.json().then((j) => Promise.reject(new Error(j.error ?? 'Failed')));
-        return r.json();
-      })
-      .then((data) => setResult({ booking_id: data.booking_id, payment_url: data.payment_url }))
-      .catch((err) => setError(err instanceof Error ? err.message : 'Failed'))
-      .finally(() => setSubmitting(false));
+    try {
+      const response = await fetch('/api/venue/bookings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          booking_date: date,
+          booking_time: selectedTime,
+          party_size: partySize,
+          name: name.trim(),
+          phone: phone.trim(),
+          email: email.trim() || undefined,
+          require_deposit: requireDeposit,
+        }),
+      });
+      if (!response.ok) {
+        const j = await response.json().catch(() => ({}));
+        throw new Error(j.error ?? 'Failed');
+      }
+      const data = await response.json();
+      setResult({ booking_id: data.booking_id, payment_url: data.payment_url });
+      addToast('Booking created', 'success');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed';
+      setError(message);
+      addToast(message, 'error');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   if (result) {
@@ -143,18 +176,18 @@ export function PhoneBookingForm({ venueId }: { venueId: string }) {
           </div>
         </div>
 
-        <button
-          type="button"
-          onClick={fetchSlots}
-          disabled={!date || loadingSlots}
-          className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50"
-        >
-          {loadingSlots ? 'Checking availability...' : 'Check Available Times'}
-        </button>
-
-        {slots.length > 0 && (
-          <div>
-            <label className="mb-1.5 block text-sm font-medium text-slate-700">Time slot</label>
+        <div>
+          <label className="mb-1.5 block text-sm font-medium text-slate-700">Time</label>
+          {loadingSlots ? (
+            <div className="flex items-center gap-2 rounded-xl border border-slate-200 px-4 py-2.5 text-sm text-slate-400">
+              <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
+              Loading available times...
+            </div>
+          ) : !date ? (
+            <p className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm text-slate-400">Select a date first</p>
+          ) : slots.length === 0 ? (
+            <p className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-700">No times available for {partySize} cover{partySize !== 1 ? 's' : ''} on this date</p>
+          ) : (
             <select
               value={selectedTime}
               onChange={(e) => setSelectedTime(e.target.value)}
@@ -163,11 +196,11 @@ export function PhoneBookingForm({ venueId }: { venueId: string }) {
             >
               <option value="">Select a time...</option>
               {slots.map((s) => (
-                <option key={s.key} value={s.start_time}>{s.label} ({s.available_covers} covers left)</option>
+                <option key={s.key} value={s.start_time}>{s.label} ({s.available_covers} cover{s.available_covers !== 1 ? 's' : ''} available)</option>
               ))}
             </select>
-          </div>
-        )}
+          )}
+        </div>
 
         <div className="border-t border-slate-100 pt-4 space-y-4">
           <div>
@@ -203,6 +236,9 @@ export function PhoneBookingForm({ venueId }: { venueId: string }) {
 
         {error && (
           <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-700">{error}</div>
+        )}
+        {validationError && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-800">{validationError}</div>
         )}
 
         <button

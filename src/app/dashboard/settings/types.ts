@@ -18,6 +18,8 @@ export interface VenueSettings {
   availability_config: AvailabilityConfigSettings | null;
   stripe_connected_account_id: string | null;
   timezone: string;
+  table_management_enabled?: boolean;
+  combination_threshold?: number;
 }
 
 export type OpeningHoursDaySettings =

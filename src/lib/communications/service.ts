@@ -23,10 +23,20 @@ const MESSAGE_CHANNELS: Record<MessageType, Array<'email' | 'sms'>> = {
   booking_modification: ['email', 'sms'],
   cancellation_confirmation: ['email', 'sms'],
   no_show_notification: ['email'],
+  custom_message: ['email', 'sms'],
 };
 
 const emailChannel: MessageChannel = new EmailChannel();
 const smsChannel: MessageChannel = new SMSChannel();
+const DEDUPED_MESSAGE_TYPES = new Set<MessageType>([
+  'booking_confirmation',
+  'deposit_payment_reminder',
+  'pre_visit_reminder',
+  'confirm_or_cancel_prompt',
+  'auto_cancel_notification',
+  'cancellation_confirmation',
+  'no_show_notification',
+]);
 
 function getChannel(ch: 'email' | 'sms'): MessageChannel {
   return ch === 'email' ? emailChannel : smsChannel;
@@ -63,6 +73,36 @@ function normalisePayload(payload: TemplateVariables): Record<string, string | n
 }
 
 export class CommunicationService {
+  private async isDuplicateSend(
+    type: MessageType,
+    channel: 'email' | 'sms',
+    ctx: LogContext
+  ): Promise<boolean> {
+    if (!ctx.venue_id) return false;
+    if (!ctx.booking_id && !ctx.guest_id) return false;
+    try {
+      const supabase = getSupabaseAdminClient();
+      let query = supabase
+        .from('communications')
+        .select('id')
+        .eq('venue_id', ctx.venue_id)
+        .eq('message_type', type)
+        .eq('channel', channel)
+        .eq('status', 'sent')
+        .limit(1);
+      if (ctx.booking_id) {
+        query = query.eq('booking_id', ctx.booking_id);
+      } else if (ctx.guest_id) {
+        query = query.eq('guest_id', ctx.guest_id);
+      }
+      const { data } = await query.maybeSingle();
+      return Boolean(data);
+    } catch (err) {
+      console.error('[CommunicationService] dedupe check failed, continuing send:', err);
+      return false;
+    }
+  }
+
   private async logCommunication(
     type: MessageType,
     channel: string,
@@ -99,6 +139,10 @@ export class CommunicationService {
 
     for (const ch of channels) {
       try {
+        if (DEDUPED_MESSAGE_TYPES.has(type)) {
+          const duplicate = await this.isDuplicateSend(type, ch, ctx);
+          if (duplicate) continue;
+        }
         if (ch === 'email') {
           const compiled = compileEmailTemplate(type, vars);
           if (compiled && recipient.email) {

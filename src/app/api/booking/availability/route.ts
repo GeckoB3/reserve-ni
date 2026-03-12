@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
-import { getAvailableSlots, computeAvailability, hasServiceConfig, fetchEngineInput } from '@/lib/availability';
+import { getAvailableSlots, computeAvailability, fetchEngineInput } from '@/lib/availability';
 import type { VenueForAvailability, BookingForAvailability } from '@/types/availability';
+import { resolveVenueMode } from '@/lib/venue-mode';
 
 /** GET /api/booking/availability?venue_id=uuid&date=YYYY-MM-DD&party_size=N */
 export async function GET(request: NextRequest) {
@@ -35,7 +36,8 @@ export async function GET(request: NextRequest) {
     }
 
     const supabase = getSupabaseAdminClient();
-    const useServiceEngine = await hasServiceConfig(supabase, venueId);
+    const venueMode = await resolveVenueMode(supabase, venueId);
+    const useServiceEngine = venueMode.availabilityEngine === 'service';
 
     if (useServiceEngine) {
       const engineInput = await fetchEngineInput({

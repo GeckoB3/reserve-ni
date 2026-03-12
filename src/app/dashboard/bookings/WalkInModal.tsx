@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 export function WalkInModal({
   onClose,
@@ -11,8 +11,26 @@ export function WalkInModal({
 }) {
   const [partySize, setPartySize] = useState(2);
   const [name, setName] = useState('');
+  const [phone, setPhone] = useState('');
+  const [tableId, setTableId] = useState('');
+  const [tableManagementEnabled, setTableManagementEnabled] = useState(false);
+  const [tables, setTables] = useState<Array<{ id: string; name: string; max_covers: number; is_active: boolean }>>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const res = await fetch('/api/venue/tables');
+        if (!res.ok) return;
+        const data = await res.json();
+        setTableManagementEnabled(data.settings?.table_management_enabled ?? false);
+        setTables((data.tables ?? []).filter((t: { is_active: boolean }) => t.is_active));
+      } catch {
+        // noop
+      }
+    })();
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -25,6 +43,8 @@ export function WalkInModal({
         body: JSON.stringify({
           party_size: partySize,
           name: name.trim() || undefined,
+          phone: phone.trim() || undefined,
+          table_id: tableManagementEnabled && tableId ? tableId : undefined,
         }),
       });
       if (!res.ok) {
@@ -74,6 +94,35 @@ export function WalkInModal({
               className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
             />
           </div>
+          <div>
+            <label htmlFor="walkin-phone" className="mb-1.5 block text-sm font-medium text-slate-700">Phone <span className="text-slate-400">(optional)</span></label>
+            <input
+              id="walkin-phone"
+              type="tel"
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              placeholder="Phone number"
+              className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+            />
+          </div>
+          {tableManagementEnabled && (
+            <div>
+              <label htmlFor="walkin-table" className="mb-1.5 block text-sm font-medium text-slate-700">Assign table <span className="text-slate-400">(optional)</span></label>
+              <select
+                id="walkin-table"
+                value={tableId}
+                onChange={(e) => setTableId(e.target.value)}
+                className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+              >
+                <option value="">Leave unassigned</option>
+                {tables.map((table) => (
+                  <option key={table.id} value={table.id}>
+                    {table.name} (max {table.max_covers})
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
           {error && (
             <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>
           )}

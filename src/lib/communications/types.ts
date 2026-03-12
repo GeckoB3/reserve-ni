@@ -13,7 +13,8 @@ export type MessageType =
   | 'auto_cancel_notification'
   | 'booking_modification'
   | 'cancellation_confirmation'
-  | 'no_show_notification';
+  | 'no_show_notification'
+  | 'custom_message';
 
 export interface Recipient {
   email?: string;
@@ -37,6 +38,7 @@ export interface TemplateVariables {
   payment_link?: string;
   manage_booking_link?: string;
   short_manage_link?: string;
+  message?: string;
   [key: string]: string | number | undefined;
 }
 

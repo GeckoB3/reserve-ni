@@ -10,11 +10,16 @@ import { StaffSection } from './sections/StaffSection';
 import { CommunicationTemplatesSection } from './sections/CommunicationTemplatesSection';
 import { StripeConnectSection } from './sections/StripeConnectSection';
 import { DataExportSection } from './sections/DataExportSection';
+import { TableManagementSection } from './sections/TableManagementSection';
+import { AvailabilityConfigSection } from './sections/AvailabilityConfigSection';
+import { BookingRulesSection } from './sections/BookingRulesSection';
+import { DepositConfigSection } from './sections/DepositConfigSection';
 
 interface SettingsViewProps {
   initialVenue: VenueSettings | null;
   isAdmin: boolean;
   initialTab?: string;
+  hasServiceConfig?: boolean;
 }
 
 const TABS = [
@@ -26,7 +31,7 @@ const TABS = [
 
 type TabKey = typeof TABS[number]['key'];
 
-export function SettingsView({ initialVenue, isAdmin, initialTab }: SettingsViewProps) {
+export function SettingsView({ initialVenue, isAdmin, initialTab, hasServiceConfig = false }: SettingsViewProps) {
   const [venue, setVenue] = useState<VenueSettings | null>(initialVenue);
   const validTabs = TABS.map(t => t.key) as readonly string[];
   const [activeTab, setActiveTab] = useState<TabKey>(
@@ -72,6 +77,14 @@ export function SettingsView({ initialVenue, isAdmin, initialTab }: SettingsView
             <ProfileSection />
             <VenueProfileSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} />
             <OpeningHoursSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} />
+            <TableManagementSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} />
+            {!hasServiceConfig && (
+              <>
+                <AvailabilityConfigSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} />
+                <BookingRulesSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} />
+                <DepositConfigSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} />
+              </>
+            )}
             <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
               <h2 className="text-base font-semibold text-slate-900">Booking Widget & QR Code</h2>
               <p className="mt-1 text-sm text-slate-500">Get embed code and a printable QR code for your booking page.</p>
