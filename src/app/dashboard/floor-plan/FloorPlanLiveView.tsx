@@ -558,7 +558,7 @@ export function FloorPlanLiveView({ isAdmin = false, venueId }: { isAdmin?: bool
                 </button>
               </>
             )}
-            {(selectedTable.service_status === 'reserved' || selectedTable.service_status === 'pending') && selectedTable.booking?.id && (
+            {(selectedTable.service_status === 'booked' || selectedTable.service_status === 'pending') && selectedTable.booking?.id && (
               <>
                 <button
                   onClick={() => handleBookingStatusChange(selectedTable.booking!.id, 'Seated')}

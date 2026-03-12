@@ -354,7 +354,7 @@ export async function POST(request: NextRequest) {
             party_size,
             cancellation_deadline,
             deposit_amount: depositAmount,
-            assigned_table: venue.show_table_in_confirmation ? assignedTableLabel : undefined,
+            assigned_table: venue.show_table_in_confirmation ? (assignedTableLabel ?? undefined) : undefined,
             manage_booking_link: manageBookingLink,
             short_manage_link: shortManageLink,
           },

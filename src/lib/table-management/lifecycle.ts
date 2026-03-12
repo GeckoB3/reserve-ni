@@ -100,7 +100,8 @@ export async function detectAssignmentConflicts(
   const dayEnd = `${booking.booking_date}T23:59:59.999Z`;
 
   for (const row of data ?? []) {
-    const linked = row.booking as BookingCore;
+    const bookingRaw = row.booking as BookingCore | BookingCore[] | null;
+    const linked = Array.isArray(bookingRaw) ? bookingRaw[0] : bookingRaw;
     if (!linked?.id) continue;
     if (excludeBookingId && linked.id === excludeBookingId) continue;
     const otherStart = timeToMinutes(linked.booking_time);

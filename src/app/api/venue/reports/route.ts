@@ -62,7 +62,11 @@ export async function GET(request: NextRequest) {
       const availableHours = days * 12;
       const occupiedByTable = new Map<string, number>();
       for (const assignment of assignments ?? []) {
-        const booking = assignment.booking as { booking_time: string; estimated_end_time: string | null };
+        const bookingRaw = assignment.booking as
+          | { booking_time?: string | null; estimated_end_time?: string | null }
+          | Array<{ booking_time?: string | null; estimated_end_time?: string | null }>
+          | null;
+        const booking = Array.isArray(bookingRaw) ? bookingRaw[0] : bookingRaw;
         const startRaw = booking?.booking_time?.slice(0, 5) ?? '00:00';
         const start = Number(startRaw.slice(0, 2)) * 60 + Number(startRaw.slice(3, 5));
         const endRaw = booking?.estimated_end_time?.includes('T')

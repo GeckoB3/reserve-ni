@@ -109,14 +109,22 @@ export async function POST(request: NextRequest) {
         .eq('table_id', table_id)
         .eq('bookings.booking_date', today);
       const hasBookingConflict = (existingAssignments ?? []).some((assignment: {
-        bookings: {
-          booking_date: string | null;
-          booking_time: string | null;
-          estimated_end_time: string | null;
-          status: string | null;
-        };
+        bookings:
+          | {
+              booking_date: string | null;
+              booking_time: string | null;
+              estimated_end_time: string | null;
+              status: string | null;
+            }
+          | Array<{
+              booking_date: string | null;
+              booking_time: string | null;
+              estimated_end_time: string | null;
+              status: string | null;
+            }>
+          | null;
       }) => {
-        const details = assignment.bookings;
+        const details = Array.isArray(assignment.bookings) ? assignment.bookings[0] : assignment.bookings;
         if (!details || !details.booking_time || !details.status) return false;
         if (!['Pending', 'Confirmed', 'Seated'].includes(details.status)) return false;
         const existingStart = timeToMinutes(extractTime(details.booking_time));
