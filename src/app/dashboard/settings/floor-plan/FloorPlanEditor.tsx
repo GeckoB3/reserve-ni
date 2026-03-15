@@ -29,6 +29,8 @@ export function FloorPlanEditor({ className, embedded = false }: Props) {
   const [backgroundUrl, setBackgroundUrl] = useState<string | null>(null);
   const [backgroundDraft, setBackgroundDraft] = useState('');
   const [comboSaving, setComboSaving] = useState(false);
+  const [joinSnapEnabled, setJoinSnapEnabled] = useState(true);
+  const [alignmentGuidesEnabled, setAlignmentGuidesEnabled] = useState(true);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const snapComboRef = useRef<Map<string, string>>(new Map());
 
@@ -507,6 +509,8 @@ export function FloorPlanEditor({ className, embedded = false }: Props) {
               onSnapApply={handleSnapApply}
               onSnapRemove={handleSnapRemove}
               combinationLinks={combinations}
+              joinSnapEnabled={joinSnapEnabled}
+              alignmentGuidesEnabled={alignmentGuidesEnabled}
             />
           </div>
         </div>
@@ -666,6 +670,26 @@ export function FloorPlanEditor({ className, embedded = false }: Props) {
           )}
 
           <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <h3 className="mb-3 text-sm font-semibold text-slate-900">Placement Aids</h3>
+            <div className="space-y-2.5">
+              <label className="flex cursor-pointer items-center justify-between">
+                <span className="text-xs text-slate-700">Alignment guides</span>
+                <button type="button" role="switch" aria-checked={alignmentGuidesEnabled} onClick={() => setAlignmentGuidesEnabled((v) => !v)} className={`relative inline-flex h-5 w-9 flex-shrink-0 rounded-full border-2 border-transparent transition-colors ${alignmentGuidesEnabled ? 'bg-brand-600' : 'bg-slate-300'}`}>
+                  <span className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-sm ring-0 transition-transform ${alignmentGuidesEnabled ? 'translate-x-4' : 'translate-x-0'}`} />
+                </button>
+              </label>
+              <p className="text-[10px] text-slate-400">When on, tables snap to alignment lines near other tables</p>
+              <label className="flex cursor-pointer items-center justify-between">
+                <span className="text-xs text-slate-700">Join snap</span>
+                <button type="button" role="switch" aria-checked={joinSnapEnabled} onClick={() => setJoinSnapEnabled((v) => !v)} className={`relative inline-flex h-5 w-9 flex-shrink-0 rounded-full border-2 border-transparent transition-colors ${joinSnapEnabled ? 'bg-brand-600' : 'bg-slate-300'}`}>
+                  <span className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-sm ring-0 transition-transform ${joinSnapEnabled ? 'translate-x-4' : 'translate-x-0'}`} />
+                </button>
+              </label>
+              <p className="text-[10px] text-slate-400">When on, tables snap together edge-to-edge and auto-link as combinations</p>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
             <h3 className="mb-3 text-sm font-semibold text-slate-900">Actions</h3>
             <div className="mb-3">
               <label className="mb-1 block text-xs font-medium text-slate-500">Background URL</label>
@@ -721,11 +745,12 @@ export function FloorPlanEditor({ className, embedded = false }: Props) {
             <h3 className="mb-3 text-sm font-semibold text-slate-900">Tips</h3>
             <ul className="space-y-1 text-xs text-slate-500">
               <li>• Drag tables to position them freely</li>
-              <li>• Tables snap together when close</li>
+              <li>• Toggle alignment guides and join snap above</li>
               <li>• Shift-click to select multiple tables</li>
               <li>• Link selected tables as a combination</li>
               <li>• Scroll to zoom, drag canvas to pan</li>
               <li>• Purple lines show linked combinations</li>
+              <li>• Use Snap to Grid for uniform cleanup</li>
             </ul>
           </div>
         </div>

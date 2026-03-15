@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { sendCommunication } from '@/lib/communications';
+import { applyBookingLifecycleStatusEffects, validateBookingStatusTransition } from '@/lib/table-management/lifecycle';
 
 /**
  * POST /api/cron/auto-cancel-bookings
@@ -36,14 +37,24 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ cancelled: 0 });
     }
 
-    const { error: updateErr } = await supabase
-      .from('bookings')
-      .update({ status: 'Cancelled', updated_at: new Date().toISOString() })
-      .in('id', ids);
-
-    if (updateErr) {
-      console.error('auto-cancel update failed:', updateErr);
-      return NextResponse.json({ error: 'Update failed' }, { status: 500 });
+    for (const booking of bookings ?? []) {
+      const check = validateBookingStatusTransition('Pending', 'Cancelled');
+      if (!check.ok) continue;
+      const { error: updateErr } = await supabase
+        .from('bookings')
+        .update({ status: 'Cancelled', updated_at: new Date().toISOString() })
+        .eq('id', booking.id);
+      if (updateErr) {
+        console.error('auto-cancel update failed:', updateErr);
+        return NextResponse.json({ error: 'Update failed' }, { status: 500 });
+      }
+      await applyBookingLifecycleStatusEffects(supabase, {
+        bookingId: booking.id,
+        guestId: booking.guest_id,
+        previousStatus: 'Pending',
+        nextStatus: 'Cancelled',
+        actorId: null,
+      });
     }
 
     const eventRows = (bookings ?? []).map((b) => ({

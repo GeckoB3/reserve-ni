@@ -7,10 +7,13 @@ import { computeAvailability, fetchEngineInput, getAvailableSlots } from '@/lib/
 import { autoAssignTable } from '@/lib/table-availability';
 import { BOOKING_MUTABLE_STATUSES } from '@/lib/table-management/constants';
 import {
+  applyBookingLifecycleStatusEffects,
   clearTableStatusesForBooking,
   getAssignedTableIds,
   replaceBookingAssignments,
   syncTableStatusesForBooking,
+  validateBookingStatusTransition,
+  validateNoShowGracePeriod,
 } from '@/lib/table-management/lifecycle';
 import type { VenueForAvailability, BookingForAvailability } from '@/types/availability';
 import { resolveVenueMode } from '@/lib/venue-mode';
@@ -124,20 +127,19 @@ export async function PATCH(
       }
       const newStatus = parsed.data;
 
-      const validTransitions: Record<string, string[]> = {
-        Pending: ['Confirmed', 'Cancelled'],
-        Confirmed: ['Seated', 'No-Show', 'Cancelled'],
-        Seated: ['Completed', 'Cancelled'],
-        Completed: [],
-        'No-Show': [],
-        Cancelled: [],
-      };
-      const allowed = validTransitions[booking.status as string];
-      if (!allowed?.includes(newStatus)) {
-        return NextResponse.json(
-          { error: `Cannot change status from ${booking.status} to ${newStatus}` },
-          { status: 400 }
-        );
+      const transitionCheck = validateBookingStatusTransition(booking.status as string, newStatus);
+      if (!transitionCheck.ok) {
+        return NextResponse.json({ error: transitionCheck.error }, { status: 400 });
+      }
+
+      if (newStatus === 'No-Show') {
+        const { data: venueGrace } = await admin.from('venues').select('no_show_grace_minutes').eq('id', staff.venue_id).single();
+        const graceMinutes = venueGrace?.no_show_grace_minutes ?? 15;
+        const bookingTimeStr = typeof booking.booking_time === 'string' ? booking.booking_time.slice(0, 5) : '00:00';
+        const graceCheck = validateNoShowGracePeriod(booking.booking_date, bookingTimeStr, graceMinutes);
+        if (!graceCheck.ok) {
+          return NextResponse.json({ error: graceCheck.error }, { status: 400 });
+        }
       }
 
       if (newStatus === 'Cancelled' && (booking.status === 'Confirmed' || booking.status === 'Pending')) {
@@ -219,73 +221,35 @@ export async function PATCH(
           .eq('id', id);
 
         if (booking.status === 'Pending' && newStatus === 'Confirmed') {
-          const { data: existingConfirmation } = await staff.db
-            .from('communications')
-            .select('id')
-            .eq('booking_id', id)
-            .eq('message_type', 'booking_confirmation')
-            .limit(1)
-            .maybeSingle();
-          if (!existingConfirmation) {
-            const { sendCommunication } = await import('@/lib/communications');
-            const { data: guestRow } = await staff.db.from('guests').select('name, email, phone').eq('id', booking.guest_id).single();
-            const { data: venueRow } = await staff.db.from('venues').select('name').eq('id', staff.venue_id).single();
-            if (guestRow && venueRow?.name) {
-              const bookingTime = typeof booking.booking_time === 'string' ? booking.booking_time.slice(0, 5) : '';
-              try {
-                await sendCommunication({
-                  type: 'booking_confirmation',
-                  recipient: { email: guestRow.email ?? undefined, phone: guestRow.phone ?? undefined },
-                  payload: {
-                    guest_name: guestRow.name ?? 'Guest',
-                    venue_name: venueRow.name,
-                    booking_date: booking.booking_date,
-                    booking_time: bookingTime,
-                    party_size: booking.party_size,
-                    cancellation_deadline: booking.cancellation_deadline ?? undefined,
-                  },
-                  venue_id: staff.venue_id,
-                  booking_id: id,
-                  guest_id: booking.guest_id,
-                });
-              } catch (commsErr) {
-                console.error('Booking confirmation on status confirm failed:', commsErr);
-              }
-            }
+          const { sendBookingConfirmationEmail } = await import('@/lib/communications/send-templated');
+          const { data: guestRow } = await staff.db.from('guests').select('name, email, phone').eq('id', booking.guest_id).single();
+          const { data: venueRow } = await staff.db.from('venues').select('name, address').eq('id', staff.venue_id).single();
+          if (guestRow?.email && venueRow?.name) {
+            const bookingTime = typeof booking.booking_time === 'string' ? booking.booking_time.slice(0, 5) : '';
+            sendBookingConfirmationEmail(
+              {
+                id,
+                guest_name: guestRow.name ?? 'Guest',
+                guest_email: guestRow.email,
+                booking_date: booking.booking_date,
+                booking_time: bookingTime,
+                party_size: booking.party_size,
+              },
+              { name: venueRow.name, address: venueRow.address ?? undefined },
+              staff.venue_id,
+            ).catch((err) => console.error('Booking confirmation on status confirm failed:', err));
           }
         }
 
-        if (newStatus === 'Seated') {
-          const today = new Date().toISOString().slice(0, 10);
-          const { data: guestData } = await admin.from('guests').select('visit_count').eq('id', booking.guest_id).single();
-          await admin
-            .from('guests')
-            .update({
-              visit_count: (guestData?.visit_count ?? 0) + 1,
-              last_visit_date: today,
-              updated_at: new Date().toISOString(),
-            })
-            .eq('id', booking.guest_id);
-        }
       }
 
-      if (newStatus === 'No-Show') {
-        const { data: guestData } = await admin.from('guests').select('no_show_count').eq('id', booking.guest_id).single();
-        await admin
-          .from('guests')
-          .update({
-            no_show_count: (guestData?.no_show_count ?? 0) + 1,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', booking.guest_id);
-      }
-
-      const assignedTableIds = await getAssignedTableIds(staff.db, id);
-      if (newStatus === 'Cancelled' || newStatus === 'No-Show' || newStatus === 'Completed') {
-        await clearTableStatusesForBooking(staff.db, id, staff.id);
-      } else if (newStatus === 'Seated' || newStatus === 'Confirmed' || newStatus === 'Pending') {
-        await syncTableStatusesForBooking(staff.db, id, assignedTableIds, newStatus, staff.id);
-      }
+      await applyBookingLifecycleStatusEffects(admin, {
+        bookingId: id,
+        guestId: booking.guest_id,
+        previousStatus: booking.status as string,
+        nextStatus: newStatus,
+        actorId: staff.id,
+      });
 
       const updated = await staff.db.from('bookings').select('*').eq('id', id).single();
       return NextResponse.json(updated.data);
@@ -516,6 +480,17 @@ export async function PATCH(
         } catch (commsErr) {
           console.error('Booking modification notification failed:', commsErr);
         }
+      }
+
+      // Reset scheduled communication logs so reminders re-trigger for the new date/time
+      try {
+        await admin
+          .from('communication_logs')
+          .delete()
+          .eq('booking_id', id)
+          .in('message_type', ['reminder_56h_email', 'day_of_reminder_sms', 'day_of_reminder_email', 'post_visit_email']);
+      } catch (logResetErr) {
+        console.error('Communication log reset failed after modification:', logResetErr);
       }
 
       const updated = await staff.db.from('bookings').select('*').eq('id', id).single();

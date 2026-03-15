@@ -73,27 +73,29 @@ export function UnifiedFloorPlanView({ isAdmin, venueId }: { isAdmin: boolean; v
       <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
         Editing Layout — changes are saved automatically as you make them.
       </div>
-      <div className="flex items-center justify-between">
-        <div className="flex gap-2">
-          {(['layout', 'tables', 'combinations', 'areas'] as EditTab[]).map((nextTab) => (
-            <button
-              key={nextTab}
-              type="button"
-              onClick={() => setTab(nextTab)}
-              className={`rounded-lg px-3 py-1.5 text-sm font-medium ${
-                tab === nextTab
-                  ? 'bg-brand-600 text-white'
-                  : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
-              }`}
-            >
-              {nextTab[0]!.toUpperCase() + nextTab.slice(1)}
-            </button>
-          ))}
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div className="overflow-x-auto">
+          <div className="flex w-max gap-2">
+            {(['layout', 'tables', 'combinations', 'areas'] as EditTab[]).map((nextTab) => (
+              <button
+                key={nextTab}
+                type="button"
+                onClick={() => setTab(nextTab)}
+                className={`rounded-lg px-3 py-1.5 text-sm font-medium ${
+                  tab === nextTab
+                    ? 'bg-brand-600 text-white'
+                    : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
+                }`}
+              >
+                {nextTab[0]!.toUpperCase() + nextTab.slice(1)}
+              </button>
+            ))}
+          </div>
         </div>
         <button
           type="button"
           onClick={() => setMode('operational')}
-          className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+          className="self-start rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 sm:self-auto"
         >
           Back to Operational View
         </button>

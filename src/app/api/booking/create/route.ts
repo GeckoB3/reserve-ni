@@ -2,13 +2,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { stripe } from '@/lib/stripe';
 import { findOrCreateGuest } from '@/lib/guests';
-import { sendCommunication } from '@/lib/communications';
+import { sendBookingConfirmationEmail } from '@/lib/communications/send-templated';
 import { getAvailableSlots, computeAvailability, fetchEngineInput } from '@/lib/availability';
 import type { VenueForAvailability, BookingForAvailability } from '@/types/availability';
 import { resolveDuration, getDayOfWeek } from '@/lib/availability/engine';
 import { generateConfirmToken, hashConfirmToken } from '@/lib/confirm-token';
 import { z } from 'zod';
-import { createShortManageLink } from '@/lib/short-manage-link';
+
 import { autoAssignTable } from '@/lib/table-availability';
 import { resolveVenueMode } from '@/lib/venue-mode';
 import { syncTableStatusesForBooking } from '@/lib/table-management/lifecycle';
@@ -70,7 +70,7 @@ export async function POST(request: NextRequest) {
 
     const { data: venue, error: venueErr } = await supabase
       .from('venues')
-      .select('id, name, stripe_connected_account_id, booking_rules, deposit_config, opening_hours, availability_config, timezone, table_management_enabled, show_table_in_confirmation')
+      .select('id, name, stripe_connected_account_id, booking_rules, deposit_config, opening_hours, availability_config, timezone, table_management_enabled, show_table_in_confirmation, address')
       .eq('id', venue_id)
       .single();
 
@@ -340,27 +340,19 @@ export async function POST(request: NextRequest) {
         .eq('id', booking.id);
       const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : request.nextUrl.origin);
       const manageBookingLink = `${baseUrl}/manage/${booking.id}/${encodeURIComponent(manageToken)}`;
-      const shortManageLink = createShortManageLink(booking.id);
-      const depositAmount = depositAmountPence != null ? (depositAmountPence / 100).toFixed(2) : undefined;
-      try {
-        await sendCommunication({
-          type: 'booking_confirmation',
-          recipient: { email: guest.email ?? undefined, phone: guest.phone ?? undefined },
-          payload: {
-            guest_name: name,
-            venue_name: venue.name,
-            booking_date,
-            booking_time,
-            party_size,
-            cancellation_deadline,
-            deposit_amount: depositAmount,
-            assigned_table: venue.show_table_in_confirmation ? (assignedTableLabel ?? undefined) : undefined,
+      if (guest.email) {
+        sendBookingConfirmationEmail(
+          {
+            id: booking.id, guest_name: name, guest_email: guest.email,
+            booking_date, booking_time, party_size,
+            dietary_notes: dietary_notes ?? null,
+            deposit_amount_pence: depositAmountPence ?? null,
+            deposit_status: requiresDeposit ? 'Pending' : 'Not Required',
             manage_booking_link: manageBookingLink,
-            short_manage_link: shortManageLink,
           },
-        });
-      } catch (commsErr) {
-        console.error('Confirmation comms failed (booking still created):', commsErr);
+          { name: venue.name, address: venue.address ?? undefined },
+          venue.id,
+        ).catch((err) => console.error('Templated confirmation email failed:', err));
       }
     }
 

@@ -4,7 +4,17 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createClient } from '@/lib/supabase/browser';
 import { parseDietaryNotes, hasAllergyKeywords } from '@/lib/day-sheet';
 import { useToast } from '@/components/ui/Toast';
-import { BOOKING_STATUS_TRANSITIONS, type BookingStatus } from '@/lib/table-management/booking-status';
+import {
+  BOOKING_PRIMARY_ACTIONS,
+  BOOKING_REVERT_ACTIONS,
+  canMarkNoShowForSlot,
+  canTransitionBookingStatus,
+  isDestructiveBookingStatus,
+  type BookingStatus,
+} from '@/lib/table-management/booking-status';
+import { UndoToast } from '@/app/dashboard/table-grid/UndoToast';
+import type { UndoAction } from '@/types/table-management';
+import { UnifiedBookingForm } from '@/components/booking/UnifiedBookingForm';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -107,9 +117,9 @@ const STATUS_STYLE: Record<string, { dot: string; bg: string; text: string; ring
 };
 
 const PRIMARY_ACTIONS: Record<string, { label: string; target: BookingStatus }> = {
-  Pending:   { label: 'Confirm', target: 'Confirmed' },
-  Confirmed: { label: 'Seat',    target: 'Seated' },
-  Seated:    { label: 'Complete', target: 'Completed' },
+  Pending:   BOOKING_PRIMARY_ACTIONS.Pending!,
+  Confirmed: BOOKING_PRIMARY_ACTIONS.Confirmed!,
+  Seated:    BOOKING_PRIMARY_ACTIONS.Seated!,
 };
 
 const DEFAULT_STATUSES = new Set(['Pending', 'Confirmed', 'Seated']);
@@ -142,19 +152,7 @@ function minutesToTime(m: number): string {
 function formatPence(pence: number): string {
   return `£${(pence / 100).toFixed(2)}`;
 }
-function canNoShow(bookingTime: string, bookingDate: string, graceMinutes: number): boolean {
-  const today = todayISO();
-  if (bookingDate < today) return true;
-  if (bookingDate > today) return false;
-  const [h, m] = bookingTime.split(':').map(Number);
-  const bookingMin = (h ?? 0) * 60 + (m ?? 0);
-  const now = new Date();
-  const nowMin = now.getHours() * 60 + now.getMinutes();
-  return nowMin >= bookingMin + graceMinutes;
-}
-function isTerminal(status: string): boolean {
-  return ['Completed', 'No-Show', 'Cancelled'].includes(status);
-}
+const isTerminal = isDestructiveBookingStatus;
 
 function ordinal(n: number): string {
   const s = ['th', 'st', 'nd', 'rd'];
@@ -662,194 +660,6 @@ function DaySheetWalkInModal({
   );
 }
 
-// ─── NewBookingModal ────────────────────────────────────────────────────────
-
-interface AvailSlot {
-  key: string;
-  label: string;
-  start_time: string;
-  available_covers: number;
-}
-
-function NewBookingModal({ initialDate, venueId, onCreated, onClose }: { initialDate: string; venueId: string; onCreated: () => void; onClose: () => void }) {
-  const [name, setName] = useState('');
-  const [phone, setPhone] = useState('');
-  const [email, setEmail] = useState('');
-  const [partySize, setPartySize] = useState(2);
-  const [bookingDate, setBookingDate] = useState(initialDate);
-  const [time, setTime] = useState('');
-  const [specialRequests, setSpecialRequests] = useState('');
-  const [requireDeposit, setRequireDeposit] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [slots, setSlots] = useState<AvailSlot[]>([]);
-  const [slotsLoading, setSlotsLoading] = useState(false);
-
-  // Auto-fetch available slots when date or party size changes
-  useEffect(() => {
-    if (!bookingDate) { setSlots([]); return; }
-    let cancelled = false;
-    setSlotsLoading(true);
-    setTime('');
-    (async () => {
-      try {
-        const res = await fetch(`/api/booking/availability?venue_id=${venueId}&date=${bookingDate}&party_size=${partySize}`);
-        if (!res.ok || cancelled) { if (!cancelled) setSlotsLoading(false); return; }
-        const data = await res.json();
-        const raw: AvailSlot[] = (data.slots ?? []).map((s: { key?: string; label?: string; start_time?: string; available_covers?: number }) => ({
-          key: s.key ?? s.start_time ?? '',
-          label: s.label ?? s.start_time?.slice(0, 5) ?? '',
-          start_time: s.start_time ?? '',
-          available_covers: s.available_covers ?? 0,
-        })).filter((s: AvailSlot) => s.start_time);
-        if (!cancelled) setSlots(raw);
-      } catch { /* ignore */ }
-      if (!cancelled) setSlotsLoading(false);
-    })();
-    return () => { cancelled = true; };
-  }, [bookingDate, partySize, venueId]);
-
-  const submit = async () => {
-    if (!name.trim() || !phone.trim() || !time || !bookingDate) {
-      setError('Name, phone, date, and time are required');
-      return;
-    }
-    setSaving(true);
-    setError(null);
-    try {
-      const res = await fetch('/api/venue/bookings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          booking_date: bookingDate,
-          booking_time: time,
-          party_size: partySize,
-          name: name.trim(),
-          phone: phone.trim(),
-          email: email.trim() || undefined,
-          special_requests: specialRequests.trim() || undefined,
-          require_deposit: requireDeposit,
-        }),
-      });
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        setError(j.error ?? 'Failed to create booking');
-        return;
-      }
-      onCreated();
-      onClose();
-    } catch {
-      setError('Failed to create booking');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm p-4 overflow-y-auto" onClick={onClose}>
-      <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl my-8" onClick={(e) => e.stopPropagation()}>
-        <h3 className="text-base font-semibold text-slate-900">New Booking</h3>
-        <div className="mt-4 space-y-3">
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="mb-1 block text-xs font-medium text-slate-600">Guest Name *</label>
-              <input value={name} onChange={(e) => setName(e.target.value)} autoFocus className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
-            </div>
-            <div>
-              <label className="mb-1 block text-xs font-medium text-slate-600">Phone *</label>
-              <input value={phone} onChange={(e) => setPhone(e.target.value)} type="tel" className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
-            </div>
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-slate-600">Email</label>
-            <input value={email} onChange={(e) => setEmail(e.target.value)} type="email" className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-slate-600">Party Size</label>
-            <div className="flex items-center gap-2">
-              <button type="button" onClick={() => setPartySize(Math.max(1, partySize - 1))} className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-lg font-bold text-slate-600 hover:bg-slate-50">−</button>
-              <input value={partySize} onChange={(e) => setPartySize(Math.max(1, Number(e.target.value) || 1))} type="number" min={1} className="h-9 w-16 rounded-lg border border-slate-200 text-center text-sm font-semibold tabular-nums focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
-              <button type="button" onClick={() => setPartySize(partySize + 1)} className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-lg font-bold text-slate-600 hover:bg-slate-50">+</button>
-            </div>
-          </div>
-
-          {/* Date picker */}
-          <div>
-            <label className="mb-1 block text-xs font-medium text-slate-600">Date *</label>
-            <input
-              type="date"
-              value={bookingDate}
-              onChange={(e) => setBookingDate(e.target.value)}
-              min={new Date().toISOString().slice(0, 10)}
-              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
-            />
-          </div>
-
-          {/* Time dropdown */}
-          <div>
-            <label className="mb-1 block text-xs font-medium text-slate-600">Time *</label>
-            {slotsLoading ? (
-              <div className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-400">
-                <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
-                Loading times...
-              </div>
-            ) : !bookingDate ? (
-              <p className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-400">Select a date first</p>
-            ) : slots.length === 0 ? (
-              <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">No times available for {partySize} cover{partySize !== 1 ? 's' : ''} on {formatDateShort(bookingDate)}</p>
-            ) : (
-              <select
-                value={time}
-                onChange={(e) => setTime(e.target.value)}
-                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
-              >
-                <option value="">Select a time...</option>
-                {slots.map((s) => (
-                  <option key={s.key} value={s.start_time}>
-                    {s.label} ({s.available_covers} cover{s.available_covers !== 1 ? 's' : ''} available)
-                  </option>
-                ))}
-              </select>
-            )}
-          </div>
-
-          <div>
-            <label className="mb-1 block text-xs font-medium text-slate-600">Special Requests</label>
-            <textarea value={specialRequests} onChange={(e) => setSpecialRequests(e.target.value)} rows={2} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
-          </div>
-
-          {/* Deposit toggle */}
-          <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50/50 px-3 py-2.5">
-            <div>
-              <p className="text-sm font-medium text-slate-700">Require deposit</p>
-              <p className="text-xs text-slate-500">Send a payment link to the guest</p>
-            </div>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={requireDeposit}
-              onClick={() => setRequireDeposit(!requireDeposit)}
-              className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ${requireDeposit ? 'bg-brand-600' : 'bg-slate-200'}`}
-            >
-              <span className={`pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow ring-0 transition-transform duration-200 ${requireDeposit ? 'translate-x-5' : 'translate-x-0'}`} />
-            </button>
-          </div>
-
-          {error && <p className="text-sm text-red-600">{error}</p>}
-        </div>
-        <div className="mt-5 flex gap-3">
-          <button type="button" disabled={saving || !time || !bookingDate} onClick={() => void submit()} className="flex-1 rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50">
-            {saving ? 'Creating...' : 'Create Booking'}
-          </button>
-          <button type="button" onClick={onClose} className="flex-1 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-50">
-            Cancel
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // ─── DepositActions ─────────────────────────────────────────────────────────
 
 function DepositActions({ booking, onAction }: { booking: DaySheetBooking; onAction: () => void }) {
@@ -953,6 +763,19 @@ export function DaySheetView({ venueId }: { venueId: string }) {
   const [sendMessageId, setSendMessageId] = useState<string | null>(null);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [dietaryOpen, setDietaryOpen] = useState(false);
+  const [undoAction, setUndoAction] = useState<UndoAction | null>(null);
+  const [tableManagementEnabled, setTableManagementEnabled] = useState(false);
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const res = await fetch('/api/venue/tables');
+        if (!res.ok) return;
+        const payload = await res.json();
+        setTableManagementEnabled(Boolean(payload.settings?.table_management_enabled));
+      } catch { /* noop */ }
+    })();
+  }, []);
 
   // Filters
   const [filters, setFilters] = useState<Filters>({
@@ -1041,7 +864,7 @@ export function DaySheetView({ venueId }: { venueId: string }) {
     if (!currentBooking) return;
     const fromStatus = currentBooking.status as BookingStatus;
 
-    if (!BOOKING_STATUS_TRANSITIONS[fromStatus]?.includes(newStatus)) {
+    if (!canTransitionBookingStatus(fromStatus, newStatus)) {
       addToast(`Cannot change from ${fromStatus} to ${newStatus}`, 'error');
       return;
     }
@@ -1104,6 +927,14 @@ export function DaySheetView({ venueId }: { venueId: string }) {
                      newStatus === 'No-Show' ? 'Marked as no-show' :
                      newStatus === 'Cancelled' ? 'Booking cancelled' : 'Status updated';
       addToast(label, 'success');
+      setUndoAction({
+        id: crypto.randomUUID(),
+        type: 'change_status',
+        description: `${currentBooking.guest_name}: ${fromStatus} -> ${newStatus}`,
+        timestamp: Date.now(),
+        previous_state: { bookingId, status: fromStatus },
+        current_state: { bookingId, status: newStatus },
+      });
       void fetchDaySheet();
     } catch {
       setData(snapshot);
@@ -1112,6 +943,15 @@ export function DaySheetView({ venueId }: { venueId: string }) {
       setActionLoading(null);
     }
   }, [data, addToast, fetchDaySheet]);
+
+  const undoStatusChange = useCallback(async () => {
+    if (!undoAction || undoAction.type !== 'change_status') return;
+    const bookingId = String(undoAction.previous_state.bookingId ?? '');
+    const previousStatus = String(undoAction.previous_state.status ?? '') as BookingStatus;
+    if (!bookingId || !previousStatus) return;
+    setUndoAction(null);
+    await changeStatus(bookingId, previousStatus);
+  }, [undoAction, changeStatus]);
 
   // Inline notes save
   const saveNotes = useCallback(async (bookingId: string, notes: string) => {
@@ -1250,11 +1090,13 @@ export function DaySheetView({ venueId }: { venueId: string }) {
 
         {/* Actions (right) */}
         <div className="flex items-center gap-1.5 print:hidden">
-          <button type="button" onClick={() => setShowWalkIn(true)} className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-700">
-            Walk-in
+          <button type="button" onClick={() => setShowNewBooking(true)} className="flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-brand-700">
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
+            New Booking
           </button>
-          <button type="button" onClick={() => setShowNewBooking(true)} className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50">
-            + New Booking
+          <button type="button" onClick={() => setShowWalkIn(true)} className="flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-emerald-700">
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
+            Walk-in
           </button>
           <button type="button" onClick={() => window.print()} className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50">
             Print
@@ -1457,6 +1299,15 @@ export function DaySheetView({ venueId }: { venueId: string }) {
                               disabled={actionLoading === b.id}
                               onClick={(e) => {
                                 e.stopPropagation();
+                                if (primaryAction.target === 'Completed') {
+                                  setConfirmDialog({
+                                    title: 'Complete Booking',
+                                    message: `${b.guest_name} (${b.party_size}) at ${b.booking_time.slice(0, 5)} will be marked Completed.`,
+                                    confirmLabel: 'Mark Completed',
+                                    onConfirm: () => void changeStatus(b.id, primaryAction.target),
+                                  });
+                                  return;
+                                }
                                 void changeStatus(b.id, primaryAction.target);
                               }}
                               className={`rounded-lg px-3 py-1.5 text-xs font-semibold text-white shadow-sm disabled:opacity-50 print:hidden ${
@@ -1626,14 +1477,32 @@ export function DaySheetView({ venueId }: { venueId: string }) {
                               <button type="button" onClick={() => setSendMessageId(b.id)} className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50">
                                 Send Message
                               </button>
+                              {BOOKING_REVERT_ACTIONS[b.status as BookingStatus] && (
+                                <button
+                                  type="button"
+                                  disabled={actionLoading === b.id}
+                                  onClick={() => {
+                                    const ra = BOOKING_REVERT_ACTIONS[b.status as BookingStatus]!;
+                                    setConfirmDialog({
+                                      title: ra.label,
+                                      message: `${b.guest_name} (${b.party_size}) at ${b.booking_time.slice(0, 5)} will be changed from ${b.status} back to ${ra.target}.`,
+                                      confirmLabel: ra.label,
+                                      onConfirm: () => void changeStatus(b.id, ra.target),
+                                    });
+                                  }}
+                                  className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-800 hover:bg-amber-100 disabled:opacity-50"
+                                >
+                                  {BOOKING_REVERT_ACTIONS[b.status as BookingStatus]!.label}
+                                </button>
+                              )}
                               {b.status === 'Confirmed' && (
                                 <button
                                   type="button"
-                                  disabled={actionLoading === b.id || !canNoShow(b.booking_time, date, data.no_show_grace_minutes)}
-                                  title={!canNoShow(b.booking_time, date, data.no_show_grace_minutes) ? `Available ${data.no_show_grace_minutes} min after booking time` : undefined}
+                                  disabled={actionLoading === b.id || !canMarkNoShowForSlot(date, b.booking_time, data.no_show_grace_minutes)}
+                                  title={!canMarkNoShowForSlot(date, b.booking_time, data.no_show_grace_minutes) ? `Available ${data.no_show_grace_minutes} min after booking time` : undefined}
                                   onClick={() => setConfirmDialog({
                                     title: 'Mark as No-Show',
-                                    message: 'Mark this booking as a no-show? This cannot be undone.',
+                                    message: `${b.guest_name} (${b.party_size}) at ${b.booking_time.slice(0, 5)} will be marked No-Show.`,
                                     confirmLabel: 'Mark No-Show',
                                     onConfirm: () => void changeStatus(b.id, 'No-Show'),
                                   })}
@@ -1648,7 +1517,7 @@ export function DaySheetView({ venueId }: { venueId: string }) {
                                   disabled={actionLoading === b.id}
                                   onClick={() => setConfirmDialog({
                                     title: 'Cancel Booking',
-                                    message: 'Cancel this booking? A cancellation message will be sent to the guest.',
+                                    message: `${b.guest_name} (${b.party_size}) at ${b.booking_time.slice(0, 5)} will be cancelled. A cancellation message will be sent to the guest.`,
                                     confirmLabel: 'Cancel Booking',
                                     onConfirm: () => void changeStatus(b.id, 'Cancelled'),
                                   })}
@@ -1683,11 +1552,13 @@ export function DaySheetView({ venueId }: { venueId: string }) {
         />
       )}
       {showNewBooking && (
-        <NewBookingModal
-          initialDate={date}
+        <UnifiedBookingForm
+          asModal
           venueId={venueId}
+          advancedMode={tableManagementEnabled}
+          initialDate={date}
           onCreated={() => {
-            addToast('Booking created', 'success');
+            setShowNewBooking(false);
             void fetchDaySheet();
           }}
           onClose={() => setShowNewBooking(false)}
@@ -1716,6 +1587,13 @@ export function DaySheetView({ venueId }: { venueId: string }) {
       )}
       {confirmDialog && (
         <ConfirmDialog state={confirmDialog} onClose={() => setConfirmDialog(null)} />
+      )}
+      {undoAction && (
+        <UndoToast
+          action={undoAction}
+          onUndo={() => { void undoStatusChange(); }}
+          onDismiss={() => setUndoAction(null)}
+        />
       )}
 
       {/* ── Print Footer (print only) ── */}

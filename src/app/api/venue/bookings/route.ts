@@ -4,9 +4,9 @@ import { getVenueStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { stripe } from '@/lib/stripe';
 import { findOrCreateGuest } from '@/lib/guests';
-import { sendCommunication } from '@/lib/communications';
 import { generateConfirmToken, hashConfirmToken } from '@/lib/confirm-token';
-import { createShortManageLink } from '@/lib/short-manage-link';
+
+import { sendBookingConfirmationEmail, sendDepositRequestSms } from '@/lib/communications/send-templated';
 import { autoAssignTable } from '@/lib/table-availability';
 import { computeAvailability, fetchEngineInput, getAvailableSlots } from '@/lib/availability';
 import type { BookingForAvailability, VenueForAvailability } from '@/types/availability';
@@ -22,6 +22,9 @@ const phoneBookingSchema = z.object({
   name: z.string().min(1).max(200),
   phone: z.string().min(1).max(30),
   email: z.string().email().optional().or(z.literal('')),
+  dietary_notes: z.string().max(500).optional(),
+  occasion: z.string().max(200).optional(),
+  special_requests: z.string().max(500).optional(),
   require_deposit: z.boolean().optional(),
 });
 
@@ -63,13 +66,24 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { booking_date, booking_time, party_size, name, phone, email, require_deposit } = parsed.data;
+    const {
+      booking_date,
+      booking_time,
+      party_size,
+      name,
+      phone,
+      email,
+      dietary_notes,
+      occasion,
+      special_requests,
+      require_deposit,
+    } = parsed.data;
     const venueId = staff.venue_id;
     const admin = getSupabaseAdminClient();
 
     const { data: venue } = await admin
       .from('venues')
-      .select('id, name, stripe_connected_account_id, booking_rules, deposit_config, table_management_enabled, show_table_in_confirmation, opening_hours, availability_config, timezone')
+      .select('id, name, stripe_connected_account_id, booking_rules, deposit_config, table_management_enabled, show_table_in_confirmation, opening_hours, availability_config, timezone, address')
       .eq('id', venueId)
       .single();
 
@@ -145,6 +159,9 @@ export async function POST(request: NextRequest) {
       deposit_amount_pence: depositAmountPence,
       deposit_status: requiresDeposit ? ('Pending' as const) : ('Not Required' as const),
       cancellation_deadline: cancellationDeadline(booking_date, booking_time),
+      dietary_notes: dietary_notes?.trim() || null,
+      occasion: occasion?.trim() || null,
+      special_requests: special_requests?.trim() || null,
     };
 
     const { data: booking, error: bookErr } = await admin
@@ -243,22 +260,14 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'Payment setup failed' }, { status: 500 });
       }
 
-      try {
-        await sendCommunication({
-          type: 'deposit_payment_request',
-          recipient: { email: guest.email ?? undefined, phone: guest.phone ?? undefined },
-          payload: {
-            guest_name: name,
-            payment_link: payment_url,
-            venue_name: venue.name,
-            booking_date,
-            booking_time,
-            party_size,
-            deposit_amount: depositAmountPence != null ? (depositAmountPence / 100).toFixed(2) : undefined,
-          },
-        });
-      } catch (commsErr) {
-        console.error('Deposit payment request comms failed (booking still created):', commsErr);
+      if (guest.phone) {
+        sendDepositRequestSms(
+          { id: booking.id, guest_name: name, booking_date, booking_time, party_size, deposit_amount_pence: depositAmountPence ?? null },
+          { name: venue.name, address: venue.address ?? undefined },
+          venueId,
+          payment_url,
+          guest.phone,
+        ).catch((err) => console.error('Templated deposit SMS failed:', err));
       }
     } else {
       const manageToken = generateConfirmToken();
@@ -272,26 +281,19 @@ export async function POST(request: NextRequest) {
 
       const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : request.nextUrl.origin);
       const manageBookingLink = `${baseUrl}/manage/${booking.id}/${encodeURIComponent(manageToken)}`;
-      const shortManageLink = createShortManageLink(booking.id);
 
-      try {
-        await sendCommunication({
-          type: 'booking_confirmation',
-          recipient: { email: guest.email ?? undefined, phone: guest.phone ?? undefined },
-          payload: {
-            guest_name: name,
-            venue_name: venue.name,
-            booking_date,
-            booking_time,
-            party_size,
-            cancellation_deadline: bookingInsert.cancellation_deadline,
-            assigned_table: venue.show_table_in_confirmation ? (assignedTableLabel ?? undefined) : undefined,
+      if (guest.email) {
+        sendBookingConfirmationEmail(
+          {
+            id: booking.id, guest_name: name, guest_email: guest.email,
+            booking_date, booking_time, party_size,
+            special_requests: special_requests ?? null,
+            dietary_notes: dietary_notes ?? null,
             manage_booking_link: manageBookingLink,
-            short_manage_link: shortManageLink,
           },
-        });
-      } catch (commsErr) {
-        console.error('Booking confirmation comms failed (booking still created):', commsErr);
+          { name: venue.name, address: venue.address ?? undefined },
+          venueId,
+        ).catch((err) => console.error('Templated confirmation email failed:', err));
       }
     }
 

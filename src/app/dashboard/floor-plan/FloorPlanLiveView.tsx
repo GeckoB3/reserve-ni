@@ -2,10 +2,19 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import dynamic from 'next/dynamic';
-import type { VenueTable, TableGridData, TableBlock } from '@/types/table-management';
+import type { VenueTable, TableGridData, TableBlock, UndoAction } from '@/types/table-management';
 import { useVenueLiveSync } from '@/lib/realtime/useVenueLiveSync';
 import { getTableStatus, type TableOperationalStatus } from '@/lib/table-management/table-status';
-import { SharedNewBookingForm } from '@/app/dashboard/bookings/SharedNewBookingForm';
+import { UnifiedBookingForm } from '@/components/booking/UnifiedBookingForm';
+import { UndoToast } from '@/app/dashboard/table-grid/UndoToast';
+import { BookingDetailPanel } from '@/app/dashboard/bookings/BookingDetailPanel';
+import { ViewToolbar } from '@/components/dashboard/ViewToolbar';
+import { WalkInModal } from '@/app/dashboard/bookings/WalkInModal';
+import { useToast } from '@/components/ui/Toast';
+import { detectAdjacentTables, type CombinationTable } from '@/lib/table-management/combination-engine';
+import { BOOKING_REVERT_ACTIONS, canMarkNoShowForSlot, canTransitionBookingStatus, isDestructiveBookingStatus, isRevertTransition, type BookingStatus } from '@/lib/table-management/booking-status';
+import { computeValidMoveTargets, resolveDropTarget, type CombinationInfo, type BookingMoveContext } from '@/lib/table-management/move-validation';
+import type { FloorDragEvent } from './LiveFloorCanvas';
 
 const LiveFloorCanvas = dynamic(() => import('./LiveFloorCanvas'), { ssr: false });
 
@@ -27,54 +36,54 @@ interface TableWithState extends VenueTable {
   elapsed_pct: number;
 }
 
-const OPERATIONAL_STATUS_LABELS: Record<TableOperationalStatus, string> = {
-  available: 'Available',
-  booked: 'Booked',
-  pending: 'Pending',
-  seated: 'Seated',
-  held: 'Held / Blocked',
-  no_show: 'No Show',
-};
-
 interface DefinedCombination {
   id: string;
   name: string;
   tableIds: string[];
 }
 
+function formatDateInput(d: Date): string {
+  const y = d.getFullYear();
+  const m = `${d.getMonth() + 1}`.padStart(2, '0');
+  const day = `${d.getDate()}`.padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+
 export function FloorPlanLiveView({ isAdmin = false, venueId }: { isAdmin?: boolean; venueId: string }) {
-  const formatDateInput = (d: Date): string => {
-    const y = d.getFullYear();
-    const m = `${d.getMonth() + 1}`.padStart(2, '0');
-    const day = `${d.getDate()}`.padStart(2, '0');
-    return `${y}-${m}-${day}`;
-  };
+  const { addToast } = useToast();
   const [tables, setTables] = useState<VenueTable[]>([]);
   const [gridData, setGridData] = useState<TableGridData | null>(null);
   const [blocks, setBlocks] = useState<TableBlock[]>([]);
   const [bookingMap, setBookingMap] = useState<Map<string, BookingOnTable>>(new Map());
   const [loading, setLoading] = useState(true);
-  const [selectedTable, setSelectedTable] = useState<TableWithState | null>(null);
+  const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
   const [combinedTableGroups, setCombinedTableGroups] = useState<Map<string, string[]>>(new Map());
   const [definedCombinations, setDefinedCombinations] = useState<DefinedCombination[]>([]);
-  const [showWalkInForm, setShowWalkInForm] = useState(false);
-  const [walkInName, setWalkInName] = useState('');
-  const [walkInPhone, setWalkInPhone] = useState('');
-  const [walkInParty, setWalkInParty] = useState(2);
-  const [walkInSaving, setWalkInSaving] = useState(false);
+  const [manualCombinations, setManualCombinations] = useState<CombinationInfo[]>([]);
   const [selectedDate, setSelectedDate] = useState(() => formatDateInput(new Date()));
   const [selectedTime, setSelectedTime] = useState(() => {
     const now = new Date();
     return `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
   });
   const [debouncedTime, setDebouncedTime] = useState(selectedTime);
-  const [showAssignList, setShowAssignList] = useState(false);
-  const [showQuickBookingForm, setShowQuickBookingForm] = useState(false);
-  const [reassignMode, setReassignMode] = useState<{
-    bookingId: string;
-    guestName: string;
-    oldTableIds: string[];
-  } | null>(null);
+  const [noShowGraceMinutes, setNoShowGraceMinutes] = useState(15);
+  const [combinationThreshold, setCombinationThreshold] = useState(80);
+  const [undoAction, setUndoAction] = useState<UndoAction | null>(null);
+  const [confirmDialog, setConfirmDialog] = useState<{ title: string; message: string; confirmLabel: string; onConfirm: () => void } | null>(null);
+
+  // Booking detail panel
+  const [detailBookingId, setDetailBookingId] = useState<string | null>(null);
+
+  // Booking creation / walk-in
+  const [showNewBookingForm, setShowNewBookingForm] = useState(false);
+  const [showWalkInModal, setShowWalkInModal] = useState(false);
+
+  // Drag/drop & reassign
+  const [reassignMode, setReassignMode] = useState<{ bookingId: string; guestName: string; oldTableIds: string[] } | null>(null);
+  const [validDropTargets, setValidDropTargets] = useState<Set<string> | null>(null);
+  const [validDropComboLabels, setValidDropComboLabels] = useState<Map<string, string> | null>(null);
+  const [dragSourceTableIds, setDragSourceTableIds] = useState<string[]>([]);
 
   useEffect(() => {
     const timeout = setTimeout(() => setDebouncedTime(selectedTime), 300);
@@ -94,18 +103,30 @@ export function FloorPlanLiveView({ isAdmin = false, venueId }: { isAdmin?: bool
       if (combosRes.ok) {
         const cData = await combosRes.json();
         const links: DefinedCombination[] = (cData.combinations ?? []).map(
-          (c: { id: string; name: string; members?: { table_id: string }[] }) => ({
+          (c: { id: string; name: string; members?: { table_id: string }[]; combined_max_covers?: number }) => ({
             id: c.id,
             name: c.name,
             tableIds: (c.members ?? []).map((m: { table_id: string }) => m.table_id),
           })
         );
         setDefinedCombinations(links);
+        const manual: CombinationInfo[] = (cData.combinations ?? []).map(
+          (c: { id: string; name: string; combined_min_covers?: number; combined_max_covers?: number; members?: { table_id: string }[] }) => ({
+            id: c.id,
+            name: c.name,
+            combined_min_covers: c.combined_min_covers,
+            combined_max_covers: c.combined_max_covers ?? 0,
+            table_ids: (c.members ?? []).map((m: { table_id: string }) => m.table_id),
+          })
+        );
+        setManualCombinations(manual);
       }
 
       if (tablesRes.ok) {
         const data = await tablesRes.json();
         setTables((data.tables ?? []).filter((t: VenueTable) => t.is_active));
+        setNoShowGraceMinutes(data.settings?.no_show_grace_minutes ?? 15);
+        setCombinationThreshold(data.settings?.combination_threshold ?? 80);
       }
 
       if (gridRes.ok) {
@@ -177,13 +198,7 @@ export function FloorPlanLiveView({ isAdmin = false, venueId }: { isAdmin?: bool
       assignmentPairs.push({ booking_id: cell.booking_id, table_id: cell.table_id });
     }
     return tables.map((t) => {
-      const tableStatus = getTableStatus(
-        t.id,
-        dateTime,
-        bookingsForStatus,
-        assignmentPairs,
-        blocks
-      );
+      const tableStatus = getTableStatus(t.id, dateTime, bookingsForStatus, assignmentPairs, blocks);
       const activeCell = (gridData?.cells ?? []).find((cell) => {
         if (cell.table_id !== t.id || !cell.booking_id || !cell.booking_details) return false;
         const currentMin = Number(debouncedTime.slice(0, 2)) * 60 + Number(debouncedTime.slice(3, 5));
@@ -197,7 +212,7 @@ export function FloorPlanLiveView({ isAdmin = false, venueId }: { isAdmin?: bool
 
       let elapsedPct = 0;
       if (booking?.start_time && booking?.estimated_end_time) {
-        const [y, mo, d] = new Date().toISOString().slice(0, 10).split('-').map(Number);
+        const [y, mo, d] = selectedDate.split('-').map(Number);
         const [h, m] = booking.start_time.split(':').map(Number);
         const startMs = new Date(y!, mo! - 1, d!, h!, m!).getTime();
         const endMs = new Date(booking.estimated_end_time).getTime();
@@ -207,16 +222,75 @@ export function FloorPlanLiveView({ isAdmin = false, venueId }: { isAdmin?: bool
         }
       }
 
-      return {
-        ...t,
-        service_status: tableStatus,
-        booking,
-        elapsed_pct: elapsedPct,
-      };
+      return { ...t, service_status: tableStatus, booking, elapsed_pct: elapsedPct };
     });
   }, [tables, bookingMap, selectedDate, debouncedTime, gridData, blocks]);
 
-  const handleBookingStatusChange = useCallback(async (bookingId: string, newStatus: string) => {
+  // Build all combinations (manual + auto-detected) -- same as table grid
+  const allCombinations = useMemo((): CombinationInfo[] => {
+    if (!gridData) return manualCombinations;
+    const comboTables: CombinationTable[] = gridData.tables.map((t) => ({
+      id: t.id, name: t.name, max_covers: t.max_covers, is_active: t.is_active,
+      position_x: t.position_x, position_y: t.position_y, width: t.width, height: t.height, rotation: t.rotation,
+    }));
+    const adjacencyMap = detectAdjacentTables(comboTables, combinationThreshold);
+    const autoCombos: CombinationInfo[] = [];
+    const seen = new Set<string>();
+    const tableMap = new Map(gridData.tables.map((t) => [t.id, t]));
+
+    for (const [tableId, neighbors] of adjacencyMap) {
+      for (const neighborId of neighbors) {
+        const key = [tableId, neighborId].sort().join('|');
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const t1 = tableMap.get(tableId);
+        const t2 = tableMap.get(neighborId);
+        if (!t1 || !t2) continue;
+        autoCombos.push({ id: `auto_${key}`, name: `${t1.name} + ${t2.name}`, combined_max_covers: t1.max_covers + t2.max_covers, table_ids: [tableId, neighborId].sort() });
+      }
+    }
+    for (const [tableId, neighbors] of adjacencyMap) {
+      for (const neighbor1 of neighbors) {
+        for (const neighbor2 of adjacencyMap.get(neighbor1) ?? []) {
+          if (neighbor2 === tableId) continue;
+          const key = [tableId, neighbor1, neighbor2].sort().join('|');
+          if (seen.has(key)) continue;
+          seen.add(key);
+          const t1 = tableMap.get(tableId);
+          const t2 = tableMap.get(neighbor1);
+          const t3 = tableMap.get(neighbor2);
+          if (!t1 || !t2 || !t3) continue;
+          autoCombos.push({ id: `auto_${key}`, name: `${t1.name} + ${t2.name} + ${t3.name}`, combined_max_covers: t1.max_covers + t2.max_covers + t3.max_covers, table_ids: [tableId, neighbor1, neighbor2].sort() });
+        }
+      }
+    }
+
+    const manualKeys = new Set(manualCombinations.map((c) => [...c.table_ids].sort().join('|')));
+    const merged = [...manualCombinations];
+    for (const auto of autoCombos) {
+      if (!manualKeys.has(auto.table_ids.join('|'))) merged.push(auto);
+    }
+    return merged;
+  }, [gridData, manualCombinations, combinationThreshold]);
+
+  const summaryData = useMemo(() => {
+    if (!gridData) return { total_covers_booked: 0, total_covers_capacity: 0, tables_in_use: 0, tables_total: 0, unassigned_count: 0, combos_in_use: 0 };
+    return gridData.summary ?? {
+      total_covers_booked: tablesWithState.filter((t) => t.booking).reduce((s, t) => s + (t.booking?.party_size ?? 0), 0),
+      total_covers_capacity: tablesWithState.reduce((s, t) => s + t.max_covers, 0),
+      tables_in_use: tablesWithState.filter((t) => t.service_status !== 'available').length,
+      tables_total: tablesWithState.length,
+      unassigned_count: (gridData?.unassigned_bookings ?? []).length,
+      combos_in_use: combinedTableGroups.size,
+    };
+  }, [gridData, tablesWithState, combinedTableGroups]);
+
+  // --- Status change handlers ---
+  const handleBookingStatusChange = useCallback(async (bookingId: string, currentStatus: BookingStatus, newStatus: BookingStatus) => {
+    if (!canTransitionBookingStatus(currentStatus, newStatus)) {
+      addToast(`Cannot change from ${currentStatus} to ${newStatus}`, 'error');
+      return false;
+    }
     try {
       const res = await fetch(`/api/venue/bookings/${bookingId}`, {
         method: 'PATCH',
@@ -225,43 +299,229 @@ export function FloorPlanLiveView({ isAdmin = false, venueId }: { isAdmin?: bool
       });
       if (!res.ok) {
         const payload = await res.json().catch(() => ({}));
-        console.error('Status change failed:', payload.error ?? res.statusText);
-        return;
+        addToast(payload.error ?? 'Status change failed', 'error');
+        return false;
       }
+      setUndoAction({
+        id: crypto.randomUUID(), type: 'change_status',
+        description: `Status changed to ${newStatus}`, timestamp: Date.now(),
+        previous_state: { bookingId, status: currentStatus },
+        current_state: { bookingId, status: newStatus },
+      });
+      addToast('Booking status updated', 'success');
       fetchData();
+      return true;
     } catch (err) {
       console.error('Status change failed:', err);
+      addToast('Status change failed', 'error');
+      return false;
     }
-  }, [fetchData]);
+  }, [fetchData, addToast]);
 
-  const summary = useMemo(() => {
-    const total = tablesWithState.length;
-    const seated = tablesWithState.filter((t) => t.service_status !== 'available').length;
-    const available = total - seated;
-    const totalCovers = tablesWithState.reduce((sum, t) => sum + t.max_covers, 0);
-    const usedCovers = tablesWithState
-      .filter((t) => t.booking)
-      .reduce((sum, t) => sum + (t.booking?.party_size ?? 0), 0);
-    return { total, seated, available, totalCovers, usedCovers };
-  }, [tablesWithState]);
+  const requestBookingStatusChange = useCallback(async (bookingId: string, currentStatus: BookingStatus, newStatus: BookingStatus) => {
+    if (newStatus === 'No-Show') {
+      const bookingStart = bookingMap.get(bookingId)?.start_time ?? '00:00';
+      if (!canMarkNoShowForSlot(selectedDate, bookingStart, noShowGraceMinutes)) {
+        addToast('No-show can only be marked after booking start time', 'error');
+        return;
+      }
+    }
+    const booking = bookingMap.get(bookingId);
+    const guestName = booking?.guest_name ?? 'Guest';
+    const partySize = booking?.party_size ?? '?';
+    const time = booking?.start_time?.slice(0, 5) ?? '';
+    if (isRevertTransition(currentStatus, newStatus)) {
+      const revertAction = BOOKING_REVERT_ACTIONS[currentStatus];
+      setConfirmDialog({
+        title: revertAction?.label ?? `Revert to ${newStatus}`,
+        message: `${guestName} (${partySize}) at ${time} will be changed from ${currentStatus} back to ${newStatus}.`,
+        confirmLabel: revertAction?.label ?? `Revert to ${newStatus}`,
+        onConfirm: () => { void handleBookingStatusChange(bookingId, currentStatus, newStatus); },
+      });
+      return;
+    }
+    if (isDestructiveBookingStatus(newStatus)) {
+      setConfirmDialog({
+        title: `Mark ${newStatus}`,
+        message: `${guestName} (${partySize}) at ${time} will be marked ${newStatus}.`,
+        confirmLabel: `Mark ${newStatus}`,
+        onConfirm: () => { void handleBookingStatusChange(bookingId, currentStatus, newStatus); },
+      });
+      return;
+    }
+    await handleBookingStatusChange(bookingId, currentStatus, newStatus);
+  }, [addToast, bookingMap, handleBookingStatusChange, selectedDate, noShowGraceMinutes]);
 
-  const unassignedBookings = useMemo(() => {
-    return gridData?.unassigned_bookings ?? [];
-  }, [gridData]);
+  // --- Reassignment/assignment ---
+  const handleReassign = useCallback(async (bookingId: string, oldTableIds: string[], newTableIds: string[]) => {
+    try {
+      const res = await fetch('/api/venue/tables/assignments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'reassign', booking_id: bookingId, old_table_ids: oldTableIds, new_table_ids: newTableIds }),
+      });
+      if (res.ok) {
+        setUndoAction({
+          id: crypto.randomUUID(), type: 'reassign_table',
+          description: 'Table reassigned', timestamp: Date.now(),
+          previous_state: { bookingId, tableIds: oldTableIds },
+          current_state: { bookingId, tableIds: newTableIds },
+        });
+        addToast('Table reassigned', 'success');
+        fetchData();
+      } else {
+        const data = await res.json().catch(() => ({}));
+        addToast(data.error ?? 'Failed to reassign table', 'error');
+      }
+    } catch (err) {
+      console.error('Reassign failed:', err);
+      addToast('Failed to reassign table', 'error');
+    }
+  }, [fetchData, addToast]);
 
-  const selectedBlock = useMemo(() => {
-    if (!selectedTable) return null;
-    const nowMin = Number(debouncedTime.slice(0, 2)) * 60 + Number(debouncedTime.slice(3, 5));
-    return blocks.find((block) => {
-      if (block.table_id !== selectedTable.id) return false;
-      const start = block.start_at.split('T')[1]?.slice(0, 5) ?? '00:00';
-      const end = block.end_at.split('T')[1]?.slice(0, 5) ?? '00:00';
-      const startMin = Number(start.slice(0, 2)) * 60 + Number(start.slice(3, 5));
-      const endMin = Number(end.slice(0, 2)) * 60 + Number(end.slice(3, 5));
-      return nowMin >= startMin && nowMin < endMin;
-    }) ?? null;
-  }, [selectedTable, blocks, debouncedTime]);
+  const handleAssign = useCallback(async (bookingId: string, tableIds: string[]) => {
+    try {
+      const res = await fetch('/api/venue/tables/assignments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ booking_id: bookingId, table_ids: tableIds }),
+      });
+      if (res.ok) {
+        addToast('Table assigned', 'success');
+        fetchData();
+      } else {
+        const data = await res.json().catch(() => ({}));
+        addToast(data.error ?? 'Failed to assign table', 'error');
+      }
+    } catch (err) {
+      console.error('Assign failed:', err);
+      addToast('Failed to assign table', 'error');
+    }
+  }, [fetchData, addToast]);
 
+  const undoStatusChange = useCallback(async () => {
+    if (!undoAction) return;
+    if (undoAction.type === 'change_status') {
+      const bookingId = String(undoAction.previous_state.bookingId ?? '');
+      const previousStatus = String(undoAction.previous_state.status ?? '') as BookingStatus;
+      const currentStatus = String(undoAction.current_state.status ?? '') as BookingStatus;
+      if (bookingId && previousStatus && currentStatus) {
+        setUndoAction(null);
+        await handleBookingStatusChange(bookingId, currentStatus, previousStatus);
+      }
+    } else if (undoAction.type === 'reassign_table') {
+      const bookingId = String(undoAction.previous_state.bookingId ?? '');
+      const oldTableIds = (undoAction.previous_state.tableIds ?? []) as string[];
+      const newTableIds = (undoAction.current_state.tableIds ?? []) as string[];
+      if (bookingId && oldTableIds.length > 0) {
+        setUndoAction(null);
+        await handleReassign(bookingId, newTableIds, oldTableIds);
+      }
+    }
+  }, [undoAction, handleBookingStatusChange, handleReassign]);
+
+  // --- Drag/drop validation ---
+  const startDragValidation = useCallback((bookingId: string, sourceTableIds: string[]) => {
+    const booking = bookingMap.get(bookingId);
+    if (!booking || !gridData) return;
+    setDragSourceTableIds(sourceTableIds);
+    const context: BookingMoveContext = {
+      id: bookingId,
+      party_size: booking.party_size,
+      start_time: booking.start_time,
+      end_time: booking.estimated_end_time
+        ? new Date(booking.estimated_end_time).toISOString().slice(11, 16)
+        : '',
+    };
+    const tableInfos = gridData.tables.map((t) => ({ id: t.id, name: t.name, max_covers: t.max_covers, position_x: t.position_x, position_y: t.position_y, width: t.width, height: t.height, rotation: t.rotation }));
+    const result = computeValidMoveTargets(context, tableInfos, gridData.cells, allCombinations);
+    setValidDropTargets(result.validTableIds);
+    setValidDropComboLabels(result.comboLabels.size > 0 ? result.comboLabels : null);
+  }, [bookingMap, gridData, allCombinations]);
+
+  const clearDragValidation = useCallback(() => {
+    setValidDropTargets(null);
+    setValidDropComboLabels(null);
+    setDragSourceTableIds([]);
+  }, []);
+
+  const handleFloorDragEnd = useCallback((event: FloorDragEvent) => {
+    const booking = bookingMap.get(event.bookingId);
+    if (!booking || !gridData) {
+      clearDragValidation();
+      return;
+    }
+    const context: BookingMoveContext = {
+      id: event.bookingId,
+      party_size: booking.party_size,
+      start_time: booking.start_time,
+      end_time: booking.estimated_end_time
+        ? new Date(booking.estimated_end_time).toISOString().slice(11, 16)
+        : '',
+    };
+    const tableInfos = gridData.tables.map((t) => ({ id: t.id, name: t.name, max_covers: t.max_covers, position_x: t.position_x, position_y: t.position_y, width: t.width, height: t.height, rotation: t.rotation }));
+    const targetTableIds = resolveDropTarget(event.targetTableId, context, tableInfos, gridData.cells, allCombinations);
+    clearDragValidation();
+
+    if (!targetTableIds) {
+      addToast('Cannot move booking to that table', 'error');
+      return;
+    }
+
+    const oldTableIds = event.sourceTableIds.length > 0 ? event.sourceTableIds : dragSourceTableIds;
+    if (oldTableIds.length > 0) {
+      void handleReassign(event.bookingId, oldTableIds, targetTableIds);
+    } else {
+      void handleAssign(event.bookingId, targetTableIds);
+    }
+  }, [bookingMap, gridData, allCombinations, clearDragValidation, addToast, handleReassign, handleAssign, dragSourceTableIds]);
+
+  // Click-based reassign mode
+  const handleTableSelect = useCallback((id: string | null) => {
+    if (reassignMode && id) {
+      const booking = bookingMap.get(reassignMode.bookingId);
+      if (!booking || !gridData) return;
+      const context: BookingMoveContext = {
+        id: reassignMode.bookingId,
+        party_size: booking.party_size,
+        start_time: booking.start_time,
+        end_time: booking.estimated_end_time
+          ? new Date(booking.estimated_end_time).toISOString().slice(11, 16)
+          : '',
+      };
+      const tableInfos = gridData.tables.map((t) => ({ id: t.id, name: t.name, max_covers: t.max_covers, position_x: t.position_x, position_y: t.position_y, width: t.width, height: t.height, rotation: t.rotation }));
+      const targetTableIds = resolveDropTarget(id, context, tableInfos, gridData.cells, allCombinations);
+      if (!targetTableIds) {
+        addToast('Cannot move booking to that table', 'error');
+        return;
+      }
+      void handleReassign(reassignMode.bookingId, reassignMode.oldTableIds, targetTableIds);
+      setReassignMode(null);
+      clearDragValidation();
+      return;
+    }
+    setSelectedTableId(id);
+  }, [reassignMode, bookingMap, gridData, allCombinations, addToast, handleReassign, clearDragValidation]);
+
+  const startReassignMode = useCallback((bookingId: string) => {
+    const booking = bookingMap.get(bookingId);
+    if (!booking) return;
+    const oldTableIds = Array.from(new Set(
+      (gridData?.cells ?? []).filter((c) => c.booking_id === bookingId).map((c) => c.table_id)
+    ));
+    setReassignMode({ bookingId, guestName: booking.guest_name, oldTableIds });
+    setSelectedTableId(null);
+    startDragValidation(bookingId, oldTableIds);
+  }, [bookingMap, gridData, startDragValidation]);
+
+  const selectedTable = useMemo(() => {
+    if (!selectedTableId) return null;
+    return tablesWithState.find((t) => t.id === selectedTableId) ?? null;
+  }, [selectedTableId, tablesWithState]);
+
+  // Walk-in handler
+
+  // --- Render ---
   if (loading) {
     return (
       <div className="flex items-center justify-center py-16">
@@ -275,19 +535,16 @@ export function FloorPlanLiveView({ isAdmin = false, venueId }: { isAdmin?: bool
       <div className="flex flex-col items-center justify-center py-16 text-center">
         <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-slate-100">
           <svg className="h-8 w-8 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6z" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6z" />
           </svg>
         </div>
         <h3 className="text-lg font-medium text-slate-900">No Active Tables</h3>
-        <p className="mt-2 max-w-sm text-sm text-slate-500">
-          Add tables first to start using the live floor plan.
-        </p>
+        <p className="mt-2 max-w-sm text-sm text-slate-500">Add tables first to start using the live floor plan.</p>
       </div>
     );
   }
 
   const hasPositions = tables.some((t) => t.position_x != null && t.position_y != null);
-
   if (!hasPositions) {
     return (
       <div className="flex flex-col items-center justify-center py-16 text-center">
@@ -297,9 +554,7 @@ export function FloorPlanLiveView({ isAdmin = false, venueId }: { isAdmin?: bool
           </svg>
         </div>
         <h3 className="text-lg font-medium text-slate-900">No Floor Plan Set Up</h3>
-        <p className="mt-2 max-w-sm text-sm text-slate-500">
-          Arrange your tables on the floor plan editor first.
-        </p>
+        <p className="mt-2 max-w-sm text-sm text-slate-500">Arrange your tables on the floor plan editor first.</p>
         {isAdmin ? (
           <p className="mt-4 text-xs text-slate-500">Use Edit Layout to arrange your tables.</p>
         ) : (
@@ -311,433 +566,162 @@ export function FloorPlanLiveView({ isAdmin = false, venueId }: { isAdmin?: bool
 
   return (
     <div className="flex h-[calc(100vh-120px)] flex-col space-y-3">
-      <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-white/80 px-5 py-3 shadow-sm backdrop-blur-sm">
-        <div className="flex items-center gap-6 text-sm">
-          <div>
-            <span className="text-xs text-slate-500">Available</span>
-            <p className="font-semibold text-green-700">{summary.available}</p>
-          </div>
-          <div>
-            <span className="text-xs text-slate-500">In Use</span>
-            <p className="font-semibold text-blue-700">{summary.seated}</p>
-          </div>
-          <div>
-            <span className="text-xs text-slate-500">Covers</span>
-            <p className="font-semibold text-slate-900">{summary.usedCovers}/{summary.totalCovers}</p>
-          </div>
-          <div>
-            <span className="text-xs text-slate-500">Unassigned</span>
-            <p className="font-semibold text-amber-700">{unassignedBookings.length}</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <input
-            type="date"
-            value={selectedDate}
-            onChange={(e) => setSelectedDate(e.target.value)}
-            className="rounded-lg border border-slate-300 px-2 py-1 text-xs"
-          />
-          <input
-            type="time"
-            value={selectedTime}
-            onChange={(e) => setSelectedTime(e.target.value)}
-            className="rounded-lg border border-slate-300 px-2 py-1 text-xs"
-          />
-          <button
-            type="button"
-            onClick={() => {
-              const recommended = tablesWithState.find((table) => table.service_status === 'available') ?? null;
-              if (recommended) setSelectedTable(recommended);
-              setShowWalkInForm(true);
-            }}
-            className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-700"
-          >
-            Walk-in
-          </button>
-          <button
-            type="button"
-            onClick={fetchData}
-            className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
-          >
-            Refresh
-          </button>
-        </div>
-      </div>
-      {liveState === 'reconnecting' && (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-          Live updates paused - reconnecting...
-        </div>
-      )}
+      <ViewToolbar
+        summary={summaryData}
+        date={selectedDate}
+        onDateChange={setSelectedDate}
+        liveState={liveState}
+        onRefresh={fetchData}
+        onNewBooking={() => setShowNewBookingForm(true)}
+        onWalkIn={() => setShowWalkInModal(true)}
+      >
+        <input type="time" value={selectedTime} onChange={(e) => setSelectedTime(e.target.value)} className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs shadow-sm" />
+      </ViewToolbar>
 
+      {/* Canvas area */}
       <div className="relative flex-1 overflow-hidden rounded-xl border border-slate-200 bg-slate-50 shadow-sm">
         {reassignMode && (
-          <div className="absolute left-4 right-4 top-4 z-30 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-900">
-            Select the destination table for {reassignMode.guestName}.{' '}
-            <button
-              type="button"
-              onClick={() => setReassignMode(null)}
-              className="font-semibold text-amber-700 underline"
-            >
-              Cancel Move
-            </button>
+          <div className="absolute left-4 right-4 top-4 z-30 flex items-center justify-between rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-900 shadow-sm">
+            <span>Click a highlighted table to move <strong>{reassignMode.guestName}</strong></span>
+            <button type="button" onClick={() => { setReassignMode(null); clearDragValidation(); }} className="font-semibold text-amber-700 underline">Cancel</button>
           </div>
         )}
         <LiveFloorCanvas
           tables={tablesWithState}
-          selectedId={selectedTable?.id ?? null}
+          selectedId={selectedTableId}
           combinedTableGroups={combinedTableGroups}
           definedCombinations={definedCombinations}
-          onSelect={(id) => {
-            const t = tablesWithState.find((x) => x.id === id);
-            setSelectedTable(t ?? null);
-            setShowWalkInForm(false);
-            if (reassignMode && t) {
-              void (async () => {
-                  const booking = bookingMap.get(reassignMode.bookingId);
-                  let targetTableIds: string[] = [t.id];
-                  if (booking) {
-                    const params = new URLSearchParams({
-                      date: selectedDate,
-                      time: booking.start_time.slice(0, 5),
-                      party_size: String(booking.party_size),
-                      booking_id: booking.id,
-                    });
-                    const suggestRes = await fetch(`/api/venue/tables/combinations/suggest?${params.toString()}`);
-                    if (suggestRes.ok) {
-                      const suggestionPayload = await suggestRes.json();
-                      const suggestions = suggestionPayload.suggestions ?? [];
-                      const preferred =
-                        suggestions.find((suggestion: { table_ids: string[] }) => suggestion.table_ids.includes(t.id)) ??
-                        suggestions[0] ??
-                        null;
-                      if (preferred?.table_ids?.length) {
-                        targetTableIds = preferred.table_ids;
-                      }
-                    }
-                  }
-                const res = await fetch('/api/venue/tables/assignments', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    action: 'reassign',
-                    booking_id: reassignMode.bookingId,
-                    old_table_ids: reassignMode.oldTableIds,
-                      new_table_ids: targetTableIds,
-                  }),
-                });
-                if (res.ok) {
-                  setReassignMode(null);
-                  fetchData();
-                }
-              })();
-            }
-          }}
+          validDropTargets={validDropTargets}
+          validDropComboLabels={validDropComboLabels}
+          reassignMode={reassignMode ? { bookingId: reassignMode.bookingId, guestName: reassignMode.guestName } : null}
+          onSelect={handleTableSelect}
+          onDragStart={startDragValidation}
+          onDragEnd={handleFloorDragEnd}
+          onDragCancel={clearDragValidation}
         />
       </div>
 
-      {selectedTable && (
-        <div className="fixed bottom-0 left-0 right-0 z-40 mx-auto max-w-lg rounded-t-2xl border border-slate-200 bg-white p-5 shadow-2xl lg:bottom-6 lg:left-auto lg:right-6 lg:max-w-sm lg:rounded-2xl">
+      {/* Table detail bottom sheet */}
+      {selectedTable && !detailBookingId && (
+        <div className="fixed bottom-0 left-0 right-0 z-40 mx-auto max-h-[60vh] max-w-lg overflow-y-auto rounded-t-2xl border border-slate-200 bg-white p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-2xl lg:bottom-6 lg:left-auto lg:right-6 lg:max-h-[calc(100vh-12rem)] lg:max-w-sm lg:rounded-2xl lg:p-5">
           <div className="flex items-center justify-between">
             <div>
               <h3 className="text-base font-semibold text-slate-900">{selectedTable.name}</h3>
-              <p className="text-xs text-slate-500">
-                {selectedTable.max_covers} covers · {selectedTable.zone ?? 'No zone'}
-              </p>
+              <p className="text-xs text-slate-500">{selectedTable.max_covers} covers · {selectedTable.zone ?? 'No zone'}</p>
             </div>
-            <button onClick={() => setSelectedTable(null)} className="text-slate-400 hover:text-slate-600">
-              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-              </svg>
+            <button aria-label="Close" onClick={() => setSelectedTableId(null)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600">
+              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" /></svg>
             </button>
           </div>
 
-          <div className="mt-3 rounded-lg bg-slate-50 px-3 py-2">
-            <p className="text-xs font-medium text-slate-500">Status</p>
-            <p className="text-sm font-semibold text-slate-900">
-              {OPERATIONAL_STATUS_LABELS[selectedTable.service_status] ?? selectedTable.service_status}
-            </p>
-          </div>
-
           {selectedTable.booking && (
-            <div className="mt-3 rounded-lg bg-blue-50 px-3 py-2">
-              <p className="text-xs font-medium text-blue-500">Current Guest</p>
-              <p className="text-sm font-semibold text-blue-900">{selectedTable.booking.guest_name}</p>
-              <p className="text-xs text-blue-600">
-                Party of {selectedTable.booking.party_size} · {selectedTable.booking.start_time.slice(0, 5)}
-              </p>
-              <p className="text-[10px] text-blue-500">Ref: {selectedTable.booking.id.slice(0, 8).toUpperCase()}</p>
-              {(combinedTableGroups.get(selectedTable.booking.id)?.length ?? 0) > 1 && (
-                <p className="mt-1 text-[10px] font-medium text-blue-700">
-                  Combined: {(combinedTableGroups.get(selectedTable.booking.id) ?? [])
-                    .map((tableId) => tablesWithState.find((table) => table.id === tableId)?.name ?? tableId)
-                    .join(' + ')}
-                </p>
-              )}
-              {selectedTable.booking.deposit_status && (
-                <div className={`mt-1 inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${
-                  selectedTable.booking.deposit_status === 'Paid'
-                    ? 'bg-emerald-100 text-emerald-700'
-                    : selectedTable.booking.deposit_status === 'Pending'
-                      ? 'bg-amber-100 text-amber-700'
-                      : 'bg-slate-100 text-slate-700'
-                }`}>
-                  Deposit: {selectedTable.booking.deposit_status}
+            <div className="mt-3 rounded-xl border border-blue-100 bg-blue-50/60 p-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-semibold text-slate-900">{selectedTable.booking.guest_name}</p>
+                  <p className="text-xs text-slate-600">Party of {selectedTable.booking.party_size} · {selectedTable.booking.start_time.slice(0, 5)}</p>
                 </div>
-              )}
-              {(selectedTable.booking.dietary_notes || selectedTable.booking.occasion) && (
-                <p className="mt-1 text-[10px] text-blue-700">
-                  {selectedTable.booking.dietary_notes ? `Dietary: ${selectedTable.booking.dietary_notes}` : ''}
-                  {selectedTable.booking.dietary_notes && selectedTable.booking.occasion ? ' · ' : ''}
-                  {selectedTable.booking.occasion ? `Occasion: ${selectedTable.booking.occasion}` : ''}
+                <button type="button" onClick={() => setDetailBookingId(selectedTable.booking!.id)} className="rounded-lg border border-brand-200 px-2.5 py-1 text-xs font-medium text-brand-700 hover:bg-brand-50">
+                  Full Details
+                </button>
+              </div>
+              {(combinedTableGroups.get(selectedTable.booking.id)?.length ?? 0) > 1 && (
+                <p className="mt-1.5 text-[10px] font-medium text-purple-700">
+                  Combined: {(combinedTableGroups.get(selectedTable.booking.id) ?? []).map((tid) => tablesWithState.find((t) => t.id === tid)?.name ?? tid).join(' + ')}
                 </p>
               )}
               {selectedTable.elapsed_pct > 0 && (
-                <div className="mt-1.5">
-                  <div className="h-1.5 rounded-full bg-blue-200">
-                    <div
-                      className={`h-1.5 rounded-full transition-all ${
-                        selectedTable.elapsed_pct > 90 ? 'bg-red-500' :
-                        selectedTable.elapsed_pct > 75 ? 'bg-amber-500' :
-                        'bg-blue-500'
-                      }`}
-                      style={{ width: `${selectedTable.elapsed_pct}%` }}
-                    />
-                  </div>
+                <div className="mt-2 h-1.5 rounded-full bg-blue-200">
+                  <div className={`h-1.5 rounded-full transition-all ${selectedTable.elapsed_pct > 90 ? 'bg-red-500' : selectedTable.elapsed_pct > 75 ? 'bg-amber-500' : 'bg-blue-500'}`} style={{ width: `${selectedTable.elapsed_pct}%` }} />
                 </div>
               )}
             </div>
           )}
-          {selectedBlock && (
-            <div className="mt-3 rounded-lg bg-slate-100 px-3 py-2">
-              <p className="text-xs font-medium text-slate-600">Blocked</p>
-              <p className="text-xs text-slate-700">
-                {(selectedBlock.start_at.split('T')[1] ?? '').slice(0, 5)}-{(selectedBlock.end_at.split('T')[1] ?? '').slice(0, 5)}
-                {selectedBlock.reason ? ` · ${selectedBlock.reason}` : ''}
-              </p>
-            </div>
-          )}
 
-          <div className="mt-4 flex flex-wrap gap-2">
+          {/* Actions */}
+          <div className="mt-3 flex flex-wrap gap-2">
             {selectedTable.service_status === 'available' && (
               <>
-                <button
-                  onClick={() => setShowQuickBookingForm((prev) => !prev)}
-                  className="rounded-lg border border-brand-300 bg-brand-50 px-3 py-1.5 text-xs font-medium text-brand-700 hover:bg-brand-100"
-                >
-                  New Booking
-                </button>
-                <button
-                  onClick={() => setShowAssignList((prev) => !prev)}
-                  className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
-                >
-                  Assign Existing
-                </button>
-                <button
-                  onClick={async () => {
-                    const [h, m] = selectedTime.split(':').map(Number);
-                    const start = `${selectedDate}T${selectedTime}:00.000Z`;
-                    const endMinTotal = (h ?? 0) * 60 + (m ?? 0) + 60;
-                    const endH = Math.floor(endMinTotal / 60).toString().padStart(2, '0');
-                    const endM = (endMinTotal % 60).toString().padStart(2, '0');
-                    const end = `${selectedDate}T${endH}:${endM}:00.000Z`;
-                    await fetch('/api/venue/tables/blocks', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({
-                        table_id: selectedTable.id,
-                        start_at: start,
-                        end_at: end,
-                        reason: 'Manual hold',
-                      }),
-                    });
-                    fetchData();
-                  }}
-                  className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
-                >
-                  Block Table
-                </button>
+                <button onClick={() => { setShowNewBookingForm(true); }} className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-700">New Booking</button>
+                <button onClick={async () => {
+                  const [h, m] = selectedTime.split(':').map(Number);
+                  const start = `${selectedDate}T${selectedTime}:00.000Z`;
+                  const endMin = (h ?? 0) * 60 + (m ?? 0) + 60;
+                  const end = `${selectedDate}T${Math.floor(endMin / 60).toString().padStart(2, '0')}:${(endMin % 60).toString().padStart(2, '0')}:00.000Z`;
+                  await fetch('/api/venue/tables/blocks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ table_id: selectedTable.id, start_at: start, end_at: end, reason: 'Manual hold' }) });
+                  fetchData();
+                }} className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50">Block Table</button>
               </>
             )}
             {(selectedTable.service_status === 'booked' || selectedTable.service_status === 'pending') && selectedTable.booking?.id && (
               <>
-                <button
-                  onClick={() => handleBookingStatusChange(selectedTable.booking!.id, 'Seated')}
-                  className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-700"
-                >
-                  Mark Seated
-                </button>
-                <button
-                  onClick={() => handleBookingStatusChange(selectedTable.booking!.id, 'No-Show')}
-                  className="rounded-lg border border-red-300 bg-white px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50"
-                >
-                  No Show
-                </button>
-                <button
-                  onClick={() => {
-                    const oldTableIds = Array.from(
-                      new Set(
-                        (gridData?.cells ?? [])
-                          .filter((cell) => cell.booking_id === selectedTable.booking?.id)
-                          .map((cell) => cell.table_id)
-                      )
-                    );
-                    setReassignMode({
-                      bookingId: selectedTable.booking!.id,
-                      guestName: selectedTable.booking!.guest_name,
-                      oldTableIds,
-                    });
-                  }}
-                  className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
-                >
-                  Move Table
-                </button>
-                <button
-                  onClick={() => handleBookingStatusChange(selectedTable.booking!.id, 'Cancelled')}
-                  className="rounded-lg border border-red-300 bg-white px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50"
-                >
-                  Cancel
-                </button>
+                <button onClick={() => { void requestBookingStatusChange(selectedTable.booking!.id, selectedTable.booking!.status as BookingStatus, 'Seated'); }} className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-700">Seat Guest</button>
+                <button onClick={() => startReassignMode(selectedTable.booking!.id)} className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50">Move</button>
+                <button onClick={() => setDetailBookingId(selectedTable.booking!.id)} className="rounded-lg border border-brand-200 px-3 py-1.5 text-xs font-medium text-brand-700 hover:bg-brand-50">Details</button>
+                <button onClick={() => { void requestBookingStatusChange(selectedTable.booking!.id, selectedTable.booking!.status as BookingStatus, 'No-Show'); }} className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50">No-Show</button>
+                <button onClick={() => { void requestBookingStatusChange(selectedTable.booking!.id, selectedTable.booking!.status as BookingStatus, 'Cancelled'); }} className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50">Cancel</button>
               </>
             )}
             {selectedTable.service_status === 'seated' && selectedTable.booking?.id && (
-              <button
-                onClick={() => handleBookingStatusChange(selectedTable.booking!.id, 'Completed')}
-                className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700"
-              >
-                Mark Completed / Clear
-              </button>
-            )}
-            {selectedBlock && (
-              <button
-                onClick={async () => {
-                  if (!confirm('Remove this table block?')) return;
-                  await fetch('/api/venue/tables/blocks', {
-                    method: 'DELETE',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ id: selectedBlock.id }),
-                  });
-                  fetchData();
-                }}
-                className="rounded-lg border border-red-300 bg-white px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50"
-              >
-                Remove Block
-              </button>
+              <>
+                <button onClick={() => { void requestBookingStatusChange(selectedTable.booking!.id, selectedTable.booking!.status as BookingStatus, 'Completed'); }} className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700">Complete</button>
+                <button onClick={() => startReassignMode(selectedTable.booking!.id)} className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50">Move</button>
+                <button onClick={() => setDetailBookingId(selectedTable.booking!.id)} className="rounded-lg border border-brand-200 px-3 py-1.5 text-xs font-medium text-brand-700 hover:bg-brand-50">Details</button>
+                <button onClick={() => { void requestBookingStatusChange(selectedTable.booking!.id, selectedTable.booking!.status as BookingStatus, 'Confirmed'); }} className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-800 hover:bg-amber-100">Unseat</button>
+              </>
             )}
           </div>
+        </div>
+      )}
 
-          {showWalkInForm && selectedTable.service_status === 'available' && (
-            <div className="mt-3 space-y-2 rounded-lg border border-green-200 bg-green-50/50 p-3">
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={walkInName}
-                  onChange={(e) => setWalkInName(e.target.value)}
-                  placeholder="Guest name"
-                  className="flex-1 rounded-md border border-slate-300 px-2 py-1.5 text-sm"
-                />
-                <input
-                  type="tel"
-                  value={walkInPhone}
-                  onChange={(e) => setWalkInPhone(e.target.value)}
-                  placeholder="Phone"
-                  className="flex-1 rounded-md border border-slate-300 px-2 py-1.5 text-sm"
-                />
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-slate-600">Party:</span>
-                {[1, 2, 3, 4, 5, 6].map((n) => (
-                  <button
-                    key={n}
-                    onClick={() => setWalkInParty(n)}
-                    className={`flex h-7 w-7 items-center justify-center rounded text-xs font-medium ${
-                      walkInParty === n ? 'bg-green-600 text-white' : 'bg-white border border-slate-200 text-slate-600'
-                    }`}
-                  >{n}</button>
-                ))}
-              </div>
-              <div className="flex gap-2">
-                <button
-                  disabled={walkInSaving}
-                  onClick={async () => {
-                    setWalkInSaving(true);
-                    try {
-                      const res = await fetch('/api/venue/bookings/walk-in', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                          table_id: selectedTable.id,
-                          booking_date: selectedDate,
-                          booking_time: selectedTime,
-                          party_size: walkInParty,
-                          name: walkInName || 'Walk-in',
-                          phone: walkInPhone,
-                        }),
-                      });
-                      if (res.ok) {
-                        setShowWalkInForm(false);
-                        setWalkInName('');
-                        setWalkInPhone('');
-                        setWalkInParty(2);
-                        setSelectedTable(null);
-                        fetchData();
-                      }
-                    } finally {
-                      setWalkInSaving(false);
-                    }
-                  }}
-                  className="flex-1 rounded-md bg-green-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-green-700 disabled:opacity-50"
-                >
-                  {walkInSaving ? 'Seating...' : 'Confirm'}
-                </button>
-                <button
-                  onClick={() => setShowWalkInForm(false)}
-                  className="rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          )}
+      {/* Booking detail panel */}
+      {detailBookingId && (
+        <BookingDetailPanel
+          bookingId={detailBookingId}
+          onClose={() => setDetailBookingId(null)}
+          onUpdated={() => { fetchData(); }}
+        />
+      )}
 
-          {showAssignList && selectedTable.service_status === 'available' && (
-            <div className="mt-3 max-h-44 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 p-2">
-              {unassignedBookings
-                .filter((booking) => booking.party_size <= selectedTable.max_covers && booking.status === 'Confirmed')
-                .map((booking) => (
-                  <button
-                    key={booking.id}
-                    onClick={async () => {
-                      await fetch('/api/venue/tables/assignments', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ booking_id: booking.id, table_ids: [selectedTable.id] }),
-                      });
-                      setShowAssignList(false);
-                      fetchData();
-                    }}
-                    className="mb-1 block w-full rounded border border-slate-200 bg-white px-2 py-1 text-left text-xs text-slate-700 hover:bg-slate-50"
-                  >
-                    {booking.guest_name} - {booking.party_size} - {booking.start_time.slice(0, 5)}
-                  </button>
-                ))}
+      {/* New booking form */}
+      {showNewBookingForm && (
+        <UnifiedBookingForm
+          asModal
+          venueId={venueId}
+          advancedMode
+          initialDate={selectedDate}
+          onCreated={() => { setShowNewBookingForm(false); fetchData(); }}
+          onClose={() => setShowNewBookingForm(false)}
+        />
+      )}
+
+      {/* Walk-in modal */}
+      {showWalkInModal && (
+        <WalkInModal
+          advancedMode
+          initialDate={selectedDate}
+          initialTime={selectedTime}
+          onClose={() => setShowWalkInModal(false)}
+          onCreated={() => { setShowWalkInModal(false); fetchData(); }}
+        />
+      )}
+
+      {/* Undo toast */}
+      {undoAction && (
+        <UndoToast action={undoAction} onUndo={() => { void undoStatusChange(); }} onDismiss={() => setUndoAction(null)} />
+      )}
+
+      {/* Confirm dialog */}
+      {confirmDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onClick={() => setConfirmDialog(null)}>
+          <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-base font-semibold text-slate-900">{confirmDialog.title}</h3>
+            <p className="mt-2 text-sm text-slate-600">{confirmDialog.message}</p>
+            <div className="mt-4 flex gap-2">
+              <button type="button" onClick={() => { confirmDialog.onConfirm(); setConfirmDialog(null); }} className="flex-1 rounded-lg bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-700">{confirmDialog.confirmLabel}</button>
+              <button type="button" onClick={() => setConfirmDialog(null)} className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Cancel</button>
             </div>
-          )}
-          {showQuickBookingForm && selectedTable.service_status === 'available' && (
-            <div className="mt-3 space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
-              <SharedNewBookingForm
-                compact
-                date={selectedDate}
-                initialTime={selectedTime}
-                defaultTableId={selectedTable.id}
-                tables={tables}
-                onCreated={() => {
-                  setShowQuickBookingForm(false);
-                  fetchData();
-                }}
-                onCancel={() => setShowQuickBookingForm(false)}
-              />
-            </div>
-          )}
+          </div>
         </div>
       )}
     </div>

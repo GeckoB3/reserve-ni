@@ -16,8 +16,14 @@ import {
 import {
   BOOKING_STATUSES,
   BOOKING_STATUS_TRANSITIONS,
+  BOOKING_REVERT_ACTIONS,
+  canTransitionBookingStatus,
+  isBookingStatus,
+  isDestructiveBookingStatus,
+  isRevertTransition,
   type BookingStatus,
 } from '@/lib/table-management/booking-status';
+import { resolveDropTarget, type CombinationInfo } from '@/lib/table-management/move-validation';
 
 const STATUS_COLORS: Record<string, string> = {
   Pending: 'bg-amber-100 border-amber-300 text-amber-800',
@@ -92,12 +98,7 @@ interface Props {
     dietary_notes: string | null;
     occasion: string | null;
   }>;
-  combinations?: Array<{
-    id: string;
-    name: string;
-    combined_max_covers: number;
-    table_ids: string[];
-  }>;
+  combinations?: CombinationInfo[];
   serviceStartTime?: string;
   serviceEndTime?: string;
   slotIntervalMinutes?: number;
@@ -128,12 +129,12 @@ interface Props {
   onRescheduleBooking: (bookingId: string) => void;
   onAssignAllUnassigned?: () => void;
   assignAllUnassignedLoading?: boolean;
+  onBookingStatusChange: (bookingId: string, currentStatus: BookingStatus, nextStatus: BookingStatus) => Promise<void>;
 }
 
 const SLOT_WIDTH_DEFAULT = 64;
 const ROW_HEIGHT = 48;
 const HEADER_HEIGHT = 40;
-const TABLE_COL_WIDTH = 140;
 
 export function TimelineGrid({
   tables,
@@ -170,6 +171,7 @@ export function TimelineGrid({
   onRescheduleBooking,
   onAssignAllUnassigned,
   assignAllUnassignedLoading,
+  onBookingStatusChange,
 }: Props) {
   const SLOT_WIDTH = slotWidth ?? SLOT_WIDTH_DEFAULT;
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -390,29 +392,6 @@ export function TimelineGrid({
     });
   }, []);
 
-  const checkOverlap = useCallback((tableId: string, block: BookingBlock): boolean => {
-    const blockStart = timeToMinutes(block.start_time);
-    const blockEnd = block.end_time ? timeToMinutes(block.end_time) : blockStart + 90;
-
-    for (const cell of cells) {
-      if (cell.table_id !== tableId) continue;
-      if (cell.is_blocked) {
-        const cTime = timeToMinutes(cell.time);
-        if (blockStart <= cTime && cTime < blockEnd) return true;
-      }
-      if (!cell.booking_id || !cell.booking_details) continue;
-      if (cell.booking_id === block.id) continue;
-
-      const cStart = timeToMinutes(cell.booking_details.start_time);
-      const cEnd = cell.booking_details.end_time
-        ? timeToMinutes(cell.booking_details.end_time)
-        : cStart + 90;
-
-      if (blockStart < cEnd && blockEnd > cStart) return true;
-    }
-    return false;
-  }, [cells]);
-
   const isInvalidTimeTarget = useCallback((tableId: string, time: string, block: BookingBlock): boolean => {
     const start = timeToMinutes(block.start_time);
     const end = block.end_time ? timeToMinutes(block.end_time) : start + 90;
@@ -441,28 +420,19 @@ export function TimelineGrid({
   }, [cells, cellMap]);
 
   const resolveTargetTableIds = useCallback((targetTableId: string, block: BookingBlock): string[] | null => {
-    const targetTable = tables.find((table) => table.id === targetTableId);
-    if (!targetTable) return null;
-
-    // Prefer moving to the single table directly when it can seat the party.
-    if (block.party_size <= targetTable.max_covers && !checkOverlap(targetTableId, block)) {
-      return [targetTableId];
-    }
-
-    const comboCandidates = (combinations ?? [])
-      .filter((combo) => combo.table_ids.includes(targetTableId))
-      .filter((combo) => combo.combined_max_covers >= block.party_size)
-      .sort((a, b) => a.combined_max_covers - b.combined_max_covers);
-
-    for (const combo of comboCandidates) {
-      const hasConflict = combo.table_ids.some((comboTableId) => checkOverlap(comboTableId, block));
-      if (!hasConflict) {
-        return combo.table_ids;
-      }
-    }
-
-    return null;
-  }, [tables, combinations, checkOverlap]);
+    const context = {
+      id: block.id,
+      party_size: block.party_size,
+      start_time: block.start_time,
+      end_time: block.end_time ?? '',
+    };
+    const tableInfos = tables.map((t) => ({
+      id: t.id, name: t.name, max_covers: t.max_covers,
+      position_x: t.position_x, position_y: t.position_y,
+      width: t.width, height: t.height, rotation: t.rotation,
+    }));
+    return resolveDropTarget(targetTableId, context, tableInfos, cells, combinations ?? []);
+  }, [tables, cells, combinations]);
 
   const handleDragEnd = useCallback((event: DragEndEvent) => {
     setActiveDrag(null);
@@ -532,20 +502,32 @@ export function TimelineGrid({
     setContextMenu({ x: e.clientX, y: e.clientY, booking: block });
   }, []);
 
-  const handleStatusChange = useCallback(async (bookingId: string, newStatus: string) => {
+  const handleStatusChange = useCallback(async (bookingId: string, currentStatus: string, newStatus: string) => {
     setContextMenu(null);
+    if (!isBookingStatus(currentStatus) || !isBookingStatus(newStatus)) return;
+    if (!canTransitionBookingStatus(currentStatus, newStatus)) {
+      onError(`Cannot change from ${currentStatus} to ${newStatus}`);
+      return;
+    }
+    const block = filteredBlocks.find((b) => b.id === bookingId);
+    const guest = block?.guest_name ?? 'Guest';
+    const party = block?.party_size ?? '?';
+    const time = block?.start_time?.slice(0, 5) ?? '';
+    if (isRevertTransition(currentStatus, newStatus)) {
+      const revertAction = BOOKING_REVERT_ACTIONS[currentStatus as BookingStatus];
+      const confirmed = await confirmAction(`${guest} (${party}) at ${time} will be changed from ${currentStatus} back to ${newStatus}. ${revertAction?.label ?? 'Revert'}?`);
+      if (!confirmed) return;
+    } else if (isDestructiveBookingStatus(newStatus)) {
+      const confirmed = await confirmAction(`${guest} (${party}) at ${time} will be marked ${newStatus}.`);
+      if (!confirmed) return;
+    }
     try {
-      await fetch(`/api/venue/bookings/${bookingId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: newStatus }),
-      });
-      onRefresh();
+      await onBookingStatusChange(bookingId, currentStatus, newStatus);
     } catch (err) {
       console.error('Status change failed:', err);
       onError('Failed to update status');
     }
-  }, [onRefresh, onError]);
+  }, [onError, onBookingStatusChange, confirmAction, filteredBlocks]);
 
   const handleUnassignFromMenu = useCallback((bookingId: string) => {
     setContextMenu(null);
@@ -653,7 +635,7 @@ export function TimelineGrid({
   return (
     <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
       <div className="flex h-full">
-        <div className="flex shrink-0 flex-col border-r border-slate-200 bg-slate-50/50" style={{ width: TABLE_COL_WIDTH }}>
+        <div className="flex w-28 shrink-0 flex-col border-r border-slate-200 bg-slate-50/50 sm:w-[140px]">
           <div className="flex h-10 items-center border-b border-slate-200 px-3 text-xs font-semibold text-slate-500">
             Tables
           </div>
@@ -883,17 +865,21 @@ export function TimelineGrid({
             </div>
             <div className="py-1">
               <p className="px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Status</p>
-              {(BOOKING_STATUS_TRANSITIONS[contextMenu.booking.status as BookingStatus] ?? BOOKING_STATUSES).map((status) => (
+              {(BOOKING_STATUS_TRANSITIONS[contextMenu.booking.status as BookingStatus] ?? BOOKING_STATUSES).map((status) => {
+                const revert = isRevertTransition(contextMenu.booking.status, status);
+                const revertLabel = revert ? BOOKING_REVERT_ACTIONS[contextMenu.booking.status as BookingStatus]?.label : null;
+                return (
                 <button
                   key={status}
-                  onClick={() => handleStatusChange(contextMenu.booking.id, status)}
-                  className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+                  onClick={() => { void handleStatusChange(contextMenu.booking.id, contextMenu.booking.status, status); }}
+                  className={`flex w-full items-center gap-2 px-3 py-1.5 text-xs hover:bg-slate-50 disabled:opacity-40 ${revert ? 'font-semibold text-amber-800' : 'text-slate-700'}`}
                   disabled={contextMenu.booking.status === status}
                 >
                   <span className={`inline-block h-2 w-2 rounded-full ${STATUS_DOTS[status] ?? 'bg-slate-400'}`} />
-                  {status}
+                  {revertLabel ?? status}
                 </button>
-              ))}
+                );
+              })}
             </div>
             <div className="border-t border-slate-100 py-1">
               <p className="px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Duration</p>
@@ -966,9 +952,7 @@ export function TimelineGrid({
                 {contextMenu.booking.status !== 'Cancelled' && (
                   <button
                     onClick={async () => {
-                      const confirmed = await confirmAction('Cancel this booking?');
-                      if (!confirmed) return;
-                      await handleStatusChange(contextMenu.booking.id, 'Cancelled');
+                      await handleStatusChange(contextMenu.booking.id, contextMenu.booking.status, 'Cancelled');
                     }}
                     className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-red-600 hover:bg-red-50"
                   >

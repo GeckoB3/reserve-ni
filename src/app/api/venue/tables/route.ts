@@ -85,7 +85,7 @@ export async function GET() {
 
   const { data: venue } = await staff.db
     .from('venues')
-    .select('table_management_enabled, floor_plan_background_url, auto_bussing_minutes, active_table_statuses')
+    .select('table_management_enabled, floor_plan_background_url, auto_bussing_minutes, active_table_statuses, no_show_grace_minutes, combination_threshold')
     .eq('id', staff.venue_id)
     .single();
 
@@ -96,6 +96,8 @@ export async function GET() {
       floor_plan_background_url: venue?.floor_plan_background_url ?? null,
       auto_bussing_minutes: venue?.auto_bussing_minutes ?? 10,
       active_table_statuses: venue?.active_table_statuses ?? [],
+      no_show_grace_minutes: venue?.no_show_grace_minutes ?? 15,
+      combination_threshold: venue?.combination_threshold ?? 80,
     },
   });
 }

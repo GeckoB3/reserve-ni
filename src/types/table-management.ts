@@ -140,7 +140,7 @@ export interface TableGridData {
 
 export interface UndoAction {
   id: string;
-  type: 'reassign_table' | 'change_time' | 'resize' | 'unassign';
+  type: 'reassign_table' | 'change_time' | 'resize' | 'unassign' | 'change_status';
   description: string;
   timestamp: number;
   previous_state: Record<string, unknown>;

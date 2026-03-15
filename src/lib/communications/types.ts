@@ -45,7 +45,8 @@ export interface TemplateVariables {
 export interface CompiledTemplate {
   subject?: string;
   body: string;
-  /** SMS: body only. Email: body as text or HTML. */
+  /** Pre-rendered HTML for email. When set, the EmailChannel uses this instead of converting body to HTML. */
+  html?: string;
 }
 
 export interface MessageChannel {

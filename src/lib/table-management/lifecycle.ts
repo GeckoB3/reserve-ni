@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { BOOKING_ACTIVE_STATUSES, type TableServiceStatus } from '@/lib/table-management/constants';
+import { canTransitionBookingStatus, canMarkNoShowForSlot, isRevertTransition, type BookingStatus } from '@/lib/table-management/booking-status';
 
 interface BookingCore {
   id: string;
@@ -192,4 +193,102 @@ export async function clearTableStatusesForBooking(
       updated_at: new Date().toISOString(),
     })
     .eq('booking_id', bookingId);
+}
+
+export function validateBookingStatusTransition(
+  fromStatus: string,
+  toStatus: BookingStatus,
+): { ok: true } | { ok: false; error: string } {
+  if (!canTransitionBookingStatus(fromStatus, toStatus)) {
+    return { ok: false, error: `Cannot change status from ${fromStatus} to ${toStatus}` };
+  }
+  return { ok: true };
+}
+
+/**
+ * Server-side enforcement of no-show grace period. Returns an error result
+ * when a No-Show transition is attempted before the grace window has elapsed.
+ */
+export function validateNoShowGracePeriod(
+  bookingDate: string,
+  bookingTime: string,
+  graceMinutes: number,
+): { ok: true } | { ok: false; error: string } {
+  if (!canMarkNoShowForSlot(bookingDate, bookingTime, graceMinutes)) {
+    return {
+      ok: false,
+      error: `Cannot mark as no-show yet \u2014 the grace period of ${graceMinutes} minutes after booking time has not elapsed`,
+    };
+  }
+  return { ok: true };
+}
+
+export async function applyBookingLifecycleStatusEffects(
+  db: SupabaseClient,
+  args: {
+    bookingId: string;
+    guestId: string;
+    previousStatus: string;
+    nextStatus: BookingStatus;
+    actorId: string | null;
+  },
+): Promise<void> {
+  const { bookingId, guestId, previousStatus, nextStatus, actorId } = args;
+
+  const isRevert = isRevertTransition(previousStatus, nextStatus);
+
+  if (previousStatus !== 'Seated' && nextStatus === 'Seated') {
+    const today = new Date().toISOString().slice(0, 10);
+    const { data: guestData } = await db.from('guests').select('visit_count').eq('id', guestId).single();
+    await db
+      .from('guests')
+      .update({
+        visit_count: (guestData?.visit_count ?? 0) + 1,
+        last_visit_date: today,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', guestId);
+  }
+
+  if (previousStatus === 'Seated' && isRevert) {
+    const { data: guestData } = await db.from('guests').select('visit_count').eq('id', guestId).single();
+    const currentCount = guestData?.visit_count ?? 0;
+    await db
+      .from('guests')
+      .update({
+        visit_count: Math.max(0, currentCount - 1),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', guestId);
+  }
+
+  if (previousStatus !== 'No-Show' && nextStatus === 'No-Show') {
+    const { data: guestData } = await db.from('guests').select('no_show_count').eq('id', guestId).single();
+    await db
+      .from('guests')
+      .update({
+        no_show_count: (guestData?.no_show_count ?? 0) + 1,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', guestId);
+  }
+
+  if (previousStatus === 'No-Show' && isRevert) {
+    const { data: guestData } = await db.from('guests').select('no_show_count').eq('id', guestId).single();
+    const currentCount = guestData?.no_show_count ?? 0;
+    await db
+      .from('guests')
+      .update({
+        no_show_count: Math.max(0, currentCount - 1),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', guestId);
+  }
+
+  const assignedTableIds = await getAssignedTableIds(db, bookingId);
+  if (nextStatus === 'Cancelled' || nextStatus === 'No-Show' || nextStatus === 'Completed') {
+    await clearTableStatusesForBooking(db, bookingId, actorId);
+  } else if (nextStatus === 'Seated' || nextStatus === 'Confirmed' || nextStatus === 'Pending') {
+    await syncTableStatusesForBooking(db, bookingId, assignedTableIds, nextStatus, actorId);
+  }
 }

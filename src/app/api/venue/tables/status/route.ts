@@ -2,7 +2,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff } from '@/lib/venue-auth';
 import { TABLE_SERVICE_STATUSES } from '@/lib/table-management/constants';
-import { clearTableStatusesForBooking } from '@/lib/table-management/lifecycle';
+import {
+  applyBookingLifecycleStatusEffects,
+  clearTableStatusesForBooking,
+  validateBookingStatusTransition,
+} from '@/lib/table-management/lifecycle';
+import type { BookingStatus } from '@/lib/table-management/booking-status';
 import { z } from 'zod';
 
 const statusUpdateSchema = z.object({
@@ -117,19 +122,55 @@ export async function PUT(request: NextRequest) {
   const activeBookingId = booking_id ?? current?.booking_id ?? null;
   if (activeBookingId) {
     if (status === 'seated') {
-      await staff.db
+      const { data: booking } = await staff.db
         .from('bookings')
-        .update({ status: 'Seated', actual_seated_time: new Date().toISOString(), updated_at: new Date().toISOString() })
+        .select('id, guest_id, status')
         .eq('id', activeBookingId)
-        .eq('venue_id', staff.venue_id);
+        .eq('venue_id', staff.venue_id)
+        .single();
+      if (booking?.id) {
+        const check = validateBookingStatusTransition(booking.status as string, 'Seated');
+        if (check.ok) {
+          await staff.db
+            .from('bookings')
+            .update({ status: 'Seated', actual_seated_time: new Date().toISOString(), updated_at: new Date().toISOString() })
+            .eq('id', activeBookingId)
+            .eq('venue_id', staff.venue_id);
+          await applyBookingLifecycleStatusEffects(staff.db, {
+            bookingId: activeBookingId,
+            guestId: booking.guest_id,
+            previousStatus: booking.status as string,
+            nextStatus: 'Seated',
+            actorId: staff.id,
+          });
+        }
+      }
     }
 
     if (status === 'paid') {
-      await staff.db
+      const { data: booking } = await staff.db
         .from('bookings')
-        .update({ status: 'Completed', actual_departed_time: new Date().toISOString(), updated_at: new Date().toISOString() })
+        .select('id, guest_id, status')
         .eq('id', activeBookingId)
-        .eq('venue_id', staff.venue_id);
+        .eq('venue_id', staff.venue_id)
+        .single();
+      if (booking?.id) {
+        const check = validateBookingStatusTransition(booking.status as string, 'Completed');
+        if (check.ok) {
+          await staff.db
+            .from('bookings')
+            .update({ status: 'Completed', actual_departed_time: new Date().toISOString(), updated_at: new Date().toISOString() })
+            .eq('id', activeBookingId)
+            .eq('venue_id', staff.venue_id);
+          await applyBookingLifecycleStatusEffects(staff.db, {
+            bookingId: activeBookingId,
+            guestId: booking.guest_id,
+            previousStatus: booking.status as string,
+            nextStatus: 'Completed' as BookingStatus,
+            actorId: staff.id,
+          });
+        }
+      }
 
       const bussingMinutes = venueSettings?.auto_bussing_minutes ?? 10;
       if (bussingMinutes <= 0) {

@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { stripe } from '@/lib/stripe';
-import { sendCommunication } from '@/lib/communications';
 import { generateConfirmToken, hashConfirmToken } from '@/lib/confirm-token';
-import { createShortManageLink } from '@/lib/short-manage-link';
+import { validateBookingStatusTransition } from '@/lib/table-management/lifecycle';
+import { sendBookingConfirmationEmail, sendDepositConfirmationEmail } from '@/lib/communications/send-templated';
 
 /**
  * POST /api/booking/confirm-payment
@@ -19,6 +19,7 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const bookingId = body.booking_id as string | undefined;
+    const guestEmail = (body.guest_email as string | undefined)?.trim() || null;
     if (!bookingId) {
       return NextResponse.json({ error: 'Missing booking_id' }, { status: 400 });
     }
@@ -47,7 +48,7 @@ export async function POST(request: NextRequest) {
     // Retrieve the venue's connected account to query the PaymentIntent.
     const { data: venue } = await supabase
       .from('venues')
-      .select('name, stripe_connected_account_id')
+      .select('name, stripe_connected_account_id, address')
       .eq('id', booking.venue_id)
       .single();
 
@@ -66,9 +67,14 @@ export async function POST(request: NextRequest) {
         confirmed: false,
         payment_status: pi.status,
         message: pi.status === 'processing'
-          ? 'Payment is still processing — it will be confirmed shortly.'
+          ? 'Payment is still processing \u2014 it will be confirmed shortly.'
           : 'Payment has not succeeded yet.',
       });
+    }
+
+    const transitionCheck = validateBookingStatusTransition(booking.status as string, 'Confirmed');
+    if (!transitionCheck.ok) {
+      return NextResponse.json({ error: transitionCheck.error }, { status: 400 });
     }
 
     // Payment verified — atomically confirm the booking (only if not already
@@ -87,6 +93,14 @@ export async function POST(request: NextRequest) {
     if (!statusRows?.length) {
       console.log('confirm-payment: booking already confirmed by webhook');
       return NextResponse.json({ confirmed: true, already_confirmed: true });
+    }
+
+    // Save guest_email on the booking if provided
+    if (guestEmail) {
+      await supabase
+        .from('bookings')
+        .update({ guest_email: guestEmail, updated_at: new Date().toISOString() })
+        .eq('id', bookingId);
     }
 
     // Generate a manage-booking token. Use an atomic WHERE clause so that if
@@ -120,33 +134,33 @@ export async function POST(request: NextRequest) {
     const manageBookingLink = manageToken
       ? `${baseUrl}/manage/${bookingId}/${encodeURIComponent(manageToken)}`
       : undefined;
-    const depositAmount = booking.deposit_amount_pence != null
-      ? (booking.deposit_amount_pence / 100).toFixed(2)
-      : undefined;
     const bookingTime = typeof booking.booking_time === 'string'
       ? booking.booking_time.slice(0, 5)
       : booking.booking_time;
 
-    try {
-      await sendCommunication({
-        type: 'booking_confirmation',
-        recipient: { email: guest?.email ?? undefined, phone: guest?.phone ?? undefined },
-        payload: {
-          guest_name: guest?.name,
-          venue_name: venue.name,
-          booking_date: booking.booking_date,
-          booking_time: bookingTime,
-          party_size: booking.party_size,
-          cancellation_deadline: booking.cancellation_deadline,
-          deposit_amount: depositAmount,
-          dietary_notes: booking.dietary_notes ?? undefined,
-          occasion: booking.occasion ?? undefined,
-          manage_booking_link: manageBookingLink,
-          short_manage_link: createShortManageLink(bookingId),
-        },
-      });
-    } catch (commsErr) {
-      console.error('confirm-payment: comms failed (booking still confirmed):', commsErr);
+    const recipientEmail = guestEmail || guest?.email;
+    const venueData = { name: venue.name, address: venue.address ?? undefined };
+    const bookingData = {
+      id: booking.id,
+      guest_name: guest?.name ?? guestEmail ?? 'Guest',
+      guest_email: recipientEmail ?? null,
+      booking_date: booking.booking_date,
+      booking_time: bookingTime,
+      party_size: booking.party_size,
+      deposit_amount_pence: booking.deposit_amount_pence ?? null,
+      deposit_status: 'Paid' as const,
+      refund_cutoff: booking.cancellation_deadline ?? null,
+      manage_booking_link: manageBookingLink ?? null,
+    };
+
+    // Booking confirmation email (dedup handled internally)
+    sendBookingConfirmationEmail(bookingData, venueData, booking.venue_id)
+      .catch((err) => console.error('confirm-payment: booking confirmation email failed:', err));
+
+    // Deposit confirmation email (dedup handled internally)
+    if (recipientEmail && booking.deposit_amount_pence) {
+      sendDepositConfirmationEmail(bookingData, venueData, booking.venue_id)
+        .catch((err) => console.error('confirm-payment: deposit confirmation email failed:', err));
     }
 
     return NextResponse.json({ confirmed: true });

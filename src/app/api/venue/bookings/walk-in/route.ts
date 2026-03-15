@@ -9,6 +9,8 @@ const walkInSchema = z.object({
   party_size: z.number().int().min(1).max(50),
   name: z.string().max(200).optional(),
   phone: z.string().max(30).optional(),
+  dietary_notes: z.string().max(500).optional(),
+  occasion: z.string().max(200).optional(),
   table_id: z.string().uuid().optional(),
   booking_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   booking_time: z.string().regex(/^([01]?[0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9])?$/).optional(),
@@ -68,7 +70,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { party_size, name, phone, table_id, booking_date, booking_time } = parsed.data;
+    const { party_size, name, phone, dietary_notes, occasion, table_id, booking_date, booking_time } = parsed.data;
 
     const admin = getSupabaseAdminClient();
     const { data: venueSettings } = await admin
@@ -183,6 +185,8 @@ export async function POST(request: NextRequest) {
         status: 'Seated',
         source: 'walk-in',
         deposit_status: 'Not Required',
+        dietary_notes: dietary_notes?.trim() || null,
+        occasion: occasion?.trim() || null,
       })
       .select('id, booking_date, booking_time, party_size, status, source')
       .single();

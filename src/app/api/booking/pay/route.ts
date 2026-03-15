@@ -36,7 +36,7 @@ export async function GET(request: NextRequest) {
     const supabase = getSupabaseAdminClient();
     const { data: booking } = await supabase
       .from('bookings')
-      .select('id, stripe_payment_intent_id, venue_id, status')
+      .select('id, stripe_payment_intent_id, venue_id, status, booking_date, booking_time, party_size, deposit_amount_pence, guest_email, guest_name, guest_phone, cancellation_deadline, guest_id')
       .eq('id', bookingId)
       .single();
 
@@ -46,12 +46,27 @@ export async function GET(request: NextRequest) {
 
     const { data: venue } = await supabase
       .from('venues')
-      .select('stripe_connected_account_id')
+      .select('name, stripe_connected_account_id, address')
       .eq('id', booking.venue_id)
       .single();
 
     if (!venue?.stripe_connected_account_id) {
       return NextResponse.json({ error: 'Venue payment not configured' }, { status: 500 });
+    }
+
+    // Resolve guest name from guests table if not on booking directly
+    let guestName = booking.guest_name ?? '';
+    let guestEmail = booking.guest_email ?? '';
+    if (booking.guest_id) {
+      const { data: guest } = await supabase
+        .from('guests')
+        .select('name, email')
+        .eq('id', booking.guest_id)
+        .single();
+      if (guest) {
+        if (!guestName) guestName = guest.name ?? '';
+        if (!guestEmail) guestEmail = guest.email ?? '';
+      }
     }
 
     const paymentIntent = await stripe.paymentIntents.retrieve(
@@ -67,6 +82,15 @@ export async function GET(request: NextRequest) {
       client_secret: paymentIntent.client_secret,
       stripe_account_id: venue.stripe_connected_account_id,
       booking_id: booking.id,
+      venue_name: venue.name,
+      venue_address: venue.address ?? null,
+      booking_date: booking.booking_date,
+      booking_time: typeof booking.booking_time === 'string' ? booking.booking_time.slice(0, 5) : booking.booking_time,
+      party_size: booking.party_size,
+      deposit_amount_pence: booking.deposit_amount_pence ?? null,
+      guest_name: guestName,
+      guest_email: guestEmail,
+      refund_cutoff: booking.cancellation_deadline ?? null,
     });
   } catch (err) {
     console.error('GET /api/booking/pay failed:', err);

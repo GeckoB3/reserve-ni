@@ -35,7 +35,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastContext.Provider value={{ addToast }}>
       {children}
-      <div className="fixed bottom-4 right-4 z-[100] flex flex-col gap-2">
+      <div className="fixed bottom-4 left-4 right-4 z-[100] flex flex-col gap-2 sm:left-auto sm:right-4 sm:max-w-sm">
         {toasts.map((t) => (
           <ToastItem key={t.id} toast={t} onDismiss={dismiss} />
         ))}
@@ -57,7 +57,7 @@ function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: (id: string)
 
   return (
     <div
-      className={`${bg} animate-in slide-in-from-right flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium text-white shadow-lg`}
+      className={`${bg} animate-in slide-in-from-right flex items-start gap-2 rounded-lg px-4 py-2.5 text-sm font-medium text-white shadow-lg`}
     >
       {toast.type === 'success' && (
         <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -69,8 +69,8 @@ function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: (id: string)
           <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
         </svg>
       )}
-      <span>{toast.message}</span>
-      <button onClick={() => onDismiss(toast.id)} className="ml-1 shrink-0 rounded p-0.5 hover:bg-white/20">
+      <span className="min-w-0 flex-1 break-words">{toast.message}</span>
+      <button aria-label="Dismiss notification" onClick={() => onDismiss(toast.id)} className="ml-1 shrink-0 rounded p-0.5 hover:bg-white/20">
         <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
         </svg>

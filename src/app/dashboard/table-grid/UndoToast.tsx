@@ -11,7 +11,7 @@ interface Props {
 
 export function UndoToast({ action, onUndo, onDismiss }: Props) {
   useEffect(() => {
-    const timer = setTimeout(onDismiss, 5000);
+    const timer = setTimeout(onDismiss, 10_000);
     return () => clearTimeout(timer);
   }, [action.id, onDismiss]);
 

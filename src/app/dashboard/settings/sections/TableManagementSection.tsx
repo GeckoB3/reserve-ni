@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { VenueSettings } from '../types';
+import { AdjacencyPreview } from './AdjacencyPreview';
 
 interface Props {
   venue: VenueSettings;
@@ -274,6 +275,8 @@ export function TableManagementSection({ venue, onUpdate, isAdmin }: Props) {
           </button>
           {recalcResult && <p className="mt-2 text-xs text-slate-600">{recalcResult}</p>}
         </div>
+
+        <AdjacencyPreview threshold={thresholdDraft} />
       </div>
 
       {showDisableWarning && (

@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { BOOKING_STATUS_TRANSITIONS, type BookingStatus } from '@/lib/table-management/booking-status';
+import { BOOKING_STATUS_TRANSITIONS, BOOKING_REVERT_ACTIONS, canMarkNoShowForSlot, isDestructiveBookingStatus, isRevertTransition, type BookingStatus } from '@/lib/table-management/booking-status';
 
 interface Guest {
   id: string;
@@ -106,6 +106,7 @@ export function BookingDetailPanel({
   const [suggestionsLoading, setSuggestionsLoading] = useState(false);
   const [internalNotes, setInternalNotes] = useState('');
   const [notesSaving, setNotesSaving] = useState(false);
+  const [confirmDialog, setConfirmDialog] = useState<{ title: string; message: string; confirmLabel: string; onConfirm: () => void } | null>(null);
 
   const load = useCallback(async () => {
     const res = await fetch(`/api/venue/bookings/${bookingId}`);
@@ -202,17 +203,47 @@ export function BookingDetailPanel({
     load().finally(() => setLoading(false));
   }, [load]);
 
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [onClose]);
+
   const updateStatus = useCallback(async (newStatus: string) => {
     if (!detail) return;
-    const previous = detail.status;
-    const now = new Date();
-    const [y, m, d] = detail.booking_date.split('-').map(Number);
-    const [hh, mm] = (detail.booking_time?.slice(0, 5) ?? '12:00').split(':').map(Number);
-    const bookingDt = new Date(y, m - 1, d, hh, mm, 0);
-    const diffMin = (bookingDt.getTime() - now.getTime()) / (60 * 1000);
-    if (newStatus === 'No-Show' && diffMin > -15 && diffMin < 15) {
-      if (!confirm('Booking time is within 15 minutes. Mark as No-Show?')) return;
+    if (newStatus === 'No-Show' && !canMarkNoShowForSlot(detail.booking_date, detail.booking_time?.slice(0, 5) ?? '12:00', 0)) {
+      setError('No-show can only be marked after the booking start time');
+      return;
     }
+    const currentStatus = detail.status as BookingStatus;
+    const revert = isRevertTransition(currentStatus, newStatus);
+    if (revert) {
+      const revertAction = BOOKING_REVERT_ACTIONS[currentStatus];
+      setConfirmDialog({
+        title: revertAction?.label ?? `Revert to ${newStatus}`,
+        message: `${detail.guest?.name ?? 'Guest'} (${detail.party_size}) at ${detail.booking_time?.slice(0, 5) ?? ''} on ${detail.booking_date} will be changed from ${detail.status} back to ${newStatus}.`,
+        confirmLabel: revertAction?.label ?? `Revert to ${newStatus}`,
+        onConfirm: () => { void executeStatusChange(newStatus); },
+      });
+      return;
+    }
+    if (isDestructiveBookingStatus(newStatus)) {
+      setConfirmDialog({
+        title: `Mark ${newStatus}`,
+        message: `${detail.guest?.name ?? 'Guest'} (${detail.party_size}) at ${detail.booking_time?.slice(0, 5) ?? ''} on ${detail.booking_date} will be marked ${newStatus}.`,
+        confirmLabel: `Mark ${newStatus}`,
+        onConfirm: () => { void executeStatusChange(newStatus); },
+      });
+      return;
+    }
+    void executeStatusChange(newStatus);
+  }, [detail]);
+
+  const executeStatusChange = useCallback(async (newStatus: string) => {
+    if (!detail) return;
+    const previous = detail.status;
     setActionLoading(true);
     setDetail((prev) => prev ? { ...prev, status: newStatus } : prev);
     try {
@@ -371,7 +402,7 @@ export function BookingDetailPanel({
   if (loading || !detail) {
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 backdrop-blur-sm p-4">
-        <div className="w-full max-w-lg rounded-2xl bg-white p-8 shadow-2xl">
+        <div role="dialog" aria-modal="true" aria-label="Booking detail" className="w-full max-w-lg rounded-2xl bg-white p-8 shadow-2xl">
           <p className="text-slate-500">{loading ? 'Loading...' : 'Booking not found.'}</p>
           <button type="button" onClick={onClose} className="mt-4 text-sm font-medium text-brand-600 hover:text-brand-700">Close</button>
         </div>
@@ -393,6 +424,9 @@ export function BookingDetailPanel({
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-black/20 backdrop-blur-sm" onClick={onClose}>
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Booking detail panel"
         className="w-full max-w-md overflow-y-auto bg-white shadow-2xl lg:rounded-l-2xl"
         onClick={(e) => e.stopPropagation()}
       >
@@ -426,7 +460,7 @@ export function BookingDetailPanel({
               </span>
             </p>
           </div>
-          <button type="button" onClick={onClose} className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-600">
+          <button type="button" aria-label="Close booking detail" onClick={onClose} className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-600">
             <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
             </svg>
@@ -736,23 +770,39 @@ export function BookingDetailPanel({
           </div>
 
           {/* Status actions */}
-          {canChangeStatus && (
-            <div className="space-y-2">
-              <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Actions</p>
-              <div className="flex flex-wrap gap-2">
-                {nextStatuses.map((status) => (
-                  <ActionButton
-                    key={status}
-                    onClick={() => updateStatus(status)}
-                    disabled={actionLoading}
-                    variant={status === 'Cancelled' ? 'outline-danger' : status === 'No-Show' ? 'danger' : 'primary'}
-                  >
-                    {status === 'Seated' ? 'Seat Guest' : status === 'Completed' ? 'Complete' : status === 'Cancelled' ? 'Cancel' : status}
-                  </ActionButton>
-                ))}
+          {canChangeStatus && (() => {
+            const currentStatus = detail.status as BookingStatus;
+            const forwardStatuses = nextStatuses.filter((s) => !isRevertTransition(currentStatus, s));
+            const revertAction = BOOKING_REVERT_ACTIONS[currentStatus];
+            return (
+              <div className="space-y-2">
+                <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Actions</p>
+                <div className="flex flex-wrap gap-2">
+                  {forwardStatuses.map((status) => (
+                    <ActionButton
+                      key={status}
+                      onClick={() => updateStatus(status)}
+                      disabled={actionLoading}
+                      variant={status === 'Cancelled' ? 'outline-danger' : status === 'No-Show' ? 'danger' : 'primary'}
+                    >
+                      {status === 'Seated' ? 'Seat Guest' : status === 'Completed' ? 'Complete' : status === 'Cancelled' ? 'Cancel' : status}
+                    </ActionButton>
+                  ))}
+                </div>
+                {revertAction && (
+                  <div className="mt-1">
+                    <ActionButton
+                      onClick={() => updateStatus(revertAction.target)}
+                      disabled={actionLoading}
+                      variant="secondary"
+                    >
+                      {revertAction.label}
+                    </ActionButton>
+                  </div>
+                )}
               </div>
-            </div>
-          )}
+            );
+          })()}
 
           {/* Modify section */}
           {!showModify ? (
@@ -937,6 +987,30 @@ export function BookingDetailPanel({
           </div>
         </div>
       </div>
+      {confirmDialog && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/30 p-4" onClick={() => setConfirmDialog(null)}>
+          <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-base font-semibold text-slate-900">{confirmDialog.title}</h3>
+            <p className="mt-2 text-sm text-slate-600">{confirmDialog.message}</p>
+            <div className="mt-4 flex gap-2">
+              <button
+                type="button"
+                onClick={() => { confirmDialog.onConfirm(); setConfirmDialog(null); }}
+                className="flex-1 rounded-lg bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-700"
+              >
+                {confirmDialog.confirmLabel}
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirmDialog(null)}
+                className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -991,13 +1065,14 @@ function DepositRefundBanner({ depositStatus, depositAmount, cancellationDeadlin
 function ActionButton({ onClick, disabled, variant, children }: {
   onClick: () => void;
   disabled: boolean;
-  variant: 'primary' | 'danger' | 'outline-danger';
+  variant: 'primary' | 'danger' | 'outline-danger' | 'secondary';
   children: React.ReactNode;
 }) {
   const styles = {
     primary: 'bg-brand-600 text-white hover:bg-brand-700',
     danger: 'bg-red-600 text-white hover:bg-red-700',
     'outline-danger': 'border border-red-200 text-red-600 hover:bg-red-50',
+    secondary: 'border border-slate-300 text-slate-700 hover:bg-slate-100',
   };
   return (
     <button

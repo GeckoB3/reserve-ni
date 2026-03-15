@@ -101,7 +101,7 @@ export function SettingsView({ initialVenue, isAdmin, initialTab, hasServiceConf
           <StripeConnectSection stripeAccountId={venue.stripe_connected_account_id} isAdmin={isAdmin} />
         )}
         {activeTab === 'comms' && (
-          <CommunicationTemplatesSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} />
+          <CommunicationTemplatesSection venue={venue} isAdmin={isAdmin} />
         )}
         {activeTab === 'staff' && (
           <>

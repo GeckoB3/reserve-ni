@@ -112,6 +112,8 @@ interface Props {
   onSnapRemove?: (result: SnapRemoveUpdate, movedTable: { id: string; x: number; y: number }) => void;
   combinationLinks?: CombinationLink[];
   backgroundUrl?: string | null;
+  joinSnapEnabled?: boolean;
+  alignmentGuidesEnabled?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -121,6 +123,7 @@ interface Props {
 export default function KonvaCanvas({
   tables, selectedId, selectedIds, onSelect, onMove,
   onGroupMove, onSnapApply, onSnapRemove, combinationLinks, backgroundUrl,
+  joinSnapEnabled = true, alignmentGuidesEnabled = true,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<Konva.Stage | null>(null);
@@ -209,13 +212,13 @@ export default function KonvaCanvas({
         }
       }
 
-      // -- Snap-join detection --
+      // -- Snap-join detection (only when join-snap is enabled) --
       const allBounds: SnapTableBounds[] = tables.map((t) => {
         const offset = dragGroupOffsetsRef.current.get(t.id);
         return toSnapBounds(t, dimensions, t.id === tableId ? { x: newX, y: newY } : offset ? offset : undefined);
       });
       const draggedBounds = allBounds.find((b) => b.id === tableId)!;
-      const snapRes = detectSnap(draggedBounds, allBounds, SNAP_THRESHOLD);
+      const snapRes = joinSnapEnabled ? detectSnap(draggedBounds, allBounds, SNAP_THRESHOLD) : null;
 
       let snapApplied = false;
       if (snapRes) {
@@ -226,7 +229,6 @@ export default function KonvaCanvas({
         snapResultRef.current = snapRes;
         snapApplied = true;
 
-        // Build visual guide: blue line on the target's snap edge
         const target = allBounds.find((b) => b.id === snapRes.targetTableId)!;
         const tL = target.x - target.w / 2;
         const tR = target.x + target.w / 2;
@@ -239,10 +241,8 @@ export default function KonvaCanvas({
           case 'bottom': snapGuideEdgeRef.current = [tL, tB, tR, tB]; break;
         }
 
-        // Ghost outline
         snapGhostRef.current = { x: newX, y: newY, w: dw, h: dh };
 
-        // Update group offsets with snap position
         if (groupDragRef.current) {
           const startPos = groupDragRef.current.startPositions.get(tableId);
           if (startPos) {
@@ -262,7 +262,7 @@ export default function KonvaCanvas({
         snapGuideEdgeRef.current = null;
         snapGhostRef.current = null;
 
-        // -- Standard edge-snap (alignment guides) --
+        // -- Alignment guides: always compute visual guides, but only hard-snap position when enabled --
         const guides: Array<{ points: number[] }> = [];
         let snappedX = false;
         let snappedY = false;
@@ -283,20 +283,32 @@ export default function KonvaCanvas({
 
           if (!snappedX) {
             if (Math.abs(dragRight - obLeft) < 15) {
-              newX = obLeft + dw / 2; guides.push({ points: [obLeft, Math.min(dragTop, obTop) - 10, obLeft, Math.max(dragBottom, obBottom) + 10] }); snappedX = true;
+              guides.push({ points: [obLeft, Math.min(dragTop, obTop) - 10, obLeft, Math.max(dragBottom, obBottom) + 10] });
+              if (alignmentGuidesEnabled) { newX = obLeft + dw / 2; }
+              snappedX = true;
             } else if (Math.abs(dragLeft - obRight) < 15) {
-              newX = obRight - dw / 2; guides.push({ points: [obRight, Math.min(dragTop, obTop) - 10, obRight, Math.max(dragBottom, obBottom) + 10] }); snappedX = true;
+              guides.push({ points: [obRight, Math.min(dragTop, obTop) - 10, obRight, Math.max(dragBottom, obBottom) + 10] });
+              if (alignmentGuidesEnabled) { newX = obRight - dw / 2; }
+              snappedX = true;
             } else if (Math.abs(newX - ob.x) < 15) {
-              newX = ob.x; guides.push({ points: [ob.x, Math.min(dragTop, obTop) - 10, ob.x, Math.max(dragBottom, obBottom) + 10] }); snappedX = true;
+              guides.push({ points: [ob.x, Math.min(dragTop, obTop) - 10, ob.x, Math.max(dragBottom, obBottom) + 10] });
+              if (alignmentGuidesEnabled) { newX = ob.x; }
+              snappedX = true;
             }
           }
           if (!snappedY) {
             if (Math.abs(dragBottom - obTop) < 15) {
-              newY = obTop + dh / 2; guides.push({ points: [Math.min(dragLeft, obLeft) - 10, obTop, Math.max(dragRight, obRight) + 10, obTop] }); snappedY = true;
+              guides.push({ points: [Math.min(dragLeft, obLeft) - 10, obTop, Math.max(dragRight, obRight) + 10, obTop] });
+              if (alignmentGuidesEnabled) { newY = obTop + dh / 2; }
+              snappedY = true;
             } else if (Math.abs(dragTop - obBottom) < 15) {
-              newY = obBottom - dh / 2; guides.push({ points: [Math.min(dragLeft, obLeft) - 10, obBottom, Math.max(dragRight, obRight) + 10, obBottom] }); snappedY = true;
+              guides.push({ points: [Math.min(dragLeft, obLeft) - 10, obBottom, Math.max(dragRight, obRight) + 10, obBottom] });
+              if (alignmentGuidesEnabled) { newY = obBottom - dh / 2; }
+              snappedY = true;
             } else if (Math.abs(newY - ob.y) < 15) {
-              newY = ob.y; guides.push({ points: [Math.min(dragLeft, obLeft) - 10, ob.y, Math.max(dragRight, obRight) + 10, ob.y] }); snappedY = true;
+              guides.push({ points: [Math.min(dragLeft, obLeft) - 10, ob.y, Math.max(dragRight, obRight) + 10, ob.y] });
+              if (alignmentGuidesEnabled) { newY = ob.y; }
+              snappedY = true;
             }
           }
         }

@@ -98,7 +98,7 @@ export class EmailChannel implements MessageChannel {
         from: fromEmail,
         subject: template.subject ?? 'Reserve NI',
         text: template.body,
-        html: textToHtml(template.body),
+        html: template.html ?? textToHtml(template.body),
       });
     } catch (err: unknown) {
       const sgErr = err as { code?: number; response?: { body?: unknown } };

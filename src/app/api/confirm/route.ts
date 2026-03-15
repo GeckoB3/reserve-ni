@@ -4,6 +4,8 @@ import { stripe } from '@/lib/stripe';
 import { sendCommunication } from '@/lib/communications';
 import { verifyConfirmToken } from '@/lib/confirm-token';
 import { verifyBookingHmac } from '@/lib/short-manage-link';
+import { validateBookingStatusTransition, applyBookingLifecycleStatusEffects } from '@/lib/table-management/lifecycle';
+import type { BookingStatus } from '@/lib/table-management/booking-status';
 
 /**
  * GET /api/confirm?booking_id=uuid&token=xxx  (token-based)
@@ -65,7 +67,7 @@ export async function GET(request: NextRequest) {
 }
 
 /**
- * POST /api/confirm — action: confirm | cancel
+ * POST /api/confirm \u2014 action: confirm | cancel
  * Body: { booking_id, token, action }.
  * Confirm: set status Confirmed, set confirm_token_used_at.
  * Cancel: set status Cancelled; if before cancellation_deadline trigger refund and set deposit_status Refunded; set confirm_token_used_at; send cancellation_confirmation.
@@ -107,6 +109,12 @@ export async function POST(request: NextRequest) {
     const usedAt = now;
 
     if (action === 'confirm') {
+      const confirmCheck = validateBookingStatusTransition(booking.status as string, 'Confirmed');
+      if (!confirmCheck.ok) {
+        return NextResponse.json({ error: confirmCheck.error }, { status: 400 });
+      }
+
+      const previousStatus = booking.status as string;
       await supabase
         .from('bookings')
         .update({
@@ -116,10 +124,24 @@ export async function POST(request: NextRequest) {
         })
         .eq('id', bookingId);
 
-      return NextResponse.json({ success: true, message: 'You’re confirmed! We look forward to seeing you.' });
+      await applyBookingLifecycleStatusEffects(supabase, {
+        bookingId,
+        guestId: booking.guest_id,
+        previousStatus,
+        nextStatus: 'Confirmed',
+        actorId: null,
+      });
+
+      return NextResponse.json({ success: true, message: 'You\u2019re confirmed! We look forward to seeing you.' });
     }
 
     if (action === 'cancel') {
+      const cancelCheck = validateBookingStatusTransition(booking.status as string, 'Cancelled');
+      if (!cancelCheck.ok) {
+        return NextResponse.json({ error: cancelCheck.error }, { status: 400 });
+      }
+
+      const previousStatus = booking.status as string;
       const deadline = booking.cancellation_deadline ? new Date(booking.cancellation_deadline) : null;
       const canRefund = deadline && new Date() <= deadline && booking.deposit_status === 'Paid' && booking.stripe_payment_intent_id;
 
@@ -149,17 +171,25 @@ export async function POST(request: NextRequest) {
         })
         .eq('id', bookingId);
 
+      await applyBookingLifecycleStatusEffects(supabase, {
+        bookingId,
+        guestId: booking.guest_id,
+        previousStatus,
+        nextStatus: 'Cancelled',
+        actorId: null,
+      });
+
       const { data: venue } = await supabase.from('venues').select('name').eq('id', booking.venue_id).single();
       const { data: guest } = await supabase.from('guests').select('name, email, phone').eq('id', booking.guest_id).single();
       const timeStr = typeof booking.booking_time === 'string' ? booking.booking_time.slice(0, 5) : '';
 
       const depositAmountStr = booking.deposit_amount_pence
-        ? `£${(booking.deposit_amount_pence / 100).toFixed(2)}`
+        ? `\u00A3${(booking.deposit_amount_pence / 100).toFixed(2)}`
         : null;
 
       let refund_message: string;
       if (refundSucceeded) {
-        refund_message = `Your deposit of ${depositAmountStr} will be refunded to your original payment method within 5–10 business days.`;
+        refund_message = `Your deposit of ${depositAmountStr} will be refunded to your original payment method within 5\u201310 business days.`;
       } else if (booking.deposit_status === 'Paid' && !canRefund) {
         refund_message = `Your deposit of ${depositAmountStr} is non-refundable as the cancellation was made less than 48 hours before the reservation.`;
       } else if (booking.deposit_status === 'Paid' && canRefund && !refundSucceeded) {

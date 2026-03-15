@@ -8,8 +8,12 @@ import { UndoToast } from './UndoToast';
 import { useToast } from '@/components/ui/Toast';
 import { useVenueLiveSync } from '@/lib/realtime/useVenueLiveSync';
 import { BookingDetailPanel } from '@/app/dashboard/bookings/BookingDetailPanel';
-import { SharedNewBookingForm } from '@/app/dashboard/bookings/SharedNewBookingForm';
+import { UnifiedBookingForm } from '@/components/booking/UnifiedBookingForm';
 import { detectAdjacentTables, type CombinationTable } from '@/lib/table-management/combination-engine';
+import { canMarkNoShowForSlot, canTransitionBookingStatus, type BookingStatus } from '@/lib/table-management/booking-status';
+import { computeValidMoveTargets, type BookingMoveContext } from '@/lib/table-management/move-validation';
+import { ViewToolbar } from '@/components/dashboard/ViewToolbar';
+import { WalkInModal } from '@/app/dashboard/bookings/WalkInModal';
 
 function formatDateInput(d: Date): string {
   const y = d.getFullYear();
@@ -128,7 +132,6 @@ export function TableGridView({ venueId }: { venueId: string }) {
   const [showUndoToast, setShowUndoToast] = useState(false);
   const [validDropTargets, setValidDropTargets] = useState<Set<string> | null>(null);
   const [validDropCombos, setValidDropCombos] = useState<Map<string, string> | null>(null);
-  const [viewportWidth, setViewportWidth] = useState<number>(1200);
   const [selectedBookingId, setSelectedBookingId] = useState<string | null>(null);
   const [newBookingCell, setNewBookingCell] = useState<{ tableId: string; time: string } | null>(null);
   const [cellContext, setCellContext] = useState<{ tableId: string; time: string; x: number; y: number } | null>(null);
@@ -145,25 +148,13 @@ export function TableGridView({ venueId }: { venueId: string }) {
   }>>([]);
   const [activeBlockId, setActiveBlockId] = useState<string | null>(null);
   const [walkInCell, setWalkInCell] = useState<{ tableId: string; time: string } | null>(null);
-  const [quickBooking, setQuickBooking] = useState({
-    name: '',
-    phone: '',
-    party_size: 2,
-  });
+  const [noShowGraceMinutes, setNoShowGraceMinutes] = useState(15);
+  const [combinationThreshold, setCombinationThreshold] = useState(80);
   const [showLegend, setShowLegend] = useState(false);
   const [slotWidth, setSlotWidth] = useState<number>(64);
   const [moveBookingId, setMoveBookingId] = useState<string | null>(null);
   const [rescheduleDialog, setRescheduleDialog] = useState<{ bookingId: string; time: string } | null>(null);
   const [assignAllUnassignedLoading, setAssignAllUnassignedLoading] = useState(false);
-  const [walkInSuggestions, setWalkInSuggestions] = useState<Array<{
-    source: 'single' | 'auto' | 'manual';
-    table_ids: string[];
-    table_names: string[];
-    combined_capacity: number;
-    spare_covers: number;
-  }>>([]);
-  const [walkInSuggestionsLoading, setWalkInSuggestionsLoading] = useState(false);
-  const [selectedWalkInSuggestionKey, setSelectedWalkInSuggestionKey] = useState<string | null>(null);
   const isUndoingRef = useRef(false);
   const reconcileTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconcileInFlightRef = useRef(false);
@@ -267,9 +258,10 @@ export function TableGridView({ venueId }: { venueId: string }) {
         const data = await res.json();
         const combos: CombinationInfo[] = (data.combinations ?? [])
           .filter((c: { is_active: boolean }) => c.is_active)
-          .map((c: { id: string; name: string; combined_max_covers: number; members?: Array<{ table_id: string }> }) => ({
+          .map((c: { id: string; name: string; combined_min_covers?: number; combined_max_covers: number; members?: Array<{ table_id: string }> }) => ({
             id: c.id,
             name: c.name,
+            combined_min_covers: c.combined_min_covers,
             combined_max_covers: c.combined_max_covers,
             table_ids: (c.members ?? []).map((m) => m.table_id),
           }));
@@ -280,6 +272,15 @@ export function TableGridView({ venueId }: { venueId: string }) {
     }
   }, []);
 
+  useEffect(() => {
+    fetch('/api/venue/tables').then(async (res) => {
+      if (res.ok) {
+        const data = await res.json();
+        setNoShowGraceMinutes(data.settings?.no_show_grace_minutes ?? 15);
+        setCombinationThreshold(data.settings?.combination_threshold ?? 80);
+      }
+    }).catch(() => {});
+  }, []);
   useEffect(() => { fetchServices(); }, [fetchServices]);
   useEffect(() => { fetchGrid(); }, [fetchGrid]);
   useEffect(() => { fetchCombinations(); }, [fetchCombinations]);
@@ -307,13 +308,6 @@ export function TableGridView({ venueId }: { venueId: string }) {
     void loadBlocks();
     return () => { cancelled = true; };
   }, [date, gridData?.cells.length]);
-  useEffect(() => {
-    const updateWidth = () => setViewportWidth(window.innerWidth);
-    updateWidth();
-    window.addEventListener('resize', updateWidth);
-    return () => window.removeEventListener('resize', updateWidth);
-  }, []);
-
   useEffect(() => {
     try {
       const saved = window.localStorage.getItem('reserve:table-grid:slot-width');
@@ -350,7 +344,7 @@ export function TableGridView({ venueId }: { venueId: string }) {
       rotation: t.rotation,
     }));
 
-    const adjacencyMap = detectAdjacentTables(comboTables, 80);
+    const adjacencyMap = detectAdjacentTables(comboTables, combinationThreshold);
     const autoCombos: CombinationInfo[] = [];
     const seen = new Set<string>();
     const tableMap = new Map(gridData.tables.map((t) => [t.id, t]));
@@ -403,7 +397,7 @@ export function TableGridView({ venueId }: { venueId: string }) {
     }
 
     return merged;
-  }, [gridData, combinations]);
+  }, [gridData, combinations, combinationThreshold]);
 
   const handleLiveChange = useCallback(() => {
     scheduleReconcile(700);
@@ -444,60 +438,17 @@ export function TableGridView({ venueId }: { venueId: string }) {
       return;
     }
 
-    const valid = new Set<string>();
-    const comboLabels = new Map<string, string>();
-    const blockStart = timeToMinutes(block.start_time);
-    const blockEnd = block.end_time ? timeToMinutes(block.end_time) : blockStart + 90;
-
-    const isTableFree = (tableId: string): boolean => {
-      for (const cell of gridData.cells) {
-        if (cell.table_id !== tableId) continue;
-        if (cell.is_blocked) {
-          const cTime = timeToMinutes(cell.time);
-          if (blockStart <= cTime && cTime < blockEnd) return false;
-        }
-        if (!cell.booking_id || !cell.booking_details) continue;
-        if (cell.booking_id === block.id) continue;
-        const cStart = timeToMinutes(cell.booking_details.start_time);
-        const cEnd = cell.booking_details.end_time
-          ? timeToMinutes(cell.booking_details.end_time)
-          : cStart + 90;
-        if (blockStart < cEnd && blockEnd > cStart) return false;
-      }
-      return true;
+    const context: BookingMoveContext = {
+      id: block.id,
+      party_size: block.party_size,
+      start_time: block.start_time,
+      end_time: block.end_time,
     };
+    const tableInfos = gridData.tables.map((t) => ({ id: t.id, name: t.name, max_covers: t.max_covers, position_x: t.position_x, position_y: t.position_y, width: t.width, height: t.height, rotation: t.rotation }));
+    const result = computeValidMoveTargets(context, tableInfos, gridData.cells, allCombinations);
 
-    for (const table of gridData.tables) {
-      // Prefer single-table targets when they can seat the party and are free.
-      if (block.party_size <= table.max_covers && isTableFree(table.id)) {
-        valid.add(table.id);
-        continue;
-      }
-
-      const comboCandidates = allCombinations
-        .filter((combo) => combo.table_ids.includes(table.id))
-        .filter((combo) => combo.combined_max_covers >= block.party_size)
-        .sort((a, b) => a.combined_max_covers - b.combined_max_covers);
-
-      for (const combo of comboCandidates) {
-        const allFree = combo.table_ids.every((tid) => isTableFree(tid));
-        if (!allFree) continue;
-
-        valid.add(table.id);
-        const tableNames = combo.table_ids.map((tid) => {
-          const t = gridData.tables.find((tbl) => tbl.id === tid);
-          return t?.name ?? tid;
-        });
-        comboLabels.set(table.id, tableNames.join(' + '));
-        for (const tid of combo.table_ids) {
-          valid.add(tid);
-        }
-        break;
-      }
-    }
-
-    setValidDropTargets(valid);
-    setValidDropCombos(comboLabels.size > 0 ? comboLabels : null);
+    setValidDropTargets(result.validTableIds);
+    setValidDropCombos(result.comboLabels.size > 0 ? result.comboLabels : null);
   }, [gridData, allCombinations]);
 
   const handleDragValidation = useCallback((block: { party_size: number; start_time: string; end_time: string; id: string } | null) => {
@@ -711,6 +662,49 @@ export function TableGridView({ venueId }: { venueId: string }) {
     }
   }, [gridData, date, scheduleReconcile, addToast]);
 
+  const handleBookingStatusChange = useCallback(async (
+    bookingId: string,
+    currentStatus: BookingStatus,
+    nextStatus: BookingStatus,
+  ) => {
+    const isUndo = isUndoingRef.current;
+    if (!canTransitionBookingStatus(currentStatus, nextStatus)) {
+      addToast(`Cannot change from ${currentStatus} to ${nextStatus}`, 'error');
+      return;
+    }
+    if (nextStatus === 'No-Show') {
+      const startTime = gridDataRef.current?.cells.find((cell) => cell.booking_id === bookingId)?.booking_details?.start_time ?? '00:00';
+      if (!canMarkNoShowForSlot(date, startTime, noShowGraceMinutes)) {
+        addToast('No-show can only be marked after booking start time', 'error');
+        return;
+      }
+    }
+    const res = await fetch(`/api/venue/bookings/${bookingId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: nextStatus }),
+    });
+    if (!res.ok) {
+      const payload = await res.json().catch(() => ({}));
+      addToast(payload.error ?? 'Failed to update status', 'error');
+      return;
+    }
+    if (!isUndo) {
+      const action: UndoAction = {
+        id: crypto.randomUUID(),
+        type: 'change_status',
+        description: `Status changed to ${nextStatus}`,
+        timestamp: Date.now(),
+        previous_state: { bookingId, status: currentStatus },
+        current_state: { bookingId, status: nextStatus },
+      };
+      setUndoStack((prev) => [...prev.slice(-9), action]);
+      setShowUndoToast(true);
+    }
+    addToast('Booking status updated', 'success');
+    scheduleReconcile();
+  }, [addToast, scheduleReconcile, date, noShowGraceMinutes]);
+
   const handleAssignAllUnassigned = useCallback(async () => {
     if (assignAllUnassignedLoading) return;
     setAssignAllUnassignedLoading(true);
@@ -788,12 +782,17 @@ export function TableGridView({ venueId }: { venueId: string }) {
           });
           scheduleReconcile();
         }
+      } else if (last.type === 'change_status') {
+        const prev = last.previous_state as { bookingId: string; status: BookingStatus };
+        const curr = last.current_state as { bookingId: string; status: BookingStatus };
+        if (prev.bookingId && prev.status && curr.status) {
+          await handleBookingStatusChange(prev.bookingId, curr.status, prev.status);
+        }
       }
-      setUndoStack((s) => s.slice(0, -1));
     } finally {
       isUndoingRef.current = false;
     }
-  }, [undoStack, handleReassign, handleTimeChange, scheduleReconcile]);
+  }, [undoStack, handleReassign, handleTimeChange, scheduleReconcile, handleBookingStatusChange]);
 
   const uniqueBlocks = useMemo(() => {
     if (!gridData) return [];
@@ -841,57 +840,6 @@ export function TableGridView({ venueId }: { venueId: string }) {
   }, [uniqueBlocks, date]);
 
   const selectedService = services.find((s) => s.id === serviceId);
-  const availableTimesForNewBooking = useMemo(() => {
-    if (!gridData || !newBookingCell?.tableId) return [];
-    const tableCells = gridData.cells
-      .filter((cell) => cell.table_id === newBookingCell.tableId)
-      .filter((cell) => !cell.booking_id && !cell.is_blocked)
-      .map((cell) => cell.time)
-      .sort();
-    return tableCells;
-  }, [gridData, newBookingCell?.tableId]);
-
-  useEffect(() => {
-    if (!walkInCell) {
-      setWalkInSuggestions([]);
-      setWalkInSuggestionsLoading(false);
-      setSelectedWalkInSuggestionKey(null);
-      return;
-    }
-    let cancelled = false;
-    const load = async () => {
-      setWalkInSuggestionsLoading(true);
-      try {
-        const params = new URLSearchParams({
-          date,
-          time: walkInCell.time,
-          party_size: String(quickBooking.party_size),
-        });
-        const res = await fetch(`/api/venue/tables/combinations/suggest?${params.toString()}`);
-        if (!res.ok) return;
-        const payload = await res.json();
-        if (cancelled) return;
-        const suggestions = payload.suggestions ?? [];
-        setWalkInSuggestions(suggestions);
-        if (suggestions.length > 0) {
-          setSelectedWalkInSuggestionKey(`${suggestions[0].source}:${suggestions[0].table_ids.join('|')}`);
-        } else {
-          setSelectedWalkInSuggestionKey(null);
-        }
-      } catch {
-        if (!cancelled) {
-          setWalkInSuggestions([]);
-          setSelectedWalkInSuggestionKey(null);
-        }
-      } finally {
-        if (!cancelled) {
-          setWalkInSuggestionsLoading(false);
-        }
-      }
-    };
-    void load();
-    return () => { cancelled = true; };
-  }, [walkInCell, date, quickBooking.party_size]);
 
   const exportCsv = useCallback(async () => {
     if (!gridData) return;
@@ -1040,185 +988,109 @@ export function TableGridView({ venueId }: { venueId: string }) {
 
   return (
     <div className="flex h-[calc(100vh-120px)] flex-col space-y-3">
-      <div className="flex flex-wrap items-center gap-3">
-        <input
-          type="date"
-          value={date}
-          onChange={(e) => setDate(e.target.value)}
-          className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
-        />
-        <button
-          type="button"
-          onClick={() => setDate((prev) => shiftDate(prev, -1))}
-          className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+      {gridData && (
+        <ViewToolbar
+          summary={gridData.summary}
+          date={date}
+          onDateChange={setDate}
+          liveState={liveState}
+          onRefresh={() => { void fetchGrid(); }}
+          onNewBooking={() => setNewBookingCell({ tableId: '', time: '' })}
+          onWalkIn={() => {
+            const defaultTime = getRoundedLocalNow(gridData?.slot_interval_minutes ?? 15);
+            setWalkInCell({ tableId: '', time: defaultTime });
+          }}
         >
-          Prev
-        </button>
-        <button
-          type="button"
-          onClick={() => setDate(formatDateInput(new Date()))}
-          className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
-        >
-          Today
-        </button>
-        <button
-          type="button"
-          onClick={() => setDate((prev) => shiftDate(prev, 1))}
-          className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
-        >
-          Next
-        </button>
-        <select
-          value={serviceId ?? ''}
-          onChange={(e) => setServiceId(e.target.value || null)}
-          className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
-        >
-          <option value="">All Services</option>
-          {services.map((s) => (
-            <option key={s.id} value={s.id}>{s.name}</option>
-          ))}
-        </select>
-        {serviceId && (
-          <span className="rounded-full border border-indigo-200 bg-indigo-50 px-2 py-1 text-[10px] font-medium text-indigo-700">
-            Service filter active
-          </span>
-        )}
-        {zones.length > 0 && (
+          {/* Service filter */}
           <select
-            value={zoneFilter ?? ''}
-            onChange={(e) => setZoneFilter(e.target.value || null)}
-            className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
+            value={serviceId ?? ''}
+            onChange={(e) => setServiceId(e.target.value || null)}
+            className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs shadow-sm"
           >
-            <option value="">All Zones</option>
-            {zones.map((z) => (
-              <option key={z} value={z}>{z}</option>
+            <option value="">All Services</option>
+            {services.map((s) => (
+              <option key={s.id} value={s.id}>{s.name}</option>
             ))}
           </select>
-        )}
-        <select
-          value={statusFilter ?? ''}
-          onChange={(e) => setStatusFilter(e.target.value || null)}
-          className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
-        >
-          <option value="">All Statuses</option>
-          <option value="Confirmed">Confirmed</option>
-          <option value="Pending">Pending</option>
-          <option value="Seated">Seated</option>
-          <option value="Arrived">Arrived</option>
-          <option value="No-Show">No-Show</option>
-          <option value="Cancelled">Cancelled</option>
-        </select>
-        <label className="inline-flex items-center gap-1 text-xs text-slate-600">
-          <input
-            type="checkbox"
-            checked={showCancelled}
-            onChange={(e) => setShowCancelled(e.target.checked)}
-          />
-          Show Cancelled
-        </label>
-        <label className="inline-flex items-center gap-1 text-xs text-slate-600">
-          <input
-            type="checkbox"
-            checked={showNoShow}
-            onChange={(e) => setShowNoShow(e.target.checked)}
-          />
-          Show No-Show
-        </label>
-        <div className="relative">
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search guest name..."
-            className="w-48 rounded-lg border border-slate-300 px-3 py-1.5 pl-8 text-sm"
-          />
-          <svg className="absolute left-2.5 top-2 h-4 w-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
-          </svg>
-        </div>
-        <button
-          type="button"
-          onClick={() => { void fetchGrid(); }}
-          className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
-        >
-          Refresh
-        </button>
-        <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[10px] font-medium ${
-          liveState === 'live'
-            ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-            : 'border-amber-200 bg-amber-50 text-amber-700'
-        }`}>
-          <span className={`inline-block h-2 w-2 rounded-full ${liveState === 'live' ? 'bg-emerald-500' : 'bg-amber-500'}`} />
-          {liveState === 'live' ? 'Live' : 'Reconnecting'}
-        </span>
-        <button
-          type="button"
-          onClick={() => setSlotWidth((prev) => Math.max(30, prev - 5))}
-          className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
-          title="Zoom out"
-        >
-          -
-        </button>
-        <span className="text-xs text-slate-600">{slotWidth}px</span>
-        <button
-          type="button"
-          onClick={() => setSlotWidth((prev) => Math.min(80, prev + 5))}
-          className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
-          title="Zoom in"
-        >
-          +
-        </button>
-        <button
-          type="button"
-          onClick={() => setShowLegend((prev) => !prev)}
-          className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
-        >
-          Legend
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            setNewBookingCell({ tableId: '', time: '' });
-          }}
-          className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-700"
-        >
-          New Booking
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            const defaultTableId = filteredTables.find((t) => t.is_active)?.id ?? gridData?.tables.find((t) => t.is_active)?.id;
-            if (!defaultTableId) {
-              addToast('No active tables available', 'error');
-              return;
-            }
-            const defaultTime = getRoundedLocalNow(gridData?.slot_interval_minutes ?? 15);
-            setWalkInSuggestionsLoading(true);
-            setWalkInCell({ tableId: defaultTableId, time: defaultTime });
-          }}
-          className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700"
-        >
-          Walk-in
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            void printDaySheet();
-          }}
-          className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
-        >
-          Print
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            void exportCsv();
-          }}
-          className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
-        >
-          Export CSV
-        </button>
-      </div>
+          {serviceId && (
+            <span className="rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[10px] font-medium text-indigo-700">
+              Service filter active
+            </span>
+          )}
+
+          {/* Zone filter */}
+          {zones.length > 0 && (
+            <select
+              value={zoneFilter ?? ''}
+              onChange={(e) => setZoneFilter(e.target.value || null)}
+              className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs shadow-sm"
+            >
+              <option value="">All Zones</option>
+              {zones.map((z) => (
+                <option key={z} value={z}>{z}</option>
+              ))}
+            </select>
+          )}
+
+          {/* Status filter */}
+          <select
+            value={statusFilter ?? ''}
+            onChange={(e) => setStatusFilter(e.target.value || null)}
+            className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs shadow-sm"
+          >
+            <option value="">All Statuses</option>
+            <option value="Confirmed">Confirmed</option>
+            <option value="Pending">Pending</option>
+            <option value="Seated">Seated</option>
+            <option value="Arrived">Arrived</option>
+            <option value="No-Show">No-Show</option>
+            <option value="Cancelled">Cancelled</option>
+          </select>
+
+          <label className="inline-flex items-center gap-1 text-xs text-slate-600">
+            <input type="checkbox" checked={showCancelled} onChange={(e) => setShowCancelled(e.target.checked)} className="rounded" />
+            Cancelled
+          </label>
+          <label className="inline-flex items-center gap-1 text-xs text-slate-600">
+            <input type="checkbox" checked={showNoShow} onChange={(e) => setShowNoShow(e.target.checked)} className="rounded" />
+            No-Show
+          </label>
+
+          {/* Guest search */}
+          <div className="relative">
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search guest..."
+              className="w-40 rounded-lg border border-slate-200 bg-white px-3 py-1.5 pl-8 text-xs shadow-sm"
+            />
+            <svg className="absolute left-2.5 top-2 h-3.5 w-3.5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
+            </svg>
+          </div>
+
+          {/* Zoom */}
+          <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white shadow-sm">
+            <button type="button" onClick={() => setSlotWidth((prev) => Math.max(30, prev - 5))} className="px-2 py-1.5 text-xs text-slate-500 hover:text-slate-700" title="Zoom out">−</button>
+            <span className="border-x border-slate-200 px-2 py-1.5 text-[10px] text-slate-600">{slotWidth}px</span>
+            <button type="button" onClick={() => setSlotWidth((prev) => Math.min(80, prev + 5))} className="px-2 py-1.5 text-xs text-slate-500 hover:text-slate-700" title="Zoom in">+</button>
+          </div>
+
+          {/* Legend toggle */}
+          <button
+            type="button"
+            onClick={() => setShowLegend((prev) => !prev)}
+            className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50"
+          >
+            Legend
+          </button>
+
+          {/* Print / Export */}
+          <button type="button" onClick={() => { void printDaySheet(); }} className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50">Print</button>
+          <button type="button" onClick={() => { void exportCsv(); }} className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50">Export</button>
+        </ViewToolbar>
+      )}
       {showLegend && (
         <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700">
           <span className="mr-3"><span className="mr-1 inline-block h-2 w-2 rounded-full bg-amber-400" />Pending</span>
@@ -1228,24 +1100,9 @@ export function TableGridView({ venueId }: { venueId: string }) {
           <span><span className="mr-1 inline-block h-2 w-2 bg-slate-300" />Blocked</span>
         </div>
       )}
-      {liveState === 'reconnecting' && (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-          Live updates paused - reconnecting...
-        </div>
-      )}
-
-      {gridData && <SummaryBar summary={gridData.summary} />}
 
       <div className="relative flex-1 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-        {viewportWidth < 900 ? (
-          <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
-            <p className="text-sm font-semibold text-slate-800">Table Grid requires a wider screen</p>
-            <p className="max-w-md text-xs text-slate-500">
-              Use a device with at least 900px width, or manage live service from Floor Plan / Reservations on smaller screens.
-            </p>
-          </div>
-        ) : (
-          <>
+        <>
         {loading ? (
           <div className="flex h-full items-center justify-center">
             <div className="h-8 w-8 animate-spin rounded-full border-2 border-slate-300 border-t-brand-600" />
@@ -1320,6 +1177,7 @@ export function TableGridView({ venueId }: { venueId: string }) {
               void handleAssignAllUnassigned();
             }}
             assignAllUnassignedLoading={assignAllUnassignedLoading}
+            onBookingStatusChange={handleBookingStatusChange}
           />
         ) : (
           <div className="flex h-full flex-col items-center justify-center gap-3 text-center">
@@ -1336,8 +1194,7 @@ export function TableGridView({ venueId }: { venueId: string }) {
             </div>
           </div>
         )}
-          </>
-        )}
+        </>
       </div>
 
       {showUndoToast && undoStack.length > 0 && (
@@ -1389,7 +1246,6 @@ export function TableGridView({ venueId }: { venueId: string }) {
               <button
                 type="button"
                 onClick={() => {
-                  setWalkInSuggestionsLoading(true);
                   setWalkInCell({ tableId: cellContext.tableId, time: cellContext.time });
                   setCellContext(null);
                 }}
@@ -1506,169 +1362,26 @@ export function TableGridView({ venueId }: { venueId: string }) {
         </div>
       )}
       {newBookingCell && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
-          <div className="w-full max-w-md rounded-xl bg-white p-5 shadow-2xl">
-            <h3 className="text-base font-semibold text-slate-900">New Booking</h3>
-            <p className="mt-1 text-xs text-slate-500">Shared booking form used across operational surfaces.</p>
-            <div className="mt-4">
-              <SharedNewBookingForm
-                date={date}
-                initialTime={newBookingCell.time || (selectedService?.start_time?.slice(0, 5) ?? '18:00')}
-                defaultTableId={newBookingCell.tableId || undefined}
-                tables={gridData?.tables ?? []}
-                availableTimes={availableTimesForNewBooking}
-                onCreated={() => {
-                  addToast('Booking created', 'success');
-                  setNewBookingCell(null);
-                  fetchGrid();
-                }}
-                onCancel={() => setNewBookingCell(null)}
-              />
-            </div>
-          </div>
-        </div>
+        <UnifiedBookingForm
+          asModal
+          venueId={venueId}
+          advancedMode
+          initialDate={date}
+          onCreated={() => {
+            setNewBookingCell(null);
+            fetchGrid();
+          }}
+          onClose={() => setNewBookingCell(null)}
+        />
       )}
       {walkInCell && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
-          <div className="w-full max-w-sm rounded-xl bg-white p-5 shadow-2xl">
-            <h3 className="text-base font-semibold text-slate-900">Walk-in</h3>
-            <div className="mt-3 space-y-2">
-              <input
-                value={quickBooking.name}
-                onChange={(e) => setQuickBooking((prev) => ({ ...prev, name: e.target.value }))}
-                placeholder="Guest name (optional)"
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-              />
-              <input
-                value={quickBooking.phone}
-                onChange={(e) => setQuickBooking((prev) => ({ ...prev, phone: e.target.value }))}
-                placeholder="Phone (optional)"
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-              />
-              <input
-                type="number"
-                min={1}
-                value={quickBooking.party_size}
-                onChange={(e) => setQuickBooking((prev) => ({ ...prev, party_size: Number(e.target.value) || 1 }))}
-                autoFocus
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-              />
-              <input
-                type="time"
-                value={walkInCell.time}
-                onChange={(e) => setWalkInCell((prev) => prev ? { ...prev, time: e.target.value } : prev)}
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-              />
-              {walkInSuggestions.length > 0 ? (
-                <div className="relative rounded-lg border border-slate-200 bg-slate-50 p-2">
-                  {walkInSuggestionsLoading && (
-                    <div className="absolute inset-0 z-10 flex items-center justify-center rounded-lg bg-white/60">
-                      <span className="h-4 w-4 animate-spin rounded-full border-2 border-slate-300 border-t-slate-600" />
-                    </div>
-                  )}
-                  <p className="text-[11px] font-semibold text-slate-600">Suggested tables</p>
-                  <MiniWalkInPreview
-                    tables={gridData?.tables ?? []}
-                    highlightedTableIds={
-                      (walkInSuggestions.find((suggestion) => `${suggestion.source}:${suggestion.table_ids.join('|')}` === selectedWalkInSuggestionKey)?.table_ids)
-                      ?? walkInSuggestions[0]?.table_ids
-                      ?? []
-                    }
-                  />
-                  <div className="mt-1 space-y-1">
-                    {walkInSuggestions.slice(0, 4).map((suggestion, index) => {
-                      const key = `${suggestion.source}:${suggestion.table_ids.join('|')}`;
-                      return (
-                        <button
-                          key={key}
-                          type="button"
-                          onClick={() => setSelectedWalkInSuggestionKey(key)}
-                          className={`w-full rounded border px-2 py-1 text-left text-xs ${
-                            selectedWalkInSuggestionKey === key
-                              ? 'border-emerald-300 bg-emerald-50 text-emerald-700'
-                              : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
-                          }`}
-                        >
-                          <span className="font-medium">{index === 0 ? 'Best fit: ' : ''}{suggestion.table_names.join(' + ')}</span>
-                          <span className="ml-1 text-[10px] text-slate-500">Cap {suggestion.combined_capacity}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              ) : walkInSuggestionsLoading ? (
-                <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-xs text-slate-600">
-                  <div className="inline-flex items-center gap-2">
-                    <span className="h-3 w-3 animate-spin rounded-full border border-slate-300 border-t-slate-600" />
-                    Loading available table suggestions...
-                  </div>
-                </div>
-              ) : (
-                <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                  No tables currently available for a party of {quickBooking.party_size}. You can add this guest to the waitlist instead.
-                  <div className="mt-1">
-                    <a href="/dashboard/waitlist" className="font-semibold underline">
-                      Add to Waitlist
-                    </a>
-                  </div>
-                </div>
-              )}
-            </div>
-            <div className="mt-4 flex gap-2">
-              <button
-                type="button"
-                onClick={async () => {
-                  const selectedSuggestion = walkInSuggestions.find((suggestion) => `${suggestion.source}:${suggestion.table_ids.join('|')}` === selectedWalkInSuggestionKey);
-                  const tableIds = selectedSuggestion?.table_ids ?? [walkInCell.tableId];
-                  const res = await fetch('/api/venue/bookings/walk-in', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                      table_id: tableIds.length === 1 ? tableIds[0] : undefined,
-                      booking_date: date,
-                      booking_time: walkInCell.time,
-                      party_size: quickBooking.party_size,
-                      name: quickBooking.name || 'Walk-in',
-                      phone: quickBooking.phone || undefined,
-                    }),
-                  });
-                  if (!res.ok) {
-                    const payload = await res.json().catch(() => ({}));
-                    addToast(payload.error ?? 'Failed to create walk-in', 'error');
-                    return;
-                  }
-                  const payload = await res.json();
-                  if (payload?.id && tableIds.length > 1) {
-                    const assignRes = await fetch('/api/venue/tables/assignments', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ booking_id: payload.id, table_ids: tableIds }),
-                    });
-                    if (!assignRes.ok) {
-                      const assignmentPayload = await assignRes.json().catch(() => ({}));
-                      addToast(assignmentPayload.error ?? 'Walk-in created but table assignment failed', 'error');
-                      return;
-                    }
-                  }
-                  addToast('Walk-in created', 'success');
-                  setWalkInCell(null);
-                  fetchGrid();
-                }}
-                disabled={walkInSuggestionsLoading}
-                className="flex-1 rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-60"
-              >
-                Seat Walk-in
-              </button>
-              <button
-                type="button"
-                onClick={() => setWalkInCell(null)}
-                className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
+        <WalkInModal
+          advancedMode
+          initialDate={date}
+          initialTime={walkInCell.time}
+          onClose={() => setWalkInCell(null)}
+          onCreated={() => { setWalkInCell(null); fetchGrid(); }}
+        />
       )}
       {blockForm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
@@ -1782,32 +1495,3 @@ export function TableGridView({ venueId }: { venueId: string }) {
   );
 }
 
-function MiniWalkInPreview({
-  tables,
-  highlightedTableIds,
-}: {
-  tables: TableGridData['tables'];
-  highlightedTableIds: string[];
-}) {
-  const positioned = tables.filter((table) => table.position_x != null && table.position_y != null);
-  if (positioned.length === 0) return null;
-  return (
-    <div className="relative mt-2 h-24 rounded border border-slate-200 bg-white">
-      {positioned.slice(0, 25).map((table) => {
-        const selected = highlightedTableIds.includes(table.id);
-        return (
-          <div
-            key={table.id}
-            className={`absolute h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border text-[8px] leading-4 text-center ${
-              selected ? 'border-emerald-500 bg-emerald-100 text-emerald-700' : 'border-slate-300 bg-slate-100 text-slate-500'
-            }`}
-            style={{ left: `${table.position_x}%`, top: `${table.position_y}%` }}
-            title={table.name}
-          >
-            {table.name.slice(0, 1)}
-          </div>
-        );
-      })}
-    </div>
-  );
-}

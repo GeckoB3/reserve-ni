@@ -3,6 +3,7 @@ import { compileEmailTemplate, compileSmsTemplate } from './templates';
 import { EmailChannel } from './channels/email';
 import { SMSChannel } from './channels/sms';
 import { getSupabaseAdminClient } from '@/lib/supabase';
+import type { CommMessageType } from '@/lib/emails/types';
 
 interface LogContext {
   venue_id?: string;
@@ -10,15 +11,132 @@ interface LogContext {
   guest_id?: string;
 }
 
-/** Which channels each message type uses. Adding WhatsApp = add channel and add to this map. */
+export interface CommunicationSettings {
+  confirmation_email_enabled: boolean;
+  confirmation_email_custom_message: string | null;
+  deposit_sms_enabled: boolean;
+  deposit_sms_custom_message: string | null;
+  deposit_confirmation_email_enabled: boolean;
+  deposit_confirmation_email_custom_message: string | null;
+  reminder_email_enabled: boolean;
+  reminder_email_custom_message: string | null;
+  day_of_reminder_enabled: boolean;
+  day_of_reminder_time: string;
+  day_of_reminder_sms_enabled: boolean;
+  day_of_reminder_email_enabled: boolean;
+  day_of_reminder_custom_message: string | null;
+  post_visit_email_enabled: boolean;
+  post_visit_email_time: string;
+  post_visit_email_custom_message: string | null;
+}
+
+const SETTINGS_CACHE = new Map<string, { data: CommunicationSettings; ts: number }>();
+const CACHE_TTL = 60_000;
+
+export async function getCommSettings(venueId: string): Promise<CommunicationSettings> {
+  const cached = SETTINGS_CACHE.get(venueId);
+  if (cached && Date.now() - cached.ts < CACHE_TTL) return cached.data;
+
+  const supabase = getSupabaseAdminClient();
+  const { data } = await supabase
+    .from('communication_settings')
+    .select('*')
+    .eq('venue_id', venueId)
+    .maybeSingle();
+
+  if (data) {
+    SETTINGS_CACHE.set(venueId, { data: data as CommunicationSettings, ts: Date.now() });
+    return data as CommunicationSettings;
+  }
+
+  // Auto-create with defaults if not found
+  const { data: created } = await supabase
+    .from('communication_settings')
+    .insert({ venue_id: venueId })
+    .select('*')
+    .single();
+
+  const settings = (created ?? {
+    confirmation_email_enabled: true,
+    confirmation_email_custom_message: null,
+    deposit_sms_enabled: true,
+    deposit_sms_custom_message: null,
+    deposit_confirmation_email_enabled: true,
+    deposit_confirmation_email_custom_message: null,
+    reminder_email_enabled: true,
+    reminder_email_custom_message: null,
+    day_of_reminder_enabled: true,
+    day_of_reminder_time: '09:00:00',
+    day_of_reminder_sms_enabled: true,
+    day_of_reminder_email_enabled: true,
+    day_of_reminder_custom_message: null,
+    post_visit_email_enabled: true,
+    post_visit_email_time: '09:00:00',
+    post_visit_email_custom_message: null,
+  }) as CommunicationSettings;
+
+  SETTINGS_CACHE.set(venueId, { data: settings, ts: Date.now() });
+  return settings;
+}
+
+export function clearSettingsCache(venueId?: string): void {
+  if (venueId) SETTINGS_CACHE.delete(venueId);
+  else SETTINGS_CACHE.clear();
+}
+
+/**
+ * Log to the new communication_logs table using INSERT ON CONFLICT DO NOTHING.
+ * Returns true if the insert succeeded (i.e. no duplicate existed), false otherwise.
+ */
+export async function logToCommLogs(opts: {
+  venue_id: string;
+  booking_id: string;
+  message_type: CommMessageType;
+  channel: 'email' | 'sms';
+  recipient: string;
+  status: 'pending' | 'sent' | 'failed';
+  external_id?: string | null;
+  error_message?: string | null;
+}): Promise<boolean> {
+  try {
+    const supabase = getSupabaseAdminClient();
+    const { data, error } = await supabase
+      .from('communication_logs')
+      .insert({
+        venue_id: opts.venue_id,
+        booking_id: opts.booking_id,
+        message_type: opts.message_type,
+        channel: opts.channel,
+        recipient: opts.recipient,
+        status: opts.status,
+        external_id: opts.external_id ?? null,
+        error_message: opts.error_message ?? null,
+        sent_at: opts.status === 'sent' ? new Date().toISOString() : null,
+      })
+      .select('id')
+      .maybeSingle();
+
+    if (error) {
+      if (error.code === '23505') return false; // unique_message_per_booking violated = duplicate
+      console.error('[logToCommLogs] insert error:', error);
+      return false;
+    }
+    return Boolean(data);
+  } catch (err) {
+    console.error('[logToCommLogs] failed:', err);
+    return false;
+  }
+}
+
+/** Which channels each message type uses. */
 const MESSAGE_CHANNELS: Record<MessageType, Array<'email' | 'sms'>> = {
-  booking_confirmation: ['email', 'sms'],
-  deposit_payment_request: ['email', 'sms'],
+  booking_confirmation: [],
+  deposit_payment_request: [],
   deposit_payment_reminder: ['sms'],
-  pre_visit_reminder: ['email', 'sms'],
+  pre_visit_reminder: [],
   confirm_or_cancel_prompt: ['sms'],
   dietary_digest: ['email'],
-  post_visit_thankyou: ['email'],
+  post_visit_thankyou: [],
   auto_cancel_notification: ['email', 'sms'],
   booking_modification: ['email', 'sms'],
   cancellation_confirmation: ['email', 'sms'],
@@ -50,12 +168,10 @@ function normalisePayload(payload: TemplateVariables): Record<string, string | n
   if (p.booking_time != null && typeof p.booking_time === 'string' && p.booking_time.length > 5) {
     p.booking_time = p.booking_time.slice(0, 5);
   }
-  // Convert YYYY-MM-DD dates to DD/MM/YYYY for human-readable messages.
   if (typeof p.booking_date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(p.booking_date)) {
     const [y, m, d] = p.booking_date.split('-');
     p.booking_date = `${d}/${m}/${y}`;
   }
-  // Format the cancellation deadline as DD/MM/YYYY at HH:MM for readability.
   if (typeof p.cancellation_deadline === 'string' && p.cancellation_deadline.includes('T')) {
     try {
       const dt = new Date(p.cancellation_deadline);
@@ -66,7 +182,7 @@ function normalisePayload(payload: TemplateVariables): Record<string, string | n
       const min = String(dt.getMinutes()).padStart(2, '0');
       p.cancellation_deadline = `${dd}/${mm}/${yyyy} at ${hh}:${min}`;
     } catch {
-      // leave as-is if parsing fails
+      // leave as-is
     }
   }
   return p;
@@ -157,8 +273,6 @@ export class CommunicationService {
           }
         }
       } catch (err) {
-        // Log the failure but continue to the next channel so one failing channel
-        // (e.g. SendGrid not yet activated) does not prevent SMS from being sent.
         console.error(`[CommunicationService] ${ch} failed for ${type}:`, err);
         await this.logCommunication(type, ch, recipient, 'failed', ctx);
       }

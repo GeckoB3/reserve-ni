@@ -18,15 +18,124 @@ function getStripeForAccount(stripeAccountId?: string): Promise<Stripe | null> {
   return stripeCache.get(cacheKey)!;
 }
 
-function PayForm({ clientSecret, bookingId, onSuccess }: { clientSecret: string; bookingId: string; onSuccess: () => void }) {
+interface BookingInfo {
+  booking_id: string;
+  venue_name: string;
+  venue_address: string | null;
+  booking_date: string;
+  booking_time: string;
+  party_size: number;
+  deposit_amount_pence: number | null;
+  guest_name: string;
+  guest_email: string;
+  refund_cutoff: string | null;
+}
+
+function formatDate(dateStr: string): string {
+  try {
+    const d = new Date(dateStr + 'T00:00:00');
+    return d.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  } catch {
+    return dateStr;
+  }
+}
+
+function formatTime(timeStr: string): string {
+  try {
+    const [h, m] = timeStr.slice(0, 5).split(':').map(Number);
+    const ampm = (h ?? 0) >= 12 ? 'pm' : 'am';
+    const h12 = (h ?? 0) % 12 || 12;
+    return `${h12}:${String(m ?? 0).padStart(2, '0')}${ampm}`;
+  } catch {
+    return timeStr;
+  }
+}
+
+function formatRefundCutoff(iso: string): string {
+  try {
+    const d = new Date(iso);
+    const day = d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+    const time = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+    return `${day} at ${time}`;
+  } catch {
+    return iso;
+  }
+}
+
+function BookingDetailsCard({ info }: { info: BookingInfo }) {
+  const deposit = info.deposit_amount_pence ? (info.deposit_amount_pence / 100).toFixed(2) : null;
+  return (
+    <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-2.5">
+      <h3 className="text-sm font-semibold text-slate-800">{info.venue_name}</h3>
+      <div className="grid gap-1.5 text-sm text-slate-600">
+        <div className="flex items-center gap-2">
+          <span className="text-base">&#128197;</span>
+          <span>{formatDate(info.booking_date)}</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-base">&#128336;</span>
+          <span>{formatTime(info.booking_time)}</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-base">&#128101;</span>
+          <span>{info.party_size} guest{info.party_size !== 1 ? 's' : ''}</span>
+        </div>
+        {info.venue_address && (
+          <div className="flex items-center gap-2">
+            <span className="text-base">&#128205;</span>
+            <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(info.venue_address)}`} target="_blank" rel="noopener noreferrer" className="text-brand-600 hover:underline">{info.venue_address}</a>
+          </div>
+        )}
+      </div>
+      {deposit && (
+        <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-800">
+          <span className="font-semibold">Deposit required: &pound;{deposit}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RefundPolicy({ refundCutoff }: { refundCutoff: string | null }) {
+  return (
+    <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-xs text-blue-700 leading-relaxed">
+      <span className="font-semibold">Refund policy:</span>{' '}
+      {refundCutoff
+        ? <>Your deposit is fully refundable if you cancel before <strong>{formatRefundCutoff(refundCutoff)}</strong>. After this time, the deposit is non-refundable. Deposits are non-refundable for no-shows.</>
+        : <>Your deposit is fully refundable if you cancel at least 48 hours before your reservation. After this time, the deposit is non-refundable. Deposits are non-refundable for no-shows.</>
+      }
+    </div>
+  );
+}
+
+function PayForm({
+  clientSecret,
+  bookingId,
+  email,
+  onEmailChange,
+  onSuccess,
+}: {
+  clientSecret: string;
+  bookingId: string;
+  email: string;
+  onEmailChange: (v: string) => void;
+  onSuccess: () => void;
+}) {
   const stripe = useStripe();
   const elements = useElements();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [emailTouched, setEmailTouched] = useState(false);
+  const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setEmailTouched(true);
     if (!stripe || !elements) return;
+    if (!emailValid) {
+      setError('Please enter a valid email address');
+      return;
+    }
     setError(null);
     setLoading(true);
     try {
@@ -42,6 +151,7 @@ function PayForm({ clientSecret, bookingId, onSuccess }: { clientSecret: string;
         clientSecret,
         confirmParams: {
           return_url: `${typeof window !== 'undefined' ? window.location.origin : ''}/pay/success`,
+          receipt_email: email.trim(),
         },
         redirect: 'if_required',
       });
@@ -51,12 +161,11 @@ function PayForm({ clientSecret, bookingId, onSuccess }: { clientSecret: string;
         return;
       }
 
-      // Payment succeeded client-side — confirm server-side.
       try {
         await fetch('/api/booking/confirm-payment', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ booking_id: bookingId }),
+          body: JSON.stringify({ booking_id: bookingId, guest_email: email.trim() }),
         });
       } catch {
         // Non-critical — webhook will handle if this fails.
@@ -70,13 +179,42 @@ function PayForm({ clientSecret, bookingId, onSuccess }: { clientSecret: string;
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-5">
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <div>
+        <label htmlFor="pay-email" className="mb-1.5 block text-sm font-medium text-slate-700">
+          Email address <span className="text-red-500">*</span>
+        </label>
+        <input
+          id="pay-email"
+          type="email"
+          required
+          value={email}
+          onChange={(e) => onEmailChange(e.target.value)}
+          onBlur={() => setEmailTouched(true)}
+          placeholder="your@email.com"
+          className={`w-full rounded-xl border bg-white px-3.5 py-2.5 text-sm transition-colors focus:outline-none focus:ring-2 ${
+            emailTouched && !emailValid
+              ? 'border-red-300 focus:border-red-400 focus:ring-red-500/20'
+              : 'border-slate-200 focus:border-brand-500 focus:ring-brand-500/20'
+          }`}
+        />
+        {emailTouched && !emailValid && (
+          <p className="mt-1 text-xs text-red-500">Please enter a valid email so we can send your confirmation</p>
+        )}
+        <p className="mt-1 text-xs text-slate-400">We&rsquo;ll send your deposit confirmation to this address</p>
+      </div>
+
       <PaymentElement options={{ layout: 'tabs' }} />
+
       {error && (
         <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
       )}
-      <button type="submit" disabled={!stripe || loading} className="w-full rounded-xl bg-brand-600 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 disabled:opacity-50">
-        {loading ? 'Processing…' : 'Pay deposit'}
+      <button
+        type="submit"
+        disabled={!stripe || loading}
+        className="w-full rounded-xl bg-brand-600 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 disabled:opacity-50 transition-colors"
+      >
+        {loading ? 'Processing\u2026' : 'Pay deposit'}
       </button>
     </form>
   );
@@ -87,7 +225,8 @@ function PayContent() {
   const token = searchParams.get('t');
   const [clientSecret, setClientSecret] = useState<string | null>(null);
   const [stripeAccountId, setStripeAccountId] = useState<string | undefined>(undefined);
-  const [bookingId, setBookingId] = useState<string>('');
+  const [bookingInfo, setBookingInfo] = useState<BookingInfo | null>(null);
+  const [email, setEmail] = useState('');
   const [status, setStatus] = useState<'loading' | 'ready' | 'success' | 'error'>('loading');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
@@ -105,7 +244,19 @@ function PayContent() {
       .then((data) => {
         setClientSecret(data.client_secret);
         setStripeAccountId(data.stripe_account_id);
-        setBookingId(data.booking_id);
+        setBookingInfo({
+          booking_id: data.booking_id,
+          venue_name: data.venue_name ?? '',
+          venue_address: data.venue_address ?? null,
+          booking_date: data.booking_date ?? '',
+          booking_time: data.booking_time ?? '',
+          party_size: data.party_size ?? 0,
+          deposit_amount_pence: data.deposit_amount_pence ?? null,
+          guest_name: data.guest_name ?? '',
+          guest_email: data.guest_email ?? '',
+          refund_cutoff: data.refund_cutoff ?? null,
+        });
+        if (data.guest_email) setEmail(data.guest_email);
         setStatus('ready');
       })
       .catch((e) => {
@@ -134,27 +285,38 @@ function PayContent() {
   }
 
   if (status === 'success') {
+    const deposit = bookingInfo?.deposit_amount_pence ? (bookingInfo.deposit_amount_pence / 100).toFixed(2) : null;
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center px-4">
-        <div className="w-full max-w-sm text-center">
+        <div className="w-full max-w-md text-center">
           <Image src="/Logo.png" alt="Reserve NI" width={120} height={36} className="mx-auto mb-8 h-8 w-auto" />
-          <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
-            <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-green-100">
+          <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm space-y-5">
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-green-100">
               <svg className="h-7 w-7 text-green-600" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
               </svg>
             </div>
-            <h2 className="text-xl font-bold text-slate-900">Deposit paid</h2>
-            <p className="mt-2 text-sm text-slate-600">
-              Your deposit has been received. You&rsquo;ll get a confirmation by email or text shortly.
-            </p>
+            <div>
+              <h2 className="text-xl font-bold text-slate-900">Deposit paid</h2>
+              {deposit && <p className="mt-1 text-sm text-slate-500">&pound;{deposit} received</p>}
+            </div>
+            {email && (
+              <p className="text-sm text-slate-600">
+                A confirmation email has been sent to <strong className="text-slate-800">{email}</strong>
+              </p>
+            )}
+            {bookingInfo && (
+              <div className="text-left">
+                <BookingDetailsCard info={bookingInfo} />
+              </div>
+            )}
           </div>
         </div>
       </div>
     );
   }
 
-  if (status === 'loading' || !clientSecret) {
+  if (status === 'loading' || !clientSecret || !bookingInfo) {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center">
         <div className="h-8 w-8 animate-spin rounded-full border-2 border-brand-600 border-t-transparent" />
@@ -164,11 +326,19 @@ function PayContent() {
 
   return (
     <div className="min-h-screen bg-slate-50 px-4 py-8">
-      <div className="mx-auto max-w-md">
-        <Image src="/Logo.png" alt="Reserve NI" width={120} height={36} className="mb-6 h-8 w-auto" />
-        <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <h1 className="text-lg font-semibold text-slate-900 mb-2">Pay your deposit</h1>
-          <p className="text-sm text-slate-500 mb-6">Full refund if you cancel 48+ hours before your reservation.</p>
+      <div className="mx-auto max-w-md space-y-5">
+        <Image src="/Logo.png" alt="Reserve NI" width={120} height={36} className="h-8 w-auto" />
+        <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm space-y-5">
+          <div>
+            <h1 className="text-lg font-semibold text-slate-900">Pay your deposit</h1>
+            <p className="mt-1 text-sm text-slate-500">
+              Hi {bookingInfo.guest_name || 'there'}, please pay your deposit to confirm your booking.
+            </p>
+          </div>
+
+          <BookingDetailsCard info={bookingInfo} />
+          <RefundPolicy refundCutoff={bookingInfo.refund_cutoff} />
+
           <Elements
             stripe={stripePromise}
             options={{
@@ -176,10 +346,16 @@ function PayContent() {
               appearance: { theme: 'stripe', variables: { colorPrimary: '#4E6B78', borderRadius: '12px' } },
             }}
           >
-            <PayForm clientSecret={clientSecret} bookingId={bookingId} onSuccess={onSuccess} />
+            <PayForm
+              clientSecret={clientSecret}
+              bookingId={bookingInfo.booking_id}
+              email={email}
+              onEmailChange={setEmail}
+              onSuccess={onSuccess}
+            />
           </Elements>
         </div>
-        <p className="mt-4 text-center text-xs text-slate-400">
+        <p className="text-center text-xs text-slate-400">
           Powered by <a href="https://www.reserveni.com" className="hover:text-brand-600">Reserve NI</a>
         </p>
       </div>

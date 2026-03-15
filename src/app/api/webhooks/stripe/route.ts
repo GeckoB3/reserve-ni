@@ -4,7 +4,8 @@ import { stripe } from '@/lib/stripe';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { sendCommunication } from '@/lib/communications';
 import { generateConfirmToken, hashConfirmToken } from '@/lib/confirm-token';
-import { createShortManageLink } from '@/lib/short-manage-link';
+import { validateBookingStatusTransition } from '@/lib/table-management/lifecycle';
+import { sendBookingConfirmationEmail, sendDepositConfirmationEmail } from '@/lib/communications/send-templated';
 
 const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
 if (!webhookSecret) {
@@ -68,7 +69,14 @@ export async function POST(request: NextRequest) {
         .single();
 
       if (!booking) {
-        console.log(`[Stripe webhook] Booking ${bookingId} not found — skipping`);
+        console.log(`[Stripe webhook] Booking ${bookingId} not found \u2014 skipping`);
+        await recordProcessed(supabase, event.id, event.type);
+        return NextResponse.json({ received: true });
+      }
+
+      const transitionCheck = validateBookingStatusTransition(booking.status as string, 'Confirmed');
+      if (!transitionCheck.ok) {
+        console.log(`[Stripe webhook] Booking ${bookingId} transition invalid (${booking.status} -> Confirmed) \u2014 skipping`);
         await recordProcessed(supabase, event.id, event.type);
         return NextResponse.json({ received: true });
       }
@@ -105,32 +113,32 @@ export async function POST(request: NextRequest) {
       if (tokenRows && tokenRows.length > 0) {
         manageToken = candidateToken;
       }
-      const { data: venue } = await supabase.from('venues').select('name').eq('id', booking.venue_id).single();
+      const { data: venue } = await supabase.from('venues').select('name, address').eq('id', booking.venue_id).single();
       const { data: guest } = await supabase.from('guests').select('name, email, phone').eq('id', booking.guest_id).single();
       const b = bRow;
       const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'https://www.reserveni.com');
       const manageBookingLink = manageToken ? `${baseUrl}/manage/${bookingId}/${encodeURIComponent(manageToken)}` : undefined;
-      const depositAmount = b?.deposit_amount_pence != null ? (b.deposit_amount_pence / 100).toFixed(2) : undefined;
-      try {
-        await sendCommunication({
-          type: 'booking_confirmation',
-          recipient: { email: guest?.email ?? undefined, phone: guest?.phone ?? undefined },
-          payload: {
-            guest_name: guest?.name,
-            venue_name: venue?.name,
-            booking_date: b?.booking_date,
-            booking_time: typeof b?.booking_time === 'string' ? b.booking_time.slice(0, 5) : b?.booking_time,
-            party_size: b?.party_size,
-            cancellation_deadline: b?.cancellation_deadline,
-            deposit_amount: depositAmount,
-            dietary_notes: b?.dietary_notes ?? undefined,
-            occasion: b?.occasion ?? undefined,
-            manage_booking_link: manageBookingLink,
-            short_manage_link: createShortManageLink(bookingId),
-          },
-        });
-      } catch (commsErr) {
-        console.error('Webhook confirmation comms failed (booking still confirmed):', commsErr);
+
+      const recipientEmail = guest?.email ?? (b as Record<string, unknown>)?.guest_email as string | null;
+      const bookingData = {
+        id: bookingId,
+        guest_name: guest?.name ?? 'Guest',
+        guest_email: recipientEmail ?? null,
+        booking_date: b?.booking_date ?? '',
+        booking_time: typeof b?.booking_time === 'string' ? b.booking_time.slice(0, 5) : b?.booking_time ?? '',
+        party_size: b?.party_size ?? 2,
+        deposit_amount_pence: b?.deposit_amount_pence ?? null,
+        deposit_status: 'Paid' as const,
+        manage_booking_link: manageBookingLink ?? null,
+      };
+      const venueData = { name: venue?.name ?? '', address: (venue as Record<string, unknown>)?.address as string | undefined };
+
+      sendBookingConfirmationEmail(bookingData, venueData, booking.venue_id)
+        .catch((err) => console.error('Webhook: booking confirmation email failed:', err));
+
+      if (recipientEmail && b?.deposit_amount_pence) {
+        sendDepositConfirmationEmail(bookingData, venueData, booking.venue_id)
+          .catch((err) => console.error('Webhook: deposit confirmation email failed:', err));
       }
     } else if (event.type === 'payment_intent.payment_failed') {
       const pi = event.data.object as Stripe.PaymentIntent;

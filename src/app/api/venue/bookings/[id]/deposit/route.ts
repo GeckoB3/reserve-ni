@@ -4,7 +4,7 @@ import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { stripe } from '@/lib/stripe';
-import { sendCommunication } from '@/lib/communications';
+import { sendDepositRequestSms } from '@/lib/communications/send-templated';
 import { createHmac } from 'crypto';
 
 const schema = z.object({
@@ -77,34 +77,34 @@ export async function POST(
     return NextResponse.json({ success: true });
   }
 
-  const { data: existing } = await admin
-    .from('communications')
-    .select('id')
-    .eq('booking_id', id)
-    .eq('message_type', 'deposit_payment_request')
-    .limit(1)
-    .maybeSingle();
-  if (existing) return NextResponse.json({ success: true, deduped: true });
-
   const { data: guest } = await admin.from('guests').select('name, email, phone').eq('id', booking.guest_id).single();
-  const { data: venue } = await admin.from('venues').select('name').eq('id', staff.venue_id).single();
-  if (!guest || !venue?.name) return NextResponse.json({ error: 'Guest or venue not found' }, { status: 400 });
+  const { data: venue } = await admin.from('venues').select('name, address').eq('id', staff.venue_id).single();
+  if (!guest?.phone || !venue?.name) return NextResponse.json({ error: 'Guest phone or venue not found' }, { status: 400 });
 
   const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || request.nextUrl.origin;
   const paymentToken = createPaymentToken(id);
   const paymentLink = `${baseUrl}/pay?t=${paymentToken}`;
-  await sendCommunication({
-    type: 'deposit_payment_request',
-    recipient: { email: guest.email ?? undefined, phone: guest.phone ?? undefined },
-    payload: {
+
+  // Clear any existing dedup entry so manual resend works
+  await admin
+    .from('communication_logs')
+    .delete()
+    .eq('booking_id', id)
+    .eq('message_type', 'deposit_request_sms');
+
+  await sendDepositRequestSms(
+    {
+      id,
       guest_name: guest.name ?? 'Guest',
-      payment_link: paymentLink,
-      venue_name: venue.name,
       booking_date: booking.booking_date,
       booking_time: typeof booking.booking_time === 'string' ? booking.booking_time.slice(0, 5) : '',
       party_size: booking.party_size,
-      deposit_amount: booking.deposit_amount_pence ? (booking.deposit_amount_pence / 100).toFixed(2) : undefined,
+      deposit_amount_pence: booking.deposit_amount_pence ?? null,
     },
-  });
+    { name: venue.name, address: venue.address ?? undefined },
+    staff.venue_id,
+    paymentLink,
+    guest.phone,
+  );
   return NextResponse.json({ success: true });
 }
