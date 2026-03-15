@@ -110,10 +110,14 @@ export function ConfirmCancelView({ bookingId, token }: { bookingId: string; tok
             <h2 className="text-lg font-semibold text-white">Cancel Booking?</h2>
           </div>
           <div className="p-6 space-y-4">
-            <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
-              <p className="font-medium">Deposit Policy</p>
-              <p className="mt-1 text-xs">Full refund if cancelled 48+ hours before your reservation. No refund within 48 hours or for no-shows.</p>
-            </div>
+            {details.deposit_paid && details.deposit_amount_pence ? (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+                <p className="font-medium">Deposit Policy</p>
+                <p className="mt-1 text-xs">Full refund if cancelled 48+ hours before your reservation. No refund within 48 hours or for no-shows.</p>
+              </div>
+            ) : (
+              <p className="text-sm text-slate-600">Are you sure you want to cancel your booking?</p>
+            )}
             {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</p>}
             <div className="flex gap-3">
               <button type="button" onClick={() => { setView('main'); setError(null); }} className="flex-1 rounded-xl border border-slate-200 px-4 py-3 text-sm font-medium text-slate-600 hover:bg-slate-50">

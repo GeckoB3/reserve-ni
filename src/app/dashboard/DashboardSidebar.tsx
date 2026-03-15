@@ -51,8 +51,6 @@ export function DashboardSidebar({ email, staffName, venueName, venueSlug, table
       <div className="lg:hidden fixed top-0 left-0 right-0 z-40 flex items-center justify-between border-b border-slate-200 bg-white px-4 py-3">
         <div className="flex items-center gap-3">
           <img src="/Logo.png" alt="Reserve NI" className="h-7 w-auto" />
-          {venueName && <span className="hidden sm:inline text-sm text-slate-400">·</span>}
-          {venueName && <span className="hidden sm:inline text-sm text-slate-500 truncate max-w-[160px]">{venueName}</span>}
         </div>
         <button
           onClick={() => setMobileOpen(!mobileOpen)}
@@ -76,9 +74,8 @@ export function DashboardSidebar({ email, staffName, venueName, venueSlug, table
         lg:translate-x-0 lg:static lg:z-auto
       `}>
         {/* Brand */}
-        <div className="flex items-center gap-3 border-b border-slate-100 px-5 py-4">
+        <div className="border-b border-slate-100 px-5 py-4">
           <img src="/Logo.png" alt="Reserve NI" className="h-8 w-auto" />
-          {venueName && <span className="text-xs text-slate-400 truncate max-w-[140px]">{venueName}</span>}
         </div>
 
         {/* Nav links */}

@@ -6,7 +6,7 @@ import { LoginForm } from './login-form';
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ redirectTo?: string; error?: string }>;
+  searchParams: Promise<{ redirectTo?: string; error?: string; reason?: string }>;
 }) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -30,6 +30,11 @@ export default async function LoginPage({
         {/* Card */}
         <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <LoginForm redirectTo={(await searchParams).redirectTo} />
+          {(await searchParams).reason === 'session_expired' && (
+            <p className="mt-4 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-center text-sm text-amber-700">
+              Your session has expired due to inactivity. Please sign in again.
+            </p>
+          )}
           {(await searchParams).error === 'auth_callback_error' && (
             <p className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-center text-sm text-red-600">
               Sign-in link invalid or expired. Request a new link.

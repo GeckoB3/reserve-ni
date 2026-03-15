@@ -15,7 +15,7 @@ function formatDate(dateStr: string): string {
 
 const detailsSchema = z.object({
   name: z.string().min(1, 'Name is required').max(200),
-  email: z.string().email('Valid email required').optional().or(z.literal('')),
+  email: z.string().min(1, 'Email is required').email('Valid email required'),
   phone: z.string().min(1, 'Phone is required').max(30),
   dietary_notes: z.string().max(1000).optional(),
   occasion: z.string().max(200).optional(),
@@ -83,7 +83,7 @@ export function DetailsStep({ slot, date, partySize, onSubmit, onBack, requiresD
           <input {...register('name')} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm placeholder:text-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500" placeholder="Your full name" />
         </FormField>
 
-        <FormField label="Email" error={errors.email?.message}>
+        <FormField label="Email" required error={errors.email?.message}>
           <input type="email" {...register('email')} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm placeholder:text-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500" placeholder="you@example.com" />
         </FormField>
 

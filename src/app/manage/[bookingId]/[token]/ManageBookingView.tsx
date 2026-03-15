@@ -161,9 +161,15 @@ export function ManageBookingView({ bookingId, token, hmac }: { bookingId: strin
           {canCancel && showCancelConfirm && (
             <div className="rounded-xl border border-red-200 bg-red-50 p-4 space-y-3">
               <p className="text-sm font-medium text-red-800">Are you sure?</p>
-              <p className="text-xs text-red-700">
-                Full refund if cancelled 48+ hours before your reservation. No refund within 48 hours or for no-shows.
-              </p>
+              {details.deposit_paid && details.deposit_amount_pence ? (
+                <p className="text-xs text-red-700">
+                  Full refund if cancelled 48+ hours before your reservation. No refund within 48 hours or for no-shows.
+                </p>
+              ) : (
+                <p className="text-xs text-red-700">
+                  Are you sure you want to cancel your booking?
+                </p>
+              )}
               {error && <p className="text-xs text-red-600">{error}</p>}
               <div className="flex gap-2">
                 <button type="button" onClick={handleCancel} disabled={cancelling} className="flex-1 rounded-lg bg-red-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50">
