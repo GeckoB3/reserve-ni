@@ -66,6 +66,8 @@ function localDateStr(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
 
+interface GuestInfo { name: string | null; email: string | null; phone: string | null }
+
 interface BookingRow {
   id: string;
   venue_id: string;
@@ -80,10 +82,24 @@ interface BookingRow {
   deposit_status: string | null;
   cancellation_deadline: string | null;
   status: string;
-  guest: { name: string | null; email: string | null; phone: string | null } | null;
+  guest: GuestInfo | null;
 }
 
 const BOOKING_SELECT = 'id, venue_id, guest_id, guest_email, booking_date, booking_time, party_size, special_requests, dietary_notes, deposit_amount_pence, deposit_status, cancellation_deadline, status, guest:guests(name, email, phone)';
+
+function normalizeBookings(rows: unknown[]): BookingRow[] {
+  return rows.map((r) => {
+    const row = r as Record<string, unknown>;
+    const rawGuest = row.guest;
+    let guest: GuestInfo | null = null;
+    if (Array.isArray(rawGuest) && rawGuest.length > 0) {
+      guest = rawGuest[0] as GuestInfo;
+    } else if (rawGuest && typeof rawGuest === 'object' && !Array.isArray(rawGuest)) {
+      guest = rawGuest as GuestInfo;
+    }
+    return { ...row, guest } as BookingRow;
+  });
+}
 
 function buildBookingData(b: BookingRow): BookingEmailData {
   return {
@@ -142,7 +158,7 @@ async function send56hReminders(results: { reminders_56h: number; errors: number
   if (!bookings?.length) return;
 
   // Filter to bookings with email
-  const emailBookings = (bookings as BookingRow[]).filter((b) => getGuestEmail(b));
+  const emailBookings = normalizeBookings(bookings).filter((b) => getGuestEmail(b));
 
   if (!emailBookings.length) return;
 
@@ -237,7 +253,7 @@ async function sendDayOfReminders(results: { day_of_reminders: number; errors: n
 
       const venueData = buildVenueData(venue);
 
-      for (const b of bookings as BookingRow[]) {
+      for (const b of normalizeBookings(bookings)) {
         try {
           const bookingData = buildBookingData(b);
           const phone = getGuestPhone(b);
@@ -331,7 +347,7 @@ async function sendPostVisitEmails(results: { post_visit: number; errors: number
 
       const venueData = buildVenueData(venue);
 
-      for (const b of bookings as BookingRow[]) {
+      for (const b of normalizeBookings(bookings)) {
         try {
           const email = getGuestEmail(b);
           if (!email) continue;
