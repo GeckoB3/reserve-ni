@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse, after } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
@@ -226,18 +226,24 @@ export async function PATCH(
           const { data: venueRow } = await staff.db.from('venues').select('name, address').eq('id', staff.venue_id).single();
           if (guestRow?.email && venueRow?.name) {
             const bookingTime = typeof booking.booking_time === 'string' ? booking.booking_time.slice(0, 5) : '';
-            sendBookingConfirmationEmail(
-              {
-                id,
-                guest_name: guestRow.name ?? 'Guest',
-                guest_email: guestRow.email,
-                booking_date: booking.booking_date,
-                booking_time: bookingTime,
-                party_size: booking.party_size,
-              },
-              { name: venueRow.name, address: venueRow.address ?? undefined },
-              staff.venue_id,
-            ).catch((err) => console.error('Booking confirmation on status confirm failed:', err));
+            const emailData = {
+              id,
+              guest_name: guestRow.name ?? 'Guest',
+              guest_email: guestRow.email,
+              booking_date: booking.booking_date,
+              booking_time: bookingTime,
+              party_size: booking.party_size,
+            };
+            const venueEmailData = { name: venueRow.name, address: venueRow.address ?? undefined };
+            const vid = staff.venue_id;
+            after(async () => {
+              try {
+                const result = await sendBookingConfirmationEmail(emailData, venueEmailData, vid);
+                if (!result.sent) console.warn('[after] status-confirm email not sent:', result.reason);
+              } catch (err) {
+                console.error('[after] status-confirm email failed:', err);
+              }
+            });
           }
         }
 

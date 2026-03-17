@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse, after } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { stripe } from '@/lib/stripe';
 import { findOrCreateGuest } from '@/lib/guests';
@@ -244,6 +244,7 @@ export async function POST(request: NextRequest) {
       source,
       dietary_notes: dietary_notes || null,
       occasion: occasion || null,
+      guest_email: email || null,
       deposit_amount_pence: depositAmountPence,
       deposit_status: requiresDeposit ? 'Pending' : 'Not Required',
       cancellation_deadline,
@@ -341,18 +342,25 @@ export async function POST(request: NextRequest) {
       const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : request.nextUrl.origin);
       const manageBookingLink = `${baseUrl}/manage/${booking.id}/${encodeURIComponent(manageToken)}`;
       if (guest.email) {
-        sendBookingConfirmationEmail(
-          {
-            id: booking.id, guest_name: name, guest_email: guest.email,
-            booking_date, booking_time, party_size,
-            dietary_notes: dietary_notes ?? null,
-            deposit_amount_pence: depositAmountPence ?? null,
-            deposit_status: requiresDeposit ? 'Pending' : 'Not Required',
-            manage_booking_link: manageBookingLink,
-          },
-          { name: venue.name, address: venue.address ?? undefined },
-          venue.id,
-        ).catch((err) => console.error('Templated confirmation email failed:', err));
+        after(async () => {
+          try {
+            const result = await sendBookingConfirmationEmail(
+              {
+                id: booking.id, guest_name: name, guest_email: guest.email!,
+                booking_date, booking_time, party_size,
+                dietary_notes: dietary_notes ?? null,
+                deposit_amount_pence: depositAmountPence ?? null,
+                deposit_status: requiresDeposit ? 'Pending' : 'Not Required',
+                manage_booking_link: manageBookingLink,
+              },
+              { name: venue.name, address: venue.address ?? undefined },
+              venue.id,
+            );
+            if (!result.sent) console.warn('[after] confirmation email not sent:', result.reason);
+          } catch (err) {
+            console.error('[after] confirmation email failed:', err);
+          }
+        });
       }
     }
 

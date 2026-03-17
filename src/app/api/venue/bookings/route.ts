@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse, after } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
@@ -156,6 +156,7 @@ export async function POST(request: NextRequest) {
       party_size,
       status: requiresDeposit ? 'Pending' : 'Confirmed',
       source: 'phone',
+      guest_email: guest.email || null,
       deposit_amount_pence: depositAmountPence,
       deposit_status: requiresDeposit ? ('Pending' as const) : ('Not Required' as const),
       cancellation_deadline: cancellationDeadline(booking_date, booking_time),
@@ -261,13 +262,21 @@ export async function POST(request: NextRequest) {
       }
 
       if (guest.phone) {
-        sendDepositRequestSms(
-          { id: booking.id, guest_name: name, booking_date, booking_time, party_size, deposit_amount_pence: depositAmountPence ?? null },
-          { name: venue.name, address: venue.address ?? undefined },
-          venueId,
-          payment_url,
-          guest.phone,
-        ).catch((err) => console.error('Templated deposit SMS failed:', err));
+        const guestPhone = guest.phone;
+        after(async () => {
+          try {
+            const result = await sendDepositRequestSms(
+              { id: booking.id, guest_name: name, booking_date, booking_time, party_size, deposit_amount_pence: depositAmountPence ?? null },
+              { name: venue.name, address: venue.address ?? undefined },
+              venueId,
+              payment_url!,
+              guestPhone,
+            );
+            if (!result.sent) console.warn('[after] deposit SMS not sent:', result.reason);
+          } catch (err) {
+            console.error('[after] deposit SMS failed:', err);
+          }
+        });
       }
     } else {
       const manageToken = generateConfirmToken();
@@ -283,17 +292,24 @@ export async function POST(request: NextRequest) {
       const manageBookingLink = `${baseUrl}/manage/${booking.id}/${encodeURIComponent(manageToken)}`;
 
       if (guest.email) {
-        sendBookingConfirmationEmail(
-          {
-            id: booking.id, guest_name: name, guest_email: guest.email,
-            booking_date, booking_time, party_size,
-            special_requests: special_requests ?? null,
-            dietary_notes: dietary_notes ?? null,
-            manage_booking_link: manageBookingLink,
-          },
-          { name: venue.name, address: venue.address ?? undefined },
-          venueId,
-        ).catch((err) => console.error('Templated confirmation email failed:', err));
+        after(async () => {
+          try {
+            const result = await sendBookingConfirmationEmail(
+              {
+                id: booking.id, guest_name: name, guest_email: guest.email!,
+                booking_date, booking_time, party_size,
+                special_requests: special_requests ?? null,
+                dietary_notes: dietary_notes ?? null,
+                manage_booking_link: manageBookingLink,
+              },
+              { name: venue.name, address: venue.address ?? undefined },
+              venueId,
+            );
+            if (!result.sent) console.warn('[after] confirmation email not sent:', result.reason);
+          } catch (err) {
+            console.error('[after] confirmation email failed:', err);
+          }
+        });
       }
     }
 

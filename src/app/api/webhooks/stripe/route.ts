@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse, after } from 'next/server';
 import Stripe from 'stripe';
 import { stripe } from '@/lib/stripe';
 import { getSupabaseAdminClient } from '@/lib/supabase';
@@ -133,13 +133,25 @@ export async function POST(request: NextRequest) {
       };
       const venueData = { name: venue?.name ?? '', address: (venue as Record<string, unknown>)?.address as string | undefined };
 
-      sendBookingConfirmationEmail(bookingData, venueData, booking.venue_id)
-        .catch((err) => console.error('Webhook: booking confirmation email failed:', err));
+      const venueIdForAfter = booking.venue_id;
+      const hasDeposit = Boolean(recipientEmail && b?.deposit_amount_pence);
+      after(async () => {
+        try {
+          const confResult = await sendBookingConfirmationEmail(bookingData, venueData, venueIdForAfter);
+          if (!confResult.sent) console.warn('[after] webhook confirmation email not sent:', confResult.reason);
+        } catch (err) {
+          console.error('[after] webhook confirmation email failed:', err);
+        }
 
-      if (recipientEmail && b?.deposit_amount_pence) {
-        sendDepositConfirmationEmail(bookingData, venueData, booking.venue_id)
-          .catch((err) => console.error('Webhook: deposit confirmation email failed:', err));
-      }
+        if (hasDeposit) {
+          try {
+            const depResult = await sendDepositConfirmationEmail(bookingData, venueData, venueIdForAfter);
+            if (!depResult.sent) console.warn('[after] webhook deposit email not sent:', depResult.reason);
+          } catch (err) {
+            console.error('[after] webhook deposit email failed:', err);
+          }
+        }
+      });
     } else if (event.type === 'payment_intent.payment_failed') {
       const pi = event.data.object as Stripe.PaymentIntent;
       const bookingId = pi.metadata?.booking_id;

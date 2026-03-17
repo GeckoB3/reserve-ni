@@ -8,7 +8,7 @@ import { renderDepositRequestSms } from '@/lib/emails/templates/deposit-request-
 import { renderDepositConfirmation } from '@/lib/emails/templates/deposit-confirmation';
 import { sendEmail } from '@/lib/emails/send-email';
 import { sendSms } from '@/lib/emails/send-sms';
-import { getCommSettings, logToCommLogs } from './service';
+import { getCommSettings, logToCommLogs, updateCommLogStatus } from './service';
 
 interface SendResult {
   sent: boolean;
@@ -29,16 +29,31 @@ async function trySendWithDedup(opts: {
     message_type: opts.messageType,
     channel: opts.channel,
     recipient: opts.recipient,
-    status: 'sent',
+    status: 'pending',
   });
 
   if (!canSend) return { sent: false, reason: 'duplicate' };
 
   try {
-    await opts.sendFn();
+    const externalId = await opts.sendFn();
+    await updateCommLogStatus({
+      venue_id: opts.venueId,
+      booking_id: opts.bookingId,
+      message_type: opts.messageType,
+      status: 'sent',
+      external_id: externalId,
+    });
     return { sent: true };
   } catch (err) {
+    const errMsg = err instanceof Error ? err.message : String(err);
     console.error(`[send-templated] ${opts.messageType} ${opts.channel} failed:`, err);
+    await updateCommLogStatus({
+      venue_id: opts.venueId,
+      booking_id: opts.bookingId,
+      message_type: opts.messageType,
+      status: 'failed',
+      error_message: errMsg,
+    });
     return { sent: false, reason: 'send_error' };
   }
 }

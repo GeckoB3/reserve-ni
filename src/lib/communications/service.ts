@@ -128,6 +128,34 @@ export async function logToCommLogs(opts: {
   }
 }
 
+/**
+ * Update an existing communication_logs row status (e.g. pending → sent or failed).
+ */
+export async function updateCommLogStatus(opts: {
+  venue_id: string;
+  booking_id: string;
+  message_type: CommMessageType;
+  status: 'sent' | 'failed';
+  external_id?: string | null;
+  error_message?: string | null;
+}): Promise<void> {
+  try {
+    const supabase = getSupabaseAdminClient();
+    await supabase
+      .from('communication_logs')
+      .update({
+        status: opts.status,
+        external_id: opts.external_id ?? null,
+        error_message: opts.error_message ?? null,
+        sent_at: opts.status === 'sent' ? new Date().toISOString() : null,
+      })
+      .eq('booking_id', opts.booking_id)
+      .eq('message_type', opts.message_type);
+  } catch (err) {
+    console.error('[updateCommLogStatus] failed:', err);
+  }
+}
+
 /** Which channels each message type uses. */
 const MESSAGE_CHANNELS: Record<MessageType, Array<'email' | 'sms'>> = {
   booking_confirmation: [],

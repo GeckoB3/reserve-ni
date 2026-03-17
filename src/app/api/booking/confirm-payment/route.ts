@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse, after } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { stripe } from '@/lib/stripe';
 import { generateConfirmToken, hashConfirmToken } from '@/lib/confirm-token';
@@ -153,15 +153,23 @@ export async function POST(request: NextRequest) {
       manage_booking_link: manageBookingLink ?? null,
     };
 
-    // Booking confirmation email (dedup handled internally)
-    sendBookingConfirmationEmail(bookingData, venueData, booking.venue_id)
-      .catch((err) => console.error('confirm-payment: booking confirmation email failed:', err));
+    after(async () => {
+      try {
+        const confResult = await sendBookingConfirmationEmail(bookingData, venueData, booking.venue_id);
+        if (!confResult.sent) console.warn('[after] confirm-payment confirmation email not sent:', confResult.reason);
+      } catch (err) {
+        console.error('[after] confirm-payment confirmation email failed:', err);
+      }
 
-    // Deposit confirmation email (dedup handled internally)
-    if (recipientEmail && booking.deposit_amount_pence) {
-      sendDepositConfirmationEmail(bookingData, venueData, booking.venue_id)
-        .catch((err) => console.error('confirm-payment: deposit confirmation email failed:', err));
-    }
+      if (recipientEmail && booking.deposit_amount_pence) {
+        try {
+          const depResult = await sendDepositConfirmationEmail(bookingData, venueData, booking.venue_id);
+          if (!depResult.sent) console.warn('[after] confirm-payment deposit email not sent:', depResult.reason);
+        } catch (err) {
+          console.error('[after] confirm-payment deposit email failed:', err);
+        }
+      }
+    });
 
     return NextResponse.json({ confirmed: true });
   } catch (err) {
