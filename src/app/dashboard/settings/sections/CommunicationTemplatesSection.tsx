@@ -13,11 +13,13 @@ interface CommCardConfig {
   customMessageKey: keyof CommunicationSettings;
   locked?: boolean;
   timeKey?: keyof CommunicationSettings;
+  hoursBeforeKey?: keyof CommunicationSettings;
   maxChars: number;
   subToggles?: Array<{
     key: keyof CommunicationSettings;
     label: string;
   }>;
+  requireOneSubToggle?: boolean;
 }
 
 const CARDS: CommCardConfig[] = [
@@ -51,11 +53,12 @@ const CARDS: CommCardConfig[] = [
   },
   {
     messageType: 'reminder_56h_email',
-    label: '56-Hour Reminder',
-    description: 'Reminder email sent approximately 56 hours before the booking.',
+    label: 'Confirm or Cancel Email',
+    description: 'Asks guests to confirm or cancel their booking. Includes a confirm button, cancel button, and manage booking link.',
     channel: 'email',
     enabledKey: 'reminder_email_enabled',
     customMessageKey: 'reminder_email_custom_message',
+    hoursBeforeKey: 'reminder_hours_before',
     maxChars: 500,
   },
   {
@@ -81,6 +84,21 @@ const CARDS: CommCardConfig[] = [
     customMessageKey: 'post_visit_email_custom_message',
     timeKey: 'post_visit_email_time',
     maxChars: 500,
+  },
+  {
+    messageType: 'booking_modification_email',
+    label: 'Booking Modification',
+    description: 'Sent when a booking\'s date, time, or party size is changed. Includes updated details and a manage-booking link.',
+    channel: 'both',
+    enabledKey: 'modification_email_enabled',
+    customMessageKey: 'modification_custom_message',
+    locked: true,
+    maxChars: 500,
+    requireOneSubToggle: true,
+    subToggles: [
+      { key: 'modification_email_enabled', label: 'Email' },
+      { key: 'modification_sms_enabled', label: 'SMS' },
+    ],
   },
 ];
 
@@ -209,7 +227,7 @@ export function CommunicationTemplatesSection({ venue, isAdmin }: CommunicationT
           {[
             { label: 'Booking made', icon: '1' },
             { label: 'Deposit paid', icon: '2' },
-            { label: '56h before', icon: '3' },
+            { label: 'Confirm/Cancel', icon: '3' },
             { label: 'Day of visit', icon: '4' },
             { label: 'After visit', icon: '5' },
           ].map((step, i) => (
@@ -276,7 +294,7 @@ function CommCard({
   onPreview: (type: CommMessageType, customMessage?: string | null) => void;
   isAdmin: boolean;
 }) {
-  const enabled = settings[card.enabledKey] as boolean;
+  const enabled = card.locked ? true : (settings[card.enabledKey] as boolean);
   const customMessage = (settings[card.customMessageKey] as string | null) ?? '';
   const badge = CHANNEL_BADGE[card.channel];
   const [expanded, setExpanded] = useState(false);
@@ -314,18 +332,46 @@ function CommCard({
       {enabled && (
         <div className="border-t border-slate-100 px-4 pb-4 pt-3">
           <div className="flex flex-wrap items-center gap-3 text-xs">
-            {card.subToggles?.map((sub) => (
-              <label key={sub.key as string} className="flex items-center gap-1.5 cursor-pointer">
+            {card.subToggles?.map((sub) => {
+              const checked = settings[sub.key] as boolean;
+              const isLastActive = card.requireOneSubToggle && checked &&
+                card.subToggles!.filter((s) => settings[s.key] as boolean).length === 1;
+              return (
+                <label key={sub.key as string} className={`flex items-center gap-1.5 ${isLastActive ? 'cursor-not-allowed' : 'cursor-pointer'}`}>
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={(e) => {
+                      if (!isAdmin) return;
+                      if (isLastActive && !e.target.checked) return;
+                      onUpdate(sub.key, e.target.checked);
+                    }}
+                    disabled={!isAdmin || isLastActive}
+                    className="h-3.5 w-3.5 rounded border-slate-300 text-brand-600 focus:ring-brand-500 disabled:opacity-50"
+                  />
+                  <span className={`text-slate-600 ${isLastActive ? 'opacity-60' : ''}`}>{sub.label}</span>
+                </label>
+              );
+            })}
+
+            {card.hoursBeforeKey && (
+              <label className="flex items-center gap-1.5">
+                <span className="text-slate-500">Send</span>
                 <input
-                  type="checkbox"
-                  checked={settings[sub.key] as boolean}
-                  onChange={(e) => isAdmin && onUpdate(sub.key, e.target.checked)}
+                  type="number"
+                  min={12}
+                  max={168}
+                  value={(settings[card.hoursBeforeKey] as number) ?? 56}
+                  onChange={(e) => {
+                    const val = Math.min(168, Math.max(12, parseInt(e.target.value, 10) || 56));
+                    isAdmin && onUpdate(card.hoursBeforeKey!, val);
+                  }}
                   disabled={!isAdmin}
-                  className="h-3.5 w-3.5 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                  className="w-16 rounded-lg border border-slate-200 px-2 py-1 text-center text-xs text-slate-700 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500/20"
                 />
-                <span className="text-slate-600">{sub.label}</span>
+                <span className="text-slate-500">hours before booking</span>
               </label>
-            ))}
+            )}
 
             {card.timeKey && (
               <label className="flex items-center gap-1.5">

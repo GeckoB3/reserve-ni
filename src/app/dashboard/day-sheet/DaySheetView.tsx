@@ -16,6 +16,7 @@ import {
 import { UndoToast } from '@/app/dashboard/table-grid/UndoToast';
 import type { UndoAction } from '@/types/table-management';
 import { UnifiedBookingForm } from '@/components/booking/UnifiedBookingForm';
+import { ModifyBookingInline } from '@/components/booking/ModifyBookingInline';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -408,27 +409,28 @@ function SendMessageDialog({ bookingId, onClose, onSent }: { bookingId: string; 
 function EditBookingModal({
   booking,
   date,
+  venueId,
   onSaved,
   onClose,
 }: {
   booking: DaySheetBooking;
   date: string;
+  venueId: string;
   onSaved: () => void;
   onClose: () => void;
 }) {
   const [guestName, setGuestName] = useState(booking.guest_name);
   const [phone, setPhone] = useState(booking.guest_phone ?? '');
   const [email, setEmail] = useState(booking.guest_email ?? '');
-  const [partySize, setPartySize] = useState(booking.party_size);
-  const [time, setTime] = useState(booking.booking_time);
   const [specialRequests, setSpecialRequests] = useState(booking.special_requests ?? '');
   const [internalNotes, setInternalNotes] = useState(booking.internal_notes ?? '');
   const [dietaryNotes, setDietaryNotes] = useState(booking.dietary_notes ?? '');
   const [occasion, setOccasion] = useState(booking.occasion ?? '');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [dateTimeSaved, setDateTimeSaved] = useState(false);
 
-  const save = async () => {
+  const saveGuestDetails = async () => {
     setSaving(true);
     setError(null);
     try {
@@ -436,28 +438,29 @@ function EditBookingModal({
       if (guestName !== booking.guest_name) body.guest_name = guestName;
       if (phone !== (booking.guest_phone ?? '')) body.guest_phone = phone || null;
       if (email !== (booking.guest_email ?? '')) body.guest_email = email || null;
-      if (partySize !== booking.party_size) body.party_size = partySize;
-      if (time !== booking.booking_time) body.booking_time = time;
       if (specialRequests !== (booking.special_requests ?? '')) body.special_requests = specialRequests;
       if (internalNotes !== (booking.internal_notes ?? '')) body.internal_notes = internalNotes;
       if (dietaryNotes !== (booking.dietary_notes ?? '')) body.dietary_notes = dietaryNotes;
       if (occasion !== (booking.occasion ?? '')) body.occasion = occasion;
 
-      if (Object.keys(body).length === 0) {
+      if (Object.keys(body).length === 0 && !dateTimeSaved) {
         onClose();
         return;
       }
 
-      const res = await fetch(`/api/venue/bookings/${booking.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        setError(j.error ?? 'Failed to save');
-        return;
+      if (Object.keys(body).length > 0) {
+        const res = await fetch(`/api/venue/bookings/${booking.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        if (!res.ok) {
+          const j = await res.json().catch(() => ({}));
+          setError(j.error ?? 'Failed to save');
+          return;
+        }
       }
+
       onSaved();
       onClose();
     } catch {
@@ -471,59 +474,62 @@ function EditBookingModal({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm p-4 overflow-y-auto" onClick={onClose}>
       <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl my-8" onClick={(e) => e.stopPropagation()}>
         <h3 className="text-base font-semibold text-slate-900">Edit Booking</h3>
-        <div className="mt-4 space-y-3">
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="mb-1 block text-xs font-medium text-slate-600">Guest Name</label>
-              <input value={guestName} onChange={(e) => setGuestName(e.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
+        <div className="mt-4 space-y-4">
+          {/* Date / Time / Party Size via availability-aware component */}
+          <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-3.5">
+            <p className="mb-2.5 text-xs font-semibold text-slate-700">Date / Time / Party Size</p>
+            <ModifyBookingInline
+              bookingId={booking.id}
+              venueId={venueId}
+              currentDate={date}
+              currentTime={booking.booking_time}
+              currentPartySize={booking.party_size}
+              onSaved={() => { setDateTimeSaved(true); onSaved(); }}
+              onCancel={() => {}}
+            />
+          </div>
+
+          {/* Guest details */}
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="mb-1 block text-xs font-medium text-slate-600">Guest Name</label>
+                <input value={guestName} onChange={(e) => setGuestName(e.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-slate-600">Phone</label>
+                <input value={phone} onChange={(e) => setPhone(e.target.value)} type="tel" className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
+              </div>
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium text-slate-600">Phone</label>
-              <input value={phone} onChange={(e) => setPhone(e.target.value)} type="tel" className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
-            </div>
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-slate-600">Email</label>
-            <input value={email} onChange={(e) => setEmail(e.target.value)} type="email" className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
-          </div>
-          <div className="grid grid-cols-3 gap-3">
-            <div>
-              <label className="mb-1 block text-xs font-medium text-slate-600">Party Size</label>
-              <NumericInput value={partySize} onChange={(v) => setPartySize(v)} min={1} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
+              <label className="mb-1 block text-xs font-medium text-slate-600">Email</label>
+              <input value={email} onChange={(e) => setEmail(e.target.value)} type="email" className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium text-slate-600">Time</label>
-              <input value={time} onChange={(e) => setTime(e.target.value)} type="time" className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
+              <label className="mb-1 block text-xs font-medium text-slate-600">Occasion</label>
+              <input value={occasion} onChange={(e) => setOccasion(e.target.value)} placeholder="e.g. Birthday, Anniversary" className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium text-slate-600">Date</label>
-              <input value={date} disabled className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-500" />
+              <label className="mb-1 block text-xs font-medium text-slate-600">Dietary Notes</label>
+              <input value={dietaryNotes} onChange={(e) => setDietaryNotes(e.target.value)} placeholder="Allergies, dietary requirements" className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
             </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-slate-600">Special Requests</label>
+              <textarea value={specialRequests} onChange={(e) => setSpecialRequests(e.target.value)} rows={2} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-slate-600">Internal Staff Notes</label>
+              <textarea value={internalNotes} onChange={(e) => setInternalNotes(e.target.value)} rows={2} placeholder="Staff-only notes (not shown to guest)" className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
+            </div>
+            {error && <p className="text-sm text-red-600">{error}</p>}
           </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-slate-600">Occasion</label>
-            <input value={occasion} onChange={(e) => setOccasion(e.target.value)} placeholder="e.g. Birthday, Anniversary" className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-slate-600">Dietary Notes</label>
-            <input value={dietaryNotes} onChange={(e) => setDietaryNotes(e.target.value)} placeholder="Allergies, dietary requirements" className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-slate-600">Special Requests</label>
-            <textarea value={specialRequests} onChange={(e) => setSpecialRequests(e.target.value)} rows={2} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-slate-600">Internal Staff Notes</label>
-            <textarea value={internalNotes} onChange={(e) => setInternalNotes(e.target.value)} rows={2} placeholder="Staff-only notes (not shown to guest)" className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
-          </div>
-          {error && <p className="text-sm text-red-600">{error}</p>}
         </div>
         <div className="mt-5 flex gap-3">
-          <button type="button" disabled={saving} onClick={() => void save()} className="flex-1 rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50">
-            {saving ? 'Saving...' : 'Save Changes'}
+          <button type="button" disabled={saving} onClick={() => void saveGuestDetails()} className="flex-1 rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50">
+            {saving ? 'Saving...' : 'Save Guest Details'}
           </button>
           <button type="button" onClick={onClose} className="flex-1 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-50">
-            Cancel
+            Close
           </button>
         </div>
       </div>
@@ -1568,6 +1574,7 @@ export function DaySheetView({ venueId }: { venueId: string }) {
         <EditBookingModal
           booking={editBooking}
           date={date}
+          venueId={venueId}
           onSaved={() => {
             addToast('Booking updated', 'success');
             void fetchDaySheet();

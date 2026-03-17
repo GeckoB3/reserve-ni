@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { BOOKING_STATUS_TRANSITIONS, BOOKING_REVERT_ACTIONS, canMarkNoShowForSlot, isDestructiveBookingStatus, isRevertTransition, type BookingStatus } from '@/lib/table-management/booking-status';
 import { NumericInput } from '@/components/ui/NumericInput';
+import { ModifyBookingInline } from '@/components/booking/ModifyBookingInline';
 
 interface Guest {
   id: string;
@@ -29,6 +30,7 @@ interface CommRow {
 
 interface BookingDetail {
   id: string;
+  venue_id: string;
   created_at?: string;
   created_by?: string | null;
   booking_date: string;
@@ -85,9 +87,6 @@ export function BookingDetailPanel({
   const [error, setError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
   const [showModify, setShowModify] = useState(false);
-  const [modifyDate, setModifyDate] = useState('');
-  const [modifyTime, setModifyTime] = useState('');
-  const [modifyPartySize, setModifyPartySize] = useState(2);
   const [modifyDurationMinutes, setModifyDurationMinutes] = useState(90);
   const [modifyGuestName, setModifyGuestName] = useState('');
   const [modifyGuestPhone, setModifyGuestPhone] = useState('');
@@ -114,9 +113,6 @@ export function BookingDetailPanel({
     if (!res.ok) { setError('Failed to load'); return; }
     const data = await res.json();
     setDetail(data);
-    setModifyDate(data.booking_date);
-    setModifyTime(data.booking_time?.slice(0, 5) ?? '12:00');
-    setModifyPartySize(data.party_size);
     const startMinutes = timeToMinutes(data.booking_time?.slice(0, 5) ?? '12:00');
     const endMinutes = data.estimated_end_time
       ? timeToMinutes(new Date(data.estimated_end_time).toISOString().slice(11, 16))
@@ -270,20 +266,6 @@ export function BookingDetailPanel({
     setActionLoading(true);
     try {
       const currentTime = detail.booking_time?.slice(0, 5) ?? '12:00';
-      const currentDate = detail.booking_date;
-      const currentParty = detail.party_size;
-      if (modifyDate !== currentDate || modifyTime !== currentTime || modifyPartySize !== currentParty) {
-        const bookingRes = await fetch(`/api/venue/bookings/${bookingId}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ booking_date: modifyDate, booking_time: modifyTime, party_size: modifyPartySize }),
-        });
-        if (!bookingRes.ok) {
-          const j = await bookingRes.json().catch(() => ({}));
-          setError(j.error ?? 'Failed');
-          return;
-        }
-      }
 
       const metadataRes = await fetch(`/api/venue/bookings/${bookingId}`, {
         method: 'PATCH',
@@ -304,7 +286,7 @@ export function BookingDetailPanel({
         return;
       }
 
-      const expectedEnd = minutesToTime(timeToMinutes(modifyTime) + modifyDurationMinutes);
+      const expectedEnd = minutesToTime(timeToMinutes(currentTime) + modifyDurationMinutes);
       const currentEnd = detail.estimated_end_time
         ? new Date(detail.estimated_end_time).toISOString().slice(11, 16)
         : minutesToTime(timeToMinutes(currentTime) + 90);
@@ -315,8 +297,8 @@ export function BookingDetailPanel({
           body: JSON.stringify({
             action: 'change_time',
             booking_id: bookingId,
-            new_time: modifyTime,
-            new_estimated_end_time: `${modifyDate}T${expectedEnd}:00.000Z`,
+            new_time: currentTime,
+            new_estimated_end_time: `${detail.booking_date}T${expectedEnd}:00.000Z`,
           }),
         });
         if (!resizeRes.ok) {
@@ -362,9 +344,6 @@ export function BookingDetailPanel({
   }, [
     detail,
     bookingId,
-    modifyDate,
-    modifyTime,
-    modifyPartySize,
     modifyDurationMinutes,
     modifyGuestName,
     modifyGuestPhone,
@@ -808,37 +787,28 @@ export function BookingDetailPanel({
           {/* Modify section */}
           {!showModify ? (
             <button type="button" onClick={() => setShowModify(true)} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50">
-              Modify Date / Time / Party Size
+              Modify Booking
             </button>
           ) : (
-            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-3">
-              <p className="text-sm font-semibold text-slate-700">Modify Booking</p>
-              {depositPaid && <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">Changing party size won&apos;t adjust the deposit already paid.</p>}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-slate-500">Date</label>
-                  <input type="date" value={modifyDate} onChange={(e) => setModifyDate(e.target.value)} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" />
-                </div>
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-slate-500">Time</label>
-                  <input type="time" value={modifyTime} onChange={(e) => setModifyTime(e.target.value)} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" />
-                </div>
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-slate-500">Covers</label>
-                  <NumericInput min={1} max={50} value={modifyPartySize} onChange={(v) => setModifyPartySize(v)} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" />
-                </div>
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-slate-500">Duration (mins)</label>
-                  <NumericInput
-                    min={15}
-                    max={480}
-                    value={modifyDurationMinutes}
-                    onChange={(v) => setModifyDurationMinutes(Math.max(15, Math.round(v / 15) * 15))}
-                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
-                  />
-                </div>
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-4">
+              {/* Date / Time / Party Size — availability-aware */}
+              <div className="rounded-xl border border-slate-200 bg-white p-3.5">
+                <p className="mb-2.5 text-xs font-semibold text-slate-700">Date / Time / Party Size</p>
+                {depositPaid && <p className="mb-2.5 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">Changing party size won&apos;t adjust the deposit already paid.</p>}
+                <ModifyBookingInline
+                  bookingId={bookingId}
+                  venueId={detail.venue_id}
+                  currentDate={detail.booking_date}
+                  currentTime={detail.booking_time}
+                  currentPartySize={detail.party_size}
+                  onSaved={async () => { await load(); onUpdated(); }}
+                  onCancel={() => {}}
+                />
               </div>
-              <div className="grid grid-cols-1 gap-3">
+
+              {/* Guest details, duration, table assignment */}
+              <div className="space-y-3">
+                <p className="text-xs font-semibold text-slate-700">Guest &amp; Booking Details</p>
                 <div>
                   <label className="mb-1 block text-xs font-medium text-slate-500">Guest Name</label>
                   <input type="text" value={modifyGuestName} onChange={(e) => setModifyGuestName(e.target.value)} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" />
@@ -852,6 +822,16 @@ export function BookingDetailPanel({
                     <label className="mb-1 block text-xs font-medium text-slate-500">Guest Email</label>
                     <input type="email" value={modifyGuestEmail} onChange={(e) => setModifyGuestEmail(e.target.value)} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" />
                   </div>
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-slate-500">Duration (mins)</label>
+                  <NumericInput
+                    min={15}
+                    max={480}
+                    value={modifyDurationMinutes}
+                    onChange={(v) => setModifyDurationMinutes(Math.max(15, Math.round(v / 15) * 15))}
+                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+                  />
                 </div>
                 <div>
                   <label className="mb-1 block text-xs font-medium text-slate-500">Dietary Notes</label>
@@ -895,10 +875,10 @@ export function BookingDetailPanel({
                     </div>
                   </div>
                 )}
-              </div>
-              <div className="flex gap-2">
-                <button type="button" onClick={submitModify} disabled={actionLoading} className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50">Save</button>
-                <button type="button" onClick={() => setShowModify(false)} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">Cancel</button>
+                <div className="flex gap-2">
+                  <button type="button" onClick={submitModify} disabled={actionLoading} className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50">Save Details</button>
+                  <button type="button" onClick={() => setShowModify(false)} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">Cancel</button>
+                </div>
               </div>
             </div>
           )}

@@ -58,6 +58,7 @@ const ALLOWED_FIELDS = new Set([
   'deposit_confirmation_email_custom_message',
   'reminder_email_enabled',
   'reminder_email_custom_message',
+  'reminder_hours_before',
   'day_of_reminder_enabled',
   'day_of_reminder_time',
   'day_of_reminder_sms_enabled',
@@ -66,6 +67,9 @@ const ALLOWED_FIELDS = new Set([
   'post_visit_email_enabled',
   'post_visit_email_time',
   'post_visit_email_custom_message',
+  'modification_email_enabled',
+  'modification_sms_enabled',
+  'modification_custom_message',
 ]);
 
 /**

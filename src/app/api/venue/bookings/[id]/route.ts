@@ -463,29 +463,36 @@ export async function PATCH(
       }
 
       const { data: guestRow } = await staff.db.from('guests').select('name, email, phone').eq('id', booking.guest_id).single();
-      const { data: venueRow } = await staff.db.from('venues').select('name').eq('id', staff.venue_id).single();
-      if (guestRow?.email && venueRow?.name) {
-        const { sendCommunication } = await import('@/lib/communications');
-        const depositAmount = booking.deposit_amount_pence != null ? (booking.deposit_amount_pence / 100).toFixed(2) : undefined;
-        try {
-          await sendCommunication({
-            type: 'booking_modification',
-            recipient: { email: guestRow.email, phone: guestRow.phone ?? undefined },
-            payload: {
-              guest_name: guestRow.name ?? 'Guest',
-              venue_name: venueRow.name,
-              booking_date: newDate,
-              booking_time: timeStr,
-              party_size: newPartySize,
-              deposit_amount: depositAmount,
-            },
-            venue_id: staff.venue_id,
-            booking_id: id,
-            guest_id: booking.guest_id,
-          });
-        } catch (commsErr) {
-          console.error('Booking modification notification failed:', commsErr);
-        }
+      const { data: venueRow } = await staff.db.from('venues').select('name, address, phone').eq('id', staff.venue_id).single();
+      if (guestRow && venueRow?.name) {
+        const { sendBookingModificationNotification } = await import('@/lib/communications/send-templated');
+        const { createShortManageLink } = await import('@/lib/short-manage-link');
+        const manageLink = createShortManageLink(id);
+        const bookingEmail: import('@/lib/emails/types').BookingEmailData = {
+          id,
+          guest_name: guestRow.name ?? 'Guest',
+          guest_email: guestRow.email ?? null,
+          guest_phone: guestRow.phone ?? null,
+          booking_date: newDate,
+          booking_time: timeStr,
+          party_size: newPartySize,
+          deposit_amount_pence: booking.deposit_amount_pence ?? null,
+          deposit_status: booking.deposit_status ?? null,
+          manage_booking_link: manageLink,
+        };
+        const venueEmail: import('@/lib/emails/types').VenueEmailData = {
+          name: venueRow.name,
+          address: venueRow.address ?? null,
+          phone: venueRow.phone ?? null,
+        };
+        const vid = staff.venue_id;
+        after(async () => {
+          try {
+            await sendBookingModificationNotification(bookingEmail, venueEmail, vid);
+          } catch (commsErr) {
+            console.error('Booking modification notification failed:', commsErr);
+          }
+        });
       }
 
       // Reset scheduled communication logs so reminders re-trigger for the new date/time

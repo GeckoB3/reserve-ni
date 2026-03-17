@@ -21,6 +21,7 @@ export interface BookingEmailData {
   deposit_status?: string | null;
   refund_cutoff?: string | null;
   manage_booking_link?: string | null;
+  confirm_cancel_link?: string | null;
 }
 
 export interface RenderedEmail {
@@ -40,4 +41,6 @@ export type CommMessageType =
   | 'reminder_56h_email'
   | 'day_of_reminder_sms'
   | 'day_of_reminder_email'
-  | 'post_visit_email';
+  | 'post_visit_email'
+  | 'booking_modification_email'
+  | 'booking_modification_sms';

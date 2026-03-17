@@ -10,6 +10,7 @@ import { renderReminder56h } from '@/lib/emails/templates/reminder-56h';
 import { renderDayOfReminderEmail } from '@/lib/emails/templates/day-of-reminder-email';
 import { renderDayOfReminderSms } from '@/lib/emails/templates/day-of-reminder-sms';
 import { renderPostVisitEmail } from '@/lib/emails/templates/post-visit';
+import { renderBookingModification } from '@/lib/emails/templates/booking-modification';
 
 const SAMPLE_BOOKING: BookingEmailData = {
   id: '00000000-0000-0000-0000-000000000000',
@@ -25,6 +26,7 @@ const SAMPLE_BOOKING: BookingEmailData = {
   deposit_status: 'Paid',
   refund_cutoff: '2026-03-18T19:00:00Z',
   manage_booking_link: 'https://www.reserveni.com/manage/preview',
+  confirm_cancel_link: 'https://www.reserveni.com/confirm/preview?hmac=sample',
 };
 
 /**
@@ -80,6 +82,9 @@ export async function POST(request: NextRequest) {
         break;
       case 'post_visit_email':
         preview = renderPostVisitEmail(SAMPLE_BOOKING, venueData, customMessage);
+        break;
+      case 'booking_modification_email':
+        preview = renderBookingModification(SAMPLE_BOOKING, venueData, customMessage);
         break;
       default:
         return NextResponse.json({ error: 'Unknown message type' }, { status: 400 });

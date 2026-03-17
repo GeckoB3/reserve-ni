@@ -1,18 +1,27 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 
 interface BookingDetails {
   booking_id: string;
+  venue_id: string;
   venue_name: string;
   venue_address: string | null;
+  venue_phone: string | null;
   booking_date: string;
   booking_time: string;
   party_size: number;
   deposit_paid: boolean;
   deposit_amount_pence: number | null;
   status: string;
+}
+
+interface Slot {
+  key: string;
+  label: string;
+  start_time: string;
+  available_covers: number;
 }
 
 export function ManageBookingView({ bookingId, token, hmac }: { bookingId: string; token?: string; hmac?: string }) {
@@ -23,6 +32,8 @@ export function ManageBookingView({ bookingId, token, hmac }: { bookingId: strin
   const [cancelling, setCancelling] = useState(false);
   const [cancelled, setCancelled] = useState(false);
   const [refundMessage, setRefundMessage] = useState<string | null>(null);
+  const [showModify, setShowModify] = useState(false);
+  const [modifySuccess, setModifySuccess] = useState(false);
 
   const authParam = hmac
     ? `hmac=${encodeURIComponent(hmac)}`
@@ -62,6 +73,13 @@ export function ManageBookingView({ bookingId, token, hmac }: { bookingId: strin
       setCancelling(false);
     }
   }, [bookingId, token, hmac]);
+
+  const handleModifySaved = useCallback(() => {
+    setShowModify(false);
+    setModifySuccess(true);
+    fetchDetails().catch(() => {});
+    setTimeout(() => setModifySuccess(false), 4000);
+  }, [fetchDetails]);
 
   if (loading) {
     return (
@@ -113,6 +131,7 @@ export function ManageBookingView({ bookingId, token, hmac }: { bookingId: strin
   if (!details) return null;
 
   const dateStr = new Date(details.booking_date + 'T12:00:00').toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
+  const canModify = details.status === 'Confirmed' || details.status === 'Pending';
   const canCancel = details.status === 'Confirmed' || details.status === 'Pending';
 
   return (
@@ -131,6 +150,12 @@ export function ManageBookingView({ bookingId, token, hmac }: { bookingId: strin
 
         {/* Booking details */}
         <div className="p-6 space-y-4">
+          {modifySuccess && (
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700 font-medium">
+              Your booking has been updated.
+            </div>
+          )}
+
           <div className="grid grid-cols-2 gap-3">
             <DetailTile label="Date" value={dateStr} />
             <DetailTile label="Time" value={details.booking_time.slice(0, 5)} />
@@ -145,13 +170,36 @@ export function ManageBookingView({ bookingId, token, hmac }: { bookingId: strin
             </div>
           )}
 
-          <p className="text-xs text-slate-400">To change the date or time, please contact the venue directly.</p>
-
-          {/* Cancel section */}
-          {canCancel && !showCancelConfirm && (
+          {/* Modify section */}
+          {canModify && !showModify && !showCancelConfirm && (
             <button
               type="button"
-              onClick={() => setShowCancelConfirm(true)}
+              onClick={() => { setShowModify(true); setShowCancelConfirm(false); }}
+              className="w-full rounded-xl border border-brand-200 bg-white px-4 py-3 text-sm font-medium text-brand-600 hover:bg-brand-50"
+            >
+              Modify Booking
+            </button>
+          )}
+
+          {canModify && showModify && (
+            <ModifyBookingSection
+              bookingId={bookingId}
+              venueId={details.venue_id}
+              venuePhone={details.venue_phone}
+              currentDate={details.booking_date}
+              currentTime={details.booking_time}
+              currentPartySize={details.party_size}
+              authPayload={hmac ? { hmac } : { token }}
+              onSaved={handleModifySaved}
+              onCancel={() => setShowModify(false)}
+            />
+          )}
+
+          {/* Cancel section */}
+          {canCancel && !showCancelConfirm && !showModify && (
+            <button
+              type="button"
+              onClick={() => { setShowCancelConfirm(true); setShowModify(false); }}
               className="w-full rounded-xl border border-red-200 bg-white px-4 py-3 text-sm font-medium text-red-600 hover:bg-red-50"
             >
               Cancel Reservation
@@ -187,6 +235,243 @@ export function ManageBookingView({ bookingId, token, hmac }: { bookingId: strin
       <p className="mt-4 text-center text-xs text-slate-400">
         <Link href="/" className="hover:text-brand-600">Powered by Reserve NI</Link>
       </p>
+    </div>
+  );
+}
+
+function ModifyBookingSection({
+  bookingId,
+  venueId,
+  venuePhone,
+  currentDate,
+  currentTime,
+  currentPartySize,
+  authPayload,
+  onSaved,
+  onCancel,
+}: {
+  bookingId: string;
+  venueId: string;
+  venuePhone: string | null;
+  currentDate: string;
+  currentTime: string;
+  currentPartySize: number;
+  authPayload: { hmac?: string; token?: string };
+  onSaved: () => void;
+  onCancel: () => void;
+}) {
+  const [date, setDate] = useState(currentDate);
+  const [partySize, setPartySize] = useState(currentPartySize);
+  const [selectedTime, setSelectedTime] = useState(currentTime.slice(0, 5));
+  const [slots, setSlots] = useState<Slot[]>([]);
+  const [loadingSlots, setLoadingSlots] = useState(false);
+  const [largePartyMessage, setLargePartyMessage] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+
+  const hasChanges =
+    date !== currentDate ||
+    selectedTime !== currentTime.slice(0, 5) ||
+    partySize !== currentPartySize;
+
+  useEffect(() => {
+    if (!date || partySize < 1) {
+      setSlots([]);
+      setLargePartyMessage(null);
+      return;
+    }
+    setLoadingSlots(true);
+    setError(null);
+    setLargePartyMessage(null);
+
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (abortRef.current) abortRef.current.abort();
+
+    debounceRef.current = setTimeout(() => {
+      const controller = new AbortController();
+      abortRef.current = controller;
+
+      (async () => {
+        try {
+          const url = `/api/booking/availability?venue_id=${encodeURIComponent(venueId)}&date=${encodeURIComponent(date)}&party_size=${partySize}`;
+          const res = await fetch(url, { signal: controller.signal });
+          if (controller.signal.aborted) return;
+          if (!res.ok) throw new Error('Failed to load times');
+          const data = await res.json();
+
+          if (data.large_party_redirect) {
+            if (!controller.signal.aborted) {
+              setSlots([]);
+              setLargePartyMessage(data.large_party_message ?? 'Please call the restaurant to book for larger parties.');
+            }
+            return;
+          }
+
+          const rawSlots: Slot[] = (data.slots ?? [])
+            .map((s: Record<string, unknown>) => ({
+              key: (s.key as string) ?? (s.start_time as string) ?? '',
+              label: (s.label as string) ?? (s.start_time as string)?.slice(0, 5) ?? '',
+              start_time: (s.start_time as string) ?? '',
+              available_covers: (s.available_covers as number) ?? 0,
+            }))
+            .filter((s: Slot) => s.start_time);
+
+          if (!controller.signal.aborted) {
+            setSlots(rawSlots);
+            const currentTimeShort = selectedTime.slice(0, 5);
+            const match = rawSlots.find((s) => s.start_time.slice(0, 5) === currentTimeShort);
+            if (!match && rawSlots.length > 0) {
+              setSelectedTime(rawSlots[0].start_time.slice(0, 5));
+            }
+          }
+        } catch (err) {
+          if (err instanceof DOMException && err.name === 'AbortError') return;
+          if (!controller.signal.aborted) setSlots([]);
+        } finally {
+          if (!controller.signal.aborted) setLoadingSlots(false);
+        }
+      })();
+    }, 250);
+
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      if (abortRef.current) abortRef.current.abort();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [date, partySize, venueId]);
+
+  const handleSave = useCallback(async () => {
+    if (!hasChanges) {
+      onCancel();
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      const base = typeof window !== 'undefined' ? window.location.origin : '';
+      const res = await fetch(`${base}/api/confirm`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          booking_id: bookingId,
+          ...authPayload,
+          action: 'modify',
+          booking_date: date,
+          booking_time: selectedTime,
+          party_size: partySize,
+        }),
+      });
+
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        setError((j as { error?: string }).error ?? 'Failed to update booking.');
+        return;
+      }
+
+      onSaved();
+    } catch {
+      setError('Network error. Please try again.');
+    } finally {
+      setSaving(false);
+    }
+  }, [bookingId, authPayload, date, selectedTime, partySize, hasChanges, onCancel, onSaved]);
+
+  return (
+    <div className="rounded-xl border border-brand-200 bg-brand-50/30 p-4 space-y-3">
+      <p className="text-sm font-semibold text-slate-800">Modify Your Booking</p>
+
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="mb-1 block text-xs font-medium text-slate-500">Date</label>
+          <input
+            type="date"
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500/20"
+          />
+        </div>
+        <div>
+          <label className="mb-1 block text-xs font-medium text-slate-500">Party Size</label>
+          <input
+            type="number"
+            inputMode="numeric"
+            min={1}
+            max={50}
+            value={partySize}
+            onChange={(e) => {
+              const v = parseInt(e.target.value, 10);
+              if (!isNaN(v) && v >= 1) setPartySize(v);
+            }}
+            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500/20"
+          />
+        </div>
+      </div>
+
+      <div>
+        <label className="mb-1 block text-xs font-medium text-slate-500">Time</label>
+        {loadingSlots ? (
+          <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+            <div className="h-4 w-4 animate-spin rounded-full border-2 border-brand-600 border-t-transparent" />
+            <span className="text-xs text-slate-500">Loading available times...</span>
+          </div>
+        ) : largePartyMessage ? (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-700">
+            <p className="font-medium">{largePartyMessage}</p>
+            {venuePhone && (
+              <p className="mt-1">
+                Call us at{' '}
+                <a href={`tel:${venuePhone}`} className="font-semibold text-amber-800 underline">
+                  {venuePhone}
+                </a>
+              </p>
+            )}
+          </div>
+        ) : slots.length === 0 ? (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+            No available times for this date and party size.
+          </div>
+        ) : (
+          <select
+            value={selectedTime}
+            onChange={(e) => setSelectedTime(e.target.value)}
+            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500/20"
+          >
+            {slots.map((slot) => (
+              <option key={slot.key} value={slot.start_time.slice(0, 5)}>
+                {slot.label} — {slot.available_covers} cover{slot.available_covers !== 1 ? 's' : ''} available
+              </option>
+            ))}
+          </select>
+        )}
+      </div>
+
+      {error && (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-600">
+          {error}
+        </div>
+      )}
+
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={handleSave}
+          disabled={saving || !hasChanges || !!largePartyMessage || (slots.length === 0 && !loadingSlots)}
+          className="flex-1 rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
+        >
+          {saving ? 'Saving...' : 'Save Changes'}
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          disabled={saving}
+          className="flex-1 rounded-lg border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-50"
+        >
+          Cancel
+        </button>
+      </div>
     </div>
   );
 }

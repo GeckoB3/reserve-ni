@@ -667,6 +667,7 @@ export function BookingsDashboard({ venueId }: { venueId: string }) {
           setMessageDraftById={setMessageDraftById}
           sendingMessageIds={sendingMessageIds}
           tableManagementEnabled={tableManagementEnabled}
+          venueId={venueId}
           onToggleExpand={toggleExpand}
           onOpenPanel={setSelectedId}
           onSendMessage={sendMessageToBooking}
@@ -695,6 +696,7 @@ export function BookingsDashboard({ venueId }: { venueId: string }) {
                 setMessageDraftById={setMessageDraftById}
                 sendingMessageIds={sendingMessageIds}
                 tableManagementEnabled={tableManagementEnabled}
+                venueId={venueId}
                 onToggleExpand={toggleExpand}
                 onOpenPanel={setSelectedId}
                 onSendMessage={sendMessageToBooking}
@@ -846,6 +848,7 @@ function BookingsAccordionList({
   setMessageDraftById,
   sendingMessageIds,
   tableManagementEnabled,
+  venueId,
   onToggleExpand,
   onOpenPanel,
   onSendMessage,
@@ -862,6 +865,7 @@ function BookingsAccordionList({
   setMessageDraftById: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   sendingMessageIds: string[];
   tableManagementEnabled: boolean;
+  venueId: string;
   onToggleExpand: (id: string) => void;
   onOpenPanel: (id: string) => void;
   onSendMessage: (id: string, message: string) => void;
@@ -962,6 +966,7 @@ function BookingsAccordionList({
                   detail={detail}
                   detailLoading={detailLoading}
                   tableManagementEnabled={tableManagementEnabled}
+                  venueId={venueId}
                   draftMessage={draftMessage}
                   sendingMessage={sendingMessage}
                   onMessageDraftChange={(value) => setMessageDraftById((prev) => ({ ...prev, [booking.id]: value }))}

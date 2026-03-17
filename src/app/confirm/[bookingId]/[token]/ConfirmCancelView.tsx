@@ -17,7 +17,7 @@ interface BookingDetails {
 
 type View = 'main' | 'cancel_confirm' | 'done';
 
-export function ConfirmCancelView({ bookingId, token }: { bookingId: string; token: string }) {
+export function ConfirmCancelView({ bookingId, token, hmac }: { bookingId: string; token?: string; hmac?: string }) {
   const [details, setDetails] = useState<BookingDetails | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -25,9 +25,13 @@ export function ConfirmCancelView({ bookingId, token }: { bookingId: string; tok
   const [actionLoading, setActionLoading] = useState(false);
   const [doneMessage, setDoneMessage] = useState('');
 
+  const authParam = hmac
+    ? `hmac=${encodeURIComponent(hmac)}`
+    : `token=${encodeURIComponent(token ?? '')}`;
+
   useEffect(() => {
     const base = typeof window !== 'undefined' ? window.location.origin : '';
-    fetch(`${base}/api/confirm?booking_id=${encodeURIComponent(bookingId)}&token=${encodeURIComponent(token)}`)
+    fetch(`${base}/api/confirm?booking_id=${encodeURIComponent(bookingId)}&${authParam}`)
       .then((r) => {
         if (!r.ok) return r.json().then((j) => Promise.reject(new Error(j.error ?? 'Failed')));
         return r.json();
@@ -35,16 +39,17 @@ export function ConfirmCancelView({ bookingId, token }: { bookingId: string; tok
       .then(setDetails)
       .catch((e) => setError(e instanceof Error ? e.message : 'Invalid link'))
       .finally(() => setLoading(false));
-  }, [bookingId, token]);
+  }, [bookingId, authParam]);
 
   const doAction = useCallback(async (action: 'confirm' | 'cancel') => {
     setActionLoading(true);
     const base = typeof window !== 'undefined' ? window.location.origin : '';
+    const authBody = hmac ? { hmac } : { token };
     try {
       const res = await fetch(`${base}/api/confirm`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ booking_id: bookingId, token, action }),
+        body: JSON.stringify({ booking_id: bookingId, ...authBody, action }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? 'Failed');
@@ -55,7 +60,7 @@ export function ConfirmCancelView({ bookingId, token }: { bookingId: string; tok
     } finally {
       setActionLoading(false);
     }
-  }, [bookingId, token]);
+  }, [bookingId, token, hmac]);
 
   if (loading) {
     return (

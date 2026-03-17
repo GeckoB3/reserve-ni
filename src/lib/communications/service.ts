@@ -20,6 +20,7 @@ export interface CommunicationSettings {
   deposit_confirmation_email_custom_message: string | null;
   reminder_email_enabled: boolean;
   reminder_email_custom_message: string | null;
+  reminder_hours_before: number;
   day_of_reminder_enabled: boolean;
   day_of_reminder_time: string;
   day_of_reminder_sms_enabled: boolean;
@@ -28,6 +29,9 @@ export interface CommunicationSettings {
   post_visit_email_enabled: boolean;
   post_visit_email_time: string;
   post_visit_email_custom_message: string | null;
+  modification_email_enabled: boolean;
+  modification_sms_enabled: boolean;
+  modification_custom_message: string | null;
 }
 
 const SETTINGS_CACHE = new Map<string, { data: CommunicationSettings; ts: number }>();
@@ -65,6 +69,7 @@ export async function getCommSettings(venueId: string): Promise<CommunicationSet
     deposit_confirmation_email_custom_message: null,
     reminder_email_enabled: true,
     reminder_email_custom_message: null,
+    reminder_hours_before: 56,
     day_of_reminder_enabled: true,
     day_of_reminder_time: '09:00:00',
     day_of_reminder_sms_enabled: true,
@@ -73,6 +78,9 @@ export async function getCommSettings(venueId: string): Promise<CommunicationSet
     post_visit_email_enabled: true,
     post_visit_email_time: '09:00:00',
     post_visit_email_custom_message: null,
+    modification_email_enabled: true,
+    modification_sms_enabled: false,
+    modification_custom_message: null,
   }) as CommunicationSettings;
 
   SETTINGS_CACHE.set(venueId, { data: settings, ts: Date.now() });
@@ -166,7 +174,7 @@ const MESSAGE_CHANNELS: Record<MessageType, Array<'email' | 'sms'>> = {
   dietary_digest: ['email'],
   post_visit_thankyou: [],
   auto_cancel_notification: ['email', 'sms'],
-  booking_modification: ['email', 'sms'],
+  booking_modification: [],
   cancellation_confirmation: ['email', 'sms'],
   no_show_notification: ['email'],
   custom_message: ['email', 'sms'],

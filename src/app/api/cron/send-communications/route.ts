@@ -7,6 +7,7 @@ import { renderDayOfReminderSms } from '@/lib/emails/templates/day-of-reminder-s
 import { renderPostVisitEmail } from '@/lib/emails/templates/post-visit';
 import { sendEmail } from '@/lib/emails/send-email';
 import { sendSms } from '@/lib/emails/send-sms';
+import { createBookingHmac } from '@/lib/short-manage-link';
 import type { BookingEmailData, VenueEmailData } from '@/lib/emails/types';
 
 /**
@@ -133,80 +134,91 @@ function getGuestPhone(b: BookingRow): string | null {
   return b.guest?.phone ?? null;
 }
 
-// ─── 56-HOUR REMINDERS ────────────────────────────────────────────────
+// ─── CONFIRM-OR-CANCEL REMINDERS (configurable hours before) ──────────
 
 async function send56hReminders(results: { reminders_56h: number; errors: number }) {
   const supabase = getSupabaseAdminClient();
   const now = new Date();
+  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'https://www.reserveni.com';
 
-  // Window: 55h45m to 56h15m
-  const windowStart = new Date(now.getTime() + 55 * 60 * 60 * 1000 + 45 * 60 * 1000);
-  const windowEnd = new Date(now.getTime() + 56 * 60 * 60 * 1000 + 15 * 60 * 1000);
-
-  const startDate = localDateStr(windowStart);
-  const endDate = localDateStr(windowEnd);
-
-  const dates = [startDate];
-  if (endDate !== startDate) dates.push(endDate);
-
-  const { data: bookings } = await supabase
-    .from('bookings')
-    .select(BOOKING_SELECT)
-    .in('booking_date', dates)
-    .in('status', ['Pending', 'Confirmed']);
-
-  if (!bookings?.length) return;
-
-  // Filter to bookings with email
-  const emailBookings = normalizeBookings(bookings).filter((b) => getGuestEmail(b));
-
-  if (!emailBookings.length) return;
-
-  const venueIds = [...new Set(emailBookings.map((b) => b.venue_id))];
   const { data: venues } = await supabase
     .from('venues')
-    .select('id, name, address, timezone')
-    .in('id', venueIds);
-  const venueMap = new Map((venues ?? []).map((v) => [v.id, v]));
+    .select('id, name, address, timezone');
 
-  for (const b of emailBookings) {
+  if (!venues?.length) return;
+
+  for (const venue of venues) {
     try {
-      const venue = venueMap.get(b.venue_id);
-      if (!venue) continue;
-
       const tz = venue.timezone ?? 'Europe/London';
-      const bookingDateTime = new Date(`${b.booking_date}T${b.booking_time}`);
-      const bookingLocalMs = bookingDateTime.getTime();
-      const nowLocal = toVenueLocal(now, tz);
-      const nowLocalMs = nowLocal.getTime();
-      const diffMs = bookingLocalMs - nowLocalMs;
-      const h56 = 56 * 60 * 60 * 1000;
-      const tolerance = 15 * 60 * 1000;
-
-      if (diffMs < h56 - tolerance || diffMs > h56 + tolerance) continue;
-
-      const settings = await getCommSettings(b.venue_id);
+      const settings = await getCommSettings(venue.id);
       if (!settings.reminder_email_enabled) continue;
 
-      const email = getGuestEmail(b)!;
-      const bookingData = buildBookingData(b);
+      const reminderHours = settings.reminder_hours_before ?? 56;
+      const nowLocal = toVenueLocal(now, tz);
+      const nowLocalMs = nowLocal.getTime();
+
+      const tolerance = 15 * 60 * 1000;
+      const windowStart = new Date(nowLocalMs + reminderHours * 60 * 60 * 1000 - tolerance);
+      const windowEnd = new Date(nowLocalMs + reminderHours * 60 * 60 * 1000 + tolerance);
+
+      const startDate = localDateStr(windowStart);
+      const endDate = localDateStr(windowEnd);
+      const dates = [startDate];
+      if (endDate !== startDate) dates.push(endDate);
+
+      const { data: bookings } = await supabase
+        .from('bookings')
+        .select(BOOKING_SELECT)
+        .eq('venue_id', venue.id)
+        .in('booking_date', dates)
+        .in('status', ['Pending', 'Confirmed']);
+
+      if (!bookings?.length) continue;
+
+      const emailBookings = normalizeBookings(bookings).filter((b) => getGuestEmail(b));
+      if (!emailBookings.length) continue;
+
       const venueData = buildVenueData(venue);
-      const rendered = renderReminder56h(bookingData, venueData, settings.reminder_email_custom_message);
 
-      const canSend = await logToCommLogs({
-        venue_id: b.venue_id,
-        booking_id: b.id,
-        message_type: 'reminder_56h_email',
-        channel: 'email',
-        recipient: email,
-        status: 'sent',
-      });
-      if (!canSend) continue;
+      for (const b of emailBookings) {
+        try {
+          const bookingDateTime = new Date(`${b.booking_date}T${b.booking_time}`);
+          const bookingLocalMs = bookingDateTime.getTime();
+          const diffMs = bookingLocalMs - nowLocalMs;
+          const targetMs = reminderHours * 60 * 60 * 1000;
 
-      await sendEmail({ to: email, ...rendered });
-      results.reminders_56h++;
+          if (diffMs < targetMs - tolerance || diffMs > targetMs + tolerance) continue;
+
+          const email = getGuestEmail(b)!;
+          const hmac = createBookingHmac(b.id);
+          const confirmCancelLink = `${baseUrl}/confirm/${b.id}?hmac=${encodeURIComponent(hmac)}`;
+          const manageLink = `${baseUrl}/manage/${b.id}?hmac=${encodeURIComponent(hmac)}`;
+
+          const bookingData = buildBookingData(b);
+          bookingData.confirm_cancel_link = confirmCancelLink;
+          bookingData.manage_booking_link = manageLink;
+
+          const rendered = renderReminder56h(bookingData, venueData, settings.reminder_email_custom_message);
+
+          const canSend = await logToCommLogs({
+            venue_id: b.venue_id,
+            booking_id: b.id,
+            message_type: 'reminder_56h_email',
+            channel: 'email',
+            recipient: email,
+            status: 'pending',
+          });
+          if (!canSend) continue;
+
+          await sendEmail({ to: email, ...rendered });
+          results.reminders_56h++;
+        } catch (err) {
+          console.error(`[confirm-cancel-reminder] booking ${b.id}:`, err);
+          results.errors++;
+        }
+      }
     } catch (err) {
-      console.error(`[56h-reminder] booking ${b.id}:`, err);
+      console.error(`[confirm-cancel-reminder] venue ${venue.id}:`, err);
       results.errors++;
     }
   }
