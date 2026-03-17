@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import type { VenueTable, TableCombination } from '@/types/table-management';
+import { NumericInput } from '@/components/ui/NumericInput';
 
 interface Props {
   combinations: TableCombination[];
@@ -119,20 +120,18 @@ export function CombinationList({ combinations, setCombinations, tables, isAdmin
             </div>
             <div>
               <label className="block text-xs font-medium text-slate-600">Min Covers (combined)</label>
-              <input
-                type="number"
+              <NumericInput
                 value={minCovers}
-                onChange={(e) => setMinCovers(parseInt(e.target.value) || 1)}
+                onChange={(v) => setMinCovers(v)}
                 min={1}
                 className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
               />
             </div>
             <div>
               <label className="block text-xs font-medium text-slate-600">Max Covers (combined)</label>
-              <input
-                type="number"
+              <NumericInput
                 value={maxCovers}
-                onChange={(e) => setMaxCovers(parseInt(e.target.value) || 4)}
+                onChange={(v) => setMaxCovers(v)}
                 min={1}
                 className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
               />

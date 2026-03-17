@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { NumericInput } from '@/components/ui/NumericInput';
 
 interface Block {
   id: string;
@@ -196,7 +197,7 @@ export function ClosuresTab({ showToast }: Props) {
             {draft.block_type === 'reduced_capacity' && (
               <div className="col-span-2">
                 <label className="mb-1 block text-xs font-medium text-slate-600">Override max covers</label>
-                <input type="number" min={0} value={draft.override_max_covers ?? ''} onChange={(e) => setDraft({ ...draft, override_max_covers: e.target.value ? parseInt(e.target.value) : null })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+                <NumericInput min={0} value={draft.override_max_covers} onChange={(v) => setDraft({ ...draft, override_max_covers: v })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
               </div>
             )}
             <div className="col-span-2">

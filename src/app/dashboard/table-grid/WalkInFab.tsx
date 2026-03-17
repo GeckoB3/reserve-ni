@@ -2,6 +2,7 @@
 
 import { useState, useMemo } from 'react';
 import type { VenueTable, TableGridCell } from '@/types/table-management';
+import { NumericInput } from '@/components/ui/NumericInput';
 
 interface Props {
   tables: VenueTable[];
@@ -156,10 +157,9 @@ export function WalkInFab({ tables, cells, onCreated }: Props) {
                       {n}
                     </button>
                   ))}
-                  <input
-                    type="number"
+                  <NumericInput
                     value={partySize}
-                    onChange={(e) => setPartySize(Math.max(1, parseInt(e.target.value) || 1))}
+                    onChange={(v) => setPartySize(v)}
                     min={1}
                     className="h-10 w-16 rounded-lg border border-slate-200 text-center text-sm"
                   />

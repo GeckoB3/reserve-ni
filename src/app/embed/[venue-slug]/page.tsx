@@ -1,16 +1,16 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
 import { BookingFlow } from '@/components/booking/BookingFlow';
 import type { VenuePublic } from '@/components/booking/types';
 
+let lastSentHeight = 0;
 function sendHeight(height: number) {
   if (typeof window === 'undefined' || !window.parent) return;
-  window.parent.postMessage(
-    { type: 'reserve-ni-height', height },
-    '*'
-  );
+  if (height === lastSentHeight) return;
+  lastSentHeight = height;
+  window.parent.postMessage({ type: 'reserve-ni-height', height }, '*');
 }
 
 export default function EmbedPage() {
@@ -21,6 +21,7 @@ export default function EmbedPage() {
   const [venue, setVenue] = useState<VenuePublic | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const contentRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
     if (!slug) {
@@ -35,19 +36,24 @@ export default function EmbedPage() {
       .finally(() => setLoading(false));
   }, [slug]);
 
-  const onHeightChange = useCallback((height: number) => {
-    sendHeight(height);
+  const onHeightChange = useCallback((_height: number) => {
+    sendHeight(document.documentElement.scrollHeight);
   }, []);
 
+  // ResizeObserver — catches every layout change automatically
   useEffect(() => {
-    const handler = () => sendHeight(document.documentElement.scrollHeight);
-    window.addEventListener('resize', handler);
-    return () => window.removeEventListener('resize', handler);
+    const el = contentRef.current ?? document.body;
+    const observer = new ResizeObserver(() => {
+      sendHeight(document.documentElement.scrollHeight);
+    });
+    observer.observe(el);
+    sendHeight(document.documentElement.scrollHeight);
+    return () => observer.disconnect();
   }, []);
 
   if (loading) {
     return (
-      <main className="min-h-screen bg-white p-6">
+      <main ref={contentRef} className="bg-white p-6">
         <div className="flex justify-center py-12">
           <div className="h-8 w-8 animate-spin rounded-full border-2 border-brand-600 border-t-transparent" />
         </div>
@@ -57,7 +63,7 @@ export default function EmbedPage() {
 
   if (error || !venue) {
     return (
-      <main className="min-h-screen bg-white p-6">
+      <main ref={contentRef} className="bg-white p-6">
         <p className="text-sm text-red-600">{error ?? 'Venue not found'}</p>
       </main>
     );
@@ -66,7 +72,7 @@ export default function EmbedPage() {
   const accentStyle = accentColour ? { '--accent': `#${accentColour.replace(/^#/, '')}` } as React.CSSProperties : undefined;
 
   return (
-    <main className="min-h-screen bg-white" style={accentStyle}>
+    <main ref={contentRef} className="bg-white p-4" style={accentStyle}>
       <BookingFlow venue={venue} embed onHeightChange={onHeightChange} accentColour={accentColour ?? undefined} cancellationPolicy="Full refund if cancelled 48+ hours before your reservation. No refund within 48 hours or for no-shows." />
     </main>
   );

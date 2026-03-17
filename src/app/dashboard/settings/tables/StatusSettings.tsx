@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { NumericInput } from '@/components/ui/NumericInput';
 
 const ALL_STATUSES = [
   { key: 'available', label: 'Available', required: true, color: 'bg-green-500' },
@@ -91,10 +92,9 @@ export function StatusSettings({ settings, onUpdate, saving, isAdmin }: Props) {
           Automatically set a table to &quot;Available&quot; after the &quot;Paid&quot; status has been active for this many minutes.
         </p>
         <div className="flex items-center gap-3">
-          <input
-            type="number"
+          <NumericInput
             value={autoBussing}
-            onChange={(e) => setAutoBussing(parseInt(e.target.value) || 10)}
+            onChange={(v) => setAutoBussing(v)}
             min={0}
             max={60}
             disabled={!isAdmin}

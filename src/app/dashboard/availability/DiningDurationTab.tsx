@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { NumericInput } from '@/components/ui/NumericInput';
 
 interface Service { id: string; name: string; }
 interface Duration {
@@ -160,13 +161,13 @@ export function DiningDurationTab({ services, showToast }: Props) {
                           <>
                             <td className="px-3 py-2">
                               <div className="flex items-center gap-1">
-                                <input type="number" min={1} value={editDraft.min_party_size} onChange={(e) => setEditDraft({ ...editDraft, min_party_size: parseInt(e.target.value) || 1 })} className="w-14 rounded border border-slate-200 px-2 py-1 text-sm" />
+                                <NumericInput min={1} value={editDraft.min_party_size} onChange={(v) => setEditDraft({ ...editDraft, min_party_size: v })} className="w-14 rounded border border-slate-200 px-2 py-1 text-sm" />
                                 <span className="text-slate-400">–</span>
-                                <input type="number" min={1} value={editDraft.max_party_size} onChange={(e) => setEditDraft({ ...editDraft, max_party_size: parseInt(e.target.value) || 1 })} className="w-14 rounded border border-slate-200 px-2 py-1 text-sm" />
+                                <NumericInput min={1} value={editDraft.max_party_size} onChange={(v) => setEditDraft({ ...editDraft, max_party_size: v })} className="w-14 rounded border border-slate-200 px-2 py-1 text-sm" />
                               </div>
                             </td>
                             <td className="px-3 py-2">
-                              <input type="number" min={15} step={15} value={editDraft.duration_minutes} onChange={(e) => setEditDraft({ ...editDraft, duration_minutes: parseInt(e.target.value) || 60 })} className="w-20 rounded border border-slate-200 px-2 py-1 text-sm" />
+                              <NumericInput min={15} value={editDraft.duration_minutes} onChange={(v) => setEditDraft({ ...editDraft, duration_minutes: v })} className="w-20 rounded border border-slate-200 px-2 py-1 text-sm" />
                             </td>
                             <td className="px-3 py-2">
                               <select value={editDraft.day_of_week ?? ''} onChange={(e) => setEditDraft({ ...editDraft, day_of_week: e.target.value ? parseInt(e.target.value) : null })} className="rounded border border-slate-200 px-2 py-1 text-sm">
@@ -233,15 +234,15 @@ function CreateDurationForm({ serviceId, saving, onCreate, onCancel }: {
       <div className="flex items-end gap-3">
         <div>
           <label className="mb-1 block text-xs font-medium text-slate-600">Min party</label>
-          <input type="number" min={1} value={min} onChange={(e) => setMin(parseInt(e.target.value) || 1)} className="w-16 rounded border border-slate-200 px-2 py-1.5 text-sm" />
+          <NumericInput min={1} value={min} onChange={(v) => setMin(v)} className="w-16 rounded border border-slate-200 px-2 py-1.5 text-sm" />
         </div>
         <div>
           <label className="mb-1 block text-xs font-medium text-slate-600">Max party</label>
-          <input type="number" min={1} value={max} onChange={(e) => setMax(parseInt(e.target.value) || 1)} className="w-16 rounded border border-slate-200 px-2 py-1.5 text-sm" />
+          <NumericInput min={1} value={max} onChange={(v) => setMax(v)} className="w-16 rounded border border-slate-200 px-2 py-1.5 text-sm" />
         </div>
         <div>
           <label className="mb-1 block text-xs font-medium text-slate-600">Duration (min)</label>
-          <input type="number" min={15} step={15} value={dur} onChange={(e) => setDur(parseInt(e.target.value) || 60)} className="w-20 rounded border border-slate-200 px-2 py-1.5 text-sm" />
+          <NumericInput min={15} value={dur} onChange={(v) => setDur(v)} className="w-20 rounded border border-slate-200 px-2 py-1.5 text-sm" />
         </div>
         <button onClick={() => onCreate(min, max, dur)} disabled={saving} className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-700 disabled:opacity-50">Add</button>
         <button onClick={onCancel} className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600">Cancel</button>

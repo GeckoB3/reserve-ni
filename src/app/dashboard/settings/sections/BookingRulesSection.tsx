@@ -5,6 +5,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useCallback } from 'react';
 import type { VenueSettings, BookingRulesSettings } from '../types';
+import { useNumericField } from '@/hooks/useNumericField';
 
 const bookingRulesSchema = z.object({
   min_party_size: z.number().int().min(1).max(20),
@@ -30,6 +31,8 @@ interface BookingRulesSectionProps {
 
 export function BookingRulesSection({ venue, onUpdate, isAdmin }: BookingRulesSectionProps) {
   const rules = venue.booking_rules ?? defaultRules;
+  const { integerProps } = useNumericField();
+  const int = integerProps();
 
   const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm<FormData>({
     resolver: zodResolver(bookingRulesSchema),
@@ -61,22 +64,22 @@ export function BookingRulesSection({ venue, onUpdate, isAdmin }: BookingRulesSe
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-4 max-w-md">
         <div>
           <label htmlFor="min_party_size" className="block text-sm font-medium text-neutral-700 mb-1">Minimum party size</label>
-          <input id="min_party_size" type="number" min={1} max={20} {...register('min_party_size', { valueAsNumber: true })} disabled={!isAdmin} className="w-full rounded border border-neutral-300 px-3 py-2 disabled:bg-neutral-50" />
+          <input id="min_party_size" {...int.inputProps} min={1} max={20} {...register('min_party_size', int.registerOptions)} disabled={!isAdmin} className="w-full rounded border border-neutral-300 px-3 py-2 disabled:bg-neutral-50" />
           {errors.min_party_size && <p className="mt-1 text-sm text-red-600">{errors.min_party_size.message}</p>}
         </div>
         <div>
           <label htmlFor="max_party_size" className="block text-sm font-medium text-neutral-700 mb-1">Maximum party size</label>
-          <input id="max_party_size" type="number" min={1} max={50} {...register('max_party_size', { valueAsNumber: true })} disabled={!isAdmin} className="w-full rounded border border-neutral-300 px-3 py-2 disabled:bg-neutral-50" />
+          <input id="max_party_size" {...int.inputProps} min={1} max={50} {...register('max_party_size', int.registerOptions)} disabled={!isAdmin} className="w-full rounded border border-neutral-300 px-3 py-2 disabled:bg-neutral-50" />
           {errors.max_party_size && <p className="mt-1 text-sm text-red-600">{errors.max_party_size.message}</p>}
         </div>
         <div>
           <label htmlFor="max_advance_booking_days" className="block text-sm font-medium text-neutral-700 mb-1">Maximum advance booking (days)</label>
-          <input id="max_advance_booking_days" type="number" min={1} max={365} {...register('max_advance_booking_days', { valueAsNumber: true })} disabled={!isAdmin} className="w-full rounded border border-neutral-300 px-3 py-2 disabled:bg-neutral-50" />
+          <input id="max_advance_booking_days" {...int.inputProps} min={1} max={365} {...register('max_advance_booking_days', int.registerOptions)} disabled={!isAdmin} className="w-full rounded border border-neutral-300 px-3 py-2 disabled:bg-neutral-50" />
           {errors.max_advance_booking_days && <p className="mt-1 text-sm text-red-600">{errors.max_advance_booking_days.message}</p>}
         </div>
         <div>
           <label htmlFor="min_notice_hours" className="block text-sm font-medium text-neutral-700 mb-1">Minimum notice (hours before booking)</label>
-          <input id="min_notice_hours" type="number" min={0} max={168} {...register('min_notice_hours', { valueAsNumber: true })} disabled={!isAdmin} className="w-full rounded border border-neutral-300 px-3 py-2 disabled:bg-neutral-50" />
+          <input id="min_notice_hours" {...int.inputProps} min={0} max={168} {...register('min_notice_hours', int.registerOptions)} disabled={!isAdmin} className="w-full rounded border border-neutral-300 px-3 py-2 disabled:bg-neutral-50" />
           {errors.min_notice_hours && <p className="mt-1 text-sm text-red-600">{errors.min_notice_hours.message}</p>}
         </div>
         {isAdmin && (

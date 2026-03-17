@@ -2,6 +2,7 @@
 
 import { useCallback, useState } from 'react';
 import type { VenueSettings, AvailabilityConfigSettings, FixedIntervalsSettings, NamedSittingsSettings, NamedSittingSettings } from '../types';
+import { NumericInput } from '@/components/ui/NumericInput';
 
 const DAYS = [
   { key: '0', label: 'Sun' },
@@ -139,11 +140,10 @@ export function AvailabilityConfigSection({ venue, onUpdate, isAdmin }: Availabi
               {DAYS.map(({ key, label }) => (
                 <div key={key}>
                   <label className="block text-xs text-neutral-500">{label}</label>
-                  <input
-                    type="number"
+                  <NumericInput
                     min={0}
                     value={local.max_covers_by_day?.[key] ?? 0}
-                    onChange={(e) => updateFixed({ max_covers_by_day: { ...local.max_covers_by_day, [key]: parseInt(e.target.value, 10) || 0 } })}
+                    onChange={(v) => updateFixed({ max_covers_by_day: { ...local.max_covers_by_day, [key]: v } })}
                     disabled={!isAdmin}
                     className="w-full rounded border border-neutral-300 px-2 py-1 text-sm disabled:bg-neutral-50"
                   />
@@ -166,12 +166,11 @@ export function AvailabilityConfigSection({ venue, onUpdate, isAdmin }: Availabi
           {local.turn_time_enabled && (
             <div>
               <label className="block text-sm font-medium text-neutral-700 mb-1">Sitting duration (minutes)</label>
-              <input
-                type="number"
+              <NumericInput
                 min={60}
                 max={180}
                 value={local.sitting_duration_minutes ?? 90}
-                onChange={(e) => updateFixed({ sitting_duration_minutes: Math.min(180, Math.max(60, parseInt(e.target.value, 10) || 90)) })}
+                onChange={(v) => updateFixed({ sitting_duration_minutes: v })}
                 disabled={!isAdmin}
                 className="w-24 rounded border border-neutral-300 px-3 py-2 disabled:bg-neutral-50"
               />
@@ -196,11 +195,10 @@ export function AvailabilityConfigSection({ venue, onUpdate, isAdmin }: Availabi
               <input type="time" value={s.end_time} onChange={(e) => updateSitting(s.id, { end_time: e.target.value })} disabled={!isAdmin} className="rounded border border-neutral-300 px-2 py-1 disabled:bg-neutral-50" />
               <label className="flex items-center gap-1">
                 <span className="text-sm text-neutral-600">Max covers</span>
-                <input
-                  type="number"
+                <NumericInput
                   min={0}
                   value={s.max_covers}
-                  onChange={(e) => updateSitting(s.id, { max_covers: parseInt(e.target.value, 10) || 0 })}
+                  onChange={(v) => updateSitting(s.id, { max_covers: v })}
                   disabled={!isAdmin}
                   className="w-20 rounded border border-neutral-300 px-2 py-1 text-sm disabled:bg-neutral-50"
                 />

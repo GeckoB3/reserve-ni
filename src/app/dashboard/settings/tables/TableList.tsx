@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import type { VenueTable, TableShape } from '@/types/table-management';
 import { getTableDimensions } from '@/types/table-management';
+import { NumericInput } from '@/components/ui/NumericInput';
 
 interface Props {
   tables: VenueTable[];
@@ -243,10 +244,9 @@ export function TableList({ tables, setTables, isAdmin, onRefresh }: Props) {
             </div>
             <div>
               <label className="block text-xs font-medium text-slate-600">Max Covers</label>
-              <input
-                type="number"
+              <NumericInput
                 value={batchMaxCovers}
-                onChange={(e) => setBatchMaxCovers(parseInt(e.target.value) || 2)}
+                onChange={(v) => setBatchMaxCovers(v)}
                 min={1}
                 max={50}
                 className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
@@ -292,10 +292,9 @@ export function TableList({ tables, setTables, isAdmin, onRefresh }: Props) {
             </div>
             <div>
               <label className="block text-xs font-medium text-slate-600">Min Covers</label>
-              <input
-                type="number"
+              <NumericInput
                 value={editing.min_covers}
-                onChange={(e) => setEditing({ ...editing, min_covers: parseInt(e.target.value) || 1 })}
+                onChange={(v) => setEditing({ ...editing, min_covers: v })}
                 min={1}
                 max={50}
                 className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
@@ -303,10 +302,9 @@ export function TableList({ tables, setTables, isAdmin, onRefresh }: Props) {
             </div>
             <div>
               <label className="block text-xs font-medium text-slate-600">Max Covers</label>
-              <input
-                type="number"
+              <NumericInput
                 value={editing.max_covers}
-                onChange={(e) => setEditing({ ...editing, max_covers: parseInt(e.target.value) || 2 })}
+                onChange={(v) => setEditing({ ...editing, max_covers: v })}
                 min={1}
                 max={50}
                 className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"

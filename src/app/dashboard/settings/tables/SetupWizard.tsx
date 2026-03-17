@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import type { VenueTable } from '@/types/table-management';
 import { getTableDimensions, computeGridPositions } from '@/types/table-management';
+import { NumericInput } from '@/components/ui/NumericInput';
 
 interface Props {
   onComplete: (tables: VenueTable[]) => void;
@@ -144,10 +145,9 @@ export function SetupWizard({ onComplete, onCancel }: Props) {
             </button>
           ))}
           <div className="flex items-center">
-            <input
-              type="number"
+            <NumericInput
               value={tableCount}
-              onChange={(e) => setTableCount(Math.max(1, Math.min(100, parseInt(e.target.value) || 1)))}
+              onChange={(v) => setTableCount(v)}
               min={1}
               max={100}
               className="h-16 w-20 rounded-xl border-2 border-slate-200 px-3 text-center text-lg font-semibold"

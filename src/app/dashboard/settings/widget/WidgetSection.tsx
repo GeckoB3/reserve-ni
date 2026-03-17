@@ -15,7 +15,7 @@ export function WidgetSection({ venueName, venueSlug, baseUrl }: WidgetSectionPr
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const embedUrl = `${baseUrl.replace(/\/$/, '')}/embed/${venueSlug}${accentColour ? `?accent=${accentColour.replace(/^#/, '')}` : ''}`;
   const bookUrl = `${baseUrl.replace(/\/$/, '')}/book/${venueSlug}`;
-  const snippet = `<iframe src="${embedUrl}" width="100%" style="border:none;" id="reserveni-widget"></iframe>
+  const snippet = `<iframe src="${embedUrl}" width="100%" height="700" style="border:none;overflow:hidden;" scrolling="no" id="reserveni-widget"></iframe>
 <script src="${baseUrl.replace(/\/$/, '')}/embed/resize.js"></script>`;
 
   useEffect(() => {

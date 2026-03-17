@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { BOOKING_STATUS_TRANSITIONS, BOOKING_REVERT_ACTIONS, canMarkNoShowForSlot, isDestructiveBookingStatus, isRevertTransition, type BookingStatus } from '@/lib/table-management/booking-status';
+import { NumericInput } from '@/components/ui/NumericInput';
 
 interface Guest {
   id: string;
@@ -824,16 +825,15 @@ export function BookingDetailPanel({
                 </div>
                 <div>
                   <label className="mb-1 block text-xs font-medium text-slate-500">Covers</label>
-                  <input type="number" min={1} max={50} value={modifyPartySize} onChange={(e) => setModifyPartySize(Number(e.target.value))} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" />
+                  <NumericInput min={1} max={50} value={modifyPartySize} onChange={(v) => setModifyPartySize(v)} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" />
                 </div>
                 <div>
                   <label className="mb-1 block text-xs font-medium text-slate-500">Duration (mins)</label>
-                  <input
-                    type="number"
+                  <NumericInput
                     min={15}
-                    step={15}
+                    max={480}
                     value={modifyDurationMinutes}
-                    onChange={(e) => setModifyDurationMinutes(Math.max(15, Math.round((Number(e.target.value) || 15) / 15) * 15))}
+                    onChange={(v) => setModifyDurationMinutes(Math.max(15, Math.round(v / 15) * 15))}
                     className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
                   />
                 </div>

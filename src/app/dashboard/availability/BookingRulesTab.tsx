@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { HelpTooltip } from '@/components/dashboard/HelpTooltip';
 import { helpContent } from '@/lib/help-content';
+import { NumericInput } from '@/components/ui/NumericInput';
 
 interface Service { id: string; name: string; }
 interface Restriction {
@@ -164,13 +165,12 @@ export function BookingRulesTab({ services, showToast }: Props) {
                 <label className="mb-1 flex items-center gap-1.5 text-xs font-medium text-slate-600">
                   Amount per person (£) <HelpTooltip content="The deposit amount charged per guest. For example, £5 per person for a party of 4 = £20 total deposit." />
                 </label>
-                <input
-                  type="number"
+                <NumericInput
+                  allowFloat
                   min={0}
                   max={100}
-                  step={0.5}
                   value={depositConfig.amount_per_person_gbp}
-                  onChange={(e) => setDepositConfig({ ...depositConfig, amount_per_person_gbp: parseFloat(e.target.value) || 0 })}
+                  onChange={(v) => setDepositConfig({ ...depositConfig, amount_per_person_gbp: v })}
                   className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
                 />
               </div>
@@ -240,23 +240,23 @@ export function BookingRulesTab({ services, showToast }: Props) {
                     <label className="mb-1 flex items-center gap-1.5 text-xs font-medium text-slate-600">
                       Min advance (minutes) <HelpTooltip content={helpContent.bookingRules.minAdvance} />
                     </label>
-                    <input type="number" min={0} value={draft.min_advance_minutes} onChange={(e) => setEditDraft({ ...draft, min_advance_minutes: parseInt(e.target.value) || 0 })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+                    <NumericInput min={0} value={draft.min_advance_minutes} onChange={(v) => setEditDraft({ ...draft, min_advance_minutes: v })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
                   </div>
                   <div>
                     <label className="mb-1 flex items-center gap-1.5 text-xs font-medium text-slate-600">
                       Max advance (days) <HelpTooltip content={helpContent.bookingRules.maxAdvance} />
                     </label>
-                    <input type="number" min={1} max={365} value={draft.max_advance_days} onChange={(e) => setEditDraft({ ...draft, max_advance_days: parseInt(e.target.value) || 1 })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+                    <NumericInput min={1} max={365} value={draft.max_advance_days} onChange={(v) => setEditDraft({ ...draft, max_advance_days: v })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
                   </div>
                   <div>
                     <label className="mb-1 flex items-center gap-1.5 text-xs font-medium text-slate-600">
                       Min party size online <HelpTooltip content={helpContent.bookingRules.partySize} />
                     </label>
-                    <input type="number" min={1} value={draft.min_party_size_online} onChange={(e) => setEditDraft({ ...draft, min_party_size_online: parseInt(e.target.value) || 1 })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+                    <NumericInput min={1} value={draft.min_party_size_online} onChange={(v) => setEditDraft({ ...draft, min_party_size_online: v })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
                   </div>
                   <div>
                     <label className="mb-1 block text-xs font-medium text-slate-600">Max party size online</label>
-                    <input type="number" min={1} value={draft.max_party_size_online} onChange={(e) => setEditDraft({ ...draft, max_party_size_online: parseInt(e.target.value) || 1 })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+                    <NumericInput min={1} value={draft.max_party_size_online} onChange={(v) => setEditDraft({ ...draft, max_party_size_online: v })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
                   </div>
                 </div>
 
@@ -281,7 +281,7 @@ export function BookingRulesTab({ services, showToast }: Props) {
                     <div className="grid grid-cols-2 gap-3">
                       <div>
                         <label className="mb-1 block text-xs font-medium text-slate-600">Redirect from party size</label>
-                        <input type="number" min={2} value={draft.large_party_threshold} onChange={(e) => setEditDraft({ ...draft, large_party_threshold: parseInt(e.target.value) || 8 })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+                        <NumericInput min={2} value={draft.large_party_threshold} onChange={(v) => setEditDraft({ ...draft, large_party_threshold: v })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
                       </div>
                       <div className="col-span-2">
                         <label className="mb-1 block text-xs font-medium text-slate-600">Message shown to guests</label>
@@ -314,7 +314,7 @@ export function BookingRulesTab({ services, showToast }: Props) {
                   {draft.deposit_required_from_party_size != null && depositConfig.enabled && (
                     <div>
                       <label className="mb-1 block text-xs font-medium text-slate-600">Deposit from party size</label>
-                      <input type="number" min={1} value={draft.deposit_required_from_party_size} onChange={(e) => setEditDraft({ ...draft, deposit_required_from_party_size: parseInt(e.target.value) || 1 })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+                      <NumericInput min={1} value={draft.deposit_required_from_party_size} onChange={(v) => setEditDraft({ ...draft, deposit_required_from_party_size: v })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
                       <p className="mt-1 text-[11px] text-slate-400">
                         £{depositConfig.amount_per_person_gbp} per person for parties of {draft.deposit_required_from_party_size}+
                       </p>

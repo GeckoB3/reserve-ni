@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useToast } from '@/components/ui/Toast';
+import { NumericInput } from '@/components/ui/NumericInput';
 
 interface Slot {
   key: string;
@@ -337,13 +338,12 @@ export function UnifiedBookingForm({
           <label htmlFor="ubf-covers" className="mb-1.5 block text-sm font-medium text-slate-700">
             Party Size
           </label>
-          <input
+          <NumericInput
             id="ubf-covers"
-            type="number"
             min={1}
             max={50}
             value={partySize}
-            onChange={(e) => setPartySize(Math.max(1, Number(e.target.value) || 1))}
+            onChange={(v) => setPartySize(v)}
             className="h-[42px] w-full rounded-xl border border-slate-200 bg-white px-3.5 text-sm font-semibold tabular-nums transition-colors focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
           />
         </div>

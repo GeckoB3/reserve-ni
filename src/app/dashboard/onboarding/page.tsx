@@ -4,6 +4,7 @@ import { useCallback, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { HelpTooltip } from '@/components/dashboard/HelpTooltip';
 import { helpContent } from '@/lib/help-content';
+import { NumericInput } from '@/components/ui/NumericInput';
 import { detectOverlaps, formatOverlapWarning } from '@/lib/service-overlap';
 
 type VenueType = 'casual_dining' | 'fine_dining' | 'cafe' | 'pub' | 'fast_casual';
@@ -318,13 +319,13 @@ export default function OnboardingPage() {
                   <label className="mb-1 flex items-center gap-1.5 text-sm font-medium text-slate-700">
                     Max covers per slot <HelpTooltip content={helpContent.capacityRules.maxCoversPerSlot} />
                   </label>
-                  <input type="number" min={1} value={capacity.max_covers_per_slot} onChange={(e) => setCapacity({ ...capacity, max_covers_per_slot: parseInt(e.target.value) || 1 })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+                  <NumericInput min={1} value={capacity.max_covers_per_slot} onChange={(v) => setCapacity({ ...capacity, max_covers_per_slot: v })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
                 </div>
                 <div>
                   <label className="mb-1 flex items-center gap-1.5 text-sm font-medium text-slate-700">
                     Max bookings per slot <HelpTooltip content={helpContent.capacityRules.maxBookingsPerSlot} />
                   </label>
-                  <input type="number" min={1} value={capacity.max_bookings_per_slot} onChange={(e) => setCapacity({ ...capacity, max_bookings_per_slot: parseInt(e.target.value) || 1 })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+                  <NumericInput min={1} value={capacity.max_bookings_per_slot} onChange={(v) => setCapacity({ ...capacity, max_bookings_per_slot: v })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
                 </div>
                 <div>
                   <label className="mb-1 flex items-center gap-1.5 text-sm font-medium text-slate-700">
@@ -340,7 +341,7 @@ export default function OnboardingPage() {
                   <label className="mb-1 flex items-center gap-1.5 text-sm font-medium text-slate-700">
                     Buffer time <HelpTooltip content={helpContent.capacityRules.bufferMinutes} />
                   </label>
-                  <input type="number" min={0} max={60} value={capacity.buffer_minutes} onChange={(e) => setCapacity({ ...capacity, buffer_minutes: parseInt(e.target.value) || 0 })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+                  <NumericInput min={0} max={60} value={capacity.buffer_minutes} onChange={(v) => setCapacity({ ...capacity, buffer_minutes: v })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
                 </div>
               </div>
             </div>
@@ -360,7 +361,7 @@ export default function OnboardingPage() {
                   <label className="mb-1 flex items-center gap-1.5 text-sm font-medium text-slate-700">
                     Deposit required from party size <HelpTooltip content={helpContent.bookingRules.depositThreshold} />
                   </label>
-                  <input type="number" min={1} value={deposit.deposit_from_party_size} onChange={(e) => setDeposit({ ...deposit, deposit_from_party_size: parseInt(e.target.value) || 1 })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+                  <NumericInput min={1} value={deposit.deposit_from_party_size} onChange={(v) => setDeposit({ ...deposit, deposit_from_party_size: v })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
                 </div>
               )}
             </div>

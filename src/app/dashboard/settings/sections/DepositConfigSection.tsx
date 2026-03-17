@@ -5,6 +5,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useCallback } from 'react';
 import type { VenueSettings, DepositConfigSettings } from '../types';
+import { useNumericField } from '@/hooks/useNumericField';
 
 const depositConfigSchema = z.object({
   enabled: z.boolean(),
@@ -34,6 +35,9 @@ interface DepositConfigSectionProps {
 
 export function DepositConfigSection({ venue, onUpdate, isAdmin }: DepositConfigSectionProps) {
   const config = venue.deposit_config ?? defaultConfig;
+  const { integerProps, floatProps } = useNumericField();
+  const int = integerProps();
+  const flt = floatProps();
 
   const { register, handleSubmit, formState: { errors, isSubmitting }, watch } = useForm<FormData>({
     resolver: zodResolver(depositConfigSchema),
@@ -81,7 +85,7 @@ export function DepositConfigSection({ venue, onUpdate, isAdmin }: DepositConfig
           <>
             <div>
               <label htmlFor="amount_per_person_gbp" className="block text-sm font-medium text-neutral-700 mb-1">Amount per person (£)</label>
-              <input id="amount_per_person_gbp" type="number" min={0} max={100} step={0.5} {...register('amount_per_person_gbp', { valueAsNumber: true })} disabled={!isAdmin} className="w-full rounded border border-neutral-300 px-3 py-2 disabled:bg-neutral-50" />
+              <input id="amount_per_person_gbp" {...flt.inputProps} min={0} max={100} step={0.5} {...register('amount_per_person_gbp', flt.registerOptions)} disabled={!isAdmin} className="w-full rounded border border-neutral-300 px-3 py-2 disabled:bg-neutral-50" />
               {errors.amount_per_person_gbp && <p className="mt-1 text-sm text-red-600">{errors.amount_per_person_gbp.message}</p>}
             </div>
             <div className="space-y-2">
@@ -100,7 +104,7 @@ export function DepositConfigSection({ venue, onUpdate, isAdmin }: DepositConfig
             </div>
             <div>
               <label htmlFor="min_party_size_for_deposit" className="block text-sm font-medium text-neutral-700 mb-1">Minimum party size for deposit</label>
-              <input id="min_party_size_for_deposit" type="number" min={1} max={50} {...register('min_party_size_for_deposit', { valueAsNumber: true })} disabled={!isAdmin} placeholder="e.g. 4 (leave blank for all sizes)" className="w-full rounded border border-neutral-300 px-3 py-2 disabled:bg-neutral-50" />
+              <input id="min_party_size_for_deposit" {...int.inputProps} min={1} max={50} {...register('min_party_size_for_deposit', int.registerOptions)} disabled={!isAdmin} placeholder="e.g. 4 (leave blank for all sizes)" className="w-full rounded border border-neutral-300 px-3 py-2 disabled:bg-neutral-50" />
               <p className="mt-1 text-xs text-neutral-500">Only require deposits for groups of this size or larger. Leave blank for all bookings.</p>
             </div>
           </>

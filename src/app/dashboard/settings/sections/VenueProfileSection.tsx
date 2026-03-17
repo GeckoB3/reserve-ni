@@ -5,6 +5,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useCallback, useState } from 'react';
 import type { VenueSettings } from '../types';
+import { useNumericField } from '@/hooks/useNumericField';
 
 const profileSchema = z.object({
   name: z.string().min(1, 'Name is required').max(200),
@@ -66,6 +67,8 @@ function slugFromName(name: string): string {
 export function VenueProfileSection({ venue, onUpdate, isAdmin }: VenueProfileSectionProps) {
   const [coverSaving, setCoverSaving] = useState(false);
   const [coverError, setCoverError] = useState<string | null>(null);
+  const { integerProps } = useNumericField();
+  const int = integerProps();
 
   const parsedAddr = parseAddress(venue.address);
 
@@ -255,7 +258,7 @@ export function VenueProfileSection({ venue, onUpdate, isAdmin }: VenueProfileSe
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label htmlFor="no_show_grace_minutes" className="block text-sm font-medium text-neutral-700 mb-1">No-show grace period (minutes)</label>
-            <input id="no_show_grace_minutes" type="number" min={10} max={60} {...register('no_show_grace_minutes', { valueAsNumber: true })} disabled={!isAdmin} className="w-full rounded border border-neutral-300 px-3 py-2 disabled:bg-neutral-50" />
+            <input id="no_show_grace_minutes" {...int.inputProps} min={10} max={60} {...register('no_show_grace_minutes', int.registerOptions)} disabled={!isAdmin} className="w-full rounded border border-neutral-300 px-3 py-2 disabled:bg-neutral-50" />
             <p className="mt-1 text-xs text-neutral-500">How long after reservation time before staff can mark no-show (10–60 min)</p>
             {errors.no_show_grace_minutes && <p className="mt-1 text-sm text-red-600">{errors.no_show_grace_minutes.message}</p>}
           </div>

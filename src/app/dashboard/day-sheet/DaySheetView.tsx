@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createClient } from '@/lib/supabase/browser';
 import { parseDietaryNotes, hasAllergyKeywords } from '@/lib/day-sheet';
 import { useToast } from '@/components/ui/Toast';
+import { NumericInput } from '@/components/ui/NumericInput';
 import {
   BOOKING_PRIMARY_ACTIONS,
   BOOKING_REVERT_ACTIONS,
@@ -488,7 +489,7 @@ function EditBookingModal({
           <div className="grid grid-cols-3 gap-3">
             <div>
               <label className="mb-1 block text-xs font-medium text-slate-600">Party Size</label>
-              <input value={partySize} onChange={(e) => setPartySize(Number(e.target.value) || 1)} type="number" min={1} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
+              <NumericInput value={partySize} onChange={(v) => setPartySize(v)} min={1} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
             </div>
             <div>
               <label className="mb-1 block text-xs font-medium text-slate-600">Time</label>
@@ -603,13 +604,12 @@ function DaySheetWalkInModal({
             <label className="mb-1.5 block text-sm font-medium text-slate-700">Party size</label>
             <div className="flex items-center gap-3">
               <button type="button" onClick={() => setPartySize(Math.max(1, partySize - 1))} className="flex h-12 w-12 items-center justify-center rounded-xl border border-slate-200 text-xl font-bold text-slate-600 hover:bg-slate-50 active:bg-slate-100">−</button>
-              <input
+              <NumericInput
                 ref={partySizeRef}
-                type="number"
                 min={1}
                 max={50}
                 value={partySize}
-                onChange={(e) => setPartySize(Math.max(1, Number(e.target.value)))}
+                onChange={(v) => setPartySize(v)}
                 className="h-12 w-20 rounded-xl border border-slate-200 text-center text-xl font-bold tabular-nums focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
               />
               <button type="button" onClick={() => setPartySize(partySize + 1)} className="flex h-12 w-12 items-center justify-center rounded-xl border border-slate-200 text-xl font-bold text-slate-600 hover:bg-slate-50 active:bg-slate-100">+</button>

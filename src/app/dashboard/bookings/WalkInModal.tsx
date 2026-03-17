@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { NumericInput } from '@/components/ui/NumericInput';
 
 interface Suggestion {
   source: 'single' | 'auto' | 'manual';
@@ -191,13 +192,12 @@ export function WalkInModal({
             <label htmlFor="walkin-party" className="mb-1.5 block text-sm font-medium text-slate-700">
               Party size
             </label>
-            <input
+            <NumericInput
               id="walkin-party"
-              type="number"
               min={1}
               max={50}
               value={partySize}
-              onChange={(e) => setPartySize(Math.max(1, Number(e.target.value) || 1))}
+              onChange={(v) => setPartySize(v)}
               className="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm transition-colors focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
               required
             />

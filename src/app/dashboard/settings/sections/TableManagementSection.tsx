@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { VenueSettings } from '../types';
 import { AdjacencyPreview } from './AdjacencyPreview';
+import { NumericInput } from '@/components/ui/NumericInput';
 
 interface Props {
   venue: VenueSettings;
@@ -246,12 +247,11 @@ export function TableManagementSection({ venue, onUpdate, isAdmin }: Props) {
           How close two tables need to be on your floor plan to be suggested as a combination. Default is 80.
         </p>
         <div className="mt-2 flex items-center gap-2">
-          <input
-            type="number"
+          <NumericInput
             min={20}
             max={300}
             value={thresholdDraft}
-            onChange={(e) => setThresholdDraft(Math.max(20, Math.min(300, Number(e.target.value) || 80)))}
+            onChange={(v) => setThresholdDraft(v)}
             disabled={!isAdmin || thresholdSaving}
             className="w-24 rounded-md border border-slate-300 px-2 py-1.5 text-sm"
           />

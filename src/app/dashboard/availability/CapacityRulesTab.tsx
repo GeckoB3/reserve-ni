@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { HelpTooltip } from '@/components/dashboard/HelpTooltip';
 import { helpContent } from '@/lib/help-content';
+import { NumericInput } from '@/components/ui/NumericInput';
 
 interface Service { id: string; name: string; }
 interface CapacityRule {
@@ -125,13 +126,13 @@ export function CapacityRulesTab({ services, showToast }: Props) {
           <label className="mb-1 flex items-center gap-1.5 text-xs font-medium text-slate-600">
             Max covers/slot <HelpTooltip content={helpContent.capacityRules.maxCoversPerSlot} />
           </label>
-          <input type="number" min={1} value={data.max_covers_per_slot} onChange={(e) => onChange({ ...data, max_covers_per_slot: parseInt(e.target.value) || 1 })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+          <NumericInput min={1} value={data.max_covers_per_slot} onChange={(v) => onChange({ ...data, max_covers_per_slot: v })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
         </div>
         <div>
           <label className="mb-1 flex items-center gap-1.5 text-xs font-medium text-slate-600">
             Max bookings/slot <HelpTooltip content={helpContent.capacityRules.maxBookingsPerSlot} />
           </label>
-          <input type="number" min={1} value={data.max_bookings_per_slot} onChange={(e) => onChange({ ...data, max_bookings_per_slot: parseInt(e.target.value) || 1 })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+          <NumericInput min={1} value={data.max_bookings_per_slot} onChange={(v) => onChange({ ...data, max_bookings_per_slot: v })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
         </div>
         <div>
           <label className="mb-1 flex items-center gap-1.5 text-xs font-medium text-slate-600">
@@ -147,7 +148,7 @@ export function CapacityRulesTab({ services, showToast }: Props) {
           <label className="mb-1 flex items-center gap-1.5 text-xs font-medium text-slate-600">
             Buffer (min) <HelpTooltip content={helpContent.capacityRules.bufferMinutes} />
           </label>
-          <input type="number" min={0} max={120} value={data.buffer_minutes} onChange={(e) => onChange({ ...data, buffer_minutes: parseInt(e.target.value) || 0 })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+          <NumericInput min={0} max={120} value={data.buffer_minutes} onChange={(v) => onChange({ ...data, buffer_minutes: v })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
         </div>
         <div>
           <label className="mb-1 flex items-center gap-1.5 text-xs font-medium text-slate-600">
