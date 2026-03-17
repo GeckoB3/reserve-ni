@@ -100,6 +100,21 @@ const CARDS: CommCardConfig[] = [
       { key: 'modification_sms_enabled', label: 'SMS' },
     ],
   },
+  {
+    messageType: 'cancellation_email',
+    label: 'Booking Cancellation',
+    description: 'Sent when a booking is cancelled. Includes booking details and refund information if applicable.',
+    channel: 'both',
+    enabledKey: 'cancellation_email_enabled',
+    customMessageKey: 'cancellation_custom_message',
+    locked: true,
+    maxChars: 500,
+    requireOneSubToggle: true,
+    subToggles: [
+      { key: 'cancellation_email_enabled', label: 'Email' },
+      { key: 'cancellation_sms_enabled', label: 'SMS' },
+    ],
+  },
 ];
 
 const CHANNEL_BADGE: Record<string, { label: string; className: string }> = {

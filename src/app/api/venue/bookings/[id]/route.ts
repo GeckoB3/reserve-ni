@@ -171,42 +171,47 @@ export async function PATCH(
           })
           .eq('id', id);
 
-        // Send cancellation confirmation to guest
-        const { sendCommunication } = await import('@/lib/communications');
         const { data: guestRow } = await staff.db.from('guests').select('name, email, phone').eq('id', booking.guest_id).single();
-        const { data: venueRow } = await staff.db.from('venues').select('name').eq('id', staff.venue_id).single();
+        const { data: venueRow } = await staff.db.from('venues').select('name, address, phone').eq('id', staff.venue_id).single();
         if (guestRow && venueRow?.name) {
           const depositAmountStr = booking.deposit_amount_pence
             ? `£${(booking.deposit_amount_pence / 100).toFixed(2)}`
             : null;
           let refund_message: string | undefined;
           if (refundSucceeded) {
-            refund_message = `Your deposit of ${depositAmountStr} will be refunded to your original payment method within 5–10 business days.`;
+            refund_message = `Your deposit of ${depositAmountStr} will be refunded to your original payment method within 5\u201310 business days.`;
           } else if (booking.deposit_status === 'Paid' && !canRefund) {
             refund_message = `Your deposit of ${depositAmountStr} is non-refundable as the cancellation was made less than 48 hours before the reservation.`;
           } else if (booking.deposit_status === 'Paid' && canRefund && !refundSucceeded) {
             refund_message = `We were unable to process your refund automatically. Please contact the venue directly to arrange your refund of ${depositAmountStr}.`;
           }
           const bookingTime = typeof booking.booking_time === 'string' ? booking.booking_time.slice(0, 5) : '';
-          try {
-            await sendCommunication({
-              type: 'cancellation_confirmation',
-              recipient: { email: guestRow.email ?? undefined, phone: guestRow.phone ?? undefined },
-              payload: {
-                guest_name: guestRow.name ?? 'Guest',
-                venue_name: venueRow.name,
-                booking_date: booking.booking_date,
-                booking_time: bookingTime,
-                party_size: booking.party_size,
-                refund_message,
-              },
-              venue_id: staff.venue_id,
-              booking_id: id,
-              guest_id: booking.guest_id,
-            });
-          } catch (commsErr) {
-            console.error('Staff cancellation notification failed:', commsErr);
-          }
+          const { sendCancellationNotification } = await import('@/lib/communications/send-templated');
+          const cancelBookingEmail: import('@/lib/emails/types').BookingEmailData = {
+            id,
+            guest_name: guestRow.name ?? 'Guest',
+            guest_email: guestRow.email ?? null,
+            guest_phone: guestRow.phone ?? null,
+            booking_date: booking.booking_date,
+            booking_time: bookingTime,
+            party_size: booking.party_size,
+            deposit_amount_pence: booking.deposit_amount_pence ?? null,
+            deposit_status: booking.deposit_status ?? null,
+          };
+          const cancelVenueEmail: import('@/lib/emails/types').VenueEmailData = {
+            name: venueRow.name,
+            address: venueRow.address ?? null,
+            phone: venueRow.phone ?? null,
+          };
+          const vid = staff.venue_id;
+          const refundMsg = refund_message;
+          after(async () => {
+            try {
+              await sendCancellationNotification(cancelBookingEmail, cancelVenueEmail, vid, refundMsg);
+            } catch (commsErr) {
+              console.error('Staff cancellation notification failed:', commsErr);
+            }
+          });
         }
       } else if (newStatus === 'No-Show') {
         const depositStatus = booking.deposit_status === 'Paid' ? 'Forfeited' : booking.deposit_status;

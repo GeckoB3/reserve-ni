@@ -7,6 +7,7 @@ import { renderBookingConfirmation } from '@/lib/emails/templates/booking-confir
 import { renderDepositRequestSms } from '@/lib/emails/templates/deposit-request-sms';
 import { renderDepositConfirmation } from '@/lib/emails/templates/deposit-confirmation';
 import { renderBookingModification, renderBookingModificationSms } from '@/lib/emails/templates/booking-modification';
+import { renderBookingCancellation, renderBookingCancellationSms } from '@/lib/emails/templates/booking-cancellation';
 import { sendEmail } from '@/lib/emails/send-email';
 import { sendSms } from '@/lib/emails/send-sms';
 import { getCommSettings, logToCommLogs, updateCommLogStatus } from './service';
@@ -263,6 +264,98 @@ export async function sendBookingModificationNotification(
     }
   } catch (err) {
     console.error('[send-templated] booking modification notification error:', err);
+  }
+
+  return results;
+}
+
+/**
+ * Send booking cancellation notification email and/or SMS based on venue settings.
+ * A booking can only be cancelled once, so trySendWithDedup would work, but we
+ * use upsert for consistency with the modification pattern.
+ */
+export async function sendCancellationNotification(
+  booking: BookingEmailData,
+  venue: VenueEmailData,
+  venueId: string,
+  refundMessage?: string | null,
+): Promise<{ email: SendResult; sms: SendResult }> {
+  const results: { email: SendResult; sms: SendResult } = {
+    email: { sent: false, reason: 'skipped' },
+    sms: { sent: false, reason: 'skipped' },
+  };
+
+  try {
+    const settings = await getCommSettings(venueId);
+
+    if (settings.cancellation_email_enabled && booking.guest_email) {
+      try {
+        const rendered = renderBookingCancellation(booking, venue, refundMessage, settings.cancellation_custom_message);
+        const externalId = await sendEmail({ to: booking.guest_email, ...rendered });
+        await upsertCommLog({
+          venue_id: venueId,
+          booking_id: booking.id,
+          message_type: 'cancellation_email',
+          channel: 'email',
+          recipient: booking.guest_email,
+          status: 'sent',
+          external_id: externalId,
+        });
+        results.email = { sent: true };
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        console.error('[send-templated] cancellation email failed:', err);
+        await upsertCommLog({
+          venue_id: venueId,
+          booking_id: booking.id,
+          message_type: 'cancellation_email',
+          channel: 'email',
+          recipient: booking.guest_email!,
+          status: 'failed',
+          error_message: errMsg,
+        });
+        results.email = { sent: false, reason: 'send_error' };
+      }
+    } else if (!booking.guest_email) {
+      results.email = { sent: false, reason: 'no_email' };
+    } else {
+      results.email = { sent: false, reason: 'disabled' };
+    }
+
+    if (settings.cancellation_sms_enabled && booking.guest_phone) {
+      try {
+        const rendered = renderBookingCancellationSms(booking, venue, refundMessage);
+        await sendSms(booking.guest_phone, rendered.body);
+        await upsertCommLog({
+          venue_id: venueId,
+          booking_id: booking.id,
+          message_type: 'cancellation_sms',
+          channel: 'sms',
+          recipient: booking.guest_phone,
+          status: 'sent',
+        });
+        results.sms = { sent: true };
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        console.error('[send-templated] cancellation SMS failed:', err);
+        await upsertCommLog({
+          venue_id: venueId,
+          booking_id: booking.id,
+          message_type: 'cancellation_sms',
+          channel: 'sms',
+          recipient: booking.guest_phone!,
+          status: 'failed',
+          error_message: errMsg,
+        });
+        results.sms = { sent: false, reason: 'send_error' };
+      }
+    } else if (!booking.guest_phone) {
+      results.sms = { sent: false, reason: 'no_phone' };
+    } else {
+      results.sms = { sent: false, reason: 'disabled' };
+    }
+  } catch (err) {
+    console.error('[send-templated] cancellation notification error:', err);
   }
 
   return results;

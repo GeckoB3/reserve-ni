@@ -11,6 +11,7 @@ import { renderDayOfReminderEmail } from '@/lib/emails/templates/day-of-reminder
 import { renderDayOfReminderSms } from '@/lib/emails/templates/day-of-reminder-sms';
 import { renderPostVisitEmail } from '@/lib/emails/templates/post-visit';
 import { renderBookingModification } from '@/lib/emails/templates/booking-modification';
+import { renderBookingCancellation } from '@/lib/emails/templates/booking-cancellation';
 
 const SAMPLE_BOOKING: BookingEmailData = {
   id: '00000000-0000-0000-0000-000000000000',
@@ -85,6 +86,9 @@ export async function POST(request: NextRequest) {
         break;
       case 'booking_modification_email':
         preview = renderBookingModification(SAMPLE_BOOKING, venueData, customMessage);
+        break;
+      case 'cancellation_email':
+        preview = renderBookingCancellation(SAMPLE_BOOKING, venueData, 'Your deposit of £20.00 will be refunded to your original payment method within 5–10 business days.', customMessage);
         break;
       default:
         return NextResponse.json({ error: 'Unknown message type' }, { status: 400 });

@@ -70,6 +70,9 @@ const ALLOWED_FIELDS = new Set([
   'modification_email_enabled',
   'modification_sms_enabled',
   'modification_custom_message',
+  'cancellation_email_enabled',
+  'cancellation_sms_enabled',
+  'cancellation_custom_message',
 ]);
 
 /**

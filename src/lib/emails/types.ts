@@ -43,4 +43,6 @@ export type CommMessageType =
   | 'day_of_reminder_email'
   | 'post_visit_email'
   | 'booking_modification_email'
-  | 'booking_modification_sms';
+  | 'booking_modification_sms'
+  | 'cancellation_email'
+  | 'cancellation_sms';

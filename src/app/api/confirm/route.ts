@@ -1,7 +1,8 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse, after } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { stripe } from '@/lib/stripe';
-import { sendCommunication } from '@/lib/communications';
+import { sendCancellationNotification } from '@/lib/communications/send-templated';
+import type { BookingEmailData, VenueEmailData } from '@/lib/emails/types';
 import { verifyConfirmToken } from '@/lib/confirm-token';
 import { verifyBookingHmac } from '@/lib/short-manage-link';
 import { validateBookingStatusTransition, applyBookingLifecycleStatusEffects } from '@/lib/table-management/lifecycle';
@@ -187,7 +188,7 @@ export async function POST(request: NextRequest) {
         actorId: null,
       });
 
-      const { data: venue } = await supabase.from('venues').select('name').eq('id', booking.venue_id).single();
+      const { data: venue } = await supabase.from('venues').select('name, address, phone').eq('id', booking.venue_id).single();
       const { data: guest } = await supabase.from('guests').select('name, email, phone').eq('id', booking.guest_id).single();
       const timeStr = typeof booking.booking_time === 'string' ? booking.booking_time.slice(0, 5) : '';
 
@@ -206,21 +207,32 @@ export async function POST(request: NextRequest) {
         refund_message = '';
       }
 
-      try {
-        await sendCommunication({
-          type: 'cancellation_confirmation',
-          recipient: { email: guest?.email ?? undefined, phone: guest?.phone ?? undefined },
-          payload: {
-            guest_name: guest?.name,
-            venue_name: venue?.name,
-            booking_date: booking.booking_date,
-            booking_time: timeStr,
-            party_size: booking.party_size,
-            refund_message: refund_message || undefined,
-          },
+      if (guest && venue?.name) {
+        const cancelBookingEmail: BookingEmailData = {
+          id: bookingId,
+          guest_name: guest.name ?? 'Guest',
+          guest_email: guest.email ?? null,
+          guest_phone: guest.phone ?? null,
+          booking_date: booking.booking_date,
+          booking_time: timeStr,
+          party_size: booking.party_size,
+          deposit_amount_pence: booking.deposit_amount_pence ?? null,
+          deposit_status: booking.deposit_status ?? null,
+        };
+        const cancelVenueEmail: VenueEmailData = {
+          name: venue.name,
+          address: venue.address ?? null,
+          phone: venue.phone ?? null,
+        };
+        const vid = booking.venue_id;
+        const refundMsg = refund_message || null;
+        after(async () => {
+          try {
+            await sendCancellationNotification(cancelBookingEmail, cancelVenueEmail, vid, refundMsg);
+          } catch (commsErr) {
+            console.error('Cancellation confirmation comms failed:', commsErr);
+          }
         });
-      } catch (commsErr) {
-        console.error('Cancellation confirmation comms failed:', commsErr);
       }
 
       return NextResponse.json({
