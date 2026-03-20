@@ -4,7 +4,7 @@ const AMBER_BG = '#FFF3CD';
 const AMBER_TEXT = '#664D03';
 const FOOTER_TEXT = '#888888';
 
-function escapeHtml(text: string): string {
+export function escapeHtml(text: string): string {
   return text
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')

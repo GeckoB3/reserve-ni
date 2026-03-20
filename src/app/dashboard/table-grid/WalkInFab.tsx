@@ -74,6 +74,8 @@ export function WalkInFab({ tables, cells, onCreated }: Props) {
           party_size: partySize,
           name: name || 'Walk-in',
           phone,
+          booking_date: new Date().toISOString().slice(0, 10),
+          booking_time: `${String(new Date().getHours()).padStart(2, '0')}:${String(new Date().getMinutes()).padStart(2, '0')}`,
         }),
       });
 

@@ -69,7 +69,9 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
   return (
     <div className="p-4 md:p-6 lg:p-8">
       <div className="mx-auto max-w-3xl">
-        <h1 className="mb-6 text-2xl font-semibold text-slate-900">Settings</h1>
+        <h1 className="mb-6 text-2xl font-semibold text-slate-900">
+          {isAdmin ? 'Settings' : 'Account settings'}
+        </h1>
         <SettingsView initialVenue={venue ?? null} isAdmin={isAdmin} initialTab={tab} hasServiceConfig={hasServiceConfig} />
       </div>
     </div>

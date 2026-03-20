@@ -8,23 +8,31 @@ import { computeTableAdjacency, getTableDimensions } from '@/types/table-managem
 import type { BlockedSides } from '@/types/table-management';
 import TableShape from '@/components/floor-plan/TableShape';
 
+/**
+ * Stat tile label colours from `DashboardStatCard` (Tailwind `text-blue-700` / `text-emerald-700`).
+ * TableShape lightens the fill from these bases; strokes use the base hex directly.
+ */
+const STAT_TILE_TEXT_BLUE_700 = '#1d4ed8';
+const STAT_TILE_TEXT_EMERALD_700 = '#047857';
+
 const STATUS_COLORS: Record<string, string> = {
-  available: '#22c55e',
-  booked: '#14b8a6',
-  pending: '#eab308',
-  reserved: '#3b82f6',
-  seated: '#10b981',
-  held: '#6b7280',
-  no_show: '#ef4444',
-  starters: '#eab308',
-  mains: '#f97316',
-  dessert: '#ec4899',
-  bill: '#8b5cf6',
-  paid: '#64748b',
-  bussing: '#94a3b8',
+  available: STAT_TILE_TEXT_EMERALD_700,
+  booked: STAT_TILE_TEXT_BLUE_700,
+  pending: STAT_TILE_TEXT_BLUE_700,
+  reserved: STAT_TILE_TEXT_BLUE_700,
+  seated: STAT_TILE_TEXT_BLUE_700,
+  held: STAT_TILE_TEXT_BLUE_700,
+  no_show: STAT_TILE_TEXT_BLUE_700,
+  starters: STAT_TILE_TEXT_BLUE_700,
+  mains: STAT_TILE_TEXT_BLUE_700,
+  dessert: STAT_TILE_TEXT_BLUE_700,
+  bill: STAT_TILE_TEXT_BLUE_700,
+  paid: STAT_TILE_TEXT_BLUE_700,
+  bussing: STAT_TILE_TEXT_BLUE_700,
 };
 
-const VALID_TARGET_COLOR = '#22c55e';
+/** Valid drop target — amber reads on both emerald-tinted empty and blue-tinted occupied fills */
+const VALID_TARGET_COLOR = '#d97706';
 const DRAG_GHOST_OPACITY = 0.35;
 
 const EMPTY_HIDDEN_SET = new Set<string>();
@@ -372,7 +380,7 @@ export default function LiveFloorCanvas({
             const isInvalid = isDragging && !isSource && !validDropTargets?.has(table.id);
             const comboLabel = validDropComboLabels?.get(table.id);
 
-            let statusColor = STATUS_COLORS[table.service_status] ?? '#64748b';
+            let statusColor = STATUS_COLORS[table.service_status] ?? STAT_TILE_TEXT_EMERALD_700;
             let opacity = 1;
 
             if (isDragging) {

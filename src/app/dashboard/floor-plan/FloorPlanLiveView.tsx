@@ -7,12 +7,14 @@ import { useVenueLiveSync } from '@/lib/realtime/useVenueLiveSync';
 import { getTableStatus, type TableOperationalStatus } from '@/lib/table-management/table-status';
 import { UnifiedBookingForm } from '@/components/booking/UnifiedBookingForm';
 import { UndoToast } from '@/app/dashboard/table-grid/UndoToast';
-import { BookingDetailPanel } from '@/app/dashboard/bookings/BookingDetailPanel';
+import { BookingDetailPanel, type BookingDetailPanelSnapshot } from '@/app/dashboard/bookings/BookingDetailPanel';
 import { ViewToolbar } from '@/components/dashboard/ViewToolbar';
 import { WalkInModal } from '@/app/dashboard/bookings/WalkInModal';
 import { useToast } from '@/components/ui/Toast';
 import { detectAdjacentTables, type CombinationTable } from '@/lib/table-management/combination-engine';
 import { BOOKING_REVERT_ACTIONS, canMarkNoShowForSlot, canTransitionBookingStatus, isDestructiveBookingStatus, isRevertTransition, type BookingStatus } from '@/lib/table-management/booking-status';
+import { coversInUseAtTime } from '@/lib/table-management/covers-at-time';
+import { computeNextBookingsSlot } from '@/lib/table-management/next-bookings-slot';
 import { computeValidMoveTargets, resolveDropTarget, type CombinationInfo, type BookingMoveContext } from '@/lib/table-management/move-validation';
 import type { FloorDragEvent } from './LiveFloorCanvas';
 
@@ -49,6 +51,16 @@ function formatDateInput(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
+function formatIsoTimeUk(iso: string): string {
+  try {
+    return new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+  } catch {
+    return iso.slice(11, 16);
+  }
+}
+
+const BLOCK_DURATION_PRESETS = [30, 45, 60, 90, 120, 180] as const;
+
 
 export function FloorPlanLiveView({ isAdmin = false, venueId }: { isAdmin?: boolean; venueId: string }) {
   const { addToast } = useToast();
@@ -78,6 +90,13 @@ export function FloorPlanLiveView({ isAdmin = false, venueId }: { isAdmin?: bool
   // Booking creation / walk-in
   const [showNewBookingForm, setShowNewBookingForm] = useState(false);
   const [showWalkInModal, setShowWalkInModal] = useState(false);
+
+  /** Block table: modal with start time + duration */
+  const [floorBlockModal, setFloorBlockModal] = useState<{ tableId: string; tableName: string } | null>(null);
+  const [floorBlockStartTime, setFloorBlockStartTime] = useState('12:00');
+  const [floorBlockDurationMins, setFloorBlockDurationMins] = useState<number>(60);
+  const [floorBlockReason, setFloorBlockReason] = useState('');
+  const [floorBlockSaving, setFloorBlockSaving] = useState(false);
 
   // Drag/drop & reassign
   const [reassignMode, setReassignMode] = useState<{ bookingId: string; guestName: string; oldTableIds: string[] } | null>(null);
@@ -179,6 +198,37 @@ export function FloorPlanLiveView({ isAdmin = false, venueId }: { isAdmin?: bool
 
   const liveState = useVenueLiveSync({ venueId, date: selectedDate, onChange: fetchData });
 
+  const floorBookingDetailSnapshot = useMemo((): BookingDetailPanelSnapshot | null => {
+    if (!detailBookingId) return null;
+    const b = bookingMap.get(detailBookingId);
+    if (!b) return null;
+    const fromCombo = combinedTableGroups.get(detailBookingId);
+    const tableIds =
+      fromCombo && fromCombo.length > 0
+        ? fromCombo
+        : [...new Set((gridData?.cells ?? []).filter((c) => c.booking_id === detailBookingId).map((c) => c.table_id))];
+    const tableNames = tableIds
+      .map((tid) => tables.find((t) => t.id === tid)?.name)
+      .filter((n): n is string => Boolean(n));
+    const sampleCell = (gridData?.cells ?? []).find((c) => c.booking_id === detailBookingId && c.booking_details);
+    const endFromGrid = sampleCell?.booking_details?.end_time?.slice(0, 5);
+    const endTime =
+      endFromGrid ??
+      (b.estimated_end_time ? new Date(b.estimated_end_time).toISOString().slice(11, 16) : b.start_time.slice(0, 5));
+    return {
+      bookingDate: selectedDate,
+      guestName: b.guest_name,
+      partySize: b.party_size,
+      status: b.status,
+      startTime: b.start_time.slice(0, 5),
+      endTime,
+      dietaryNotes: b.dietary_notes,
+      occasion: b.occasion,
+      depositStatus: b.deposit_status ?? undefined,
+      tableNames: tableNames.length > 0 ? tableNames : undefined,
+    };
+  }, [detailBookingId, bookingMap, combinedTableGroups, gridData, tables, selectedDate]);
+
   const tablesWithState: TableWithState[] = useMemo(() => {
     const now = Date.now();
     const dateTime = `${selectedDate}T${debouncedTime}:00.000Z`;
@@ -274,16 +324,33 @@ export function FloorPlanLiveView({ isAdmin = false, venueId }: { isAdmin?: bool
   }, [gridData, manualCombinations, combinationThreshold]);
 
   const summaryData = useMemo(() => {
-    if (!gridData) return { total_covers_booked: 0, total_covers_capacity: 0, tables_in_use: 0, tables_total: 0, unassigned_count: 0, combos_in_use: 0 };
-    return gridData.summary ?? {
-      total_covers_booked: tablesWithState.filter((t) => t.booking).reduce((s, t) => s + (t.booking?.party_size ?? 0), 0),
+    if (!gridData) {
+      return {
+        total_covers_booked: 0,
+        total_covers_capacity: 0,
+        tables_in_use: 0,
+        tables_total: 0,
+        unassigned_count: 0,
+        combos_in_use: 0,
+        covers_in_use_now: 0,
+        next_bookings_slot: null,
+      };
+    }
+    const [th, tm] = debouncedTime.split(':').map(Number);
+    const timeMin = (th ?? 0) * 60 + (tm ?? 0);
+    const visibleTableIds = new Set(tables.map((t) => t.id));
+    const liveCovers = coversInUseAtTime(gridData, timeMin, visibleTableIds);
+    const next_bookings_slot = computeNextBookingsSlot(gridData, timeMin);
+    const base = gridData.summary ?? {
+      total_covers_booked: 0,
       total_covers_capacity: tablesWithState.reduce((s, t) => s + t.max_covers, 0),
       tables_in_use: tablesWithState.filter((t) => t.service_status !== 'available').length,
       tables_total: tablesWithState.length,
       unassigned_count: (gridData?.unassigned_bookings ?? []).length,
       combos_in_use: combinedTableGroups.size,
     };
-  }, [gridData, tablesWithState, combinedTableGroups]);
+    return { ...base, covers_in_use_now: liveCovers, next_bookings_slot };
+  }, [gridData, tablesWithState, combinedTableGroups, debouncedTime, tables]);
 
   // --- Status change handlers ---
   const handleBookingStatusChange = useCallback(async (bookingId: string, currentStatus: BookingStatus, newStatus: BookingStatus) => {
@@ -519,6 +586,87 @@ export function FloorPlanLiveView({ isAdmin = false, venueId }: { isAdmin?: bool
     return tablesWithState.find((t) => t.id === selectedTableId) ?? null;
   }, [selectedTableId, tablesWithState]);
 
+  /** Blocks that cover the current timeline position for the selected table */
+  const blocksAtScrubberForSelected = useMemo(() => {
+    if (!selectedTableId || blocks.length === 0) return [];
+    const t = Date.parse(`${selectedDate}T${debouncedTime}:00.000Z`);
+    if (Number.isNaN(t)) return [];
+    return blocks.filter(
+      (b) =>
+        b.table_id === selectedTableId &&
+        Date.parse(b.start_at) <= t &&
+        Date.parse(b.end_at) > t,
+    );
+  }, [blocks, selectedTableId, selectedDate, debouncedTime]);
+
+  const removeTableBlock = useCallback(
+    async (blockId: string) => {
+      try {
+        const res = await fetch('/api/venue/tables/blocks', {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: blockId }),
+        });
+        const payload = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          addToast((payload as { error?: string }).error ?? 'Failed to remove block', 'error');
+          return;
+        }
+        addToast('Block removed', 'success');
+        await fetchData();
+      } catch (err) {
+        console.error('Remove block failed:', err);
+        addToast('Failed to remove block', 'error');
+      }
+    },
+    [addToast, fetchData],
+  );
+
+  const submitFloorBlock = useCallback(async () => {
+    if (!floorBlockModal) return;
+    setFloorBlockSaving(true);
+    try {
+      const start = new Date(`${selectedDate}T${floorBlockStartTime}:00.000Z`);
+      if (Number.isNaN(start.getTime())) {
+        addToast('Invalid start time', 'error');
+        return;
+      }
+      const end = new Date(start.getTime() + floorBlockDurationMins * 60 * 1000);
+      const res = await fetch('/api/venue/tables/blocks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          table_id: floorBlockModal.tableId,
+          start_at: start.toISOString(),
+          end_at: end.toISOString(),
+          reason: floorBlockReason.trim() || null,
+          repeat: 'none',
+        }),
+      });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        addToast((payload as { error?: string }).error ?? 'Failed to create block', 'error');
+        return;
+      }
+      addToast('Table blocked', 'success');
+      setFloorBlockModal(null);
+      await fetchData();
+    } catch (err) {
+      console.error('Create block failed:', err);
+      addToast('Failed to create block', 'error');
+    } finally {
+      setFloorBlockSaving(false);
+    }
+  }, [
+    floorBlockModal,
+    selectedDate,
+    floorBlockStartTime,
+    floorBlockDurationMins,
+    floorBlockReason,
+    addToast,
+    fetchData,
+  ]);
+
   // Walk-in handler
 
   // --- Render ---
@@ -567,6 +715,7 @@ export function FloorPlanLiveView({ isAdmin = false, venueId }: { isAdmin?: bool
   return (
     <div className="flex h-[calc(100vh-120px)] flex-col space-y-3">
       <ViewToolbar
+        title="Live floor"
         summary={summaryData}
         date={selectedDate}
         onDateChange={setSelectedDate}
@@ -575,7 +724,16 @@ export function FloorPlanLiveView({ isAdmin = false, venueId }: { isAdmin?: bool
         onNewBooking={() => setShowNewBookingForm(true)}
         onWalkIn={() => setShowWalkInModal(true)}
       >
-        <input type="time" value={selectedTime} onChange={(e) => setSelectedTime(e.target.value)} className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs shadow-sm" />
+        <div className="flex flex-wrap items-center gap-2">
+          <label className="text-sm font-medium text-slate-600">Timeline</label>
+          <input
+            type="time"
+            value={selectedTime}
+            onChange={(e) => setSelectedTime(e.target.value)}
+            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+          />
+          <span className="text-xs text-slate-500">Drag and status use this clock position.</span>
+        </div>
       </ViewToolbar>
 
       {/* Canvas area */}
@@ -614,6 +772,45 @@ export function FloorPlanLiveView({ isAdmin = false, venueId }: { isAdmin?: bool
             </button>
           </div>
 
+          {selectedTable.service_status === 'held' && (
+            <div className="mt-3 rounded-xl border border-stone-200 bg-stone-50 p-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-stone-600">Blocked</p>
+              <p className="mt-1 text-xs text-stone-600">
+                At the timeline time shown above, this table is not available for bookings.
+              </p>
+              {blocksAtScrubberForSelected.length === 0 ? (
+                <p className="mt-2 text-xs text-amber-700">
+                  Block details could not be loaded. Try refreshing.
+                </p>
+              ) : (
+                <ul className="mt-2 space-y-2">
+                  {blocksAtScrubberForSelected.map((b) => (
+                    <li
+                      key={b.id}
+                      className="flex flex-col gap-2 rounded-lg border border-stone-200 bg-white px-3 py-2 sm:flex-row sm:items-center sm:justify-between"
+                    >
+                      <div>
+                        <p className="text-sm font-medium text-stone-900">
+                          {formatIsoTimeUk(b.start_at)} – {formatIsoTimeUk(b.end_at)}
+                        </p>
+                        {b.reason ? (
+                          <p className="text-xs text-stone-500">{b.reason}</p>
+                        ) : null}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => { void removeTableBlock(b.id); }}
+                        className="shrink-0 rounded-lg border border-stone-300 bg-white px-3 py-1.5 text-xs font-semibold text-stone-800 hover:bg-stone-100"
+                      >
+                        Unblock
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+
           {selectedTable.booking && (
             <div className="mt-3 rounded-xl border border-blue-100 bg-blue-50/60 p-3">
               <div className="flex items-center justify-between">
@@ -643,14 +840,18 @@ export function FloorPlanLiveView({ isAdmin = false, venueId }: { isAdmin?: bool
             {selectedTable.service_status === 'available' && (
               <>
                 <button onClick={() => { setShowNewBookingForm(true); }} className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-700">New Booking</button>
-                <button onClick={async () => {
-                  const [h, m] = selectedTime.split(':').map(Number);
-                  const start = `${selectedDate}T${selectedTime}:00.000Z`;
-                  const endMin = (h ?? 0) * 60 + (m ?? 0) + 60;
-                  const end = `${selectedDate}T${Math.floor(endMin / 60).toString().padStart(2, '0')}:${(endMin % 60).toString().padStart(2, '0')}:00.000Z`;
-                  await fetch('/api/venue/tables/blocks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ table_id: selectedTable.id, start_at: start, end_at: end, reason: 'Manual hold' }) });
-                  fetchData();
-                }} className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50">Block Table</button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFloorBlockStartTime(selectedTime);
+                    setFloorBlockDurationMins(60);
+                    setFloorBlockReason('');
+                    setFloorBlockModal({ tableId: selectedTable.id, tableName: selectedTable.name });
+                  }}
+                  className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                >
+                  Block table…
+                </button>
               </>
             )}
             {(selectedTable.service_status === 'booked' || selectedTable.service_status === 'pending') && selectedTable.booking?.id && (
@@ -678,6 +879,8 @@ export function FloorPlanLiveView({ isAdmin = false, venueId }: { isAdmin?: bool
       {detailBookingId && (
         <BookingDetailPanel
           bookingId={detailBookingId}
+          venueId={venueId}
+          initialSnapshot={floorBookingDetailSnapshot}
           onClose={() => setDetailBookingId(null)}
           onUpdated={() => { fetchData(); }}
         />
@@ -700,10 +903,106 @@ export function FloorPlanLiveView({ isAdmin = false, venueId }: { isAdmin?: bool
         <WalkInModal
           advancedMode
           initialDate={selectedDate}
-          initialTime={selectedTime}
           onClose={() => setShowWalkInModal(false)}
           onCreated={() => { setShowWalkInModal(false); fetchData(); }}
         />
+      )}
+
+      {/* Block table — start time + duration */}
+      {floorBlockModal && (
+        <div
+          className="fixed inset-0 z-[60] flex items-end justify-center bg-black/30 p-4 backdrop-blur-sm sm:items-center"
+          onClick={() => !floorBlockSaving && setFloorBlockModal(null)}
+          role="presentation"
+        >
+          <div
+            role="dialog"
+            aria-labelledby="floor-block-title"
+            className="w-full max-w-md rounded-2xl bg-white p-5 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 id="floor-block-title" className="text-base font-semibold text-slate-900">
+              Block {floorBlockModal.tableName}
+            </h3>
+            <p className="mt-1 text-xs text-slate-500">
+              The table will be unavailable for new bookings for the period you set. Existing bookings that overlap this time are not allowed—you’ll need to reschedule them first.
+            </p>
+            <p className="mt-2 text-xs font-medium text-slate-600">
+              Date:{' '}
+              <span className="tabular-nums text-slate-900">
+                {new Date(`${selectedDate}T12:00:00`).toLocaleDateString('en-GB', {
+                  weekday: 'short',
+                  day: 'numeric',
+                  month: 'short',
+                  year: 'numeric',
+                })}
+              </span>
+            </p>
+            <div className="mt-4 space-y-3">
+              <div>
+                <label htmlFor="floor-block-start" className="mb-1 block text-xs font-medium text-slate-700">
+                  Start time
+                </label>
+                <input
+                  id="floor-block-start"
+                  type="time"
+                  value={floorBlockStartTime}
+                  onChange={(e) => setFloorBlockStartTime(e.target.value)}
+                  className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
+                />
+              </div>
+              <div>
+                <label htmlFor="floor-block-duration" className="mb-1 block text-xs font-medium text-slate-700">
+                  Duration
+                </label>
+                <select
+                  id="floor-block-duration"
+                  value={floorBlockDurationMins}
+                  onChange={(e) => setFloorBlockDurationMins(Number(e.target.value))}
+                  className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
+                >
+                  {BLOCK_DURATION_PRESETS.map((m) => (
+                    <option key={m} value={m}>
+                      {m} minutes
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label htmlFor="floor-block-reason" className="mb-1 block text-xs font-medium text-slate-700">
+                  Reason <span className="font-normal text-slate-400">(optional)</span>
+                </label>
+                <input
+                  id="floor-block-reason"
+                  type="text"
+                  value={floorBlockReason}
+                  onChange={(e) => setFloorBlockReason(e.target.value)}
+                  placeholder="e.g. Private event, maintenance"
+                  maxLength={300}
+                  className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
+                />
+              </div>
+            </div>
+            <div className="mt-5 flex gap-2">
+              <button
+                type="button"
+                disabled={floorBlockSaving}
+                onClick={() => { void submitFloorBlock(); }}
+                className="flex-1 rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
+              >
+                {floorBlockSaving ? 'Saving…' : 'Block table'}
+              </button>
+              <button
+                type="button"
+                disabled={floorBlockSaving}
+                onClick={() => setFloorBlockModal(null)}
+                className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Undo toast */}

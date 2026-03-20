@@ -76,6 +76,7 @@ export interface StaffMember {
   id: string;
   email: string;
   name: string | null;
+  phone?: string | null;
   role: string;
   created_at: string;
 }

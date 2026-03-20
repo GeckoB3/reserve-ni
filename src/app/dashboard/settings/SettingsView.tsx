@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import Link from 'next/link';
 import type { VenueSettings } from './types';
 import { ProfileSection } from './sections/ProfileSection';
@@ -14,6 +14,7 @@ import { TableManagementSection } from './sections/TableManagementSection';
 import { AvailabilityConfigSection } from './sections/AvailabilityConfigSection';
 import { BookingRulesSection } from './sections/BookingRulesSection';
 import { DepositConfigSection } from './sections/DepositConfigSection';
+import { StaffPersonalSettingsSection } from './sections/StaffPersonalSettingsSection';
 
 interface SettingsViewProps {
   initialVenue: VenueSettings | null;
@@ -31,16 +32,38 @@ const TABS = [
 
 type TabKey = typeof TABS[number]['key'];
 
+function resolveInitialTab(initialTab: string | undefined, admin: boolean): TabKey {
+  const allowedKeys = (admin ? TABS : TABS.filter((t) => t.key !== 'staff')).map((t) => t.key) as TabKey[];
+  const t = initialTab as TabKey | undefined;
+  if (t && allowedKeys.includes(t)) {
+    return t;
+  }
+  return 'profile';
+}
+
 export function SettingsView({ initialVenue, isAdmin, initialTab, hasServiceConfig = false }: SettingsViewProps) {
   const [venue, setVenue] = useState<VenueSettings | null>(initialVenue);
-  const validTabs = TABS.map(t => t.key) as readonly string[];
-  const [activeTab, setActiveTab] = useState<TabKey>(
-    initialTab && validTabs.includes(initialTab) ? initialTab as TabKey : 'profile'
+  const visibleTabs = useMemo(
+    () => (isAdmin ? [...TABS] : TABS.filter((t) => t.key !== 'staff')),
+    [isAdmin],
   );
+  const [activeTab, setActiveTab] = useState<TabKey>(() => resolveInitialTab(initialTab, isAdmin));
 
   const onUpdate = useCallback((patch: Partial<VenueSettings>) => {
     setVenue((v) => (v ? { ...v, ...patch } : null));
   }, []);
+
+  if (!isAdmin) {
+    return (
+      <div className="space-y-6">
+        <p className="text-sm text-slate-600">
+          Manage your personal details and password. Venue settings (payments, communications, opening hours, and
+          more) are only visible to admins — ask an admin if something needs to change.
+        </p>
+        <StaffPersonalSettingsSection />
+      </div>
+    );
+  }
 
   if (!venue) {
     return (
@@ -54,7 +77,7 @@ export function SettingsView({ initialVenue, isAdmin, initialTab, hasServiceConf
     <div className="space-y-6">
       {/* Tab navigation */}
       <div className="flex gap-1 overflow-x-auto rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
-        {TABS.map((tab) => (
+        {visibleTabs.map((tab) => (
           <button
             key={tab.key}
             type="button"
@@ -95,6 +118,7 @@ export function SettingsView({ initialVenue, isAdmin, initialTab, hasServiceConf
                 Open Widget Settings
               </Link>
             </div>
+            <DataExportSection />
           </>
         )}
         {activeTab === 'payments' && (
@@ -103,12 +127,7 @@ export function SettingsView({ initialVenue, isAdmin, initialTab, hasServiceConf
         {activeTab === 'comms' && (
           <CommunicationTemplatesSection venue={venue} isAdmin={isAdmin} />
         )}
-        {activeTab === 'staff' && (
-          <>
-            <StaffSection venueId={venue.id} isAdmin={isAdmin} />
-            <DataExportSection />
-          </>
-        )}
+        {activeTab === 'staff' && isAdmin && <StaffSection venueId={venue.id} isAdmin={isAdmin} />}
       </div>
     </div>
   );

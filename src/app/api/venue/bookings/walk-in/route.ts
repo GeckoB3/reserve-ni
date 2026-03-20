@@ -51,7 +51,7 @@ function extractTime(value: string): string {
 /**
  * POST /api/venue/bookings/walk-in
  * Quick add walk-in: source walk-in, status Seated, no deposit.
- * Body: { party_size, name? }. Uses today's date and current time (rounded to next 15 min).
+ * Body: { party_size, name? }. Uses today's date and current venue-local time.
  */
 export async function POST(request: NextRequest) {
   try {
@@ -81,10 +81,8 @@ export async function POST(request: NextRequest) {
     const timezone = venueSettings?.timezone ?? 'Europe/London';
     const localNow = venueLocalDateTime(timezone);
     const today = booking_date ?? localNow.date;
-    const min = localNow.hours * 60 + localNow.minutes;
-    const nextSlot = Math.ceil(min / 15) * 15;
-    const roundedTime = `${Math.floor(nextSlot / 60).toString().padStart(2, '0')}:${(nextSlot % 60).toString().padStart(2, '0')}:00`;
-    const bookingTime = booking_time ? (booking_time.length === 5 ? `${booking_time}:00` : booking_time) : roundedTime;
+    const exactTime = `${String(localNow.hours).padStart(2, '0')}:${String(localNow.minutes).padStart(2, '0')}:00`;
+    const bookingTime = booking_time ? (booking_time.length === 5 ? `${booking_time}:00` : booking_time) : exactTime;
 
     if (table_id) {
       const { data: tableCheck } = await admin

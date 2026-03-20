@@ -56,6 +56,7 @@ CREATE TABLE staff (
   venue_id uuid NOT NULL REFERENCES venues (id) ON DELETE CASCADE,
   email text NOT NULL,
   name text,
+  phone text,
   role staff_role NOT NULL DEFAULT 'staff',
   created_at timestamptz NOT NULL DEFAULT now()
 );

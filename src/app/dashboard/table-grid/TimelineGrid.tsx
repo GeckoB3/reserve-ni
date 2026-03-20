@@ -11,8 +11,11 @@ import {
   TouchSensor,
   useSensor,
   useSensors,
+  rectIntersection,
+  type CollisionDetection,
   type DragStartEvent,
   type DragEndEvent,
+  type DragMoveEvent,
 } from '@dnd-kit/core';
 import {
   BOOKING_STATUSES,
@@ -36,6 +39,9 @@ const STATUS_COLORS: Record<string, string> = {
   Cancelled: 'bg-slate-100 border-slate-300 text-slate-500',
   'Deposit Pending': 'bg-orange-100 border-orange-300 text-orange-800',
 };
+
+/** Touch/pen: if pointer moved more than this on X or Y before contextmenu, skip menu (drag intent). */
+const CONTEXT_MENU_MAX_POINTER_MOVE_PX = 10;
 
 const STATUS_DOTS: Record<string, string> = {
   Pending: 'bg-amber-500',
@@ -81,6 +87,10 @@ interface BookingBlock {
   occasion: string | null;
   startCol: number;
   spanCols: number;
+  leftPx: number;
+  widthPx: number;
+  _startMin: number;
+  _endMin: number;
   rowSpan: number;
   laneIndex: number;
   laneCount: number;
@@ -136,6 +146,32 @@ interface Props {
 const SLOT_WIDTH_DEFAULT = 64;
 const ROW_HEIGHT = 48;
 const HEADER_HEIGHT = 40;
+/** Left/right unassigned toolbar row height — stacked label + full-width “Assign All” (matches narrow sidebar). */
+const UNASSIGNED_HEADER_HEIGHT = 64;
+
+/** Prefer timeline cells over parent row droppables so drop target + drag preview match the slot under the pointer. */
+const cellFirstTimelineCollision: CollisionDetection = (args) => {
+  const collisions = rectIntersection(args);
+  const cells = collisions.filter((c) => String(c.id).startsWith('cell_'));
+  return cells.length > 0 ? cells : collisions;
+};
+
+const CELL_DROP_ID_REGEX = /^cell_(.+)_(\d{1,2}:\d{2})$/;
+
+type DragDropPreview =
+  | { kind: 'time'; time: string; invalid: boolean }
+  | { kind: 'table'; label: string; invalid: boolean };
+
+function formatTargetTableLabel(
+  targetTableIds: string[] | null | undefined,
+  hoveredTableId: string,
+  tableList: VenueTable[],
+): string {
+  if (targetTableIds && targetTableIds.length > 0) {
+    return targetTableIds.map((id) => tableList.find((t) => t.id === id)?.name ?? id).join(' + ');
+  }
+  return tableList.find((t) => t.id === hoveredTableId)?.name ?? 'Table';
+}
 
 export function TimelineGrid({
   tables,
@@ -178,9 +214,14 @@ export function TimelineGrid({
   const scrollRef = useRef<HTMLDivElement>(null);
   const leftScrollRef = useRef<HTMLDivElement>(null);
   const [activeDrag, setActiveDrag] = useState<BookingBlock | null>(null);
+  const activeDragRef = useRef<BookingBlock | null>(null);
+  /** Touch/pen start position for a booking — used to avoid opening the context menu after a drag-intent move. */
+  const bookingPointerDownRef = useRef<{ bookingId: string; x: number; y: number } | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; booking: BookingBlock } | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<{ message: string; resolve: (value: boolean) => void } | null>(null);
   const [resizeVisual, setResizeVisual] = useState<{ bookingId: string; deltaSlots: number } | null>(null);
+  /** Hovered drop target while dragging — time (same table) or table/combination name (table move). */
+  const [dragDropPreview, setDragDropPreview] = useState<DragDropPreview | null>(null);
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportHeight, setViewportHeight] = useState(600);
 
@@ -222,6 +263,11 @@ export function TimelineGrid({
       const startCol = Math.max(0, Math.floor((bStart - startMin) / slotInterval));
       const endCol = Math.ceil((bEnd - startMin) / slotInterval);
       const spanCols = Math.max(1, endCol - startCol);
+
+      const clampedStart = Math.max(bStart, startMin);
+      const leftPx = ((clampedStart - startMin) / slotInterval) * SLOT_WIDTH;
+      const widthPx = Math.max(SLOT_WIDTH * 0.25, ((bEnd - clampedStart) / slotInterval) * SLOT_WIDTH);
+
       const allTableIds = bookingTableMap.get(cell.booking_id) ?? [cell.table_id];
       const tableNames = allTableIds.map((tid) => tableNameById.get(tid) ?? tid);
       for (const tableId of allTableIds) {
@@ -240,6 +286,10 @@ export function TimelineGrid({
           occasion: cell.booking_details.occasion,
           startCol,
           spanCols,
+          leftPx,
+          widthPx,
+          _startMin: bStart,
+          _endMin: bEnd,
           rowSpan: 1,
           laneIndex: 0,
           laneCount: 1,
@@ -256,6 +306,10 @@ export function TimelineGrid({
       const startCol = Math.max(0, Math.floor((bStart - startMin) / slotInterval));
       const endCol = Math.ceil((bEnd - startMin) / slotInterval);
 
+      const clampedStart = Math.max(bStart, startMin);
+      const uLeftPx = ((clampedStart - startMin) / slotInterval) * SLOT_WIDTH;
+      const uWidthPx = Math.max(SLOT_WIDTH * 0.25, ((bEnd - clampedStart) / slotInterval) * SLOT_WIDTH);
+
       blocks.push({
         id: b.id,
         guest_name: b.guest_name,
@@ -271,6 +325,10 @@ export function TimelineGrid({
         occasion: b.occasion,
         startCol,
         spanCols: Math.max(1, endCol - startCol),
+        leftPx: uLeftPx,
+        widthPx: uWidthPx,
+        _startMin: bStart,
+        _endMin: bEnd,
         rowSpan: 1,
         laneIndex: 0,
         laneCount: 1,
@@ -287,18 +345,17 @@ export function TimelineGrid({
 
     for (const rowBlocks of byRow.values()) {
       rowBlocks.sort((a, b) => {
-        if (a.startCol !== b.startCol) return a.startCol - b.startCol;
-        return a.spanCols - b.spanCols;
+        if (a._startMin !== b._startMin) return a._startMin - b._startMin;
+        return a._endMin - b._endMin;
       });
       const laneEnds: number[] = [];
       for (const block of rowBlocks) {
-        const blockEndCol = block.startCol + block.spanCols;
-        let laneIndex = laneEnds.findIndex((laneEnd) => laneEnd <= block.startCol);
+        let laneIndex = laneEnds.findIndex((laneEnd) => laneEnd <= block._startMin);
         if (laneIndex === -1) {
-          laneEnds.push(blockEndCol);
+          laneEnds.push(block._endMin);
           laneIndex = laneEnds.length - 1;
         } else {
-          laneEnds[laneIndex] = blockEndCol;
+          laneEnds[laneIndex] = block._endMin;
         }
         block.laneIndex = laneIndex;
       }
@@ -309,7 +366,7 @@ export function TimelineGrid({
     }
 
     return blocks;
-  }, [cells, unassignedBookings, startMin, slotInterval, tables]);
+  }, [cells, unassignedBookings, startMin, slotInterval, tables, SLOT_WIDTH]);
 
   const filteredBlocks = useMemo(() => {
     let blocks = bookingBlocks;
@@ -318,6 +375,14 @@ export function TimelineGrid({
     if (statusFilter) blocks = blocks.filter((b) => b.status === statusFilter);
     return blocks;
   }, [bookingBlocks, statusFilter, showCancelled, showNoShow]);
+
+  const unassignedBlocks = useMemo(() => {
+    const list = filteredBlocks.filter((b) => !b.table_id);
+    return [...list].sort((a, b) => {
+      if (a._startMin !== b._startMin) return a._startMin - b._startMin;
+      return a.id.localeCompare(b.id);
+    });
+  }, [filteredBlocks]);
 
   const cellMap = useMemo(() => {
     const map = new Map<string, TableGridCell>();
@@ -389,13 +454,24 @@ export function TimelineGrid({
   );
 
   const handleDragStart = useCallback((event: DragStartEvent) => {
+    setContextMenu(null);
+    setDragDropPreview(null);
     const bookingId = String(event.active.id).split('__')[0] ?? String(event.active.id);
     const block = filteredBlocks.find((b) => b.id === bookingId);
     if (block) {
+      activeDragRef.current = block;
       setActiveDrag(block);
       onDragValidation(block);
     }
   }, [filteredBlocks, onDragValidation]);
+
+  const handleDragCancel = useCallback(() => {
+    setContextMenu(null);
+    setDragDropPreview(null);
+    activeDragRef.current = null;
+    setActiveDrag(null);
+    onDragValidation(null);
+  }, [onDragValidation]);
 
   const confirmAction = useCallback((message: string): Promise<boolean> => {
     return new Promise((resolve) => {
@@ -445,7 +521,68 @@ export function TimelineGrid({
     return resolveDropTarget(targetTableId, context, tableInfos, cells, combinations ?? []);
   }, [tables, cells, combinations]);
 
+  const handleDragMove = useCallback((event: DragMoveEvent) => {
+    setContextMenu((prev) => (prev ? null : prev));
+
+    const block = activeDragRef.current;
+    const overId = event.over?.id != null ? String(event.over.id) : '';
+
+    if (!block || !overId) {
+      setDragDropPreview(null);
+      return;
+    }
+
+    if (overId.startsWith('cell_')) {
+      const m = overId.match(CELL_DROP_ID_REGEX);
+      if (!m) {
+        setDragDropPreview(null);
+        return;
+      }
+
+      const tableId = m[1] ?? '';
+      const time = m[2] ?? '';
+      const targetCell = cellMap.get(`${tableId}__${time}`);
+      const blocked = Boolean(targetCell?.is_blocked);
+      const isTableMove = !block.table_ids.includes(tableId);
+
+      if (isTableMove) {
+        const targetTableIds = resolveTargetTableIds(tableId, block);
+        const invalid = blocked || !targetTableIds || targetTableIds.length === 0;
+        const label = formatTargetTableLabel(targetTableIds, tableId, tables);
+        setDragDropPreview({ kind: 'table', label, invalid });
+        return;
+      }
+
+      const invalid = blocked || isInvalidTimeTarget(tableId, time, block);
+      setDragDropPreview({ kind: 'time', time, invalid });
+      return;
+    }
+
+    if (overId.startsWith('table_')) {
+      const tableId = overId.replace('table_', '');
+      if (!tableId) {
+        setDragDropPreview(null);
+        return;
+      }
+      const isTableMove = !block.table_ids.includes(tableId);
+      if (!isTableMove) {
+        setDragDropPreview(null);
+        return;
+      }
+      const targetTableIds = resolveTargetTableIds(tableId, block);
+      const invalid = !targetTableIds || targetTableIds.length === 0;
+      const label = formatTargetTableLabel(targetTableIds, tableId, tables);
+      setDragDropPreview({ kind: 'table', label, invalid });
+      return;
+    }
+
+    setDragDropPreview(null);
+  }, [cellMap, isInvalidTimeTarget, resolveTargetTableIds, tables]);
+
   const handleDragEnd = useCallback((event: DragEndEvent) => {
+    setContextMenu(null);
+    setDragDropPreview(null);
+    activeDragRef.current = null;
     setActiveDrag(null);
     onDragValidation(null);
     const { active, over } = event;
@@ -478,7 +615,7 @@ export function TimelineGrid({
         } else {
           onAssign(bookingId, targetTableIds);
         }
-        // Reallocating table(s) must not accidentally change booking time.
+        // Never change booking time when changing table — time updates only on same-table cell drops below.
         return;
       }
 
@@ -508,8 +645,25 @@ export function TimelineGrid({
     }
   }, [filteredBlocks, tables, onReassign, onTimeChange, onAssign, onError, onDragValidation, cellMap, resolveTargetTableIds]);
 
+  const handleBookingPointerDown = useCallback((block: BookingBlock, clientX: number, clientY: number) => {
+    bookingPointerDownRef.current = { bookingId: block.id, x: clientX, y: clientY };
+  }, []);
+
   const handleContextMenu = useCallback((e: React.MouseEvent, block: BookingBlock) => {
     e.preventDefault();
+    if (activeDragRef.current?.id === block.id) return;
+
+    const ne = e.nativeEvent as PointerEvent | MouseEvent;
+    const pointerType = 'pointerType' in ne ? ne.pointerType : 'mouse';
+    if (pointerType === 'touch' || pointerType === 'pen') {
+      const down = bookingPointerDownRef.current;
+      if (down?.bookingId === block.id) {
+        const dx = Math.abs(e.clientX - down.x);
+        const dy = Math.abs(e.clientY - down.y);
+        if (Math.max(dx, dy) > CONTEXT_MENU_MAX_POINTER_MOVE_PX) return;
+      }
+    }
+
     setContextMenu({ x: e.clientX, y: e.clientY, booking: block });
   }, []);
 
@@ -551,6 +705,18 @@ export function TimelineGrid({
     };
     window.addEventListener('keydown', handleEsc);
     return () => window.removeEventListener('keydown', handleEsc);
+  }, []);
+
+  useEffect(() => {
+    const clearBookingPointer = () => {
+      bookingPointerDownRef.current = null;
+    };
+    window.addEventListener('pointerup', clearBookingPointer);
+    window.addEventListener('pointercancel', clearBookingPointer);
+    return () => {
+      window.removeEventListener('pointerup', clearBookingPointer);
+      window.removeEventListener('pointercancel', clearBookingPointer);
+    };
   }, []);
 
   const gridWidth = timeSlots.length * SLOT_WIDTH;
@@ -598,7 +764,6 @@ export function TimelineGrid({
     return result;
   }, [tables, zones, bookingBlocks]);
 
-  const totalRows = sortedTables.length + (unassignedBookings.length > 0 ? 2 : 0);
   const rowEntries = useMemo(() => {
     const entries: Array<{ key: string; type: 'zone' | 'table'; height: number; table?: VenueTable; zone?: string }> = [];
     sortedTables.forEach((table, i) => {
@@ -642,9 +807,19 @@ export function TimelineGrid({
   const totalBodyHeight = rowEntries.reduce((sum, entry) => sum + entry.height, 0);
   const renderedBodyHeight = visibleRowEntries.reduce((sum, entry) => sum + entry.height, 0);
   const bottomSpacerHeight = Math.max(0, totalBodyHeight - topSpacerHeight - renderedBodyHeight);
+  const unassignedSectionHeight =
+    unassignedBlocks.length > 0 ? UNASSIGNED_HEADER_HEIGHT + unassignedBlocks.length * ROW_HEIGHT : 0;
+  const timelineBodyScrollHeight = totalBodyHeight + unassignedSectionHeight;
 
   return (
-    <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+    <DndContext
+      sensors={sensors}
+      collisionDetection={cellFirstTimelineCollision}
+      onDragStart={handleDragStart}
+      onDragMove={handleDragMove}
+      onDragCancel={handleDragCancel}
+      onDragEnd={handleDragEnd}
+    >
       <div className="flex h-full">
         <div className="flex w-28 shrink-0 flex-col border-r border-slate-200 bg-slate-50/50 sm:w-[140px]">
           <div className="flex h-10 items-center border-b border-slate-200 px-3 text-xs font-semibold text-slate-500">
@@ -676,26 +851,36 @@ export function TimelineGrid({
               return <TableRowHeader key={entry.key} table={table} isValidTarget={isValid} comboLabel={comboLabel} />;
             })}
             <div style={{ height: bottomSpacerHeight }} />
-            {unassignedBookings.length > 0 && (
+            {unassignedBlocks.length > 0 && (
               <>
-                <div className="flex h-6 items-center justify-between gap-2 bg-amber-50 px-3 text-[10px] font-bold uppercase tracking-wider text-amber-500">
-                  <span>Unassigned</span>
-                  {onAssignAllUnassigned && (
+                <div
+                  className="flex min-w-0 flex-col justify-center gap-1.5 border-b border-emerald-100 bg-emerald-50 px-2 py-2 sm:px-3"
+                  style={{ height: UNASSIGNED_HEADER_HEIGHT }}
+                >
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700">Unassigned</span>
+                  {onAssignAllUnassigned && unassignedBookings.length > 0 && (
                     <button
                       type="button"
                       onClick={onAssignAllUnassigned}
                       disabled={assignAllUnassignedLoading}
-                      className="rounded border border-amber-300 bg-white px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-amber-700 hover:bg-amber-100 disabled:opacity-50"
+                      className="w-full shrink-0 rounded-md border border-emerald-200 bg-white px-2 py-1.5 text-center text-[10px] font-semibold uppercase tracking-wider text-emerald-800 shadow-sm hover:bg-emerald-100/80 disabled:opacity-50"
                     >
                       {assignAllUnassignedLoading ? 'Assigning...' : 'Assign All'}
                     </button>
                   )}
                 </div>
-                <div className="flex items-center bg-amber-50/30 px-3" style={{ height: ROW_HEIGHT }}>
-                  <span className="text-xs font-medium text-amber-700">
-                    {unassignedBookings.length} booking{unassignedBookings.length !== 1 ? 's' : ''}
-                  </span>
-                </div>
+                {unassignedBlocks.map((block) => (
+                  <div
+                    key={block.id}
+                    className="flex min-w-0 flex-col justify-center border-b border-emerald-100 bg-emerald-50/60 px-2 py-0.5 sm:px-3"
+                    style={{ height: ROW_HEIGHT }}
+                  >
+                    <span className="truncate text-xs font-semibold text-emerald-900">{block.guest_name}</span>
+                    <span className="truncate text-[10px] text-emerald-700">
+                      {block.start_time.slice(0, 5)} · {block.party_size} pax
+                    </span>
+                  </div>
+                ))}
               </>
             )}
           </div>
@@ -721,7 +906,7 @@ export function TimelineGrid({
                 style={{
                   left: currentTimeOffset,
                   top: HEADER_HEIGHT,
-                  height: totalRows * ROW_HEIGHT + (zones.length > 0 ? zones.length * 24 : 0),
+                  height: timelineBodyScrollHeight,
                 }}
               />
             )}
@@ -791,6 +976,7 @@ export function TimelineGrid({
                       highlighted={highlightedBookingIds.has(block.id)}
                       isMultiTable={block.table_ids.length > 1}
                       onContextMenu={handleContextMenu}
+                      onBookingPointerDown={handleBookingPointerDown}
                       onClick={onBookingClick}
                       resizeVisual={resizeVisual}
                       onResizeVisual={setResizeVisual}
@@ -802,52 +988,87 @@ export function TimelineGrid({
             })}
             <div style={{ height: bottomSpacerHeight }} />
 
-            {unassignedBookings.length > 0 && (
+            {unassignedBlocks.length > 0 && (
               <>
-                <div style={{ height: 24 }} />
-                <div className="relative flex bg-amber-50/20" style={{ width: gridWidth, height: ROW_HEIGHT }}>
+                <div
+                  className="flex shrink-0 border-b border-emerald-100 bg-emerald-50"
+                  style={{ width: gridWidth, height: UNASSIGNED_HEADER_HEIGHT }}
+                >
                   {timeSlots.map((time) => (
                     <div
                       key={time}
-                      className="shrink-0 border-b border-r border-amber-100/50"
-                      style={{ width: SLOT_WIDTH, height: ROW_HEIGHT }}
+                      className="shrink-0 border-r border-emerald-100/70"
+                      style={{ width: SLOT_WIDTH, height: UNASSIGNED_HEADER_HEIGHT }}
                     />
                   ))}
-                  {filteredBlocks
-                    .filter((b) => !b.table_id)
-                    .map((block) => (
-                      <DraggableBlock
-                        key={block.id}
-                        block={block}
-                        dragId={`${block.id}__unassigned`}
-                        slotWidth={SLOT_WIDTH}
-                        rowHeight={ROW_HEIGHT}
-                        highlighted={highlightedBookingIds.has(block.id)}
-                        isMultiTable={false}
-                        onContextMenu={handleContextMenu}
-                        onClick={onBookingClick}
-                        resizeVisual={resizeVisual}
-                        onResizeVisual={setResizeVisual}
-                        activeDragBookingId={activeDrag?.id ?? null}
+                </div>
+                {unassignedBlocks.map((block) => (
+                  <div key={block.id} className="relative flex shrink-0 bg-emerald-50/30" style={{ width: gridWidth, height: ROW_HEIGHT }}>
+                    {timeSlots.map((time) => (
+                      <div
+                        key={time}
+                        className="shrink-0 border-b border-r border-emerald-100/60"
+                        style={{ width: SLOT_WIDTH, height: ROW_HEIGHT }}
                       />
                     ))}
-                </div>
+                    <DraggableBlock
+                      block={{ ...block, laneIndex: 0, laneCount: 1, rowSpan: 1 }}
+                      dragId={`${block.id}__unassigned`}
+                      slotWidth={SLOT_WIDTH}
+                      rowHeight={ROW_HEIGHT}
+                      highlighted={highlightedBookingIds.has(block.id)}
+                      isMultiTable={false}
+                      onContextMenu={handleContextMenu}
+                      onBookingPointerDown={handleBookingPointerDown}
+                      onClick={onBookingClick}
+                      resizeVisual={resizeVisual}
+                      onResizeVisual={setResizeVisual}
+                      activeDragBookingId={activeDrag?.id ?? null}
+                    />
+                  </div>
+                ))}
               </>
             )}
           </div>
         </div>
       </div>
 
-      <DragOverlay>
+      <DragOverlay className="overflow-visible">
         {activeDrag && (
-          <div className={`flex flex-col gap-0.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium shadow-lg ${
-            STATUS_COLORS[activeDrag.status] ?? 'bg-slate-100 border-slate-300 text-slate-800'
-          }`}>
-            <div className="flex items-center gap-1.5">
-              <span>{activeDrag.guest_name}</span>
-              <span className="rounded-full bg-white/60 px-1.5 py-0.5 text-[10px] font-bold">
-                {activeDrag.party_size}
-              </span>
+          <div className="flex flex-col gap-0.5 overflow-visible">
+            <div className="relative inline-block max-w-[min(100vw-2rem,20rem)] overflow-visible">
+              {dragDropPreview && (
+                <div
+                  className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-1.5 w-max max-w-[90vw] -translate-x-1/2"
+                  aria-live="polite"
+                >
+                  <span
+                    className={`inline-block max-w-[min(90vw,18rem)] truncate rounded-md px-2 py-1 text-center text-[11px] font-semibold shadow-md ${
+                      dragDropPreview.kind === 'time' ? 'tabular-nums' : ''
+                    } ${
+                      dragDropPreview.invalid
+                        ? 'bg-red-600 text-white'
+                        : 'bg-slate-900 text-white'
+                    }`}
+                  >
+                    {dragDropPreview.kind === 'time'
+                      ? `Move to ${dragDropPreview.time}`
+                      : `Move to ${dragDropPreview.label}`}
+                  </span>
+                </div>
+              )}
+              <div
+                className={`flex flex-col gap-0.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium shadow-lg ${
+                  STATUS_COLORS[activeDrag.status] ?? 'bg-slate-100 border-slate-300 text-slate-800'
+                }`}
+              >
+                <div className="flex items-center gap-1.5">
+                  <span>{activeDrag.guest_name}</span>
+                  <span className="rounded-full bg-white/60 px-1.5 py-0.5 text-[10px] font-bold">
+                    {activeDrag.party_size}
+                  </span>
+                </div>
+              </div>
             </div>
             {activeDrag.table_ids.length > 1 && (
               <span className="text-[10px] font-semibold text-purple-700">
@@ -1116,7 +1337,7 @@ function DroppableCell({
   );
 }
 
-function DraggableBlock({ block, dragId, slotWidth, rowHeight, highlighted, isMultiTable, onContextMenu, onClick, resizeVisual, onResizeVisual, activeDragBookingId }: {
+function DraggableBlock({ block, dragId, slotWidth, rowHeight, highlighted, isMultiTable, onContextMenu, onBookingPointerDown, onClick, resizeVisual, onResizeVisual, activeDragBookingId }: {
   block: BookingBlock;
   dragId: string;
   slotWidth: number;
@@ -1124,6 +1345,7 @@ function DraggableBlock({ block, dragId, slotWidth, rowHeight, highlighted, isMu
   highlighted: boolean;
   isMultiTable: boolean;
   onContextMenu: (e: React.MouseEvent, block: BookingBlock) => void;
+  onBookingPointerDown: (block: BookingBlock, clientX: number, clientY: number) => void;
   onClick: (bookingId: string) => void;
   resizeVisual: { bookingId: string; deltaSlots: number } | null;
   onResizeVisual: (state: { bookingId: string; deltaSlots: number } | null) => void;
@@ -1137,9 +1359,9 @@ function DraggableBlock({ block, dragId, slotWidth, rowHeight, highlighted, isMu
   const [resizePreviewEnd, setResizePreviewEnd] = useState<string | null>(null);
 
   const colorClass = STATUS_COLORS[block.status] ?? 'bg-slate-100 border-slate-300 text-slate-800';
-  const left = block.startCol * slotWidth + 2;
+  const left = block.leftPx + 2;
   const resizeDelta = resizeVisual?.bookingId === block.id ? resizeVisual.deltaSlots * slotWidth : 0;
-  const width = Math.max(16, block.spanCols * slotWidth - 4 + resizeDelta);
+  const width = Math.max(16, block.widthPx - 4 + resizeDelta);
   const isSiblingDragging = activeDragBookingId === block.id && !isDragging;
   const rowHeightForLane = Math.max(18, (rowHeight * Math.max(1, block.rowSpan) - 8) / Math.max(1, block.laneCount));
   const top = 1 + block.laneIndex * rowHeightForLane;
@@ -1206,6 +1428,10 @@ function DraggableBlock({ block, dragId, slotWidth, rowHeight, highlighted, isMu
     <div
       ref={setNodeRef}
       {...attributes}
+      onPointerDownCapture={(e) => {
+        if (e.button !== 0) return;
+        onBookingPointerDown(block, e.clientX, e.clientY);
+      }}
       onContextMenu={(e) => onContextMenu(e, block)}
       onClick={() => { if (!justResizedRef.current) onClick(block.id); }}
       className={`absolute flex cursor-grab touch-none select-none items-center gap-1 overflow-hidden rounded-md border px-2 text-xs font-medium transition-shadow active:cursor-grabbing ${colorClass} ${

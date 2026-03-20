@@ -17,6 +17,11 @@ import { UndoToast } from '@/app/dashboard/table-grid/UndoToast';
 import type { UndoAction } from '@/types/table-management';
 import { UnifiedBookingForm } from '@/components/booking/UnifiedBookingForm';
 import { ModifyBookingInline } from '@/components/booking/ModifyBookingInline';
+import { DashboardStatCard } from '@/components/dashboard/DashboardStatCard';
+import {
+  computeNextBookingsSlotFromBookingRows,
+  nextBookingsTileContent,
+} from '@/lib/table-management/next-bookings-slot';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -103,9 +108,7 @@ interface Filters {
 // ─── Constants ──────────────────────────────────────────────────────────────
 
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-const SHORT_WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-const SHORT_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 const POLL_INTERVAL_MS = 30_000;
 
@@ -140,9 +143,10 @@ function formatDateFull(date: string): string {
   const d = new Date(date + 'T12:00:00');
   return `${WEEKDAYS[d.getDay()]} ${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
 }
-function formatDateShort(date: string): string {
-  const d = new Date(date + 'T12:00:00');
-  return `${SHORT_WEEKDAYS[d.getDay()]} ${d.getDate()} ${SHORT_MONTHS[d.getMonth()]}`;
+/** Long heading — matches table grid / live floor date strip. */
+function formatDateHeading(date: string): string {
+  const d = new Date(`${date}T12:00:00`);
+  return d.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 }
 function timeToMinutes(t: string): number {
   const [h, m] = t.split(':').map(Number);
@@ -179,83 +183,76 @@ function FillBar({ booked, capacity }: { booked: number; capacity: number }) {
   );
 }
 
-// ─── SummaryBar ─────────────────────────────────────────────────────────────
+// ─── Day sheet stats row (same card language as table grid / floor plan SummaryBar) ──
 
-function SummaryBar({
+function DaySheetStatsRow({
   summary,
-  capacityConfigured,
+  periods,
 }: {
   summary: DaySheetData['summary'];
-  capacityConfigured: boolean;
+  periods: DaySheetPeriod[];
 }) {
-  const isToday = summary.is_today;
+  const isTodayView = summary.is_today;
 
-  // Build the "freeing soon" display
-  const netFreeing = summary.freeing_soon - summary.arriving_soon;
-  let freeingLabel: string;
-  let freeingValue: string;
-  let freeingAccent: string;
-  if (!isToday || !capacityConfigured) {
-    freeingLabel = 'Pending';
-    freeingValue = String(summary.pending_count);
-    freeingAccent = summary.pending_count > 0 ? 'text-amber-700 border-amber-200' : 'text-slate-700 border-slate-200';
-  } else if (netFreeing > 0) {
-    freeingLabel = 'Freeing in 30 min';
-    freeingValue = `+${netFreeing}`;
-    freeingAccent = 'text-emerald-700 border-emerald-200';
-  } else if (netFreeing < 0) {
-    freeingLabel = 'Arriving in 30 min';
-    freeingValue = String(Math.abs(netFreeing));
-    freeingAccent = 'text-amber-700 border-amber-200';
-  } else if (summary.freeing_soon > 0) {
-    freeingLabel = 'Freeing in 30 min';
-    freeingValue = `${summary.freeing_soon} (${summary.arriving_soon} arriving)`;
-    freeingAccent = 'text-slate-700 border-slate-200';
-  } else {
-    freeingLabel = 'Freeing in 30 min';
-    freeingValue = '0';
-    freeingAccent = 'text-slate-700 border-slate-200';
+  const bookingRows = periods.flatMap((p) =>
+    p.bookings.map((b) => ({
+      id: b.id,
+      start_time: b.booking_time,
+      party_size: b.party_size,
+      status: b.status,
+    })),
+  );
+  const refMinutes = isTodayView ? new Date().getHours() * 60 + new Date().getMinutes() : 0;
+  const nextBookingsSlot = computeNextBookingsSlotFromBookingRows(bookingRows, refMinutes);
+  const nextBookings = nextBookingsTileContent(nextBookingsSlot);
+
+  const cap = summary.venue_max_capacity;
+  const coversPct =
+    cap != null && cap > 0 ? Math.round((summary.covers_in_use / cap) * 100) : 0;
+
+  const avail = summary.covers_available_now;
+
+  if (isTodayView) {
+    return (
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 print:grid-cols-4">
+        <DashboardStatCard
+          label="Covers in use"
+          value={cap != null ? `${summary.covers_in_use}/${cap}` : summary.covers_in_use}
+          color="blue"
+          subValue={cap != null && cap > 0 ? `${coversPct}% of capacity` : undefined}
+        />
+        <DashboardStatCard
+          label="Available now"
+          value={avail != null ? avail : '—'}
+          color="violet"
+        />
+        <DashboardStatCard label="Bookings" value={summary.total_bookings} color="emerald" />
+        <DashboardStatCard
+          value={nextBookings.primaryValue}
+          color="amber"
+          subValue={nextBookings.guestsLine}
+          subValue2={nextBookings.bookingsLine}
+        />
+      </div>
+    );
   }
 
-  const cards: Array<{ label: string; value: string | number; sub?: string; accent: string }> = isToday
-    ? [
-        {
-          label: 'Covers In Use',
-          value: summary.covers_in_use,
-          sub: summary.venue_max_capacity != null ? `of ${summary.venue_max_capacity}` : undefined,
-          accent: summary.covers_in_use > 0 ? 'text-blue-700 border-blue-200' : 'text-slate-700 border-slate-200',
-        },
-        {
-          label: 'Available Now',
-          value: summary.covers_available_now != null ? summary.covers_available_now : '—',
-          accent: summary.covers_available_now != null
-            ? summary.covers_available_now === 0 ? 'text-red-700 border-red-200'
-              : summary.covers_available_now <= 5 ? 'text-amber-700 border-amber-200'
-              : 'text-emerald-700 border-emerald-200'
-            : 'text-slate-700 border-slate-200',
-        },
-        { label: 'Bookings', value: summary.total_bookings, accent: 'text-slate-700 border-slate-200' },
-        { label: freeingLabel, value: freeingValue, accent: freeingAccent },
-      ]
-    : [
-        { label: 'Total Covers', value: summary.total_covers, accent: 'text-brand-700 border-brand-200' },
-        { label: 'Remaining', value: summary.covers_remaining != null ? summary.covers_remaining : '—', accent: 'text-emerald-700 border-emerald-200' },
-        { label: 'Bookings', value: summary.total_bookings, accent: 'text-slate-700 border-slate-200' },
-        { label: freeingLabel, value: freeingValue, accent: freeingAccent },
-      ];
-
+  const rem = summary.covers_remaining;
   return (
-    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 print:grid-cols-4">
-      {cards.map((c) => (
-        <div
-          key={c.label}
-          className={`rounded-xl border bg-white p-3 text-left shadow-sm ${c.accent}`}
-        >
-          <p className="text-[11px] font-medium text-slate-500">{c.label}</p>
-          <p className="mt-0.5 text-xl font-bold tabular-nums">{c.value}</p>
-          {c.sub && <p className="text-[10px] text-slate-400">{c.sub}</p>}
-        </div>
-      ))}
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 print:grid-cols-4">
+      <DashboardStatCard label="Total covers" value={summary.total_covers} color="blue" />
+      <DashboardStatCard
+        label="Remaining"
+        value={rem != null ? rem : '—'}
+        color="violet"
+      />
+      <DashboardStatCard label="Bookings" value={summary.total_bookings} color="emerald" />
+      <DashboardStatCard
+        value={nextBookings.primaryValue}
+        color="amber"
+        subValue={nextBookings.guestsLine}
+        subValue2={nextBookings.bookingsLine}
+      />
     </div>
   );
 }
@@ -1002,11 +999,17 @@ export function DaySheetView({ venueId }: { venueId: string }) {
   if (loading && !data) {
     return (
       <div className="space-y-4">
-        <div className="h-14 animate-pulse rounded-xl bg-white shadow-sm" />
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-          {[...Array(4)].map((_, i) => <div key={i} className="h-20 animate-pulse rounded-xl bg-white shadow-sm" />)}
+        <div className="h-16 animate-pulse rounded-xl bg-slate-100/80" />
+        <div className="h-14 animate-pulse rounded-xl bg-slate-100/80" />
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          {[...Array(4)].map((_, i) => (
+            <div key={i} className="h-24 animate-pulse rounded-xl bg-slate-100/80" />
+          ))}
         </div>
-        {[...Array(3)].map((_, i) => <div key={i} className="h-16 animate-pulse rounded-xl bg-white shadow-sm" />)}
+        <div className="h-14 animate-pulse rounded-xl bg-slate-100/80" />
+        {[...Array(2)].map((_, i) => (
+          <div key={i} className="h-16 animate-pulse rounded-xl bg-slate-100/80" />
+        ))}
       </div>
     );
   }
@@ -1021,97 +1024,125 @@ export function DaySheetView({ venueId }: { venueId: string }) {
   }
 
   return (
-    <div className="daysheet-root space-y-3">
-      {/* ── Toolbar ── */}
-      <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2.5 shadow-sm print:shadow-none print:border-0 print:px-0">
-        {/* Date nav (left) */}
-        <div className="flex items-center gap-1">
-          <button type="button" onClick={() => setDate(addDays(date, -1))} className="rounded-lg p-2 text-slate-400 hover:bg-slate-50 hover:text-slate-600 print:hidden">
-            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" /></svg>
-          </button>
-          <div className="relative">
-            <button type="button" onClick={() => setShowDatePicker(!showDatePicker)} className="px-2 py-1 text-sm font-semibold text-slate-900 hover:bg-slate-50 rounded-lg">
-              {formatDateShort(date)}
-              {isToday && <span className="ml-1.5 text-xs font-medium text-brand-600">Today</span>}
-            </button>
-            {showDatePicker && (
-              <input
-                type="date"
-                value={date}
-                onChange={(e) => { setDate(e.target.value || todayISO()); setShowDatePicker(false); }}
-                onBlur={() => setShowDatePicker(false)}
-                className="absolute left-0 top-full mt-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm shadow-lg z-20"
-                autoFocus
-              />
-            )}
-          </div>
-          <button type="button" onClick={() => setDate(addDays(date, 1))} className="rounded-lg p-2 text-slate-400 hover:bg-slate-50 hover:text-slate-600 print:hidden">
-            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" /></svg>
-          </button>
-          {!isToday && (
-            <button type="button" onClick={() => setDate(todayISO())} className="rounded-lg border border-slate-200 px-2.5 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50 print:hidden">
-              Today
-            </button>
-          )}
+    <div className="daysheet-root space-y-4">
+      {/* Row 1 — matches table grid / live floor (Operations + primary actions) */}
+      <div className="flex flex-col gap-3 print:hidden sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Operations</p>
+          <h1 className="truncate text-lg font-semibold text-slate-900 sm:text-xl">Day sheet</h1>
         </div>
-
-        {/* Filters (centre) */}
-        <div className="flex flex-1 flex-wrap items-center gap-2 print:hidden">
-          <select
-            value={filters.periodKey}
-            onChange={(e) => setFilters((f) => ({ ...f, periodKey: e.target.value }))}
-            className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-medium text-slate-700 focus:border-brand-500"
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setDate(todayISO())}
+            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 shadow-sm hover:bg-slate-50"
           >
-            <option value="all">All Periods</option>
-            {data.periods.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
-          </select>
-          <input
-            value={filters.search}
-            onChange={(e) => setFilters((f) => ({ ...f, search: e.target.value }))}
-            placeholder="Search guest / party size..."
-            className="w-40 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
-          />
-          <label className="flex items-center gap-1 text-xs text-slate-600">
-            <input type="checkbox" checked={filters.statuses.has('Completed')} onChange={(e) => setFilters((f) => { const s = new Set(f.statuses); if (e.target.checked) s.add('Completed'); else s.delete('Completed'); return { ...f, statuses: s }; })} className="rounded border-slate-300" />
-            Completed
-          </label>
-          <label className="flex items-center gap-1 text-xs text-slate-600">
-            <input type="checkbox" checked={filters.showCancelled} onChange={(e) => setFilters((f) => ({ ...f, showCancelled: e.target.checked }))} className="rounded border-slate-300" />
-            Cancelled
-          </label>
-          <label className="flex items-center gap-1 text-xs text-slate-600">
-            <input type="checkbox" checked={filters.showNoShow} onChange={(e) => setFilters((f) => ({ ...f, showNoShow: e.target.checked }))} className="rounded border-slate-300" />
-            No-show
-          </label>
-          {hasActiveFilters && (
-            <button
-              type="button"
-              onClick={() => setFilters({ periodKey: 'all', statuses: new Set(DEFAULT_STATUSES), search: '', showCancelled: false, showNoShow: false })}
-              className="text-xs font-medium text-brand-600 hover:text-brand-700"
-            >
-              Clear filters
-            </button>
-          )}
-        </div>
-
-        {/* Actions (right) */}
-        <div className="flex items-center gap-1.5 print:hidden">
-          <button type="button" onClick={() => setShowNewBooking(true)} className="flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-brand-700">
-            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
-            New Booking
+            Today
           </button>
-          <button type="button" onClick={() => setShowWalkIn(true)} className="flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-emerald-700">
-            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
-            Walk-in
-          </button>
-          <button type="button" onClick={() => window.print()} className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50">
+          <button
+            type="button"
+            onClick={() => window.print()}
+            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 shadow-sm hover:bg-slate-50"
+          >
             Print
           </button>
-          <button type="button" onClick={() => { setLoading(true); void fetchDaySheet(); }} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-50 hover:text-slate-600" title="Refresh">
-            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182" /></svg>
+          <button
+            type="button"
+            onClick={() => {
+              setLoading(true);
+              void fetchDaySheet();
+            }}
+            className="rounded-lg border border-slate-200 bg-white p-2 text-slate-500 shadow-sm hover:bg-slate-50 hover:text-slate-700"
+            aria-label="Refresh"
+          >
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182" />
+            </svg>
           </button>
-          <span className={`h-2 w-2 rounded-full ${connection === 'green' ? 'bg-emerald-500' : connection === 'amber' ? 'bg-amber-400 animate-pulse' : 'bg-red-500 animate-pulse'}`} title={connection === 'green' ? 'Live updates' : connection === 'amber' ? 'Polling every 30s' : 'Offline'} />
+          <span
+            className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium ${
+              connection === 'green'
+                ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                : connection === 'amber'
+                  ? 'border-amber-200 bg-amber-50 text-amber-700'
+                  : 'border-red-200 bg-red-50 text-red-700'
+            }`}
+          >
+            <span
+              className={`h-1.5 w-1.5 rounded-full ${
+                connection === 'green' ? 'bg-emerald-500' : connection === 'amber' ? 'bg-amber-500 animate-pulse' : 'bg-red-500 animate-pulse'
+              }`}
+            />
+            {connection === 'green' ? 'Live' : connection === 'amber' ? 'Polling' : 'Offline'}
+          </span>
+          <button
+            type="button"
+            onClick={() => setShowNewBooking(true)}
+            className="inline-flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-brand-700"
+          >
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+            </svg>
+            New Booking
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowWalkIn(true)}
+            className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-emerald-700"
+          >
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z" />
+            </svg>
+            Walk-in
+          </button>
         </div>
+      </div>
+
+      {/* Row 2 — date navigator (same card treatment as table grid / floor) */}
+      <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-3 shadow-sm print:hidden sm:px-4">
+        <button
+          type="button"
+          onClick={() => setDate(addDays(date, -1))}
+          className="rounded-lg p-2 text-slate-400 hover:bg-slate-50 hover:text-slate-600"
+          aria-label="Previous day"
+        >
+          <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" />
+          </svg>
+        </button>
+        <div className="relative min-w-0 flex-1 px-2 text-center">
+          <button
+            type="button"
+            onClick={() => setShowDatePicker((o) => !o)}
+            className="w-full rounded-lg py-1 hover:bg-slate-50/80"
+          >
+            <h2 className="truncate text-sm font-semibold text-slate-900 sm:text-base">{formatDateHeading(date)}</h2>
+            {isToday && <span className="text-xs font-medium text-brand-600">Today</span>}
+          </button>
+          {showDatePicker && (
+            <input
+              type="date"
+              value={date}
+              onChange={(e) => {
+                setDate(e.target.value || todayISO());
+                setShowDatePicker(false);
+              }}
+              onBlur={() => setShowDatePicker(false)}
+              className="absolute left-1/2 top-full z-20 mt-1 -translate-x-1/2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm shadow-lg"
+              autoFocus
+            />
+          )}
+        </div>
+        <button
+          type="button"
+          onClick={() => setDate(addDays(date, 1))}
+          className="rounded-lg p-2 text-slate-400 hover:bg-slate-50 hover:text-slate-600"
+          aria-label="Next day"
+        >
+          <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
+          </svg>
+        </button>
       </div>
 
       {/* Connection warning */}
@@ -1138,11 +1169,81 @@ export function DaySheetView({ venueId }: { venueId: string }) {
         <p className="text-sm font-medium text-slate-700">{formatDateFull(date)}</p>
       </div>
 
-      {/* ── Summary Bar ── */}
-      <SummaryBar
-        summary={data.summary}
-        capacityConfigured={data.capacity_configured}
-      />
+      {/* Row 3 — stat cards (aligned with table grid / floor plan) */}
+      <DaySheetStatsRow summary={data.summary} periods={data.periods} />
+
+      {/* Row 4 — filters (toolbar tools card, same as grid/floor filter strip) */}
+      <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm print:hidden sm:flex-row sm:flex-wrap sm:items-center">
+        <select
+          value={filters.periodKey}
+          onChange={(e) => setFilters((f) => ({ ...f, periodKey: e.target.value }))}
+          className="rounded-lg border border-slate-200 px-2.5 py-2 text-sm font-medium text-slate-700 focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+        >
+          <option value="all">All periods</option>
+          {data.periods.map((p) => (
+            <option key={p.key} value={p.key}>
+              {p.label}
+            </option>
+          ))}
+        </select>
+        <input
+          value={filters.search}
+          onChange={(e) => setFilters((f) => ({ ...f, search: e.target.value }))}
+          placeholder="Search guest / party size…"
+          className="min-w-[10rem] flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 sm:max-w-xs"
+        />
+        <label className="flex items-center gap-2 text-sm text-slate-600">
+          <input
+            type="checkbox"
+            checked={filters.statuses.has('Completed')}
+            onChange={(e) =>
+              setFilters((f) => {
+                const s = new Set(f.statuses);
+                if (e.target.checked) s.add('Completed');
+                else s.delete('Completed');
+                return { ...f, statuses: s };
+              })
+            }
+            className="rounded border-slate-300"
+          />
+          Completed
+        </label>
+        <label className="flex items-center gap-2 text-sm text-slate-600">
+          <input
+            type="checkbox"
+            checked={filters.showCancelled}
+            onChange={(e) => setFilters((f) => ({ ...f, showCancelled: e.target.checked }))}
+            className="rounded border-slate-300"
+          />
+          Cancelled
+        </label>
+        <label className="flex items-center gap-2 text-sm text-slate-600">
+          <input
+            type="checkbox"
+            checked={filters.showNoShow}
+            onChange={(e) => setFilters((f) => ({ ...f, showNoShow: e.target.checked }))}
+            className="rounded border-slate-300"
+          />
+          No-show
+        </label>
+        {hasActiveFilters && (
+          <button
+            type="button"
+            onClick={() =>
+              setFilters({
+                periodKey: 'all',
+                statuses: new Set(DEFAULT_STATUSES),
+                search: '',
+                showCancelled: false,
+                showNoShow: false,
+              })
+            }
+            className="text-sm font-medium text-brand-600 hover:text-brand-700"
+          >
+            Clear filters
+          </button>
+        )}
+      </div>
 
       {/* ── Dietary Summary ── */}
       {data.dietary_summary.length > 0 && (

@@ -129,7 +129,8 @@ describe('renderDepositConfirmation', () => {
 describe('renderReminder56h', () => {
   it('renders reminder with booking details', () => {
     const result = renderReminder56h(SAMPLE_BOOKING, SAMPLE_VENUE);
-    expect(result.subject).toContain('Reminder');
+    expect(result.subject).toContain('Please confirm');
+    expect(result.subject).toContain(SAMPLE_VENUE.name);
     expect(result.html).toContain('upcoming booking');
   });
 
@@ -141,7 +142,8 @@ describe('renderReminder56h', () => {
   it('shows no-deposit variant when no deposit', () => {
     const noDeposit = { ...SAMPLE_BOOKING, deposit_status: 'Not Required', deposit_amount_pence: null };
     const result = renderReminder56h(noDeposit, SAMPLE_VENUE);
-    expect(result.text).toContain('let us know');
+    expect(result.text).toContain('Please confirm or cancel');
+    expect(result.text).not.toContain('paid a deposit');
   });
 });
 

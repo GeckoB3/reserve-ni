@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { BOOKING_STATUS_TRANSITIONS, BOOKING_REVERT_ACTIONS, canMarkNoShowForSlot, isDestructiveBookingStatus, isRevertTransition, type BookingStatus } from '@/lib/table-management/booking-status';
 import { NumericInput } from '@/components/ui/NumericInput';
 import { ModifyBookingInline } from '@/components/booking/ModifyBookingInline';
@@ -73,14 +73,76 @@ interface AssignmentSuggestion {
   spare_covers: number;
 }
 
+/** Shown immediately when opening from table grid / floor plan before GET completes. */
+export interface BookingDetailPanelSnapshot {
+  bookingDate: string;
+  guestName: string;
+  partySize: number;
+  status: string;
+  startTime: string;
+  endTime: string;
+  dietaryNotes?: string | null;
+  occasion?: string | null;
+  specialRequests?: string | null;
+  depositStatus?: string | null;
+  /** Display-only until the booking payload hydrates. */
+  tableNames?: string[];
+}
+
+function formatDateNice(value: string): string {
+  const d = new Date(`${value}T12:00:00`);
+  if (Number.isNaN(d.getTime())) return value;
+  const today = new Date();
+  const tomorrow = new Date(today);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  if (d.toDateString() === today.toDateString()) return 'Today';
+  if (d.toDateString() === tomorrow.toDateString()) return 'Tomorrow';
+  return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+}
+
+function buildPlaceholderDetail(
+  id: string,
+  vId: string,
+  snap: BookingDetailPanelSnapshot
+): BookingDetail {
+  const startTime = snap.startTime.slice(0, 5);
+  const endTime = snap.endTime.slice(0, 5);
+  return {
+    id,
+    venue_id: vId,
+    booking_date: snap.bookingDate,
+    booking_time: startTime,
+    estimated_end_time: `${snap.bookingDate}T${endTime}:00.000Z`,
+    party_size: snap.partySize,
+    status: snap.status,
+    source: '—',
+    deposit_status: snap.depositStatus ?? 'Pending',
+    deposit_amount_pence: null,
+    dietary_notes: snap.dietaryNotes ?? null,
+    occasion: snap.occasion ?? null,
+    special_requests: snap.specialRequests ?? null,
+    internal_notes: null,
+    cancellation_deadline: null,
+    guest: { id: '', name: snap.guestName, email: null, phone: null, visit_count: 0 },
+    events: [],
+    communications: [],
+    table_assignments: [],
+  };
+}
+
 export function BookingDetailPanel({
   bookingId,
   onClose,
   onUpdated,
+  venueId,
+  initialSnapshot,
 }: {
   bookingId: string;
   onClose: () => void;
   onUpdated: () => void;
+  /** Required for optimistic placeholder from grid/floor views. */
+  venueId?: string;
+  initialSnapshot?: BookingDetailPanelSnapshot | null;
 }) {
   const [detail, setDetail] = useState<BookingDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -108,10 +170,26 @@ export function BookingDetailPanel({
   const [notesSaving, setNotesSaving] = useState(false);
   const [confirmDialog, setConfirmDialog] = useState<{ title: string; message: string; confirmLabel: string; onConfirm: () => void } | null>(null);
 
+  const optimisticDetail = useMemo(() => {
+    if (!initialSnapshot || !venueId) return null;
+    return buildPlaceholderDetail(bookingId, venueId, initialSnapshot);
+  }, [bookingId, venueId, initialSnapshot]);
+
+  const displayDetail = detail ?? optimisticDetail;
+  const isHydrated = detail !== null;
+
   const load = useCallback(async () => {
-    const res = await fetch(`/api/venue/bookings/${bookingId}`);
-    if (!res.ok) { setError('Failed to load'); return; }
-    const data = await res.json();
+    const [bookingRes, tablesRes] = await Promise.all([
+      fetch(`/api/venue/bookings/${bookingId}`),
+      fetch('/api/venue/tables'),
+    ]);
+
+    if (!bookingRes.ok) {
+      setError(bookingRes.status === 404 ? 'Booking not found' : 'Failed to load booking');
+      return;
+    }
+
+    const data = (await bookingRes.json()) as BookingDetail;
     setDetail(data);
     const startMinutes = timeToMinutes(data.booking_time?.slice(0, 5) ?? '12:00');
     const endMinutes = data.estimated_end_time
@@ -129,7 +207,6 @@ export function BookingDetailPanel({
     setInternalNotes(data.internal_notes ?? '');
 
     try {
-      const tablesRes = await fetch('/api/venue/tables');
       if (tablesRes.ok) {
         const tablesData = await tablesRes.json();
         setTableManagementEnabled(tablesData.settings?.table_management_enabled ?? false);
@@ -195,9 +272,14 @@ export function BookingDetailPanel({
   }, [showAssignModal, loadAssignmentSuggestions]);
 
   useEffect(() => {
+    setDetail(null);
+    setInternalNotes('');
+    setCustomMessage('');
+    setShowModify(false);
+    setShowAssignModal(false);
     setLoading(true);
     setError(null);
-    load().finally(() => setLoading(false));
+    void load().finally(() => setLoading(false));
   }, [load]);
 
   useEffect(() => {
@@ -379,25 +461,56 @@ export function BookingDetailPanel({
     }
   }, [bookingId, load, onUpdated]);
 
-  if (loading || !detail) {
+  if (!displayDetail) {
     return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 backdrop-blur-sm p-4">
-        <div role="dialog" aria-modal="true" aria-label="Booking detail" className="w-full max-w-lg rounded-2xl bg-white p-8 shadow-2xl">
-          <p className="text-slate-500">{loading ? 'Loading...' : 'Booking not found.'}</p>
-          <button type="button" onClick={onClose} className="mt-4 text-sm font-medium text-brand-600 hover:text-brand-700">Close</button>
+      <div className="fixed inset-0 z-50 flex justify-end bg-black/20 backdrop-blur-sm" onClick={onClose}>
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Booking detail panel"
+          className="flex w-full max-w-sm flex-col border-l border-slate-200 bg-white shadow-2xl lg:rounded-l-2xl"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+            <div className="h-4 w-28 animate-pulse rounded bg-slate-200" />
+            <div className="h-8 w-8 animate-pulse rounded-lg bg-slate-100" />
+          </div>
+          <div className="animate-pulse space-y-3 p-4">
+            <div className="h-20 rounded-xl bg-slate-100" />
+            <div className="grid grid-cols-2 gap-2">
+              <div className="h-14 rounded-lg bg-slate-100" />
+              <div className="h-14 rounded-lg bg-slate-100" />
+              <div className="h-14 rounded-lg bg-slate-100" />
+              <div className="h-14 rounded-lg bg-slate-100" />
+            </div>
+          </div>
+          {error && (
+            <div className="mx-4 mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+              {error}
+              <button type="button" onClick={onClose} className="mt-2 block text-[11px] font-medium text-brand-600 hover:text-brand-700">
+                Close
+              </button>
+            </div>
+          )}
         </div>
       </div>
     );
   }
 
-  const depositPaid = detail.deposit_status === 'Paid' && detail.deposit_amount_pence;
-  const depositAmountStr = detail.deposit_amount_pence ? `£${(detail.deposit_amount_pence / 100).toFixed(2)}` : null;
-  const nextStatuses = BOOKING_STATUS_TRANSITIONS[detail.status as BookingStatus] ?? [];
+  const d = displayDetail;
+  const optimisticTableLabel =
+    !isHydrated && initialSnapshot?.tableNames && initialSnapshot.tableNames.length > 0
+      ? initialSnapshot.tableNames.join(' + ')
+      : null;
+
+  const depositPaid = d.deposit_status === 'Paid' && d.deposit_amount_pence;
+  const depositAmountStr = d.deposit_amount_pence ? `£${(d.deposit_amount_pence / 100).toFixed(2)}` : null;
+  const nextStatuses = BOOKING_STATUS_TRANSITIONS[d.status as BookingStatus] ?? [];
   const canChangeStatus = nextStatuses.length > 0;
-  const confirmationSentAt = detail.communications.find((comm) => comm.message_type === 'booking_confirmation')?.created_at;
-  const startTime = detail.booking_time?.slice(0, 5) ?? '00:00';
-  const endTime = detail.estimated_end_time
-    ? new Date(detail.estimated_end_time).toISOString().slice(11, 16)
+  const confirmationSentAt = d.communications.find((comm) => comm.message_type === 'booking_confirmation')?.created_at;
+  const startTime = d.booking_time?.slice(0, 5) ?? '00:00';
+  const endTime = d.estimated_end_time
+    ? new Date(d.estimated_end_time).toISOString().slice(11, 16)
     : minutesToTime(timeToMinutes(startTime) + 90);
   const durationMinutes = Math.max(15, timeToMinutes(endTime) - timeToMinutes(startTime));
 
@@ -407,102 +520,143 @@ export function BookingDetailPanel({
         role="dialog"
         aria-modal="true"
         aria-label="Booking detail panel"
-        className="w-full max-w-md overflow-y-auto bg-white shadow-2xl lg:rounded-l-2xl"
+        className="w-full max-w-sm overflow-y-auto bg-white shadow-2xl lg:rounded-l-2xl"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Header */}
-        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-100 bg-white/95 backdrop-blur px-5 py-4">
-          <div>
-            <h2 className="text-lg font-semibold text-slate-900">{detail.guest?.name ?? 'Booking Details'}</h2>
-            <p className="text-xs text-slate-500">
-              Ref: {detail.id.slice(0, 8)}
-              <button
-                type="button"
-                onClick={() => navigator.clipboard?.writeText(detail.id)}
-                className="ml-2 rounded border border-slate-200 px-1.5 py-0.5 text-[10px] font-medium text-slate-600 hover:bg-slate-50"
-              >
-                Copy
-              </button>
-              <span className={`ml-2 rounded-full px-2 py-0.5 text-[10px] font-medium ${
-                detail.status === 'Pending'
-                  ? 'bg-amber-100 text-amber-700'
-                  : detail.status === 'Confirmed'
-                    ? 'bg-teal-100 text-teal-700'
-                    : detail.status === 'Seated'
-                      ? 'bg-blue-100 text-blue-700'
-                      : detail.status === 'Completed'
-                        ? 'bg-slate-100 text-slate-700'
-                        : detail.status === 'No-Show'
-                          ? 'bg-red-100 text-red-700'
-                          : 'bg-slate-100 text-slate-600'
-              }`}>
-                {detail.status}
-              </span>
-            </p>
+        {/* Header — compact */}
+        <div className="sticky top-0 z-10 border-b border-slate-100 bg-white/95 px-4 py-3 backdrop-blur">
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="truncate text-base font-semibold text-slate-900">{d.guest?.name ?? 'Booking'}</h2>
+                <span
+                  className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                    d.status === 'Pending'
+                      ? 'bg-amber-100 text-amber-800'
+                      : d.status === 'Confirmed'
+                        ? 'bg-teal-100 text-teal-800'
+                        : d.status === 'Seated'
+                          ? 'bg-blue-100 text-blue-800'
+                          : d.status === 'Completed'
+                            ? 'bg-slate-100 text-slate-700'
+                            : d.status === 'No-Show'
+                              ? 'bg-red-100 text-red-800'
+                              : 'bg-slate-100 text-slate-600'
+                  }`}
+                >
+                  {d.status}
+                </span>
+                {loading && optimisticDetail != null && (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-500">
+                    <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-brand-500" />
+                    Syncing
+                  </span>
+                )}
+              </div>
+              <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-slate-500">
+                <span className="font-mono">#{d.id.slice(0, 8)}</span>
+                <button
+                  type="button"
+                  onClick={() => navigator.clipboard?.writeText(d.id)}
+                  className="rounded border border-slate-200 px-1 py-0.5 text-[10px] font-medium text-slate-600 hover:bg-slate-50"
+                >
+                  Copy
+                </button>
+              </p>
+            </div>
+            <button type="button" aria-label="Close booking detail" onClick={onClose} className="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600">
+              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+              </svg>
+            </button>
           </div>
-          <button type="button" aria-label="Close booking detail" onClick={onClose} className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-600">
-            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
-            </svg>
-          </button>
         </div>
 
-        <div className="space-y-6 p-5">
+        <div className="space-y-3 p-4">
           {error && (
-            <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
+            <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{error}</div>
           )}
 
-          {/* Guest info card */}
-          <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-4">
-            <div className="flex items-center gap-3 mb-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-brand-100 text-sm font-bold text-brand-700">
-                {(detail.guest?.name ?? '?').charAt(0).toUpperCase()}
+          {/* Guest + summary row (concertina-style) */}
+          <div className="grid gap-2.5">
+            <div className="rounded-xl border border-slate-200 bg-white p-3">
+              <div className="flex items-center gap-2.5">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brand-100 text-sm font-bold text-brand-700">
+                  {(d.guest?.name ?? '?').charAt(0).toUpperCase()}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-semibold text-slate-900">{d.guest?.name ?? 'Guest'}</p>
+                  <p className="text-[11px] text-slate-500">
+                    {(d.guest?.visit_count ?? 0) > 0 ? `${d.guest?.visit_count} previous visits` : 'First visit'}
+                  </p>
+                </div>
               </div>
-              <div>
-                <p className="font-semibold text-slate-900">{detail.guest?.name ?? 'Unknown guest'}</p>
-                <p className="text-xs text-slate-500">{detail.guest?.visit_count ?? 0} previous visits</p>
+              <div className="mt-2 space-y-1 border-t border-slate-100 pt-2">
+                {d.guest?.email ? (
+                  <a href={`mailto:${d.guest.email}`} className="flex items-center gap-2 text-xs text-slate-600 hover:text-brand-600">
+                    <svg className="h-3.5 w-3.5 shrink-0 text-slate-400" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 0 1-2.25 2.25h-15a2.25 2.25 0 0 1-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25m19.5 0v.243a2.25 2.25 0 0 1-1.07 1.916l-7.5 4.615a2.25 2.25 0 0 1-2.36 0L3.32 8.91a2.25 2.25 0 0 1-1.07-1.916V6.75" /></svg>
+                    <span className="truncate">{d.guest.email}</span>
+                  </a>
+                ) : (
+                  <p className="text-xs italic text-slate-400">No email on file</p>
+                )}
+                {d.guest?.phone ? (
+                  <a href={`tel:${d.guest.phone}`} className="flex items-center gap-2 text-xs text-slate-600 hover:text-brand-600">
+                    <svg className="h-3.5 w-3.5 shrink-0 text-slate-400" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 0 0 2.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 0 1-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 0 0-1.091-.852H4.5A2.25 2.25 0 0 0 2.25 4.5v2.25Z" /></svg>
+                    {d.guest.phone}
+                  </a>
+                ) : (
+                  <p className="text-xs italic text-slate-400">No phone on file</p>
+                )}
               </div>
             </div>
-            <div className="grid grid-cols-1 gap-1.5 text-sm">
-              {detail.guest?.email && (
-                <div className="flex items-center gap-2 text-slate-600">
-                  <svg className="h-3.5 w-3.5 text-slate-400" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 0 1-2.25 2.25h-15a2.25 2.25 0 0 1-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25m19.5 0v.243a2.25 2.25 0 0 1-1.07 1.916l-7.5 4.615a2.25 2.25 0 0 1-2.36 0L3.32 8.91a2.25 2.25 0 0 1-1.07-1.916V6.75" /></svg>
-                  <a href={`mailto:${detail.guest.email}`} className="underline-offset-2 hover:underline">
-                    {detail.guest.email}
-                  </a>
-                </div>
-              )}
-              {detail.guest?.phone && (
-                <div className="flex items-center gap-2 text-slate-600">
-                  <svg className="h-3.5 w-3.5 text-slate-400" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 0 0 2.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 0 1-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 0 0-1.091-.852H4.5A2.25 2.25 0 0 0 2.25 4.5v2.25Z" /></svg>
-                  <a href={`tel:${detail.guest.phone}`} className="underline-offset-2 hover:underline">
-                    {detail.guest.phone}
-                  </a>
+
+            <div className="rounded-xl border border-slate-200 bg-white p-3">
+              <div className="grid grid-cols-2 gap-x-3 gap-y-2">
+                <CompactInfo label="Date" value={formatDateNice(d.booking_date)} />
+                <CompactInfo label="Time" value={`${startTime} – ${endTime}`} />
+                <CompactInfo label="Covers" value={String(d.party_size)} />
+                <CompactInfo
+                  label="Deposit"
+                  value={
+                    depositPaid && depositAmountStr
+                      ? `${depositAmountStr} paid`
+                      : d.deposit_status === 'Not Required'
+                        ? 'None'
+                        : d.deposit_status
+                  }
+                  valueClass={
+                    d.deposit_status === 'Paid'
+                      ? 'text-emerald-700'
+                      : d.deposit_status === 'Pending'
+                        ? 'text-amber-700'
+                        : 'text-slate-600'
+                  }
+                />
+                <CompactInfo label="Duration" value={`${durationMinutes} min`} />
+                <CompactInfo label="Source" value={d.source} />
+              </div>
+              {isHydrated && (
+                <div className="mt-2 border-t border-slate-100 pt-2">
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Meta</p>
+                  <p className="mt-0.5 text-[11px] text-slate-500">
+                    {d.created_at ? <>Created {new Date(d.created_at).toLocaleString()}</> : '—'}
+                    {d.created_by ? <> · {d.created_by}</> : null}
+                  </p>
+                  <p className="mt-0.5 text-[11px] text-slate-500">
+                    Service {d.service_id ? 'assigned' : '—'}
+                  </p>
                 </div>
               )}
             </div>
           </div>
 
-          {/* Booking details grid */}
-          <div className="grid grid-cols-2 gap-3">
-            <InfoTile label="Date" value={detail.booking_date} />
-            <InfoTile label="Start Time" value={startTime} />
-            <InfoTile label="End Time" value={endTime} />
-            <InfoTile label="Duration" value={`${durationMinutes} min`} />
-            <InfoTile label="Covers" value={String(detail.party_size)} />
-            <InfoTile label="Source" value={detail.source} />
-            <InfoTile label="Status" value={detail.status} />
-            <InfoTile label="Deposit" value={depositPaid ? `${depositAmountStr} Paid` : detail.deposit_status} />
-            <InfoTile label="Service" value={detail.service_id ? 'Assigned' : '—'} />
-            <InfoTile label="Created" value={detail.created_at ? new Date(detail.created_at).toLocaleString() : '—'} />
-            <InfoTile label="Created By" value={detail.created_by ?? '—'} />
-          </div>
           {confirmationSentAt && (
-            <p className="text-xs text-slate-500">Confirmation already sent on {new Date(confirmationSentAt).toLocaleString()}.</p>
+            <p className="text-[11px] text-slate-500">Confirmation sent {new Date(confirmationSentAt).toLocaleString()}</p>
           )}
           <button
             type="button"
-            disabled={actionLoading}
+            disabled={actionLoading || !isHydrated}
             onClick={async () => {
               setActionLoading(true);
               try {
@@ -518,76 +672,82 @@ export function BookingDetailPanel({
                 setActionLoading(false);
               }
             }}
-            className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+            className="w-full rounded-lg border border-slate-200 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
           >
-            Resend Confirmation
+            Resend confirmation
           </button>
 
-          <div className="rounded-xl border border-slate-200 bg-white p-4">
-            <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Deposit Actions</p>
-            <div className="mt-2 flex flex-wrap gap-2">
-              {detail.deposit_status !== 'Paid' && detail.deposit_status !== 'Refunded' && (
+          <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Deposit</p>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {d.deposit_status !== 'Paid' && d.deposit_status !== 'Refunded' && (
                 <>
                   <button
                     type="button"
-                    disabled={actionLoading}
+                    disabled={actionLoading || !isHydrated}
                     onClick={() => runDepositAction('send_payment_link')}
-                    className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+                    className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
                   >
-                    Send Payment Link
+                    Payment link
                   </button>
                   <button
                     type="button"
-                    disabled={actionLoading}
+                    disabled={actionLoading || !isHydrated}
                     onClick={() => runDepositAction('waive')}
-                    className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+                    className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
                   >
-                    Mark as Waived
+                    Waive
                   </button>
                   <button
                     type="button"
-                    disabled={actionLoading}
+                    disabled={actionLoading || !isHydrated}
                     onClick={() => runDepositAction('record_cash')}
-                    className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+                    className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
                   >
-                    Record Cash Deposit
+                    Cash
                   </button>
                 </>
               )}
-              {detail.deposit_status === 'Paid' && (
+              {d.deposit_status === 'Paid' && (
                 <button
                   type="button"
-                  disabled={actionLoading}
+                  disabled={actionLoading || !isHydrated}
                   onClick={() => runDepositAction('refund')}
-                  className="rounded-lg border border-red-300 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-60"
+                  className="rounded-lg border border-red-200 bg-white px-2.5 py-1.5 text-[11px] font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
                 >
-                  Issue Refund
+                  Refund
                 </button>
               )}
             </div>
           </div>
 
           {/* Table assignment */}
-          {tableManagementEnabled && (
-            <div className={`rounded-xl border px-4 py-3 ${assignedTables.length > 0 ? 'border-slate-200 bg-slate-50/50' : 'border-amber-200 bg-amber-50'}`}>
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs font-medium text-slate-500">Table</p>
-                  <p className={`text-sm font-semibold ${assignedTables.length > 0 ? 'text-slate-900' : 'text-amber-700'}`}>
-                    {assignedTables.length > 0
-                      ? assignedTables.map((t) => t.name).join(' + ')
-                      : 'No table assigned'}
-                  </p>
+          {tableManagementEnabled && (() => {
+            const tableLine =
+              optimisticTableLabel ??
+              (assignedTables.length > 0 ? assignedTables.map((t) => t.name).join(' + ') : null);
+            const hasTable = Boolean(tableLine);
+            return (
+              <div className={`rounded-xl border px-3 py-2.5 ${hasTable ? 'border-slate-200 bg-slate-50/50' : 'border-amber-200 bg-amber-50'}`}>
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Table</p>
+                    <p className={`truncate text-sm font-semibold ${hasTable ? 'text-slate-900' : 'text-amber-700'}`}>
+                      {hasTable ? tableLine : 'No table assigned'}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={!isHydrated || actionLoading}
+                    onClick={() => setShowAssignModal(true)}
+                    className="shrink-0 rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-[11px] font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                  >
+                    {hasTable ? 'Reassign' : 'Assign'}
+                  </button>
                 </div>
-                <button
-                  onClick={() => setShowAssignModal(true)}
-                  className="rounded-lg border border-slate-300 bg-white px-3 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50"
-                >
-                  {assignedTables.length > 0 ? 'Reassign' : 'Assign'}
-                </button>
               </div>
-            </div>
-          )}
+            );
+          })()}
 
           {showAssignModal && (
             <div className="rounded-xl border border-brand-200 bg-brand-50/30 p-4">
@@ -691,41 +851,44 @@ export function BookingDetailPanel({
           )}
 
           {/* Deposit refund status banner */}
-          {detail.status === 'Cancelled' && detail.deposit_amount_pence != null && detail.deposit_amount_pence > 0 && (
-            <DepositRefundBanner depositStatus={detail.deposit_status} depositAmount={depositAmountStr!} cancellationDeadline={detail.cancellation_deadline} />
+          {d.status === 'Cancelled' && d.deposit_amount_pence != null && d.deposit_amount_pence > 0 && (
+            <DepositRefundBanner depositStatus={d.deposit_status} depositAmount={depositAmountStr!} cancellationDeadline={d.cancellation_deadline} />
           )}
 
-          {/* Special notes */}
-          {(detail.dietary_notes || detail.occasion || detail.special_requests) && (
-            <div className="space-y-2">
-              {detail.dietary_notes && (
-                <div className="rounded-lg bg-amber-50 px-3 py-2 text-sm">
-                  <span className="font-medium text-amber-800">Dietary:</span>{' '}
-                  <span className="text-amber-700">{detail.dietary_notes}</span>
+          {/* Guest-facing notes */}
+          {(d.dietary_notes || d.occasion || d.special_requests) && (
+            <div className="space-y-1.5 rounded-xl border border-slate-200 bg-white p-3">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Guest notes</p>
+              {d.dietary_notes && (
+                <div className="rounded-lg bg-amber-50/90 px-2.5 py-1.5 text-xs">
+                  <span className="font-semibold text-amber-900">Dietary</span>
+                  <span className="text-amber-800"> · {d.dietary_notes}</span>
                 </div>
               )}
-              {detail.occasion && (
-                <div className="rounded-lg bg-violet-50 px-3 py-2 text-sm">
-                  <span className="font-medium text-violet-800">Occasion:</span>{' '}
-                  <span className="text-violet-700">{detail.occasion}</span>
+              {d.occasion && (
+                <div className="rounded-lg bg-violet-50/90 px-2.5 py-1.5 text-xs">
+                  <span className="font-semibold text-violet-900">Occasion</span>
+                  <span className="text-violet-800"> · {d.occasion}</span>
                 </div>
               )}
-              {detail.special_requests && (
-                <div className="rounded-lg bg-sky-50 px-3 py-2 text-sm">
-                  <span className="font-medium text-sky-800">Requests:</span>{' '}
-                  <span className="text-sky-700">{detail.special_requests}</span>
+              {d.special_requests && (
+                <div className="rounded-lg bg-sky-50/90 px-2.5 py-1.5 text-xs">
+                  <span className="font-semibold text-sky-900">Requests</span>
+                  <span className="text-sky-800"> · {d.special_requests}</span>
                 </div>
               )}
             </div>
           )}
 
-          <div className="rounded-xl border border-slate-200 bg-white p-4">
-            <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Internal Staff Notes</p>
+          <div className="rounded-xl border border-slate-200 bg-white p-3">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Staff notes</p>
             <textarea
               value={internalNotes}
               onChange={(e) => setInternalNotes(e.target.value)}
+              disabled={!isHydrated}
               onBlur={async () => {
-                if (internalNotes === (detail.internal_notes ?? '')) return;
+                if (!isHydrated) return;
+                if (internalNotes === (d.internal_notes ?? '')) return;
                 setNotesSaving(true);
                 try {
                   const res = await fetch(`/api/venue/bookings/${bookingId}`, {
@@ -742,38 +905,38 @@ export function BookingDetailPanel({
                   setNotesSaving(false);
                 }
               }}
-              rows={3}
-              className="mt-2 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
-              placeholder="Internal notes visible to staff only..."
+              rows={2}
+              className="mt-1.5 w-full rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs text-slate-800 placeholder:text-slate-400 disabled:bg-slate-50"
+              placeholder={isHydrated ? 'Internal notes (staff only)…' : 'Loading…'}
             />
-            {notesSaving && <p className="mt-1 text-[11px] text-slate-500">Saving...</p>}
+            {notesSaving && <p className="mt-1 text-[10px] text-slate-500">Saving…</p>}
           </div>
 
           {/* Status actions */}
           {canChangeStatus && (() => {
-            const currentStatus = detail.status as BookingStatus;
+            const currentStatus = d.status as BookingStatus;
             const forwardStatuses = nextStatuses.filter((s) => !isRevertTransition(currentStatus, s));
             const revertAction = BOOKING_REVERT_ACTIONS[currentStatus];
             return (
-              <div className="space-y-2">
-                <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Actions</p>
-                <div className="flex flex-wrap gap-2">
+              <div className="rounded-xl border border-slate-200 bg-slate-50/60 px-3 py-2.5">
+                <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Actions</p>
+                <div className="flex flex-wrap gap-1.5">
                   {forwardStatuses.map((status) => (
                     <ActionButton
                       key={status}
                       onClick={() => updateStatus(status)}
-                      disabled={actionLoading}
+                      disabled={actionLoading || !isHydrated}
                       variant={status === 'Cancelled' ? 'outline-danger' : status === 'No-Show' ? 'danger' : 'primary'}
                     >
-                      {status === 'Seated' ? 'Seat Guest' : status === 'Completed' ? 'Complete' : status === 'Cancelled' ? 'Cancel' : status}
+                      {status === 'Seated' ? 'Seat' : status === 'Completed' ? 'Complete' : status === 'Cancelled' ? 'Cancel' : status}
                     </ActionButton>
                   ))}
                 </div>
                 {revertAction && (
-                  <div className="mt-1">
+                  <div className="mt-1.5">
                     <ActionButton
                       onClick={() => updateStatus(revertAction.target)}
-                      disabled={actionLoading}
+                      disabled={actionLoading || !isHydrated}
                       variant="secondary"
                     >
                       {revertAction.label}
@@ -786,8 +949,13 @@ export function BookingDetailPanel({
 
           {/* Modify section */}
           {!showModify ? (
-            <button type="button" onClick={() => setShowModify(true)} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50">
-              Modify Booking
+            <button
+              type="button"
+              disabled={!isHydrated}
+              onClick={() => setShowModify(true)}
+              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            >
+              Modify booking
             </button>
           ) : (
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-4">
@@ -797,10 +965,10 @@ export function BookingDetailPanel({
                 {depositPaid && <p className="mb-2.5 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">Changing party size won&apos;t adjust the deposit already paid.</p>}
                 <ModifyBookingInline
                   bookingId={bookingId}
-                  venueId={detail.venue_id}
-                  currentDate={detail.booking_date}
-                  currentTime={detail.booking_time}
-                  currentPartySize={detail.party_size}
+                  venueId={d.venue_id || venueId || ''}
+                  currentDate={d.booking_date}
+                  currentTime={d.booking_time}
+                  currentPartySize={d.party_size}
                   onSaved={async () => { await load(); onUpdated(); }}
                   onCancel={() => {}}
                 />
@@ -884,20 +1052,20 @@ export function BookingDetailPanel({
           )}
 
           {/* Timeline */}
-          <div>
-            <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-400">Timeline</p>
-            {detail.events.length === 0 ? (
-              <p className="text-sm text-slate-400">No events yet.</p>
+          <div className="rounded-xl border border-slate-200 bg-white p-3">
+            <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Timeline</p>
+            {d.events.length === 0 ? (
+              <p className="text-xs text-slate-400">{isHydrated ? 'No events yet.' : '…'}</p>
             ) : (
-              <div className="space-y-2">
-                {detail.events.map((ev) => (
-                  <div key={ev.id} className="flex items-start gap-3 text-sm">
-                    <span className="mt-0.5 flex h-5 w-5 items-center justify-center rounded-full bg-slate-100">
-                      <span className="h-1.5 w-1.5 rounded-full bg-slate-400" />
+              <div className="max-h-36 space-y-1.5 overflow-y-auto pr-1">
+                {d.events.map((ev) => (
+                  <div key={ev.id} className="flex items-start gap-2 text-xs">
+                    <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-slate-100">
+                      <span className="h-1 w-1 rounded-full bg-slate-400" />
                     </span>
-                    <div className="flex-1">
+                    <div className="min-w-0 flex-1">
                       <span className="font-medium text-slate-700">{ev.event_type.replace(/_/g, ' ')}</span>
-                      <span className="ml-2 text-xs text-slate-400">
+                      <span className="ml-1.5 text-[10px] text-slate-400">
                         {new Date(ev.created_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
                       </span>
                     </div>
@@ -908,17 +1076,17 @@ export function BookingDetailPanel({
           </div>
 
           {/* Communications */}
-          <div>
-            <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-400">Communications</p>
-            {detail.communications && detail.communications.length > 0 && (
-              <div className="space-y-2">
-                {detail.communications.map((c) => (
-                  <div key={c.id} className="flex items-center gap-2 text-sm">
-                    <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${c.channel === 'email' ? 'bg-blue-50 text-blue-700' : 'bg-green-50 text-green-700'}`}>
+          <div className="rounded-xl border border-slate-200 bg-white p-3">
+            <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Communications</p>
+            {d.communications && d.communications.length > 0 && (
+              <div className="mb-2 max-h-32 space-y-1 overflow-y-auto pr-1">
+                {d.communications.map((c) => (
+                  <div key={c.id} className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
+                    <span className={`inline-flex rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${c.channel === 'email' ? 'bg-blue-50 text-blue-700' : 'bg-green-50 text-green-700'}`}>
                       {c.channel}
                     </span>
                     <span className="font-medium text-slate-700">{c.message_type.replace(/_/g, ' ')}</span>
-                    <span className={`ml-auto text-xs ${c.status === 'sent' ? 'text-emerald-600' : 'text-red-500'}`}>
+                    <span className={`text-[10px] ${c.status === 'sent' ? 'text-emerald-600' : 'text-red-500'}`}>
                       {c.status}
                     </span>
                     <span className="text-[10px] text-slate-400">
@@ -928,18 +1096,18 @@ export function BookingDetailPanel({
                 ))}
               </div>
             )}
-            <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
-              <p className="text-xs font-medium text-slate-600">Send custom message</p>
+            <div className="rounded-lg border border-slate-100 bg-slate-50/80 p-2.5">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Custom message</p>
               <textarea
                 value={customMessage}
                 onChange={(e) => setCustomMessage(e.target.value)}
-                rows={3}
-                className="mt-2 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
-                placeholder="Write an SMS/email message to the guest..."
+                rows={2}
+                className="mt-1.5 w-full rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs"
+                placeholder="SMS / email to guest…"
               />
               <button
                 type="button"
-                disabled={actionLoading || customMessage.trim().length === 0}
+                disabled={actionLoading || customMessage.trim().length === 0 || !isHydrated}
                 onClick={async () => {
                   setActionLoading(true);
                   try {
@@ -959,9 +1127,9 @@ export function BookingDetailPanel({
                     setActionLoading(false);
                   }
                 }}
-                className="mt-2 rounded-lg bg-slate-800 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-900 disabled:opacity-60"
+                className="mt-2 rounded-lg bg-slate-800 px-2.5 py-1.5 text-[11px] font-semibold text-white hover:bg-slate-900 disabled:opacity-50"
               >
-                Send Custom Message
+                Send
               </button>
             </div>
           </div>
@@ -995,11 +1163,19 @@ export function BookingDetailPanel({
   );
 }
 
-function InfoTile({ label, value }: { label: string; value: string }) {
+function CompactInfo({
+  label,
+  value,
+  valueClass,
+}: {
+  label: string;
+  value: ReactNode;
+  valueClass?: string;
+}) {
   return (
-    <div className="rounded-lg border border-slate-100 bg-white px-3 py-2.5">
-      <p className="text-xs font-medium text-slate-400">{label}</p>
-      <p className="mt-0.5 text-sm font-semibold text-slate-800">{value}</p>
+    <div className="min-w-0">
+      <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">{label}</p>
+      <p className={['mt-0.5 truncate text-sm font-medium text-slate-800', valueClass].filter(Boolean).join(' ')}>{value}</p>
     </div>
   );
 }
@@ -1059,7 +1235,7 @@ function ActionButton({ onClick, disabled, variant, children }: {
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className={`rounded-lg px-4 py-2 text-sm font-medium disabled:opacity-50 ${styles[variant]}`}
+      className={`rounded-lg px-2.5 py-1.5 text-xs font-semibold disabled:opacity-50 ${styles[variant]}`}
     >
       {children}
     </button>

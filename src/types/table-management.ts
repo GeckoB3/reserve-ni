@@ -135,6 +135,8 @@ export interface TableGridData {
     tables_total: number;
     unassigned_count: number;
     combos_in_use?: number;
+    /** Client-computed: covers on tables at a given clock time (see coversInUseAtTime). */
+    covers_in_use_now?: number;
   };
 }
 

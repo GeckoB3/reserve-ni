@@ -37,6 +37,11 @@ export function WalkInModal({
   const [bookingDate, setBookingDate] = useState(initialDate ?? new Date().toISOString().slice(0, 10));
   const [bookingTime, setBookingTime] = useState(initialTime ?? currentTime());
 
+  useEffect(() => {
+    setBookingDate(initialDate ?? new Date().toISOString().slice(0, 10));
+    setBookingTime(initialTime ?? currentTime());
+  }, [initialDate, initialTime]);
+
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [selectedSuggestionKey, setSelectedSuggestionKey] = useState<string | null>(null);
   const [tablePickerOpen, setTablePickerOpen] = useState(false);

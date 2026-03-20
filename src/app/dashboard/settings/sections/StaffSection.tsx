@@ -16,6 +16,7 @@ export function StaffSection({ venueId, isAdmin }: StaffSectionProps) {
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [createEmail, setCreateEmail] = useState('');
   const [createPassword, setCreatePassword] = useState('');
+  const [createPasswordConfirm, setCreatePasswordConfirm] = useState('');
   const [createName, setCreateName] = useState('');
   const [createRole, setCreateRole] = useState<'admin' | 'staff'>('staff');
   const [creating, setCreating] = useState(false);
@@ -85,24 +86,42 @@ export function StaffSection({ venueId, isAdmin }: StaffSectionProps) {
       setCreateError('Password must be at least 8 characters');
       return;
     }
+    if (createPassword !== createPasswordConfirm) {
+      setCreateError('Passwords do not match');
+      return;
+    }
     setCreating(true);
     try {
       const res = await fetch('/api/venue/staff/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password: createPassword, name: createName.trim() || undefined, role: createRole }),
+        body: JSON.stringify({
+          email,
+          password: createPassword,
+          password_confirm: createPasswordConfirm,
+          name: createName.trim() || undefined,
+          role: createRole,
+        }),
       });
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
         throw new Error(j.error ?? 'Failed to create user');
       }
-      const { staff: newMember } = await res.json();
+      const { staff: newMember, welcome_email_sent: welcomeSent } = await res.json() as {
+        staff: StaffMember;
+        welcome_email_sent?: boolean;
+      };
       setStaff((prev) => [...prev, newMember]);
       setCreateEmail('');
       setCreatePassword('');
+      setCreatePasswordConfirm('');
       setCreateName('');
       setCreateRole('staff');
-      setCreateSuccess(`User ${email} created successfully`);
+      setCreateSuccess(
+        welcomeSent
+          ? `User ${email} created. They have been emailed their login details.`
+          : `User ${email} created. Welcome email could not be sent — check SendGrid configuration and share their login details manually.`,
+      );
       setShowCreateForm(false);
       setTimeout(() => setCreateSuccess(null), 4000);
     } catch (err) {
@@ -110,7 +129,7 @@ export function StaffSection({ venueId, isAdmin }: StaffSectionProps) {
     } finally {
       setCreating(false);
     }
-  }, [createEmail, createPassword, createName, createRole]);
+  }, [createEmail, createPassword, createPasswordConfirm, createName, createRole]);
 
   // Own password change handler
   const onChangePassword = useCallback(async (e: React.FormEvent) => {
@@ -329,7 +348,12 @@ export function StaffSection({ venueId, isAdmin }: StaffSectionProps) {
           {isAdmin && (
             <button
               type="button"
-              onClick={() => { setShowCreateForm(!showCreateForm); setCreateError(null); setCreateSuccess(null); }}
+              onClick={() => {
+                setShowCreateForm(!showCreateForm);
+                setCreateError(null);
+                setCreateSuccess(null);
+                setCreatePasswordConfirm('');
+              }}
               className="inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-brand-700"
             >
               <PlusIcon className="h-4 w-4" />
@@ -381,6 +405,20 @@ export function StaffSection({ venueId, isAdmin }: StaffSectionProps) {
                     placeholder="Min 8 characters"
                     required
                     minLength={8}
+                    autoComplete="new-password"
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-slate-700">Confirm password <span className="text-red-400">*</span></label>
+                  <input
+                    type="password"
+                    value={createPasswordConfirm}
+                    onChange={(e) => setCreatePasswordConfirm(e.target.value)}
+                    placeholder="Re-enter password"
+                    required
+                    minLength={8}
+                    autoComplete="new-password"
                     className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
                   />
                 </div>
@@ -401,7 +439,7 @@ export function StaffSection({ venueId, isAdmin }: StaffSectionProps) {
                 <button type="submit" disabled={creating} className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50">
                   {creating ? 'Creating...' : 'Create User'}
                 </button>
-                <button type="button" onClick={() => { setShowCreateForm(false); setCreateError(null); }} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">
+                <button type="button" onClick={() => { setShowCreateForm(false); setCreateError(null); setCreatePasswordConfirm(''); }} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">
                   Cancel
                 </button>
               </div>

@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { getVenueStaff } from '@/lib/venue-auth';
+import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 
-/** GET /api/venue/staff — list staff for the authenticated user's venue. */
+/** GET /api/venue/staff — list staff for the venue (admin only). */
 export async function GET() {
   try {
     const supabase = await createClient();
@@ -10,10 +10,13 @@ export async function GET() {
     if (!staff) {
       return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
     }
+    if (!requireAdmin(staff)) {
+      return NextResponse.json({ error: 'Forbidden: admin only' }, { status: 403 });
+    }
 
     const { data: rows, error } = await staff.db
       .from('staff')
-      .select('id, email, name, role, created_at')
+      .select('id, email, name, phone, role, created_at')
       .eq('venue_id', staff.venue_id)
       .order('created_at', { ascending: true });
 

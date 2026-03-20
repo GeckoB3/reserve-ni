@@ -18,6 +18,7 @@ import {
   type BookingStatus,
 } from '@/lib/table-management/booking-status';
 import { useToast } from '@/components/ui/Toast';
+import { DashboardStatCard } from '@/components/dashboard/DashboardStatCard';
 
 interface BookingRow {
   id: string;
@@ -594,10 +595,10 @@ export function BookingsDashboard({ venueId }: { venueId: string }) {
       )}
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <StatCard label="Bookings" value={stats.total} color="brand" />
-        <StatCard label="Total covers" value={stats.totalCovers} color="violet" />
-        <StatCard label="Confirmed" value={stats.confirmed} color="emerald" />
-        <StatCard label="Pending" value={stats.pending} color="amber" />
+        <DashboardStatCard label="Bookings" value={stats.total} color="blue" />
+        <DashboardStatCard label="Total covers" value={stats.totalCovers} color="violet" />
+        <DashboardStatCard label="Confirmed" value={stats.confirmed} color="emerald" />
+        <DashboardStatCard label="Pending" value={stats.pending} color="amber" />
       </div>
 
       <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm sm:flex-row sm:items-center sm:justify-between">
@@ -711,6 +712,7 @@ export function BookingsDashboard({ venueId }: { venueId: string }) {
       {selectedId && (
         <BookingDetailPanel
           bookingId={selectedId}
+          venueId={venueId}
           onClose={() => setSelectedId(null)}
           onUpdated={() => {
             if (!selectedId) return;
@@ -770,21 +772,6 @@ export function BookingsDashboard({ venueId }: { venueId: string }) {
           </div>
         </div>
       )}
-    </div>
-  );
-}
-
-function StatCard({ label, value, color }: { label: string; value: number; color: string }) {
-  const colors: Record<string, string> = {
-    brand: 'bg-brand-50 text-brand-700 border-brand-100',
-    violet: 'bg-violet-50 text-violet-700 border-violet-100',
-    emerald: 'bg-emerald-50 text-emerald-700 border-emerald-100',
-    amber: 'bg-amber-50 text-amber-700 border-amber-100',
-  };
-  return (
-    <div className={`rounded-xl border px-4 py-3 ${colors[color] ?? 'bg-slate-50 text-slate-700 border-slate-200'}`}>
-      <p className="text-2xl font-bold tabular-nums">{value}</p>
-      <p className="text-xs font-medium opacity-75">{label}</p>
     </div>
   );
 }

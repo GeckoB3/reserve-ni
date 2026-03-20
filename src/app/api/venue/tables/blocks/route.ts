@@ -1,7 +1,98 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff } from '@/lib/venue-auth';
+
+const BOOKING_STATUSES_BLOCK_CONFLICTS = ['Pending', 'Confirmed', 'Seated'] as const;
+
+function bookingWindowMs(
+  bookingDate: string,
+  bookingTime: string | null,
+  estimatedEnd: string | null,
+): { start: number; end: number } | null {
+  if (!bookingTime) return null;
+  const t = bookingTime.slice(0, 5);
+  const start = Date.parse(`${bookingDate}T${t}:00.000Z`);
+  if (Number.isNaN(start)) return null;
+  let end: number;
+  if (estimatedEnd && String(estimatedEnd).includes('T')) {
+    end = Date.parse(String(estimatedEnd));
+  } else if (estimatedEnd) {
+    end = Date.parse(`${bookingDate}T${String(estimatedEnd).slice(0, 5)}:00.000Z`);
+  } else {
+    end = start + 90 * 60 * 1000;
+  }
+  if (Number.isNaN(end)) end = start + 90 * 60 * 1000;
+  return { start, end };
+}
+
+function intervalsOverlap(a0: number, a1: number, b0: number, b1: number): boolean {
+  return a0 < b1 && a1 > b0;
+}
+
+type GuestEmbed = { name: string | null };
+
+type BookingEmbed = {
+  booking_date: string | null;
+  booking_time: string | null;
+  estimated_end_time: string | null;
+  status: string | null;
+  venue_id: string | null;
+  guest: GuestEmbed | GuestEmbed[] | null;
+};
+
+type AssignmentRow = {
+  booking_id: string;
+  bookings: BookingEmbed | BookingEmbed[] | null;
+};
+
+function guestNameFromBookingEmbed(b: BookingEmbed): string {
+  const g = b.guest;
+  const guest = Array.isArray(g) ? g[0] : g;
+  return guest?.name?.trim() || 'Guest';
+}
+
+/**
+ * Returns an error message if the block window overlaps any active booking on this table.
+ */
+async function getTableBlockBookingConflict(
+  db: SupabaseClient,
+  venueId: string,
+  tableId: string,
+  blockStartMs: number,
+  blockEndMs: number,
+): Promise<string | null> {
+  const { data: rows, error } = await db
+    .from('booking_table_assignments')
+    .select(
+      'booking_id, bookings!inner(booking_date, booking_time, estimated_end_time, status, venue_id, guest:guests(name))',
+    )
+    .eq('table_id', tableId)
+    .eq('bookings.venue_id', venueId);
+
+  if (error) {
+    console.error('[table blocks] conflict lookup failed:', error);
+    return 'Could not verify bookings for this table';
+  }
+
+  for (const row of (rows ?? []) as unknown as AssignmentRow[]) {
+    const b = Array.isArray(row.bookings) ? row.bookings[0] : row.bookings;
+    if (!b?.booking_date || !b.booking_time || !b.status) continue;
+    if (!BOOKING_STATUSES_BLOCK_CONFLICTS.includes(b.status as (typeof BOOKING_STATUSES_BLOCK_CONFLICTS)[number])) {
+      continue;
+    }
+    const win = bookingWindowMs(b.booking_date, b.booking_time, b.estimated_end_time);
+    if (!win) continue;
+    if (intervalsOverlap(blockStartMs, blockEndMs, win.start, win.end)) {
+      const name = guestNameFromBookingEmbed(b);
+      const time = b.booking_time.slice(0, 5);
+      return `This block would overlap a booking (${name} at ${time}). Remove or reschedule the booking first, or choose a different time.`;
+    }
+  }
+
+  return null;
+}
 
 const blockCreateSchema = z.object({
   table_id: z.string().uuid(),
@@ -102,6 +193,15 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  for (const rec of records) {
+    const s = Date.parse(rec.start_at);
+    const e = Date.parse(rec.end_at);
+    const conflict = await getTableBlockBookingConflict(staff.db, staff.venue_id, table_id, s, e);
+    if (conflict) {
+      return NextResponse.json({ error: conflict }, { status: 409 });
+    }
+  }
+
   const { data, error } = await staff.db
     .from('table_blocks')
     .insert(records)
@@ -127,8 +227,34 @@ export async function PATCH(request: NextRequest) {
   }
 
   const { id, ...updates } = parsed.data;
-  if (updates.start_at && updates.end_at && new Date(updates.end_at) <= new Date(updates.start_at)) {
+
+  const { data: existing, error: loadErr } = await staff.db
+    .from('table_blocks')
+    .select('table_id, start_at, end_at')
+    .eq('id', id)
+    .eq('venue_id', staff.venue_id)
+    .single();
+  if (loadErr || !existing) {
+    return NextResponse.json({ error: 'Block not found' }, { status: 404 });
+  }
+
+  const nextStart = updates.start_at ?? existing.start_at;
+  const nextEnd = updates.end_at ?? existing.end_at;
+  if (new Date(nextEnd) <= new Date(nextStart)) {
     return NextResponse.json({ error: 'End time must be after start time' }, { status: 400 });
+  }
+
+  const s = Date.parse(nextStart);
+  const e = Date.parse(nextEnd);
+  const conflict = await getTableBlockBookingConflict(
+    staff.db,
+    staff.venue_id,
+    existing.table_id as string,
+    s,
+    e,
+  );
+  if (conflict) {
+    return NextResponse.json({ error: conflict }, { status: 409 });
   }
 
   const { data, error } = await staff.db

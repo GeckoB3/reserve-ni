@@ -3,17 +3,19 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import type { TableGridData, UndoAction } from '@/types/table-management';
 import { TimelineGrid } from './TimelineGrid';
-import { SummaryBar } from './SummaryBar';
 import { UndoToast } from './UndoToast';
 import { useToast } from '@/components/ui/Toast';
 import { useVenueLiveSync } from '@/lib/realtime/useVenueLiveSync';
-import { BookingDetailPanel } from '@/app/dashboard/bookings/BookingDetailPanel';
+import { BookingDetailPanel, type BookingDetailPanelSnapshot } from '@/app/dashboard/bookings/BookingDetailPanel';
 import { UnifiedBookingForm } from '@/components/booking/UnifiedBookingForm';
 import { detectAdjacentTables, type CombinationTable } from '@/lib/table-management/combination-engine';
 import { canMarkNoShowForSlot, canTransitionBookingStatus, type BookingStatus } from '@/lib/table-management/booking-status';
 import { computeValidMoveTargets, type BookingMoveContext } from '@/lib/table-management/move-validation';
 import { ViewToolbar } from '@/components/dashboard/ViewToolbar';
+import type { ViewToolbarSummary } from '@/components/dashboard/ViewToolbar';
 import { WalkInModal } from '@/app/dashboard/bookings/WalkInModal';
+import { coversInUseAtTime } from '@/lib/table-management/covers-at-time';
+import { computeNextBookingsSlot } from '@/lib/table-management/next-bookings-slot';
 
 function formatDateInput(d: Date): string {
   const y = d.getFullYear();
@@ -33,17 +35,6 @@ function shiftDate(isoDate: string, deltaDays: number): string {
   return formatDateInput(base);
 }
 
-function getRoundedLocalNow(slotIntervalMinutes = 15): string {
-  const now = new Date();
-  const hours = now.getHours();
-  const minutes = now.getMinutes();
-  const minutesSinceMidnight = hours * 60 + minutes;
-  const rounded = Math.ceil(minutesSinceMidnight / slotIntervalMinutes) * slotIntervalMinutes;
-  const safe = Math.min(rounded, (23 * 60) + 45);
-  const hh = Math.floor(safe / 60).toString().padStart(2, '0');
-  const mm = (safe % 60).toString().padStart(2, '0');
-  return `${hh}:${mm}`;
-}
 
 function withOptimisticBookingMove(
   prev: TableGridData | null,
@@ -133,6 +124,8 @@ export function TableGridView({ venueId }: { venueId: string }) {
   const [validDropTargets, setValidDropTargets] = useState<Set<string> | null>(null);
   const [validDropCombos, setValidDropCombos] = useState<Map<string, string> | null>(null);
   const [selectedBookingId, setSelectedBookingId] = useState<string | null>(null);
+  /** Bumps every minute while viewing today so “covers in use” stays current. */
+  const [coversClockTick, setCoversClockTick] = useState(0);
   const [newBookingCell, setNewBookingCell] = useState<{ tableId: string; time: string } | null>(null);
   const [cellContext, setCellContext] = useState<{ tableId: string; time: string; x: number; y: number } | null>(null);
   const [blockForm, setBlockForm] = useState<BlockFormState | null>(null);
@@ -162,6 +155,47 @@ export function TableGridView({ venueId }: { venueId: string }) {
   const lastReconcileAtRef = useRef(0);
   const gridDataRef = useRef<TableGridData | null>(null);
   const { addToast } = useToast();
+
+  const selectedBookingSnapshot = useMemo((): BookingDetailPanelSnapshot | null => {
+    if (!selectedBookingId || !gridData) return null;
+    const cellsWithBooking = gridData.cells.filter(
+      (c) => c.booking_id === selectedBookingId && c.booking_details
+    );
+    if (cellsWithBooking.length > 0) {
+      const bd = cellsWithBooking[0]!.booking_details!;
+      const tableIds = [...new Set(cellsWithBooking.map((c) => c.table_id))];
+      const tableNames = tableIds
+        .map((tid) => gridData.tables.find((t) => t.id === tid)?.name)
+        .filter((n): n is string => Boolean(n));
+      return {
+        bookingDate: date,
+        guestName: bd.guest_name,
+        partySize: bd.party_size,
+        status: bd.status,
+        startTime: bd.start_time,
+        endTime: bd.end_time,
+        dietaryNotes: bd.dietary_notes,
+        occasion: bd.occasion,
+        depositStatus: bd.deposit_status ?? undefined,
+        tableNames: tableNames.length > 0 ? tableNames : undefined,
+      };
+    }
+    const unassigned = gridData.unassigned_bookings?.find((b) => b.id === selectedBookingId);
+    if (unassigned) {
+      return {
+        bookingDate: date,
+        guestName: unassigned.guest_name,
+        partySize: unassigned.party_size,
+        status: unassigned.status,
+        startTime: unassigned.start_time,
+        endTime: unassigned.end_time,
+        dietaryNotes: unassigned.dietary_notes,
+        occasion: unassigned.occasion,
+        tableNames: undefined,
+      };
+    }
+    return null;
+  }, [selectedBookingId, gridData, date]);
 
   useEffect(() => {
     gridDataRef.current = gridData;
@@ -415,6 +449,26 @@ export function TableGridView({ venueId }: { venueId: string }) {
     if (zoneFilter) tables = tables.filter((t) => t.zone === zoneFilter);
     return tables;
   }, [gridData, zoneFilter]);
+
+  useEffect(() => {
+    const today = formatDateInput(new Date());
+    if (date !== today) return;
+    const id = window.setInterval(() => setCoversClockTick((n) => n + 1), 60_000);
+    return () => window.clearInterval(id);
+  }, [date]);
+
+  const viewToolbarSummary = useMemo((): ViewToolbarSummary | null => {
+    if (!gridData) return null;
+    const today = formatDateInput(new Date());
+    const isToday = date === today;
+    const now = new Date();
+    const nowMin = now.getHours() * 60 + now.getMinutes();
+    const visibleTableIds = new Set(filteredTables.map((t) => t.id));
+    const inUse = isToday ? coversInUseAtTime(gridData, nowMin, visibleTableIds) : 0;
+    const refMin = isToday ? nowMin : 0;
+    const next_bookings_slot = computeNextBookingsSlot(gridData, refMin);
+    return { ...gridData.summary, covers_in_use_now: inUse, next_bookings_slot };
+  }, [gridData, date, filteredTables, coversClockTick]);
 
   const highlightedBookingIds = useMemo(() => {
     if (!search.trim() || !gridData) return new Set<string>();
@@ -987,117 +1041,144 @@ export function TableGridView({ venueId }: { venueId: string }) {
   }, [gridData, date]);
 
   return (
-    <div className="flex h-[calc(100vh-120px)] flex-col space-y-3">
+    <div className="flex h-[calc(100vh-120px)] flex-col space-y-4">
       {gridData && (
         <ViewToolbar
-          summary={gridData.summary}
+          title="Table grid"
+          summary={viewToolbarSummary ?? gridData.summary}
           date={date}
           onDateChange={setDate}
           liveState={liveState}
           onRefresh={() => { void fetchGrid(); }}
           onNewBooking={() => setNewBookingCell({ tableId: '', time: '' })}
           onWalkIn={() => {
-            const defaultTime = getRoundedLocalNow(gridData?.slot_interval_minutes ?? 15);
-            setWalkInCell({ tableId: '', time: defaultTime });
+            setWalkInCell({ tableId: '', time: '' });
           }}
+          secondaryActions={(
+            <>
+              <button
+                type="button"
+                onClick={() => { void printDaySheet(); }}
+                className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 shadow-sm hover:bg-slate-50"
+              >
+                Print
+              </button>
+              <button
+                type="button"
+                onClick={() => { void exportCsv(); }}
+                className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 shadow-sm hover:bg-slate-50"
+              >
+                Export CSV
+              </button>
+            </>
+          )}
         >
-          {/* Service filter */}
-          <select
-            value={serviceId ?? ''}
-            onChange={(e) => setServiceId(e.target.value || null)}
-            className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs shadow-sm"
-          >
-            <option value="">All Services</option>
-            {services.map((s) => (
-              <option key={s.id} value={s.id}>{s.name}</option>
-            ))}
-          </select>
-          {serviceId && (
-            <span className="rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[10px] font-medium text-indigo-700">
-              Service filter active
-            </span>
-          )}
-
-          {/* Zone filter */}
-          {zones.length > 0 && (
-            <select
-              value={zoneFilter ?? ''}
-              onChange={(e) => setZoneFilter(e.target.value || null)}
-              className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs shadow-sm"
-            >
-              <option value="">All Zones</option>
-              {zones.map((z) => (
-                <option key={z} value={z}>{z}</option>
-              ))}
-            </select>
-          )}
-
-          {/* Status filter */}
-          <select
-            value={statusFilter ?? ''}
-            onChange={(e) => setStatusFilter(e.target.value || null)}
-            className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs shadow-sm"
-          >
-            <option value="">All Statuses</option>
-            <option value="Confirmed">Confirmed</option>
-            <option value="Pending">Pending</option>
-            <option value="Seated">Seated</option>
-            <option value="Arrived">Arrived</option>
-            <option value="No-Show">No-Show</option>
-            <option value="Cancelled">Cancelled</option>
-          </select>
-
-          <label className="inline-flex items-center gap-1 text-xs text-slate-600">
-            <input type="checkbox" checked={showCancelled} onChange={(e) => setShowCancelled(e.target.checked)} className="rounded" />
-            Cancelled
-          </label>
-          <label className="inline-flex items-center gap-1 text-xs text-slate-600">
-            <input type="checkbox" checked={showNoShow} onChange={(e) => setShowNoShow(e.target.checked)} className="rounded" />
-            No-Show
-          </label>
-
-          {/* Guest search */}
-          <div className="relative">
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search guest..."
-              className="w-40 rounded-lg border border-slate-200 bg-white px-3 py-1.5 pl-8 text-xs shadow-sm"
-            />
-            <svg className="absolute left-2.5 top-2 h-3.5 w-3.5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
-            </svg>
+          <div className="flex w-full flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+              <select
+                value={serviceId ?? ''}
+                onChange={(e) => setServiceId(e.target.value || null)}
+                className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+              >
+                <option value="">All services</option>
+                {services.map((s) => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
+              </select>
+              {serviceId && (
+                <span className="inline-flex items-center rounded-full border border-violet-200 bg-violet-50 px-2.5 py-1 text-xs font-medium text-violet-800">
+                  Service filter on
+                </span>
+              )}
+              {zones.length > 0 && (
+                <select
+                  value={zoneFilter ?? ''}
+                  onChange={(e) => setZoneFilter(e.target.value || null)}
+                  className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                >
+                  <option value="">All zones</option>
+                  {zones.map((z) => (
+                    <option key={z} value={z}>{z}</option>
+                  ))}
+                </select>
+              )}
+              <select
+                value={statusFilter ?? ''}
+                onChange={(e) => setStatusFilter(e.target.value || null)}
+                className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+              >
+                <option value="">All statuses</option>
+                <option value="Confirmed">Confirmed</option>
+                <option value="Pending">Pending</option>
+                <option value="Seated">Seated</option>
+                <option value="Arrived">Arrived</option>
+                <option value="No-Show">No-Show</option>
+                <option value="Cancelled">Cancelled</option>
+              </select>
+              <label className="inline-flex cursor-pointer items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 shadow-sm hover:bg-slate-50">
+                <input type="checkbox" checked={showCancelled} onChange={(e) => setShowCancelled(e.target.checked)} className="rounded border-slate-300 text-brand-600 focus:ring-brand-500" />
+                Cancelled
+              </label>
+              <label className="inline-flex cursor-pointer items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 shadow-sm hover:bg-slate-50">
+                <input type="checkbox" checked={showNoShow} onChange={(e) => setShowNoShow(e.target.checked)} className="rounded border-slate-300 text-brand-600 focus:ring-brand-500" />
+                No-Show
+              </label>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="relative min-w-[12rem] flex-1 sm:min-w-[18rem]">
+                <input
+                  type="text"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Search guest, phone, or ref"
+                  className="w-full rounded-lg border border-slate-200 px-3 py-2 pl-9 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                />
+                <svg className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
+                </svg>
+              </div>
+              <div className="flex items-center rounded-lg border border-slate-200 bg-white shadow-sm">
+                <button type="button" onClick={() => setSlotWidth((prev) => Math.max(30, prev - 5))} className="px-2.5 py-2 text-sm text-slate-500 hover:text-slate-700" title="Zoom out">−</button>
+                <span className="border-x border-slate-200 px-2 py-2 text-xs font-medium tabular-nums text-slate-600">{slotWidth}px</span>
+                <button type="button" onClick={() => setSlotWidth((prev) => Math.min(80, prev + 5))} className="px-2.5 py-2 text-sm text-slate-500 hover:text-slate-700" title="Zoom in">+</button>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowLegend((prev) => !prev)}
+                className={`rounded-lg border px-3 py-2 text-sm font-medium shadow-sm transition-colors ${
+                  showLegend
+                    ? 'border-brand-200 bg-brand-50 text-brand-800'
+                    : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                }`}
+              >
+                Legend
+              </button>
+            </div>
           </div>
-
-          {/* Zoom */}
-          <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white shadow-sm">
-            <button type="button" onClick={() => setSlotWidth((prev) => Math.max(30, prev - 5))} className="px-2 py-1.5 text-xs text-slate-500 hover:text-slate-700" title="Zoom out">−</button>
-            <span className="border-x border-slate-200 px-2 py-1.5 text-[10px] text-slate-600">{slotWidth}px</span>
-            <button type="button" onClick={() => setSlotWidth((prev) => Math.min(80, prev + 5))} className="px-2 py-1.5 text-xs text-slate-500 hover:text-slate-700" title="Zoom in">+</button>
-          </div>
-
-          {/* Legend toggle */}
-          <button
-            type="button"
-            onClick={() => setShowLegend((prev) => !prev)}
-            className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50"
-          >
-            Legend
-          </button>
-
-          {/* Print / Export */}
-          <button type="button" onClick={() => { void printDaySheet(); }} className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50">Print</button>
-          <button type="button" onClick={() => { void exportCsv(); }} className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50">Export</button>
         </ViewToolbar>
       )}
       {showLegend && (
-        <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700">
-          <span className="mr-3"><span className="mr-1 inline-block h-2 w-2 rounded-full bg-amber-400" />Pending</span>
-          <span className="mr-3"><span className="mr-1 inline-block h-2 w-2 rounded-full bg-teal-500" />Confirmed</span>
-          <span className="mr-3"><span className="mr-1 inline-block h-2 w-2 rounded-full bg-blue-600" />Seated</span>
-          <span className="mr-3"><span className="mr-1 inline-block h-2 w-2 rounded-full bg-red-500" />No-Show</span>
-          <span><span className="mr-1 inline-block h-2 w-2 bg-slate-300" />Blocked</span>
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-xs font-medium text-slate-600 shadow-sm">
+          <span className="inline-flex items-center gap-1.5">
+            <span className="h-2 w-2 rounded-full bg-amber-500" />
+            Pending
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <span className="h-2 w-2 rounded-full bg-emerald-500" />
+            Confirmed
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <span className="h-2 w-2 rounded-full bg-blue-600" />
+            Seated
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <span className="h-2 w-2 rounded-full bg-red-500" />
+            No-Show
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <span className="h-2 w-2 rounded-sm bg-slate-300" />
+            Blocked
+          </span>
         </div>
       )}
 
@@ -1153,12 +1234,14 @@ export function TableGridView({ venueId }: { venueId: string }) {
               if (moveBookingId) {
                 const currentAssignments = gridData.cells.filter((c) => c.booking_id === moveBookingId).map((c) => c.table_id);
                 const oldTableIds = Array.from(new Set(currentAssignments));
-                if (oldTableIds.length > 0 && oldTableIds[0] !== tableId) {
+                const movingToNewTable = oldTableIds.length > 0 && !oldTableIds.includes(tableId);
+                if (movingToNewTable) {
                   void handleReassign(moveBookingId, oldTableIds, [tableId]);
-                }
-                const currentStart = gridData.cells.find((c) => c.booking_id === moveBookingId)?.booking_details?.start_time?.slice(0, 5);
-                if (currentStart && currentStart !== time) {
-                  void handleTimeChange(moveBookingId, time);
+                } else if (oldTableIds.length > 0 && oldTableIds.includes(tableId)) {
+                  const currentStart = gridData.cells.find((c) => c.booking_id === moveBookingId)?.booking_details?.start_time?.slice(0, 5);
+                  if (currentStart && currentStart !== time) {
+                    void handleTimeChange(moveBookingId, time);
+                  }
                 }
                 setMoveBookingId(null);
                 return;
@@ -1207,6 +1290,8 @@ export function TableGridView({ venueId }: { venueId: string }) {
       {selectedBookingId && (
         <BookingDetailPanel
           bookingId={selectedBookingId}
+          venueId={venueId}
+          initialSnapshot={selectedBookingSnapshot}
           onClose={() => setSelectedBookingId(null)}
           onUpdated={() => {
             fetchGrid();
@@ -1246,7 +1331,7 @@ export function TableGridView({ venueId }: { venueId: string }) {
               <button
                 type="button"
                 onClick={() => {
-                  setWalkInCell({ tableId: cellContext.tableId, time: cellContext.time });
+                  setWalkInCell({ tableId: cellContext.tableId, time: '' });
                   setCellContext(null);
                 }}
                 className="rounded-md px-2 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-50"
@@ -1378,7 +1463,6 @@ export function TableGridView({ venueId }: { venueId: string }) {
         <WalkInModal
           advancedMode
           initialDate={date}
-          initialTime={walkInCell.time}
           onClose={() => setWalkInCell(null)}
           onCreated={() => { setWalkInCell(null); fetchGrid(); }}
         />
