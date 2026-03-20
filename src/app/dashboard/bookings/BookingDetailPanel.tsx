@@ -65,6 +65,25 @@ function minutesToTime(value: number): string {
   return `${h}:${m}`;
 }
 
+/** HH:mm from DB ISO timestamp; null if missing or unparseable (avoids Invalid Date / RangeError on toISOString). */
+function estimatedEndToHHMM(iso: string | null | undefined): string | null {
+  if (iso == null || typeof iso !== 'string' || !iso.trim()) return null;
+  const d = new Date(iso.trim());
+  if (!Number.isNaN(d.getTime())) {
+    return d.toISOString().slice(11, 16);
+  }
+  const afterT = iso.includes('T') ? iso.split('T')[1] : null;
+  const hm = (afterT ?? iso).slice(0, 5);
+  if (/^\d{2}:\d{2}$/.test(hm)) return hm;
+  return null;
+}
+
+function endHHMMOrFallback(iso: string | null | undefined, startHHMM: string, fallbackDurationMins: number): string {
+  const parsed = estimatedEndToHHMM(iso);
+  if (parsed) return parsed;
+  return minutesToTime(timeToMinutes(startHHMM) + fallbackDurationMins);
+}
+
 interface AssignmentSuggestion {
   source: 'single' | 'auto' | 'manual';
   table_ids: string[];
@@ -106,13 +125,18 @@ function buildPlaceholderDetail(
   snap: BookingDetailPanelSnapshot
 ): BookingDetail {
   const startTime = snap.startTime.slice(0, 5);
-  const endTime = snap.endTime.slice(0, 5);
+  const endTimeRaw = snap.endTime?.trim() ? snap.endTime.slice(0, 5) : '';
+  const endTime = /^\d{2}:\d{2}$/.test(endTimeRaw)
+    ? endTimeRaw
+    : minutesToTime(timeToMinutes(startTime) + 90);
+  const estimatedEndIso = `${snap.bookingDate}T${endTime}:00.000Z`;
+  const estimatedEndDate = new Date(estimatedEndIso);
   return {
     id,
     venue_id: vId,
     booking_date: snap.bookingDate,
     booking_time: startTime,
-    estimated_end_time: `${snap.bookingDate}T${endTime}:00.000Z`,
+    estimated_end_time: Number.isNaN(estimatedEndDate.getTime()) ? null : estimatedEndIso,
     party_size: snap.partySize,
     status: snap.status,
     source: '—',
@@ -192,9 +216,8 @@ export function BookingDetailPanel({
     const data = (await bookingRes.json()) as BookingDetail;
     setDetail(data);
     const startMinutes = timeToMinutes(data.booking_time?.slice(0, 5) ?? '12:00');
-    const endMinutes = data.estimated_end_time
-      ? timeToMinutes(new Date(data.estimated_end_time).toISOString().slice(11, 16))
-      : startMinutes + 90;
+    const endHHMM = endHHMMOrFallback(data.estimated_end_time, data.booking_time?.slice(0, 5) ?? '12:00', 90);
+    const endMinutes = timeToMinutes(endHHMM);
     setModifyDurationMinutes(Math.max(15, endMinutes - startMinutes));
     setModifyGuestName(data.guest?.name ?? '');
     setModifyGuestPhone(data.guest?.phone ?? '');
@@ -369,9 +392,7 @@ export function BookingDetailPanel({
       }
 
       const expectedEnd = minutesToTime(timeToMinutes(currentTime) + modifyDurationMinutes);
-      const currentEnd = detail.estimated_end_time
-        ? new Date(detail.estimated_end_time).toISOString().slice(11, 16)
-        : minutesToTime(timeToMinutes(currentTime) + 90);
+      const currentEnd = endHHMMOrFallback(detail.estimated_end_time, currentTime, 90);
       if (expectedEnd !== currentEnd) {
         const resizeRes = await fetch('/api/venue/tables/assignments', {
           method: 'POST',
@@ -509,9 +530,7 @@ export function BookingDetailPanel({
   const canChangeStatus = nextStatuses.length > 0;
   const confirmationSentAt = d.communications.find((comm) => comm.message_type === 'booking_confirmation')?.created_at;
   const startTime = d.booking_time?.slice(0, 5) ?? '00:00';
-  const endTime = d.estimated_end_time
-    ? new Date(d.estimated_end_time).toISOString().slice(11, 16)
-    : minutesToTime(timeToMinutes(startTime) + 90);
+  const endTime = endHHMMOrFallback(d.estimated_end_time, startTime, 90);
   const durationMinutes = Math.max(15, timeToMinutes(endTime) - timeToMinutes(startTime));
 
   return (

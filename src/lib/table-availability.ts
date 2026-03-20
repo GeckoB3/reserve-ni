@@ -368,9 +368,7 @@ export async function getTableAvailabilityGrid(
               status: matchedBooking.status,
               deposit_status: (matchedBooking as BookingWithTime & { deposit_status?: string | null }).deposit_status ?? null,
               start_time: matchedBooking.booking_time,
-              end_time: matchedBooking.estimated_end_time
-                ? minutesToTime(timeToMinutes(matchedBooking.estimated_end_time.split('T')[1] ?? ''))
-                : '',
+              end_time: minutesToTime(getBookingTimeRange(matchedBooking).endMin),
               dietary_notes: matchedBooking.dietary_notes,
               occasion: matchedBooking.occasion,
             }
