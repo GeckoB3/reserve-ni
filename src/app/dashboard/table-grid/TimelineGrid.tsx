@@ -8,6 +8,7 @@ import {
   useDraggable,
   useDroppable,
   PointerSensor,
+  TouchSensor,
   useSensor,
   useSensors,
   type DragStartEvent,
@@ -375,7 +376,17 @@ export function TimelineGrid({
     return ((nowMinutes - startMin) / slotInterval) * SLOT_WIDTH;
   }, [nowMinutes, startMin, slotInterval, SLOT_WIDTH]);
 
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: { distance: 8 },
+    }),
+    useSensor(TouchSensor, {
+      activationConstraint: {
+        delay: 200,
+        tolerance: 8,
+      },
+    }),
+  );
 
   const handleDragStart = useCallback((event: DragStartEvent) => {
     const bookingId = String(event.active.id).split('__')[0] ?? String(event.active.id);
@@ -1197,15 +1208,15 @@ function DraggableBlock({ block, dragId, slotWidth, rowHeight, highlighted, isMu
       {...attributes}
       onContextMenu={(e) => onContextMenu(e, block)}
       onClick={() => { if (!justResizedRef.current) onClick(block.id); }}
-      className={`absolute flex cursor-grab items-center gap-1 overflow-hidden rounded-md border px-2 text-xs font-medium transition-shadow active:cursor-grabbing ${colorClass} ${
+      className={`absolute flex cursor-grab touch-none select-none items-center gap-1 overflow-hidden rounded-md border px-2 text-xs font-medium transition-shadow active:cursor-grabbing ${colorClass} ${
         isDragging ? 'z-30 opacity-50' : ''
       } ${highlighted ? 'ring-2 ring-amber-400 ring-offset-1' : ''} ${
         isMultiTable ? 'border-l-[3px] border-l-purple-500' : ''
       }`}
-      style={{ left, top, width, height }}
+      style={{ left, top, width, height, WebkitTapHighlightColor: 'transparent' }}
       title={`${block.guest_name} · Party of ${block.party_size} · ${block.start_time.slice(0, 5)}–${block.end_time.slice(0, 5)}${isMultiTable ? ' · Table combination' : ''}`}
     >
-      <div {...listeners} className="flex w-full items-center gap-1 pr-2">
+      <div {...listeners} className="flex w-full min-h-0 flex-1 items-center gap-1 pr-2 touch-none">
         {isCondensed ? (
           <>
             <span className="text-[10px] font-semibold">{block.party_size}</span>
