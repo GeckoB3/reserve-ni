@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { NumericInput } from '@/components/ui/NumericInput';
+import type { TableForSelector, OccupancyMap } from '@/components/table-tracking/TableSelector';
 
 interface Suggestion {
   source: 'single' | 'auto' | 'manual';
@@ -50,6 +51,35 @@ export function WalkInModal({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Covers-mode: simple multi-select table chips
+  const [coversTables, setCoversTables] = useState<TableForSelector[]>([]);
+  const [coversSelectedTableIds, setCoversSelectedTableIds] = useState<string[]>([]);
+  const [coversOccupancy, setCoversOccupancy] = useState<OccupancyMap>({});
+  const [coversTablesLoaded, setCoversTablesLoaded] = useState(false);
+
+  useEffect(() => {
+    if (advancedMode) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch('/api/venue/tables');
+        if (!res.ok || cancelled) return;
+        const payload = await res.json();
+        const tables: TableForSelector[] = (payload.tables ?? [])
+          .filter((t: { is_active: boolean }) => t.is_active)
+          .map((t: { id: string; name: string; max_covers: number; sort_order: number }) => ({
+            id: t.id, name: t.name, max_covers: t.max_covers, sort_order: t.sort_order,
+          }));
+        if (!cancelled) {
+          setCoversTables(tables);
+          setCoversOccupancy({});
+          setCoversTablesLoaded(true);
+        }
+      } catch { /* non-critical */ }
+    })();
+    return () => { cancelled = true; };
+  }, [advancedMode]);
+
   // Fetch table suggestions eagerly so they're ready when the user opens the picker
   useEffect(() => {
     if (!advancedMode || !bookingDate || !bookingTime) {
@@ -94,18 +124,22 @@ export function WalkInModal({
     setError(null);
     setLoading(true);
     try {
+      const walkinBody: Record<string, unknown> = {
+        party_size: partySize,
+        name: name.trim() || undefined,
+        phone: phone.trim() || undefined,
+        dietary_notes: dietaryNotes.trim() || undefined,
+        occasion: occasion.trim() || undefined,
+        booking_date: bookingDate,
+        booking_time: bookingTime,
+      };
+      if (!advancedMode && coversSelectedTableIds.length > 0) {
+        walkinBody.table_ids = coversSelectedTableIds;
+      }
       const res = await fetch('/api/venue/bookings/walk-in', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          party_size: partySize,
-          name: name.trim() || undefined,
-          phone: phone.trim() || undefined,
-          dietary_notes: dietaryNotes.trim() || undefined,
-          occasion: occasion.trim() || undefined,
-          booking_date: bookingDate,
-          booking_time: bookingTime,
-        }),
+        body: JSON.stringify(walkinBody),
       });
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
@@ -267,6 +301,43 @@ export function WalkInModal({
               className="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm transition-colors focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
             />
           </div>
+
+          {/* Table assignment — covers mode (simple chips) */}
+          {!advancedMode && coversTablesLoaded && coversTables.length > 0 && (
+            <div>
+              <p className="mb-1.5 text-sm font-medium text-slate-700">
+                Table <span className="text-slate-400">(optional)</span>
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {coversTables.map((table) => {
+                  const isSelected = coversSelectedTableIds.includes(table.id);
+                  const occupant = coversOccupancy[table.id] ?? null;
+                  return (
+                    <button
+                      key={table.id}
+                      type="button"
+                      onClick={() =>
+                        setCoversSelectedTableIds((prev) =>
+                          isSelected ? prev.filter((id) => id !== table.id) : [...prev, table.id]
+                        )
+                      }
+                      title={occupant ? `Occupied by ${occupant.guestName}` : `${table.name} (${table.max_covers} seats)`}
+                      className={`rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                        isSelected
+                          ? 'border-brand-400 bg-brand-50 text-brand-800 ring-1 ring-brand-400'
+                          : occupant
+                            ? 'border-red-200 bg-red-50 text-red-700 hover:bg-red-100'
+                            : 'border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100'
+                      }`}
+                    >
+                      {table.name}
+                      <span className="ml-1 text-[10px] opacity-70">({table.max_covers})</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {/* Table assignment — advanced mode only */}
           {advancedMode && (

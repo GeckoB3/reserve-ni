@@ -150,6 +150,14 @@ export interface BookingRestriction {
   deposit_required_from_party_size: number | null;
 }
 
+/** Optional JSON on availability_blocks (reduced_capacity); merged when several blocks apply. */
+export interface BlockYieldOverridesPayload {
+  max_bookings_per_slot?: number;
+  slot_interval_minutes?: number;
+  buffer_minutes?: number;
+  duration_minutes?: number;
+}
+
 /** Row from availability_blocks table. */
 export interface AvailabilityBlock {
   id: string;
@@ -161,6 +169,41 @@ export interface AvailabilityBlock {
   time_start: string | null;
   time_end: string | null;
   override_max_covers: number | null;
+  reason: string | null;
+  yield_overrides?: BlockYieldOverridesPayload | null;
+}
+
+/** Date-scoped overrides merged onto booking_restrictions for matching slots/days. */
+export interface BookingRestrictionException {
+  id: string;
+  venue_id: string;
+  service_id: string | null;
+  date_start: string;
+  date_end: string;
+  time_start: string | null;
+  time_end: string | null;
+  min_advance_minutes: number | null;
+  max_advance_days: number | null;
+  min_party_size_online: number | null;
+  max_party_size_online: number | null;
+  large_party_threshold: number | null;
+  large_party_message: string | null;
+  deposit_required_from_party_size: number | null;
+  reason: string | null;
+}
+
+/** Date-scoped service window: closed, extra open day, or custom times. */
+export interface ServiceScheduleException {
+  id: string;
+  venue_id: string;
+  service_id: string;
+  date_start: string;
+  date_end: string;
+  is_closed: boolean;
+  opens_extra_day: boolean;
+  start_time: string | null;
+  end_time: string | null;
+  last_booking_time: string | null;
   reason: string | null;
 }
 
@@ -202,6 +245,9 @@ export interface EngineInput {
   restrictions: BookingRestriction[];
   blocks: AvailabilityBlock[];
   bookings: BookingForEngine[];
+  /** Date-overlapping rows; engine picks best match per service/date. */
+  schedule_exceptions: ServiceScheduleException[];
+  restriction_exceptions: BookingRestrictionException[];
   deposit_config: {
     enabled: boolean;
     amount_per_person_gbp: number;

@@ -264,6 +264,7 @@ export function ExpandedBookingContent({
   onStatusAction,
   onOpenPanel,
   onDetailUpdated,
+  onRequestChangeTable,
 }: {
   booking: BookingRow;
   detail: BookingDetailLite | undefined;
@@ -277,6 +278,7 @@ export function ExpandedBookingContent({
   onStatusAction: (status: BookingStatus) => void;
   onOpenPanel: () => void;
   onDetailUpdated: () => void;
+  onRequestChangeTable?: () => void;
 }) {
   const [showMessageBox, setShowMessageBox] = useState(false);
   const [showModify, setShowModify] = useState(false);
@@ -382,7 +384,7 @@ export function ExpandedBookingContent({
               </p>
             </div>
           </div>
-          {tableManagementEnabled && (
+          {(tableManagementEnabled || tableNames.length > 0) && (
             <div className="mt-2.5 border-t border-slate-100 pt-2">
               <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Table</p>
               <p className={`text-sm font-medium ${tableNames.length > 0 ? 'text-slate-800' : 'text-amber-600'}`}>
@@ -443,6 +445,16 @@ export function ExpandedBookingContent({
             {action.label}
           </button>
         ))}
+
+        {onRequestChangeTable && (
+          <button
+            type="button"
+            onClick={onRequestChangeTable}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm transition-colors hover:bg-slate-50"
+          >
+            Change table
+          </button>
+        )}
 
         {revertAction && (
           <button

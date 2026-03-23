@@ -1,6 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { TableSelector } from '@/components/table-tracking/TableSelector';
+import type { OccupancyMap, TableForSelector } from '@/components/table-tracking/TableSelector';
 import { createClient } from '@/lib/supabase/browser';
 import { BookingDetailPanel } from './BookingDetailPanel';
 import { WalkInModal } from './WalkInModal';
@@ -36,6 +38,7 @@ interface BookingRow {
   guest_name: string;
   guest_email: string | null;
   guest_phone: string | null;
+  table_assignments?: Array<{ id: string; name: string }>;
 }
 
 interface BookingDetailLite {
@@ -112,6 +115,35 @@ function formatDateTime(value: string | null | undefined): string {
   return d.toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' });
 }
 
+interface DaySheetForTableChange {
+  periods: Array<{
+    bookings: Array<{
+      id: string;
+      guest_name: string;
+      status: string;
+      table_assignments?: Array<{ id: string; name: string }>;
+    }>;
+  }>;
+  active_tables: TableForSelector[];
+}
+
+function buildCoversOccupancyMap(dayData: DaySheetForTableChange | null, excludeBookingId: string): OccupancyMap {
+  const map: OccupancyMap = {};
+  if (!dayData) return map;
+  const tables = dayData.active_tables ?? [];
+  for (const t of tables) map[t.id] = null;
+  for (const period of dayData.periods) {
+    for (const b of period.bookings) {
+      if (b.id === excludeBookingId) continue;
+      if (b.status !== 'Seated' || !b.table_assignments?.length) continue;
+      for (const ta of b.table_assignments) {
+        map[ta.id] = { bookingId: b.id, guestName: b.guest_name };
+      }
+    }
+  }
+  return map;
+}
+
 export function BookingsDashboard({ venueId }: { venueId: string }) {
   const { addToast } = useToast();
   const [viewMode, setViewMode] = useState<ViewMode>('day');
@@ -136,9 +168,15 @@ export function BookingsDashboard({ venueId }: { venueId: string }) {
   const [messageDraftById, setMessageDraftById] = useState<Record<string, string>>({});
   const [sendingMessageIds, setSendingMessageIds] = useState<string[]>([]);
   const [tableManagementEnabled, setTableManagementEnabled] = useState(false);
+  const [coversActiveTables, setCoversActiveTables] = useState<TableForSelector[]>([]);
   const [noShowGraceMinutes, setNoShowGraceMinutes] = useState(15);
   const [confirmDialog, setConfirmDialog] = useState<{ title: string; message: string; confirmLabel: string; onConfirm: () => void } | null>(null);
   const [undoAction, setUndoAction] = useState<UndoAction | null>(null);
+  const [changeTableBooking, setChangeTableBooking] = useState<BookingRow | null>(null);
+  const [changeTableDayData, setChangeTableDayData] = useState<DaySheetForTableChange | null>(null);
+  const [changeTableDayLoading, setChangeTableDayLoading] = useState(false);
+  const [changeTableSelectedIds, setChangeTableSelectedIds] = useState<string[]>([]);
+  const [changeTableSaving, setChangeTableSaving] = useState(false);
 
   const { from, to } = useMemo(() => {
     if (viewMode === 'day') return { from: anchorDate, to: anchorDate };
@@ -155,10 +193,67 @@ export function BookingsDashboard({ venueId }: { venueId: string }) {
       const data = await res.json();
       setTableManagementEnabled(Boolean(data.settings?.table_management_enabled));
       setNoShowGraceMinutes(data.settings?.no_show_grace_minutes ?? 15);
+      const rawTables = (data.tables ?? []) as Array<{
+        id: string;
+        name: string;
+        max_covers: number;
+        sort_order: number;
+        is_active: boolean;
+      }>;
+      setCoversActiveTables(
+        rawTables
+          .filter((t) => t.is_active)
+          .map((t) => ({
+            id: t.id,
+            name: t.name,
+            max_covers: t.max_covers,
+            sort_order: t.sort_order ?? 0,
+          })),
+      );
     } catch {
       setTableManagementEnabled(false);
+      setCoversActiveTables([]);
     }
   }, []);
+
+  const coversChangeTableEnabled = !tableManagementEnabled && coversActiveTables.length > 0;
+
+  const openChangeTableModal = useCallback(async (booking: BookingRow) => {
+    setChangeTableBooking(booking);
+    setChangeTableSelectedIds((booking.table_assignments ?? []).map((t) => t.id));
+    setChangeTableDayData(null);
+    setChangeTableDayLoading(true);
+    try {
+      const res = await fetch(`/api/venue/day-sheet?date=${booking.booking_date}`);
+      if (res.ok) {
+        const json = (await res.json()) as DaySheetForTableChange;
+        setChangeTableDayData(json);
+      }
+    } catch {
+      setChangeTableDayData(null);
+    } finally {
+      setChangeTableDayLoading(false);
+    }
+  }, []);
+
+  const closeChangeTableModal = useCallback(() => {
+    setChangeTableBooking(null);
+    setChangeTableDayData(null);
+    setChangeTableSelectedIds([]);
+    setChangeTableDayLoading(false);
+    setChangeTableSaving(false);
+  }, []);
+
+  const changeTableSelectorTables = useMemo(() => {
+    const fromDay = changeTableDayData?.active_tables;
+    if (fromDay && fromDay.length > 0) return fromDay;
+    return coversActiveTables;
+  }, [changeTableDayData, coversActiveTables]);
+
+  const changeTableOccupancyMap = useMemo(() => {
+    if (!changeTableBooking || !changeTableDayData) return {};
+    return buildCoversOccupancyMap(changeTableDayData, changeTableBooking.id);
+  }, [changeTableBooking, changeTableDayData]);
 
   const fetchBookings = useCallback(async (options?: FetchBookingsOptions) => {
     const silent = options?.silent ?? false;
@@ -202,6 +297,47 @@ export function BookingsDashboard({ venueId }: { venueId: string }) {
       else setLoading(false);
     }
   }, [from, invalidCustomRange, statusFilter, to, viewMode]);
+
+  const changeTableSaveLock = useRef(false);
+
+  const confirmChangeTableAssignment = useCallback(async (ids: string[]) => {
+    if (!changeTableBooking || changeTableSaveLock.current) return;
+    changeTableSaveLock.current = true;
+    const bookingId = changeTableBooking.id;
+    const oldIds = (changeTableBooking.table_assignments ?? []).map((t) => t.id);
+    setChangeTableSaving(true);
+    try {
+      const res = oldIds.length > 0
+        ? await fetch('/api/venue/tables/assignments', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              action: 'reassign',
+              booking_id: bookingId,
+              old_table_ids: oldIds,
+              new_table_ids: ids,
+            }),
+          })
+        : await fetch('/api/venue/tables/assignments', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ booking_id: bookingId, table_ids: ids }),
+          });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        setError((j as { error?: string }).error ?? 'Failed to update table assignment.');
+        return;
+      }
+      addToast('Table assignment updated', 'success');
+      closeChangeTableModal();
+      void fetchBookings({ silent: true, ids: [bookingId] });
+    } catch {
+      setError('Failed to update table assignment.');
+    } finally {
+      changeTableSaveLock.current = false;
+      setChangeTableSaving(false);
+    }
+  }, [addToast, changeTableBooking, closeChangeTableModal, fetchBookings]);
 
   useEffect(() => {
     void fetchModeData();
@@ -668,6 +804,8 @@ export function BookingsDashboard({ venueId }: { venueId: string }) {
           setMessageDraftById={setMessageDraftById}
           sendingMessageIds={sendingMessageIds}
           tableManagementEnabled={tableManagementEnabled}
+          coversChangeTableEnabled={coversChangeTableEnabled}
+          onRequestChangeTable={(b) => { void openChangeTableModal(b); }}
           venueId={venueId}
           onToggleExpand={toggleExpand}
           onOpenPanel={setSelectedId}
@@ -697,6 +835,8 @@ export function BookingsDashboard({ venueId }: { venueId: string }) {
                 setMessageDraftById={setMessageDraftById}
                 sendingMessageIds={sendingMessageIds}
                 tableManagementEnabled={tableManagementEnabled}
+                coversChangeTableEnabled={coversChangeTableEnabled}
+                onRequestChangeTable={(b) => { void openChangeTableModal(b); }}
                 venueId={venueId}
                 onToggleExpand={toggleExpand}
                 onOpenPanel={setSelectedId}
@@ -740,6 +880,54 @@ export function BookingsDashboard({ venueId }: { venueId: string }) {
           onClose={() => setNewBookingOpen(false)}
           onCreated={handleNewBookingCreated}
         />
+      )}
+      {changeTableBooking && (
+        <div
+          className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/30 p-4 backdrop-blur-sm"
+          onClick={() => { if (!changeTableSaving) closeChangeTableModal(); }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Change table"
+            className="my-16 w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h3 className="text-lg font-semibold text-slate-900">Change table</h3>
+            <p className="mt-2 text-sm text-slate-600">
+              Select table(s) for {changeTableBooking.guest_name}. Tables already assigned to this booking are treated as free so you can move or keep them.
+            </p>
+            {changeTableDayLoading && (
+              <p className="mt-2 text-xs text-slate-500">Loading table occupancy for this date…</p>
+            )}
+            {changeTableSelectorTables.length === 0 ? (
+              <p className="mt-4 text-sm text-amber-700">No active tables are configured. Add tables in venue settings.</p>
+            ) : (
+              <div className={changeTableSaving ? 'pointer-events-none opacity-60' : ''}>
+                <TableSelector
+                  tables={changeTableSelectorTables}
+                  occupancyMap={changeTableOccupancyMap}
+                  partySize={changeTableBooking.party_size}
+                  selectedIds={changeTableSelectedIds}
+                  onChange={setChangeTableSelectedIds}
+                  confirmLabel={changeTableSaving ? 'Saving…' : 'Save'}
+                  skipLabel="Cancel"
+                  onConfirm={(ids) => { void confirmChangeTableAssignment(ids); }}
+                  onSkip={() => { if (!changeTableSaving) closeChangeTableModal(); }}
+                />
+              </div>
+            )}
+            {changeTableSelectorTables.length === 0 && (
+              <button
+                type="button"
+                onClick={closeChangeTableModal}
+                className="mt-4 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              >
+                Close
+              </button>
+            )}
+          </div>
+        </div>
       )}
       {undoAction && (
         <UndoToast
@@ -835,6 +1023,8 @@ function BookingsAccordionList({
   setMessageDraftById,
   sendingMessageIds,
   tableManagementEnabled,
+  coversChangeTableEnabled,
+  onRequestChangeTable,
   venueId,
   onToggleExpand,
   onOpenPanel,
@@ -852,6 +1042,8 @@ function BookingsAccordionList({
   setMessageDraftById: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   sendingMessageIds: string[];
   tableManagementEnabled: boolean;
+  coversChangeTableEnabled: boolean;
+  onRequestChangeTable: (booking: BookingRow) => void;
   venueId: string;
   onToggleExpand: (id: string) => void;
   onOpenPanel: (id: string) => void;
@@ -918,6 +1110,13 @@ function BookingsAccordionList({
                         Dietary
                       </span>
                     )}
+                    {booking.table_assignments && booking.table_assignments.length > 0 && (
+                      <span className="hidden rounded bg-indigo-50 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-700 sm:inline-block">
+                        {booking.table_assignments.length === 1
+                          ? booking.table_assignments[0]!.name
+                          : booking.table_assignments.map((t) => t.name).join(', ')}
+                      </span>
+                    )}
                   </div>
                   <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-600">
                     <span className="font-medium tabular-nums">{booking.booking_time.slice(0, 5)}</span>
@@ -928,18 +1127,31 @@ function BookingsAccordionList({
                 </div>
                 {(() => {
                   const action = BOOKING_PRIMARY_ACTIONS[booking.status as BookingStatus];
-                  if (!action) return null;
+                  const showChangeTable = coversChangeTableEnabled && booking.status === 'Seated';
+                  if (!action && !showChangeTable) return null;
                   return (
                     /* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions */
-                    <div onClick={(e) => e.stopPropagation()} className="flex-shrink-0">
-                      <button
-                        type="button"
-                        onClick={() => onStatusAction(booking, action.target)}
-                        className="inline-flex items-center rounded-lg bg-brand-600 px-2.5 py-1 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
-                        aria-label={`${action.label} booking for ${booking.guest_name}`}
-                      >
-                        {action.label}
-                      </button>
+                    <div onClick={(e) => e.stopPropagation()} className="flex flex-shrink-0 flex-wrap items-center justify-end gap-1.5">
+                      {action && (
+                        <button
+                          type="button"
+                          onClick={() => onStatusAction(booking, action.target)}
+                          className="inline-flex items-center rounded-lg bg-brand-600 px-2.5 py-1 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+                          aria-label={`${action.label} booking for ${booking.guest_name}`}
+                        >
+                          {action.label}
+                        </button>
+                      )}
+                      {showChangeTable && (
+                        <button
+                          type="button"
+                          onClick={() => onRequestChangeTable(booking)}
+                          className="inline-flex items-center rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 shadow-sm transition-colors hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-400/30"
+                          aria-label={`Change table for ${booking.guest_name}`}
+                        >
+                          Change table
+                        </button>
+                      )}
                     </div>
                   );
                 })()}
@@ -961,6 +1173,7 @@ function BookingsAccordionList({
                   onStatusAction={(status) => { onStatusAction(booking, status); }}
                   onOpenPanel={() => onOpenPanel(booking.id)}
                   onDetailUpdated={() => onDetailUpdated(booking.id)}
+                  onRequestChangeTable={coversChangeTableEnabled && booking.status === 'Seated' ? () => onRequestChangeTable(booking) : undefined}
                 />
               )}
             </div>

@@ -741,7 +741,7 @@ export function BookingDetailPanel({
           </div>
 
           {/* Table assignment */}
-          {tableManagementEnabled && (() => {
+          {(tableManagementEnabled || assignedTables.length > 0) && (() => {
             const tableLine =
               optimisticTableLabel ??
               (assignedTables.length > 0 ? assignedTables.map((t) => t.name).join(' + ') : null);
@@ -1036,7 +1036,7 @@ export function BookingDetailPanel({
                   <label className="mb-1 block text-xs font-medium text-slate-500">Internal Notes</label>
                   <textarea value={modifyInternalNotes} onChange={(e) => setModifyInternalNotes(e.target.value)} rows={2} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" />
                 </div>
-                {tableManagementEnabled && (
+                {(tableManagementEnabled || allTables.length > 0) && (
                   <div>
                     <p className="mb-1 text-xs font-medium text-slate-500">Assigned Tables</p>
                     <div className="flex flex-wrap gap-1.5">

@@ -14,9 +14,16 @@ interface Block {
   time_end: string | null;
   override_max_covers: number | null;
   reason: string | null;
+  yield_overrides?: Record<string, number> | null;
+}
+
+interface ServiceLite {
+  id: string;
+  name: string;
 }
 
 interface Props {
+  services: ServiceLite[];
   showToast: (msg: string) => void;
 }
 
@@ -32,19 +39,24 @@ const BLOCK_TYPE_COLORS: Record<Block['block_type'], string> = {
   special_event: 'bg-blue-100 text-blue-700',
 };
 
-export function ClosuresTab({ showToast }: Props) {
+export function ClosuresTab({ services, showToast }: Props) {
   const [blocks, setBlocks] = useState<Block[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [saving, setSaving] = useState(false);
   const [draft, setDraft] = useState({
     block_type: 'closed' as Block['block_type'],
+    service_id: '' as string,
     date_start: '',
     date_end: '',
     time_start: null as string | null,
     time_end: null as string | null,
     override_max_covers: null as number | null,
     reason: '',
+    yield_max_bookings: null as number | null,
+    yield_interval: null as number | null,
+    yield_buffer: null as number | null,
+    yield_duration: null as number | null,
   });
 
   useEffect(() => {
@@ -70,18 +82,45 @@ export function ClosuresTab({ showToast }: Props) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          ...draft,
+          block_type: draft.block_type,
+          service_id: draft.service_id || null,
+          date_start: draft.date_start,
+          date_end: draft.date_end,
           time_start: draft.time_start || null,
           time_end: draft.time_end || null,
           reason: draft.reason || null,
           override_max_covers: draft.block_type === 'reduced_capacity' ? draft.override_max_covers : null,
+          yield_overrides:
+            draft.block_type === 'reduced_capacity'
+              ? (() => {
+                  const o: Record<string, number> = {};
+                  if (draft.yield_max_bookings != null) o.max_bookings_per_slot = draft.yield_max_bookings;
+                  if (draft.yield_interval != null) o.slot_interval_minutes = draft.yield_interval;
+                  if (draft.yield_buffer != null) o.buffer_minutes = draft.yield_buffer;
+                  if (draft.yield_duration != null) o.duration_minutes = draft.yield_duration;
+                  return Object.keys(o).length > 0 ? o : null;
+                })()
+              : null,
         }),
       });
       if (!res.ok) throw new Error();
       const data = await res.json();
       setBlocks([...blocks, data.block]);
       setCreating(false);
-      setDraft({ block_type: 'closed', date_start: '', date_end: '', time_start: null, time_end: null, override_max_covers: null, reason: '' });
+      setDraft({
+        block_type: 'closed',
+        service_id: '',
+        date_start: '',
+        date_end: '',
+        time_start: null,
+        time_end: null,
+        override_max_covers: null,
+        reason: '',
+        yield_max_bookings: null,
+        yield_interval: null,
+        yield_buffer: null,
+        yield_duration: null,
+      });
       showToast('Block created');
     } catch {
       showToast('Failed to create block');
@@ -136,6 +175,11 @@ export function ClosuresTab({ showToast }: Props) {
                 {block.override_max_covers != null && (
                   <p className="mt-1 text-xs text-amber-600">Reduced to {block.override_max_covers} covers</p>
                 )}
+                {block.service_id && (
+                  <p className="mt-0.5 text-xs text-slate-500">
+                    Service: {services.find((s) => s.id === block.service_id)?.name ?? block.service_id.slice(0, 8)}
+                  </p>
+                )}
               </div>
               <button onClick={() => handleDelete(block.id)} className="rounded-lg p-2 text-slate-400 hover:bg-red-50 hover:text-red-600">
                 <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
@@ -178,6 +222,21 @@ export function ClosuresTab({ showToast }: Props) {
                 <option value="special_event">Special Event</option>
               </select>
             </div>
+            <div className="col-span-2">
+              <label className="mb-1 block text-xs font-medium text-slate-600">Service scope</label>
+              <select
+                value={draft.service_id}
+                onChange={(e) => setDraft({ ...draft, service_id: e.target.value })}
+                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+              >
+                <option value="">All services</option>
+                {services.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
+            </div>
             <div>
               <label className="mb-1 block text-xs font-medium text-slate-600">Start date</label>
               <input type="date" value={draft.date_start} onChange={(e) => setDraft({ ...draft, date_start: e.target.value, date_end: draft.date_end || e.target.value })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
@@ -195,10 +254,31 @@ export function ClosuresTab({ showToast }: Props) {
               <input type="time" value={draft.time_end ?? ''} onChange={(e) => setDraft({ ...draft, time_end: e.target.value || null })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
             </div>
             {draft.block_type === 'reduced_capacity' && (
-              <div className="col-span-2">
-                <label className="mb-1 block text-xs font-medium text-slate-600">Override max covers</label>
-                <NumericInput min={0} value={draft.override_max_covers} onChange={(v) => setDraft({ ...draft, override_max_covers: v })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
-              </div>
+              <>
+                <div className="col-span-2">
+                  <label className="mb-1 block text-xs font-medium text-slate-600">Override max covers</label>
+                  <NumericInput min={0} value={draft.override_max_covers} onChange={(v) => setDraft({ ...draft, override_max_covers: v })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+                </div>
+                <div className="col-span-2 grid grid-cols-2 gap-2 rounded-lg border border-amber-100 bg-amber-50/30 p-2">
+                  <p className="col-span-2 text-[10px] font-medium text-amber-900">Optional yield overrides</p>
+                  <div>
+                    <label className="text-[10px] text-slate-600">Max bookings / slot</label>
+                    <NumericInput min={1} value={draft.yield_max_bookings} onChange={(v) => setDraft({ ...draft, yield_max_bookings: v })} className="w-full rounded border border-slate-200 px-2 py-1 text-sm" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-slate-600">Slot interval (min)</label>
+                    <NumericInput min={5} value={draft.yield_interval} onChange={(v) => setDraft({ ...draft, yield_interval: v })} className="w-full rounded border border-slate-200 px-2 py-1 text-sm" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-slate-600">Buffer (min)</label>
+                    <NumericInput min={0} value={draft.yield_buffer} onChange={(v) => setDraft({ ...draft, yield_buffer: v })} className="w-full rounded border border-slate-200 px-2 py-1 text-sm" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-slate-600">Duration (min)</label>
+                    <NumericInput min={15} value={draft.yield_duration} onChange={(v) => setDraft({ ...draft, yield_duration: v })} className="w-full rounded border border-slate-200 px-2 py-1 text-sm" />
+                  </div>
+                </div>
+              </>
             )}
             <div className="col-span-2">
               <label className="mb-1 block text-xs font-medium text-slate-600">Reason (optional)</label>

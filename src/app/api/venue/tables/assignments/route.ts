@@ -11,6 +11,7 @@ import {
   validateTableCapacity,
   validateTablesBelongToVenue,
 } from '@/lib/table-management/lifecycle';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 
 const assignSchema = z.object({
@@ -30,12 +31,23 @@ const timeChangeSchema = z.object({
   new_estimated_end_time: z.string().optional(),
 });
 
+async function isCoversOnlyVenue(db: SupabaseClient, venueId: string): Promise<boolean> {
+  const { data } = await db
+    .from('venues')
+    .select('table_management_enabled')
+    .eq('id', venueId)
+    .single();
+  return !(data?.table_management_enabled);
+}
+
 export async function POST(request: NextRequest) {
   const supabase = await createClient();
   const staff = await getVenueStaff(supabase);
   if (!staff) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
 
   const body = await request.json();
+  const coversOnly = await isCoversOnlyVenue(staff.db, staff.venue_id);
+
   const logAssignmentEvent = async (
     bookingId: string,
     eventType: 'table_assigned' | 'table_reassigned' | 'table_unassigned' | 'booking_time_changed',
@@ -68,20 +80,22 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'One or more tables do not belong to this venue' }, { status: 400 });
     }
 
-    const capacityValid = await validateTableCapacity(staff.db, parsed.data.new_table_ids, booking.party_size);
-    if (!capacityValid) {
-      return NextResponse.json({ error: 'Assigned table(s) do not fit this party size' }, { status: 400 });
-    }
+    if (!coversOnly) {
+      const capacityValid = await validateTableCapacity(staff.db, parsed.data.new_table_ids, booking.party_size);
+      if (!capacityValid) {
+        return NextResponse.json({ error: 'Assigned table(s) do not fit this party size' }, { status: 400 });
+      }
 
-    const conflicts = await detectAssignmentConflicts(
-      staff.db,
-      staff.venue_id,
-      booking,
-      parsed.data.new_table_ids,
-      parsed.data.booking_id,
-    );
-    if (conflicts.length > 0) {
-      return NextResponse.json({ error: 'One or more target tables are already occupied in this time window' }, { status: 409 });
+      const conflicts = await detectAssignmentConflicts(
+        staff.db,
+        staff.venue_id,
+        booking,
+        parsed.data.new_table_ids,
+        parsed.data.booking_id,
+      );
+      if (conflicts.length > 0) {
+        return NextResponse.json({ error: 'One or more target tables are already occupied in this time window' }, { status: 409 });
+      }
     }
 
     try {
@@ -119,17 +133,19 @@ export async function POST(request: NextRequest) {
       updates.estimated_end_time = parsed.data.new_estimated_end_time;
     }
 
-    const assignedTableIds = await getAssignedTableIds(staff.db, parsed.data.booking_id);
-    const conflictCandidate = { ...booking, booking_time: timeForDb, estimated_end_time: (parsed.data.new_estimated_end_time ?? booking.estimated_end_time) };
-    const conflicts = await detectAssignmentConflicts(
-      staff.db,
-      staff.venue_id,
-      conflictCandidate,
-      assignedTableIds,
-      parsed.data.booking_id,
-    );
-    if (conflicts.length > 0) {
-      return NextResponse.json({ error: 'Time move conflicts with existing table assignments' }, { status: 409 });
+    if (!coversOnly) {
+      const assignedTableIds = await getAssignedTableIds(staff.db, parsed.data.booking_id);
+      const conflictCandidate = { ...booking, booking_time: timeForDb, estimated_end_time: (parsed.data.new_estimated_end_time ?? booking.estimated_end_time) };
+      const conflicts = await detectAssignmentConflicts(
+        staff.db,
+        staff.venue_id,
+        conflictCandidate,
+        assignedTableIds,
+        parsed.data.booking_id,
+      );
+      if (conflicts.length > 0) {
+        return NextResponse.json({ error: 'Time move conflicts with existing table assignments' }, { status: 409 });
+      }
     }
 
     const { error } = await staff.db
@@ -143,6 +159,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to change time' }, { status: 500 });
     }
 
+    const assignedTableIds = await getAssignedTableIds(staff.db, parsed.data.booking_id);
     await syncTableStatusesForBooking(staff.db, parsed.data.booking_id, assignedTableIds, booking.status, staff.id);
     await logAssignmentEvent(parsed.data.booking_id, 'booking_time_changed', {
       new_time: timeForDb,
@@ -189,20 +206,22 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'One or more tables do not belong to this venue' }, { status: 400 });
   }
 
-  const capacityValid = await validateTableCapacity(staff.db, parsed.data.table_ids, booking.party_size);
-  if (!capacityValid) {
-    return NextResponse.json({ error: 'Assigned table(s) do not fit this party size' }, { status: 400 });
-  }
+  if (!coversOnly) {
+    const capacityValid = await validateTableCapacity(staff.db, parsed.data.table_ids, booking.party_size);
+    if (!capacityValid) {
+      return NextResponse.json({ error: 'Assigned table(s) do not fit this party size' }, { status: 400 });
+    }
 
-  const conflicts = await detectAssignmentConflicts(
-    staff.db,
-    staff.venue_id,
-    booking,
-    parsed.data.table_ids,
-    parsed.data.booking_id,
-  );
-  if (conflicts.length > 0) {
-    return NextResponse.json({ error: 'One or more target tables are already occupied in this time window' }, { status: 409 });
+    const conflicts = await detectAssignmentConflicts(
+      staff.db,
+      staff.venue_id,
+      booking,
+      parsed.data.table_ids,
+      parsed.data.booking_id,
+    );
+    if (conflicts.length > 0) {
+      return NextResponse.json({ error: 'One or more target tables are already occupied in this time window' }, { status: 409 });
+    }
   }
 
   try {

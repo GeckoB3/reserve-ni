@@ -19,7 +19,11 @@ import type {
   VenueForAvailability,
 } from '@/types/availability';
 
-export { computeAvailability } from './engine';
+export {
+  computeAvailability,
+  computeEffectiveMinSlotCoverCap,
+  resolveServiceForDate,
+} from './engine';
 export { fetchEngineInput, hasServiceConfig } from './fetch';
 
 const DEFAULT_SITTING_DURATION_MINUTES = 90;

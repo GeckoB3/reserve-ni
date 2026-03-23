@@ -8,9 +8,11 @@ import type {
   AvailabilityBlock,
   BookingForEngine,
   BookingRestriction,
+  BookingRestrictionException,
   EngineInput,
   PartySizeDuration,
   ServiceCapacityRule,
+  ServiceScheduleException,
   VenueService,
 } from '@/types/availability';
 
@@ -53,6 +55,8 @@ export async function fetchEngineInput({
     bookingsRes,
     blocksRes,
     venueRes,
+    restrictionExcRes,
+    scheduleExcRes,
   ] = await Promise.all([
     supabase
       .from('venue_services')
@@ -66,7 +70,9 @@ export async function fetchEngineInput({
       .eq('booking_date', date),
     supabase
       .from('availability_blocks')
-      .select('id, venue_id, service_id, block_type, date_start, date_end, time_start, time_end, override_max_covers, reason')
+      .select(
+        'id, venue_id, service_id, block_type, date_start, date_end, time_start, time_end, override_max_covers, reason, yield_overrides',
+      )
       .eq('venue_id', venueId)
       .lte('date_start', date)
       .gte('date_end', date),
@@ -75,7 +81,45 @@ export async function fetchEngineInput({
       .select('deposit_config')
       .eq('id', venueId)
       .single(),
+    supabase
+      .from('booking_restriction_exceptions')
+      .select(
+        'id, venue_id, service_id, date_start, date_end, time_start, time_end, min_advance_minutes, max_advance_days, min_party_size_online, max_party_size_online, large_party_threshold, large_party_message, deposit_required_from_party_size, reason',
+      )
+      .eq('venue_id', venueId)
+      .lte('date_start', date)
+      .gte('date_end', date),
+    supabase
+      .from('service_schedule_exceptions')
+      .select(
+        'id, venue_id, service_id, date_start, date_end, is_closed, opens_extra_day, start_time, end_time, last_booking_time, reason',
+      )
+      .eq('venue_id', venueId)
+      .lte('date_start', date)
+      .gte('date_end', date),
   ]);
+
+  let blocksData: unknown[] = blocksRes.data ?? [];
+  if (
+    blocksRes.error &&
+    (blocksRes.error.code === '42703' || blocksRes.error.message?.includes('yield_overrides'))
+  ) {
+    const retry = await supabase
+      .from('availability_blocks')
+      .select(
+        'id, venue_id, service_id, block_type, date_start, date_end, time_start, time_end, override_max_covers, reason',
+      )
+      .eq('venue_id', venueId)
+      .lte('date_start', date)
+      .gte('date_end', date);
+    if (!retry.error) {
+      blocksData = (retry.data ?? []) as unknown[];
+    } else {
+      console.error('fetchEngineInput: availability_blocks fallback failed:', retry.error.message);
+    }
+  } else if (blocksRes.error) {
+    console.error('fetchEngineInput: availability_blocks', blocksRes.error.message);
+  }
 
   const services: VenueService[] = (servicesRes.data ?? []).map((r) => ({
     ...r,
@@ -119,6 +163,53 @@ export async function fetchEngineInput({
 
   const depositConfig = venueRes.data?.deposit_config as { enabled?: boolean; amount_per_person_gbp?: number } | null;
 
+  if (restrictionExcRes.error) {
+    console.error('fetchEngineInput: booking_restriction_exceptions', restrictionExcRes.error.message);
+  }
+  if (scheduleExcRes.error) {
+    console.error('fetchEngineInput: service_schedule_exceptions', scheduleExcRes.error.message);
+  }
+
+  const restriction_exceptions: BookingRestrictionException[] = !restrictionExcRes.error
+    ? (restrictionExcRes.data ?? []).map(
+    (row: Record<string, unknown>) => ({
+      id: row.id as string,
+      venue_id: row.venue_id as string,
+      service_id: (row.service_id as string | null) ?? null,
+      date_start: row.date_start as string,
+      date_end: row.date_end as string,
+      time_start: row.time_start != null ? String(row.time_start).slice(0, 5) : null,
+      time_end: row.time_end != null ? String(row.time_end).slice(0, 5) : null,
+      min_advance_minutes: (row.min_advance_minutes as number | null) ?? null,
+      max_advance_days: (row.max_advance_days as number | null) ?? null,
+      min_party_size_online: (row.min_party_size_online as number | null) ?? null,
+      max_party_size_online: (row.max_party_size_online as number | null) ?? null,
+      large_party_threshold: (row.large_party_threshold as number | null) ?? null,
+      large_party_message: (row.large_party_message as string | null) ?? null,
+      deposit_required_from_party_size: (row.deposit_required_from_party_size as number | null) ?? null,
+      reason: (row.reason as string | null) ?? null,
+    }),
+  )
+    : [];
+
+  const schedule_exceptions: ServiceScheduleException[] = !scheduleExcRes.error
+    ? (scheduleExcRes.data ?? []).map(
+    (row: Record<string, unknown>) => ({
+      id: row.id as string,
+      venue_id: row.venue_id as string,
+      service_id: row.service_id as string,
+      date_start: row.date_start as string,
+      date_end: row.date_end as string,
+      is_closed: Boolean(row.is_closed),
+      opens_extra_day: Boolean(row.opens_extra_day),
+      start_time: row.start_time != null ? String(row.start_time).slice(0, 5) : null,
+      end_time: row.end_time != null ? String(row.end_time).slice(0, 5) : null,
+      last_booking_time: row.last_booking_time != null ? String(row.last_booking_time).slice(0, 5) : null,
+      reason: (row.reason as string | null) ?? null,
+    }),
+  )
+    : [];
+
   return {
     venue_id: venueId,
     date,
@@ -131,7 +222,9 @@ export async function fetchEngineInput({
     })),
     durations: (durationsRes.data ?? []) as PartySizeDuration[],
     restrictions: (restrictionsRes.data ?? []) as BookingRestriction[],
-    blocks: (blocksRes.data ?? []) as AvailabilityBlock[],
+    blocks: blocksData as AvailabilityBlock[],
+    restriction_exceptions,
+    schedule_exceptions,
     bookings,
     deposit_config: depositConfig?.enabled
       ? { enabled: true, amount_per_person_gbp: depositConfig.amount_per_person_gbp ?? 5 }

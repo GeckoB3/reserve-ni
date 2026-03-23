@@ -82,7 +82,29 @@ export async function GET(request: NextRequest) {
       bookings = bookings.filter((b: Record<string, unknown>) => b.status === statusFilter);
     }
 
-    return NextResponse.json({ bookings });
+    // Attach table assignments
+    const bookingIds = bookings.map((b: Record<string, unknown>) => b.id as string);
+    const assignmentsMap = new Map<string, Array<{ id: string; name: string }>>();
+    if (bookingIds.length > 0) {
+      const { data: assignRows } = await staff.db
+        .from('booking_table_assignments')
+        .select('booking_id, table_id, table:venue_tables(id, name)')
+        .in('booking_id', bookingIds);
+      for (const row of assignRows ?? []) {
+        const r = row as unknown as { booking_id: string; table_id: string; table: Array<{ id: string; name: string }> | { id: string; name: string } | null };
+        const tableObj = Array.isArray(r.table) ? r.table[0] : r.table;
+        const existing = assignmentsMap.get(r.booking_id) ?? [];
+        existing.push({ id: tableObj?.id ?? r.table_id, name: tableObj?.name ?? 'Unknown' });
+        assignmentsMap.set(r.booking_id, existing);
+      }
+    }
+
+    const enriched = bookings.map((b: Record<string, unknown>) => ({
+      ...b,
+      table_assignments: assignmentsMap.get(b.id as string) ?? [],
+    }));
+
+    return NextResponse.json({ bookings: enriched });
   } catch (err) {
     console.error('GET /api/venue/bookings/list failed:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

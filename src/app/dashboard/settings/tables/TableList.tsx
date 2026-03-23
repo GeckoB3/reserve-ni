@@ -10,6 +10,7 @@ interface Props {
   setTables: (tables: VenueTable[]) => void;
   isAdmin: boolean;
   onRefresh: () => void;
+  variant?: 'full' | 'covers';
 }
 
 const SHAPES: { value: TableShape; label: string }[] = [
@@ -41,7 +42,8 @@ const emptyTable: EditingTable = {
   is_active: true,
 };
 
-export function TableList({ tables, setTables, isAdmin, onRefresh }: Props) {
+export function TableList({ tables, setTables, isAdmin, onRefresh, variant = 'full' }: Props) {
+  const isCovers = variant === 'covers';
   const [editing, setEditing] = useState<EditingTable | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -279,7 +281,7 @@ export function TableList({ tables, setTables, isAdmin, onRefresh }: Props) {
           {error && (
             <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>
           )}
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+          <div className={`grid gap-4 ${isCovers ? 'grid-cols-2' : 'grid-cols-2 sm:grid-cols-3'}`}>
             <div>
               <label className="block text-xs font-medium text-slate-600">Name</label>
               <input
@@ -290,64 +292,70 @@ export function TableList({ tables, setTables, isAdmin, onRefresh }: Props) {
                 placeholder="Table 1"
               />
             </div>
+            {!isCovers && (
+              <div>
+                <label className="block text-xs font-medium text-slate-600">Min Covers</label>
+                <NumericInput
+                  value={editing.min_covers}
+                  onChange={(v) => setEditing({ ...editing, min_covers: v })}
+                  min={1}
+                  max={50}
+                  className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
+                />
+              </div>
+            )}
             <div>
-              <label className="block text-xs font-medium text-slate-600">Min Covers</label>
-              <NumericInput
-                value={editing.min_covers}
-                onChange={(v) => setEditing({ ...editing, min_covers: v })}
-                min={1}
-                max={50}
-                className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-slate-600">Max Covers</label>
+              <label className="block text-xs font-medium text-slate-600">{isCovers ? 'Seats' : 'Max Covers'}</label>
               <NumericInput
                 value={editing.max_covers}
-                onChange={(v) => setEditing({ ...editing, max_covers: v })}
+                onChange={(v) => setEditing({ ...editing, max_covers: v, ...(isCovers ? { min_covers: 1 } : {}) })}
                 min={1}
                 max={50}
                 className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
               />
             </div>
-            <div>
-              <label className="block text-xs font-medium text-slate-600">Shape</label>
-              <select
-                value={editing.shape}
-                onChange={(e) => setEditing({ ...editing, shape: e.target.value as TableShape })}
-                className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
-              >
-                {SHAPES.map((s) => (
-                  <option key={s.value} value={s.value}>{s.label}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-slate-600">Zone</label>
-              <input
-                type="text"
-                value={editing.zone}
-                onChange={(e) => setEditing({ ...editing, zone: e.target.value })}
-                className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
-                placeholder="Main, Patio, etc."
-                list="zone-suggestions"
-              />
-              {zones.length > 0 && (
-                <datalist id="zone-suggestions">
-                  {zones.map((z) => <option key={z} value={z} />)}
-                </datalist>
-              )}
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-slate-600">Server Section</label>
-              <input
-                type="text"
-                value={editing.server_section}
-                onChange={(e) => setEditing({ ...editing, server_section: e.target.value })}
-                className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
-                placeholder="Optional"
-              />
-            </div>
+            {!isCovers && (
+              <>
+                <div>
+                  <label className="block text-xs font-medium text-slate-600">Shape</label>
+                  <select
+                    value={editing.shape}
+                    onChange={(e) => setEditing({ ...editing, shape: e.target.value as TableShape })}
+                    className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
+                  >
+                    {SHAPES.map((s) => (
+                      <option key={s.value} value={s.value}>{s.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-600">Zone</label>
+                  <input
+                    type="text"
+                    value={editing.zone}
+                    onChange={(e) => setEditing({ ...editing, zone: e.target.value })}
+                    className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
+                    placeholder="Main, Patio, etc."
+                    list="zone-suggestions"
+                  />
+                  {zones.length > 0 && (
+                    <datalist id="zone-suggestions">
+                      {zones.map((z) => <option key={z} value={z} />)}
+                    </datalist>
+                  )}
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-600">Server Section</label>
+                  <input
+                    type="text"
+                    value={editing.server_section}
+                    onChange={(e) => setEditing({ ...editing, server_section: e.target.value })}
+                    className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
+                    placeholder="Optional"
+                  />
+                </div>
+              </>
+            )}
           </div>
           <div className="mt-3 flex items-center gap-2">
             <label className="text-xs font-medium text-slate-600">Active</label>
@@ -386,7 +394,7 @@ export function TableList({ tables, setTables, isAdmin, onRefresh }: Props) {
         </div>
       ) : (
         <div className="space-y-4">
-          {zones.length > 0 && (
+          {!isCovers && zones.length > 0 && (
             <>
               {Array.from(groupedByZone.entries()).map(([zone, zoneTables]) => (
                 <div key={zone}>
@@ -394,6 +402,7 @@ export function TableList({ tables, setTables, isAdmin, onRefresh }: Props) {
                   <TableGrid
                     tables={zoneTables}
                     isAdmin={isAdmin}
+                    variant={variant}
                     onEdit={(t) => setEditing({
                       id: t.id,
                       name: t.name,
@@ -415,6 +424,7 @@ export function TableList({ tables, setTables, isAdmin, onRefresh }: Props) {
                   <TableGrid
                     tables={noZone}
                     isAdmin={isAdmin}
+                    variant={variant}
                     onEdit={(t) => setEditing({
                       id: t.id,
                       name: t.name,
@@ -432,10 +442,11 @@ export function TableList({ tables, setTables, isAdmin, onRefresh }: Props) {
               )}
             </>
           )}
-          {zones.length === 0 && (
+          {(isCovers || zones.length === 0) && (
             <TableGrid
-              tables={tables}
+              tables={isCovers ? tables : (zones.length === 0 ? tables : [])}
               isAdmin={isAdmin}
+              variant={variant}
               onEdit={(t) => setEditing({
                 id: t.id,
                 name: t.name,
@@ -456,13 +467,15 @@ export function TableList({ tables, setTables, isAdmin, onRefresh }: Props) {
   );
 }
 
-function TableGrid({ tables, isAdmin, onEdit, onDelete, onDuplicate }: {
+function TableGrid({ tables, isAdmin, onEdit, onDelete, onDuplicate, variant = 'full' }: {
   tables: VenueTable[];
   isAdmin: boolean;
   onEdit: (t: VenueTable) => void;
   onDelete: (id: string) => void;
   onDuplicate: (t: VenueTable) => void;
+  variant?: 'full' | 'covers';
 }) {
+  const isCovers = variant === 'covers';
   return (
     <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
       <div className="overflow-x-auto">
@@ -470,9 +483,9 @@ function TableGrid({ tables, isAdmin, onEdit, onDelete, onDuplicate }: {
           <thead>
             <tr className="border-b border-slate-100 bg-slate-50/50">
               <th className="px-4 py-2.5 text-left text-xs font-medium text-slate-500">Name</th>
-              <th className="px-4 py-2.5 text-left text-xs font-medium text-slate-500">Shape</th>
-              <th className="px-4 py-2.5 text-center text-xs font-medium text-slate-500">Covers</th>
-              <th className="px-4 py-2.5 text-left text-xs font-medium text-slate-500">Zone</th>
+              {!isCovers && <th className="px-4 py-2.5 text-left text-xs font-medium text-slate-500">Shape</th>}
+              <th className="px-4 py-2.5 text-center text-xs font-medium text-slate-500">{isCovers ? 'Seats' : 'Covers'}</th>
+              {!isCovers && <th className="px-4 py-2.5 text-left text-xs font-medium text-slate-500">Zone</th>}
               <th className="px-4 py-2.5 text-center text-xs font-medium text-slate-500">Active</th>
               {isAdmin && (
                 <th className="px-4 py-2.5 text-right text-xs font-medium text-slate-500">Actions</th>
@@ -483,9 +496,9 @@ function TableGrid({ tables, isAdmin, onEdit, onDelete, onDuplicate }: {
             {tables.map((t) => (
               <tr key={t.id} className={`hover:bg-slate-50/50 ${!t.is_active ? 'opacity-50' : ''}`}>
                 <td className="px-4 py-2.5 font-medium text-slate-900">{t.name}</td>
-                <td className="px-4 py-2.5 capitalize text-slate-600">{t.shape}</td>
-                <td className="px-4 py-2.5 text-center text-slate-600">{t.min_covers}–{t.max_covers}</td>
-                <td className="px-4 py-2.5 text-slate-600">{t.zone ?? '—'}</td>
+                {!isCovers && <td className="px-4 py-2.5 capitalize text-slate-600">{t.shape}</td>}
+                <td className="px-4 py-2.5 text-center text-slate-600">{isCovers ? t.max_covers : `${t.min_covers}–${t.max_covers}`}</td>
+                {!isCovers && <td className="px-4 py-2.5 text-slate-600">{t.zone ?? '—'}</td>}
                 <td className="px-4 py-2.5 text-center">
                   <span className={`inline-block h-2 w-2 rounded-full ${t.is_active ? 'bg-green-500' : 'bg-slate-300'}`} />
                 </td>

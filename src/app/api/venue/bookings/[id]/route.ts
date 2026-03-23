@@ -14,6 +14,7 @@ import {
   syncTableStatusesForBooking,
   validateBookingStatusTransition,
   validateNoShowGracePeriod,
+  validateTablesBelongToVenue,
 } from '@/lib/table-management/lifecycle';
 import type { VenueForAvailability, BookingForAvailability } from '@/types/availability';
 import { resolveVenueMode } from '@/lib/venue-mode';
@@ -261,6 +262,15 @@ export async function PATCH(
         nextStatus: newStatus,
         actorId: staff.id,
       });
+
+      if (newStatus === 'Seated' && Array.isArray(body.table_ids) && body.table_ids.length > 0) {
+        const tableIds = body.table_ids as string[];
+        const valid = await validateTablesBelongToVenue(admin, staff.venue_id, tableIds);
+        if (valid) {
+          await replaceBookingAssignments(admin, id, tableIds, staff.id);
+          await syncTableStatusesForBooking(admin, id, tableIds, newStatus, staff.id);
+        }
+      }
 
       const updated = await staff.db.from('bookings').select('*').eq('id', id).single();
       return NextResponse.json(updated.data);

@@ -12,6 +12,7 @@ const walkInSchema = z.object({
   dietary_notes: z.string().max(500).optional(),
   occasion: z.string().max(200).optional(),
   table_id: z.string().uuid().optional(),
+  table_ids: z.array(z.string().uuid()).optional(),
   booking_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   booking_time: z.string().regex(/^([01]?[0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9])?$/).optional(),
 });
@@ -70,21 +71,24 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { party_size, name, phone, dietary_notes, occasion, table_id, booking_date, booking_time } = parsed.data;
+    const { party_size, name, phone, dietary_notes, occasion, table_id, table_ids: rawTableIds, booking_date, booking_time } = parsed.data;
 
     const admin = getSupabaseAdminClient();
     const { data: venueSettings } = await admin
       .from('venues')
-      .select('timezone')
+      .select('timezone, table_management_enabled')
       .eq('id', staff.venue_id)
       .single();
     const timezone = venueSettings?.timezone ?? 'Europe/London';
+    const coversOnly = !(venueSettings?.table_management_enabled);
     const localNow = venueLocalDateTime(timezone);
     const today = booking_date ?? localNow.date;
     const exactTime = `${String(localNow.hours).padStart(2, '0')}:${String(localNow.minutes).padStart(2, '0')}:00`;
     const bookingTime = booking_time ? (booking_time.length === 5 ? `${booking_time}:00` : booking_time) : exactTime;
 
-    if (table_id) {
+    const resolvedTableIds = rawTableIds ?? (table_id ? [table_id] : []);
+
+    if (table_id && !coversOnly) {
       const { data: tableCheck } = await admin
         .from('venue_tables')
         .select('id, max_covers')
@@ -194,9 +198,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to create booking' }, { status: 500 });
     }
 
-    if (table_id) {
-      await replaceBookingAssignments(admin, booking.id, [table_id], staff.id);
-      await syncTableStatusesForBooking(admin, booking.id, [table_id], 'Seated', staff.id);
+    if (resolvedTableIds.length > 0) {
+      await replaceBookingAssignments(admin, booking.id, resolvedTableIds, staff.id);
+      await syncTableStatusesForBooking(admin, booking.id, resolvedTableIds, 'Seated', staff.id);
     }
 
     return NextResponse.json(booking, { status: 201 });

@@ -1,7 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff } from '@/lib/venue-auth';
-import { computeAvailability, fetchEngineInput, getAvailableSlots, timeToMinutes, getDayOfWeek } from '@/lib/availability';
+import {
+  computeAvailability,
+  computeEffectiveMinSlotCoverCap,
+  fetchEngineInput,
+  getAvailableSlots,
+  resolveServiceForDate,
+  timeToMinutes,
+  getDayOfWeek,
+} from '@/lib/availability';
 import type { BookingForAvailability, VenueForAvailability, AvailabilityConfig, FixedIntervalsConfig, NamedSittingsConfig } from '@/types/availability';
 import { nowInVenueTz, dietarySummary } from '@/lib/day-sheet';
 import { resolveVenueMode } from '@/lib/venue-mode';
@@ -222,17 +230,30 @@ export async function GET(request: NextRequest) {
       for (const result of serviceResults) {
         const service = result.service;
 
-        // Skip services not active on this day of the week
-        if (!service.days_of_week.includes(dayOfWeek)) continue;
+        const effectiveService = resolveServiceForDate(
+          service,
+          engineInput.schedule_exceptions,
+          staff.venue_id,
+          dateStr,
+          dayOfWeek,
+        );
+        if (!effectiveService) continue;
 
-        const startMin = timeToMinutes(service.start_time);
-        const endMin = timeToMinutes(service.end_time);
+        const startMin = timeToMinutes(effectiveService.start_time);
+        const endMin = timeToMinutes(effectiveService.end_time);
 
         const rules = engineInput.capacity_rules.filter((r) => r.service_id === service.id);
         const dayRule = rules.find((r) => r.day_of_week === dayOfWeek && !r.time_range_start);
         const defaultRule = rules.find((r) => r.day_of_week == null && !r.time_range_start);
         const rule = dayRule ?? defaultRule;
-        const maxCovers = rule?.max_covers_per_slot ?? null;
+
+        const effectiveMax = computeEffectiveMinSlotCoverCap(
+          engineInput,
+          service,
+          effectiveService,
+          dayOfWeek,
+        );
+        const maxCovers = effectiveMax ?? rule?.max_covers_per_slot ?? null;
         if (maxCovers != null) capacityConfigured = true;
 
         const periodBookings = allBookings
@@ -252,8 +273,8 @@ export async function GET(request: NextRequest) {
         periods.push({
           key: service.id,
           label: service.name,
-          start_time: service.start_time.slice(0, 5),
-          end_time: service.end_time.slice(0, 5),
+          start_time: effectiveService.start_time.slice(0, 5),
+          end_time: effectiveService.end_time.slice(0, 5),
           max_covers: maxCovers,
           booked_covers: bookedCovers,
           bookings: periodBookings,
@@ -483,6 +504,45 @@ export async function GET(request: NextRequest) {
           .reduce((s, b) => s + b.party_size, 0)
       : 0;
 
+    // Fetch active venue tables for table status strip + selector
+    const { data: venueTablesRows } = await staff.db
+      .from('venue_tables')
+      .select('id, name, max_covers, sort_order')
+      .eq('venue_id', staff.venue_id)
+      .eq('is_active', true)
+      .order('sort_order');
+    const activeTables = (venueTablesRows ?? []).map((t: { id: string; name: string; max_covers: number; sort_order: number }) => ({
+      id: t.id,
+      name: t.name,
+      max_covers: t.max_covers,
+      sort_order: t.sort_order,
+    }));
+
+    // Fetch table assignments for today's bookings
+    const bookingIds = allBookings.map((b) => b.id);
+    let assignmentsMap = new Map<string, Array<{ id: string; name: string }>>();
+    if (bookingIds.length > 0 && activeTables.length > 0) {
+      const { data: assignRows } = await staff.db
+        .from('booking_table_assignments')
+        .select('booking_id, table_id, table:venue_tables(id, name)')
+        .in('booking_id', bookingIds);
+      for (const row of assignRows ?? []) {
+        const r = row as unknown as { booking_id: string; table_id: string; table: Array<{ id: string; name: string }> | { id: string; name: string } | null };
+        const tableObj = Array.isArray(r.table) ? r.table[0] : r.table;
+        const existing = assignmentsMap.get(r.booking_id) ?? [];
+        existing.push({ id: tableObj?.id ?? r.table_id, name: tableObj?.name ?? 'Unknown' });
+        assignmentsMap.set(r.booking_id, existing);
+      }
+    }
+
+    // Attach table_assignments to each booking in periods
+    for (const period of periods) {
+      for (const booking of period.bookings) {
+        (booking as DaySheetBooking & { table_assignments?: Array<{ id: string; name: string }> }).table_assignments =
+          assignmentsMap.get(booking.id) ?? [];
+      }
+    }
+
     // Dietary summary (only active bookings — includes special_requests for allergy detection)
     const dietaryInput = allBookings
       .filter((b) => ACTIVE_STATUSES.includes(b.status))
@@ -513,6 +573,7 @@ export async function GET(request: NextRequest) {
       dietary_summary: dietary,
       no_show_grace_minutes: Math.min(60, Math.max(10, venue.no_show_grace_minutes ?? 15)),
       capacity_configured: capacityConfigured,
+      active_tables: activeTables,
     });
   } catch (err) {
     console.error('GET /api/venue/day-sheet failed:', err);

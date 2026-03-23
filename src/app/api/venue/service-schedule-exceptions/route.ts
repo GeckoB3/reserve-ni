@@ -4,34 +4,19 @@ import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { z } from 'zod';
 
-const yieldOverridesSchema = z
-  .object({
-    max_bookings_per_slot: z.number().int().min(1).max(500).optional(),
-    slot_interval_minutes: z.number().int().min(5).max(120).optional(),
-    buffer_minutes: z.number().int().min(0).max(120).optional(),
-    duration_minutes: z.number().int().min(15).max(300).optional(),
-  })
-  .strict()
-  .nullable()
-  .optional();
-
-const blockSchema = z.object({
-  service_id: z.string().uuid().nullable().optional(),
-  block_type: z.enum(['closed', 'reduced_capacity', 'special_event']),
+const rowSchema = z.object({
+  service_id: z.string().uuid(),
   date_start: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   date_end: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  time_start: z.string().regex(/^\d{2}:\d{2}$/).nullable().optional(),
-  time_end: z.string().regex(/^\d{2}:\d{2}$/).nullable().optional(),
-  override_max_covers: z.number().int().min(0).nullable().optional(),
+  is_closed: z.boolean().optional(),
+  opens_extra_day: z.boolean().optional(),
+  start_time: z.string().regex(/^\d{2}:\d{2}$/).nullable().optional(),
+  end_time: z.string().regex(/^\d{2}:\d{2}$/).nullable().optional(),
+  last_booking_time: z.string().regex(/^\d{2}:\d{2}$/).nullable().optional(),
   reason: z.string().max(500).nullable().optional(),
-  yield_overrides: yieldOverridesSchema,
 });
 
-const blockPatchSchema = blockSchema.partial().extend({
-  id: z.string().uuid(),
-});
-
-/** GET /api/venue/availability-blocks */
+/** GET /api/venue/service-schedule-exceptions */
 export async function GET() {
   try {
     const supabase = await createClient();
@@ -40,24 +25,27 @@ export async function GET() {
 
     const admin = getSupabaseAdminClient();
     const { data, error } = await admin
-      .from('availability_blocks')
+      .from('service_schedule_exceptions')
       .select('*')
       .eq('venue_id', staff.venue_id)
       .order('date_start', { ascending: true });
 
     if (error) {
-      console.error('GET /api/venue/availability-blocks failed:', error);
-      return NextResponse.json({ error: 'Failed to fetch blocks' }, { status: 500 });
+      if (error.message?.includes('does not exist') || error.code === '42P01') {
+        return NextResponse.json({ exceptions: [] });
+      }
+      console.error('GET service-schedule-exceptions failed:', error);
+      return NextResponse.json({ error: 'Failed to fetch exceptions' }, { status: 500 });
     }
 
-    return NextResponse.json({ blocks: data });
+    return NextResponse.json({ exceptions: data ?? [] });
   } catch (err) {
-    console.error('GET /api/venue/availability-blocks failed:', err);
+    console.error('GET service-schedule-exceptions failed:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
 
-/** POST /api/venue/availability-blocks — create a block (admin only). */
+/** POST */
 export async function POST(request: NextRequest) {
   try {
     const supabase = await createClient();
@@ -66,31 +54,39 @@ export async function POST(request: NextRequest) {
     if (!requireAdmin(staff)) return NextResponse.json({ error: 'Forbidden: admin only' }, { status: 403 });
 
     const body = await request.json();
-    const parsed = blockSchema.safeParse(body);
+    const parsed = rowSchema.safeParse(body);
     if (!parsed.success) {
       return NextResponse.json({ error: 'Invalid request', details: parsed.error.flatten() }, { status: 400 });
     }
 
     const admin = getSupabaseAdminClient();
     const { data, error } = await admin
-      .from('availability_blocks')
-      .insert({ venue_id: staff.venue_id, ...parsed.data })
+      .from('service_schedule_exceptions')
+      .insert({
+        venue_id: staff.venue_id,
+        ...parsed.data,
+        is_closed: parsed.data.is_closed ?? false,
+        opens_extra_day: parsed.data.opens_extra_day ?? false,
+        start_time: parsed.data.start_time ?? null,
+        end_time: parsed.data.end_time ?? null,
+        last_booking_time: parsed.data.last_booking_time ?? null,
+      })
       .select('*')
       .single();
 
     if (error) {
-      console.error('POST /api/venue/availability-blocks failed:', error);
-      return NextResponse.json({ error: 'Failed to create block' }, { status: 500 });
+      console.error('POST service-schedule-exceptions failed:', error);
+      return NextResponse.json({ error: 'Failed to create exception' }, { status: 500 });
     }
 
-    return NextResponse.json({ block: data }, { status: 201 });
+    return NextResponse.json({ exception: data }, { status: 201 });
   } catch (err) {
-    console.error('POST /api/venue/availability-blocks failed:', err);
+    console.error('POST service-schedule-exceptions failed:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
 
-/** PATCH /api/venue/availability-blocks */
+/** PATCH */
 export async function PATCH(request: NextRequest) {
   try {
     const supabase = await createClient();
@@ -99,34 +95,36 @@ export async function PATCH(request: NextRequest) {
     if (!requireAdmin(staff)) return NextResponse.json({ error: 'Forbidden: admin only' }, { status: 403 });
 
     const body = await request.json();
-    const parsed = blockPatchSchema.safeParse(body);
+    const { id, ...fields } = body;
+    if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 });
+
+    const parsed = rowSchema.partial().safeParse(fields);
     if (!parsed.success) {
       return NextResponse.json({ error: 'Invalid request', details: parsed.error.flatten() }, { status: 400 });
     }
 
-    const { id, ...fields } = parsed.data;
     const admin = getSupabaseAdminClient();
     const { data, error } = await admin
-      .from('availability_blocks')
-      .update(fields)
+      .from('service_schedule_exceptions')
+      .update(parsed.data)
       .eq('id', id)
       .eq('venue_id', staff.venue_id)
       .select('*')
       .single();
 
     if (error) {
-      console.error('PATCH /api/venue/availability-blocks failed:', error);
-      return NextResponse.json({ error: 'Failed to update block' }, { status: 500 });
+      console.error('PATCH service-schedule-exceptions failed:', error);
+      return NextResponse.json({ error: 'Failed to update exception' }, { status: 500 });
     }
 
-    return NextResponse.json({ block: data });
+    return NextResponse.json({ exception: data });
   } catch (err) {
-    console.error('PATCH /api/venue/availability-blocks failed:', err);
+    console.error('PATCH service-schedule-exceptions failed:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
 
-/** DELETE /api/venue/availability-blocks */
+/** DELETE */
 export async function DELETE(request: NextRequest) {
   try {
     const supabase = await createClient();
@@ -138,15 +136,20 @@ export async function DELETE(request: NextRequest) {
     if (!body.id) return NextResponse.json({ error: 'Missing id' }, { status: 400 });
 
     const admin = getSupabaseAdminClient();
-    const { error } = await admin.from('availability_blocks').delete().eq('id', body.id).eq('venue_id', staff.venue_id);
+    const { error } = await admin
+      .from('service_schedule_exceptions')
+      .delete()
+      .eq('id', body.id)
+      .eq('venue_id', staff.venue_id);
+
     if (error) {
-      console.error('DELETE /api/venue/availability-blocks failed:', error);
-      return NextResponse.json({ error: 'Failed to delete block' }, { status: 500 });
+      console.error('DELETE service-schedule-exceptions failed:', error);
+      return NextResponse.json({ error: 'Failed to delete exception' }, { status: 500 });
     }
 
     return NextResponse.json({ success: true });
   } catch (err) {
-    console.error('DELETE /api/venue/availability-blocks failed:', err);
+    console.error('DELETE service-schedule-exceptions failed:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

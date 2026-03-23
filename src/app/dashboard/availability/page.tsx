@@ -7,12 +7,14 @@ import { CapacityRulesTab } from './CapacityRulesTab';
 import { DiningDurationTab } from './DiningDurationTab';
 import { BookingRulesTab } from './BookingRulesTab';
 import { ClosuresTab } from './ClosuresTab';
+import { AvailabilityCalendarTab } from './AvailabilityCalendarTab';
 
 const TABS = [
   { key: 'services', label: 'Services' },
   { key: 'capacity', label: 'Capacity Rules' },
   { key: 'duration', label: 'Dining Duration' },
   { key: 'rules', label: 'Booking Rules' },
+  { key: 'calendar', label: 'Calendar' },
   { key: 'closures', label: 'Closures' },
 ] as const;
 
@@ -68,7 +70,7 @@ export default function AvailabilitySettingsPage() {
       <div className="mb-6 flex items-start justify-between">
         <div>
           <h1 className="mb-1 text-xl font-bold text-slate-900">Availability Settings</h1>
-          <p className="text-sm text-slate-500">Manage your services, capacity, dining durations, booking rules, and closures.</p>
+          <p className="text-sm text-slate-500">Manage services, capacity, durations, booking rules, calendar blocks, and closures.</p>
         </div>
         <Link
           href="/dashboard/onboarding"
@@ -108,8 +110,11 @@ export default function AvailabilitySettingsPage() {
       {activeTab === 'rules' && (
         <BookingRulesTab services={services} showToast={showToast} />
       )}
+      {activeTab === 'calendar' && (
+        <AvailabilityCalendarTab services={services} showToast={showToast} />
+      )}
       {activeTab === 'closures' && (
-        <ClosuresTab showToast={showToast} />
+        <ClosuresTab services={services} showToast={showToast} />
       )}
 
       {/* Toast */}

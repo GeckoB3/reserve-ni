@@ -4,34 +4,23 @@ import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { z } from 'zod';
 
-const yieldOverridesSchema = z
-  .object({
-    max_bookings_per_slot: z.number().int().min(1).max(500).optional(),
-    slot_interval_minutes: z.number().int().min(5).max(120).optional(),
-    buffer_minutes: z.number().int().min(0).max(120).optional(),
-    duration_minutes: z.number().int().min(15).max(300).optional(),
-  })
-  .strict()
-  .nullable()
-  .optional();
-
-const blockSchema = z.object({
+const rowSchema = z.object({
   service_id: z.string().uuid().nullable().optional(),
-  block_type: z.enum(['closed', 'reduced_capacity', 'special_event']),
   date_start: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   date_end: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   time_start: z.string().regex(/^\d{2}:\d{2}$/).nullable().optional(),
   time_end: z.string().regex(/^\d{2}:\d{2}$/).nullable().optional(),
-  override_max_covers: z.number().int().min(0).nullable().optional(),
+  min_advance_minutes: z.number().int().min(0).nullable().optional(),
+  max_advance_days: z.number().int().min(0).nullable().optional(),
+  min_party_size_online: z.number().int().min(1).nullable().optional(),
+  max_party_size_online: z.number().int().min(1).nullable().optional(),
+  large_party_threshold: z.number().int().min(1).nullable().optional(),
+  large_party_message: z.string().max(500).nullable().optional(),
+  deposit_required_from_party_size: z.number().int().min(1).nullable().optional(),
   reason: z.string().max(500).nullable().optional(),
-  yield_overrides: yieldOverridesSchema,
 });
 
-const blockPatchSchema = blockSchema.partial().extend({
-  id: z.string().uuid(),
-});
-
-/** GET /api/venue/availability-blocks */
+/** GET /api/venue/booking-restriction-exceptions */
 export async function GET() {
   try {
     const supabase = await createClient();
@@ -40,24 +29,27 @@ export async function GET() {
 
     const admin = getSupabaseAdminClient();
     const { data, error } = await admin
-      .from('availability_blocks')
+      .from('booking_restriction_exceptions')
       .select('*')
       .eq('venue_id', staff.venue_id)
       .order('date_start', { ascending: true });
 
     if (error) {
-      console.error('GET /api/venue/availability-blocks failed:', error);
-      return NextResponse.json({ error: 'Failed to fetch blocks' }, { status: 500 });
+      if (error.message?.includes('does not exist') || error.code === '42P01') {
+        return NextResponse.json({ exceptions: [] });
+      }
+      console.error('GET booking-restriction-exceptions failed:', error);
+      return NextResponse.json({ error: 'Failed to fetch exceptions' }, { status: 500 });
     }
 
-    return NextResponse.json({ blocks: data });
+    return NextResponse.json({ exceptions: data ?? [] });
   } catch (err) {
-    console.error('GET /api/venue/availability-blocks failed:', err);
+    console.error('GET booking-restriction-exceptions failed:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
 
-/** POST /api/venue/availability-blocks — create a block (admin only). */
+/** POST */
 export async function POST(request: NextRequest) {
   try {
     const supabase = await createClient();
@@ -66,31 +58,37 @@ export async function POST(request: NextRequest) {
     if (!requireAdmin(staff)) return NextResponse.json({ error: 'Forbidden: admin only' }, { status: 403 });
 
     const body = await request.json();
-    const parsed = blockSchema.safeParse(body);
+    const parsed = rowSchema.safeParse(body);
     if (!parsed.success) {
       return NextResponse.json({ error: 'Invalid request', details: parsed.error.flatten() }, { status: 400 });
     }
 
     const admin = getSupabaseAdminClient();
     const { data, error } = await admin
-      .from('availability_blocks')
-      .insert({ venue_id: staff.venue_id, ...parsed.data })
+      .from('booking_restriction_exceptions')
+      .insert({
+        venue_id: staff.venue_id,
+        ...parsed.data,
+        service_id: parsed.data.service_id ?? null,
+        time_start: parsed.data.time_start ?? null,
+        time_end: parsed.data.time_end ?? null,
+      })
       .select('*')
       .single();
 
     if (error) {
-      console.error('POST /api/venue/availability-blocks failed:', error);
-      return NextResponse.json({ error: 'Failed to create block' }, { status: 500 });
+      console.error('POST booking-restriction-exceptions failed:', error);
+      return NextResponse.json({ error: 'Failed to create exception' }, { status: 500 });
     }
 
-    return NextResponse.json({ block: data }, { status: 201 });
+    return NextResponse.json({ exception: data }, { status: 201 });
   } catch (err) {
-    console.error('POST /api/venue/availability-blocks failed:', err);
+    console.error('POST booking-restriction-exceptions failed:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
 
-/** PATCH /api/venue/availability-blocks */
+/** PATCH */
 export async function PATCH(request: NextRequest) {
   try {
     const supabase = await createClient();
@@ -99,34 +97,36 @@ export async function PATCH(request: NextRequest) {
     if (!requireAdmin(staff)) return NextResponse.json({ error: 'Forbidden: admin only' }, { status: 403 });
 
     const body = await request.json();
-    const parsed = blockPatchSchema.safeParse(body);
+    const { id, ...fields } = body;
+    if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 });
+
+    const parsed = rowSchema.partial().safeParse(fields);
     if (!parsed.success) {
       return NextResponse.json({ error: 'Invalid request', details: parsed.error.flatten() }, { status: 400 });
     }
 
-    const { id, ...fields } = parsed.data;
     const admin = getSupabaseAdminClient();
     const { data, error } = await admin
-      .from('availability_blocks')
-      .update(fields)
+      .from('booking_restriction_exceptions')
+      .update(parsed.data)
       .eq('id', id)
       .eq('venue_id', staff.venue_id)
       .select('*')
       .single();
 
     if (error) {
-      console.error('PATCH /api/venue/availability-blocks failed:', error);
-      return NextResponse.json({ error: 'Failed to update block' }, { status: 500 });
+      console.error('PATCH booking-restriction-exceptions failed:', error);
+      return NextResponse.json({ error: 'Failed to update exception' }, { status: 500 });
     }
 
-    return NextResponse.json({ block: data });
+    return NextResponse.json({ exception: data });
   } catch (err) {
-    console.error('PATCH /api/venue/availability-blocks failed:', err);
+    console.error('PATCH booking-restriction-exceptions failed:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
 
-/** DELETE /api/venue/availability-blocks */
+/** DELETE */
 export async function DELETE(request: NextRequest) {
   try {
     const supabase = await createClient();
@@ -138,15 +138,20 @@ export async function DELETE(request: NextRequest) {
     if (!body.id) return NextResponse.json({ error: 'Missing id' }, { status: 400 });
 
     const admin = getSupabaseAdminClient();
-    const { error } = await admin.from('availability_blocks').delete().eq('id', body.id).eq('venue_id', staff.venue_id);
+    const { error } = await admin
+      .from('booking_restriction_exceptions')
+      .delete()
+      .eq('id', body.id)
+      .eq('venue_id', staff.venue_id);
+
     if (error) {
-      console.error('DELETE /api/venue/availability-blocks failed:', error);
-      return NextResponse.json({ error: 'Failed to delete block' }, { status: 500 });
+      console.error('DELETE booking-restriction-exceptions failed:', error);
+      return NextResponse.json({ error: 'Failed to delete exception' }, { status: 500 });
     }
 
     return NextResponse.json({ success: true });
   } catch (err) {
-    console.error('DELETE /api/venue/availability-blocks failed:', err);
+    console.error('DELETE booking-restriction-exceptions failed:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
