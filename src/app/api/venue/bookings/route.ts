@@ -8,11 +8,13 @@ import { generateConfirmToken, hashConfirmToken } from '@/lib/confirm-token';
 
 import { sendBookingConfirmationEmail, sendDepositRequestSms } from '@/lib/communications/send-templated';
 import { autoAssignTable } from '@/lib/table-availability';
-import { computeAvailability, fetchEngineInput, getAvailableSlots } from '@/lib/availability';
-import type { BookingForAvailability, VenueForAvailability } from '@/types/availability';
+import { computeAvailability, fetchEngineInput } from '@/lib/availability';
+import { AVAILABILITY_SETUP_REQUIRED_MESSAGE } from '@/lib/availability/availability-errors';
+import { getDayOfWeek, resolveDuration } from '@/lib/availability/engine';
 import { resolveVenueMode } from '@/lib/venue-mode';
 import { syncTableStatusesForBooking } from '@/lib/table-management/lifecycle';
 import { z } from 'zod';
+import { normalizeToE164 } from '@/lib/phone/e164';
 import { createHmac } from 'crypto';
 
 const phoneBookingSchema = z.object({
@@ -20,7 +22,7 @@ const phoneBookingSchema = z.object({
   booking_time: z.string().regex(/^([01]?[0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9])?$/),
   party_size: z.number().int().min(1).max(50),
   name: z.string().min(1).max(200),
-  phone: z.string().min(1).max(30),
+  phone: z.string().min(1).max(24),
   email: z.string().email().optional().or(z.literal('')),
   dietary_notes: z.string().max(500).optional(),
   occasion: z.string().max(200).optional(),
@@ -81,9 +83,14 @@ export async function POST(request: NextRequest) {
     const venueId = staff.venue_id;
     const admin = getSupabaseAdminClient();
 
+    const phoneE164 = normalizeToE164(phone, 'GB');
+    if (!phoneE164) {
+      return NextResponse.json({ error: 'Invalid phone number' }, { status: 400 });
+    }
+
     const { data: venue } = await admin
       .from('venues')
-      .select('id, name, stripe_connected_account_id, booking_rules, deposit_config, table_management_enabled, show_table_in_confirmation, opening_hours, availability_config, timezone, address')
+      .select('id, name, stripe_connected_account_id, booking_rules, deposit_config, table_management_enabled, show_table_in_confirmation, timezone, address')
       .eq('id', venueId)
       .single();
 
@@ -91,55 +98,49 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Venue not found' }, { status: 404 });
     }
 
-    const depositConfig = (venue.deposit_config as { enabled?: boolean; amount_per_person_gbp?: number; phone_requires_deposit?: boolean }) ?? {};
-    // Staff can override via the require_deposit toggle. If not provided, fall back to venue config.
-    const requiresDeposit = require_deposit ?? (depositConfig.enabled && depositConfig.phone_requires_deposit);
+    const depositConfig = (venue.deposit_config as {
+      enabled?: boolean;
+      amount_per_person_gbp?: number;
+      phone_requires_deposit?: boolean;
+    }) ?? {};
     const amountPerPersonGbp = depositConfig.amount_per_person_gbp ?? 5;
-    const depositAmountPence = requiresDeposit ? Math.round(amountPerPersonGbp * party_size * 100) : null;
 
-    const { guest } = await findOrCreateGuest(admin, venueId, { name, email: email || null, phone });
+    const { guest } = await findOrCreateGuest(admin, venueId, { name, email: email || null, phone: phoneE164 });
     const timeForDb = booking_time.length === 5 ? booking_time + ':00' : booking_time;
     const timeStr = timeForDb.slice(0, 5);
     const venueMode = await resolveVenueMode(admin, venueId);
 
-    if (venueMode.availabilityEngine === 'service') {
-      const engineInput = await fetchEngineInput({
-        supabase: admin,
-        venueId,
-        date: booking_date,
-        partySize: party_size,
-      });
-      const slots = computeAvailability(engineInput).flatMap((result) => result.slots);
-      const slot = slots.find((s) => s.start_time === timeStr);
-      if (!slot || slot.available_covers < party_size) {
-        return NextResponse.json({ error: 'Selected time is not available' }, { status: 409 });
-      }
-    } else {
-      const { data: existingBookings } = await admin
-        .from('bookings')
-        .select('id, booking_date, booking_time, party_size, status')
-        .eq('venue_id', venueId)
-        .eq('booking_date', booking_date);
-
-      const venueForAvail: VenueForAvailability = {
-        id: venue.id,
-        opening_hours: venue.opening_hours,
-        availability_config: venue.availability_config,
-        timezone: venue.timezone ?? 'Europe/London',
-      };
-      const bookingsForAvail: BookingForAvailability[] = (existingBookings ?? []).map((b) => ({
-        id: b.id,
-        booking_date: b.booking_date,
-        booking_time: typeof b.booking_time === 'string' ? b.booking_time.slice(0, 5) : '00:00',
-        party_size: b.party_size,
-        status: b.status,
-      }));
-      const slots = getAvailableSlots(venueForAvail, booking_date, bookingsForAvail);
-      const slot = slots.find((s) => s.start_time === timeStr || s.key === timeStr);
-      if (!slot || slot.available_covers < party_size) {
-        return NextResponse.json({ error: 'Selected time is not available' }, { status: 409 });
-      }
+    if (venueMode.availabilityEngine !== 'service') {
+      return NextResponse.json({ error: AVAILABILITY_SETUP_REQUIRED_MESSAGE }, { status: 503 });
     }
+
+    const engineInput = await fetchEngineInput({
+      supabase: admin,
+      venueId,
+      date: booking_date,
+      partySize: party_size,
+    });
+    const slots = computeAvailability(engineInput).flatMap((result) => result.slots);
+    const slot = slots.find((s) => s.start_time === timeStr);
+    if (!slot || slot.available_covers < party_size) {
+      return NextResponse.json({ error: 'Selected time is not available' }, { status: 409 });
+    }
+
+    const engineDow = getDayOfWeek(booking_date);
+    const durationMins = resolveDuration(engineInput.durations, slot.service_id, party_size, engineDow);
+    const [y, mo, d] = booking_date.split('-').map(Number);
+    const [hh, mm] = timeStr.split(':').map(Number);
+    const endDate = new Date(Date.UTC(y!, mo! - 1, d!, hh!, mm!, 0));
+    endDate.setMinutes(endDate.getMinutes() + durationMins);
+    const estimatedEndTime = endDate.toISOString();
+
+    const channelRequiresPhone = depositConfig.phone_requires_deposit ?? false;
+    const requiresDeposit =
+      require_deposit !== undefined
+        ? require_deposit
+        : (slot.deposit_required && channelRequiresPhone) ||
+          ((depositConfig.enabled ?? false) && channelRequiresPhone);
+    const depositAmountPence = requiresDeposit ? Math.round(amountPerPersonGbp * party_size * 100) : null;
 
     if (requiresDeposit && !venue.stripe_connected_account_id) {
       return NextResponse.json(
@@ -163,6 +164,8 @@ export async function POST(request: NextRequest) {
       dietary_notes: dietary_notes?.trim() || null,
       occasion: occasion?.trim() || null,
       special_requests: special_requests?.trim() || null,
+      service_id: slot.service_id,
+      estimated_end_time: estimatedEndTime,
     };
 
     const { data: booking, error: bookErr } = await admin
@@ -177,36 +180,16 @@ export async function POST(request: NextRequest) {
     }
 
     let assignedTableLabel: string | null = null;
-    if (venueMode.tableManagementEnabled && venueMode.availabilityEngine === 'service') {
-      let durationMins = 90;
-      let bufferMins = 15;
-      try {
-        const timeStr = booking_time.slice(0, 5);
-        const dayOfWeek = new Date(booking_date).getDay();
-        const { data: svcRules } = await admin
-          .from('venue_services')
-          .select('id, service_capacity_rules(buffer_minutes), party_size_durations(min_party_size, max_party_size, duration_minutes)')
-          .eq('venue_id', venueId)
-          .eq('is_active', true)
-          .lte('start_time', timeStr + ':00')
-          .gte('end_time', timeStr + ':00');
-
-        const matchingSvc = (svcRules ?? []).find((s: Record<string, unknown>) => {
-          const days = (s as Record<string, unknown>).active_days as number[] | undefined;
-          return !days || days.includes(dayOfWeek);
-        }) ?? (svcRules ?? [])[0];
-
-        if (matchingSvc) {
-          const durations = (matchingSvc as Record<string, unknown>).party_size_durations as Array<{ min_party_size: number; max_party_size: number; duration_minutes: number }> | undefined;
-          const match = durations?.find((d) => party_size >= d.min_party_size && party_size <= d.max_party_size);
-          if (match) durationMins = match.duration_minutes;
-
-          const capRules = (matchingSvc as Record<string, unknown>).service_capacity_rules as Array<{ buffer_minutes?: number }> | undefined;
-          if (capRules?.[0]?.buffer_minutes) bufferMins = capRules[0].buffer_minutes;
-        }
-      } catch (err) {
-        console.error('Duration lookup failed, using defaults:', err);
-      }
+    if (venueMode.tableManagementEnabled) {
+      const { data: defaultRule } = await admin
+        .from('service_capacity_rules')
+        .select('buffer_minutes')
+        .eq('service_id', slot.service_id)
+        .is('day_of_week', null)
+        .is('time_range_start', null)
+        .limit(1)
+        .maybeSingle();
+      const bufferMins = defaultRule?.buffer_minutes ?? 15;
 
       const assigned = await autoAssignTable(
         admin,

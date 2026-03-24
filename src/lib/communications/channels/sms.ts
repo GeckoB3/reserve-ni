@@ -1,24 +1,16 @@
 import { getTwilioClient } from '@/lib/twilio';
+import { normalizeToE164, normalizeToE164Lenient } from '@/lib/phone/e164';
 import type { MessageChannel, Recipient, CompiledTemplate, TemplateVariables } from '../types';
 
-/**
- * Normalise a phone number to E.164 format for Twilio.
- * Handles UK numbers: 07... -> +447..., 447... -> +447...
- * Passes through numbers already starting with +.
- */
-function normaliseToE164(phone: string): string {
-  let cleaned = phone.replace(/[\s\-()]/g, '');
-  if (cleaned.startsWith('+')) return cleaned;
-  if (cleaned.startsWith('00')) {
-    return '+' + cleaned.slice(2);
-  }
-  if (cleaned.startsWith('0')) {
-    return '+44' + cleaned.slice(1);
-  }
-  if (cleaned.startsWith('44')) {
-    return '+' + cleaned;
-  }
-  return '+' + cleaned;
+function toTwilioE164(raw: string, label: 'recipient' | 'from'): string | null {
+  const cleaned = raw.replace(/[\s\-()]/g, '').trim();
+  if (!cleaned) return null;
+  const strict = normalizeToE164(cleaned, 'GB') ?? normalizeToE164(cleaned);
+  if (strict) return strict;
+  const lenient = normalizeToE164Lenient(cleaned, 'GB') ?? normalizeToE164Lenient(cleaned);
+  if (lenient) return lenient;
+  console.warn(`[SMSChannel] Invalid ${label} phone; skipping send (original: ${raw})`);
+  return null;
 }
 
 export class SMSChannel implements MessageChannel {
@@ -40,8 +32,15 @@ export class SMSChannel implements MessageChannel {
       return;
     }
 
-    const to = normaliseToE164(phone);
-    const from = normaliseToE164(fromNumber);
+    const to = toTwilioE164(phone, 'recipient');
+    if (!to) return;
+
+    const from = toTwilioE164(fromNumber, 'from');
+    if (!from) {
+      console.warn('[SMSChannel] Invalid TWILIO_PHONE_NUMBER; skipping SMS');
+      return;
+    }
+
     console.log(`[SMSChannel] Sending to ${to} (original: ${phone})`);
 
     await client.messages.create({

@@ -25,8 +25,8 @@ export interface FetchEngineInputParams {
 }
 
 /**
- * Check whether a venue has been migrated to the service-based model.
- * Returns true if at least one venue_service row exists for this venue.
+ * True when the venue has at least one **active** service (matches Dashboard → Availability
+ * and Settings). Inactive-only rows do not count — use Dashboard to reactivate or add services.
  */
 export async function hasServiceConfig(
   supabase: SupabaseClient,
@@ -35,7 +35,8 @@ export async function hasServiceConfig(
   const { count } = await supabase
     .from('venue_services')
     .select('id', { count: 'exact', head: true })
-    .eq('venue_id', venueId);
+    .eq('venue_id', venueId)
+    .eq('is_active', true);
 
   return (count ?? 0) > 0;
 }

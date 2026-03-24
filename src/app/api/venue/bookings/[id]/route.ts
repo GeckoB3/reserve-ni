@@ -3,7 +3,8 @@ import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { stripe } from '@/lib/stripe';
-import { computeAvailability, fetchEngineInput, getAvailableSlots } from '@/lib/availability';
+import { computeAvailability, fetchEngineInput } from '@/lib/availability';
+import { AVAILABILITY_SETUP_REQUIRED_MESSAGE } from '@/lib/availability/availability-errors';
 import { autoAssignTable } from '@/lib/table-availability';
 import { BOOKING_MUTABLE_STATUSES } from '@/lib/table-management/constants';
 import {
@@ -16,9 +17,9 @@ import {
   validateNoShowGracePeriod,
   validateTablesBelongToVenue,
 } from '@/lib/table-management/lifecycle';
-import type { VenueForAvailability, BookingForAvailability } from '@/types/availability';
 import { resolveVenueMode } from '@/lib/venue-mode';
 import { z } from 'zod';
+import { normalizeToE164 } from '@/lib/phone/e164';
 
 const statusSchema = z.enum(BOOKING_MUTABLE_STATUSES);
 
@@ -321,7 +322,16 @@ export async function PATCH(
           guestUpdatePayload.name = typeof body.guest_name === 'string' && body.guest_name.trim() ? body.guest_name.trim() : null;
         }
         if (body.guest_phone !== undefined) {
-          guestUpdatePayload.phone = typeof body.guest_phone === 'string' && body.guest_phone.trim() ? body.guest_phone.trim() : null;
+          const raw = typeof body.guest_phone === 'string' ? body.guest_phone.trim() : '';
+          if (!raw) {
+            guestUpdatePayload.phone = null;
+          } else {
+            const e164 = normalizeToE164(raw, 'GB');
+            if (!e164) {
+              return NextResponse.json({ error: 'Invalid phone number' }, { status: 400 });
+            }
+            guestUpdatePayload.phone = e164;
+          }
         }
         if (body.guest_email !== undefined) {
           guestUpdatePayload.email = typeof body.guest_email === 'string' && body.guest_email.trim() ? body.guest_email.trim() : null;
@@ -343,61 +353,26 @@ export async function PATCH(
         return NextResponse.json({ error: 'Invalid date or party size' }, { status: 400 });
       }
 
-      const { data: venue } = await admin.from('venues').select('id, opening_hours, availability_config, timezone').eq('id', staff.venue_id).single();
-      if (!venue) {
-        return NextResponse.json({ error: 'Venue not found' }, { status: 500 });
-      }
       const timeStr = newTime.slice(0, 5);
       const venueMode = await resolveVenueMode(admin, staff.venue_id);
-      if (venueMode.availabilityEngine === 'service') {
-        const engineInput = await fetchEngineInput({
-          supabase: admin,
-          venueId: staff.venue_id,
-          date: newDate,
-          partySize: newPartySize,
-        });
-        engineInput.bookings = engineInput.bookings.filter((b) => b.id !== id);
-        const slots = computeAvailability(engineInput).flatMap((result) => result.slots);
-        const slot = slots.find((s) => s.start_time === timeStr && (!booking.service_id || s.service_id === booking.service_id));
-        if (!slot || slot.available_covers < newPartySize) {
-          return NextResponse.json(
-            { error: 'Selected date/time is not available or has insufficient capacity' },
-            { status: 409 }
-          );
-        }
-      } else {
-        const { data: allBookings } = await admin
-          .from('bookings')
-          .select('id, booking_date, booking_time, party_size, status')
-          .eq('venue_id', staff.venue_id)
-          .eq('booking_date', newDate);
+      if (venueMode.availabilityEngine !== 'service') {
+        return NextResponse.json({ error: AVAILABILITY_SETUP_REQUIRED_MESSAGE }, { status: 503 });
+      }
 
-        const bookingsForAvail: BookingForAvailability[] = (allBookings ?? [])
-          .filter((b: { id: string }) => b.id !== id)
-          .filter((b: { status: string }) => ['Confirmed', 'Pending'].includes(b.status))
-          .map((b: { id: string; booking_date: string; booking_time: string; party_size: number; status: string }) => ({
-            id: b.id,
-            booking_date: b.booking_date,
-            booking_time: typeof b.booking_time === 'string' ? b.booking_time.slice(0, 5) : '00:00',
-            party_size: b.party_size,
-            status: b.status,
-          }));
-
-        const venueForAvail: VenueForAvailability = {
-          id: venue.id,
-          opening_hours: venue.opening_hours,
-          availability_config: venue.availability_config,
-          timezone: venue.timezone ?? 'Europe/London',
-        };
-
-        const slots = getAvailableSlots(venueForAvail, newDate, bookingsForAvail);
-        const slot = slots.find((s) => s.start_time === timeStr || s.key === timeStr);
-        if (!slot || slot.available_covers < newPartySize) {
-          return NextResponse.json(
-            { error: 'Selected date/time is not available or has insufficient capacity' },
-            { status: 409 }
-          );
-        }
+      const engineInput = await fetchEngineInput({
+        supabase: admin,
+        venueId: staff.venue_id,
+        date: newDate,
+        partySize: newPartySize,
+      });
+      engineInput.bookings = engineInput.bookings.filter((b) => b.id !== id);
+      const slots = computeAvailability(engineInput).flatMap((result) => result.slots);
+      const slot = slots.find((s) => s.start_time === timeStr && (!booking.service_id || s.service_id === booking.service_id));
+      if (!slot || slot.available_covers < newPartySize) {
+        return NextResponse.json(
+          { error: 'Selected date/time is not available or has insufficient capacity' },
+          { status: 409 }
+        );
       }
 
       const before = {

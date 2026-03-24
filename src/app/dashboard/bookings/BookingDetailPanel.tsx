@@ -3,7 +3,10 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { BOOKING_STATUS_TRANSITIONS, BOOKING_REVERT_ACTIONS, canMarkNoShowForSlot, isDestructiveBookingStatus, isRevertTransition, type BookingStatus } from '@/lib/table-management/booking-status';
 import { NumericInput } from '@/components/ui/NumericInput';
+import { PhoneWithCountryField } from '@/components/phone/PhoneWithCountryField';
+import { normalizeToE164 } from '@/lib/phone/e164';
 import { ModifyBookingInline } from '@/components/booking/ModifyBookingInline';
+import { BookingNotesEditablePanel } from '@/components/booking/BookingNotesEditablePanel';
 
 interface Guest {
   id: string;
@@ -190,8 +193,6 @@ export function BookingDetailPanel({
   const [customMessage, setCustomMessage] = useState('');
   const [assignmentSuggestions, setAssignmentSuggestions] = useState<AssignmentSuggestion[]>([]);
   const [suggestionsLoading, setSuggestionsLoading] = useState(false);
-  const [internalNotes, setInternalNotes] = useState('');
-  const [notesSaving, setNotesSaving] = useState(false);
   const [confirmDialog, setConfirmDialog] = useState<{ title: string; message: string; confirmLabel: string; onConfirm: () => void } | null>(null);
 
   const optimisticDetail = useMemo(() => {
@@ -227,7 +228,6 @@ export function BookingDetailPanel({
     setModifySpecialRequests(data.special_requests ?? '');
     setModifyInternalNotes(data.internal_notes ?? '');
     setModifyTableIds((data.table_assignments ?? []).map((t: { id: string }) => t.id));
-    setInternalNotes(data.internal_notes ?? '');
 
     try {
       if (tablesRes.ok) {
@@ -296,7 +296,6 @@ export function BookingDetailPanel({
 
   useEffect(() => {
     setDetail(null);
-    setInternalNotes('');
     setCustomMessage('');
     setShowModify(false);
     setShowAssignModal(false);
@@ -372,12 +371,20 @@ export function BookingDetailPanel({
     try {
       const currentTime = detail.booking_time?.slice(0, 5) ?? '12:00';
 
+      const phoneTrim = modifyGuestPhone.trim();
+      const guestPhoneNormalized = phoneTrim ? normalizeToE164(modifyGuestPhone, 'GB') : null;
+      if (phoneTrim && !guestPhoneNormalized) {
+        setError('Enter a valid phone number');
+        setActionLoading(false);
+        return;
+      }
+
       const metadataRes = await fetch(`/api/venue/bookings/${bookingId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           guest_name: modifyGuestName,
-          guest_phone: modifyGuestPhone,
+          guest_phone: guestPhoneNormalized,
           guest_email: modifyGuestEmail,
           dietary_notes: modifyDietary,
           occasion: modifyOccasion,
@@ -874,62 +881,29 @@ export function BookingDetailPanel({
             <DepositRefundBanner depositStatus={d.deposit_status} depositAmount={depositAmountStr!} cancellationDeadline={d.cancellation_deadline} />
           )}
 
-          {/* Guest-facing notes */}
-          {(d.dietary_notes || d.occasion || d.special_requests) && (
-            <div className="space-y-1.5 rounded-xl border border-slate-200 bg-white p-3">
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Guest notes</p>
-              {d.dietary_notes && (
-                <div className="rounded-lg bg-amber-50/90 px-2.5 py-1.5 text-xs">
-                  <span className="font-semibold text-amber-900">Dietary</span>
-                  <span className="text-amber-800"> · {d.dietary_notes}</span>
-                </div>
-              )}
-              {d.occasion && (
-                <div className="rounded-lg bg-violet-50/90 px-2.5 py-1.5 text-xs">
-                  <span className="font-semibold text-violet-900">Occasion</span>
-                  <span className="text-violet-800"> · {d.occasion}</span>
-                </div>
-              )}
-              {d.special_requests && (
-                <div className="rounded-lg bg-sky-50/90 px-2.5 py-1.5 text-xs">
-                  <span className="font-semibold text-sky-900">Requests</span>
-                  <span className="text-sky-800"> · {d.special_requests}</span>
-                </div>
-              )}
+          {d.occasion && (
+            <div className="rounded-xl border border-slate-200 bg-white p-3">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Occasion</p>
+              <div className="mt-1.5 rounded-lg bg-violet-50/90 px-2.5 py-1.5 text-xs">
+                <span className="font-semibold text-violet-900">Occasion</span>
+                <span className="text-violet-800"> · {d.occasion}</span>
+              </div>
             </div>
           )}
 
-          <div className="rounded-xl border border-slate-200 bg-white p-3">
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Staff notes</p>
-            <textarea
-              value={internalNotes}
-              onChange={(e) => setInternalNotes(e.target.value)}
-              disabled={!isHydrated}
-              onBlur={async () => {
-                if (!isHydrated) return;
-                if (internalNotes === (d.internal_notes ?? '')) return;
-                setNotesSaving(true);
-                try {
-                  const res = await fetch(`/api/venue/bookings/${bookingId}`, {
-                    method: 'PATCH',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ internal_notes: internalNotes }),
-                  });
-                  if (res.ok) {
-                    await load();
-                  } else {
-                    setError('Failed to save notes');
-                  }
-                } finally {
-                  setNotesSaving(false);
-                }
-              }}
-              rows={2}
-              className="mt-1.5 w-full rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs text-slate-800 placeholder:text-slate-400 disabled:bg-slate-50"
-              placeholder={isHydrated ? 'Internal notes (staff only)…' : 'Loading…'}
-            />
-            {notesSaving && <p className="mt-1 text-[10px] text-slate-500">Saving…</p>}
-          </div>
+          <BookingNotesEditablePanel
+            bookingId={bookingId}
+            dietaryNotes={d.dietary_notes}
+            guestRequests={d.special_requests}
+            staffNotes={d.internal_notes}
+            disabled={!isHydrated}
+            onSaved={() => {
+              void (async () => {
+                await load();
+                onUpdated();
+              })();
+            }}
+          />
 
           {/* Status actions */}
           {canChangeStatus && (() => {
@@ -1000,15 +974,17 @@ export function BookingDetailPanel({
                   <label className="mb-1 block text-xs font-medium text-slate-500">Guest Name</label>
                   <input type="text" value={modifyGuestName} onChange={(e) => setModifyGuestName(e.target.value)} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" />
                 </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="mb-1 block text-xs font-medium text-slate-500">Guest Phone</label>
-                    <input type="text" value={modifyGuestPhone} onChange={(e) => setModifyGuestPhone(e.target.value)} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" />
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-xs font-medium text-slate-500">Guest Email</label>
-                    <input type="email" value={modifyGuestEmail} onChange={(e) => setModifyGuestEmail(e.target.value)} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" />
-                  </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-slate-500">Guest Phone</label>
+                  <PhoneWithCountryField
+                    value={modifyGuestPhone}
+                    onChange={setModifyGuestPhone}
+                    inputClassName="w-full min-w-0 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-slate-500">Guest Email</label>
+                  <input type="email" value={modifyGuestEmail} onChange={(e) => setModifyGuestEmail(e.target.value)} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" />
                 </div>
                 <div>
                   <label className="mb-1 block text-xs font-medium text-slate-500">Duration (mins)</label>

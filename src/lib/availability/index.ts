@@ -1,8 +1,6 @@
 /**
- * Reserve NI availability engine — LEGACY mode.
- *
- * Pure functions for the old JSONB-based availability_config model.
- * New venues should use the service-based engine in ./engine.ts.
+ * Reserve NI availability: service engine (computeAvailability, fetchEngineInput)
+ * plus legacy JSON helpers (getAvailableSlots) retained for tests and tooling.
  */
 
 import type {

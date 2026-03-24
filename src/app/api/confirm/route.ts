@@ -7,9 +7,9 @@ import { verifyConfirmToken } from '@/lib/confirm-token';
 import { verifyBookingHmac } from '@/lib/short-manage-link';
 import { validateBookingStatusTransition, applyBookingLifecycleStatusEffects } from '@/lib/table-management/lifecycle';
 import type { BookingStatus } from '@/lib/table-management/booking-status';
-import { computeAvailability, fetchEngineInput, getAvailableSlots } from '@/lib/availability';
+import { computeAvailability, fetchEngineInput } from '@/lib/availability';
+import { AVAILABILITY_SETUP_REQUIRED_MESSAGE } from '@/lib/availability/availability-errors';
 import { resolveVenueMode } from '@/lib/venue-mode';
-import type { VenueForAvailability, BookingForAvailability } from '@/types/availability';
 
 /**
  * GET /api/confirm?booking_id=uuid&token=xxx  (token-based)
@@ -266,84 +266,35 @@ export async function POST(request: NextRequest) {
       const timeStr = newTime.slice(0, 5);
       const venueMode = await resolveVenueMode(supabase, booking.venue_id);
 
-      if (venueMode.availabilityEngine === 'service') {
-        const engineInput = await fetchEngineInput({
-          supabase,
-          venueId: booking.venue_id,
-          date: newDate,
-          partySize: newPartySize,
-        });
-        engineInput.bookings = engineInput.bookings.filter((b) => b.id !== bookingId);
+      if (venueMode.availabilityEngine !== 'service') {
+        return NextResponse.json({ error: AVAILABILITY_SETUP_REQUIRED_MESSAGE }, { status: 503 });
+      }
 
-        const results = computeAvailability(engineInput);
-        const allSlots = results.flatMap((r) => r.slots);
-        const largeParty = results.some((r) => r.large_party_redirect);
-        const largePartyMsg = results.find((r) => r.large_party_message)?.large_party_message;
+      const engineInput = await fetchEngineInput({
+        supabase,
+        venueId: booking.venue_id,
+        date: newDate,
+        partySize: newPartySize,
+      });
+      engineInput.bookings = engineInput.bookings.filter((b) => b.id !== bookingId);
 
-        if (largeParty) {
-          return NextResponse.json({
-            error: largePartyMsg ?? 'For parties of this size, please call the restaurant directly.',
-          }, { status: 400 });
-        }
+      const results = computeAvailability(engineInput);
+      const allSlots = results.flatMap((r) => r.slots);
+      const largeParty = results.some((r) => r.large_party_redirect);
+      const largePartyMsg = results.find((r) => r.large_party_message)?.large_party_message;
 
-        const slot = allSlots.find((s) => s.start_time === timeStr && (!booking.service_id || s.service_id === booking.service_id));
-        if (!slot || slot.available_covers < newPartySize) {
-          return NextResponse.json(
-            { error: 'The selected date/time is not available for this party size.' },
-            { status: 409 },
-          );
-        }
-      } else {
-        const [venueRes, bookingsRes] = await Promise.all([
-          supabase.from('venues').select('id, opening_hours, availability_config, timezone, booking_rules').eq('id', booking.venue_id).single(),
-          supabase.from('bookings')
-            .select('id, booking_date, booking_time, party_size, status')
-            .eq('venue_id', booking.venue_id)
-            .eq('booking_date', newDate),
-        ]);
+      if (largeParty) {
+        return NextResponse.json({
+          error: largePartyMsg ?? 'For parties of this size, please call the restaurant directly.',
+        }, { status: 400 });
+      }
 
-        if (!venueRes.data) {
-          return NextResponse.json({ error: 'Venue not found' }, { status: 500 });
-        }
-
-        const rules = (venueRes.data.booking_rules ?? {}) as { min_party_size?: number; max_party_size?: number; min_notice_hours?: number };
-        if (rules.max_party_size && newPartySize > rules.max_party_size) {
-          return NextResponse.json({
-            error: `Online bookings are limited to ${rules.max_party_size} guests. Please call the restaurant for larger parties.`,
-          }, { status: 400 });
-        }
-        if (rules.min_party_size && newPartySize < rules.min_party_size) {
-          return NextResponse.json({
-            error: `Minimum party size for online bookings is ${rules.min_party_size}.`,
-          }, { status: 400 });
-        }
-
-        const bookingsForAvail: BookingForAvailability[] = (bookingsRes.data ?? [])
-          .filter((b: { id: string }) => b.id !== bookingId)
-          .filter((b: { status: string }) => ['Confirmed', 'Pending'].includes(b.status))
-          .map((b: { id: string; booking_date: string; booking_time: string; party_size: number; status: string }) => ({
-            id: b.id,
-            booking_date: b.booking_date,
-            booking_time: typeof b.booking_time === 'string' ? b.booking_time.slice(0, 5) : '00:00',
-            party_size: b.party_size,
-            status: b.status,
-          }));
-
-        const venueForAvail: VenueForAvailability = {
-          id: venueRes.data.id,
-          opening_hours: venueRes.data.opening_hours,
-          availability_config: venueRes.data.availability_config,
-          timezone: venueRes.data.timezone ?? 'Europe/London',
-        };
-
-        const slots = getAvailableSlots(venueForAvail, newDate, bookingsForAvail);
-        const slot = slots.find((s) => s.start_time === timeStr || s.key === timeStr);
-        if (!slot || slot.available_covers < newPartySize) {
-          return NextResponse.json(
-            { error: 'The selected date/time is not available for this party size.' },
-            { status: 409 },
-          );
-        }
+      const slot = allSlots.find((s) => s.start_time === timeStr && (!booking.service_id || s.service_id === booking.service_id));
+      if (!slot || slot.available_covers < newPartySize) {
+        return NextResponse.json(
+          { error: 'The selected date/time is not available for this party size.' },
+          { status: 409 },
+        );
       }
 
       const now = new Date().toISOString();

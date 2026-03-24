@@ -1,9 +1,11 @@
 'use client';
 
-import { useForm } from 'react-hook-form';
+import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import type { AvailableSlot, GuestDetails } from './types';
+import { normalizeToE164 } from '@/lib/phone/e164';
+import { PhoneWithCountryField } from '@/components/phone/PhoneWithCountryField';
 
 const SHORT_WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const SHORT_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -16,7 +18,11 @@ function formatDate(dateStr: string): string {
 const detailsSchema = z.object({
   name: z.string().min(1, 'Name is required').max(200),
   email: z.string().min(1, 'Email is required').email('Valid email required'),
-  phone: z.string().min(1, 'Phone is required').max(30),
+  phone: z
+    .string()
+    .min(1, 'Phone is required')
+    .max(24)
+    .refine((v) => normalizeToE164(v, 'GB') !== null, 'Enter a valid mobile number'),
   dietary_notes: z.string().max(1000).optional(),
   occasion: z.string().max(200).optional(),
 });
@@ -37,7 +43,7 @@ interface DetailsStepProps {
 }
 
 export function DetailsStep({ slot, date, partySize, onSubmit, onBack, requiresDeposit, depositPerPerson }: DetailsStepProps) {
-  const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm<FormDataWithTerms>({
+  const { register, control, handleSubmit, formState: { errors, isSubmitting } } = useForm<FormDataWithTerms>({
     resolver: zodResolver(detailsSchemaWithTerms),
     defaultValues: { name: '', email: '', phone: '', dietary_notes: '', occasion: '', acceptTerms: false },
   });
@@ -78,7 +84,18 @@ export function DetailsStep({ slot, date, partySize, onSubmit, onBack, requiresD
         </div>
       )}
 
-      <form onSubmit={handleSubmit((d) => onSubmit({ name: d.name, email: d.email || '', phone: d.phone, dietary_notes: d.dietary_notes, occasion: d.occasion }))} className="space-y-4">
+      <form
+        onSubmit={handleSubmit((d) =>
+          onSubmit({
+            name: d.name,
+            email: d.email || '',
+            phone: normalizeToE164(d.phone, 'GB') ?? d.phone,
+            dietary_notes: d.dietary_notes,
+            occasion: d.occasion,
+          }),
+        )}
+        className="space-y-4"
+      >
         <FormField label="Name" required error={errors.name?.message}>
           <input {...register('name')} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm placeholder:text-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500" placeholder="Your full name" />
         </FormField>
@@ -88,7 +105,19 @@ export function DetailsStep({ slot, date, partySize, onSubmit, onBack, requiresD
         </FormField>
 
         <FormField label="Phone" required error={errors.phone?.message}>
-          <input type="tel" {...register('phone')} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm placeholder:text-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500" placeholder="07..." />
+          <Controller
+            name="phone"
+            control={control}
+            render={({ field }) => (
+              <PhoneWithCountryField
+                id="details-phone"
+                name={field.name}
+                value={field.value}
+                onChange={field.onChange}
+                inputClassName="w-full min-w-0 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm placeholder:text-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+              />
+            )}
+          />
         </FormField>
 
         <FormField label="Dietary notes" error={errors.dietary_notes?.message}>

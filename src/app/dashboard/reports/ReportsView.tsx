@@ -5,6 +5,7 @@ import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, Legend, LineChart, Line, CartesianGrid,
 } from 'recharts';
+import { DataExportSection } from './DataExportSection';
 
 interface Report1 {
   total_bookings_created: number;
@@ -34,6 +35,16 @@ interface Report4 {
   total_forfeited_pence: number;
 }
 
+interface Report6Row {
+  guest_id: string;
+  name: string | null;
+  email: string | null;
+  phone: string | null;
+  visit_count: number;
+  last_visit_date: string | null;
+  bookings_in_period: number;
+}
+
 interface ReportsData {
   from: string;
   to: string;
@@ -49,6 +60,7 @@ interface ReportsData {
     occupied_hours: number;
     available_hours: number;
   }>;
+  report6_frequent_visitors?: Report6Row[];
 }
 
 const COLORS = ['#4E6B78', '#059669', '#f59e0b', '#ef4444', '#8b5cf6', '#6b7280'];
@@ -70,11 +82,26 @@ function downloadCsv(filename: string, rows: string[][]) {
   URL.revokeObjectURL(a.href);
 }
 
+type ExportFlash = { variant: 'success' | 'notice'; message: string };
+
 export function ReportsView() {
   const [range, setRange] = useState(last7Days);
   const [data, setData] = useState<ReportsData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [exportFlash, setExportFlash] = useState<ExportFlash | null>(null);
+
+  const dismissExportFlashSoon = useCallback(() => {
+    window.setTimeout(() => setExportFlash(null), 4500);
+  }, []);
+
+  const notifyExport = useCallback(
+    (variant: ExportFlash['variant'], message: string) => {
+      setExportFlash({ variant, message });
+      dismissExportFlashSoon();
+    },
+    [dismissExportFlashSoon],
+  );
 
   const fetchReports = useCallback(async () => {
     setLoading(true);
@@ -151,6 +178,22 @@ export function ReportsView() {
     ]);
   }, [data]);
 
+  const exportReport6 = useCallback(() => {
+    if (!data) return;
+    const rows = data.report6_frequent_visitors ?? [];
+    downloadCsv(`report6-frequent-visitors-${data.from}-${data.to}.csv`, [
+      ['Name', 'Email', 'Phone', 'Lifetime visits', 'Last visit', 'Bookings in period'],
+      ...rows.map((row) => [
+        row.name ?? '',
+        row.email ?? '',
+        row.phone ?? '',
+        String(row.visit_count),
+        row.last_visit_date ?? '',
+        String(row.bookings_in_period),
+      ]),
+    ]);
+  }, [data]);
+
   if (loading && !data) {
     return (
       <div className="space-y-5">
@@ -175,6 +218,7 @@ export function ReportsView() {
   const r3 = data?.report3_cancellation;
   const r4 = data?.report4_deposit;
   const r5 = data?.report5_table_utilisation ?? [];
+  const r6 = data?.report6_frequent_visitors ?? [];
 
   const sourcePieData = r1?.by_source ? Object.entries(r1.by_source).map(([name, value]) => ({ name, value })) : [];
   const statusBarData = r1?.by_status ? Object.entries(r1.by_status).map(([source, count]) => ({ source, count })) : [];
@@ -184,6 +228,20 @@ export function ReportsView() {
 
   return (
     <div className="space-y-6">
+      {exportFlash && (
+        <div
+          role="status"
+          aria-live="polite"
+          className={`rounded-xl border px-4 py-3 text-sm ${
+            exportFlash.variant === 'success'
+              ? 'border-emerald-200 bg-emerald-50 text-emerald-900'
+              : 'border-amber-200 bg-amber-50 text-amber-900'
+          }`}
+        >
+          {exportFlash.message}
+        </div>
+      )}
+
       {/* Date range controls */}
       <div className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
         <label className="flex items-center gap-2 text-sm">
@@ -215,7 +273,14 @@ export function ReportsView() {
       </div>
 
       {/* Report 1 */}
-      <ReportSection title="Booking Summary" onExport={exportReport1}>
+      <ReportSection
+        title="Booking Summary"
+        onExport={exportReport1}
+        exportBlocked={!r1}
+        exportBlockedMessage="There is no booking summary to export for this period."
+        onExportSuccess={() => notifyExport('success', 'Booking summary CSV download started — check your downloads folder.')}
+        onExportBlocked={(msg) => notifyExport('notice', msg)}
+      >
         {r1 && (
           <>
             <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-3">
@@ -258,7 +323,14 @@ export function ReportsView() {
       </ReportSection>
 
       {/* Report 2 */}
-      <ReportSection title="No-Show Rate" onExport={exportReport2}>
+      <ReportSection
+        title="No-Show Rate"
+        onExport={exportReport2}
+        exportBlocked={r2.length === 0}
+        exportBlockedMessage="There is no no-show rate data to export for this period."
+        onExportSuccess={() => notifyExport('success', 'No-show rate CSV download started — check your downloads folder.')}
+        onExportBlocked={(msg) => notifyExport('notice', msg)}
+      >
         <p className="mb-3 text-sm text-slate-500">
           Overall: <span className="font-semibold text-slate-900">{noShowRateOverall.toFixed(1)}%</span>
         </p>
@@ -278,7 +350,14 @@ export function ReportsView() {
       </ReportSection>
 
       {/* Report 3 */}
-      <ReportSection title="Cancellation Rate" onExport={exportReport3}>
+      <ReportSection
+        title="Cancellation Rate"
+        onExport={exportReport3}
+        exportBlocked={!r3}
+        exportBlockedMessage="There is no cancellation data to export for this period."
+        onExportSuccess={() => notifyExport('success', 'Cancellation rate CSV download started — check your downloads folder.')}
+        onExportBlocked={(msg) => notifyExport('notice', msg)}
+      >
         {r3 && (
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <MetricCard label="Total created" value={String(r3.total_bookings_created)} />
@@ -290,7 +369,14 @@ export function ReportsView() {
       </ReportSection>
 
       {/* Report 4 */}
-      <ReportSection title="Deposit Summary" onExport={exportReport4}>
+      <ReportSection
+        title="Deposit Summary"
+        onExport={exportReport4}
+        exportBlocked={!r4}
+        exportBlockedMessage="There is no deposit summary to export for this period."
+        onExportSuccess={() => notifyExport('success', 'Deposit summary CSV download started — check your downloads folder.')}
+        onExportBlocked={(msg) => notifyExport('notice', msg)}
+      >
         {r4 && (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <MetricCard label="Total collected" value={`£${(r4.total_collected_pence / 100).toFixed(2)}`} accent="emerald" />
@@ -300,8 +386,66 @@ export function ReportsView() {
         )}
       </ReportSection>
 
+      <ReportSection
+        title="Identifiable frequent guests"
+        onExport={exportReport6}
+        exportBlocked={!data}
+        exportBlockedMessage="Reports are still loading or unavailable."
+        onExportSuccess={() =>
+          notifyExport(
+            'success',
+            r6.length > 0
+              ? 'Frequent guests CSV download started — check your downloads folder.'
+              : 'CSV with headers only was downloaded (no guests matched this period).',
+          )
+        }
+        onExportBlocked={(msg) => notifyExport('notice', msg)}
+      >
+        <p className="mb-4 text-sm text-slate-500">
+          Guests with an email or phone on file who have been seated at least once before. Walk-ins without contact details are not listed.
+          Ranked by lifetime visits (each time a booking is marked seated). Only guests with at least one non-cancelled booking in the selected date range appear here.
+        </p>
+        {r6.length > 0 ? (
+          <div className="overflow-x-auto rounded-lg border border-slate-100">
+            <table className="w-full min-w-[640px] text-sm">
+              <thead className="border-b border-slate-100 bg-slate-50">
+                <tr>
+                  <th className="px-3 py-2 text-left text-xs font-medium text-slate-500">Name</th>
+                  <th className="px-3 py-2 text-left text-xs font-medium text-slate-500">Email</th>
+                  <th className="px-3 py-2 text-left text-xs font-medium text-slate-500">Phone</th>
+                  <th className="px-3 py-2 text-right text-xs font-medium text-slate-500">Lifetime visits</th>
+                  <th className="px-3 py-2 text-left text-xs font-medium text-slate-500">Last visit</th>
+                  <th className="px-3 py-2 text-right text-xs font-medium text-slate-500">Bookings (period)</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {r6.map((row) => (
+                  <tr key={row.guest_id} className="hover:bg-slate-50/60">
+                    <td className="px-3 py-2.5 font-medium text-slate-800">{row.name ?? '—'}</td>
+                    <td className="max-w-[180px] truncate px-3 py-2.5 text-slate-600" title={row.email ?? undefined}>{row.email ?? '—'}</td>
+                    <td className="whitespace-nowrap px-3 py-2.5 text-slate-600">{row.phone ?? '—'}</td>
+                    <td className="px-3 py-2.5 text-right tabular-nums text-slate-800">{row.visit_count}</td>
+                    <td className="whitespace-nowrap px-3 py-2.5 text-slate-600">{row.last_visit_date ?? '—'}</td>
+                    <td className="px-3 py-2.5 text-right tabular-nums text-slate-800">{row.bookings_in_period}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="text-sm text-slate-400">No identifiable guests match this period. Try a wider date range or add email/phone to guest profiles.</p>
+        )}
+      </ReportSection>
+
       {data?.table_management_enabled && (
-        <ReportSection title="Table Utilisation" onExport={exportReport5}>
+        <ReportSection
+          title="Table Utilisation"
+          onExport={exportReport5}
+          exportBlocked={r5.length === 0}
+          exportBlockedMessage="There is no table utilisation data to export for this period."
+          onExportSuccess={() => notifyExport('success', 'Table utilisation CSV download started — check your downloads folder.')}
+          onExportBlocked={(msg) => notifyExport('notice', msg)}
+        >
           {r5.length > 0 ? (
             <div className="space-y-2">
               {r5.map((row) => (
@@ -333,17 +477,57 @@ export function ReportsView() {
           )}
         </ReportSection>
       )}
+
+      <DataExportSection onExportFlash={notifyExport} />
     </div>
   );
 }
 
-function ReportSection({ title, onExport, children }: { title: string; onExport: () => void; children: React.ReactNode }) {
+function ReportSection({
+  title,
+  onExport,
+  exportBlocked,
+  exportBlockedMessage,
+  onExportSuccess,
+  onExportBlocked,
+  children,
+}: {
+  title: string;
+  onExport: () => void;
+  exportBlocked?: boolean;
+  exportBlockedMessage?: string;
+  onExportSuccess: () => void;
+  onExportBlocked: (message: string) => void;
+  children: React.ReactNode;
+}) {
+  const blocked = Boolean(exportBlocked);
+  const blockedHint = exportBlockedMessage ?? 'Nothing to export for this report.';
+
+  const handleExportClick = () => {
+    if (blocked) {
+      onExportBlocked(blockedHint);
+      return;
+    }
+    onExport();
+    onExportSuccess();
+  };
+
   return (
     <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-      <div className="mb-4 flex items-center justify-between">
+      <div className="mb-4 flex items-center justify-between gap-3">
         <h2 className="text-lg font-semibold text-slate-900">{title}</h2>
-        <button type="button" onClick={onExport} className="flex items-center gap-1.5 text-sm font-medium text-brand-600 hover:text-brand-700">
-          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+        <button
+          type="button"
+          onClick={handleExportClick}
+          title={blocked ? blockedHint : 'Download this report as a CSV file'}
+          aria-label={blocked ? `Export CSV: ${blockedHint}` : 'Export CSV'}
+          className={`flex shrink-0 items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 ${
+            blocked
+              ? 'text-slate-400 hover:bg-slate-50 hover:text-slate-600'
+              : 'text-brand-600 hover:bg-brand-50 hover:text-brand-700'
+          }`}
+        >
+          <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" aria-hidden>
             <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" />
           </svg>
           Export CSV

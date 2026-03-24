@@ -116,7 +116,7 @@ export default function TermsPage() {
               <p>
                 Your personal data is handled in accordance with our{' '}
                 <Link href="/privacy" className="text-brand-600 hover:underline">Privacy Policy</Link>.
-                Venues are entitled to export their booking and guest data at any time via the dashboard.
+                Venues are entitled to export their booking and guest data at any time via the Reports section of the dashboard.
               </p>
             </section>
 

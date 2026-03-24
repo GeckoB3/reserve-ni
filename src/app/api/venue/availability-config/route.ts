@@ -5,7 +5,10 @@ import { getSupabaseAdminClient } from '@/lib/supabase';
 import { availabilityConfigSchema } from '@/types/config-schemas';
 import type { AvailabilityConfig } from '@/types/availability';
 
-/** PATCH /api/venue/availability-config — update availability_config (admin only). */
+const LEGACY_CONFIG_LOCKED_MESSAGE =
+  'Availability is managed under Dashboard → Availability. Remove or deactivate services there to edit legacy settings, or contact support.';
+
+/** PATCH /api/venue/availability-config — update availability_config (admin only). Blocked when any active venue_service exists. */
 export async function PATCH(request: NextRequest) {
   try {
     const supabase = await createClient();
@@ -15,6 +18,21 @@ export async function PATCH(request: NextRequest) {
     }
     if (!requireAdmin(staff)) {
       return NextResponse.json({ error: 'Forbidden: admin only' }, { status: 403 });
+    }
+
+    const admin = getSupabaseAdminClient();
+    const { count: activeServiceCount, error: countErr } = await admin
+      .from('venue_services')
+      .select('*', { count: 'exact', head: true })
+      .eq('venue_id', staff.venue_id)
+      .eq('is_active', true);
+
+    if (countErr) {
+      console.error('PATCH /api/venue/availability-config active service count failed:', countErr);
+      return NextResponse.json({ error: 'Failed to verify venue configuration' }, { status: 500 });
+    }
+    if ((activeServiceCount ?? 0) > 0) {
+      return NextResponse.json({ error: LEGACY_CONFIG_LOCKED_MESSAGE }, { status: 403 });
     }
 
     const body = await request.json();
@@ -28,7 +46,6 @@ export async function PATCH(request: NextRequest) {
 
     const availability_config = parsed.data as AvailabilityConfig;
 
-    const admin = getSupabaseAdminClient();
     const { data: venue, error } = await admin
       .from('venues')
       .update({ availability_config, updated_at: new Date().toISOString() })

@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { NumericInput } from '@/components/ui/NumericInput';
+import { PhoneWithCountryField } from '@/components/phone/PhoneWithCountryField';
+import { normalizeToE164 } from '@/lib/phone/e164';
 import type { TableForSelector, OccupancyMap } from '@/components/table-tracking/TableSelector';
 
 interface Suggestion {
@@ -124,10 +126,16 @@ export function WalkInModal({
     setError(null);
     setLoading(true);
     try {
+      const walkinPhone = normalizeToE164(phone, 'GB');
+      if (phone.trim() && !walkinPhone) {
+        setError('Enter a valid phone number or leave phone blank');
+        setLoading(false);
+        return;
+      }
       const walkinBody: Record<string, unknown> = {
         party_size: partySize,
         name: name.trim() || undefined,
-        phone: phone.trim() || undefined,
+        phone: walkinPhone || undefined,
         dietary_notes: dietaryNotes.trim() || undefined,
         occasion: occasion.trim() || undefined,
         booking_date: bookingDate,
@@ -262,13 +270,11 @@ export function WalkInModal({
             <label htmlFor="walkin-phone" className="mb-1.5 block text-sm font-medium text-slate-700">
               Phone <span className="text-slate-400">(optional)</span>
             </label>
-            <input
+            <PhoneWithCountryField
               id="walkin-phone"
-              type="tel"
               value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-              placeholder="Phone number"
-              className="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm transition-colors focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
+              onChange={setPhone}
+              inputClassName="w-full min-w-0 rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm transition-colors focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
             />
           </div>
 

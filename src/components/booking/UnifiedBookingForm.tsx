@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useToast } from '@/components/ui/Toast';
 import { NumericInput } from '@/components/ui/NumericInput';
+import { PhoneWithCountryField } from '@/components/phone/PhoneWithCountryField';
+import { normalizeToE164 } from '@/lib/phone/e164';
 
 interface Slot {
   key: string;
@@ -171,7 +173,8 @@ export function UnifiedBookingForm({
     [selectedSuggestionKey, suggestions],
   );
 
-  const canSubmit = Boolean(date && selectedTime && name.trim() && phone.trim() && !saving);
+  const phoneE164 = normalizeToE164(phone, 'GB');
+  const canSubmit = Boolean(date && selectedTime && name.trim() && phoneE164 && !saving);
 
   const resetForm = useCallback(() => {
     setDate(initialDate ?? new Date().toISOString().slice(0, 10));
@@ -194,8 +197,9 @@ export function UnifiedBookingForm({
     e.preventDefault();
     setError(null);
 
-    if (!date || !selectedTime || !name.trim() || !phone.trim()) {
-      setError('Date, time, guest name, and phone are required.');
+    const resolvedPhone = normalizeToE164(phone, 'GB');
+    if (!date || !selectedTime || !name.trim() || !resolvedPhone) {
+      setError('Date, time, guest name, and a valid phone number are required.');
       return;
     }
 
@@ -209,7 +213,7 @@ export function UnifiedBookingForm({
           booking_time: selectedTime,
           party_size: partySize,
           name: name.trim(),
-          phone: phone.trim(),
+          phone: resolvedPhone,
           email: email.trim() || undefined,
           dietary_notes: dietaryNotes.trim() || undefined,
           special_requests: notes.trim() || undefined,
@@ -413,14 +417,11 @@ export function UnifiedBookingForm({
           <label htmlFor="ubf-phone" className="mb-1.5 block text-sm font-medium text-slate-700">
             Phone number
           </label>
-          <input
+          <PhoneWithCountryField
             id="ubf-phone"
-            type="tel"
             value={phone}
-            onChange={(e) => setPhone(e.target.value)}
-            placeholder="+44 7xxx xxxxxx"
-            className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm transition-colors focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
-            required
+            onChange={setPhone}
+            inputClassName="w-full min-w-0 rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm transition-colors focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
           />
         </div>
 

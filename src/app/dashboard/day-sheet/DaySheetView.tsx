@@ -17,6 +17,7 @@ import { UndoToast } from '@/app/dashboard/table-grid/UndoToast';
 import type { UndoAction } from '@/types/table-management';
 import { UnifiedBookingForm } from '@/components/booking/UnifiedBookingForm';
 import { ModifyBookingInline } from '@/components/booking/ModifyBookingInline';
+import { BookingNotesEditablePanel } from '@/components/booking/BookingNotesEditablePanel';
 import { DashboardStatCard } from '@/components/dashboard/DashboardStatCard';
 import {
   computeNextBookingsSlotFromBookingRows,
@@ -24,6 +25,8 @@ import {
 } from '@/lib/table-management/next-bookings-slot';
 import { TableSelector } from '@/components/table-tracking/TableSelector';
 import type { OccupancyMap } from '@/components/table-tracking/TableSelector';
+import { PhoneWithCountryField } from '@/components/phone/PhoneWithCountryField';
+import { normalizeToE164 } from '@/lib/phone/e164';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -158,6 +161,17 @@ function formatDateFull(date: string): string {
 function formatDateHeading(date: string): string {
   const d = new Date(`${date}T12:00:00`);
   return d.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+}
+/** Relative day label — matches dashboard/bookings concertina. */
+function formatDateNice(dateStr: string): string {
+  const d = new Date(`${dateStr}T12:00:00`);
+  if (Number.isNaN(d.getTime())) return dateStr;
+  const today = new Date();
+  const tomorrow = new Date(today);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  if (d.toDateString() === today.toDateString()) return 'Today';
+  if (d.toDateString() === tomorrow.toDateString()) return 'Tomorrow';
+  return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
 }
 function timeToMinutes(t: string): number {
   const [h, m] = t.split(':').map(Number);
@@ -442,9 +456,15 @@ function EditBookingModal({
     setSaving(true);
     setError(null);
     try {
+      if (phone.trim() && !normalizeToE164(phone, 'GB')) {
+        setError('Enter a valid phone number');
+        setSaving(false);
+        return;
+      }
+      const resolvedPhone = phone.trim() ? (normalizeToE164(phone, 'GB') ?? phone.trim()) : '';
       const body: Record<string, unknown> = {};
       if (guestName !== booking.guest_name) body.guest_name = guestName;
-      if (phone !== (booking.guest_phone ?? '')) body.guest_phone = phone || null;
+      if (resolvedPhone !== (booking.guest_phone ?? '')) body.guest_phone = resolvedPhone || null;
       if (email !== (booking.guest_email ?? '')) body.guest_email = email || null;
       if (specialRequests !== (booking.special_requests ?? '')) body.special_requests = specialRequests;
       if (internalNotes !== (booking.internal_notes ?? '')) body.internal_notes = internalNotes;
@@ -499,14 +519,18 @@ function EditBookingModal({
 
           {/* Guest details */}
           <div className="space-y-3">
-            <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-3">
               <div>
                 <label className="mb-1 block text-xs font-medium text-slate-600">Guest Name</label>
                 <input value={guestName} onChange={(e) => setGuestName(e.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
               </div>
               <div>
                 <label className="mb-1 block text-xs font-medium text-slate-600">Phone</label>
-                <input value={phone} onChange={(e) => setPhone(e.target.value)} type="tel" className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
+                <PhoneWithCountryField
+                  value={phone}
+                  onChange={setPhone}
+                  inputClassName="w-full min-w-0 rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+                />
               </div>
             </div>
             <div>
@@ -585,10 +609,16 @@ function DaySheetWalkInModal({
     setError(null);
     setLoading(true);
     try {
+      const walkinPhone = normalizeToE164(phone, 'GB');
+      if (phone.trim() && !walkinPhone) {
+        setError('Enter a valid phone number or leave phone blank');
+        setLoading(false);
+        return;
+      }
       const walkinBody: Record<string, unknown> = {
         party_size: partySize,
         name: name.trim() || undefined,
-        phone: phone.trim() || undefined,
+        phone: walkinPhone || undefined,
         notes: notes.trim() || undefined,
       };
       if (selectedTableIds.length > 0) {
@@ -660,7 +690,11 @@ function DaySheetWalkInModal({
           </div>
           <div>
             <label className="mb-1 block text-sm font-medium text-slate-700">Phone <span className="text-slate-400">(optional)</span></label>
-            <input value={phone} onChange={(e) => setPhone(e.target.value)} type="tel" className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
+            <PhoneWithCountryField
+              value={phone}
+              onChange={setPhone}
+              inputClassName="w-full min-w-0 rounded-xl border border-slate-200 px-4 py-2.5 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+            />
           </div>
           <div>
             <label className="mb-1 block text-sm font-medium text-slate-700">Notes <span className="text-slate-400">(optional)</span></label>
@@ -1048,17 +1082,6 @@ export function DaySheetView({ venueId }: { venueId: string }) {
     setUndoAction(null);
     await changeStatus(bookingId, previousStatus);
   }, [undoAction, changeStatus]);
-
-  // Inline notes save
-  const saveNotes = useCallback(async (bookingId: string, notes: string) => {
-    try {
-      await fetch(`/api/venue/bookings/${bookingId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ internal_notes: notes }),
-      });
-    } catch { /* silent */ }
-  }, []);
 
   // Remaining capacity for walk-in — use time-aware API data
   const walkInCapacity = useMemo(() => {
@@ -1617,194 +1640,224 @@ export function DaySheetView({ venueId }: { venueId: string }) {
                           </div>
                         )}
 
-                        {/* ── Expanded detail ── */}
-                        {isExpanded && (
-                          <div className="border-t border-slate-100 bg-slate-50/30 px-4 py-4 space-y-4">
-                            {/* Guest info */}
-                            <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
-                              <div>
-                                <span className="text-xs text-slate-500">Guest</span>
-                                <p className="font-medium text-slate-900">{b.guest_name}</p>
-                              </div>
-                              <div>
-                                <span className="text-xs text-slate-500">Party Size</span>
-                                <p className="font-medium text-slate-900">{b.party_size} covers</p>
-                              </div>
-                              <div>
-                                <span className="text-xs text-slate-500">Phone</span>
-                                {b.guest_phone ? (
-                                  <a href={`tel:${b.guest_phone}`} className="block font-medium text-brand-600 hover:text-brand-700">{b.guest_phone}</a>
-                                ) : (
-                                  <p className="text-slate-400">—</p>
-                                )}
-                              </div>
-                              <div>
-                                <span className="text-xs text-slate-500">Email</span>
-                                {b.guest_email ? (
-                                  <a href={`mailto:${b.guest_email}`} className="block font-medium text-brand-600 hover:text-brand-700 truncate">{b.guest_email}</a>
-                                ) : (
-                                  <p className="text-slate-400">—</p>
-                                )}
-                              </div>
-                              <div>
-                                <span className="text-xs text-slate-500">Time</span>
-                                <p className="font-medium text-slate-900">{b.booking_time}{b.estimated_end_time ? ` – ${b.estimated_end_time}` : ''}</p>
-                              </div>
-                              <div>
-                                <span className="text-xs text-slate-500">Source</span>
-                                <p className="font-medium text-slate-700">{b.source}</p>
-                              </div>
-                              <div>
-                                <span className="text-xs text-slate-500">Created</span>
-                                <p className="text-slate-600">{new Date(b.created_at).toLocaleString()}</p>
-                              </div>
-                              <div>
-                                <span className="text-xs text-slate-500">Visit History</span>
-                                <p className="font-medium text-slate-700">
-                                  {b.visit_count === 0 ? 'First visit' : `${ordinal(b.visit_count + 1)} visit`}
-                                  {b.no_show_count > 0 && <span className="ml-1 text-xs text-red-500">({b.no_show_count} no-show{b.no_show_count > 1 ? 's' : ''})</span>}
-                                </p>
+                        {/* ── Expanded detail (layout aligned with dashboard/bookings concertina) ── */}
+                        {isExpanded && (() => {
+                          const guestName = b.guest_name || 'Guest';
+                          const depositAmtStr = b.deposit_amount_pence ? `£${(b.deposit_amount_pence / 100).toFixed(2)}` : null;
+                          const tableNames = (b.table_assignments ?? []).map((t) => t.name);
+                          return (
+                            // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions
+                            <div
+                              className="border-t border-slate-100 bg-slate-50/40"
+                              onClick={(e) => e.stopPropagation()}
+                              onKeyDown={(e) => e.stopPropagation()}
+                            >
+                              <div className="space-y-3 px-2 py-3 sm:px-3 lg:px-1 lg:py-3">
+                                <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
+                                  {/* Guest card */}
+                                  <div className="rounded-xl border border-slate-200 bg-white p-3.5">
+                                    <div className="flex items-center gap-3">
+                                      <div className="flex h-9 w-9 items-center justify-center rounded-full bg-brand-100 text-sm font-bold text-brand-700">
+                                        {guestName.charAt(0).toUpperCase()}
+                                      </div>
+                                      <div className="min-w-0 flex-1">
+                                        <p className="truncate text-sm font-semibold text-slate-900">{guestName}</p>
+                                        <p className="text-[11px] text-slate-500">
+                                          {b.visit_count > 0 ? `${b.visit_count} visit${b.visit_count !== 1 ? 's' : ''}` : 'First visit'}
+                                          {b.no_show_count > 0 && (
+                                            <span className="ml-1 text-red-500">({b.no_show_count} no-show{b.no_show_count > 1 ? 's' : ''})</span>
+                                          )}
+                                        </p>
+                                      </div>
+                                    </div>
+                                    <div className="mt-2.5 space-y-1">
+                                      {b.guest_phone ? (
+                                        <a href={`tel:${b.guest_phone}`} className="flex items-center gap-2 text-xs text-slate-600 hover:text-brand-600">
+                                          <svg className="h-3.5 w-3.5 shrink-0 text-slate-400" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 0 0 2.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 0 1-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 0 0-1.091-.852H4.5A2.25 2.25 0 0 0 2.25 4.5v2.25Z" /></svg>
+                                          {b.guest_phone}
+                                        </a>
+                                      ) : null}
+                                      {b.guest_email ? (
+                                        <a href={`mailto:${b.guest_email}`} className="flex items-center gap-2 text-xs text-slate-600 hover:text-brand-600">
+                                          <svg className="h-3.5 w-3.5 shrink-0 text-slate-400" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 0 1-2.25 2.25h-15a2.25 2.25 0 0 1-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25m19.5 0v.243a2.25 2.25 0 0 1-1.07 1.916l-7.5 4.615a2.25 2.25 0 0 1-2.36 0L3.32 8.91a2.25 2.25 0 0 1-1.07-1.916V6.75" /></svg>
+                                          <span className="truncate">{b.guest_email}</span>
+                                        </a>
+                                      ) : null}
+                                      {!b.guest_phone && !b.guest_email && (
+                                        <p className="text-xs italic text-slate-400">No contact details</p>
+                                      )}
+                                    </div>
+                                  </div>
+
+                                  {/* Booking summary */}
+                                  <div className="rounded-xl border border-slate-200 bg-white p-3.5">
+                                    <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+                                      <div>
+                                        <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Date</p>
+                                        <p className="text-sm font-medium text-slate-800">{formatDateNice(date)}</p>
+                                      </div>
+                                      <div>
+                                        <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Time</p>
+                                        <p className="text-sm font-medium text-slate-800">
+                                          {b.booking_time.slice(0, 5)}
+                                          {b.estimated_end_time ? (
+                                            <span className="text-slate-500"> – {b.estimated_end_time}</span>
+                                          ) : null}
+                                        </p>
+                                      </div>
+                                      <div>
+                                        <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Covers</p>
+                                        <p className="text-sm font-medium text-slate-800">{b.party_size}</p>
+                                      </div>
+                                      <div>
+                                        <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Deposit</p>
+                                        <p className={`text-sm font-medium ${b.deposit_status === 'Paid' ? 'text-emerald-700' : b.deposit_status === 'Pending' || b.deposit_status === 'Requested' || b.deposit_status === 'Unpaid' ? 'text-amber-700' : 'text-slate-500'}`}>
+                                          {b.deposit_status === 'Paid' && depositAmtStr ? `${depositAmtStr} Paid` : b.deposit_status === 'Not Required' ? 'None' : b.deposit_status}
+                                        </p>
+                                      </div>
+                                    </div>
+                                    {(tableManagementEnabled || tableNames.length > 0) && (
+                                      <div className="mt-2.5 border-t border-slate-100 pt-2">
+                                        <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Table</p>
+                                        <p className={`text-sm font-medium ${tableNames.length > 0 ? 'text-slate-800' : 'text-amber-600'}`}>
+                                          {tableNames.length > 0 ? tableNames.join(' + ') : 'Unassigned'}
+                                        </p>
+                                      </div>
+                                    )}
+                                    {b.occasion && (
+                                      <div className="mt-2.5 border-t border-slate-100 pt-2">
+                                        <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Occasion</p>
+                                        <p className="text-sm font-medium text-violet-900">{b.occasion}</p>
+                                      </div>
+                                    )}
+                                    <div className="mt-2.5 border-t border-slate-100 pt-2 grid grid-cols-1 gap-2 sm:grid-cols-3 sm:gap-x-3">
+                                      <div>
+                                        <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Source</p>
+                                        <p className="text-sm font-medium text-slate-700">{b.source}</p>
+                                      </div>
+                                      <div>
+                                        <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Created</p>
+                                        <p className="text-xs font-medium text-slate-600">{new Date(b.created_at).toLocaleString('en-GB', { dateStyle: 'short', timeStyle: 'short' })}</p>
+                                      </div>
+                                      <div>
+                                        <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Visit history</p>
+                                        <p className="text-sm font-medium text-slate-700">
+                                          {b.visit_count === 0 ? 'First visit' : `${ordinal(b.visit_count + 1)} visit`}
+                                        </p>
+                                      </div>
+                                    </div>
+                                    <div className="mt-2.5 border-t border-slate-100 pt-2">
+                                      <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Deposit actions</p>
+                                      <DepositActions booking={b} onAction={() => void fetchDaySheet()} />
+                                    </div>
+                                  </div>
+
+                                  <BookingNotesEditablePanel
+                                    bookingId={b.id}
+                                    dietaryNotes={b.dietary_notes}
+                                    guestRequests={b.special_requests}
+                                    staffNotes={b.internal_notes}
+                                    onSaved={() => {
+                                      void fetchDaySheet();
+                                    }}
+                                  />
+                                </div>
+
+                                {/* Actions bar — matches bookings concertina toolbar */}
+                                <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-slate-50/60 px-3.5 py-2.5 print:hidden">
+                                  <button type="button" onClick={() => setEditBooking(b)} className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50">
+                                    Edit Booking
+                                  </button>
+                                  {!tableManagementEnabled && b.status === 'Seated' && activeTables.length > 0 && (
+                                    <button
+                                      type="button"
+                                      disabled={actionLoading === b.id}
+                                      onClick={() => {
+                                        setChangeTableBookingId(b.id);
+                                        setChangeTableSelectedIds((b.table_assignments ?? []).map((t) => t.id));
+                                      }}
+                                      className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                                    >
+                                      Change table
+                                    </button>
+                                  )}
+                                  <button type="button" onClick={() => setSendMessageId(b.id)} className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50">
+                                    Send Message
+                                  </button>
+                                  {BOOKING_REVERT_ACTIONS[b.status as BookingStatus] && (
+                                    <button
+                                      type="button"
+                                      disabled={actionLoading === b.id}
+                                      onClick={() => {
+                                        const ra = BOOKING_REVERT_ACTIONS[b.status as BookingStatus]!;
+                                        setConfirmDialog({
+                                          title: ra.label,
+                                          message: `${b.guest_name} (${b.party_size}) at ${b.booking_time.slice(0, 5)} will be changed from ${b.status} back to ${ra.target}.`,
+                                          confirmLabel: ra.label,
+                                          onConfirm: () => void changeStatus(b.id, ra.target),
+                                        });
+                                      }}
+                                      className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-800 hover:bg-amber-100 disabled:opacity-50"
+                                    >
+                                      {BOOKING_REVERT_ACTIONS[b.status as BookingStatus]!.label}
+                                    </button>
+                                  )}
+                                  {b.status === 'Confirmed' && (
+                                    <button
+                                      type="button"
+                                      disabled={actionLoading === b.id || !canMarkNoShowForSlot(date, b.booking_time, data.no_show_grace_minutes)}
+                                      title={!canMarkNoShowForSlot(date, b.booking_time, data.no_show_grace_minutes) ? `Available ${data.no_show_grace_minutes} min after booking time` : undefined}
+                                      onClick={() => setConfirmDialog({
+                                        title: 'Mark as No-Show',
+                                        message: `${b.guest_name} (${b.party_size}) at ${b.booking_time.slice(0, 5)} will be marked No-Show.`,
+                                        confirmLabel: 'Mark No-Show',
+                                        onConfirm: () => void changeStatus(b.id, 'No-Show'),
+                                      })}
+                                      className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
+                                    >
+                                      No-Show
+                                    </button>
+                                  )}
+                                  {(b.status === 'Pending' || b.status === 'Confirmed') && (
+                                    <button
+                                      type="button"
+                                      disabled={actionLoading === b.id}
+                                      onClick={() => setConfirmDialog({
+                                        title: 'Cancel Booking',
+                                        message: `${b.guest_name} (${b.party_size}) at ${b.booking_time.slice(0, 5)} will be cancelled. A cancellation message will be sent to the guest.`,
+                                        confirmLabel: 'Cancel Booking',
+                                        onConfirm: () => void changeStatus(b.id, 'Cancelled'),
+                                      })}
+                                      className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
+                                    >
+                                      Cancel Booking
+                                    </button>
+                                  )}
+                                </div>
+
+                                <div className="rounded-xl border border-slate-200 bg-white p-3">
+                                  <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Communications</p>
+                                  {expandedComms == null ? (
+                                    <p className="text-xs text-slate-400">Loading...</p>
+                                  ) : expandedComms.length === 0 ? (
+                                    <p className="text-xs text-slate-400">No messages sent</p>
+                                  ) : (
+                                    <ul className="max-h-32 space-y-1 overflow-y-auto pr-1">
+                                      {expandedComms.map((c) => (
+                                        <li key={c.id} className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-slate-600">
+                                          <span className={`rounded px-1.5 py-0.5 font-medium ${c.channel === 'sms' ? 'bg-blue-50 text-blue-700' : 'bg-slate-50 text-slate-600'}`}>{c.channel.toUpperCase()}</span>
+                                          <span>{c.message_type.replace(/_/g, ' ')}</span>
+                                          <span className={c.status === 'sent' ? 'text-emerald-600' : 'text-red-500'}>{c.status}</span>
+                                          <span className="text-slate-400">{new Date(c.created_at).toLocaleString()}</span>
+                                        </li>
+                                      ))}
+                                    </ul>
+                                  )}
+                                </div>
                               </div>
                             </div>
-
-                            {/* Special requests */}
-                            {b.special_requests && (
-                              <div>
-                                <span className="text-xs text-slate-500">Special Requests</span>
-                                <p className={`mt-0.5 text-sm ${hasAllergy ? 'font-semibold text-red-800' : 'text-slate-700'}`}>{b.special_requests}</p>
-                              </div>
-                            )}
-
-                            {/* Dietary */}
-                            {b.dietary_notes && (
-                              <div>
-                                <span className="text-xs text-slate-500">Dietary Notes</span>
-                                <p className={`mt-0.5 text-sm ${hasAllergy ? 'font-semibold text-red-800' : 'text-slate-700'}`}>{b.dietary_notes}</p>
-                              </div>
-                            )}
-
-                            {/* Occasion */}
-                            {b.occasion && (
-                              <div>
-                                <span className="text-xs text-slate-500">Occasion</span>
-                                <p className="mt-0.5 text-sm text-slate-700">{b.occasion}</p>
-                              </div>
-                            )}
-
-                            {/* Internal notes (editable) */}
-                            <div>
-                              <span className="text-xs text-slate-500">Internal Staff Notes</span>
-                              <textarea
-                                defaultValue={b.internal_notes ?? ''}
-                                onBlur={(e) => void saveNotes(b.id, e.target.value)}
-                                rows={2}
-                                placeholder="Add staff-only notes..."
-                                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
-                              />
-                            </div>
-
-                            {/* Deposit */}
-                            <div>
-                              <span className="text-xs text-slate-500">Deposit</span>
-                              <div className="mt-1">
-                                <DepositActions booking={b} onAction={() => void fetchDaySheet()} />
-                              </div>
-                            </div>
-
-                            {/* Communications log */}
-                            <div>
-                              <span className="text-xs text-slate-500">Communications</span>
-                              {expandedComms == null ? (
-                                <p className="mt-1 text-xs text-slate-400">Loading...</p>
-                              ) : expandedComms.length === 0 ? (
-                                <p className="mt-1 text-xs text-slate-400">No messages sent</p>
-                              ) : (
-                                <ul className="mt-1 space-y-1 max-h-32 overflow-y-auto">
-                                  {expandedComms.map((c) => (
-                                    <li key={c.id} className="flex items-center gap-2 text-xs text-slate-600">
-                                      <span className={`rounded px-1.5 py-0.5 font-medium ${c.channel === 'sms' ? 'bg-blue-50 text-blue-700' : 'bg-slate-50 text-slate-600'}`}>{c.channel.toUpperCase()}</span>
-                                      <span>{c.message_type.replace(/_/g, ' ')}</span>
-                                      <span className={c.status === 'sent' ? 'text-emerald-600' : 'text-red-500'}>{c.status}</span>
-                                      <span className="text-slate-400">{new Date(c.created_at).toLocaleString()}</span>
-                                    </li>
-                                  ))}
-                                </ul>
-                              )}
-                            </div>
-
-                            {/* Action buttons */}
-                            <div className="flex flex-wrap gap-2 border-t border-slate-100 pt-3 print:hidden">
-                              <button type="button" onClick={() => setEditBooking(b)} className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50">
-                                Edit Booking
-                              </button>
-                              {!tableManagementEnabled && b.status === 'Seated' && activeTables.length > 0 && (
-                                <button
-                                  type="button"
-                                  disabled={actionLoading === b.id}
-                                  onClick={() => {
-                                    setChangeTableBookingId(b.id);
-                                    setChangeTableSelectedIds((b.table_assignments ?? []).map((t) => t.id));
-                                  }}
-                                  className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-                                >
-                                  Change table
-                                </button>
-                              )}
-                              <button type="button" onClick={() => setSendMessageId(b.id)} className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50">
-                                Send Message
-                              </button>
-                              {BOOKING_REVERT_ACTIONS[b.status as BookingStatus] && (
-                                <button
-                                  type="button"
-                                  disabled={actionLoading === b.id}
-                                  onClick={() => {
-                                    const ra = BOOKING_REVERT_ACTIONS[b.status as BookingStatus]!;
-                                    setConfirmDialog({
-                                      title: ra.label,
-                                      message: `${b.guest_name} (${b.party_size}) at ${b.booking_time.slice(0, 5)} will be changed from ${b.status} back to ${ra.target}.`,
-                                      confirmLabel: ra.label,
-                                      onConfirm: () => void changeStatus(b.id, ra.target),
-                                    });
-                                  }}
-                                  className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-800 hover:bg-amber-100 disabled:opacity-50"
-                                >
-                                  {BOOKING_REVERT_ACTIONS[b.status as BookingStatus]!.label}
-                                </button>
-                              )}
-                              {b.status === 'Confirmed' && (
-                                <button
-                                  type="button"
-                                  disabled={actionLoading === b.id || !canMarkNoShowForSlot(date, b.booking_time, data.no_show_grace_minutes)}
-                                  title={!canMarkNoShowForSlot(date, b.booking_time, data.no_show_grace_minutes) ? `Available ${data.no_show_grace_minutes} min after booking time` : undefined}
-                                  onClick={() => setConfirmDialog({
-                                    title: 'Mark as No-Show',
-                                    message: `${b.guest_name} (${b.party_size}) at ${b.booking_time.slice(0, 5)} will be marked No-Show.`,
-                                    confirmLabel: 'Mark No-Show',
-                                    onConfirm: () => void changeStatus(b.id, 'No-Show'),
-                                  })}
-                                  className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
-                                >
-                                  No-Show
-                                </button>
-                              )}
-                              {(b.status === 'Pending' || b.status === 'Confirmed') && (
-                                <button
-                                  type="button"
-                                  disabled={actionLoading === b.id}
-                                  onClick={() => setConfirmDialog({
-                                    title: 'Cancel Booking',
-                                    message: `${b.guest_name} (${b.party_size}) at ${b.booking_time.slice(0, 5)} will be cancelled. A cancellation message will be sent to the guest.`,
-                                    confirmLabel: 'Cancel Booking',
-                                    onConfirm: () => void changeStatus(b.id, 'Cancelled'),
-                                  })}
-                                  className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
-                                >
-                                  Cancel Booking
-                                </button>
-                              )}
-                            </div>
-                          </div>
-                        )}
+                          );
+                        })()}
                       </li>
                     );
                   })}

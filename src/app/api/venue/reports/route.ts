@@ -28,16 +28,29 @@ export async function GET(request: NextRequest) {
     const pStart = `${from}T00:00:00.000Z`;
     const pEnd = `${to}T23:59:59.999Z`;
 
-    const [{ data: summary, error: e1 }, { data: noShowSeries, error: e2 }, { data: cancellation, error: e3 }, { data: deposit, error: e4 }, { data: venueFlags }] = await Promise.all([
+    const [
+      { data: summary, error: e1 },
+      { data: noShowSeries, error: e2 },
+      { data: cancellation, error: e3 },
+      { data: deposit, error: e4 },
+      { data: frequentVisitors, error: e5 },
+      { data: venueFlags },
+    ] = await Promise.all([
       supabase.rpc('report_booking_summary', { p_venue_id: staff.venue_id, p_start: pStart, p_end: pEnd }),
       supabase.rpc('report_no_show_series', { p_venue_id: staff.venue_id, p_start: pStart, p_end: pEnd, p_granularity: 'day' }),
       supabase.rpc('report_cancellation', { p_venue_id: staff.venue_id, p_start: pStart, p_end: pEnd }),
       supabase.rpc('report_deposit_summary', { p_venue_id: staff.venue_id, p_start: pStart, p_end: pEnd }),
+      supabase.rpc('report_frequent_visitors', {
+        p_venue_id: staff.venue_id,
+        p_start: from,
+        p_end: to,
+        p_limit: 100,
+      }),
       supabase.from('venues').select('table_management_enabled').eq('id', staff.venue_id).single(),
     ]);
 
-    if (e1 || e2 || e3 || e4) {
-      console.error('reports rpc errors:', e1, e2, e3, e4);
+    if (e1 || e2 || e3 || e4 || e5) {
+      console.error('reports rpc errors:', e1, e2, e3, e4, e5);
       return NextResponse.json({ error: 'Failed to load reports' }, { status: 500 });
     }
 
@@ -99,6 +112,7 @@ export async function GET(request: NextRequest) {
       report3_cancellation: cancellationObj ?? null,
       report4_deposit: depositObj ?? null,
       report5_table_utilisation: tableUtilisation,
+      report6_frequent_visitors: frequentVisitors ?? [],
     });
   } catch (err) {
     console.error('GET /api/venue/reports failed:', err);

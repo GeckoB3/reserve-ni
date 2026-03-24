@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import sgMail from '@sendgrid/mail';
+import { normalizeToE164 } from '@/lib/phone/e164';
 
 const apiKey = process.env.SENDGRID_API_KEY;
 if (apiKey) {
@@ -10,7 +11,6 @@ const CONTACT_TO = 'hello@reserveni.com';
 const FROM = { email: 'hello@reserveni.com', name: 'Reserve NI' };
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const PHONE_REGEX = /^[\d\s+\-()]{7,20}$/;
 const MAX_MESSAGE_LENGTH = 2000;
 
 interface ContactBody {
@@ -51,16 +51,22 @@ function validate(body: unknown): { ok: true; data: ContactPayload } | { ok: fal
   if (!EMAIL_REGEX.test(email)) {
     return { ok: false, error: 'Please enter a valid email address.' };
   }
-  if (phone !== undefined && phone !== '' && !PHONE_REGEX.test(phone)) {
-    return { ok: false, error: 'Please enter a valid phone number (7–20 characters).' };
+  if (phone !== undefined && phone !== '') {
+    const e164 = normalizeToE164(phone, 'GB');
+    if (!e164) {
+      return { ok: false, error: 'Please enter a valid phone number.' };
+    }
   }
   if (message !== undefined && message.length > MAX_MESSAGE_LENGTH) {
     return { ok: false, error: 'Message must be under 2000 characters.' };
   }
 
+  const phoneNormalised =
+    phone !== undefined && phone !== '' ? normalizeToE164(phone, 'GB') ?? undefined : undefined;
+
   return {
     ok: true,
-    data: { name, email, phone, restaurantName, message } as ContactPayload,
+    data: { name, email, phone: phoneNormalised, restaurantName, message } as ContactPayload,
   };
 }
 

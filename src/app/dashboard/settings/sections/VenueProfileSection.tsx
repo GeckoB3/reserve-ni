@@ -1,11 +1,13 @@
 'use client';
 
-import { useForm } from 'react-hook-form';
+import { Controller, useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useCallback, useState } from 'react';
 import type { VenueSettings } from '../types';
 import { useNumericField } from '@/hooks/useNumericField';
+import { PhoneWithCountryField } from '@/components/phone/PhoneWithCountryField';
+import { normalizeToE164 } from '@/lib/phone/e164';
 
 const profileSchema = z.object({
   name: z.string().min(1, 'Name is required').max(200),
@@ -14,7 +16,13 @@ const profileSchema = z.object({
   address_street: z.string().max(200).optional(),
   address_town: z.string().max(100).optional(),
   address_postcode: z.string().max(20).optional(),
-  phone: z.string().max(30).optional(),
+  phone: z
+    .string()
+    .max(24)
+    .optional()
+    .refine((v) => !v?.trim() || normalizeToE164(v.trim(), 'GB') !== null, {
+      message: 'Enter a valid phone number',
+    }),
   email: z.string().email().optional().or(z.literal('')),
   cuisine_type: z.string().max(100).optional(),
   price_band: z.string().max(50).optional(),
@@ -72,7 +80,7 @@ export function VenueProfileSection({ venue, onUpdate, isAdmin }: VenueProfileSe
 
   const parsedAddr = parseAddress(venue.address);
 
-  const { register, handleSubmit, formState: { errors, isSubmitting }, setValue, watch } = useForm<ProfileForm>({
+  const { register, handleSubmit, control, formState: { errors, isSubmitting }, setValue, watch } = useForm<ProfileForm>({
     resolver: zodResolver(profileSchema),
     defaultValues: {
       name: venue.name ?? '',
@@ -112,7 +120,7 @@ export function VenueProfileSection({ venue, onUpdate, isAdmin }: VenueProfileSe
         name: data.name,
         slug: data.slug,
         address: combinedAddress || undefined,
-        phone: data.phone || undefined,
+        phone: data.phone?.trim() ? normalizeToE164(data.phone.trim(), 'GB') ?? undefined : undefined,
         email: data.email || undefined,
         cuisine_type: data.cuisine_type || undefined,
         price_band: data.price_band || undefined,
@@ -233,7 +241,20 @@ export function VenueProfileSection({ venue, onUpdate, isAdmin }: VenueProfileSe
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label htmlFor="phone" className="block text-sm font-medium text-neutral-700 mb-1">Phone</label>
-            <input id="phone" type="tel" {...register('phone')} disabled={!isAdmin} className="w-full rounded border border-neutral-300 px-3 py-2 disabled:bg-neutral-50" />
+            <Controller
+              name="phone"
+              control={control}
+              render={({ field }) => (
+                <PhoneWithCountryField
+                  id="phone"
+                  value={field.value ?? ''}
+                  onChange={field.onChange}
+                  disabled={!isAdmin}
+                  inputClassName="w-full min-w-0 rounded border border-neutral-300 px-3 py-2 text-sm disabled:bg-neutral-50"
+                />
+              )}
+            />
+            {errors.phone && <p className="mt-1 text-sm text-red-600">{errors.phone.message}</p>}
           </div>
           <div>
             <label htmlFor="email" className="block text-sm font-medium text-neutral-700 mb-1">Email</label>

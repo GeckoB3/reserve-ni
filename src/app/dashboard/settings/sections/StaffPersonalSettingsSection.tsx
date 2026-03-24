@@ -1,6 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { PhoneWithCountryField } from '@/components/phone/PhoneWithCountryField';
+import { normalizeToE164 } from '@/lib/phone/e164';
 
 interface StaffProfileRow {
   id: string;
@@ -63,13 +65,20 @@ export function StaffPersonalSettingsSection() {
       setProfileSuccess(null);
       setSavingProfile(true);
       try {
+        const phoneTrim = phone.trim();
+        const phoneE164 = phoneTrim ? normalizeToE164(phone, 'GB') : null;
+        if (phoneTrim && !phoneE164) {
+          setProfileError('Enter a valid phone number or leave phone blank');
+          setSavingProfile(false);
+          return;
+        }
         const res = await fetch('/api/venue/staff/me', {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             name: name.trim(),
             email: email.trim().toLowerCase(),
-            phone: phone.trim(),
+            phone: phoneE164 ?? '',
           }),
         });
         if (!res.ok) {
@@ -201,16 +210,13 @@ export function StaffPersonalSettingsSection() {
               <label htmlFor="staff-phone" className="mb-1 block text-sm font-medium text-slate-700">
                 Phone
               </label>
-              <input
+              <PhoneWithCountryField
                 id="staff-phone"
-                type="tel"
                 value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                placeholder="Optional"
-                maxLength={50}
-                autoComplete="tel"
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+                onChange={setPhone}
+                inputClassName="w-full min-w-0 rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
               />
+              <p className="mt-1 text-xs text-slate-500">Optional. Include country code.</p>
             </div>
           </div>
           {profileError && <p className="text-sm text-red-600">{profileError}</p>}

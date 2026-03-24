@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { z } from 'zod';
+import { normalizeToE164 } from '@/lib/phone/e164';
 
 const joinSchema = z.object({
   venue_id: z.string().uuid(),
@@ -9,7 +10,7 @@ const joinSchema = z.object({
   party_size: z.number().int().min(1).max(50),
   guest_name: z.string().min(1).max(200),
   guest_email: z.string().email().optional().or(z.literal('')),
-  guest_phone: z.string().min(1).max(30),
+  guest_phone: z.string().min(1).max(24),
   service_id: z.string().uuid().optional(),
   notes: z.string().max(500).optional(),
 });
@@ -25,12 +26,17 @@ export async function POST(request: NextRequest) {
 
     const supabase = getSupabaseAdminClient();
 
+    const guestPhoneE164 = normalizeToE164(parsed.data.guest_phone, 'GB');
+    if (!guestPhoneE164) {
+      return NextResponse.json({ error: 'Invalid phone number' }, { status: 400 });
+    }
+
     const { count } = await supabase
       .from('waitlist_entries')
       .select('id', { count: 'exact', head: true })
       .eq('venue_id', parsed.data.venue_id)
       .eq('desired_date', parsed.data.desired_date)
-      .eq('guest_phone', parsed.data.guest_phone)
+      .eq('guest_phone', guestPhoneE164)
       .eq('status', 'waiting');
 
     if ((count ?? 0) > 0) {
@@ -47,7 +53,7 @@ export async function POST(request: NextRequest) {
         party_size: parsed.data.party_size,
         guest_name: parsed.data.guest_name,
         guest_email: parsed.data.guest_email || null,
-        guest_phone: parsed.data.guest_phone,
+        guest_phone: guestPhoneE164,
         notes: parsed.data.notes || null,
       })
       .select('id, status')

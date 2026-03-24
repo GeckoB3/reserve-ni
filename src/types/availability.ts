@@ -1,10 +1,10 @@
 /**
- * Availability engine types. Schemas for venue availability_config and
- * opening_hours JSONB, and results from getAvailableSlots.
+ * Availability engine types. Includes schemas for venues.availability_config and
+ * opening_hours JSONB (legacy / display), service-engine types, and slot shapes
+ * from computeAvailability.
  *
- * The engine supports TWO modes:
- *   1. Legacy JSONB mode (availability_config on venues) — kept for backward compatibility
- *   2. Service-based mode (venue_services + related tables) — the new gold standard
+ * Live booking and slot APIs use the service engine only (active venue_services).
+ * Legacy JSON helpers (e.g. getAvailableSlots) remain for tests and one-off tooling.
  */
 
 /** Day of week 0=Sunday, 1=Monday, ..., 6=Saturday (matches JS Date.getDay()) */

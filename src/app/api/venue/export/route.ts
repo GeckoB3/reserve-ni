@@ -31,11 +31,11 @@ export async function GET(request: NextRequest) {
         .select(`
           id,
           booking_date,
-          start_time,
+          booking_time,
           party_size,
           status,
           deposit_status,
-          deposit_amount,
+          deposit_amount_pence,
           stripe_payment_intent_id,
           source,
           dietary_notes,
@@ -75,14 +75,19 @@ export async function GET(request: NextRequest) {
 
       const rows = (bookings ?? []).map((b) => {
         const guest = Array.isArray(b.guests) ? b.guests[0] : b.guests;
+        const timeRaw = typeof b.booking_time === 'string' ? b.booking_time : '';
+        const timeDisplay = timeRaw.length >= 5 ? timeRaw.slice(0, 5) : timeRaw;
+        const pence = b.deposit_amount_pence as number | null | undefined;
+        const depositGbp =
+          pence != null && Number.isFinite(pence) ? (pence / 100).toFixed(2) : '';
         return [
           b.id,
           b.booking_date,
-          b.start_time,
+          timeDisplay,
           b.party_size,
           b.status,
           b.deposit_status ?? '',
-          b.deposit_amount ?? '',
+          depositGbp,
           b.stripe_payment_intent_id ?? '',
           b.source ?? '',
           (guest as { name?: string } | null)?.name ?? '',
@@ -113,6 +118,8 @@ export async function GET(request: NextRequest) {
           name,
           email,
           phone,
+          visit_count,
+          last_visit_date,
           created_at
         `)
         .eq('venue_id', staff.venue_id)
@@ -134,12 +141,23 @@ export async function GET(request: NextRequest) {
         if (b.guest_id) countMap[b.guest_id] = (countMap[b.guest_id] ?? 0) + 1;
       }
 
-      const headers = ['Guest ID', 'Name', 'Email', 'Phone', 'Total Bookings', 'First Seen'];
+      const headers = [
+        'Guest ID',
+        'Name',
+        'Email',
+        'Phone',
+        'Visit count (seated)',
+        'Last visit',
+        'Total bookings',
+        'First seen',
+      ];
       const rows = (guests ?? []).map((g) => [
         g.id,
         g.name ?? '',
         g.email ?? '',
         g.phone ?? '',
+        (g as { visit_count?: number }).visit_count ?? 0,
+        (g as { last_visit_date?: string | null }).last_visit_date ?? '',
         countMap[g.id] ?? 0,
         g.created_at,
       ]);

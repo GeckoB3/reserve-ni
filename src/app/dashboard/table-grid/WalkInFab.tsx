@@ -3,6 +3,8 @@
 import { useState, useMemo } from 'react';
 import type { VenueTable, TableGridCell } from '@/types/table-management';
 import { NumericInput } from '@/components/ui/NumericInput';
+import { PhoneWithCountryField } from '@/components/phone/PhoneWithCountryField';
+import { normalizeToE164 } from '@/lib/phone/e164';
 
 interface Props {
   tables: VenueTable[];
@@ -65,6 +67,13 @@ export function WalkInFab({ tables, cells, onCreated }: Props) {
     setSaving(true);
     setError(null);
 
+    const walkinPhone = normalizeToE164(phone, 'GB');
+    if (phone.trim() && !walkinPhone) {
+      setError('Enter a valid phone number or leave phone blank');
+      setSaving(false);
+      return;
+    }
+
     try {
       const res = await fetch('/api/venue/bookings/walk-in', {
         method: 'POST',
@@ -73,7 +82,7 @@ export function WalkInFab({ tables, cells, onCreated }: Props) {
           table_id: tableId,
           party_size: partySize,
           name: name || 'Walk-in',
-          phone,
+          phone: walkinPhone || undefined,
           booking_date: new Date().toISOString().slice(0, 10),
           booking_time: `${String(new Date().getHours()).padStart(2, '0')}:${String(new Date().getMinutes()).padStart(2, '0')}`,
         }),
@@ -181,13 +190,13 @@ export function WalkInFab({ tables, cells, onCreated }: Props) {
 
               <div>
                 <label className="block text-xs font-medium text-slate-600">Phone</label>
-                <input
-                  type="tel"
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                  className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                  placeholder="Phone number"
-                />
+                <div className="mt-1">
+                  <PhoneWithCountryField
+                    value={phone}
+                    onChange={setPhone}
+                    inputClassName="w-full min-w-0 rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  />
+                </div>
               </div>
             </div>
 

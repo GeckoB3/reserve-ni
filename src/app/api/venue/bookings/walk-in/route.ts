@@ -4,11 +4,12 @@ import { getVenueStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { replaceBookingAssignments, syncTableStatusesForBooking } from '@/lib/table-management/lifecycle';
 import { z } from 'zod';
+import { normalizeToE164 } from '@/lib/phone/e164';
 
 const walkInSchema = z.object({
   party_size: z.number().int().min(1).max(50),
   name: z.string().max(200).optional(),
-  phone: z.string().max(30).optional(),
+  phone: z.string().max(24).optional(),
   dietary_notes: z.string().max(500).optional(),
   occasion: z.string().max(200).optional(),
   table_id: z.string().uuid().optional(),
@@ -72,6 +73,15 @@ export async function POST(request: NextRequest) {
     }
 
     const { party_size, name, phone, dietary_notes, occasion, table_id, table_ids: rawTableIds, booking_date, booking_time } = parsed.data;
+
+    let phoneE164: string | null = null;
+    if (phone?.trim()) {
+      const n = normalizeToE164(phone.trim(), 'GB');
+      if (!n) {
+        return NextResponse.json({ error: 'Invalid phone number' }, { status: 400 });
+      }
+      phoneE164 = n;
+    }
 
     const admin = getSupabaseAdminClient();
     const { data: venueSettings } = await admin
@@ -165,7 +175,7 @@ export async function POST(request: NextRequest) {
         venue_id: staff.venue_id,
         name: name?.trim() || 'Walk-in',
         email: null,
-        phone: phone?.trim() || null,
+        phone: phoneE164,
         visit_count: 1,
       })
       .select('id')

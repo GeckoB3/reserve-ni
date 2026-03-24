@@ -2,7 +2,12 @@
 
 import { useState } from 'react';
 
-export function DataExportSection() {
+export interface DataExportSectionProps {
+  /** Shown after successful download or when export is blocked (e.g. API error). */
+  onExportFlash?: (variant: 'success' | 'notice', message: string) => void;
+}
+
+export function DataExportSection({ onExportFlash }: DataExportSectionProps) {
   const [downloading, setDownloading] = useState<'bookings' | 'guests' | null>(null);
 
   async function handleDownload(type: 'bookings' | 'guests') {
@@ -11,7 +16,10 @@ export function DataExportSection() {
       const res = await fetch(`/api/venue/export?type=${type}`);
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
-        alert(body.error ?? 'Export failed — please try again.');
+        const msg =
+          typeof body.error === 'string' ? body.error : 'Export failed — please try again.';
+        if (onExportFlash) onExportFlash('notice', msg);
+        else alert(msg);
         return;
       }
       const blob = await res.blob();
@@ -25,8 +33,15 @@ export function DataExportSection() {
       a.click();
       a.remove();
       URL.revokeObjectURL(url);
+      const label = type === 'bookings' ? 'Bookings' : 'Guest list';
+      onExportFlash?.(
+        'success',
+        `${label} CSV download started — check your downloads folder.`,
+      );
     } catch {
-      alert('Export failed — please check your connection and try again.');
+      const msg = 'Export failed — please check your connection and try again.';
+      if (onExportFlash) onExportFlash('notice', msg);
+      else alert(msg);
     } finally {
       setDownloading(null);
     }
@@ -37,16 +52,17 @@ export function DataExportSection() {
       <div className="mb-4">
         <h2 className="text-base font-semibold text-slate-900">Export your data</h2>
         <p className="mt-1 text-sm text-slate-500">
-          Download a full CSV export of your bookings or guest records. You are entitled to your data at any time.
+          Download a full CSV export of your bookings or guest records. Exports include all records for your venue
+          (not limited to the date range above). You are entitled to your data at any time.
         </p>
       </div>
 
       <div className="flex flex-wrap gap-3">
         <button
           type="button"
-          onClick={() => handleDownload('bookings')}
+          onClick={() => void handleDownload('bookings')}
           disabled={downloading !== null}
-          className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 transition-colors"
+          className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-50"
         >
           {downloading === 'bookings' ? (
             <div className="h-4 w-4 animate-spin rounded-full border-2 border-slate-400 border-t-transparent" />
@@ -58,9 +74,9 @@ export function DataExportSection() {
 
         <button
           type="button"
-          onClick={() => handleDownload('guests')}
+          onClick={() => void handleDownload('guests')}
           disabled={downloading !== null}
-          className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 transition-colors"
+          className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-50"
         >
           {downloading === 'guests' ? (
             <div className="h-4 w-4 animate-spin rounded-full border-2 border-slate-400 border-t-transparent" />
@@ -72,7 +88,7 @@ export function DataExportSection() {
       </div>
 
       <p className="mt-3 text-xs text-slate-400">
-        Exports are generated in real time and include all records for your venue.
+        Files are generated in real time from your venue&apos;s data.
       </p>
     </section>
   );
@@ -81,7 +97,11 @@ export function DataExportSection() {
 function DownloadIcon({ className }: { className?: string }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" />
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3"
+      />
     </svg>
   );
 }

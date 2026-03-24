@@ -3,11 +3,12 @@ import { getSupabaseAdminClient } from '@/lib/supabase';
 import { stripe } from '@/lib/stripe';
 import { findOrCreateGuest } from '@/lib/guests';
 import { sendBookingConfirmationEmail } from '@/lib/communications/send-templated';
-import { getAvailableSlots, computeAvailability, fetchEngineInput } from '@/lib/availability';
-import type { VenueForAvailability, BookingForAvailability } from '@/types/availability';
+import { computeAvailability, fetchEngineInput } from '@/lib/availability';
+import { AVAILABILITY_SETUP_REQUIRED_MESSAGE } from '@/lib/availability/availability-errors';
 import { resolveDuration, getDayOfWeek } from '@/lib/availability/engine';
 import { generateConfirmToken, hashConfirmToken } from '@/lib/confirm-token';
 import { z } from 'zod';
+import { normalizeToE164 } from '@/lib/phone/e164';
 
 import { autoAssignTable } from '@/lib/table-availability';
 import { resolveVenueMode } from '@/lib/venue-mode';
@@ -20,7 +21,7 @@ const createBookingSchema = z.object({
   party_size: z.number().int().min(1).max(50),
   name: z.string().min(1).max(200),
   email: z.string().email().optional().or(z.literal('')),
-  phone: z.string().min(1).max(30),
+  phone: z.string().min(1).max(24),
   dietary_notes: z.string().max(1000).optional(),
   occasion: z.string().max(200).optional(),
   source: z.enum(['online', 'phone', 'walk-in', 'widget', 'booking_page']),
@@ -66,11 +67,16 @@ export async function POST(request: NextRequest) {
       service_id: requestServiceId,
     } = parsed.data;
 
+    const phoneE164 = normalizeToE164(phone, 'GB');
+    if (!phoneE164) {
+      return NextResponse.json({ error: 'Invalid phone number' }, { status: 400 });
+    }
+
     const supabase = getSupabaseAdminClient();
 
     const { data: venue, error: venueErr } = await supabase
       .from('venues')
-      .select('id, name, stripe_connected_account_id, booking_rules, deposit_config, opening_hours, availability_config, timezone, table_management_enabled, show_table_in_confirmation, address')
+      .select('id, name, stripe_connected_account_id, booking_rules, deposit_config, timezone, table_management_enabled, show_table_in_confirmation, address')
       .eq('id', venue_id)
       .single();
 
@@ -79,34 +85,39 @@ export async function POST(request: NextRequest) {
     }
 
     const venueMode = await resolveVenueMode(supabase, venue_id);
-    const useServiceEngine = venueMode.availabilityEngine === 'service';
 
-    if (useServiceEngine) {
-      const { data: restrictions } = await supabase
+    if (venueMode.availabilityEngine !== 'service') {
+      return NextResponse.json({ error: AVAILABILITY_SETUP_REQUIRED_MESSAGE }, { status: 503 });
+    }
+
+    const { data: activeServices } = await supabase
+      .from('venue_services')
+      .select('id')
+      .eq('venue_id', venue_id)
+      .eq('is_active', true);
+    const serviceIds = (activeServices ?? []).map((s) => s.id);
+
+    let minParty = 1;
+    let maxParty = 50;
+    if (serviceIds.length > 0) {
+      const { data: restrRows } = await supabase
         .from('booking_restrictions')
         .select('min_party_size_online, max_party_size_online')
-        .eq('venue_id', venue_id)
-        .limit(1)
-        .maybeSingle();
-
-      const minParty = restrictions?.min_party_size_online ?? 1;
-      const maxParty = restrictions?.max_party_size_online ?? 50;
-      if (party_size < minParty || party_size > maxParty) {
-        return NextResponse.json(
-          { error: `Party size must be between ${minParty} and ${maxParty}` },
-          { status: 400 }
-        );
+        .in('service_id', serviceIds);
+      for (const row of restrRows ?? []) {
+        minParty = Math.max(minParty, row.min_party_size_online ?? 1);
+        maxParty = Math.min(maxParty, row.max_party_size_online ?? 50);
       }
     } else {
       const rules = (venue.booking_rules as { min_party_size?: number; max_party_size?: number }) ?? {};
-      const minParty = rules.min_party_size ?? 1;
-      const maxParty = rules.max_party_size ?? 50;
-      if (party_size < minParty || party_size > maxParty) {
-        return NextResponse.json(
-          { error: `Party size must be between ${minParty} and ${maxParty}` },
-          { status: 400 }
-        );
-      }
+      minParty = rules.min_party_size ?? 1;
+      maxParty = rules.max_party_size ?? 50;
+    }
+    if (party_size < minParty || party_size > maxParty) {
+      return NextResponse.json(
+        { error: `Party size must be between ${minParty} and ${maxParty}` },
+        { status: 400 }
+      );
     }
 
     const depositConfig = (venue.deposit_config as { enabled?: boolean; amount_per_person_gbp?: number; online_requires_deposit?: boolean; phone_requires_deposit?: boolean; min_party_size_for_deposit?: number; weekend_only?: boolean }) ?? {};
@@ -119,69 +130,47 @@ export async function POST(request: NextRequest) {
     let requiresDeposit = false;
     let depositAmountPence: number | null = null;
 
-    if (useServiceEngine) {
-      const engineInput = await fetchEngineInput({
-        supabase,
-        venueId: venue_id,
-        date: booking_date,
-        partySize: party_size,
-      });
+    const engineInput = await fetchEngineInput({
+      supabase,
+      venueId: venue_id,
+      date: booking_date,
+      partySize: party_size,
+    });
 
-      const results = computeAvailability(engineInput);
-      const allSlots = results.flatMap((r) => r.slots);
-      const slot = allSlots.find((s) => s.start_time === timeStr && (!requestServiceId || s.service_id === requestServiceId));
+    const results = computeAvailability(engineInput);
+    const allSlots = results.flatMap((r) => r.slots);
+    const slot = allSlots.find((s) => s.start_time === timeStr && (!requestServiceId || s.service_id === requestServiceId));
 
-      if (!slot || slot.available_covers < party_size) {
-        const alternatives = allSlots
-          .filter((s) => s.available_covers >= party_size)
-          .slice(0, 3)
-          .map((s) => ({ time: s.start_time, service: s.service_name, service_id: s.service_id }));
+    if (!slot || slot.available_covers < party_size) {
+      const alternatives = allSlots
+        .filter((s) => s.available_covers >= party_size)
+        .slice(0, 3)
+        .map((s) => ({ time: s.start_time, service: s.service_name, service_id: s.service_id }));
 
-        return NextResponse.json(
-          { error: 'This time slot is no longer available', alternatives },
-          { status: 409 }
-        );
-      }
+      return NextResponse.json(
+        { error: 'This time slot is no longer available', alternatives },
+        { status: 409 }
+      );
+    }
 
-      resolvedServiceId = slot.service_id;
-      const engineDow = getDayOfWeek(booking_date);
-      const duration = resolveDuration(engineInput.durations, slot.service_id, party_size, engineDow);
-      const [y, mo, d] = booking_date.split('-').map(Number);
-      const [hh, mm] = timeStr.split(':').map(Number);
-      const endDate = new Date(Date.UTC(y!, mo! - 1, d!, hh!, mm!, 0));
-      endDate.setMinutes(endDate.getMinutes() + duration);
-      estimatedEndTime = endDate.toISOString();
+    resolvedServiceId = slot.service_id;
+    const engineDow = getDayOfWeek(booking_date);
+    const duration = resolveDuration(engineInput.durations, slot.service_id, party_size, engineDow);
+    const [y, mo, d] = booking_date.split('-').map(Number);
+    const [hh, mm] = timeStr.split(':').map(Number);
+    const endDate = new Date(Date.UTC(y!, mo! - 1, d!, hh!, mm!, 0));
+    endDate.setMinutes(endDate.getMinutes() + duration);
+    estimatedEndTime = endDate.toISOString();
 
-      const isOnlineSource = source === 'online' || source === 'widget' || source === 'booking_page';
-      const channelRequires =
-        (isOnlineSource && (depositConfig.online_requires_deposit !== false)) ||
-        (source === 'phone' && (depositConfig.phone_requires_deposit ?? false));
+    const isOnlineSource = source === 'online' || source === 'widget' || source === 'booking_page';
+    const channelRequires =
+      (isOnlineSource && (depositConfig.online_requires_deposit !== false)) ||
+      (source === 'phone' && (depositConfig.phone_requires_deposit ?? false));
 
-      if (slot.deposit_required && channelRequires) {
-        requiresDeposit = true;
-        const amountPerPerson = depositConfig.amount_per_person_gbp ?? 5;
-        depositAmountPence = Math.round(amountPerPerson * party_size * 100);
-      }
-    } else {
-      const depositEnabled = depositConfig.enabled ?? false;
-      const amountPerPersonGbp = depositConfig.amount_per_person_gbp ?? 5;
-      const onlineRequiresDeposit = depositConfig.online_requires_deposit !== false;
-      const phoneRequiresDeposit = depositConfig.phone_requires_deposit ?? false;
-      const minPartySizeForDeposit = depositConfig.min_party_size_for_deposit;
-      const weekendOnly = depositConfig.weekend_only ?? false;
-
-      const isOnlineSource = source === 'online' || source === 'widget' || source === 'booking_page';
-      const channelRequires =
-        (isOnlineSource && onlineRequiresDeposit) ||
-        (source === 'phone' && phoneRequiresDeposit);
-
-      const partySizeMet = !minPartySizeForDeposit || party_size >= minPartySizeForDeposit;
-      const dayOfWeek = new Date(booking_date + 'T12:00:00').getDay();
-      const isWeekend = dayOfWeek === 0 || dayOfWeek === 5 || dayOfWeek === 6;
-      const weekendMet = !weekendOnly || isWeekend;
-
-      requiresDeposit = depositEnabled && channelRequires && partySizeMet && weekendMet;
-      depositAmountPence = requiresDeposit ? Math.round(amountPerPersonGbp * party_size * 100) : null;
+    if (slot.deposit_required && channelRequires) {
+      requiresDeposit = true;
+      const amountPerPerson = depositConfig.amount_per_person_gbp ?? 5;
+      depositAmountPence = Math.round(amountPerPerson * party_size * 100);
     }
 
     if (requiresDeposit && !venue.stripe_connected_account_id) {
@@ -191,40 +180,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (!useServiceEngine) {
-      const { data: existingBookings } = await supabase
-        .from('bookings')
-        .select('id, booking_date, booking_time, party_size, status')
-        .eq('venue_id', venue_id)
-        .eq('booking_date', booking_date);
-
-      const venueForAvail: VenueForAvailability = {
-        id: venue.id,
-        opening_hours: venue.opening_hours,
-        availability_config: venue.availability_config,
-        timezone: venue.timezone ?? 'Europe/London',
-      };
-      const bookingsForAvail: BookingForAvailability[] = (existingBookings ?? []).map((b: { id: string; booking_date: string; booking_time: string; party_size: number; status: string }) => ({
-        id: b.id,
-        booking_date: b.booking_date,
-        booking_time: typeof b.booking_time === 'string' ? b.booking_time.slice(0, 5) : '',
-        party_size: b.party_size,
-        status: b.status,
-      }));
-      const slots = getAvailableSlots(venueForAvail, booking_date, bookingsForAvail);
-      const slot = slots.find((s) => s.start_time === timeStr || s.key === timeStr);
-      if (!slot || slot.available_covers < party_size) {
-        return NextResponse.json(
-          { error: 'This time slot is no longer available' },
-          { status: 409 }
-        );
-      }
-    }
-
     const { guest } = await findOrCreateGuest(supabase, venue_id, {
       name,
       email: email || null,
-      phone,
+      phone: phoneE164,
     });
 
     const cancellation_deadline = cancellationDeadline(booking_date, booking_time);
@@ -265,7 +224,7 @@ export async function POST(request: NextRequest) {
     }
 
     let assignedTableLabel: string | null = null;
-    if (venueMode.tableManagementEnabled && useServiceEngine && estimatedEndTime) {
+    if (venueMode.tableManagementEnabled && estimatedEndTime) {
       const durationMs = new Date(estimatedEndTime).getTime() - new Date(`${booking_date}T${timeForDb}`).getTime();
       const durationMins = Math.round(durationMs / 60000);
       const defaultRule = await supabase

@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import type { AvailableSlot, ServiceGroup } from './types';
+import { PhoneWithCountryField } from '@/components/phone/PhoneWithCountryField';
+import { normalizeToE164 } from '@/lib/phone/e164';
 
 interface SlotStepProps {
   date: string;
@@ -192,7 +194,8 @@ function WaitlistForm({ venueId, date, partySize }: { venueId: string; date: str
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!name.trim() || !phone.trim()) return;
+    const guestPhone = normalizeToE164(phone, 'GB');
+    if (!name.trim() || !guestPhone) return;
     setStatus('submitting');
     try {
       const res = await fetch('/api/booking/waitlist', {
@@ -204,7 +207,7 @@ function WaitlistForm({ venueId, date, partySize }: { venueId: string; date: str
           desired_time: desiredTime || undefined,
           party_size: partySize,
           guest_name: name,
-          guest_phone: phone,
+          guest_phone: guestPhone,
           guest_email: email || undefined,
         }),
       });
@@ -249,11 +252,15 @@ function WaitlistForm({ venueId, date, partySize }: { venueId: string; date: str
         <p className="text-xs text-red-600">{message}</p>
       )}
       <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="Your name" required className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm placeholder:text-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
-      <input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Phone number" required className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm placeholder:text-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
+      <PhoneWithCountryField
+        value={phone}
+        onChange={setPhone}
+        inputClassName="w-full min-w-0 rounded-lg border border-slate-200 px-3 py-2 text-sm placeholder:text-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+      />
       <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email (optional)" className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm placeholder:text-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
       <input type="time" value={desiredTime} onChange={(e) => setDesiredTime(e.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
       <div className="flex gap-2">
-        <button type="submit" disabled={status === 'submitting' || !name.trim() || !phone.trim()} className="flex-1 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50">
+        <button type="submit" disabled={status === 'submitting' || !name.trim() || !normalizeToE164(phone, 'GB')} className="flex-1 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50">
           {status === 'submitting' ? 'Adding...' : 'Join Standby'}
         </button>
         <button type="button" onClick={() => setOpen(false)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-500 hover:bg-slate-50">Cancel</button>

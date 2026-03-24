@@ -5,12 +5,10 @@ import {
   computeAvailability,
   computeEffectiveMinSlotCoverCap,
   fetchEngineInput,
-  getAvailableSlots,
   resolveServiceForDate,
   timeToMinutes,
   getDayOfWeek,
 } from '@/lib/availability';
-import type { BookingForAvailability, VenueForAvailability, AvailabilityConfig, FixedIntervalsConfig, NamedSittingsConfig } from '@/types/availability';
 import { nowInVenueTz, dietarySummary } from '@/lib/day-sheet';
 import { resolveVenueMode } from '@/lib/venue-mode';
 
@@ -69,33 +67,6 @@ function timeStr(t: string): string {
   return typeof t === 'string' ? t.slice(0, 5) : '12:00';
 }
 
-function isFixed(c: AvailabilityConfig): c is FixedIntervalsConfig {
-  return c.model === 'fixed_intervals';
-}
-
-function isNamed(c: AvailabilityConfig): c is NamedSittingsConfig {
-  return c.model === 'named_sittings';
-}
-
-interface OpeningHours {
-  [day: string]: {
-    closed?: boolean;
-    open?: string;
-    close?: string;
-    periods?: Array<{ open: string; close: string }>;
-  };
-}
-
-function getOpeningPeriods(openingHours: OpeningHours | null, day: number): Array<{ open: string; close: string }> {
-  if (!openingHours) return [];
-  const dh = openingHours[String(day)];
-  if (!dh) return [];
-  if (dh.closed) return [];
-  if (Array.isArray(dh.periods)) return dh.periods;
-  if (dh.open && dh.close) return [{ open: dh.open, close: dh.close }];
-  return [];
-}
-
 const ACTIVE_STATUSES = ['Pending', 'Confirmed', 'Seated'];
 
 /**
@@ -113,7 +84,7 @@ export async function GET(request: NextRequest) {
 
     const { data: venue, error: venueErr } = await staff.db
       .from('venues')
-      .select('id, name, opening_hours, availability_config, timezone, table_management_enabled, no_show_grace_minutes')
+      .select('id, name, timezone, table_management_enabled, no_show_grace_minutes')
       .eq('id', staff.venue_id)
       .single();
 
@@ -281,119 +252,27 @@ export async function GET(request: NextRequest) {
         });
       }
     } else {
-      const config = venue.availability_config as AvailabilityConfig | null;
+      const mapped = allBookings
+        .map((b) => {
+          assignedBookingIds.add(b.id);
+          return b;
+        })
+        .map(toSheetBooking)
+        .sort((a, b) => a.booking_time.localeCompare(b.booking_time));
 
-      if (config && isNamed(config)) {
-        for (const sitting of config.sittings) {
-          const startMin = timeToMinutes(sitting.start_time);
-          const endMin = timeToMinutes(sitting.end_time);
-          capacityConfigured = true;
+      const bookedCovers = mapped
+        .filter((b) => ACTIVE_STATUSES.includes(b.status))
+        .reduce((sum, b) => sum + b.party_size, 0);
 
-          const periodBookings = allBookings
-            .filter((b) => {
-              if (assignedBookingIds.has(b.id)) return false;
-              const bMin = timeToMinutes(b.booking_time);
-              return bMin >= startMin && bMin < endMin;
-            })
-            .map((b) => { assignedBookingIds.add(b.id); return b; })
-            .map(toSheetBooking)
-            .sort((a, b) => a.booking_time.localeCompare(b.booking_time));
-
-          const bookedCovers = periodBookings
-            .filter((b) => ACTIVE_STATUSES.includes(b.status))
-            .reduce((sum, b) => sum + b.party_size, 0);
-
-          periods.push({
-            key: sitting.id,
-            label: sitting.name,
-            start_time: sitting.start_time,
-            end_time: sitting.end_time,
-            max_covers: sitting.max_covers,
-            booked_covers: bookedCovers,
-            bookings: periodBookings,
-          });
-        }
-      } else if (config && isFixed(config)) {
-        const dayNum = getDayOfWeek(dateStr);
-        const openingPeriods = getOpeningPeriods(venue.opening_hours as OpeningHours | null, dayNum);
-        const maxCovers = config.max_covers_by_day?.[String(dayNum)] ?? null;
-        if (maxCovers != null) capacityConfigured = true;
-
-        if (openingPeriods.length === 0) {
-          const mapped = allBookings
-            .filter((b) => !assignedBookingIds.has(b.id))
-            .map((b) => { assignedBookingIds.add(b.id); return b; })
-            .map(toSheetBooking)
-            .sort((a, b) => a.booking_time.localeCompare(b.booking_time));
-
-          const bookedCovers = mapped
-            .filter((b) => ACTIVE_STATUSES.includes(b.status))
-            .reduce((sum, b) => sum + b.party_size, 0);
-
-          periods.push({
-            key: 'all',
-            label: 'All Bookings',
-            start_time: '00:00',
-            end_time: '23:59',
-            max_covers: maxCovers,
-            booked_covers: bookedCovers,
-            bookings: mapped,
-          });
-        } else {
-          const periodLabels = openingPeriods.length === 1
-            ? ['Service']
-            : openingPeriods.map((_, i) => i === 0 ? 'Lunch' : i === 1 ? 'Dinner' : `Period ${i + 1}`);
-
-          for (let i = 0; i < openingPeriods.length; i++) {
-            const period = openingPeriods[i]!;
-            const startMin = timeToMinutes(period.open);
-            const endMin = timeToMinutes(period.close);
-
-            const periodBookings = allBookings
-              .filter((b) => {
-                if (assignedBookingIds.has(b.id)) return false;
-                const bMin = timeToMinutes(b.booking_time);
-                return bMin >= startMin && bMin < endMin;
-              })
-              .map((b) => { assignedBookingIds.add(b.id); return b; })
-              .map(toSheetBooking)
-              .sort((a, b) => a.booking_time.localeCompare(b.booking_time));
-
-            const bookedCovers = periodBookings
-              .filter((b) => ACTIVE_STATUSES.includes(b.status))
-              .reduce((sum, b) => sum + b.party_size, 0);
-
-            periods.push({
-              key: `period-${i}`,
-              label: periodLabels[i]!,
-              start_time: period.open,
-              end_time: period.close,
-              max_covers: maxCovers,
-              booked_covers: bookedCovers,
-              bookings: periodBookings,
-            });
-          }
-        }
-      } else {
-        // No availability config — flat list
-        const mapped = allBookings
-          .map(toSheetBooking)
-          .sort((a, b) => a.booking_time.localeCompare(b.booking_time));
-
-        const bookedCovers = mapped
-          .filter((b) => ACTIVE_STATUSES.includes(b.status))
-          .reduce((sum, b) => sum + b.party_size, 0);
-
-        periods.push({
-          key: 'all',
-          label: 'All Bookings',
-          start_time: '00:00',
-          end_time: '23:59',
-          max_covers: null,
-          booked_covers: bookedCovers,
-          bookings: mapped,
-        });
-      }
+      periods.push({
+        key: 'all',
+        label: 'All Bookings',
+        start_time: '00:00',
+        end_time: '23:59',
+        max_covers: null,
+        booked_covers: bookedCovers,
+        bookings: mapped,
+      });
     }
 
     // Assign bookings not falling in any period to an "Other" group
@@ -444,17 +323,9 @@ export async function GET(request: NextRequest) {
     // seated at the same time). Use MAX across periods, not SUM, because all periods
     // share the same physical space.
     let venueMaxCapacity: number | null = null;
-    if (capacityConfigured) {
-      const config = venue.availability_config as AvailabilityConfig | null;
-      if (config && isFixed(config)) {
-        const dayNum = getDayOfWeek(dateStr);
-        venueMaxCapacity = config.max_covers_by_day?.[String(dayNum)] ?? null;
-      } else if (config && isNamed(config)) {
-        venueMaxCapacity = Math.max(...config.sittings.map((sit) => sit.max_covers));
-      } else if (venueMode.availabilityEngine === 'service') {
-        const caps = periods.map((p) => p.max_covers ?? 0).filter((c) => c > 0);
-        venueMaxCapacity = caps.length > 0 ? Math.max(...caps) : null;
-      }
+    if (capacityConfigured && venueMode.availabilityEngine === 'service') {
+      const caps = periods.map((p) => p.max_covers ?? 0).filter((c) => c > 0);
+      venueMaxCapacity = caps.length > 0 ? Math.max(...caps) : null;
     }
 
     const coversRemaining = venueMaxCapacity != null ? Math.max(0, venueMaxCapacity - totalCovers) : null;
@@ -463,12 +334,7 @@ export async function GET(request: NextRequest) {
     const isToday = dateStr === now.dateStr;
     const nowMinutes = now.minutesSinceMidnight;
 
-    // Default dining duration from availability config
     let defaultDurationMin = 90;
-    const avConfig = venue.availability_config as AvailabilityConfig | null;
-    if (avConfig && isFixed(avConfig) && avConfig.sitting_duration_minutes) {
-      defaultDurationMin = avConfig.sitting_duration_minutes;
-    }
     if (serviceDurationMin != null) {
       defaultDurationMin = serviceDurationMin;
     }

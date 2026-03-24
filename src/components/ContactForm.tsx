@@ -1,6 +1,8 @@
 'use client';
 
 import { useState } from 'react';
+import { PhoneWithCountryField } from '@/components/phone/PhoneWithCountryField';
+import { normalizeToE164 } from '@/lib/phone/e164';
 
 type Status = 'idle' | 'submitting' | 'success' | 'error';
 
@@ -31,13 +33,21 @@ export default function ContactForm() {
     setErrorMessage('');
 
     try {
+      const phoneTrim = formData.phone.trim();
+      const phoneE164 = phoneTrim ? normalizeToE164(formData.phone, 'GB') : null;
+      if (phoneTrim && !phoneE164) {
+        setStatus('error');
+        setErrorMessage('Please enter a valid phone number.');
+        return;
+      }
+
       const res = await fetch('/api/contact', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name: formData.name.trim(),
           email: formData.email.trim(),
-          phone: formData.phone.trim() || undefined,
+          phone: phoneE164 ?? undefined,
           restaurantName: formData.restaurantName.trim() || undefined,
           message: formData.message.trim() || undefined,
           company_website: formData.company_website,
@@ -127,15 +137,12 @@ export default function ContactForm() {
         <label htmlFor="contact-phone" className={labelClass}>
           Phone
         </label>
-        <input
+        <PhoneWithCountryField
           id="contact-phone"
-          type="tel"
-          name="phone"
           value={formData.phone}
-          onChange={handleChange}
-          placeholder=""
-          className={inputClass}
+          onChange={(e164) => setFormData((prev) => ({ ...prev, phone: e164 }))}
           disabled={status === 'submitting'}
+          inputClassName={inputClass}
         />
       </div>
 

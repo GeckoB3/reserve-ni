@@ -2,12 +2,52 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
-
-function formatDate(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
+import { nowInVenueTz } from '@/lib/day-sheet';
+import { getDayOfWeek, fetchEngineInput } from '@/lib/availability';
+import {
+  peakOverlappingCovers,
+  resolveOpeningWindowMinutes,
+  coversOverlappingNow,
+  coversArrivingWithin,
+  resolveVenueConcurrentCapLegacy,
+  type DashboardLoadBooking,
+} from '@/lib/dashboard/load-metrics';
+import {
+  resolveServiceEngineConcurrentCapFromInput,
+  defaultDurationForDashboardDay,
+} from '@/lib/dashboard/resolve-venue-concurrent-cap';
+import { resolveVenueMode } from '@/lib/venue-mode';
+import type { AvailabilityConfig, EngineInput, OpeningHours } from '@/types/availability';
 
 const WEEKDAYS_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+function addDaysToDateStr(dateStr: string, delta: number): string {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const t = new Date(Date.UTC(y, m - 1, d + delta));
+  return t.toISOString().slice(0, 10);
+}
+
+function weekdayShortForDateStr(dateStr: string): string {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const wd = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+  return WEEKDAYS_SHORT[wd]!;
+}
+
+function toLoadBookings(
+  rows: Array<{
+    booking_time: string;
+    party_size: number;
+    status: string;
+    estimated_end_time?: string | null;
+  }>,
+): DashboardLoadBooking[] {
+  return rows.map((b) => ({
+    booking_time: typeof b.booking_time === 'string' ? b.booking_time : '',
+    party_size: b.party_size,
+    status: b.status,
+    estimated_end_time: b.estimated_end_time ?? null,
+  }));
+}
 
 /** GET /api/venue/dashboard-home — summary data for the dashboard home page */
 export async function GET() {
@@ -17,32 +57,58 @@ export async function GET() {
     if (!staff) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
 
     const admin = getSupabaseAdminClient();
-    const today = new Date();
-    const todayStr = formatDate(today);
 
-    const weekEnd = new Date(today);
-    weekEnd.setDate(weekEnd.getDate() + 6);
-    const weekEndStr = formatDate(weekEnd);
+    const { data: venueRow, error: venueErr } = await admin
+      .from('venues')
+      .select('availability_config, opening_hours, timezone')
+      .eq('id', staff.venue_id)
+      .single();
 
-    const [todayBookingsRes, weekBookingsRes, venueRes] = await Promise.all([
+    if (venueErr || !venueRow) {
+      console.error('GET /api/venue/dashboard-home venue failed:', venueErr);
+      return NextResponse.json({ error: 'Venue not found' }, { status: 500 });
+    }
+
+    const tz = (venueRow.timezone as string) ?? 'Europe/London';
+    const { dateStr: todayStrVenue, minutesSinceMidnight: nowMinutes } = nowInVenueTz(tz);
+    const weekEndStr = addDaysToDateStr(todayStrVenue, 6);
+
+    const availabilityConfig = venueRow.availability_config as AvailabilityConfig | null;
+    const openingHours = venueRow.opening_hours;
+    const venueMode = await resolveVenueMode(admin, staff.venue_id);
+    const engine: 'legacy' | 'service' = venueMode.availabilityEngine === 'service' ? 'service' : 'legacy';
+
+    const dateStrs = Array.from({ length: 7 }, (_, i) => addDaysToDateStr(todayStrVenue, i));
+
+    let engineInputsByDate: Map<string, EngineInput> | null = null;
+    if (engine === 'service') {
+      const inputs = await Promise.all(
+        dateStrs.map((d) =>
+          fetchEngineInput({
+            supabase: admin,
+            venueId: staff.venue_id,
+            date: d,
+            partySize: 1,
+          }),
+        ),
+      );
+      engineInputsByDate = new Map(dateStrs.map((d, i) => [d, inputs[i]!]));
+    }
+
+    const [todayBookingsRes, weekBookingsRes] = await Promise.all([
       admin
         .from('bookings')
-        .select('id, booking_time, party_size, status, deposit_amount_pence')
+        .select('id, booking_time, party_size, status, deposit_amount_pence, guest_id, estimated_end_time, deposit_status')
         .eq('venue_id', staff.venue_id)
-        .eq('booking_date', todayStr)
+        .eq('booking_date', todayStrVenue)
         .in('status', ['Confirmed', 'Pending', 'Seated']),
       admin
         .from('bookings')
-        .select('id, booking_date, party_size, status, deposit_amount_pence')
+        .select('id, booking_date, booking_time, party_size, status, deposit_amount_pence, guest_id, estimated_end_time, deposit_status')
         .eq('venue_id', staff.venue_id)
-        .gte('booking_date', todayStr)
+        .gte('booking_date', todayStrVenue)
         .lte('booking_date', weekEndStr)
         .in('status', ['Confirmed', 'Pending', 'Seated']),
-      admin
-        .from('venues')
-        .select('availability_config')
-        .eq('id', staff.venue_id)
-        .single(),
     ]);
 
     const todayBookings = todayBookingsRes.data ?? [];
@@ -51,48 +117,94 @@ export async function GET() {
     const todayCovers = todayBookings.reduce((sum, b) => sum + b.party_size, 0);
     const todayBookingCount = todayBookings.length;
     const todayRevenue = todayBookings.reduce((sum, b) => sum + (b.deposit_amount_pence ?? 0), 0) / 100;
+    const confirmedCount = todayBookings.filter((b) => b.status === 'Confirmed').length;
+    const pendingCount = todayBookings.filter((b) => b.status === 'Pending').length;
+    const seatedCount = todayBookings.filter((b) => b.status === 'Seated').length;
 
-    const now = new Date();
-    const nowMin = now.getHours() * 60 + now.getMinutes();
     let nextBooking: { time: string; party_size: number } | null = null;
-    for (const b of todayBookings.sort((a, b) => a.booking_time.localeCompare(b.booking_time))) {
-      const [h, m] = b.booking_time.split(':').map(Number);
-      if (h! * 60 + m! > nowMin) {
-        nextBooking = { time: b.booking_time.slice(0, 5), party_size: b.party_size };
+    for (const b of [...todayBookings].sort((a, b) => String(a.booking_time).localeCompare(String(b.booking_time)))) {
+      const t = String(b.booking_time);
+      const [h, m] = t.split(':').map(Number);
+      if ((h ?? 0) * 60 + (m ?? 0) > nowMinutes) {
+        nextBooking = { time: t.slice(0, 5), party_size: b.party_size };
         break;
       }
     }
 
     const forecast: Array<{ date: string; day: string; covers: number; bookings: number }> = [];
-    for (let i = 0; i < 7; i++) {
-      const d = new Date(today);
-      d.setDate(d.getDate() + i);
-      const dateStr = formatDate(d);
+    for (const dateStr of dateStrs) {
       const dayBookings = weekBookings.filter((b) => b.booking_date === dateStr);
       forecast.push({
         date: dateStr,
-        day: WEEKDAYS_SHORT[d.getDay()]!,
+        day: weekdayShortForDateStr(dateStr),
         covers: dayBookings.reduce((sum, b) => sum + b.party_size, 0),
         bookings: dayBookings.length,
       });
     }
 
-    const config = venueRes.data?.availability_config as { max_covers_by_day?: Record<string, number> } | null;
-    const defaultMaxCovers = config?.max_covers_by_day
-      ? Math.max(...Object.values(config.max_covers_by_day))
-      : 40;
+    const caps: Array<number | null> = dateStrs.map((dateStr) => {
+      if (engine === 'service' && engineInputsByDate) {
+        const input = engineInputsByDate.get(dateStr);
+        if (!input) return null;
+        return resolveServiceEngineConcurrentCapFromInput(input, staff.venue_id, dateStr);
+      }
+      return resolveVenueConcurrentCapLegacy(availabilityConfig, dateStr);
+    });
 
-    const heatmap: Array<{ date: string; day: string; fillPercent: number; covers: number }> = forecast.map((f) => ({
-      date: f.date,
-      day: f.day,
-      fillPercent: defaultMaxCovers > 0 ? Math.min(100, Math.round((f.covers / defaultMaxCovers) * 100)) : 0,
-      covers: f.covers,
-    }));
+    const heatmap: Array<{
+      date: string;
+      day: string;
+      daily_total_covers: number;
+      peak_in_house_covers: number;
+      concurrent_cap: number | null;
+      fill_percent: number | null;
+    }> = [];
+
+    for (let i = 0; i < 7; i++) {
+      const dateStr = dateStrs[i]!;
+      const dayBookings = weekBookings.filter((b) => b.booking_date === dateStr);
+      const engineInput = engine === 'service' ? engineInputsByDate?.get(dateStr) ?? null : null;
+      const defaultDur = defaultDurationForDashboardDay(engine, engineInput, availabilityConfig);
+
+      const dayOfWeek = getDayOfWeek(dateStr);
+      const window = resolveOpeningWindowMinutes(openingHours as OpeningHours | null, dayOfWeek);
+      const earliestMin = window?.startMin ?? 11 * 60;
+      const latestMin = window?.endMin ?? 23 * 60;
+
+      const peak = peakOverlappingCovers(toLoadBookings(dayBookings), {
+        earliestMin,
+        latestMin,
+        stepMinutes: 30,
+        defaultDurationMinutes: defaultDur,
+      });
+
+      const cap = caps[i] ?? null;
+      const fillPercent = cap != null && cap > 0 ? Math.min(100, Math.round((peak / cap) * 100)) : null;
+
+      heatmap.push({
+        date: dateStr,
+        day: forecast[i]!.day,
+        daily_total_covers: forecast[i]!.covers ?? 0,
+        peak_in_house_covers: peak ?? 0,
+        concurrent_cap: cap ?? null,
+        fill_percent: fillPercent ?? null,
+      });
+    }
+
+    const todayHeat = heatmap[0]!;
+    const todayEngineInput = engine === 'service' ? engineInputsByDate?.get(todayStrVenue) ?? null : null;
+    const todayDefaultDur = defaultDurationForDashboardDay(engine, todayEngineInput, availabilityConfig);
+    const todayLoadBookings = toLoadBookings(todayBookings);
+
+    const coversInHouseNow = coversOverlappingNow(todayLoadBookings, nowMinutes, todayDefaultDur);
+    const arrivingWithin30 = coversArrivingWithin(todayLoadBookings, nowMinutes, 30, todayDefaultDur);
 
     const alerts: Array<{ type: string; message: string }> = [];
-    const todayFill = heatmap[0];
-    if (todayFill && todayFill.fillPercent >= 80) {
-      alerts.push({ type: 'warning', message: `Today is ${todayFill.fillPercent}% booked — consider reducing walk-ins.` });
+    if (todayHeat.fill_percent != null && todayHeat.fill_percent >= 80) {
+      alerts.push({
+        type: 'warning',
+        message: `Today is ${todayHeat.fill_percent}% full at the busiest time (${todayHeat.peak_in_house_covers ?? 0}${todayHeat.concurrent_cap != null ? ` of ${todayHeat.concurrent_cap}` : ''} covers) — walk-in availability may be limited.`,
+      });
     }
     if (todayBookings.some((b) => b.status === 'Pending')) {
       const pendingCount = todayBookings.filter((b) => b.status === 'Pending').length;
@@ -103,21 +215,44 @@ export async function GET() {
       alerts.push({ type: 'info', message: `No bookings yet for tomorrow (${tomorrow.day}).` });
     }
 
+    const guestIds = [...new Set(todayBookings.slice(0, 10).map((b) => b.guest_id).filter(Boolean))] as string[];
+    const guestNameById = new Map<string, string>();
+    if (guestIds.length > 0) {
+      const { data: guests } = await admin.from('guests').select('id, name').in('id', guestIds);
+      for (const g of guests ?? []) {
+        guestNameById.set((g as { id: string; name: string | null }).id, (g as { name: string | null }).name?.trim() || 'Guest');
+      }
+    }
+
+    const sortedTodayBookings = [...todayBookings].sort((a, b) =>
+      String(a.booking_time).localeCompare(String(b.booking_time)),
+    );
+
     return NextResponse.json({
       today: {
-        covers: todayCovers,
-        bookings: todayBookingCount,
-        revenue: todayRevenue,
+        covers: todayCovers ?? 0,
+        bookings: todayBookingCount ?? 0,
+        confirmed: confirmedCount ?? 0,
+        pending: pendingCount ?? 0,
+        seated: seatedCount ?? 0,
+        revenue: todayRevenue ?? 0,
         next_booking: nextBooking,
+        peak_in_house_covers: todayHeat.peak_in_house_covers ?? 0,
+        concurrent_cap: todayHeat.concurrent_cap ?? null,
+        peak_fill_percent: todayHeat.fill_percent ?? null,
+        covers_in_house_now: coversInHouseNow ?? 0,
+        arriving_within_30_min: arrivingWithin30 ?? 0,
       },
       forecast,
       heatmap,
       alerts,
-      recent_bookings: todayBookings.slice(0, 10).map((b) => ({
+      recent_bookings: sortedTodayBookings.slice(0, 10).map((b) => ({
         id: b.id,
         time: typeof b.booking_time === 'string' ? b.booking_time.slice(0, 5) : '',
         party_size: b.party_size,
         status: b.status,
+        guest_name: b.guest_id ? (guestNameById.get(b.guest_id) ?? 'Guest') : 'Guest',
+        deposit_status: (b.deposit_status as string | undefined) ?? 'N/A',
       })),
     });
   } catch (err) {

@@ -2,11 +2,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff } from '@/lib/venue-auth';
 import { z } from 'zod';
+import { normalizeToE164 } from '@/lib/phone/e164';
 
 const patchSchema = z
   .object({
     name: z.string().max(200).optional(),
-    phone: z.union([z.string().max(50), z.literal('')]).optional(),
+    phone: z.union([z.string().max(24), z.literal('')]).optional(),
     email: z.string().email('Valid email required').optional(),
   })
   .refine((d) => d.name !== undefined || d.phone !== undefined || d.email !== undefined, {
@@ -82,7 +83,16 @@ export async function PATCH(request: NextRequest) {
       updates.name = parsed.data.name.trim() || null;
     }
     if (parsed.data.phone !== undefined) {
-      updates.phone = parsed.data.phone.trim() || null;
+      const t = parsed.data.phone.trim();
+      if (!t) {
+        updates.phone = null;
+      } else {
+        const e164 = normalizeToE164(t, 'GB');
+        if (!e164) {
+          return NextResponse.json({ error: 'Invalid phone number' }, { status: 400 });
+        }
+        updates.phone = e164;
+      }
     }
 
     if (parsed.data.email !== undefined) {

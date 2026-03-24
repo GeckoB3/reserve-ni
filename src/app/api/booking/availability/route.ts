@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
-import { getAvailableSlots, computeAvailability, fetchEngineInput } from '@/lib/availability';
-import type { VenueForAvailability, BookingForAvailability } from '@/types/availability';
+import { computeAvailability, fetchEngineInput } from '@/lib/availability';
+import { AVAILABILITY_SETUP_REQUIRED_MESSAGE } from '@/lib/availability/availability-errors';
 import { resolveVenueMode } from '@/lib/venue-mode';
 import type { VenueTable } from '@/types/table-management';
 import { BOOKING_ACTIVE_STATUSES } from '@/lib/table-management/constants';
@@ -161,94 +161,21 @@ export async function GET(request: NextRequest) {
     const venueMode = await resolveVenueMode(supabase, venueId);
     const useServiceEngine = venueMode.availabilityEngine === 'service';
 
-    if (useServiceEngine) {
-      const engineInput = await fetchEngineInput({
-        supabase,
-        venueId,
-        date: dateStr,
-        partySize: partySize ?? 2,
-      });
-
-      const results = computeAvailability(engineInput);
-
-      let activeResults = results.filter((r) => r.slots.length > 0 || r.large_party_redirect);
-      let allSlots = activeResults.flatMap((r) => r.slots);
-
-      if (venueMode.tableManagementEnabled) {
-        const tablePartySize = partySize ?? 2;
-        const timesWithTable = await buildTableFilterByTime(
-          supabase,
-          venueId,
-          dateStr,
-          allSlots.map((slot) => ({
-            start_time: slot.start_time,
-            end_time: slot.end_time,
-          })),
-          tablePartySize,
-        );
-
-        activeResults = activeResults.map((serviceResult) => ({
-          ...serviceResult,
-          slots: serviceResult.slots.filter((slot) => timesWithTable.has(slot.start_time)),
-        })).filter((serviceResult) => serviceResult.slots.length > 0 || serviceResult.large_party_redirect);
-        allSlots = activeResults.flatMap((r) => r.slots);
-      }
-
-      allSlots.sort((a, b) => a.start_time.localeCompare(b.start_time));
-
-      const largePartyRedirect = activeResults.find((r) => r.large_party_redirect);
-
-      return NextResponse.json({
-        date: dateStr,
-        venue_id: venueId,
-        slots: allSlots,
-        services: activeResults.map((r) => ({
-          id: r.service.id,
-          name: r.service.name,
-          slots: r.slots,
-          large_party_redirect: r.large_party_redirect,
-          large_party_message: r.large_party_message,
-        })),
-        large_party_redirect: largePartyRedirect?.large_party_redirect ?? false,
-        large_party_message: largePartyRedirect?.large_party_message ?? null,
-      });
+    if (!useServiceEngine) {
+      return NextResponse.json({ error: AVAILABILITY_SETUP_REQUIRED_MESSAGE }, { status: 503 });
     }
 
-    // Legacy JSONB-based engine
-    const [venueRes, bookingsRes] = await Promise.all([
-      supabase.from('venues').select('id, opening_hours, availability_config, timezone').eq('id', venueId).single(),
-      supabase
-        .from('bookings')
-        .select('id, booking_date, booking_time, party_size, status')
-        .eq('venue_id', venueId)
-        .eq('booking_date', dateStr),
-    ]);
+    const engineInput = await fetchEngineInput({
+      supabase,
+      venueId,
+      date: dateStr,
+      partySize: partySize ?? 2,
+    });
 
-    if (venueRes.error || !venueRes.data) {
-      return NextResponse.json({ error: 'Venue not found' }, { status: 404 });
-    }
+    const results = computeAvailability(engineInput);
 
-    const venue: VenueForAvailability = {
-      id: venueRes.data.id,
-      opening_hours: venueRes.data.opening_hours,
-      availability_config: venueRes.data.availability_config,
-      timezone: venueRes.data.timezone ?? 'Europe/London',
-    };
-
-    const bookings: BookingForAvailability[] = (bookingsRes.data ?? []).map((r) => ({
-      id: r.id,
-      booking_date: r.booking_date,
-      booking_time: typeof r.booking_time === 'string' ? r.booking_time.slice(0, 5) : '00:00',
-      party_size: r.party_size,
-      status: r.status,
-    }));
-
-    const slots = getAvailableSlots(venue, dateStr, bookings);
-
-    let result = slots;
-    if (partySize != null && partySize > 0) {
-      result = slots.filter((s) => s.available_covers >= partySize);
-    }
+    let activeResults = results.filter((r) => r.slots.length > 0 || r.large_party_redirect);
+    let allSlots = activeResults.flatMap((r) => r.slots);
 
     if (venueMode.tableManagementEnabled) {
       const tablePartySize = partySize ?? 2;
@@ -256,24 +183,37 @@ export async function GET(request: NextRequest) {
         supabase,
         venueId,
         dateStr,
-        result.map((slot) => ({
+        allSlots.map((slot) => ({
           start_time: slot.start_time,
-          key: slot.key,
           end_time: slot.end_time,
         })),
         tablePartySize,
       );
 
-      result = result.filter((slot) => {
-        const slotTime = slot.start_time ?? slot.key;
-        return slotTime ? timesWithTable.has(slotTime) : false;
-      });
+      activeResults = activeResults.map((serviceResult) => ({
+        ...serviceResult,
+        slots: serviceResult.slots.filter((slot) => timesWithTable.has(slot.start_time)),
+      })).filter((serviceResult) => serviceResult.slots.length > 0 || serviceResult.large_party_redirect);
+      allSlots = activeResults.flatMap((r) => r.slots);
     }
+
+    allSlots.sort((a, b) => a.start_time.localeCompare(b.start_time));
+
+    const largePartyRedirect = activeResults.find((r) => r.large_party_redirect);
 
     return NextResponse.json({
       date: dateStr,
       venue_id: venueId,
-      slots: result,
+      slots: allSlots,
+      services: activeResults.map((r) => ({
+        id: r.service.id,
+        name: r.service.name,
+        slots: r.slots,
+        large_party_redirect: r.large_party_redirect,
+        large_party_message: r.large_party_message,
+      })),
+      large_party_redirect: largePartyRedirect?.large_party_redirect ?? false,
+      large_party_message: largePartyRedirect?.large_party_message ?? null,
     });
   } catch (error) {
     console.error('Availability fetch failed:', error);

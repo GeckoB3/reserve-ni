@@ -5,17 +5,17 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { createHash } from 'crypto';
+import { normalizeToE164, normalizeToE164Lenient } from '@/lib/phone/e164';
 
 function normaliseEmail(email: string): string {
   return email.trim().toLowerCase();
 }
 
-/** Simple E.164-ish: digits only, ensure leading + for storage. Not full validation. */
-function normalisePhone(phone: string): string {
-  const digits = phone.replace(/\D/g, '');
-  if (digits.startsWith('44')) return '+' + digits;
-  if (digits.length >= 10) return '+44' + digits.replace(/^0/, '');
-  return '+' + digits;
+/** E.164 for storage and matching; strict first, then lenient for legacy rows. */
+function normaliseGuestPhone(phone: string): string | null {
+  const t = phone.trim();
+  if (!t) return null;
+  return normalizeToE164(t, 'GB') ?? normalizeToE164Lenient(t, 'GB');
 }
 
 function computeGlobalGuestHash(email: string | null, phone: string | null): string | null {
@@ -49,7 +49,7 @@ export async function findOrCreateGuest(
   input: GuestInput
 ): Promise<{ guest: GuestRecord; created: boolean }> {
   const email = input.email ? normaliseEmail(input.email) : null;
-  const phone = input.phone ? normalisePhone(input.phone) : null;
+  const phone = input.phone ? normaliseGuestPhone(input.phone) : null;
   const name = input.name?.trim() || null;
 
   if (email) {
