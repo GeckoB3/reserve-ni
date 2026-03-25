@@ -156,19 +156,19 @@ export interface UndoAction {
  */
 export function getTableDimensions(maxCovers: number, shape: string): { width: number; height: number } {
   if (shape === 'circle') {
-    if (maxCovers <= 2) return { width: 6, height: 6 };
+    if (maxCovers <= 2) return { width: 7, height: 7 };
     if (maxCovers <= 4) return { width: 7.5, height: 7.5 };
     if (maxCovers <= 6) return { width: 9, height: 9 };
     return { width: 10.5, height: 10.5 };
   }
   if (shape === 'square') {
-    if (maxCovers <= 2) return { width: 6.5, height: 6.5 };
-    if (maxCovers <= 4) return { width: 6.5, height: 6.5 };
+    if (maxCovers <= 2) return { width: 7, height: 7 };
+    if (maxCovers <= 4) return { width: 7, height: 7 };
     if (maxCovers <= 6) return { width: 7, height: 7 };
     if (maxCovers <= 8) return { width: 7.5, height: 7.5 };
     return { width: 8.5, height: 8.5 };
   }
-  if (maxCovers <= 2) return { width: 6.5, height: 6.5 };
+  if (maxCovers <= 2) return { width: 8, height: 6.5 };
   if (maxCovers <= 4) return { width: 8, height: 6.5 };
   if (maxCovers <= 6) return { width: 10, height: 7 };
   if (maxCovers <= 8) return { width: 12, height: 7.5 };

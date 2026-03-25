@@ -9,6 +9,10 @@ export default async function ReportsPage() {
   if (!user) redirect('/login?redirectTo=/dashboard/reports');
 
   const staff = await getDashboardStaff(supabase);
+  if (staff.role !== 'admin') {
+    redirect('/dashboard');
+  }
+
   const venueId = staff.venue_id;
 
   if (!venueId) {

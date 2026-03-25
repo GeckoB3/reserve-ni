@@ -5,6 +5,7 @@ import { Stage, Layer, Line, Rect, Text, Circle } from 'react-konva';
 import type { KonvaEventObject } from 'konva/lib/Node';
 import type Konva from 'konva';
 import { computeTableAdjacency, getTableDimensions } from '@/types/table-management';
+import { computeStageFitToView } from '@/lib/floor-plan/fit-view';
 import type { BlockedSides } from '@/types/table-management';
 import TableShape from '@/components/floor-plan/TableShape';
 
@@ -288,6 +289,38 @@ export default function LiveFloorCanvas({
     });
   }, [scale, stagePos]);
 
+  const fitViewToStage = useCallback(() => {
+    const fit = computeStageFitToView(tables, dimensions.width, dimensions.height);
+    setScale(fit.scale);
+    setStagePos({ x: fit.x, y: fit.y });
+  }, [tables, dimensions.width, dimensions.height]);
+
+  const initialFitDone = useRef(false);
+  useEffect(() => {
+    if (!initialFitDone.current && tables.length > 0 && dimensions.width > 1) {
+      fitViewToStage();
+      initialFitDone.current = true;
+    }
+  }, [tables, dimensions.width, dimensions.height, fitViewToStage]);
+
+  const zoomBy = useCallback(
+    (delta: number) => {
+      const newScale = Math.max(0.3, Math.min(3, scale + delta));
+      const cx = dimensions.width / 2;
+      const cy = dimensions.height / 2;
+      const pointTo = {
+        x: (cx - stagePos.x) / scale,
+        y: (cy - stagePos.y) / scale,
+      };
+      setScale(newScale);
+      setStagePos({
+        x: cx - pointTo.x * newScale,
+        y: cy - pointTo.y * newScale,
+      });
+    },
+    [scale, stagePos, dimensions.width, dimensions.height],
+  );
+
   const isDragging = draggingBookingId != null || reassignMode != null;
   const activeBookingId = draggingBookingId ?? reassignMode?.bookingId ?? null;
 
@@ -295,16 +328,20 @@ export default function LiveFloorCanvas({
     <div ref={containerRef} className="h-full w-full" style={{ position: 'relative', touchAction: 'none' }}>
       <div className="absolute right-2 top-2 z-10 flex gap-1">
         <button
-          onClick={() => setScale((s) => Math.min(3, s + 0.2))}
+          type="button"
+          onClick={() => zoomBy(0.2)}
           className="flex h-9 w-9 items-center justify-center rounded border border-slate-300 bg-white text-sm text-slate-600 hover:bg-slate-50"
         >+</button>
         <button
-          onClick={() => setScale((s) => Math.max(0.3, s - 0.2))}
+          type="button"
+          onClick={() => zoomBy(-0.2)}
           className="flex h-9 w-9 items-center justify-center rounded border border-slate-300 bg-white text-sm text-slate-600 hover:bg-slate-50"
         >−</button>
         <button
-          onClick={() => { setScale(1); setStagePos({ x: 0, y: 0 }); }}
-          className="flex h-9 items-center justify-center rounded border border-slate-300 bg-white px-2 text-xs text-slate-600 hover:bg-slate-50"
+          type="button"
+          onClick={fitViewToStage}
+          className="flex h-9 min-w-[2.75rem] items-center justify-center rounded border border-slate-300 bg-white px-2 text-xs text-slate-600 hover:bg-slate-50"
+          title="Fit entire floor plan to this view (same as filling the canvas)"
         >{Math.round(scale * 100)}%</button>
       </div>
 
@@ -480,12 +517,13 @@ export default function LiveFloorCanvas({
                     )}
                     {comboLabel && (
                       <Text
-                        x={-60}
+                        x={-72}
                         y={h / 2 + 10}
-                        width={120}
+                        width={144}
                         align="center"
+                        verticalAlign="middle"
                         text={comboLabel}
-                        fontSize={10}
+                        fontSize={12}
                         fill="#16a34a"
                         fontStyle="bold"
                         listening={false}
@@ -539,15 +577,16 @@ export default function LiveFloorCanvas({
                 listening={false}
               />
               <Text
-                x={dragPointer.x - 30}
-                y={dragPointer.y + 20}
-                width={60}
+                x={dragPointer.x - 48}
+                y={dragPointer.y + 18}
+                width={96}
                 align="center"
+                verticalAlign="middle"
                 text={(() => {
                   const b = tables.find((t) => t.booking?.id === draggingBookingId);
                   return b?.booking?.guest_name ?? '';
                 })()}
-                fontSize={10}
+                fontSize={12}
                 fill="#1e40af"
                 fontStyle="bold"
                 listening={false}

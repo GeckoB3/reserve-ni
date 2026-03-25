@@ -17,14 +17,16 @@ export default async function DashboardLayout({ children }: { children: React.Re
   let staffName: string | undefined;
   let tableManagementEnabled = false;
   let venueId: string | undefined;
+  let isAdmin = false;
   try {
     const admin = getSupabaseAdminClient();
     const { data: staffRows } = await admin
       .from('staff')
-      .select('venue_id, name')
+      .select('venue_id, name, role')
       .ilike('email', email.toLowerCase().trim())
       .limit(1);
     const staffRow = staffRows?.[0];
+    isAdmin = staffRow?.role === 'admin';
     staffName = staffRow?.name ?? undefined;
     venueId = staffRow?.venue_id ?? undefined;
     if (venueId) {
@@ -43,7 +45,14 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   return (
     <div className="flex h-screen overflow-hidden bg-slate-50">
-      <DashboardSidebar email={email} staffName={staffName} venueName={venueName} venueSlug={venueSlug} tableManagementEnabled={tableManagementEnabled} />
+      <DashboardSidebar
+        email={email}
+        staffName={staffName}
+        venueName={venueName}
+        venueSlug={venueSlug}
+        tableManagementEnabled={tableManagementEnabled}
+        isAdmin={isAdmin}
+      />
       <main className="flex-1 overflow-y-auto pt-14 lg:pt-0">
         {venueId && <SessionTimeoutGuard venueId={venueId} />}
         {children}

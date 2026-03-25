@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { createClient } from '@/lib/supabase/browser';
 
 const NAV_ITEMS = [
@@ -21,12 +21,28 @@ interface Props {
   venueName?: string;
   venueSlug?: string;
   tableManagementEnabled?: boolean;
+  /** Reports and Availability nav items are admin-only. */
+  isAdmin?: boolean;
 }
 
-export function DashboardSidebar({ email, staffName, venueName, venueSlug, tableManagementEnabled }: Props) {
+const ADMIN_ONLY_HREFS = new Set(['/dashboard/reports', '/dashboard/availability']);
+
+export function DashboardSidebar({
+  email,
+  staffName,
+  venueName,
+  venueSlug,
+  tableManagementEnabled,
+  isAdmin = false,
+}: Props) {
   const pathname = usePathname();
   const router = useRouter();
   const [mobileOpen, setMobileOpen] = useState(false);
+
+  const navItems = useMemo(
+    () => (isAdmin ? NAV_ITEMS : NAV_ITEMS.filter((item) => !ADMIN_ONLY_HREFS.has(item.href))),
+    [isAdmin],
+  );
 
   async function handleSignOut() {
     const supabase = createClient();
@@ -80,7 +96,7 @@ export function DashboardSidebar({ email, staffName, venueName, venueSlug, table
 
         {/* Nav links */}
         <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-1">
-          {NAV_ITEMS.map((item) => {
+          {navItems.map((item) => {
             if (item.href === '/dashboard/bookings' && !tableManagementEnabled) {
               const daySheetActive = pathname.startsWith('/dashboard/day-sheet');
               return (
@@ -115,6 +131,52 @@ export function DashboardSidebar({ email, staffName, venueName, venueSlug, table
               );
             }
 
+            if (item.href === '/dashboard/bookings' && tableManagementEnabled) {
+              const reservationsActive = isActive(item.href);
+              return (
+                <div key="reservations-with-table-views" className="space-y-1">
+                  <Link
+                    href={item.href}
+                    onClick={() => setMobileOpen(false)}
+                    className={`
+                      flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors
+                      ${reservationsActive
+                        ? 'bg-brand-50 text-brand-700'
+                        : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                      }
+                    `}
+                  >
+                    <item.icon className={`h-5 w-5 flex-shrink-0 ${reservationsActive ? 'text-brand-600' : 'text-slate-400'}`} />
+                    {item.label}
+                  </Link>
+                  <Link
+                    href="/dashboard/table-grid"
+                    onClick={() => setMobileOpen(false)}
+                    className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
+                      pathname.startsWith('/dashboard/table-grid')
+                        ? 'bg-brand-50 text-brand-700'
+                        : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                    }`}
+                  >
+                    <TableGridIcon className={`h-5 w-5 flex-shrink-0 ${pathname.startsWith('/dashboard/table-grid') ? 'text-brand-600' : 'text-slate-400'}`} />
+                    Table Grid
+                  </Link>
+                  <Link
+                    href="/dashboard/floor-plan"
+                    onClick={() => setMobileOpen(false)}
+                    className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
+                      pathname.startsWith('/dashboard/floor-plan')
+                        ? 'bg-brand-50 text-brand-700'
+                        : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                    }`}
+                  >
+                    <MapIcon className={`h-5 w-5 flex-shrink-0 ${pathname.startsWith('/dashboard/floor-plan') ? 'text-brand-600' : 'text-slate-400'}`} />
+                    Floor Plan
+                  </Link>
+                </div>
+              );
+            }
+
             const active = isActive(item.href);
             return (
               <Link
@@ -134,35 +196,6 @@ export function DashboardSidebar({ email, staffName, venueName, venueSlug, table
               </Link>
             );
           })}
-
-          {tableManagementEnabled && (
-            <>
-              <Link
-                href="/dashboard/table-grid"
-                onClick={() => setMobileOpen(false)}
-                className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
-                  pathname.startsWith('/dashboard/table-grid')
-                    ? 'bg-brand-50 text-brand-700'
-                    : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
-                }`}
-              >
-                <TableGridIcon className={`h-5 w-5 flex-shrink-0 ${pathname.startsWith('/dashboard/table-grid') ? 'text-brand-600' : 'text-slate-400'}`} />
-                Table Grid
-              </Link>
-              <Link
-                href="/dashboard/floor-plan"
-                onClick={() => setMobileOpen(false)}
-                className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
-                  pathname.startsWith('/dashboard/floor-plan')
-                    ? 'bg-brand-50 text-brand-700'
-                    : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
-                }`}
-              >
-                <MapIcon className={`h-5 w-5 flex-shrink-0 ${pathname.startsWith('/dashboard/floor-plan') ? 'text-brand-600' : 'text-slate-400'}`} />
-                Floor Plan
-              </Link>
-            </>
-          )}
 
           {/* Your Booking Page — external link */}
           {venueSlug && (

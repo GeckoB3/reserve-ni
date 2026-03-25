@@ -18,6 +18,7 @@ import {
   type SnapGroupUpdate,
   type SnapRemoveUpdate,
 } from '@/lib/floor-plan/snap-detection';
+import { computeStageFitToView } from '@/lib/floor-plan/fit-view';
 
 // ---------------------------------------------------------------------------
 // Constants & helpers
@@ -442,9 +443,36 @@ export default function KonvaCanvas({
   );
 
   const resetView = useCallback(() => {
-    setScale(1);
-    setStagePos({ x: 0, y: 0 });
-  }, []);
+    const fit = computeStageFitToView(tables, dimensions.width, dimensions.height);
+    setScale(fit.scale);
+    setStagePos({ x: fit.x, y: fit.y });
+  }, [tables, dimensions.width, dimensions.height]);
+
+  const initialFitDone = useRef(false);
+  useEffect(() => {
+    if (!initialFitDone.current && tables.length > 0 && dimensions.width > 1) {
+      resetView();
+      initialFitDone.current = true;
+    }
+  }, [tables, dimensions.width, dimensions.height, resetView]);
+
+  const zoomBy = useCallback(
+    (delta: number) => {
+      const newScale = Math.max(0.3, Math.min(3, scale + delta));
+      const cx = dimensions.width / 2;
+      const cy = dimensions.height / 2;
+      const pointTo = {
+        x: (cx - stagePos.x) / scale,
+        y: (cy - stagePos.y) / scale,
+      };
+      setScale(newScale);
+      setStagePos({
+        x: cx - pointTo.x * newScale,
+        y: cy - pointTo.y * newScale,
+      });
+    },
+    [scale, stagePos, dimensions.width, dimensions.height],
+  );
 
   const handleSplit = useCallback(
     (ejectTableId: string, ejectedSide: string) => {
@@ -543,7 +571,7 @@ export default function KonvaCanvas({
         outline,
         label,
         labelX: (minX + maxX) / 2,
-        labelY: minY - 18,
+        labelY: minY - 22,
       });
     });
 
@@ -614,19 +642,22 @@ export default function KonvaCanvas({
     >
       <div className="absolute right-2 top-2 z-10 flex gap-1">
         <button
-          onClick={() => setScale((s) => Math.min(3, s + 0.2))}
+          type="button"
+          onClick={() => zoomBy(0.2)}
           className="flex h-7 w-7 items-center justify-center rounded border border-slate-300 bg-white text-sm text-slate-600 hover:bg-slate-50"
           title="Zoom in"
         >+</button>
         <button
-          onClick={() => setScale((s) => Math.max(0.3, s - 0.2))}
+          type="button"
+          onClick={() => zoomBy(-0.2)}
           className="flex h-7 w-7 items-center justify-center rounded border border-slate-300 bg-white text-sm text-slate-600 hover:bg-slate-50"
           title="Zoom out"
         >−</button>
         <button
+          type="button"
           onClick={resetView}
-          className="flex h-7 items-center justify-center rounded border border-slate-300 bg-white px-2 text-xs text-slate-600 hover:bg-slate-50"
-          title="Reset view"
+          className="flex h-7 min-w-[2.75rem] items-center justify-center rounded border border-slate-300 bg-white px-2 text-xs text-slate-600 hover:bg-slate-50"
+          title="Fit entire floor plan to this view (same as filling the canvas)"
         >{Math.round(scale * 100)}%</button>
       </div>
 
@@ -669,11 +700,11 @@ export default function KonvaCanvas({
             <Text
               key={`label-${g.groupId}`}
               text={g.label}
-              x={g.labelX - 80}
+              x={g.labelX - 96}
               y={g.labelY}
-              width={160}
+              width={192}
               align="center"
-              fontSize={10}
+              fontSize={12}
               fontFamily="Inter, system-ui, sans-serif"
               fontStyle="600"
               fill="#374151"

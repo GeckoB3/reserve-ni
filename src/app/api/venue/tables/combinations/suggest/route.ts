@@ -4,6 +4,8 @@ import { getVenueStaff } from '@/lib/venue-auth';
 import {
   detectAdjacentTables,
   findValidCombinations,
+  getOccupiedTableIdsForWindow,
+  getRequestWindowMinutes,
   type CombinationBooking,
   type CombinationBlock,
   type CombinationTable,
@@ -128,9 +130,11 @@ export async function GET(request: NextRequest) {
 
   const threshold = venueRes.data?.combination_threshold ?? 80;
   const adjacency = detectAdjacentTables(tables, threshold);
+  const datetime = `${date}T${time.length === 5 ? `${time}:00` : time}.000Z`;
+
   const suggestions = findValidCombinations({
     partySize,
-    datetime: `${date}T${time.length === 5 ? `${time}:00` : time}.000Z`,
+    datetime,
     durationMinutes,
     tables,
     bookings,
@@ -140,9 +144,20 @@ export async function GET(request: NextRequest) {
     excludeBookingId,
   });
 
+  const { requestStartMin, requestEndMin } = getRequestWindowMinutes(datetime, durationMinutes);
+  const occupied_table_ids = getOccupiedTableIdsForWindow(
+    tables.map((t) => t.id),
+    requestStartMin,
+    requestEndMin,
+    bookings,
+    blocks,
+    excludeBookingId,
+  );
+
   return NextResponse.json({
     threshold,
     suggestions,
     best: suggestions[0] ?? null,
+    occupied_table_ids,
   });
 }

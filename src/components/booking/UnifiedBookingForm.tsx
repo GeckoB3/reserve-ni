@@ -2,9 +2,36 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useToast } from '@/components/ui/Toast';
-import { NumericInput } from '@/components/ui/NumericInput';
 import { PhoneWithCountryField } from '@/components/phone/PhoneWithCountryField';
 import { normalizeToE164 } from '@/lib/phone/e164';
+import MiniFloorPlanPicker, { type MiniFloorTableRow } from '@/components/floor-plan/MiniFloorPlanPicker';
+
+// ── Helpers ───────────────────────────────────────────────────────────────
+function toDateStr(d: Date): string {
+  return d.toISOString().slice(0, 10);
+}
+
+const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+function formatDateLabel(dateStr: string): string {
+  const today = toDateStr(new Date());
+  const tomorrow = toDateStr(new Date(Date.now() + 86400000));
+  if (dateStr === today) return 'Today';
+  if (dateStr === tomorrow) return 'Tomorrow';
+  const d = new Date(dateStr + 'T00:00');
+  return `${DAY_NAMES[d.getDay()]}, ${d.getDate()} ${MONTH_NAMES[d.getMonth()]}`;
+}
+
+const PARTY_GRID = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] as const;
+
+function ChevronDown({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" d="m19 9-7 7-7-7" />
+    </svg>
+  );
+}
 
 interface Slot {
   key: string;
@@ -58,12 +85,24 @@ export function UnifiedBookingForm({
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [selectedSuggestionKey, setSelectedSuggestionKey] = useState<string | null>(null);
   const [loadingSuggestions, setLoadingSuggestions] = useState(false);
+  const [tableAssignMode, setTableAssignMode] = useState<'suggested' | 'floor'>('suggested');
+  const [manualTableIds, setManualTableIds] = useState<string[]>([]);
+  const [occupiedTableIds, setOccupiedTableIds] = useState<string[]>([]);
+  const [prefetchedTables, setPrefetchedTables] = useState<MiniFloorTableRow[] | null>(null);
 
   const [requireDeposit, setRequireDeposit] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const [result, setResult] = useState<{ booking_id: string; payment_url?: string } | null>(null);
+
+  const [openPanel, setOpenPanel] = useState<'party' | 'date' | 'time' | null>(null);
+  const [gridCenter, setGridCenter] = useState('20:00');
+  const [calendarMonth, setCalendarMonth] = useState(() => {
+    const d = new Date((initialDate ?? new Date().toISOString().slice(0, 10)) + 'T00:00');
+    return new Date(d.getFullYear(), d.getMonth(), 1);
+  });
+  const panelRef = useRef<HTMLDivElement>(null);
 
   const nameRef = useRef<HTMLInputElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -75,6 +114,18 @@ export function UnifiedBookingForm({
     return () => clearTimeout(timer);
   }, []);
 
+  // Close dropdown panels on outside click
+  useEffect(() => {
+    if (!openPanel) return;
+    function handler(e: MouseEvent) {
+      if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
+        setOpenPanel(null);
+      }
+    }
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [openPanel]);
+
   // Fetch available time slots when date or party size changes (debounced)
   useEffect(() => {
     if (!date) {
@@ -83,6 +134,7 @@ export function UnifiedBookingForm({
     }
     setLoadingSlots(true);
     setSelectedTime(initialTime ?? '');
+    setGridCenter('20:00');
 
     if (debounceRef.current) clearTimeout(debounceRef.current);
     if (abortRef.current) abortRef.current.abort();
@@ -107,7 +159,20 @@ export function UnifiedBookingForm({
               available_covers: (s.available_covers as number) ?? 0,
             }))
             .filter((s: Slot) => s.start_time);
-          if (!controller.signal.aborted) setSlots(rawSlots);
+          if (!controller.signal.aborted) {
+            setSlots(rawSlots);
+            if (!initialTime && rawSlots.length > 0) {
+              const defaultCenter = 20 * 60;
+              let best = rawSlots[0];
+              let bestDist = Infinity;
+              for (const s of rawSlots) {
+                const p = s.start_time.slice(0, 5).split(':');
+                const dist = Math.abs(parseInt(p[0], 10) * 60 + parseInt(p[1], 10) - defaultCenter);
+                if (dist < bestDist) { best = s; bestDist = dist; }
+              }
+              setSelectedTime(best.start_time);
+            }
+          }
         } catch (err) {
           if (err instanceof DOMException && err.name === 'AbortError') return;
           if (!controller.signal.aborted) {
@@ -127,14 +192,32 @@ export function UnifiedBookingForm({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [addToast, date, partySize, venueId]);
 
+  // Pre-fetch tables when advanced mode is on so floor plan loads instantly
+  useEffect(() => {
+    if (!advancedMode) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch('/api/venue/tables');
+        if (cancelled || !res.ok) return;
+        const payload = await res.json();
+        if (!cancelled) setPrefetchedTables((payload.tables ?? []) as MiniFloorTableRow[]);
+      } catch { /* non-critical */ }
+    })();
+    return () => { cancelled = true; };
+  }, [advancedMode]);
+
   // Fetch table suggestions when in advanced mode and time is selected
   useEffect(() => {
     let cancelled = false;
     if (!advancedMode || !date || !selectedTime) {
       setSuggestions([]);
       setSelectedSuggestionKey(null);
+      setOccupiedTableIds([]);
+      setManualTableIds([]);
       return;
     }
+    setManualTableIds([]);
     setLoadingSuggestions(true);
     (async () => {
       try {
@@ -142,17 +225,21 @@ export function UnifiedBookingForm({
           date,
           time: selectedTime.slice(0, 5),
           party_size: String(partySize),
+          duration_minutes: '90',
         });
         const res = await fetch(`/api/venue/tables/combinations/suggest?${params.toString()}`);
         if (cancelled) return;
         if (!res.ok) {
           setSuggestions([]);
           setSelectedSuggestionKey(null);
+          setOccupiedTableIds([]);
           return;
         }
         const payload = await res.json();
         const next = (payload.suggestions ?? []) as Suggestion[];
+        const busy = (payload.occupied_table_ids ?? []) as string[];
         setSuggestions(next);
+        setOccupiedTableIds(Array.isArray(busy) ? busy : []);
         setSelectedSuggestionKey(
           next.length > 0 ? `${next[0].source}:${next[0].table_ids.join('|')}` : null,
         );
@@ -160,6 +247,7 @@ export function UnifiedBookingForm({
         if (!cancelled) {
           setSuggestions([]);
           setSelectedSuggestionKey(null);
+          setOccupiedTableIds([]);
         }
       } finally {
         if (!cancelled) setLoadingSuggestions(false);
@@ -173,12 +261,64 @@ export function UnifiedBookingForm({
     [selectedSuggestionKey, suggestions],
   );
 
+  const tableIdsToAssign = useMemo(() => {
+    if (tableAssignMode === 'floor' && manualTableIds.length > 0) return manualTableIds;
+    if (tableAssignMode === 'suggested' && selectedSuggestion?.table_ids?.length)
+      return selectedSuggestion.table_ids;
+    return null;
+  }, [manualTableIds, selectedSuggestion, tableAssignMode]);
+
   const phoneE164 = normalizeToE164(phone, 'GB');
   const canSubmit = Boolean(date && selectedTime && name.trim() && phoneE164 && !saving);
+
+  const timeOptions = useMemo(() => {
+    if (!slots.length) return [] as string[];
+    const slotMinutes = slots.map(s => {
+      const parts = s.start_time.slice(0, 5).split(':');
+      return parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10);
+    });
+    const boundaries = new Set<number>();
+    for (const m of slotMinutes) {
+      boundaries.add(Math.round(m / 30) * 30);
+    }
+    return Array.from(boundaries)
+      .sort((a, b) => a - b)
+      .map(m => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`);
+  }, [slots]);
+
+  const nearbySlots = useMemo(() => {
+    if (!gridCenter || !slots.length) return slots.slice(0, 9);
+    const cp = gridCenter.split(':');
+    const centerMin = parseInt(cp[0], 10) * 60 + parseInt(cp[1], 10);
+    const withDist = slots.map(s => {
+      const sp = s.start_time.slice(0, 5).split(':');
+      const slotMin = parseInt(sp[0], 10) * 60 + parseInt(sp[1], 10);
+      return { slot: s, dist: Math.abs(slotMin - centerMin) };
+    });
+    withDist.sort((a, b) => a.dist - b.dist);
+    const closest = withDist.slice(0, 9).map(x => x.slot);
+    closest.sort((a, b) => a.start_time.localeCompare(b.start_time));
+    return closest;
+  }, [gridCenter, slots]);
+
+  const calendarGrid = useMemo(() => {
+    const yr = calendarMonth.getFullYear();
+    const mo = calendarMonth.getMonth();
+    const firstDow = new Date(yr, mo, 1).getDay();
+    const offset = (firstDow + 6) % 7;
+    const total = new Date(yr, mo + 1, 0).getDate();
+    const cells: (number | null)[] = [];
+    for (let i = 0; i < offset; i++) cells.push(null);
+    for (let d = 1; d <= total; d++) cells.push(d);
+    return { yr, mo, cells };
+  }, [calendarMonth]);
 
   const resetForm = useCallback(() => {
     setDate(initialDate ?? new Date().toISOString().slice(0, 10));
     setPartySize(2);
+    setOpenPanel(null);
+    setGridCenter('20:00');
+    setCalendarMonth(new Date(new Date().getFullYear(), new Date().getMonth(), 1));
     setSlots([]);
     setSelectedTime(initialTime ?? '');
     setName('');
@@ -188,6 +328,9 @@ export function UnifiedBookingForm({
     setNotes('');
     setSuggestions([]);
     setSelectedSuggestionKey(null);
+    setTableAssignMode('suggested');
+    setManualTableIds([]);
+    setOccupiedTableIds([]);
     setRequireDeposit(false);
     setError(null);
     setResult(null);
@@ -229,14 +372,13 @@ export function UnifiedBookingForm({
 
       const payload = await createRes.json();
 
-      // Assign table if in advanced mode and a suggestion is selected
-      if (advancedMode && payload.booking_id && selectedSuggestion?.table_ids?.length) {
+      if (advancedMode && payload.booking_id && tableIdsToAssign?.length) {
         const assignRes = await fetch('/api/venue/tables/assignments', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             booking_id: payload.booking_id,
-            table_ids: selectedSuggestion.table_ids,
+            table_ids: tableIdsToAssign,
           }),
         });
         if (!assignRes.ok) {
@@ -270,8 +412,8 @@ export function UnifiedBookingForm({
   if (!asModal && result) {
     const hasDeposit = Boolean(result.payment_url);
     return (
-      <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-        <div className={`rounded-xl border p-5 ${hasDeposit ? 'border-amber-200 bg-amber-50' : 'border-emerald-200 bg-emerald-50'}`}>
+      <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:rounded-2xl sm:p-6">
+        <div className={`rounded-lg border p-4 sm:rounded-xl sm:p-5 ${hasDeposit ? 'border-amber-200 bg-amber-50' : 'border-emerald-200 bg-emerald-50'}`}>
           <div className="mb-2 flex items-center gap-3">
             <div className={`flex h-9 w-9 items-center justify-center rounded-full ${hasDeposit ? 'bg-amber-100' : 'bg-emerald-100'}`}>
               <svg className={`h-5 w-5 ${hasDeposit ? 'text-amber-600' : 'text-emerald-600'}`} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
@@ -321,74 +463,279 @@ export function UnifiedBookingForm({
   }
 
   const formContent = (
-    <form onSubmit={handleSubmit} className="space-y-5">
-      {/* Date + Covers */}
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <label htmlFor="ubf-date" className="mb-1.5 block text-sm font-medium text-slate-700">
-            Date
-          </label>
-          <input
-            id="ubf-date"
-            type="date"
-            value={date}
-            onChange={(e) => setDate(e.target.value)}
-            min={new Date().toISOString().slice(0, 10)}
-            className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm transition-colors focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
-            required
-          />
-        </div>
-        <div>
-          <label htmlFor="ubf-covers" className="mb-1.5 block text-sm font-medium text-slate-700">
-            Party Size
-          </label>
-          <NumericInput
-            id="ubf-covers"
-            min={1}
-            max={50}
-            value={partySize}
-            onChange={(v) => setPartySize(v)}
-            className="h-[42px] w-full rounded-xl border border-slate-200 bg-white px-3.5 text-sm font-semibold tabular-nums transition-colors focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
-          />
+    <form onSubmit={handleSubmit} className="space-y-3 sm:space-y-4">
+      {/* ── Selector Row (3 separate dropdowns) ── */}
+      <div ref={panelRef}>
+        <div className="grid grid-cols-3 gap-1.5 min-[400px]:gap-2 sm:flex sm:flex-row sm:items-end sm:gap-2">
+          {/* ── Party ── */}
+          <div className="relative min-w-0">
+            <p className="mb-1 text-[10px] sm:text-[11px] font-medium uppercase tracking-wide text-slate-400">Party</p>
+            <button
+              type="button"
+              onClick={() => setOpenPanel(openPanel === 'party' ? null : 'party')}
+              className={`flex min-h-[40px] w-full touch-manipulation items-center justify-center gap-1.5 rounded-lg border px-2 py-1.5 text-xs font-semibold tabular-nums transition-colors min-[400px]:px-3 min-[400px]:py-2 min-[400px]:text-sm ${
+                openPanel === 'party'
+                  ? 'border-brand-300 bg-brand-50 text-brand-700'
+                  : 'border-slate-200 bg-white text-slate-900 hover:border-slate-300'
+              }`}
+            >
+              {partySize}
+              <ChevronDown className={`h-3.5 w-3.5 text-slate-400 transition-transform duration-150 ${openPanel === 'party' ? 'rotate-180' : ''}`} />
+            </button>
+
+            {openPanel === 'party' && (
+              <div className="absolute left-0 z-20 mt-1.5 w-[min(17rem,calc(100vw-2rem))] rounded-xl border border-slate-200 bg-white p-2 shadow-lg sm:w-56 sm:p-3">
+                <div className="grid grid-cols-4 gap-1.5">
+                  {PARTY_GRID.map((n) => (
+                    <button
+                      key={n}
+                      type="button"
+                      onClick={() => { setPartySize(n); setOpenPanel(null); }}
+                      className={`rounded-lg py-2 text-center text-sm font-semibold tabular-nums transition-all ${
+                        partySize === n
+                          ? 'bg-brand-600 text-white shadow-sm'
+                          : 'bg-slate-50 text-slate-700 hover:bg-brand-50 hover:text-brand-700'
+                      }`}
+                    >
+                      {n}
+                    </button>
+                  ))}
+                </div>
+                <div className="mt-2 flex items-center gap-2 border-t border-slate-100 pt-2">
+                  <span className="text-xs text-slate-400">Other:</span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={50}
+                    placeholder="13+"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        const v = parseInt((e.target as HTMLInputElement).value, 10);
+                        if (!Number.isNaN(v) && v >= 1 && v <= 50) { setPartySize(v); setOpenPanel(null); }
+                      }
+                    }}
+                    onBlur={(e) => {
+                      const v = parseInt(e.target.value, 10);
+                      if (!Number.isNaN(v) && v >= 1 && v <= 50) { setPartySize(v); setOpenPanel(null); }
+                    }}
+                    className="h-7 w-14 rounded-md border border-slate-200 bg-white px-2 text-center text-sm font-semibold tabular-nums focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* ── Date ── */}
+          <div className="relative min-w-0 flex-1 sm:min-w-[140px]">
+            <p className="mb-1 text-[10px] sm:text-[11px] font-medium uppercase tracking-wide text-slate-400">Date</p>
+            <button
+              type="button"
+              onClick={() => {
+                if (openPanel === 'date') {
+                  setOpenPanel(null);
+                } else {
+                  const d = new Date(date + 'T00:00');
+                  setCalendarMonth(new Date(d.getFullYear(), d.getMonth(), 1));
+                  setOpenPanel('date');
+                }
+              }}
+              className={`flex min-h-[40px] w-full touch-manipulation items-center justify-between rounded-lg border px-2 py-1.5 text-xs font-semibold transition-colors min-[400px]:px-3 min-[400px]:py-2 min-[400px]:text-sm ${
+                openPanel === 'date'
+                  ? 'border-brand-300 bg-brand-50 text-brand-700'
+                  : 'border-slate-200 bg-white text-slate-900 hover:border-slate-300'
+              }`}
+            >
+              <span className="truncate">{formatDateLabel(date)}</span>
+              <ChevronDown className={`ml-2 h-3.5 w-3.5 flex-shrink-0 text-slate-400 transition-transform duration-150 ${openPanel === 'date' ? 'rotate-180' : ''}`} />
+            </button>
+
+            {openPanel === 'date' && (() => {
+              const { yr, mo, cells } = calendarGrid;
+              const todayStr = toDateStr(new Date());
+              const tomorrowStr = toDateStr(new Date(Date.now() + 86400000));
+              const nowDate = new Date();
+              const canGoPrev = new Date(yr, mo - 1, 1) >= new Date(nowDate.getFullYear(), nowDate.getMonth(), 1);
+
+              return (
+                <div className="absolute left-1/2 z-20 mt-1.5 w-[min(18rem,calc(100vw-2rem))] -translate-x-1/2 rounded-xl border border-slate-200 bg-white p-2 shadow-lg sm:left-0 sm:w-72 sm:translate-x-0 sm:p-3">
+                  {/* Quick shortcuts */}
+                  <div className="mb-2 flex gap-1.5 sm:mb-3">
+                    <button
+                      type="button"
+                      onClick={() => { setDate(todayStr); setOpenPanel(null); }}
+                      className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-all ${
+                        date === todayStr ? 'bg-brand-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-brand-50 hover:text-brand-700'
+                      }`}
+                    >
+                      Today
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setDate(tomorrowStr); setOpenPanel(null); }}
+                      className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-all ${
+                        date === tomorrowStr ? 'bg-brand-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-brand-50 hover:text-brand-700'
+                      }`}
+                    >
+                      Tomorrow
+                    </button>
+                  </div>
+
+                  {/* Month navigation */}
+                  <div className="mb-2 flex items-center justify-between">
+                    <button
+                      type="button"
+                      disabled={!canGoPrev}
+                      onClick={() => setCalendarMonth(new Date(yr, mo - 1, 1))}
+                      className="rounded-md p-1 text-slate-500 transition-colors hover:bg-slate-100 disabled:invisible"
+                    >
+                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" />
+                      </svg>
+                    </button>
+                    <p className="text-sm font-semibold text-slate-800">{MONTH_NAMES[mo]} {yr}</p>
+                    <button
+                      type="button"
+                      onClick={() => setCalendarMonth(new Date(yr, mo + 1, 1))}
+                      className="rounded-md p-1 text-slate-500 transition-colors hover:bg-slate-100"
+                    >
+                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
+                      </svg>
+                    </button>
+                  </div>
+
+                  {/* Day-of-week headers */}
+                  <div className="grid grid-cols-7">
+                    {['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'].map(dn => (
+                      <div key={dn} className="py-1 text-center text-[10px] font-semibold uppercase text-slate-400">{dn}</div>
+                    ))}
+                  </div>
+
+                  {/* Day cells */}
+                  <div className="grid grid-cols-7">
+                    {cells.map((day, i) => {
+                      if (day === null) return <div key={`e${i}`} />;
+                      const ds = `${yr}-${String(mo + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                      const isPast = ds < todayStr;
+                      const isSelected = ds === date;
+                      const isToday = ds === todayStr;
+
+                      return (
+                        <button
+                          key={ds}
+                          type="button"
+                          disabled={isPast}
+                          onClick={() => { setDate(ds); setOpenPanel(null); }}
+                          className={`mx-auto flex h-8 w-8 items-center justify-center rounded-full text-xs font-medium transition-all ${
+                            isSelected
+                              ? 'bg-brand-600 text-white shadow-sm'
+                              : isToday
+                                ? 'font-semibold text-brand-700 ring-1 ring-brand-400'
+                                : isPast
+                                  ? 'cursor-not-allowed text-slate-300'
+                                  : 'text-slate-700 hover:bg-brand-50 hover:text-brand-700'
+                          }`}
+                        >
+                          {day}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+
+          {/* ── Time ── */}
+          <div className="relative min-w-0 flex-1 sm:min-w-[100px]">
+            <p className="mb-1 text-[10px] sm:text-[11px] font-medium uppercase tracking-wide text-slate-400">Time</p>
+            <button
+              type="button"
+              disabled={loadingSlots || (!slots.length && !loadingSlots)}
+              onClick={() => setOpenPanel(openPanel === 'time' ? null : 'time')}
+              className={`flex min-h-[40px] w-full touch-manipulation items-center justify-between rounded-lg border px-2 py-1.5 text-xs font-semibold tabular-nums transition-colors disabled:cursor-not-allowed disabled:opacity-40 min-[400px]:px-3 min-[400px]:py-2 min-[400px]:text-sm ${
+                selectedTime
+                  ? 'border-brand-400 bg-brand-50 text-brand-700'
+                  : openPanel === 'time'
+                    ? 'border-brand-300 bg-brand-50 text-brand-700'
+                    : 'border-slate-200 bg-white text-slate-400 hover:border-slate-300'
+              }`}
+            >
+              <span>{selectedTime ? selectedTime.slice(0, 5) : 'Select'}</span>
+              <ChevronDown className={`ml-2 h-3.5 w-3.5 flex-shrink-0 text-slate-400 transition-transform duration-150 ${openPanel === 'time' ? 'rotate-180' : ''}`} />
+            </button>
+
+            {openPanel === 'time' && timeOptions.length > 0 && (
+              <div className="absolute right-1/2 z-20 mt-1.5 w-[min(12rem,calc(100vw-2rem))] translate-x-1/2 rounded-xl border border-slate-200 bg-white py-1 shadow-lg sm:right-0 sm:w-auto sm:min-w-[180px] sm:translate-x-0">
+                <div className="flex max-h-72 flex-col gap-0.5 overflow-y-auto px-1 py-1 sm:max-h-80" style={{ scrollbarWidth: 'thin' }}>
+                  {timeOptions.map((t) => (
+                    <button
+                      key={t}
+                      type="button"
+                      onClick={() => { setGridCenter(t); setSelectedTime(t); setOpenPanel(null); }}
+                      className={`w-full rounded-md px-3 py-2 text-left text-sm font-semibold tabular-nums transition-all ${
+                        gridCenter === t
+                          ? 'bg-brand-600 text-white shadow-sm'
+                          : 'text-slate-700 hover:bg-brand-50 hover:text-brand-700'
+                      }`}
+                    >
+                      {t}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
-      {/* Time */}
+      {/* ── Available Times Panel ── */}
       <div>
-        <label htmlFor="ubf-time" className="mb-1.5 block text-sm font-medium text-slate-700">
-          Time
-        </label>
         {loadingSlots ? (
-          <div className="flex items-center gap-2.5 rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-sm text-slate-400">
+          <div className="flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-slate-50 py-5 text-xs text-slate-400 sm:rounded-xl sm:py-6 sm:text-sm">
             <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
             </svg>
-            Loading available times...
+            Loading times&hellip;
           </div>
-        ) : !date ? (
-          <p className="rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-sm text-slate-400">
-            Select a date first
-          </p>
         ) : slots.length === 0 ? (
-          <div className="rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-2.5 text-sm text-amber-700">
-            No available times for {partySize} cover{partySize !== 1 ? 's' : ''} on this date.
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-4 text-center text-xs text-amber-700 sm:rounded-xl sm:px-4 sm:py-5 sm:text-sm">
+            No available times for {partySize} {partySize === 1 ? 'guest' : 'guests'} on this date
+          </div>
+        ) : nearbySlots.length === 0 ? (
+          <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50/50 px-3 py-4 text-center text-xs text-slate-500 sm:rounded-xl sm:px-4 sm:py-5 sm:text-sm">
+            No slots near {gridCenter} &mdash; try a different time
           </div>
         ) : (
-          <select
-            id="ubf-time"
-            value={selectedTime}
-            onChange={(e) => setSelectedTime(e.target.value)}
-            className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm transition-colors focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
-            required
-          >
-            <option value="">Select a time...</option>
-            {slots.map((slot) => (
-              <option key={slot.key} value={slot.start_time}>
-                {slot.label} ({slot.available_covers} cover{slot.available_covers !== 1 ? 's' : ''} remaining)
-              </option>
-            ))}
-          </select>
+          <>
+            <p className="mb-1.5 text-[10px] font-medium uppercase tracking-wide text-slate-400 sm:mb-2 sm:text-[11px]">
+              {gridCenter ? `Times around ${gridCenter}` : 'Available times'}
+            </p>
+            <div className="grid grid-cols-3 gap-1.5 rounded-lg border border-slate-200 bg-slate-50/50 p-1.5 sm:gap-2 sm:rounded-xl sm:p-2.5">
+              {nearbySlots.map((slot) => {
+                const isActive = selectedTime === slot.start_time;
+                const tight = slot.available_covers <= partySize;
+                return (
+                  <button
+                    key={slot.key}
+                    type="button"
+                    onClick={() => setSelectedTime(slot.start_time)}
+                    className={`touch-manipulation rounded-md py-2.5 text-center text-xs font-semibold tabular-nums transition-all sm:rounded-lg sm:py-3 sm:text-sm ${
+                      isActive
+                        ? 'bg-brand-100 text-brand-700 ring-2 ring-brand-400'
+                        : tight
+                          ? 'border border-amber-200 bg-amber-50 text-amber-800 hover:border-amber-300 hover:bg-amber-100'
+                          : 'border border-slate-200 bg-white text-slate-700 hover:border-brand-300 hover:bg-brand-50'
+                    }`}
+                  >
+                    {slot.label}
+                  </button>
+                );
+              })}
+            </div>
+          </>
         )}
       </div>
 
@@ -396,9 +743,9 @@ export function UnifiedBookingForm({
       <div className="border-t border-slate-100" />
 
       {/* Guest Details */}
-      <div className="space-y-4">
+      <div className="space-y-3 sm:space-y-3.5">
         <div>
-          <label htmlFor="ubf-name" className="mb-1.5 block text-sm font-medium text-slate-700">
+          <label htmlFor="ubf-name" className="mb-1 block text-xs font-medium text-slate-700 sm:text-sm">
             Guest name
           </label>
           <input
@@ -408,25 +755,25 @@ export function UnifiedBookingForm({
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="Full name"
-            className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm transition-colors focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
+            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm transition-colors focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20 sm:rounded-xl sm:px-3.5 sm:py-2.5"
             required
           />
         </div>
 
         <div>
-          <label htmlFor="ubf-phone" className="mb-1.5 block text-sm font-medium text-slate-700">
+          <label htmlFor="ubf-phone" className="mb-1 block text-xs font-medium text-slate-700 sm:text-sm">
             Phone number
           </label>
           <PhoneWithCountryField
             id="ubf-phone"
             value={phone}
             onChange={setPhone}
-            inputClassName="w-full min-w-0 rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm transition-colors focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
+            inputClassName="w-full min-w-0 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm transition-colors focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20 sm:rounded-xl sm:px-3.5 sm:py-2.5"
           />
         </div>
 
         <div>
-          <label htmlFor="ubf-email" className="mb-1.5 block text-sm font-medium text-slate-700">
+          <label htmlFor="ubf-email" className="mb-1 block text-xs font-medium text-slate-700 sm:text-sm">
             Email <span className="text-slate-400">(optional)</span>
           </label>
           <input
@@ -435,12 +782,12 @@ export function UnifiedBookingForm({
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             placeholder="guest@example.com"
-            className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm transition-colors focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
+            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm transition-colors focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20 sm:rounded-xl sm:px-3.5 sm:py-2.5"
           />
         </div>
 
         <div>
-          <label htmlFor="ubf-dietary" className="mb-1.5 block text-sm font-medium text-slate-700">
+          <label htmlFor="ubf-dietary" className="mb-1 block text-xs font-medium text-slate-700 sm:text-sm">
             Dietary notes <span className="text-slate-400">(optional)</span>
           </label>
           <textarea
@@ -449,12 +796,12 @@ export function UnifiedBookingForm({
             onChange={(e) => setDietaryNotes(e.target.value)}
             rows={2}
             placeholder="Allergies, intolerances, dietary requirements..."
-            className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm transition-colors focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
+            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm transition-colors focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20 sm:rounded-xl sm:px-3.5 sm:py-2.5"
           />
         </div>
 
         <div>
-          <label htmlFor="ubf-notes" className="mb-1.5 block text-sm font-medium text-slate-700">
+          <label htmlFor="ubf-notes" className="mb-1 block text-xs font-medium text-slate-700 sm:text-sm">
             Notes <span className="text-slate-400">(optional)</span>
           </label>
           <textarea
@@ -463,70 +810,119 @@ export function UnifiedBookingForm({
             onChange={(e) => setNotes(e.target.value)}
             rows={2}
             placeholder="Internal notes for staff..."
-            className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm transition-colors focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
+            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm transition-colors focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20 sm:rounded-xl sm:px-3.5 sm:py-2.5"
           />
         </div>
       </div>
 
       {/* Table suggestions (advanced mode only) */}
       {advancedMode && date && selectedTime && (
-        <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-4">
-          <p className="mb-2.5 text-xs font-semibold uppercase tracking-wide text-slate-500">
+        <div className="rounded-lg border border-slate-200 bg-slate-50/80 p-2.5 sm:rounded-xl sm:p-3.5">
+          <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-slate-500 sm:mb-2.5 sm:text-xs">
             Table Assignment
           </p>
-          {loadingSuggestions ? (
-            <div className="flex items-center gap-2 text-xs text-slate-400">
-              <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-slate-300 border-t-slate-600" />
-              Loading suggestions...
-            </div>
-          ) : suggestions.length === 0 ? (
-            <p className="text-xs text-slate-500">
-              No table suggestions available for this time and party size.
-            </p>
-          ) : (
-            <div className="space-y-1.5">
-              {suggestions.slice(0, 5).map((suggestion) => {
-                const key = `${suggestion.source}:${suggestion.table_ids.join('|')}`;
-                const isSelected = selectedSuggestionKey === key;
-                return (
-                  <button
-                    key={key}
-                    type="button"
-                    onClick={() => setSelectedSuggestionKey(key)}
-                    className={`w-full rounded-lg border px-3 py-2.5 text-left text-sm transition-all ${
-                      isSelected
-                        ? 'border-emerald-300 bg-emerald-50 text-emerald-800 ring-1 ring-emerald-200'
-                        : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="font-medium">{suggestion.table_names.join(' + ')}</span>
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs text-slate-500">
-                          Cap {suggestion.combined_capacity}
-                        </span>
-                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${
+
+          <div className="mb-2 inline-flex w-full rounded-lg border border-slate-200 bg-white p-0.5 sm:mb-2.5 sm:w-auto">
+            <button
+              type="button"
+              onClick={() => {
+                setTableAssignMode('suggested');
+                setManualTableIds([]);
+              }}
+              className={`rounded-md px-3 py-1.5 text-xs font-medium transition-all duration-150 ${
+                tableAssignMode === 'suggested'
+                  ? 'bg-brand-600 text-white shadow-sm'
+                  : 'text-slate-600 hover:bg-slate-50'
+              }`}
+            >
+              Suggested
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setTableAssignMode('floor');
+                if (manualTableIds.length === 0 && selectedSuggestion?.table_ids?.length) {
+                  setManualTableIds(selectedSuggestion.table_ids);
+                }
+              }}
+              className={`rounded-md px-3 py-1.5 text-xs font-medium transition-all duration-150 ${
+                tableAssignMode === 'floor'
+                  ? 'bg-brand-600 text-white shadow-sm'
+                  : 'text-slate-600 hover:bg-slate-50'
+              }`}
+            >
+              Floor plan
+            </button>
+          </div>
+
+          {tableAssignMode === 'suggested' && (
+            <>
+              {loadingSuggestions ? (
+                <div className="flex items-center gap-2 text-xs text-slate-400">
+                  <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-slate-300 border-t-slate-600" />
+                  Loading suggestions...
+                </div>
+              ) : suggestions.length === 0 ? (
+                <p className="text-xs text-slate-500">
+                  No table suggestions available for this time and party size. Try floor plan to pick manually.
+                </p>
+              ) : (
+                <div className="space-y-1">
+                  {suggestions.slice(0, 5).map((suggestion) => {
+                    const key = `${suggestion.source}:${suggestion.table_ids.join('|')}`;
+                    const isSelected = selectedSuggestionKey === key;
+                    return (
+                      <button
+                        key={key}
+                        type="button"
+                        onClick={() => setSelectedSuggestionKey(key)}
+                        className={`w-full rounded-lg border px-2.5 py-2 text-left text-sm transition-all ${
                           isSelected
-                            ? 'bg-emerald-100 text-emerald-700'
-                            : 'bg-slate-100 text-slate-500'
-                        }`}>
-                          {suggestion.source === 'manual' ? 'Manual' : suggestion.source === 'auto' ? 'Auto' : 'Single'}
-                        </span>
-                      </div>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
+                            ? 'border-emerald-300 bg-emerald-50 text-emerald-800 ring-1 ring-emerald-200'
+                            : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50'
+                        }`}
+                      >
+                        <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
+                          <span className="break-words font-medium">{suggestion.table_names.join(' + ')}</span>
+                          <div className="flex flex-shrink-0 items-center gap-2">
+                            <span className="text-xs text-slate-500">
+                              Cap {suggestion.combined_capacity}
+                            </span>
+                            <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${
+                              isSelected
+                                ? 'bg-emerald-100 text-emerald-700'
+                                : 'bg-slate-100 text-slate-500'
+                            }`}>
+                              {suggestion.source === 'manual' ? 'Manual' : suggestion.source === 'auto' ? 'Auto' : 'Single'}
+                            </span>
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </>
+          )}
+
+          {tableAssignMode === 'floor' && (
+            <MiniFloorPlanPicker
+              tables={prefetchedTables}
+              selectedIds={manualTableIds}
+              onChange={setManualTableIds}
+              occupiedTableIds={occupiedTableIds}
+              partySize={partySize}
+              minHeight={220}
+            />
           )}
         </div>
       )}
 
       {/* Deposit toggle */}
-      <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50/50 px-4 py-3">
-        <div className="mr-3">
-          <p className="text-sm font-medium text-slate-700">Require deposit</p>
-          <p className="text-xs text-slate-500">Send a payment link to the guest</p>
+      <div className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50/50 px-3 py-2.5 sm:rounded-xl sm:px-4 sm:py-3">
+        <div className="min-w-0 pr-1">
+          <p className="text-xs font-medium text-slate-700 sm:text-sm">Require deposit</p>
+          <p className="text-[11px] text-slate-500 sm:text-xs">Send a payment link to the guest</p>
         </div>
         <button
           type="button"
@@ -551,18 +947,18 @@ export function UnifiedBookingForm({
         <div
           role="alert"
           aria-live="polite"
-          className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+          className="rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 text-xs text-red-700 sm:rounded-xl sm:px-4 sm:py-3 sm:text-sm"
         >
           {error}
         </div>
       )}
 
       {/* Actions */}
-      <div className="flex gap-3">
+      <div className="flex flex-col-reverse gap-2 sm:flex-row sm:gap-3">
         <button
           type="submit"
           disabled={!canSubmit}
-          className="flex-1 rounded-xl bg-brand-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50"
+          className="min-h-[44px] w-full touch-manipulation rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50 sm:min-h-0 sm:flex-1 sm:rounded-xl sm:py-3"
         >
           {saving ? 'Creating...' : 'Create Booking'}
         </button>
@@ -570,7 +966,7 @@ export function UnifiedBookingForm({
           <button
             type="button"
             onClick={onClose}
-            className="rounded-xl border border-slate-200 px-4 py-3 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-50"
+            className="min-h-[44px] w-full touch-manipulation rounded-lg border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-50 sm:min-h-0 sm:w-auto sm:rounded-xl sm:py-3"
           >
             Cancel
           </button>
@@ -582,23 +978,23 @@ export function UnifiedBookingForm({
   if (asModal) {
     return (
       <div
-        className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/20 p-4 backdrop-blur-sm"
+        className="fixed inset-0 z-50 flex items-end justify-center overflow-y-auto bg-black/20 p-0 backdrop-blur-sm sm:items-center sm:p-4"
         onClick={onClose}
       >
         <div
           role="dialog"
           aria-modal="true"
           aria-label="Create booking"
-          className="my-8 w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl"
+          className={`max-h-[min(100dvh,100vh)] w-full max-w-[min(100vw,42rem)] overflow-y-auto rounded-t-2xl bg-white p-4 pb-[max(1rem,env(safe-area-inset-bottom))] shadow-2xl sm:my-8 sm:rounded-2xl sm:p-6 sm:pb-6 ${advancedMode ? 'sm:max-w-2xl' : 'sm:max-w-lg'}`}
           onClick={(e) => e.stopPropagation()}
         >
-          <div className="mb-5 flex items-center justify-between">
-            <h2 className="text-lg font-semibold text-slate-900">New Booking</h2>
+          <div className="mb-3 flex items-center justify-between gap-2 sm:mb-5">
+            <h2 className="text-base font-semibold text-slate-900 sm:text-lg">New Booking</h2>
             <button
               type="button"
               aria-label="Close"
               onClick={onClose}
-              className="rounded-lg p-2 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
+              className="min-h-[44px] min-w-[44px] touch-manipulation rounded-lg p-2 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600 sm:min-h-0 sm:min-w-0"
             >
               <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
@@ -612,7 +1008,7 @@ export function UnifiedBookingForm({
   }
 
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:rounded-2xl sm:p-6">
       {formContent}
     </div>
   );

@@ -69,6 +69,15 @@ function extractIsoTime(value: string): string {
   return value.slice(0, 5);
 }
 
+/** Matches the window used inside findValidCombinations for a given slot datetime. */
+export function getRequestWindowMinutes(
+  datetime: string,
+  durationMinutes: number,
+): { requestStartMin: number; requestEndMin: number } {
+  const requestStartMin = timeToMinutes(extractIsoTime(datetime));
+  return { requestStartMin, requestEndMin: requestStartMin + durationMinutes };
+}
+
 export function getRotatedBoundingBox(table: CombinationTable): BoundingBox {
   const width = table.width ?? 0;
   const height = table.height ?? 0;
@@ -220,6 +229,24 @@ export function scoreCombination(
     waste,
     compactnessArea,
   };
+}
+
+/**
+ * Tables that are not free for the given time window (booking overlap or table block).
+ * Used by the suggest API for floor-plan busy hints and by tests.
+ */
+export function getOccupiedTableIdsForWindow(
+  tableIds: string[],
+  requestStartMin: number,
+  requestEndMin: number,
+  bookings: CombinationBooking[],
+  blocks: CombinationBlock[],
+  excludeBookingId?: string,
+): string[] {
+  return tableIds.filter(
+    (id) =>
+      !isTableAvailableForWindow(id, requestStartMin, requestEndMin, bookings, blocks, excludeBookingId),
+  );
 }
 
 function isTableAvailableForWindow(
