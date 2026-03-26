@@ -61,6 +61,7 @@ interface VenueProfileSectionProps {
   venue: VenueSettings;
   onUpdate: (patch: Partial<VenueSettings>) => void;
   isAdmin: boolean;
+  bookingModel?: string;
 }
 
 function slugFromName(name: string): string {
@@ -72,7 +73,8 @@ function slugFromName(name: string): string {
     .replace(/^-|-$/g, '') || 'venue';
 }
 
-export function VenueProfileSection({ venue, onUpdate, isAdmin }: VenueProfileSectionProps) {
+export function VenueProfileSection({ venue, onUpdate, isAdmin, bookingModel = 'table_reservation' }: VenueProfileSectionProps) {
+  const isAppointment = bookingModel === 'practitioner_appointment';
   const [coverSaving, setCoverSaving] = useState(false);
   const [coverError, setCoverError] = useState<string | null>(null);
   const { integerProps } = useNumericField();
@@ -179,7 +181,7 @@ export function VenueProfileSection({ venue, onUpdate, isAdmin }: VenueProfileSe
 
   return (
     <section className="rounded-lg border border-neutral-200 bg-white p-6 shadow-sm">
-      <h2 className="mb-4 text-lg font-semibold text-neutral-900">Venue profile</h2>
+      <h2 className="mb-4 text-lg font-semibold text-neutral-900">{isAppointment ? 'Business profile' : 'Venue profile'}</h2>
 
       <div className="mb-6">
         <span className="block text-sm font-medium text-neutral-700 mb-1">Cover photo</span>
@@ -261,33 +263,41 @@ export function VenueProfileSection({ venue, onUpdate, isAdmin }: VenueProfileSe
             <input id="email" type="email" {...register('email')} disabled={!isAdmin} className="w-full rounded border border-neutral-300 px-3 py-2 disabled:bg-neutral-50" />
           </div>
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
-            <label htmlFor="cuisine_type" className="block text-sm font-medium text-neutral-700 mb-1">Cuisine type</label>
-            <input id="cuisine_type" {...register('cuisine_type')} disabled={!isAdmin} placeholder="e.g. Italian, Irish, Gastropub" className="w-full rounded border border-neutral-300 px-3 py-2 disabled:bg-neutral-50" />
+        {!isAppointment && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label htmlFor="cuisine_type" className="block text-sm font-medium text-neutral-700 mb-1">Cuisine type</label>
+              <input id="cuisine_type" {...register('cuisine_type')} disabled={!isAdmin} placeholder="e.g. Italian, Irish, Gastropub" className="w-full rounded border border-neutral-300 px-3 py-2 disabled:bg-neutral-50" />
+            </div>
+            <div>
+              <label htmlFor="price_band" className="block text-sm font-medium text-neutral-700 mb-1">Price band</label>
+              <select id="price_band" {...register('price_band')} disabled={!isAdmin} className="w-full rounded border border-neutral-300 px-3 py-2 disabled:bg-neutral-50">
+                <option value="">Not set</option>
+                <option value="£">£ — Budget</option>
+                <option value="££">££ — Mid-range</option>
+                <option value="£££">£££ — Fine dining</option>
+              </select>
+            </div>
           </div>
-          <div>
-            <label htmlFor="price_band" className="block text-sm font-medium text-neutral-700 mb-1">Price band</label>
-            <select id="price_band" {...register('price_band')} disabled={!isAdmin} className="w-full rounded border border-neutral-300 px-3 py-2 disabled:bg-neutral-50">
-              <option value="">Not set</option>
-              <option value="£">£ — Budget</option>
-              <option value="££">££ — Mid-range</option>
-              <option value="£££">£££ — Fine dining</option>
-            </select>
-          </div>
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        )}
+        <div className={`grid grid-cols-1 ${isAppointment ? '' : 'sm:grid-cols-2'} gap-4`}>
           <div>
             <label htmlFor="no_show_grace_minutes" className="block text-sm font-medium text-neutral-700 mb-1">No-show grace period (minutes)</label>
             <input id="no_show_grace_minutes" {...int.inputProps} min={10} max={60} {...register('no_show_grace_minutes', int.registerOptions)} disabled={!isAdmin} className="w-full rounded border border-neutral-300 px-3 py-2 disabled:bg-neutral-50" />
-            <p className="mt-1 text-xs text-neutral-500">How long after reservation time before staff can mark no-show (10–60 min)</p>
+            <p className="mt-1 text-xs text-neutral-500">
+              {isAppointment
+                ? 'How long after appointment time before staff can mark no-show (10–60 min)'
+                : 'How long after reservation time before staff can mark no-show (10–60 min)'}
+            </p>
             {errors.no_show_grace_minutes && <p className="mt-1 text-sm text-red-600">{errors.no_show_grace_minutes.message}</p>}
           </div>
-          <div>
-            <label htmlFor="kitchen_email" className="block text-sm font-medium text-neutral-700 mb-1">Kitchen email</label>
-            <input id="kitchen_email" type="email" {...register('kitchen_email')} disabled={!isAdmin} placeholder="kitchen@venue.com" className="w-full rounded border border-neutral-300 px-3 py-2 disabled:bg-neutral-50" />
-            <p className="mt-1 text-xs text-neutral-500">Receives the daily dietary digest email</p>
-          </div>
+          {!isAppointment && (
+            <div>
+              <label htmlFor="kitchen_email" className="block text-sm font-medium text-neutral-700 mb-1">Kitchen email</label>
+              <input id="kitchen_email" type="email" {...register('kitchen_email')} disabled={!isAdmin} placeholder="kitchen@venue.com" className="w-full rounded border border-neutral-300 px-3 py-2 disabled:bg-neutral-50" />
+              <p className="mt-1 text-xs text-neutral-500">Receives the daily dietary digest email</p>
+            </div>
+          )}
         </div>
         <div>
           <label htmlFor="timezone" className="block text-sm font-medium text-neutral-700 mb-1">Timezone</label>

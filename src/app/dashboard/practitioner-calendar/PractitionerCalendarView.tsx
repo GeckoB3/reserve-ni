@@ -345,8 +345,8 @@ export function PractitionerCalendarView({
               return (
                 <div key={prac.id} className="flex-1 min-w-[180px] border-r border-slate-100 last:border-r-0">
                   {/* Header */}
-                  <div className="sticky top-0 z-10 bg-white border-b border-slate-100 px-3 py-2 h-10 flex items-center">
-                    <span className="text-sm font-semibold text-slate-900 truncate">{prac.name}</span>
+                  <div className="sticky top-0 z-10 bg-white border-b border-slate-100 px-3 py-2 h-10 flex items-center justify-center">
+                    <span className="text-sm font-semibold text-slate-900 truncate text-center">{prac.name}</span>
                   </div>
 
                   {/* Time grid */}

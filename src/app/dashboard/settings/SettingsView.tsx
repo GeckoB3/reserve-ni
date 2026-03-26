@@ -200,7 +200,7 @@ export function SettingsView({ initialVenue, isAdmin, initialTab, hasServiceConf
         {activeTab === 'profile' && (
           <>
             <ProfileSection />
-            <VenueProfileSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} />
+            <VenueProfileSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} bookingModel={bookingModel} />
             <OpeningHoursSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} />
             {!isAppointment && <TableManagementSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} />}
             {!isAppointment && (
@@ -246,8 +246,8 @@ export function SettingsView({ initialVenue, isAdmin, initialTab, hasServiceConf
                 </div>
               </div>
             )}
-            <BookingRulesSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} />
-            <DepositConfigSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} />
+            <BookingRulesSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} bookingModel={bookingModel} />
+            {!isAppointment && <DepositConfigSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} />}
             <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
               <h2 className="text-base font-semibold text-slate-900">Booking Widget & QR Code</h2>
               <p className="mt-1 text-sm text-slate-500">Get embed code and a printable QR code for your booking page.</p>

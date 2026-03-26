@@ -163,6 +163,7 @@ export function BookingDetailPanel({
   onUpdated,
   venueId,
   initialSnapshot,
+  isAppointment = false,
 }: {
   bookingId: string;
   onClose: () => void;
@@ -170,6 +171,7 @@ export function BookingDetailPanel({
   /** Required for optimistic placeholder from grid/floor views. */
   venueId?: string;
   initialSnapshot?: BookingDetailPanelSnapshot | null;
+  isAppointment?: boolean;
 }) {
   const [detail, setDetail] = useState<BookingDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -897,6 +899,7 @@ export function BookingDetailPanel({
             guestRequests={d.special_requests}
             staffNotes={d.internal_notes}
             disabled={!isHydrated}
+            isAppointment={isAppointment}
             onSaved={() => {
               void (async () => {
                 await load();

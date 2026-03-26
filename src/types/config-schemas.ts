@@ -34,6 +34,8 @@ export const bookingRulesSchema = z.object({
   max_party_size: z.number().int().min(1).max(50).default(20),
   max_advance_booking_days: z.number().int().min(1).max(365).default(90),
   min_notice_hours: z.number().int().min(0).max(168).default(24),
+  cancellation_notice_hours: z.number().int().min(0).max(168).optional(),
+  allow_same_day_booking: z.boolean().optional(),
 });
 
 /** Deposit config: which sources require deposit. */

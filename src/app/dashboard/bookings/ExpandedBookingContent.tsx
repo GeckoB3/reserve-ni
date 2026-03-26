@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   BOOKING_PRIMARY_ACTIONS,
   BOOKING_REVERT_ACTIONS,
@@ -28,6 +28,8 @@ interface BookingRow {
   guest_name: string;
   guest_email: string | null;
   guest_phone: string | null;
+  group_booking_id?: string | null;
+  person_label?: string | null;
 }
 
 interface BookingDetailLite {
@@ -78,6 +80,7 @@ export function ExpandedBookingContent({
   onOpenPanel,
   onDetailUpdated,
   onRequestChangeTable,
+  isAppointment = false,
 }: {
   booking: BookingRow;
   detail: BookingDetailLite | undefined;
@@ -92,10 +95,31 @@ export function ExpandedBookingContent({
   onOpenPanel: () => void;
   onDetailUpdated: () => void;
   onRequestChangeTable?: () => void;
+  isAppointment?: boolean;
 }) {
   const [showMessageBox, setShowMessageBox] = useState(false);
   const [showModify, setShowModify] = useState(false);
   const [confirmAction, setConfirmAction] = useState<{ status: BookingStatus; label: string } | null>(null);
+  const [linkedBookings, setLinkedBookings] = useState<Array<{ id: string; person_label: string | null; booking_time: string; status: string }>>([]);
+
+  useEffect(() => {
+    if (!booking.group_booking_id) { setLinkedBookings([]); return; }
+    fetch(`/api/venue/bookings/list?group_booking_id=${booking.group_booking_id}`)
+      .then(async (res) => {
+        if (!res.ok) return;
+        const data = await res.json();
+        const others = (data.bookings ?? [])
+          .filter((b: { id: string }) => b.id !== booking.id)
+          .map((b: { id: string; person_label: string | null; booking_time: string; status: string }) => ({
+            id: b.id,
+            person_label: b.person_label,
+            booking_time: b.booking_time,
+            status: b.status,
+          }));
+        setLinkedBookings(others);
+      })
+      .catch(() => { /* ignore */ });
+  }, [booking.group_booking_id, booking.id]);
 
   if (detailLoading) {
     return (
@@ -186,10 +210,12 @@ export function ExpandedBookingContent({
               <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Time</p>
               <p className="text-sm font-medium text-slate-800">{booking.booking_time.slice(0, 5)}</p>
             </div>
-            <div>
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Covers</p>
-              <p className="text-sm font-medium text-slate-800">{booking.party_size}</p>
-            </div>
+            {!isAppointment && (
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Covers</p>
+                <p className="text-sm font-medium text-slate-800">{booking.party_size}</p>
+              </div>
+            )}
             <div>
               <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Deposit</p>
               <p className={`text-sm font-medium ${booking.deposit_status === 'Paid' ? 'text-emerald-700' : booking.deposit_status === 'Pending' ? 'text-amber-700' : 'text-slate-500'}`}>
@@ -213,8 +239,39 @@ export function ExpandedBookingContent({
           guestRequests={detail?.special_requests}
           staffNotes={detail?.internal_notes}
           onSaved={onDetailUpdated}
+          isAppointment={isAppointment}
         />
       </div>
+
+      {/* Group booking info */}
+      {booking.group_booking_id && (
+        <div className="rounded-xl border border-purple-200 bg-purple-50/50 p-3.5">
+          <div className="flex items-center gap-2 mb-2">
+            <svg className="h-4 w-4 text-purple-500" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M15 19.128a9.38 9.38 0 0 0 2.625.372 9.337 9.337 0 0 0 4.121-.952 4.125 4.125 0 0 0-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 0 1 8.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0 1 11.964-3.07M12 6.375a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0Zm8.25 2.25a2.625 2.625 0 1 1-5.25 0 2.625 2.625 0 0 1 5.25 0Z" /></svg>
+            <span className="text-xs font-semibold text-purple-800">Group Booking</span>
+            {booking.person_label && <span className="text-xs text-purple-600">&middot; {booking.person_label}</span>}
+          </div>
+          {linkedBookings.length > 0 && (
+            <div className="space-y-1.5">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-purple-400">Other people in this group</p>
+              {linkedBookings.map((lb) => (
+                <div key={lb.id} className="flex items-center justify-between text-xs">
+                  <span className="text-purple-700 font-medium">{lb.person_label ?? 'Unknown'}</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-purple-600">{lb.booking_time?.slice(0, 5)}</span>
+                    <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-medium ${
+                      lb.status === 'Confirmed' ? 'bg-green-100 text-green-700' :
+                      lb.status === 'Pending' ? 'bg-amber-100 text-amber-700' :
+                      lb.status === 'Cancelled' ? 'bg-red-100 text-red-700' :
+                      'bg-slate-100 text-slate-600'
+                    }`}>{lb.status}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Row 2: Actions bar */}
       <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-slate-50/60 px-3.5 py-2.5">

@@ -44,6 +44,8 @@ interface BookingRow {
   table_assignments?: Array<{ id: string; name: string }>;
   practitioner_id?: string | null;
   appointment_service_id?: string | null;
+  group_booking_id?: string | null;
+  person_label?: string | null;
 }
 
 interface BookingDetailLite {
@@ -461,21 +463,29 @@ export function BookingsDashboard({ venueId, bookingModel = 'table_reservation',
 
   const exportCsv = useCallback(() => {
     const esc = (value: string) => `"${value.replace(/"/g, '""')}"`;
-    const rows = bookings.map((b) => [
-      b.booking_date,
-      b.booking_time?.slice(0, 5) ?? '',
-      b.guest_name,
-      String(b.party_size),
-      b.status,
-      b.source,
-      b.deposit_status,
-      b.deposit_amount_pence != null ? (b.deposit_amount_pence / 100).toFixed(2) : '',
-      b.dietary_notes ?? '',
-      b.occasion ?? '',
-      b.guest_phone ?? '',
-      b.guest_email ?? '',
-    ]);
-    const header = ['Date', 'Time', isAppointment ? 'Client' : 'Guest', 'Party Size', 'Status', 'Source', 'Deposit Status', 'Deposit Amount GBP', 'Dietary Notes', 'Occasion', 'Phone', 'Email'];
+    const rows = bookings.map((b) => {
+      const base = [
+        b.booking_date,
+        b.booking_time?.slice(0, 5) ?? '',
+        b.guest_name,
+        ...(!isAppointment ? [String(b.party_size)] : []),
+        b.status,
+        b.source,
+        b.deposit_status,
+        b.deposit_amount_pence != null ? (b.deposit_amount_pence / 100).toFixed(2) : '',
+        ...(!isAppointment ? [b.dietary_notes ?? '', b.occasion ?? ''] : []),
+        b.guest_phone ?? '',
+        b.guest_email ?? '',
+      ];
+      return base;
+    });
+    const header = [
+      'Date', 'Time', isAppointment ? 'Client' : 'Guest',
+      ...(!isAppointment ? ['Party Size'] : []),
+      'Status', 'Source', 'Deposit Status', 'Deposit Amount GBP',
+      ...(!isAppointment ? ['Dietary Notes', 'Occasion'] : []),
+      'Phone', 'Email',
+    ];
     const csv = [header, ...rows].map((row) => row.map((cell) => esc(String(cell))).join(',')).join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
@@ -871,6 +881,7 @@ export function BookingsDashboard({ venueId, bookingModel = 'table_reservation',
             });
             void fetchBookings({ silent: true, ids: [selectedId] });
           }}
+          isAppointment={isAppointment}
         />
       )}
       {walkInOpen && (
@@ -1152,6 +1163,11 @@ function BookingsAccordionList({
                           : booking.table_assignments.map((t) => t.name).join(', ')}
                       </span>
                     )}
+                    {booking.group_booking_id && (
+                      <span className="hidden rounded-full bg-purple-50 px-2 py-0.5 text-[10px] font-medium text-purple-700 sm:inline-block" title={booking.person_label ?? 'Group booking'}>
+                        {booking.person_label ? `Group: ${booking.person_label}` : 'Group'}
+                      </span>
+                    )}
                   </div>
                   <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-600">
                     <span className="font-medium tabular-nums">{booking.booking_time.slice(0, 5)}</span>
@@ -1209,6 +1225,7 @@ function BookingsAccordionList({
                   onOpenPanel={() => onOpenPanel(booking.id)}
                   onDetailUpdated={() => onDetailUpdated(booking.id)}
                   onRequestChangeTable={!isAppointment && coversChangeTableEnabled && booking.status === 'Seated' ? () => onRequestChangeTable(booking) : undefined}
+                  isAppointment={isAppointment}
                 />
               )}
             </div>

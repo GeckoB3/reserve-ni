@@ -12,12 +12,20 @@ import { timeToMinutes, minutesToTime } from '@/lib/availability';
 // Types
 // ---------------------------------------------------------------------------
 
+export interface PhantomBooking {
+  practitioner_id: string;
+  start_time: string;         // "HH:mm"
+  duration_minutes: number;
+  buffer_minutes: number;
+}
+
 export interface AppointmentEngineInput {
   date: string; // "YYYY-MM-DD"
   practitioners: Practitioner[];
   services: AppointmentService[];
   practitionerServices: PractitionerService[];
   existingBookings: AppointmentBooking[];
+  phantomBookings?: PhantomBooking[];
 }
 
 export interface AppointmentBooking {
@@ -100,9 +108,15 @@ const CAPACITY_CONSUMING_STATUSES = ['Confirmed', 'Pending', 'Seated'];
 // Core engine
 // ---------------------------------------------------------------------------
 
-export function computeAppointmentAvailability(input: AppointmentEngineInput): AppointmentAvailabilityResult {
-  const { date, practitioners, services, practitionerServices, existingBookings } = input;
+export function computeAppointmentAvailability(input: AppointmentEngineInput, nowMinutes?: number): AppointmentAvailabilityResult {
+  const { date, practitioners, services, practitionerServices, existingBookings, phantomBookings = [] } = input;
   const serviceMap = new Map(services.map((s) => [s.id, s]));
+
+  // Determine the earliest bookable minute for today (past slots are unavailable)
+  const now = new Date();
+  const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  const isToday = date === todayStr;
+  const currentMinute = nowMinutes ?? (now.getHours() * 60 + now.getMinutes());
 
   const result: AppointmentAvailabilityResult = { practitioners: [] };
 
@@ -116,6 +130,10 @@ export function computeAppointmentAvailability(input: AppointmentEngineInput): A
 
     const practitionerBookings = existingBookings.filter(
       (b) => b.practitioner_id === practitioner.id && CAPACITY_CONSUMING_STATUSES.includes(b.status)
+    );
+
+    const practitionerPhantoms = phantomBookings.filter(
+      (p) => p.practitioner_id === practitioner.id
     );
 
     const allLinksForPractitioner = practitionerServices.filter((ps) => ps.practitioner_id === practitioner.id);
@@ -151,6 +169,9 @@ export function computeAppointmentAvailability(input: AppointmentEngineInput): A
 
       for (const range of workingRanges) {
         for (let t = range.start; t + totalDuration <= range.end; t += 15) {
+          // Skip slots in the past for today
+          if (isToday && t < currentMinute) continue;
+
           const slotEnd = t + totalDuration;
 
           // Check breaks
@@ -164,6 +185,14 @@ export function computeAppointmentAvailability(input: AppointmentEngineInput): A
             return overlaps(t, slotEnd, bStart, bEnd);
           });
           if (hitsBooking) continue;
+
+          // Check phantom bookings (already-selected slots in a group booking)
+          const hitsPhantom = practitionerPhantoms.some((p) => {
+            const pStart = timeToMinutes(p.start_time);
+            const pEnd = pStart + p.duration_minutes + p.buffer_minutes;
+            return overlaps(t, slotEnd, pStart, pEnd);
+          });
+          if (hitsPhantom) continue;
 
           serviceSlots.push({
             practitioner_id: practitioner.id,

@@ -32,6 +32,7 @@ interface ServiceFormData {
   buffer_minutes: number;
   price: string;
   deposit: string;
+  require_deposit: boolean;
   colour: string;
   is_active: boolean;
   practitioner_ids: string[];
@@ -49,6 +50,7 @@ const DEFAULT_FORM: ServiceFormData = {
   buffer_minutes: 0,
   price: '',
   deposit: '',
+  require_deposit: false,
   colour: '#3B82F6',
   is_active: true,
   practitioner_ids: [],
@@ -100,6 +102,9 @@ export function AppointmentServicesView({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [showBulkDeposit, setShowBulkDeposit] = useState(false);
+  const [bulkDepositAmount, setBulkDepositAmount] = useState('');
+  const [bulkSaving, setBulkSaving] = useState(false);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
@@ -145,6 +150,7 @@ export function AppointmentServicesView({
       buffer_minutes: svc.buffer_minutes,
       price: penceToPounds(svc.price_pence),
       deposit: penceToPounds(svc.deposit_pence),
+      require_deposit: svc.deposit_pence != null && svc.deposit_pence > 0,
       colour: svc.colour || '#3B82F6',
       is_active: svc.is_active,
       practitioner_ids: svcLinks,
@@ -167,6 +173,7 @@ export function AppointmentServicesView({
     setSaving(true);
     setError(null);
     try {
+      const depositPence = form.require_deposit ? (poundsToPence(form.deposit) ?? 0) : 0;
       const payload = {
         ...(editingId ? { id: editingId } : {}),
         name: form.name.trim(),
@@ -174,7 +181,7 @@ export function AppointmentServicesView({
         duration_minutes: form.duration_minutes,
         buffer_minutes: form.buffer_minutes,
         price_pence: poundsToPence(form.price) ?? undefined,
-        deposit_pence: poundsToPence(form.deposit) ?? undefined,
+        deposit_pence: depositPence,
         colour: form.colour,
         is_active: form.is_active,
         practitioner_ids: form.practitioner_ids,
@@ -227,6 +234,33 @@ export function AppointmentServicesView({
     }));
   }
 
+  async function handleBulkDeposit() {
+    const pence = poundsToPence(bulkDepositAmount);
+    if (pence == null || pence < 0) {
+      setError('Please enter a valid deposit amount');
+      return;
+    }
+    setBulkSaving(true);
+    setError(null);
+    try {
+      const activeServices = services.filter((s) => s.is_active);
+      for (const svc of activeServices) {
+        await fetch('/api/venue/appointment-services', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: svc.id, deposit_pence: pence }),
+        });
+      }
+      setShowBulkDeposit(false);
+      setBulkDepositAmount('');
+      await fetchAll();
+    } catch {
+      setError('Failed to update deposits. Please try again.');
+    } finally {
+      setBulkSaving(false);
+    }
+  }
+
   function practitionersForService(serviceId: string): Array<{ id: string; name: string }> {
     return links.filter((l) => l.service_id === serviceId).map((l) => {
       const p = practitioners.find((pr) => pr.id === l.practitioner_id);
@@ -236,18 +270,73 @@ export function AppointmentServicesView({
 
   return (
     <div>
-      <div className="mb-6 flex items-center justify-between">
+      <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <h1 className="text-2xl font-semibold text-slate-900">Services</h1>
         {isAdmin && (
-          <button
-            onClick={openCreate}
-            className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition-colors"
-          >
-            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path d="M12 5v14m-7-7h14"/></svg>
-            Add Service
-          </button>
+          <div className="flex items-center gap-2">
+            {services.length > 0 && (
+              <button
+                onClick={() => setShowBulkDeposit(true)}
+                className="inline-flex items-center gap-2 rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors"
+              >
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path d="M12 6v12m-3-2.818.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" /></svg>
+                Set Deposits for All
+              </button>
+            )}
+            <button
+              onClick={openCreate}
+              className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition-colors"
+            >
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path d="M12 5v14m-7-7h14"/></svg>
+              Add Service
+            </button>
+          </div>
         )}
       </div>
+
+      {/* Bulk Deposit Modal */}
+      {showBulkDeposit && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div role="dialog" aria-modal="true" className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl">
+            <h2 className="text-lg font-semibold text-slate-900 mb-4">Set deposit for all services</h2>
+            <p className="text-sm text-slate-500 mb-4">
+              This will update the deposit amount for all active services. Set to {sym}0 to remove deposits.
+            </p>
+            {error && (
+              <div className="mb-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
+            )}
+            <div className="mb-4">
+              <label className="mb-1 block text-sm font-medium text-slate-700">Deposit amount ({sym})</label>
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-400">{sym}</span>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={bulkDepositAmount}
+                  onChange={(e) => setBulkDepositAmount(e.target.value)}
+                  className="w-full rounded-lg border border-slate-300 pl-7 pr-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                  placeholder="5.00"
+                />
+              </div>
+            </div>
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => { setShowBulkDeposit(false); setError(null); }}
+                className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleBulkDeposit}
+                disabled={bulkSaving}
+                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+              >
+                {bulkSaving ? 'Updating...' : 'Apply to All'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {!showModal && error && (
         <div className="mb-4 rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700 flex items-center justify-between">
@@ -443,36 +532,56 @@ export function AppointmentServicesView({
                 </div>
               </div>
 
-              {/* Price + Deposit */}
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="mb-1 block text-sm font-medium text-slate-700">Price ({sym})</label>
-                  <div className="relative">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-400">{sym}</span>
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      value={form.price}
-                      onChange={(e) => setForm({ ...form, price: e.target.value })}
-                      className="w-full rounded-lg border border-slate-300 pl-7 pr-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-                      placeholder="0.00"
-                    />
-                  </div>
+              {/* Price */}
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-700">Price ({sym})</label>
+                <div className="relative max-w-[200px]">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-400">{sym}</span>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={form.price}
+                    onChange={(e) => setForm({ ...form, price: e.target.value })}
+                    className="w-full rounded-lg border border-slate-300 pl-7 pr-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                    placeholder="0.00"
+                  />
                 </div>
-                <div>
-                  <label className="mb-1 block text-sm font-medium text-slate-700">Deposit ({sym})</label>
-                  <div className="relative">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-400">{sym}</span>
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      value={form.deposit}
-                      onChange={(e) => setForm({ ...form, deposit: e.target.value })}
-                      className="w-full rounded-lg border border-slate-300 pl-7 pr-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-                      placeholder="0.00"
+              </div>
+
+              {/* Deposit toggle + amount */}
+              <div className="rounded-lg border border-slate-200 p-4 space-y-3">
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setForm({ ...form, require_deposit: !form.require_deposit })}
+                    className={`relative h-6 w-11 rounded-full transition-colors ${
+                      form.require_deposit ? 'bg-blue-600' : 'bg-slate-300'
+                    }`}
+                  >
+                    <span
+                      className={`absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${
+                        form.require_deposit ? 'translate-x-5' : 'translate-x-0'
+                      }`}
                     />
-                  </div>
+                  </button>
+                  <span className="text-sm font-medium text-slate-700">Require deposit for this service</span>
                 </div>
+                {form.require_deposit && (
+                  <div>
+                    <label className="mb-1 block text-sm text-slate-600">Deposit amount ({sym})</label>
+                    <div className="relative max-w-[200px]">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-400">{sym}</span>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={form.deposit}
+                        onChange={(e) => setForm({ ...form, deposit: e.target.value })}
+                        className="w-full rounded-lg border border-slate-300 pl-7 pr-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                        placeholder="5.00"
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Colour */}

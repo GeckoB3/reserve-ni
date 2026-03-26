@@ -36,6 +36,8 @@ export interface BookingRulesSettings {
   max_party_size: number;
   max_advance_booking_days: number;
   min_notice_hours: number;
+  cancellation_notice_hours?: number;
+  allow_same_day_booking?: boolean;
 }
 
 export interface DepositConfigSettings {

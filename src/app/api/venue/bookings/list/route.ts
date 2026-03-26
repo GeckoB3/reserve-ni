@@ -21,16 +21,19 @@ export async function GET(request: NextRequest) {
     const to = request.nextUrl.searchParams.get('to');
     const ids = request.nextUrl.searchParams.get('ids');
     const statusFilter = request.nextUrl.searchParams.get('status');
+    const groupBookingId = request.nextUrl.searchParams.get('group_booking_id');
     const isoRe = /^\d{4}-\d{2}-\d{2}$/;
 
     let query = staff.db
       .from('bookings')
-      .select('id, booking_date, booking_time, party_size, status, source, deposit_status, deposit_amount_pence, dietary_notes, occasion, estimated_end_time, created_at, guest_id, practitioner_id, appointment_service_id, experience_event_id, class_instance_id, resource_id, booking_end_time')
+      .select('id, booking_date, booking_time, party_size, status, source, deposit_status, deposit_amount_pence, dietary_notes, occasion, estimated_end_time, created_at, guest_id, practitioner_id, appointment_service_id, experience_event_id, class_instance_id, resource_id, booking_end_time, group_booking_id, person_label')
       .eq('venue_id', staff.venue_id)
       .order('booking_date', { ascending: true })
       .order('booking_time', { ascending: true });
 
-    if (ids) {
+    if (groupBookingId) {
+      query = query.eq('group_booking_id', groupBookingId);
+    } else if (ids) {
       const idList = ids.split(',').filter(Boolean);
       if (idList.length === 0) {
         return NextResponse.json({ bookings: [] });
@@ -81,6 +84,8 @@ export async function GET(request: NextRequest) {
         experience_event_id: r.experience_event_id ?? null,
         class_instance_id: r.class_instance_id ?? null,
         resource_id: r.resource_id ?? null,
+        group_booking_id: r.group_booking_id ?? null,
+        person_label: r.person_label ?? null,
       };
     });
 

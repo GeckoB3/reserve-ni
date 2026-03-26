@@ -215,9 +215,10 @@ export interface BookingNotesEditablePanelProps {
   onSaved: () => void;
   /** When true, values are visible but editing is blocked (e.g. booking detail still loading). */
   disabled?: boolean;
+  /** When true, hides dietary notes and uses appointment-style labels/placeholders. */
+  isAppointment?: boolean;
 }
 
-/** Same three-field notes card as the bookings list concertina: dietary, guest requests, staff (internal). */
 export function BookingNotesEditablePanel({
   bookingId,
   dietaryNotes,
@@ -225,27 +226,32 @@ export function BookingNotesEditablePanel({
   staffNotes,
   onSaved,
   disabled = false,
+  isAppointment = false,
 }: BookingNotesEditablePanelProps) {
   return (
     <div
       className={`rounded-xl border border-slate-200 bg-white p-3.5 space-y-4 ${disabled ? 'pointer-events-none opacity-50' : ''}`}
       aria-busy={disabled || undefined}
     >
+      {!isAppointment && (
+        <>
+          <EditableField
+            label="Dietary Notes"
+            value={dietaryNotes ?? ''}
+            bookingId={bookingId}
+            fieldKey="dietary_notes"
+            placeholder="e.g. Gluten free, nut allergy"
+            onSaved={onSaved}
+          />
+          <div className="border-t border-slate-100" />
+        </>
+      )}
       <EditableField
-        label="Dietary Notes"
-        value={dietaryNotes ?? ''}
-        bookingId={bookingId}
-        fieldKey="dietary_notes"
-        placeholder="e.g. Gluten free, nut allergy"
-        onSaved={onSaved}
-      />
-      <div className="border-t border-slate-100" />
-      <EditableField
-        label="Guest Requests"
+        label={isAppointment ? 'Client Requests' : 'Guest Requests'}
         value={guestRequests ?? ''}
         bookingId={bookingId}
         fieldKey="special_requests"
-        placeholder="e.g. Window seat preferred"
+        placeholder={isAppointment ? 'e.g. Prefers morning appointments, needs wheelchair access' : 'e.g. Window seat preferred'}
         onSaved={onSaved}
       />
       <div className="border-t border-slate-100" />
@@ -254,7 +260,7 @@ export function BookingNotesEditablePanel({
         value={staffNotes ?? ''}
         bookingId={bookingId}
         fieldKey="internal_notes"
-        placeholder="Internal notes (not visible to guest)"
+        placeholder={isAppointment ? 'Internal notes (not visible to client)' : 'Internal notes (not visible to guest)'}
         multiline
         onSaved={onSaved}
       />

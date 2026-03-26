@@ -25,10 +25,11 @@ interface PractitionerServiceLink {
   service_id: string;
 }
 
-type Tab = 'team' | 'hours' | 'breaks' | 'daysoff';
+type Tab = 'team' | 'services' | 'hours' | 'breaks' | 'daysoff';
 
 const TABS: Array<{ key: Tab; label: string }> = [
   { key: 'team', label: 'Team' },
+  { key: 'services', label: 'Services' },
   { key: 'hours', label: 'Working Hours' },
   { key: 'breaks', label: 'Breaks' },
   { key: 'daysoff', label: 'Days Off' },
@@ -63,6 +64,7 @@ export function AppointmentAvailabilitySettings({ venueId }: { venueId: string }
   const [formEmail, setFormEmail] = useState('');
   const [formPhone, setFormPhone] = useState('');
   const [formActive, setFormActive] = useState(true);
+  const [formServiceIds, setFormServiceIds] = useState<string[]>([]);
 
   // Selected practitioner for hours/breaks/daysoff tabs
   const [selectedPractitionerId, setSelectedPractitionerId] = useState<string>('');
@@ -117,6 +119,7 @@ export function AppointmentAvailabilitySettings({ venueId }: { venueId: string }
     setFormEmail('');
     setFormPhone('');
     setFormActive(true);
+    setFormServiceIds([]);
     setError(null);
     setShowForm(true);
   }
@@ -127,6 +130,7 @@ export function AppointmentAvailabilitySettings({ venueId }: { venueId: string }
     setFormEmail(p.email ?? '');
     setFormPhone(p.phone ?? '');
     setFormActive(p.is_active);
+    setFormServiceIds(pLinks.filter((l) => l.practitioner_id === p.id).map((l) => l.service_id));
     setError(null);
     setShowForm(true);
   }
@@ -159,6 +163,21 @@ export function AppointmentAvailabilitySettings({ venueId }: { venueId: string }
         const d = await res.json();
         throw new Error(d.error ?? 'Failed to save');
       }
+
+      const practitionerData = await res.json();
+      const pracId = editingId ?? practitionerData?.id;
+
+      if (pracId) {
+        const linkRes = await fetch('/api/venue/practitioner-services', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ practitioner_id: pracId, service_ids: formServiceIds }),
+        });
+        if (!linkRes.ok) {
+          console.error('Failed to sync practitioner service links');
+        }
+      }
+
       setShowForm(false);
       flash(editingId ? 'Team member updated' : 'Team member added');
       await fetchData();
@@ -403,6 +422,32 @@ export function AppointmentAvailabilitySettings({ venueId }: { venueId: string }
                         </button>
                         <span className="text-sm text-slate-700">Active</span>
                       </div>
+
+                      {services.length > 0 && (
+                        <div>
+                          <label className="mb-1.5 block text-sm font-medium text-slate-700">Services offered</label>
+                          <p className="mb-2 text-xs text-slate-500">Select which services this team member can perform. Leave all unchecked to offer all services.</p>
+                          <div className="space-y-2 max-h-40 overflow-y-auto rounded-lg border border-slate-200 p-3">
+                            {services.map((svc) => (
+                              <label key={svc.id} className="flex items-center gap-2.5 cursor-pointer">
+                                <input
+                                  type="checkbox"
+                                  checked={formServiceIds.includes(svc.id)}
+                                  onChange={(e) => {
+                                    setFormServiceIds((prev) =>
+                                      e.target.checked
+                                        ? [...prev, svc.id]
+                                        : prev.filter((id) => id !== svc.id)
+                                    );
+                                  }}
+                                  className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                                />
+                                <span className="text-sm text-slate-700">{svc.name}</span>
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </div>
                     <div className="mt-6 flex justify-end gap-3">
                       <button onClick={() => setShowForm(false)} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Cancel</button>
@@ -416,8 +461,18 @@ export function AppointmentAvailabilitySettings({ venueId }: { venueId: string }
             </div>
           )}
 
+          {/* ─── Services Tab ─── */}
+          {tab === 'services' && (
+            <ServiceLinkingGrid
+              practitioners={practitioners}
+              services={services}
+              links={pLinks}
+              onLinksChanged={fetchData}
+            />
+          )}
+
           {/* ─── Working Hours / Breaks / Days Off ─── */}
-          {tab !== 'team' && (
+          {(tab === 'hours' || tab === 'breaks' || tab === 'daysoff') && (
             <div>
               {/* Practitioner selector */}
               {practitioners.length === 0 ? (
@@ -750,6 +805,123 @@ function DaysOffEditor({
       >
         {saving ? 'Saving...' : 'Save Days Off'}
       </button>
+    </div>
+  );
+}
+
+// ─── Service Linking Grid ─────────────────────────────────────────────────
+function ServiceLinkingGrid({
+  practitioners,
+  services,
+  links,
+  onLinksChanged,
+}: {
+  practitioners: Practitioner[];
+  services: Service[];
+  links: PractitionerServiceLink[];
+  onLinksChanged: () => void;
+}) {
+  const [saving, setSaving] = useState<string | null>(null);
+
+  function isLinked(pracId: string, svcId: string): boolean {
+    return links.some((l) => l.practitioner_id === pracId && l.service_id === svcId);
+  }
+
+  async function toggleLink(pracId: string, svcId: string) {
+    setSaving(`${pracId}_${svcId}`);
+    try {
+      const currentServiceIds = links.filter((l) => l.practitioner_id === pracId).map((l) => l.service_id);
+      const newServiceIds = isLinked(pracId, svcId)
+        ? currentServiceIds.filter((id) => id !== svcId)
+        : [...currentServiceIds, svcId];
+
+      const res = await fetch('/api/venue/practitioner-services', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ practitioner_id: pracId, service_ids: newServiceIds }),
+      });
+      if (res.ok) onLinksChanged();
+    } catch {
+      // silently fail — re-fetch restores truth
+    } finally {
+      setSaving(null);
+    }
+  }
+
+  if (services.length === 0) {
+    return (
+      <div className="rounded-xl border border-slate-200 bg-white p-12 text-center">
+        <p className="text-slate-500">No services configured yet. Add services first from the Services page.</p>
+      </div>
+    );
+  }
+
+  if (practitioners.length === 0) {
+    return (
+      <div className="rounded-xl border border-slate-200 bg-white p-12 text-center">
+        <p className="text-slate-500">No team members configured yet. Add team members from the Team tab.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <p className="mb-4 text-sm text-slate-500">
+        Configure which services each team member can perform. Team members with no services checked will be offered all services.
+      </p>
+      <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+        <table className="min-w-full text-sm">
+          <thead>
+            <tr className="border-b border-slate-100 bg-slate-50">
+              <th className="px-4 py-3 text-left font-semibold text-slate-700">Team Member</th>
+              {services.map((svc) => (
+                <th key={svc.id} className="px-4 py-3 text-center font-semibold text-slate-700 whitespace-nowrap">{svc.name}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {practitioners.map((prac) => {
+              const pracHasLinks = links.some((l) => l.practitioner_id === prac.id);
+              return (
+                <tr key={prac.id} className="border-b border-slate-50 last:border-b-0 hover:bg-slate-50/50">
+                  <td className="px-4 py-3 font-medium text-slate-900">
+                    <div className="flex items-center gap-2">
+                      {prac.name}
+                      {!pracHasLinks && (
+                        <span className="text-[10px] text-slate-400 rounded-full bg-slate-100 px-2 py-0.5">All services</span>
+                      )}
+                    </div>
+                  </td>
+                  {services.map((svc) => {
+                    const linked = isLinked(prac.id, svc.id);
+                    const isSaving = saving === `${prac.id}_${svc.id}`;
+                    return (
+                      <td key={svc.id} className="px-4 py-3 text-center">
+                        <button
+                          type="button"
+                          onClick={() => toggleLink(prac.id, svc.id)}
+                          disabled={isSaving}
+                          className={`inline-flex h-6 w-6 items-center justify-center rounded transition-colors ${
+                            linked
+                              ? 'bg-blue-600 text-white hover:bg-blue-700'
+                              : 'border border-slate-300 text-transparent hover:border-blue-400 hover:bg-blue-50'
+                          } ${isSaving ? 'opacity-50' : ''}`}
+                        >
+                          {linked && (
+                            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                            </svg>
+                          )}
+                        </button>
+                      </td>
+                    );
+                  })}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
