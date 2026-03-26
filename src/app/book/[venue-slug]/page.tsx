@@ -1,6 +1,6 @@
 import { notFound } from 'next/navigation';
 import { getSupabaseAdminClient } from '@/lib/supabase';
-import { BookingFlow } from '@/components/booking/BookingFlow';
+import { BookingFlowRouter } from '@/components/booking/BookingFlowRouter';
 import { hasServiceConfig } from '@/lib/availability';
 import type { VenuePublic, OpeningHours } from '@/components/booking/types';
 
@@ -8,25 +8,29 @@ async function getVenue(slug: string): Promise<VenuePublic | null> {
   const supabase = getSupabaseAdminClient();
   const { data, error } = await supabase
     .from('venues')
-    .select('id, name, slug, cover_photo_url, address, phone, deposit_config, booking_rules, opening_hours, timezone')
+    .select('id, name, slug, cover_photo_url, address, phone, deposit_config, booking_rules, opening_hours, timezone, booking_model, terminology')
     .eq('slug', slug)
     .single();
   if (error || !data) return null;
 
-  const usesNewEngine = await hasServiceConfig(supabase, data.id);
-  if (usesNewEngine) {
-    const { data: restriction } = await supabase
-      .from('booking_restrictions')
-      .select('min_party_size_online, max_party_size_online')
-      .eq('venue_id', data.id)
-      .limit(1)
-      .maybeSingle();
+  const bookingModel = (data.booking_model as string) ?? 'table_reservation';
 
-    if (restriction) {
-      data.booking_rules = {
-        min_party_size: restriction.min_party_size_online,
-        max_party_size: restriction.max_party_size_online,
-      };
+  if (bookingModel === 'table_reservation') {
+    const usesNewEngine = await hasServiceConfig(supabase, data.id);
+    if (usesNewEngine) {
+      const { data: restriction } = await supabase
+        .from('booking_restrictions')
+        .select('min_party_size_online, max_party_size_online')
+        .eq('venue_id', data.id)
+        .limit(1)
+        .maybeSingle();
+
+      if (restriction) {
+        data.booking_rules = {
+          min_party_size: restriction.min_party_size_online,
+          max_party_size: restriction.max_party_size_online,
+        };
+      }
     }
   }
 
@@ -148,7 +152,7 @@ export default async function BookPage({ params }: { params: Promise<{ 'venue-sl
 
       {/* Booking flow */}
       <div className="mx-auto max-w-lg px-4 py-8 pb-24">
-        <BookingFlow venue={venue} cancellationPolicy={CANCELLATION_POLICY} />
+        <BookingFlowRouter venue={venue} cancellationPolicy={CANCELLATION_POLICY} />
       </div>
 
       {/* Footer */}

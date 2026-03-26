@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { DashboardSidebar } from './DashboardSidebar';
 import { SessionTimeoutGuard } from '@/components/SessionTimeoutGuard';
+import type { BookingModel } from '@/types/booking-models';
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createClient();
@@ -16,8 +17,12 @@ export default async function DashboardLayout({ children }: { children: React.Re
   let venueSlug: string | undefined;
   let staffName: string | undefined;
   let tableManagementEnabled = false;
+  let bookingModel: BookingModel = 'table_reservation';
   let venueId: string | undefined;
   let isAdmin = false;
+  let pricingTier: string = 'business';
+  let planStatus: string = 'active';
+  let onboardingCompleted = true;
   try {
     const admin = getSupabaseAdminClient();
     const { data: staffRows } = await admin
@@ -26,21 +31,34 @@ export default async function DashboardLayout({ children }: { children: React.Re
       .ilike('email', email.toLowerCase().trim())
       .limit(1);
     const staffRow = staffRows?.[0];
+
+    if (!staffRow?.venue_id) {
+      redirect('/signup/business-type');
+    }
+
     isAdmin = staffRow?.role === 'admin';
     staffName = staffRow?.name ?? undefined;
     venueId = staffRow?.venue_id ?? undefined;
     if (venueId) {
       const { data: venue } = await admin
         .from('venues')
-        .select('name, slug, table_management_enabled')
+        .select('name, slug, table_management_enabled, booking_model, pricing_tier, plan_status, onboarding_completed')
         .eq('id', venueId)
         .single();
       venueName = venue?.name ?? undefined;
       venueSlug = venue?.slug ?? undefined;
       tableManagementEnabled = venue?.table_management_enabled ?? false;
+      bookingModel = (venue?.booking_model as BookingModel) ?? 'table_reservation';
+      pricingTier = (venue?.pricing_tier as string) ?? 'business';
+      planStatus = (venue?.plan_status as string) ?? 'active';
+      onboardingCompleted = (venue?.onboarding_completed as boolean) ?? true;
+
+      if (!onboardingCompleted) {
+        redirect('/onboarding');
+      }
     }
-  } catch {
-    // Non-critical; sidebar still renders without venue name
+  } catch (e) {
+    if (e && typeof e === 'object' && 'digest' in e) throw e;
   }
 
   return (
@@ -51,9 +69,32 @@ export default async function DashboardLayout({ children }: { children: React.Re
         venueName={venueName}
         venueSlug={venueSlug}
         tableManagementEnabled={tableManagementEnabled}
+        bookingModel={bookingModel}
         isAdmin={isAdmin}
       />
       <main className="flex-1 overflow-y-auto pt-14 lg:pt-0">
+        {planStatus === 'cancelled' && (
+          <div className="border-b border-amber-200 bg-amber-50 px-6 py-3">
+            <div className="flex items-center justify-between">
+              <p className="text-sm text-amber-800">
+                Your subscription has been cancelled. Resubscribe to continue using all features.
+              </p>
+              <a
+                href="/dashboard/settings?tab=plan"
+                className="rounded-lg bg-amber-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-amber-700"
+              >
+                Resubscribe
+              </a>
+            </div>
+          </div>
+        )}
+        {planStatus === 'past_due' && (
+          <div className="border-b border-red-200 bg-red-50 px-6 py-3">
+            <p className="text-sm text-red-800">
+              Your last payment failed. Please update your payment method to avoid service interruption.
+            </p>
+          </div>
+        )}
         {venueId && <SessionTimeoutGuard venueId={venueId} />}
         {children}
       </main>

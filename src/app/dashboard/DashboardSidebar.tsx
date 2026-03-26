@@ -5,7 +5,11 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useMemo, useState } from 'react';
 import { createClient } from '@/lib/supabase/browser';
 
-const NAV_ITEMS = [
+import type { BookingModel } from '@/types/booking-models';
+
+type NavItem = { href: string; label: string; icon: React.ComponentType<{ className?: string }> };
+
+const BASE_NAV_ITEMS: NavItem[] = [
   { href: '/dashboard', label: 'Home', icon: HomeIcon },
   { href: '/dashboard/bookings', label: 'Reservations', icon: CalendarIcon },
   { href: '/dashboard/bookings/new', label: 'New Booking', icon: PlusIcon },
@@ -15,12 +19,31 @@ const NAV_ITEMS = [
   { href: '/dashboard/availability', label: 'Availability', icon: ClockIcon },
 ];
 
+const MODEL_NAV_ITEMS: Partial<Record<BookingModel, NavItem[]>> = {
+  practitioner_appointment: [
+    { href: '/dashboard/practitioner-calendar', label: 'Calendar', icon: CalendarIcon },
+    { href: '/dashboard/appointment-services', label: 'Services', icon: ClockIcon },
+  ],
+  event_ticket: [
+    { href: '/dashboard/event-manager', label: 'Events', icon: CalendarIcon },
+  ],
+  class_session: [
+    { href: '/dashboard/class-timetable', label: 'Timetable', icon: CalendarIcon },
+  ],
+  resource_booking: [
+    { href: '/dashboard/resource-timeline', label: 'Resources', icon: CalendarIcon },
+  ],
+};
+
+const TABLE_RESERVATION_ONLY = new Set(['/dashboard/waitlist', '/dashboard/availability']);
+
 interface Props {
   email: string;
   staffName?: string;
   venueName?: string;
   venueSlug?: string;
   tableManagementEnabled?: boolean;
+  bookingModel?: BookingModel;
   /** Reports and Availability nav items are admin-only. */
   isAdmin?: boolean;
 }
@@ -33,16 +56,36 @@ export function DashboardSidebar({
   venueName,
   venueSlug,
   tableManagementEnabled,
+  bookingModel = 'table_reservation',
   isAdmin = false,
 }: Props) {
   const pathname = usePathname();
   const router = useRouter();
   const [mobileOpen, setMobileOpen] = useState(false);
 
-  const navItems = useMemo(
-    () => (isAdmin ? NAV_ITEMS : NAV_ITEMS.filter((item) => !ADMIN_ONLY_HREFS.has(item.href))),
-    [isAdmin],
-  );
+  const navItems = useMemo(() => {
+    const isTableReservation = bookingModel === 'table_reservation';
+
+    // Start with base items, filtering out model-A-only items for other models
+    let items = BASE_NAV_ITEMS.filter((item) => {
+      if (!isTableReservation && TABLE_RESERVATION_ONLY.has(item.href)) return false;
+      if (!isAdmin && ADMIN_ONLY_HREFS.has(item.href)) return false;
+      return true;
+    });
+
+    // Insert model-specific nav items after "New Booking"
+    const modelItems = MODEL_NAV_ITEMS[bookingModel];
+    if (modelItems) {
+      const insertIdx = items.findIndex((i) => i.href === '/dashboard/bookings/new');
+      if (insertIdx >= 0) {
+        items = [...items.slice(0, insertIdx + 1), ...modelItems, ...items.slice(insertIdx + 1)];
+      } else {
+        items = [...items, ...modelItems];
+      }
+    }
+
+    return items;
+  }, [isAdmin, bookingModel]);
 
   async function handleSignOut() {
     const supabase = createClient();

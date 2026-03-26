@@ -20,6 +20,9 @@ export interface VenueSettings {
   timezone: string;
   table_management_enabled?: boolean;
   combination_threshold?: number;
+  pricing_tier?: string;
+  plan_status?: string;
+  calendar_count?: number | null;
 }
 
 export type OpeningHoursDaySettings =

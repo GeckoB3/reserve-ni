@@ -14,9 +14,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Reserve NI - Booking & Guest Management for NI Restaurants",
+  title: "Reserve NI - Booking Management for Every Business in Northern Ireland",
   description:
-    "Reduce no-shows, collect deposits, and automate guest communications. Built for independent restaurants in Northern Ireland.",
+    "Manage bookings, reduce no-shows, collect deposits, and automate client communications. Built for restaurants, salons, studios, and every bookable business in Northern Ireland.",
 };
 
 export default function RootLayout({

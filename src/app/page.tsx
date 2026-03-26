@@ -1,33 +1,50 @@
 import Link from "next/link";
 import ContactForm from "@/components/ContactForm";
+import { PricingCalculator } from "@/components/landing/PricingCalculator";
 
 const features = [
   {
     title: "Deposit Collection",
-    description: "Reduce no-shows by 60%+ with per-head deposits via Stripe. Funds go directly to your account - Reserve NI never holds your money.",
+    description: "Reduce no-shows by 60%+ with per-head deposits via Stripe. Funds go directly to your account. Reserve NI never holds your money.",
     icon: CreditCardIcon,
   },
   {
     title: "Smart Communications",
-    description: "Automated confirmation emails, SMS reminders 24 hours before, and follow-ups - all handled for you.",
+    description: "Automated confirmation emails, SMS reminders 24 hours before, and follow-ups, all handled for you.",
     icon: ChatIcon,
   },
   {
     title: "Real-time Dashboard",
-    description: "Live booking management with a day sheet view, walk-in logging, phone bookings, and allergy flag tracking.",
+    description: "Live booking management with day sheet view, walk-in logging, phone bookings, and allergy flag tracking.",
     icon: DashboardIcon,
   },
   {
     title: "Easy Setup",
-    description: "Embed the booking widget on your website or generate a QR code for table-side booking. Up and running in minutes.",
+    description: "Embed the booking widget on your website or generate a QR code. Up and running in minutes.",
     icon: BoltIcon,
+  },
+  {
+    title: "Any Bookable Business",
+    description: "Restaurants, barbers, beauty salons, yoga studios, tennis courts, escape rooms. If it's bookable, Reserve NI handles it.",
+    icon: GridIcon,
+  },
+  {
+    title: "Built for Northern Ireland",
+    description: "Local support, GBP pricing, and tailored to the NI business community. No commissions, no hidden fees.",
+    icon: MapPinIcon,
   },
 ];
 
+const businessTypes = [
+  "Restaurants", "Barbers", "Hairdressers", "Beauty Therapists", "Physiotherapists",
+  "Yoga Studios", "Gyms", "Tennis Courts", "Escape Rooms", "Dog Groomers",
+  "Photography Studios", "Meeting Rooms", "Golf Tee Times", "Driving Instructors",
+];
+
 const steps = [
-  { number: "1", title: "Sign up and configure", description: "Create your account, set your sittings, covers, and cancellation policy." },
-  { number: "2", title: "Embed or share", description: "Add the booking widget to your website or print a QR code for in-venue use." },
-  { number: "3", title: "Manage live", description: "See today's bookings at a glance, mark arrivals, handle no-shows, and track deposits." },
+  { number: "1", title: "Sign up and choose your plan", description: "Create your account, pick your business type, and select Standard or Business." },
+  { number: "2", title: "Set up in minutes", description: "Our model-aware wizard walks you through the setup for your specific business type." },
+  { number: "3", title: "Start taking bookings", description: "Share your booking page link, embed the widget, or print a QR code so your clients can book instantly." },
 ];
 
 export default function Home() {
@@ -39,9 +56,11 @@ export default function Home() {
           <Link href="/" className="flex-shrink-0">
             <img src="/Logo.png" alt="Reserve NI" className="h-9 w-auto" />
           </Link>
-          <Link href="/login" className="rounded-xl bg-brand-600 px-5 py-2.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-brand-700">
-            Log in
-          </Link>
+          <div className="flex items-center gap-4">
+            <Link href="/login" className="rounded-xl bg-brand-600 px-5 py-2.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-brand-700">
+              Log in
+            </Link>
+          </div>
         </div>
       </nav>
 
@@ -54,18 +73,26 @@ export default function Home() {
             Reserve&nbsp;NI
           </h1>
           <p className="mt-4 text-lg font-medium text-brand-700 sm:text-xl">
-            Booking and guest management for Northern Ireland&rsquo;s independent restaurants
+            Booking management for every business in Northern Ireland
           </p>
           <p className="mx-auto mt-6 max-w-2xl text-base leading-relaxed text-slate-500 sm:text-lg">
-            Reduce no-shows, collect deposits, and automate guest communications - all in one platform built for NI hospitality.
+            Restaurants, salons, studios, courts, and more: manage bookings, reduce no-shows, and automate client communications from one platform.
           </p>
           <div className="mt-10 flex flex-col items-center gap-4 sm:flex-row sm:justify-center">
-            <Link href="#contact" className="inline-flex h-12 items-center rounded-xl bg-brand-600 px-8 text-base font-semibold text-white shadow-lg shadow-brand-600/20 transition-all hover:bg-brand-700 hover:shadow-xl hover:shadow-brand-600/30">
+            <Link href="#pricing" className="inline-flex h-12 items-center rounded-xl bg-brand-600 px-8 text-base font-semibold text-white shadow-lg shadow-brand-600/20 transition-all hover:bg-brand-700 hover:shadow-xl hover:shadow-brand-600/30">
               Get started
             </Link>
-            <Link href="#features" className="inline-flex h-12 items-center rounded-xl border border-slate-200 bg-white px-8 text-base font-semibold text-slate-700 transition-colors hover:border-slate-300 hover:bg-slate-50">
-              Learn more
-            </Link>
+          </div>
+          {/* Business type ticker */}
+          <div className="mt-12 flex flex-wrap justify-center gap-2">
+            {businessTypes.map((bt) => (
+              <span key={bt} className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-500">
+                {bt}
+              </span>
+            ))}
+            <span className="rounded-full border border-brand-200 bg-brand-50 px-3 py-1 text-xs font-medium text-brand-600">
+              + 30 more
+            </span>
           </div>
         </div>
       </section>
@@ -74,12 +101,12 @@ export default function Home() {
       <section id="features" className="scroll-mt-16 bg-white py-20 sm:py-28">
         <div className="mx-auto max-w-6xl px-6">
           <h2 className="text-center text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">
-            Everything you need to fill seats - and keep them filled
+            Everything you need to manage bookings
           </h2>
           <p className="mx-auto mt-4 max-w-2xl text-center text-slate-500">
-            Purpose-built for independent restaurants. No enterprise bloat, no commission on covers.
+            Purpose-built for Northern Ireland. No enterprise bloat, no commission on bookings.
           </p>
-          <div className="mt-14 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="mt-14 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
             {features.map((f) => (
               <div key={f.title} className="group rounded-2xl border border-slate-100 bg-white p-6 transition-all hover:border-brand-200 hover:shadow-lg hover:shadow-brand-600/5">
                 <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-brand-50 text-brand-600 transition-colors group-hover:bg-brand-100">
@@ -97,7 +124,7 @@ export default function Home() {
       <section className="bg-slate-50 py-20 sm:py-28">
         <div className="mx-auto max-w-4xl px-6">
           <h2 className="text-center text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">How it works</h2>
-          <p className="mx-auto mt-4 max-w-xl text-center text-slate-500">Three steps to fewer no-shows and happier guests.</p>
+          <p className="mx-auto mt-4 max-w-xl text-center text-slate-500">Three steps to streamlined bookings.</p>
           <ol className="mt-14 grid gap-10 sm:grid-cols-3">
             {steps.map((s) => (
               <li key={s.number} className="text-center">
@@ -111,36 +138,85 @@ export default function Home() {
       </section>
 
       {/* Pricing */}
-      <section className="bg-white py-20 sm:py-28">
-        <div className="mx-auto max-w-3xl px-6 text-center">
-          <h2 className="text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">Pricing</h2>
-          <p className="mx-auto mt-4 max-w-xl text-slate-500">Simple and transparent&nbsp;&mdash; no commission, no hidden fees.</p>
-          <div className="mx-auto mt-12 max-w-md overflow-hidden rounded-2xl border border-brand-100 bg-gradient-to-br from-brand-50 to-white shadow-sm">
-            <div className="p-8">
-              <span className="inline-block rounded-full bg-brand-100 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-brand-700">Founding programme</span>
-              <p className="mt-4 text-5xl font-extrabold text-slate-900">Free</p>
-              <p className="mt-1 text-sm text-slate-500">for the first 10&ndash;20 venues</p>
-              <ul className="mt-6 space-y-3 text-left text-sm text-slate-600">
-                <li className="flex items-start gap-2.5">
-                  <svg className="mt-0.5 h-5 w-5 flex-shrink-0 text-brand-600" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" /></svg>
-                  Full access to all features during founding programme
-                </li>
-                <li className="flex items-start gap-2.5">
-                  <svg className="mt-0.5 h-5 w-5 flex-shrink-0 text-brand-600" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" /></svg>
-                  Deposits go directly to your Stripe account
-                </li>
-                <li className="flex items-start gap-2.5">
-                  <svg className="mt-0.5 h-5 w-5 flex-shrink-0 text-brand-600" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" /></svg>
-                  Reserve NI never holds your funds
-                </li>
-                <li className="flex items-start gap-2.5">
-                  <svg className="mt-0.5 h-5 w-5 flex-shrink-0 text-brand-600" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" /></svg>
-                  Priority support and onboarding
-                </li>
+      <section id="pricing" className="scroll-mt-16 bg-white py-20 sm:py-28">
+        <div className="mx-auto max-w-5xl px-6">
+          <h2 className="text-center text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">Simple, transparent pricing</h2>
+          <p className="mx-auto mt-4 max-w-xl text-center text-slate-500">No commission, no hidden fees. Pick the plan that fits your business.</p>
+
+          <div className="mt-14 grid items-stretch gap-8 sm:grid-cols-2 lg:grid-cols-3">
+            {/* Standard */}
+            <div className="flex flex-col rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
+              <h3 className="text-lg font-bold text-slate-900">Standard</h3>
+              <div className="mt-3 flex items-baseline gap-1">
+                <span className="text-4xl font-extrabold text-slate-900">&pound;10</span>
+                <span className="text-sm text-slate-500">/month per calendar</span>
+              </div>
+              <p className="mt-2 text-sm font-medium leading-snug text-slate-700">
+                Everything you need to fill your diary and stop no-shows
+              </p>
+              <PricingCalculator />
+              <ul className="mt-6 flex-1 space-y-3 text-sm text-slate-600">
+                <PricingFeature text="Open for bookings 24/7, even when you are not" />
+                <PricingFeature text="Automated reminders so clients show up, not just book" />
+                <PricingFeature text="Take deposits upfront. Late cancellations cost you less" />
+                <PricingFeature text="One-tap confirm or cancel. Clients manage themselves" />
+                <PricingFeature text="Your schedule, client notes, and history on any device" />
+                <PricingFeature text="A professional booking page ready to share in minutes" />
               </ul>
-              <Link href="#contact" className="mt-8 inline-flex h-12 w-full items-center justify-center rounded-xl bg-brand-600 text-base font-semibold text-white shadow-lg shadow-brand-600/20 transition-all hover:bg-brand-700 hover:shadow-xl">
-                Join the founding programme
+              <Link href="/signup" className="mt-8 inline-flex h-11 w-full items-center justify-center rounded-xl bg-brand-600 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700">
+                Get started
               </Link>
+            </div>
+
+            {/* Business */}
+            <div className="flex flex-col rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
+              <h3 className="text-lg font-bold text-slate-900">Business</h3>
+              <div className="mt-3 flex items-baseline gap-1">
+                <span className="text-4xl font-extrabold text-slate-900">&pound;79</span>
+                <span className="text-sm text-slate-500">/month</span>
+              </div>
+              <p className="mt-2 text-sm font-medium leading-snug text-slate-700">
+                Run a smoother operation and never lose a booking again
+              </p>
+              <p className="mt-4 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Everything in Standard, plus
+              </p>
+              <ul className="mt-3 flex-1 space-y-3 text-sm text-slate-600">
+                <PricingFeature text="Unlimited calendars included" />
+                <PricingFeature text="SMS reminders. 98% open rate vs 20% for email" />
+                <PricingFeature text="Confirm or cancel by text. Reduce no-shows by 60%+" />
+                <PricingFeature text="Visual timeline and table management. Your whole day at a glance" />
+                <PricingFeature text="Live floor plan so you can seat walk-ins on the spot" />
+                <PricingFeature text="Priority phone support whenever you need it" />
+              </ul>
+              <Link href="/signup" className="mt-8 inline-flex h-11 w-full items-center justify-center rounded-xl bg-brand-600 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700">
+                Get started
+              </Link>
+            </div>
+
+            {/* Founding Partner */}
+            <div className="flex flex-col rounded-2xl border border-emerald-200 bg-gradient-to-br from-emerald-50 to-white p-8 shadow-sm">
+              <div className="flex items-center gap-2">
+                <h3 className="text-lg font-bold text-slate-900">Founding Partner</h3>
+                <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-700">Limited</span>
+              </div>
+              <div className="mt-3 flex items-baseline gap-1">
+                <span className="text-4xl font-extrabold text-slate-900">Free</span>
+                <span className="text-sm text-slate-500">for 6 months</span>
+              </div>
+              <p className="mt-2 text-sm font-medium leading-snug text-emerald-800">
+                Be one of the first. Get everything free while you help us build it
+              </p>
+              <p className="mt-1 text-xs text-emerald-600">Only 20 spots available.</p>
+              <ul className="mt-6 flex-1 space-y-3 text-sm text-slate-600">
+                <PricingFeature text="Full Business plan. Every feature, nothing held back" />
+                <PricingFeature text="Six months completely free. No card needed to start" />
+                <PricingFeature text="We set everything up with you, one-on-one" />
+                <PricingFeature text="Your feedback directly shapes what we build next" />
+              </ul>
+              <a href="#contact" className="mt-8 inline-flex h-11 w-full items-center justify-center rounded-xl bg-emerald-600 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-emerald-700">
+                Apply now
+              </a>
             </div>
           </div>
         </div>
@@ -166,12 +242,24 @@ export default function Home() {
         <div className="mx-auto flex max-w-6xl flex-col items-center gap-4 px-6 text-sm text-slate-500 sm:flex-row sm:justify-between">
           <p>&copy; 2026 Reserve&nbsp;NI</p>
           <div className="flex gap-6">
+            <Link href="/signup" className="transition-colors hover:text-slate-900">Sign up</Link>
             <Link href="/login" className="transition-colors hover:text-slate-900">Login</Link>
             <a href="mailto:hello@reserveni.com" className="transition-colors hover:text-slate-900">Contact</a>
           </div>
         </div>
       </footer>
     </div>
+  );
+}
+
+function PricingFeature({ text }: { text: string }) {
+  return (
+    <li className="flex items-start gap-2.5">
+      <svg className="mt-0.5 h-5 w-5 flex-shrink-0 text-brand-600" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
+      </svg>
+      {text}
+    </li>
   );
 }
 
@@ -203,6 +291,23 @@ function BoltIcon() {
   return (
     <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
       <path strokeLinecap="round" strokeLinejoin="round" d="m3.75 13.5 10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75Z" />
+    </svg>
+  );
+}
+
+function GridIcon() {
+  return (
+    <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 0 1 6 3.75h2.25A2.25 2.25 0 0 1 10.5 6v2.25a2.25 2.25 0 0 1-2.25 2.25H6a2.25 2.25 0 0 1-2.25-2.25V6ZM3.75 15.75A2.25 2.25 0 0 1 6 13.5h2.25a2.25 2.25 0 0 1 2.25 2.25V18a2.25 2.25 0 0 1-2.25 2.25H6A2.25 2.25 0 0 1 3.75 18v-2.25ZM13.5 6a2.25 2.25 0 0 1 2.25-2.25H18A2.25 2.25 0 0 1 20.25 6v2.25A2.25 2.25 0 0 1 18 10.5h-2.25a2.25 2.25 0 0 1-2.25-2.25V6ZM13.5 15.75a2.25 2.25 0 0 1 2.25-2.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-2.25a2.25 2.25 0 0 1-2.25-2.25v-2.25Z" />
+    </svg>
+  );
+}
+
+function MapPinIcon() {
+  return (
+    <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M15 10.5a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1 1 15 0Z" />
     </svg>
   );
 }

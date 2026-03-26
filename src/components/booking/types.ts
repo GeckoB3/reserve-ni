@@ -15,6 +15,8 @@ export interface VenuePublic {
   booking_rules: BookingRulesPublic | null;
   opening_hours: OpeningHours | null;
   timezone: string;
+  booking_model?: string;
+  terminology?: { client: string; booking: string; staff: string };
 }
 
 export interface DepositConfigPublic {

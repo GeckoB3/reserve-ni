@@ -13,6 +13,10 @@ import {
   type CombinationTable,
   type ManualCombination,
 } from '@/lib/table-management/combination-engine';
+import { computeAppointmentAvailability, fetchAppointmentInput } from '@/lib/availability/appointment-engine';
+import { computeEventAvailability, fetchEventInput } from '@/lib/availability/event-ticket-engine';
+import { computeClassAvailability, fetchClassInput } from '@/lib/availability/class-session-engine';
+import { computeResourceAvailability, fetchResourceInput } from '@/lib/availability/resource-booking-engine';
 
 function toMinutes(value: string): number {
   const [h, m] = value.slice(0, 5).split(':').map(Number);
@@ -159,6 +163,22 @@ export async function GET(request: NextRequest) {
 
     const supabase = getSupabaseAdminClient();
     const venueMode = await resolveVenueMode(supabase, venueId);
+
+    // Dispatch to model-specific availability engines
+    if (venueMode.bookingModel === 'practitioner_appointment') {
+      return handleAppointmentAvailability(supabase, venueId, dateStr, searchParams);
+    }
+    if (venueMode.bookingModel === 'event_ticket') {
+      return handleEventAvailability(supabase, venueId, dateStr);
+    }
+    if (venueMode.bookingModel === 'class_session') {
+      return handleClassAvailability(supabase, venueId, dateStr);
+    }
+    if (venueMode.bookingModel === 'resource_booking') {
+      return handleResourceAvailability(supabase, venueId, dateStr, searchParams);
+    }
+
+    // Model A: table reservation
     const useServiceEngine = venueMode.availabilityEngine === 'service';
 
     if (!useServiceEngine) {
@@ -222,4 +242,68 @@ export async function GET(request: NextRequest) {
       { status: 500 }
     );
   }
+}
+
+// ---------------------------------------------------------------------------
+// Model B: Practitioner appointment availability
+// ---------------------------------------------------------------------------
+async function handleAppointmentAvailability(
+  supabase: ReturnType<typeof getSupabaseAdminClient>,
+  venueId: string,
+  date: string,
+  searchParams: URLSearchParams,
+) {
+  const practitionerId = searchParams.get('practitioner_id') ?? undefined;
+  const serviceId = searchParams.get('service_id') ?? undefined;
+
+  const input = await fetchAppointmentInput({ supabase, venueId, date, practitionerId, serviceId });
+  const result = computeAppointmentAvailability(input);
+
+  return NextResponse.json({ date, venue_id: venueId, ...result });
+}
+
+// ---------------------------------------------------------------------------
+// Model C: Event / experience availability
+// ---------------------------------------------------------------------------
+async function handleEventAvailability(
+  supabase: ReturnType<typeof getSupabaseAdminClient>,
+  venueId: string,
+  date: string,
+) {
+  const input = await fetchEventInput({ supabase, venueId, date });
+  const result = computeEventAvailability(input);
+
+  return NextResponse.json({ date, venue_id: venueId, events: result });
+}
+
+// ---------------------------------------------------------------------------
+// Model D: Class session availability
+// ---------------------------------------------------------------------------
+async function handleClassAvailability(
+  supabase: ReturnType<typeof getSupabaseAdminClient>,
+  venueId: string,
+  date: string,
+) {
+  const input = await fetchClassInput({ supabase, venueId, date });
+  const result = computeClassAvailability(input);
+
+  return NextResponse.json({ date, venue_id: venueId, classes: result });
+}
+
+// ---------------------------------------------------------------------------
+// Model E: Resource booking availability
+// ---------------------------------------------------------------------------
+async function handleResourceAvailability(
+  supabase: ReturnType<typeof getSupabaseAdminClient>,
+  venueId: string,
+  date: string,
+  searchParams: URLSearchParams,
+) {
+  const resourceId = searchParams.get('resource_id') ?? undefined;
+  const durationMinutes = parseInt(searchParams.get('duration') ?? '60', 10) || 60;
+
+  const input = await fetchResourceInput({ supabase, venueId, date, resourceId });
+  const result = computeResourceAvailability(input, durationMinutes);
+
+  return NextResponse.json({ date, venue_id: venueId, resources: result });
 }

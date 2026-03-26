@@ -1,0 +1,324 @@
+import { NextRequest, NextResponse } from 'next/server';
+import Stripe from 'stripe';
+import { stripe } from '@/lib/stripe';
+import { getSupabaseAdminClient } from '@/lib/supabase';
+import { getBusinessConfig } from '@/lib/business-config';
+
+const webhookSecret = process.env.STRIPE_ONBOARDING_WEBHOOK_SECRET;
+if (!webhookSecret) {
+  console.warn('STRIPE_ONBOARDING_WEBHOOK_SECRET is not set; subscription webhook verification will fail');
+}
+
+export async function POST(request: NextRequest) {
+  let event: Stripe.Event;
+
+  try {
+    const rawBody = await request.text();
+    const sig = request.headers.get('stripe-signature');
+    if (!sig) {
+      return NextResponse.json({ error: 'Missing signature' }, { status: 400 });
+    }
+    if (!webhookSecret) {
+      return NextResponse.json({ error: 'Webhook secret not configured' }, { status: 500 });
+    }
+    event = Stripe.webhooks.constructEvent(rawBody, sig, webhookSecret);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Unknown error';
+    console.error('[Subscription webhook] Signature verification failed:', message);
+    return NextResponse.json({ error: 'Invalid signature' }, { status: 400 });
+  }
+
+  const supabase = getSupabaseAdminClient();
+
+  // Idempotency check
+  const { data: existing } = await supabase
+    .from('webhook_events')
+    .select('id')
+    .eq('stripe_event_id', event.id)
+    .maybeSingle();
+
+  if (existing) {
+    return NextResponse.json({ received: true });
+  }
+
+  console.log(`[Subscription webhook] ${event.type} (event: ${event.id})`);
+
+  try {
+    switch (event.type) {
+      case 'checkout.session.completed': {
+        await handleCheckoutCompleted(supabase, event.data.object as Stripe.Checkout.Session);
+        break;
+      }
+
+      case 'customer.subscription.updated': {
+        await handleSubscriptionUpdated(supabase, event.data.object as Stripe.Subscription);
+        break;
+      }
+
+      case 'customer.subscription.deleted': {
+        await handleSubscriptionDeleted(supabase, event.data.object as Stripe.Subscription);
+        break;
+      }
+
+      case 'invoice.payment_failed': {
+        const invoice = event.data.object as Stripe.Invoice;
+        if (invoice.customer) {
+          const customerId =
+            typeof invoice.customer === 'string' ? invoice.customer : invoice.customer.id;
+          await supabase
+            .from('venues')
+            .update({ plan_status: 'past_due' })
+            .eq('stripe_customer_id', customerId);
+        }
+        break;
+      }
+
+      case 'invoice.payment_succeeded': {
+        const invoice = event.data.object as Stripe.Invoice;
+        if (invoice.customer) {
+          const customerId =
+            typeof invoice.customer === 'string' ? invoice.customer : invoice.customer.id;
+          await supabase
+            .from('venues')
+            .update({ plan_status: 'active' })
+            .eq('stripe_customer_id', customerId);
+        }
+        break;
+      }
+
+      default:
+        console.log(`[Subscription webhook] Unhandled event type: ${event.type}`);
+    }
+
+    await supabase.from('webhook_events').insert({
+      stripe_event_id: event.id,
+      event_type: event.type,
+    });
+
+    return NextResponse.json({ received: true });
+  } catch (err) {
+    console.error('[Subscription webhook] Processing failed:', event.id, event.type, err);
+    return NextResponse.json({ error: 'Processing failed' }, { status: 500 });
+  }
+}
+
+async function handleCheckoutCompleted(
+  supabase: ReturnType<typeof getSupabaseAdminClient>,
+  session: Stripe.Checkout.Session
+) {
+  const metadata = session.metadata ?? {};
+  const businessType = metadata.business_type;
+  const plan = metadata.plan;
+  const supabaseUserId = metadata.supabase_user_id;
+
+  // Handle change-plan sessions (upgrade/downgrade/resubscribe) from existing venues
+  const venueIdMeta = metadata.venue_id;
+  const actionMeta = metadata.action;
+  if (venueIdMeta && actionMeta) {
+    const oldSubId = metadata.old_subscription_id;
+    if (oldSubId) {
+      try {
+        await stripe.subscriptions.cancel(oldSubId);
+      } catch (e) {
+        console.warn('[Subscription webhook] Could not cancel old subscription:', oldSubId, e);
+      }
+    }
+
+    const newPlan = metadata.plan;
+    const subscriptionId =
+      typeof session.subscription === 'string' ? session.subscription : null;
+
+    let subscriptionItemId: string | null = null;
+    if (subscriptionId) {
+      try {
+        const sub = await stripe.subscriptions.retrieve(subscriptionId);
+        subscriptionItemId = sub.items.data[0]?.id ?? null;
+      } catch {
+        console.warn('[Subscription webhook] Could not retrieve new subscription item');
+      }
+    }
+
+    const changePlanUpdates: Record<string, unknown> = {
+      stripe_subscription_id: subscriptionId,
+      stripe_subscription_item_id: subscriptionItemId,
+      plan_status: 'active',
+    };
+    if (newPlan === 'standard' || newPlan === 'business') {
+      changePlanUpdates.pricing_tier = newPlan;
+    }
+    if (newPlan === 'standard') {
+      const qty = parseInt(metadata.calendar_count ?? '1', 10);
+      changePlanUpdates.calendar_count = qty;
+    } else {
+      changePlanUpdates.calendar_count = null;
+    }
+
+    await supabase
+      .from('venues')
+      .update(changePlanUpdates)
+      .eq('id', venueIdMeta);
+
+    console.log(`[Subscription webhook] Processed change-plan (${actionMeta}) for venue ${venueIdMeta}`);
+    return;
+  }
+
+  if (!businessType || !plan || !supabaseUserId) {
+    console.log('[Subscription webhook] checkout.session.completed missing metadata — skipping venue creation');
+    return;
+  }
+
+  // Check if venue already provisioned (idempotency — the success page may have already created it)
+  const customerId =
+    typeof session.customer === 'string' ? session.customer : (session.customer as Stripe.Customer)?.id;
+  if (customerId) {
+    const { data: existingVenue } = await supabase
+      .from('venues')
+      .select('id')
+      .eq('stripe_customer_id', customerId)
+      .maybeSingle();
+
+    if (existingVenue) {
+      console.log('[Subscription webhook] Venue already exists for customer', customerId);
+      return;
+    }
+  }
+
+  // Also check by user email via staff table
+  const { data: userData } = await supabase.auth.admin.getUserById(supabaseUserId);
+  const userEmail = userData?.user?.email;
+  if (userEmail) {
+    const { data: existingStaff } = await supabase
+      .from('staff')
+      .select('venue_id')
+      .ilike('email', userEmail.toLowerCase().trim())
+      .limit(1);
+
+    if (existingStaff && existingStaff.length > 0) {
+      console.log('[Subscription webhook] Staff record already exists for', userEmail);
+      return;
+    }
+  }
+
+  const config = getBusinessConfig(businessType);
+  const calendarCount = parseInt(metadata.calendar_count ?? '1', 10);
+
+  const subscriptionId =
+    typeof session.subscription === 'string' ? session.subscription : null;
+
+  let subscriptionItemId: string | null = null;
+  if (subscriptionId) {
+    try {
+      const sub = await stripe.subscriptions.retrieve(subscriptionId);
+      subscriptionItemId = sub.items.data[0]?.id ?? null;
+    } catch {
+      console.warn('[Subscription webhook] Could not retrieve subscription item');
+    }
+  }
+
+  const slug = `venue-${Date.now()}`;
+
+  const { data: venue, error: venueError } = await supabase
+    .from('venues')
+    .insert({
+      name: 'My Business',
+      slug,
+      booking_model: config.model,
+      business_type: businessType,
+      business_category: config.category,
+      terminology: config.terms,
+      pricing_tier: plan,
+      plan_status: 'active',
+      stripe_customer_id: customerId,
+      stripe_subscription_id: subscriptionId,
+      stripe_subscription_item_id: subscriptionItemId,
+      calendar_count: plan === 'standard' ? calendarCount : null,
+      onboarding_step: 0,
+      onboarding_completed: false,
+    })
+    .select('id')
+    .single();
+
+  if (venueError || !venue) {
+    console.error('[Subscription webhook] Failed to create venue:', venueError);
+    throw new Error('Venue creation failed');
+  }
+
+  if (userEmail) {
+    const { error: staffError } = await supabase.from('staff').insert({
+      venue_id: venue.id,
+      email: userEmail,
+      name: userEmail.split('@')[0] ?? 'Admin',
+      role: 'admin',
+    });
+
+    if (staffError) {
+      console.error('[Subscription webhook] Failed to create staff:', staffError);
+      throw new Error('Staff creation failed: ' + staffError.message);
+    }
+  }
+}
+
+async function handleSubscriptionUpdated(
+  supabase: ReturnType<typeof getSupabaseAdminClient>,
+  subscription: Stripe.Subscription
+) {
+  const customerId =
+    typeof subscription.customer === 'string'
+      ? subscription.customer
+      : subscription.customer.id;
+
+  const updates: Record<string, unknown> = {
+    stripe_subscription_id: subscription.id,
+    stripe_subscription_item_id: subscription.items.data[0]?.id ?? null,
+  };
+
+  switch (subscription.status) {
+    case 'active':
+      updates.plan_status = 'active';
+      break;
+    case 'past_due':
+      updates.plan_status = 'past_due';
+      break;
+    case 'canceled':
+    case 'unpaid':
+      updates.plan_status = 'cancelled';
+      break;
+    case 'trialing':
+      updates.plan_status = 'trialing';
+      break;
+  }
+
+  // Map price ID to tier so pricing_tier stays in sync after Stripe changes
+  const priceId = subscription.items.data[0]?.price?.id;
+  if (priceId === process.env.STRIPE_STANDARD_PRICE_ID) {
+    updates.pricing_tier = 'standard';
+    updates.calendar_count = subscription.items.data[0]?.quantity ?? 1;
+  } else if (priceId === process.env.STRIPE_BUSINESS_PRICE_ID) {
+    updates.pricing_tier = 'business';
+    updates.calendar_count = null;
+  }
+
+  await supabase
+    .from('venues')
+    .update(updates)
+    .eq('stripe_customer_id', customerId);
+}
+
+async function handleSubscriptionDeleted(
+  supabase: ReturnType<typeof getSupabaseAdminClient>,
+  subscription: Stripe.Subscription
+) {
+  const customerId =
+    typeof subscription.customer === 'string'
+      ? subscription.customer
+      : subscription.customer.id;
+
+  await supabase
+    .from('venues')
+    .update({
+      plan_status: 'cancelled',
+      stripe_subscription_id: null,
+      stripe_subscription_item_id: null,
+    })
+    .eq('stripe_customer_id', customerId);
+}

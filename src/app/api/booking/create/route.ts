@@ -13,6 +13,10 @@ import { normalizeToE164 } from '@/lib/phone/e164';
 import { autoAssignTable } from '@/lib/table-availability';
 import { resolveVenueMode } from '@/lib/venue-mode';
 import { syncTableStatusesForBooking } from '@/lib/table-management/lifecycle';
+import { fetchAppointmentInput, computeAppointmentAvailability } from '@/lib/availability/appointment-engine';
+import { fetchEventInput, computeEventAvailability } from '@/lib/availability/event-ticket-engine';
+import { fetchClassInput, computeClassAvailability } from '@/lib/availability/class-session-engine';
+import { fetchResourceInput, computeResourceAvailability } from '@/lib/availability/resource-booking-engine';
 
 const createBookingSchema = z.object({
   venue_id: z.string().uuid(),
@@ -26,6 +30,22 @@ const createBookingSchema = z.object({
   occasion: z.string().max(200).optional(),
   source: z.enum(['online', 'phone', 'walk-in', 'widget', 'booking_page']),
   service_id: z.string().uuid().optional(),
+  // Model B: appointment fields
+  practitioner_id: z.string().uuid().optional(),
+  appointment_service_id: z.string().uuid().optional(),
+  // Model C: event ticket fields
+  experience_event_id: z.string().uuid().optional(),
+  ticket_lines: z.array(z.object({
+    ticket_type_id: z.string().uuid(),
+    label: z.string(),
+    quantity: z.number().int().min(1),
+    unit_price_pence: z.number().int().min(0),
+  })).optional(),
+  // Model D: class session fields
+  class_instance_id: z.string().uuid().optional(),
+  // Model E: resource fields
+  resource_id: z.string().uuid().optional(),
+  booking_end_time: z.string().regex(/^([01]?[0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9])?$/).optional(),
 });
 
 /** Compute cancellation_deadline: booking datetime minus 48 hours (Europe/London). */
@@ -85,6 +105,11 @@ export async function POST(request: NextRequest) {
     }
 
     const venueMode = await resolveVenueMode(supabase, venue_id);
+
+    // Dispatch to model-specific create handlers (B, C, D, E)
+    if (venueMode.bookingModel !== 'table_reservation') {
+      return handleNonTableBooking(request, supabase, venue, venueMode, parsed.data, phoneE164);
+    }
 
     if (venueMode.availabilityEngine !== 'service') {
       return NextResponse.json({ error: AVAILABILITY_SETUP_REQUIRED_MESSAGE }, { status: 503 });
@@ -337,4 +362,250 @@ export async function POST(request: NextRequest) {
     console.error('POST /api/booking/create failed:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
+}
+
+// ---------------------------------------------------------------------------
+// Models B–E: unified non-table booking handler
+// ---------------------------------------------------------------------------
+
+async function handleNonTableBooking(
+  request: NextRequest,
+  supabase: ReturnType<typeof getSupabaseAdminClient>,
+  venue: Record<string, unknown>,
+  venueMode: Awaited<ReturnType<typeof resolveVenueMode>>,
+  data: z.infer<typeof createBookingSchema>,
+  phoneE164: string,
+) {
+  const {
+    venue_id, booking_date, booking_time, party_size, name, email,
+    dietary_notes, occasion, source,
+    practitioner_id, appointment_service_id,
+    experience_event_id, ticket_lines,
+    class_instance_id,
+    resource_id, booking_end_time,
+  } = data;
+
+  const timeForDb = booking_time.length === 5 ? booking_time + ':00' : booking_time;
+  const timeStr = timeForDb.slice(0, 5);
+
+  // ---- Validate slot availability per model ----
+  let estimatedEndTime: string | null = null;
+  let depositAmountPence: number | null = null;
+  let requiresDeposit = false;
+
+  if (venueMode.bookingModel === 'practitioner_appointment') {
+    if (!practitioner_id || !appointment_service_id) {
+      return NextResponse.json({ error: 'practitioner_id and appointment_service_id are required' }, { status: 400 });
+    }
+    const input = await fetchAppointmentInput({ supabase, venueId: venue_id, date: booking_date, practitionerId: practitioner_id, serviceId: appointment_service_id });
+    const result = computeAppointmentAvailability(input);
+    const prac = result.practitioners.find((p) => p.id === practitioner_id);
+    const slotAvailable = prac?.slots.some((s) => s.start_time === timeStr && s.service_id === appointment_service_id);
+    if (!slotAvailable) {
+      return NextResponse.json({ error: 'This appointment slot is no longer available' }, { status: 409 });
+    }
+    const svc = input.services.find((s) => s.id === appointment_service_id);
+    if (svc) {
+      const [y, mo, d] = booking_date.split('-').map(Number);
+      const [hh, mm] = timeStr.split(':').map(Number);
+      const endDate = new Date(Date.UTC(y!, mo! - 1, d!, hh!, mm!, 0));
+      endDate.setMinutes(endDate.getMinutes() + svc.duration_minutes);
+      estimatedEndTime = endDate.toISOString();
+
+      if (svc.deposit_pence != null && svc.deposit_pence > 0) {
+        requiresDeposit = true;
+        depositAmountPence = svc.deposit_pence;
+      } else if (svc.price_pence != null && svc.price_pence > 0) {
+        requiresDeposit = true;
+        depositAmountPence = svc.price_pence;
+      }
+    }
+  } else if (venueMode.bookingModel === 'event_ticket') {
+    if (!experience_event_id) {
+      return NextResponse.json({ error: 'experience_event_id is required' }, { status: 400 });
+    }
+    const input = await fetchEventInput({ supabase, venueId: venue_id, date: booking_date });
+    const result = computeEventAvailability(input);
+    const event = result.find((e) => e.event_id === experience_event_id);
+    if (!event || event.remaining_capacity < party_size) {
+      return NextResponse.json({ error: 'This event is fully booked or unavailable' }, { status: 409 });
+    }
+    if (ticket_lines && ticket_lines.length > 0) {
+      depositAmountPence = ticket_lines.reduce((sum, tl) => sum + tl.quantity * tl.unit_price_pence, 0);
+      if (depositAmountPence > 0) requiresDeposit = true;
+    }
+  } else if (venueMode.bookingModel === 'class_session') {
+    if (!class_instance_id) {
+      return NextResponse.json({ error: 'class_instance_id is required' }, { status: 400 });
+    }
+    const input = await fetchClassInput({ supabase, venueId: venue_id, date: booking_date });
+    const result = computeClassAvailability(input);
+    const cls = result.find((c) => c.instance_id === class_instance_id);
+    if (!cls || cls.remaining < party_size) {
+      return NextResponse.json({ error: 'This class is full or unavailable' }, { status: 409 });
+    }
+    if (cls.price_pence != null && cls.price_pence > 0) {
+      requiresDeposit = true;
+      depositAmountPence = cls.price_pence * party_size;
+    }
+  } else if (venueMode.bookingModel === 'resource_booking') {
+    if (!resource_id || !booking_end_time) {
+      return NextResponse.json({ error: 'resource_id and booking_end_time are required' }, { status: 400 });
+    }
+    const endTimeStr = booking_end_time.length === 5 ? booking_end_time + ':00' : booking_end_time;
+    const durationMinutes = (
+      ((parseInt(endTimeStr.slice(0, 2)) * 60) + parseInt(endTimeStr.slice(3, 5))) -
+      ((parseInt(timeStr.slice(0, 2)) * 60) + parseInt(timeStr.slice(3, 5)))
+    );
+    const input = await fetchResourceInput({ supabase, venueId: venue_id, date: booking_date, resourceId: resource_id });
+    const result = computeResourceAvailability(input, durationMinutes);
+    const res = result.find((r) => r.id === resource_id);
+    const slotAvailable = res?.slots.some((s) => s.start_time === timeStr);
+    if (!slotAvailable) {
+      return NextResponse.json({ error: 'This resource slot is no longer available' }, { status: 409 });
+    }
+    if (res?.price_per_slot_pence != null) {
+      const numSlots = Math.ceil(durationMinutes / res.slot_interval_minutes);
+      depositAmountPence = res.price_per_slot_pence * numSlots;
+      if (depositAmountPence > 0) requiresDeposit = true;
+    }
+  }
+
+  if (requiresDeposit && !(venue.stripe_connected_account_id as string | null)) {
+    return NextResponse.json(
+      { error: 'Venue has not set up payments; payment is required for this booking.' },
+      { status: 400 }
+    );
+  }
+
+  const { guest } = await findOrCreateGuest(supabase, venue_id, {
+    name,
+    email: email || null,
+    phone: phoneE164,
+  });
+
+  const cancellation_deadline = cancellationDeadline(booking_date, booking_time);
+  const cancellationPolicySnapshot = {
+    refund_window_hours: 48,
+    policy: 'Full refund if cancelled 48+ hours before. No refund within 48 hours or for no-shows.',
+  };
+
+  const bookingInsert: Record<string, unknown> = {
+    venue_id,
+    guest_id: guest.id,
+    booking_date,
+    booking_time: timeForDb,
+    party_size,
+    status: requiresDeposit ? 'Pending' : 'Confirmed',
+    source,
+    dietary_notes: dietary_notes || null,
+    occasion: occasion || null,
+    guest_email: email || null,
+    deposit_amount_pence: depositAmountPence,
+    deposit_status: requiresDeposit ? 'Pending' : 'Not Required',
+    cancellation_deadline,
+    cancellation_policy_snapshot: cancellationPolicySnapshot,
+    estimated_end_time: estimatedEndTime,
+    // Model-specific anchors
+    practitioner_id: practitioner_id ?? null,
+    appointment_service_id: appointment_service_id ?? null,
+    experience_event_id: experience_event_id ?? null,
+    class_instance_id: class_instance_id ?? null,
+    resource_id: resource_id ?? null,
+    booking_end_time: booking_end_time ? (booking_end_time.length === 5 ? booking_end_time + ':00' : booking_end_time) : null,
+  };
+
+  const { data: booking, error: bookErr } = await supabase
+    .from('bookings')
+    .insert(bookingInsert)
+    .select('id, status, deposit_status')
+    .single();
+
+  if (bookErr) {
+    console.error('Booking insert failed:', bookErr);
+    return NextResponse.json({ error: 'Failed to create booking' }, { status: 500 });
+  }
+
+  // Insert ticket lines for event/class bookings
+  if (ticket_lines && ticket_lines.length > 0) {
+    const lines = ticket_lines.map((tl) => ({
+      booking_id: booking.id,
+      ticket_type_id: tl.ticket_type_id,
+      label: tl.label,
+      quantity: tl.quantity,
+      unit_price_pence: tl.unit_price_pence,
+    }));
+    await supabase.from('booking_ticket_lines').insert(lines);
+  }
+
+  // Stripe payment intent
+  let client_secret: string | null = null;
+
+  if (requiresDeposit && depositAmountPence != null && depositAmountPence > 0 && (venue.stripe_connected_account_id as string)) {
+    try {
+      const paymentIntent = await stripe.paymentIntents.create(
+        {
+          amount: depositAmountPence,
+          currency: 'gbp',
+          metadata: { booking_id: booking.id, venue_id },
+          automatic_payment_methods: { enabled: true },
+        },
+        { stripeAccount: venue.stripe_connected_account_id as string }
+      );
+      client_secret = paymentIntent.client_secret;
+
+      await supabase
+        .from('bookings')
+        .update({ stripe_payment_intent_id: paymentIntent.id, updated_at: new Date().toISOString() })
+        .eq('id', booking.id);
+    } catch (stripeErr) {
+      console.error('PaymentIntent create failed:', stripeErr);
+      await supabase.from('bookings').delete().eq('id', booking.id);
+      return NextResponse.json({ error: 'Payment setup failed' }, { status: 500 });
+    }
+  }
+
+  // Send confirmation for non-deposit bookings
+  if (!requiresDeposit) {
+    const manageToken = generateConfirmToken();
+    await supabase
+      .from('bookings')
+      .update({ confirm_token_hash: hashConfirmToken(manageToken), updated_at: new Date().toISOString() })
+      .eq('id', booking.id);
+
+    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : request.nextUrl.origin);
+    const manageBookingLink = `${baseUrl}/manage/${booking.id}/${encodeURIComponent(manageToken)}`;
+
+    if (guest.email) {
+      after(async () => {
+        try {
+          await sendBookingConfirmationEmail(
+            {
+              id: booking.id, guest_name: name, guest_email: guest.email!,
+              booking_date, booking_time, party_size,
+              dietary_notes: dietary_notes ?? null,
+              deposit_amount_pence: depositAmountPence ?? null,
+              deposit_status: requiresDeposit ? 'Pending' : 'Not Required',
+              manage_booking_link: manageBookingLink,
+            },
+            { name: venue.name as string, address: (venue.address as string) ?? undefined },
+            venue_id,
+          );
+        } catch (err) {
+          console.error('[after] confirmation email failed:', err);
+        }
+      });
+    }
+  }
+
+  return NextResponse.json(
+    {
+      booking_id: booking.id,
+      requires_deposit: requiresDeposit,
+      client_secret: client_secret ?? undefined,
+      stripe_account_id: requiresDeposit ? (venue.stripe_connected_account_id as string) : undefined,
+      status: booking.status,
+    },
+    { status: 201 }
+  );
 }

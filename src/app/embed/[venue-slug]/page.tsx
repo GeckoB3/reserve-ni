@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
-import { BookingFlow } from '@/components/booking/BookingFlow';
+import { BookingFlowRouter } from '@/components/booking/BookingFlowRouter';
 import type { VenuePublic } from '@/components/booking/types';
 
 let lastSentHeight = 0;
@@ -73,7 +73,7 @@ export default function EmbedPage() {
 
   return (
     <main ref={contentRef} className="bg-white p-4" style={accentStyle}>
-      <BookingFlow venue={venue} embed onHeightChange={onHeightChange} accentColour={accentColour ?? undefined} cancellationPolicy="Full refund if cancelled 48+ hours before your reservation. No refund within 48 hours or for no-shows." />
+      <BookingFlowRouter venue={venue} embed onHeightChange={onHeightChange} accentColour={accentColour ?? undefined} cancellationPolicy="Full refund if cancelled 48+ hours before your reservation. No refund within 48 hours or for no-shows." />
     </main>
   );
 }

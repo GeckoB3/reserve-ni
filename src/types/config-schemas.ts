@@ -95,7 +95,27 @@ export const availabilityConfigSchema = z.union([
   namedSittingsConfigSchema,
 ]);
 
+/** Terminology config: label overrides per venue. */
+export const terminologySchema = z.object({
+  client: z.string().min(1).max(40).default('Guest'),
+  booking: z.string().min(1).max(40).default('Reservation'),
+  staff: z.string().min(1).max(40).default('Staff'),
+});
+
+/** Working-hours entry used by practitioners and resources. */
+export const workingHoursEntrySchema = z.object({
+  start: timeHHmm,
+  end: timeHHmm,
+});
+
+/** Working hours keyed by day ("0"–"6" or day name). */
+export const workingHoursSchema = z.record(
+  z.string(),
+  z.array(workingHoursEntrySchema),
+);
+
 export type OpeningHoursPeriod = z.infer<typeof openingHoursPeriodSchema>;
 export type OpeningHoursDayConfig = z.infer<typeof openingHoursDaySchema>;
 export type BookingRules = z.infer<typeof bookingRulesSchema>;
 export type DepositConfig = z.infer<typeof depositConfigSchema>;
+export type Terminology = z.infer<typeof terminologySchema>;

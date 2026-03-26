@@ -21,7 +21,7 @@ export async function GET(request: NextRequest) {
     const supabase = getSupabaseAdminClient();
     const { data: venue, error } = await supabase
       .from('venues')
-      .select('id, name, slug, cover_photo_url, address, phone, deposit_config, booking_rules, opening_hours, timezone')
+      .select('id, name, slug, cover_photo_url, address, phone, deposit_config, booking_rules, opening_hours, timezone, booking_model, terminology')
       .eq('slug', slug.trim())
       .single();
 
@@ -30,24 +30,31 @@ export async function GET(request: NextRequest) {
     }
 
     const venueMode = await resolveVenueMode(supabase, venue.id);
-    const usesNewEngine = venueMode.availabilityEngine === 'service';
-    if (usesNewEngine) {
-      const { data: restriction } = await supabase
-        .from('booking_restrictions')
-        .select('min_party_size_online, max_party_size_online')
-        .eq('venue_id', venue.id)
-        .limit(1)
-        .maybeSingle();
 
-      if (restriction) {
-        venue.booking_rules = {
-          min_party_size: restriction.min_party_size_online,
-          max_party_size: restriction.max_party_size_online,
-        };
+    if (venueMode.bookingModel === 'table_reservation') {
+      const usesNewEngine = venueMode.availabilityEngine === 'service';
+      if (usesNewEngine) {
+        const { data: restriction } = await supabase
+          .from('booking_restrictions')
+          .select('min_party_size_online, max_party_size_online')
+          .eq('venue_id', venue.id)
+          .limit(1)
+          .maybeSingle();
+
+        if (restriction) {
+          venue.booking_rules = {
+            min_party_size: restriction.min_party_size_online,
+            max_party_size: restriction.max_party_size_online,
+          };
+        }
       }
     }
 
-    return NextResponse.json(venue);
+    return NextResponse.json({
+      ...venue,
+      booking_model: venueMode.bookingModel,
+      terminology: venueMode.terminology,
+    });
   } catch (err) {
     console.error('GET /api/booking/venue failed:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

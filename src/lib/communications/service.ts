@@ -3,6 +3,7 @@ import { compileEmailTemplate, compileSmsTemplate } from './templates';
 import { EmailChannel } from './channels/email';
 import { SMSChannel } from './channels/sms';
 import { getSupabaseAdminClient } from '@/lib/supabase';
+import { isSmsAllowed } from '@/lib/tier-enforcement';
 import type { CommMessageType } from '@/lib/emails/types';
 
 interface LogContext {
@@ -293,9 +294,17 @@ export class CommunicationService {
       return;
     }
 
+    // Standard tier: filter out SMS channels (email only)
+    let smsAllowed = true;
+    if (ctx.venue_id) {
+      smsAllowed = await isSmsAllowed(ctx.venue_id);
+    }
+
     const vars = normalisePayload(payload);
 
     for (const ch of channels) {
+      if (ch === 'sms' && !smsAllowed) continue;
+
       try {
         if (DEDUPED_MESSAGE_TYPES.has(type)) {
           const duplicate = await this.isDuplicateSend(type, ch, ctx);
