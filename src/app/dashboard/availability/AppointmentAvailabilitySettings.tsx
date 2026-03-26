@@ -69,10 +69,25 @@ export function AppointmentAvailabilitySettings({ venueId }: { venueId: string }
   // Selected practitioner for hours/breaks/daysoff tabs
   const [selectedPractitionerId, setSelectedPractitionerId] = useState<string>('');
 
-  const fetchData = useCallback(async () => {
-    setLoading(true);
+  const fetchData = useCallback(async (options?: { silent?: boolean }) => {
+    const silent = options?.silent === true;
+    if (!silent) {
+      setLoading(true);
+    }
     setError(null);
     try {
+      if (silent) {
+        const svcRes = await fetch('/api/venue/appointment-services');
+        if (!svcRes.ok) {
+          setError('Failed to refresh service links.');
+          return;
+        }
+        const svcData = await svcRes.json();
+        setServices(svcData.services ?? []);
+        setPLinks(svcData.practitioner_services ?? []);
+        return;
+      }
+
       const [pracRes, svcRes] = await Promise.all([
         fetch('/api/venue/practitioners'),
         fetch('/api/venue/appointment-services'),
@@ -91,9 +106,13 @@ export function AppointmentAvailabilitySettings({ venueId }: { venueId: string }
         return pracs.length > 0 ? pracs[0].id : '';
       });
     } catch {
-      setError('Failed to load data. Please check your connection.');
+      if (!silent) {
+        setError('Failed to load data. Please check your connection.');
+      }
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -467,7 +486,7 @@ export function AppointmentAvailabilitySettings({ venueId }: { venueId: string }
               practitioners={practitioners}
               services={services}
               links={pLinks}
-              onLinksChanged={fetchData}
+              onLinksChanged={() => fetchData({ silent: true })}
             />
           )}
 
@@ -809,6 +828,28 @@ function DaysOffEditor({
   );
 }
 
+/** Build per-practitioner service id lists from API links (empty = implicit “all services”). */
+function buildDraftFromLinks(
+  practitioners: Practitioner[],
+  links: PractitionerServiceLink[],
+): Record<string, string[]> {
+  const draft: Record<string, string[]> = {};
+  for (const p of practitioners) {
+    draft[p.id] = links.filter((l) => l.practitioner_id === p.id).map((l) => l.service_id);
+  }
+  return draft;
+}
+
+function areServiceDraftsEqual(a: Record<string, string[]>, b: Record<string, string[]>): boolean {
+  const ids = new Set([...Object.keys(a), ...Object.keys(b)]);
+  for (const id of ids) {
+    const sa = [...(a[id] ?? [])].sort().join(',');
+    const sb = [...(b[id] ?? [])].sort().join(',');
+    if (sa !== sb) return false;
+  }
+  return true;
+}
+
 // ─── Service Linking Grid ─────────────────────────────────────────────────
 function ServiceLinkingGrid({
   practitioners,
@@ -819,32 +860,65 @@ function ServiceLinkingGrid({
   practitioners: Practitioner[];
   services: Service[];
   links: PractitionerServiceLink[];
-  onLinksChanged: () => void;
+  onLinksChanged: () => void | Promise<void>;
 }) {
-  const [saving, setSaving] = useState<string | null>(null);
+  const baseline = useMemo(() => buildDraftFromLinks(practitioners, links), [practitioners, links]);
+  const [draft, setDraft] = useState<Record<string, string[]>>(baseline);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
-  function isLinked(pracId: string, svcId: string): boolean {
-    return links.some((l) => l.practitioner_id === pracId && l.service_id === svcId);
+  useEffect(() => {
+    setDraft(baseline);
+    setSaveError(null);
+  }, [baseline]);
+
+  const dirty = useMemo(() => !areServiceDraftsEqual(draft, baseline), [draft, baseline]);
+
+  function toggleCell(practitionerId: string, serviceId: string) {
+    setDraft((prev) => {
+      const cur = [...(prev[practitionerId] ?? [])];
+      const idx = cur.indexOf(serviceId);
+      if (idx >= 0) {
+        cur.splice(idx, 1);
+      } else {
+        cur.push(serviceId);
+      }
+      return { ...prev, [practitionerId]: cur };
+    });
+    setSaveError(null);
   }
 
-  async function toggleLink(pracId: string, svcId: string) {
-    setSaving(`${pracId}_${svcId}`);
-    try {
-      const currentServiceIds = links.filter((l) => l.practitioner_id === pracId).map((l) => l.service_id);
-      const newServiceIds = isLinked(pracId, svcId)
-        ? currentServiceIds.filter((id) => id !== svcId)
-        : [...currentServiceIds, svcId];
+  function discard() {
+    setDraft(baseline);
+    setSaveError(null);
+  }
 
-      const res = await fetch('/api/venue/practitioner-services', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ practitioner_id: pracId, service_ids: newServiceIds }),
-      });
-      if (res.ok) onLinksChanged();
-    } catch {
-      // silently fail — re-fetch restores truth
+  async function save() {
+    setSaving(true);
+    setSaveError(null);
+    try {
+      const results = await Promise.all(
+        practitioners.map((p) =>
+          fetch('/api/venue/practitioner-services', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              practitioner_id: p.id,
+              service_ids: draft[p.id] ?? [],
+            }),
+          }),
+        ),
+      );
+      if (results.some((r) => !r.ok)) {
+        const firstBad = results.find((r) => !r.ok);
+        const body = firstBad ? await firstBad.json().catch(() => ({})) : {};
+        throw new Error(typeof body.error === 'string' ? body.error : 'Save failed');
+      }
+      await onLinksChanged();
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : 'Could not save changes');
     } finally {
-      setSaving(null);
+      setSaving(false);
     }
   }
 
@@ -865,54 +939,91 @@ function ServiceLinkingGrid({
   }
 
   return (
-    <div>
-      <p className="mb-4 text-sm text-slate-500">
-        Configure which services each team member can perform. Team members with no services checked will be offered all services.
-      </p>
-      <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+    <div className="space-y-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <p className="max-w-2xl text-sm text-slate-600">
+          Tick the services each team member offers. Leave a row with <strong>no</strong> boxes ticked to offer{' '}
+          <strong>all</strong> services for that person. Changes apply when you click Save.
+        </p>
+        <div className="flex flex-shrink-0 flex-wrap items-center gap-2">
+          {dirty && (
+            <span className="rounded-full bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-800 ring-1 ring-amber-200/80">
+              Unsaved changes
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={discard}
+            disabled={!dirty || saving}
+            className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+          >
+            Discard
+          </button>
+          <button
+            type="button"
+            onClick={() => void save()}
+            disabled={!dirty || saving}
+            className="rounded-lg bg-blue-600 px-4 py-1.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 disabled:opacity-40"
+          >
+            {saving ? 'Saving…' : 'Save changes'}
+          </button>
+        </div>
+      </div>
+
+      {saveError && (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{saveError}</div>
+      )}
+
+      <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
         <table className="min-w-full text-sm">
           <thead>
-            <tr className="border-b border-slate-100 bg-slate-50">
-              <th className="px-4 py-3 text-left font-semibold text-slate-700">Team Member</th>
+            <tr className="border-b border-slate-100 bg-slate-50/90">
+              <th className="sticky left-0 z-10 min-w-[10rem] border-r border-slate-100 bg-slate-50/95 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 backdrop-blur-sm">
+                Team member
+              </th>
               {services.map((svc) => (
-                <th key={svc.id} className="px-4 py-3 text-center font-semibold text-slate-700 whitespace-nowrap">{svc.name}</th>
+                <th
+                  key={svc.id}
+                  className="min-w-[7rem] px-3 py-3 text-center text-xs font-semibold text-slate-700"
+                  title={svc.name}
+                >
+                  <span className="line-clamp-2">{svc.name}</span>
+                </th>
               ))}
             </tr>
           </thead>
-          <tbody>
+          <tbody className="divide-y divide-slate-100">
             {practitioners.map((prac) => {
-              const pracHasLinks = links.some((l) => l.practitioner_id === prac.id);
+              const ids = draft[prac.id] ?? [];
+              const offersAllImplicit = ids.length === 0;
               return (
-                <tr key={prac.id} className="border-b border-slate-50 last:border-b-0 hover:bg-slate-50/50">
-                  <td className="px-4 py-3 font-medium text-slate-900">
-                    <div className="flex items-center gap-2">
-                      {prac.name}
-                      {!pracHasLinks && (
-                        <span className="text-[10px] text-slate-400 rounded-full bg-slate-100 px-2 py-0.5">All services</span>
+                <tr
+                  key={prac.id}
+                  className="group border-b border-slate-50 bg-white transition-colors hover:bg-slate-50/90"
+                >
+                  <td className="sticky left-0 z-10 border-r border-slate-100 bg-white px-4 py-3 font-medium text-slate-900 shadow-[2px_0_8px_-2px_rgba(0,0,0,0.06)] group-hover:bg-slate-50/90">
+                    <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-2">
+                      <span>{prac.name}</span>
+                      {offersAllImplicit && (
+                        <span className="w-fit rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-slate-500">
+                          All services
+                        </span>
                       )}
                     </div>
                   </td>
                   {services.map((svc) => {
-                    const linked = isLinked(prac.id, svc.id);
-                    const isSaving = saving === `${prac.id}_${svc.id}`;
+                    const checked = ids.includes(svc.id);
                     return (
-                      <td key={svc.id} className="px-4 py-3 text-center">
-                        <button
-                          type="button"
-                          onClick={() => toggleLink(prac.id, svc.id)}
-                          disabled={isSaving}
-                          className={`inline-flex h-6 w-6 items-center justify-center rounded transition-colors ${
-                            linked
-                              ? 'bg-blue-600 text-white hover:bg-blue-700'
-                              : 'border border-slate-300 text-transparent hover:border-blue-400 hover:bg-blue-50'
-                          } ${isSaving ? 'opacity-50' : ''}`}
-                        >
-                          {linked && (
-                            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                            </svg>
-                          )}
-                        </button>
+                      <td key={svc.id} className="px-2 py-2 text-center align-middle">
+                        <label className="inline-flex cursor-pointer items-center justify-center p-2">
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => toggleCell(prac.id, svc.id)}
+                            className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-2 focus:ring-blue-500 focus:ring-offset-0"
+                            aria-label={`${prac.name} — ${svc.name}`}
+                          />
+                        </label>
                       </td>
                     );
                   })}

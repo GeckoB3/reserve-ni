@@ -17,6 +17,7 @@ import { fetchAppointmentInput, computeAppointmentAvailability } from '@/lib/ava
 import { fetchEventInput, computeEventAvailability } from '@/lib/availability/event-ticket-engine';
 import { fetchClassInput, computeClassAvailability } from '@/lib/availability/class-session-engine';
 import { fetchResourceInput, computeResourceAvailability } from '@/lib/availability/resource-booking-engine';
+import { cancellationDeadlineHoursBefore } from '@/lib/booking/cancellation-deadline';
 
 const createBookingSchema = z.object({
   venue_id: z.string().uuid(),
@@ -48,13 +49,9 @@ const createBookingSchema = z.object({
   booking_end_time: z.string().regex(/^([01]?[0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9])?$/).optional(),
 });
 
-/** Compute cancellation_deadline: booking datetime minus 48 hours (Europe/London). */
+/** Table reservations: fixed 48h refund window (legacy). */
 function cancellationDeadline(bookingDate: string, bookingTime: string): string {
-  const [y, m, d] = bookingDate.split('-').map(Number);
-  const [hh, mm] = bookingTime.slice(0, 5).split(':').map(Number);
-  const dt = new Date(Date.UTC(y!, m! - 1, d!, hh, mm, 0));
-  dt.setHours(dt.getHours() - 48);
-  return dt.toISOString();
+  return cancellationDeadlineHoursBefore(bookingDate, bookingTime, 48);
 }
 
 /**
@@ -412,12 +409,10 @@ async function handleNonTableBooking(
       endDate.setMinutes(endDate.getMinutes() + svc.duration_minutes);
       estimatedEndTime = endDate.toISOString();
 
+      // Model B: only charge deposit when the service has a positive deposit (set in Appointment Services).
       if (svc.deposit_pence != null && svc.deposit_pence > 0) {
         requiresDeposit = true;
         depositAmountPence = svc.deposit_pence;
-      } else if (svc.price_pence != null && svc.price_pence > 0) {
-        requiresDeposit = true;
-        depositAmountPence = svc.price_pence;
       }
     }
   } else if (venueMode.bookingModel === 'event_ticket') {
@@ -484,10 +479,16 @@ async function handleNonTableBooking(
     phone: phoneE164,
   });
 
-  const cancellation_deadline = cancellationDeadline(booking_date, booking_time);
+  const bookingRulesJson = (venue.booking_rules as { cancellation_notice_hours?: number } | null) ?? {};
+  const refundWindowHours =
+    venueMode.bookingModel === 'practitioner_appointment' && typeof bookingRulesJson.cancellation_notice_hours === 'number'
+      ? bookingRulesJson.cancellation_notice_hours
+      : 48;
+
+  const cancellation_deadline = cancellationDeadlineHoursBefore(booking_date, booking_time, refundWindowHours);
   const cancellationPolicySnapshot = {
-    refund_window_hours: 48,
-    policy: 'Full refund if cancelled 48+ hours before. No refund within 48 hours or for no-shows.',
+    refund_window_hours: refundWindowHours,
+    policy: `Full refund if cancelled ${refundWindowHours}+ hours before appointment start. No refund within ${refundWindowHours} hours of the appointment or for no-shows.`,
   };
 
   const bookingInsert: Record<string, unknown> = {
@@ -602,9 +603,11 @@ async function handleNonTableBooking(
     {
       booking_id: booking.id,
       requires_deposit: requiresDeposit,
+      deposit_amount_pence: depositAmountPence ?? 0,
       client_secret: client_secret ?? undefined,
       stripe_account_id: requiresDeposit ? (venue.stripe_connected_account_id as string) : undefined,
       status: booking.status,
+      cancellation_notice_hours: refundWindowHours,
     },
     { status: 201 }
   );

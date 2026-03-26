@@ -31,6 +31,9 @@ export interface DepositConfigPublic {
 export interface BookingRulesPublic {
   min_party_size: number;
   max_party_size: number;
+  /** Model B: hours before appointment start to cancel for deposit refund */
+  cancellation_notice_hours?: number;
+  allow_same_day_booking?: boolean;
 }
 
 export interface AvailableSlot {

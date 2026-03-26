@@ -6,6 +6,7 @@ import { z } from 'zod';
 import type { AvailableSlot, GuestDetails } from './types';
 import { normalizeToE164 } from '@/lib/phone/e164';
 import { PhoneWithCountryField } from '@/components/phone/PhoneWithCountryField';
+import { formatRefundDeadlineDisplay } from '@/lib/booking/cancellation-deadline';
 
 const SHORT_WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const SHORT_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -25,6 +26,8 @@ const detailsSchema = z.object({
     .refine((v) => normalizeToE164(v, 'GB') !== null, 'Enter a valid mobile number'),
   dietary_notes: z.string().max(1000).optional(),
   occasion: z.string().max(200).optional(),
+  /** Model B: shown as “Comments or requests”, stored as booking dietary_notes */
+  comments_requests: z.string().max(1000).optional(),
 });
 
 const detailsSchemaWithTerms = detailsSchema.and(
@@ -40,15 +43,46 @@ interface DetailsStepProps {
   onBack: () => void;
   requiresDeposit?: boolean;
   depositPerPerson?: number;
+  variant?: 'restaurant' | 'appointment';
+  appointmentDepositPence?: number | null;
+  currencySymbol?: string;
+  refundNoticeHours?: number;
 }
 
-export function DetailsStep({ slot, date, partySize, onSubmit, onBack, requiresDeposit, depositPerPerson }: DetailsStepProps) {
+export function DetailsStep({
+  slot,
+  date,
+  partySize,
+  onSubmit,
+  onBack,
+  requiresDeposit,
+  depositPerPerson,
+  variant = 'restaurant',
+  appointmentDepositPence = null,
+  currencySymbol = '£',
+  refundNoticeHours = 48,
+}: DetailsStepProps) {
   const { register, control, handleSubmit, formState: { errors, isSubmitting } } = useForm<FormDataWithTerms>({
     resolver: zodResolver(detailsSchemaWithTerms),
-    defaultValues: { name: '', email: '', phone: '', dietary_notes: '', occasion: '', acceptTerms: false },
+    defaultValues: {
+      name: '',
+      email: '',
+      phone: '',
+      dietary_notes: '',
+      occasion: '',
+      comments_requests: '',
+      acceptTerms: false,
+    },
   });
 
   const dateStr = formatDate(date);
+  const isAppointment = variant === 'appointment';
+  const depositPence = appointmentDepositPence ?? 0;
+  const hasDeposit = isAppointment && depositPence > 0;
+  const refundDeadlineLabel =
+    hasDeposit && slot.start_time
+      ? formatRefundDeadlineDisplay(date, slot.start_time, refundNoticeHours)
+      : null;
 
   return (
     <div className="space-y-5">
@@ -66,7 +100,43 @@ export function DetailsStep({ slot, date, partySize, onSubmit, onBack, requiresD
         </div>
       </div>
 
-      {requiresDeposit && (
+      {isAppointment && (
+        <div
+          className={`rounded-xl border px-4 py-3 ${
+            hasDeposit ? 'border-amber-200 bg-amber-50' : 'border-slate-200 bg-slate-50'
+          }`}
+        >
+          <p className="text-sm font-semibold text-slate-900">Cancellation policy</p>
+          {!hasDeposit && <p className="mt-1 text-sm text-slate-600">Cancel for free anytime</p>}
+          {hasDeposit && (
+            <div className="mt-2 space-y-2">
+              <p className="text-sm font-medium text-amber-900">
+                Deposit: {currencySymbol}
+                {(depositPence / 100).toFixed(2)}
+                {partySize > 1 ? ` (total for ${partySize} appointments)` : ''}
+              </p>
+              {partySize <= 1 && refundDeadlineLabel && (
+                <p className="text-sm text-amber-900">
+                  <span className="font-medium">Refund if you cancel in time:</span> full refund of this deposit if you cancel by{' '}
+                  <span className="font-semibold">{refundDeadlineLabel}</span> (at least {refundNoticeHours} hours before your appointment starts).
+                </p>
+              )}
+              {partySize > 1 && (
+                <p className="text-sm text-amber-900">
+                  <span className="font-medium">Refund if you cancel in time:</span> each appointment has its own deadline — cancel at least{' '}
+                  <span className="font-semibold">{refundNoticeHours} hours</span> before that appointment&apos;s start time to receive a full refund of that
+                  appointment&apos;s share of the deposit.
+                </p>
+              )}
+              <p className="text-xs text-amber-800/90">
+                After the deadline for each appointment, that share of the deposit is non-refundable. No-shows are not refunded.
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {!isAppointment && requiresDeposit && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
           <div className="flex items-start gap-2.5">
             <svg className="mt-0.5 h-4 w-4 flex-shrink-0 text-amber-500" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
@@ -90,8 +160,10 @@ export function DetailsStep({ slot, date, partySize, onSubmit, onBack, requiresD
             name: d.name,
             email: d.email || '',
             phone: normalizeToE164(d.phone, 'GB') ?? d.phone,
-            dietary_notes: d.dietary_notes,
-            occasion: d.occasion,
+            dietary_notes: isAppointment
+              ? (d.comments_requests?.trim() ? d.comments_requests.trim() : undefined)
+              : (d.dietary_notes?.trim() ? d.dietary_notes.trim() : undefined),
+            occasion: isAppointment ? undefined : (d.occasion?.trim() ? d.occasion.trim() : undefined),
           }),
         )}
         className="space-y-4"
@@ -120,13 +192,28 @@ export function DetailsStep({ slot, date, partySize, onSubmit, onBack, requiresD
           />
         </FormField>
 
-        <FormField label="Dietary notes" error={errors.dietary_notes?.message}>
-          <textarea {...register('dietary_notes')} rows={2} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm placeholder:text-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500" placeholder="Allergies, vegetarian, etc." />
-        </FormField>
+        {!isAppointment && (
+          <>
+            <FormField label="Dietary notes" error={errors.dietary_notes?.message}>
+              <textarea {...register('dietary_notes')} rows={2} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm placeholder:text-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500" placeholder="Allergies, vegetarian, etc." />
+            </FormField>
 
-        <FormField label="Occasion" error={errors.occasion?.message}>
-          <input {...register('occasion')} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm placeholder:text-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500" placeholder="e.g. Birthday, Anniversary" />
-        </FormField>
+            <FormField label="Occasion" error={errors.occasion?.message}>
+              <input {...register('occasion')} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm placeholder:text-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500" placeholder="e.g. Birthday, Anniversary" />
+            </FormField>
+          </>
+        )}
+
+        {isAppointment && (
+          <FormField label="Comments or requests" error={errors.comments_requests?.message}>
+            <textarea
+              {...register('comments_requests')}
+              rows={3}
+              className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm placeholder:text-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+              placeholder="Anything we should know (access needs, preferences, running late, etc.)"
+            />
+          </FormField>
+        )}
 
         <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 bg-slate-50/50 px-4 py-3">
           <input type="checkbox" {...register('acceptTerms')} className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500" />
@@ -144,7 +231,13 @@ export function DetailsStep({ slot, date, partySize, onSubmit, onBack, requiresD
           disabled={isSubmitting}
           className="w-full rounded-xl bg-brand-600 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 disabled:opacity-50"
         >
-          {isSubmitting ? 'Processing...' : requiresDeposit ? 'Continue to Payment' : 'Confirm Booking'}
+          {isSubmitting
+            ? 'Processing...'
+            : isAppointment && hasDeposit
+              ? 'Continue to payment'
+              : !isAppointment && requiresDeposit
+                ? 'Continue to Payment'
+                : 'Confirm Booking'}
         </button>
       </form>
     </div>

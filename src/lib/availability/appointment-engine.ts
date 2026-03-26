@@ -51,7 +51,13 @@ export interface AppointmentAvailabilityResult {
   practitioners: Array<{
     id: string;
     name: string;
-    services: Array<{ id: string; name: string; duration_minutes: number; price_pence: number | null }>;
+    services: Array<{
+      id: string;
+      name: string;
+      duration_minutes: number;
+      price_pence: number | null;
+      deposit_pence: number | null;
+    }>;
     slots: PractitionerSlot[];
   }>;
 }
@@ -154,7 +160,13 @@ export function computeAppointmentAvailability(input: AppointmentEngineInput, no
     const offeredServices = allLinksForPractitioner.length > 0 ? linkedServices : services.filter((s) => s.is_active);
 
     const allSlots: PractitionerSlot[] = [];
-    const practitionerServiceList: Array<{ id: string; name: string; duration_minutes: number; price_pence: number | null }> = [];
+    const practitionerServiceList: Array<{
+      id: string;
+      name: string;
+      duration_minutes: number;
+      price_pence: number | null;
+      deposit_pence: number | null;
+    }> = [];
 
     for (const svc of offeredServices) {
       const totalDuration = svc.duration_minutes + svc.buffer_minutes;
@@ -165,6 +177,7 @@ export function computeAppointmentAvailability(input: AppointmentEngineInput, no
         name: svc.name,
         duration_minutes: svc.duration_minutes,
         price_pence: svc.price_pence,
+        deposit_pence: svc.deposit_pence,
       });
 
       for (const range of workingRanges) {

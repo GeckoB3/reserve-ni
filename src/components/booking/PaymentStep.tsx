@@ -13,6 +13,8 @@ interface PaymentStepProps {
   onComplete: () => void;
   onBack: () => void;
   cancellationPolicy?: string;
+  /** Show total only (e.g. Model B fixed service deposit), not per-person split */
+  summaryMode?: 'per_person' | 'total';
 }
 
 function PaymentForm({ clientSecret, onComplete, onBack }: { clientSecret: string; onComplete: () => void; onBack: () => void }) {
@@ -106,24 +108,39 @@ function getStripeForAccount(stripeAccountId?: string): Promise<Stripe | null> {
   return stripeInstanceCache.get(cacheKey)!;
 }
 
-export function PaymentStep({ clientSecret, stripeAccountId, amountPence, partySize, onComplete, onBack, cancellationPolicy }: PaymentStepProps) {
+export function PaymentStep({
+  clientSecret,
+  stripeAccountId,
+  amountPence,
+  partySize,
+  onComplete,
+  onBack,
+  cancellationPolicy,
+  summaryMode = 'per_person',
+}: PaymentStepProps) {
   const amount = (amountPence / 100).toFixed(2);
-  const perPerson = (amountPence / 100 / partySize).toFixed(2);
+  const perPerson = partySize > 0 ? (amountPence / 100 / partySize).toFixed(2) : amount;
   const stripePromise = useMemo(() => getStripeForAccount(stripeAccountId), [stripeAccountId]);
+  const showSplit = summaryMode === 'per_person' && partySize > 1;
 
   return (
     <div className="space-y-5">
       {/* Deposit breakdown card */}
       <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-        <div className="flex items-center justify-between">
+        <div className={`flex items-center ${showSplit ? 'justify-between' : ''}`}>
           <div>
             <p className="text-xs font-medium text-slate-500">Deposit required</p>
             <p className="text-2xl font-bold text-slate-900">&pound;{amount}</p>
+            {summaryMode === 'total' && partySize > 1 && (
+              <p className="mt-1 text-xs text-slate-500">Total for {partySize} appointments</p>
+            )}
           </div>
-          <div className="text-right">
-            <p className="text-xs text-slate-400">{partySize} &times; &pound;{perPerson}</p>
-            <p className="text-xs text-slate-400">per person</p>
-          </div>
+          {showSplit && (
+            <div className="text-right">
+              <p className="text-xs text-slate-400">{partySize} &times; &pound;{perPerson}</p>
+              <p className="text-xs text-slate-400">per person</p>
+            </div>
+          )}
         </div>
       </div>
 

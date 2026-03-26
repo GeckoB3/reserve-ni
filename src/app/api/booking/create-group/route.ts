@@ -13,6 +13,7 @@ import {
 } from '@/lib/availability/appointment-engine';
 import { z } from 'zod';
 import { randomUUID } from 'crypto';
+import { cancellationDeadlineHoursBefore } from '@/lib/booking/cancellation-deadline';
 
 const personEntrySchema = z.object({
   person_label: z.string().min(1).max(100),
@@ -29,15 +30,8 @@ const createGroupSchema = z.object({
   phone: z.string().min(1).max(24),
   source: z.enum(['online', 'phone', 'walk-in', 'widget', 'booking_page']),
   people: z.array(personEntrySchema).min(1).max(10),
+  dietary_notes: z.string().max(1000).optional(),
 });
-
-function cancellationDeadline(bookingDate: string, bookingTime: string): string {
-  const [y, m, d] = bookingDate.split('-').map(Number);
-  const [hh, mm] = bookingTime.slice(0, 5).split(':').map(Number);
-  const dt = new Date(Date.UTC(y!, m! - 1, d!, hh, mm, 0));
-  dt.setHours(dt.getHours() - 48);
-  return dt.toISOString();
-}
 
 /**
  * POST /api/booking/create-group
@@ -55,7 +49,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { venue_id, name, email, phone, source, people } = parsed.data;
+    const { venue_id, name, email, phone, source, people, dietary_notes } = parsed.data;
 
     const phoneE164 = normalizeToE164(phone, 'GB');
     if (!phoneE164) {
@@ -66,7 +60,7 @@ export async function POST(request: NextRequest) {
 
     const { data: venue, error: venueErr } = await supabase
       .from('venues')
-      .select('id, name, stripe_connected_account_id, address')
+      .select('id, name, stripe_connected_account_id, address, booking_rules')
       .eq('id', venue_id)
       .single();
 
@@ -106,12 +100,8 @@ export async function POST(request: NextRequest) {
         serviceId: person.appointment_service_id,
       });
 
-      // Inject phantom bookings for same-date slots
-      const sameDatePhantoms = phantoms.filter((p) =>
-        // phantoms are always for the same date since we fetched by person.booking_date
-        true
-      );
-      input.phantomBookings = sameDatePhantoms;
+      // Inject phantom bookings from earlier people in this group (overlap checks)
+      input.phantomBookings = [...phantoms];
 
       const result = computeAppointmentAvailability(input);
       const prac = result.practitioners.find((p) => p.id === person.practitioner_id);
@@ -183,12 +173,18 @@ export async function POST(request: NextRequest) {
     const groupBookingId = randomUUID();
     const bookingIds: string[] = [];
 
+    const bookingRulesJson = (venue.booking_rules as { cancellation_notice_hours?: number } | null) ?? {};
+    const refundWindowHours =
+      typeof bookingRulesJson.cancellation_notice_hours === 'number'
+        ? bookingRulesJson.cancellation_notice_hours
+        : 48;
+
     for (const person of validatedPeople) {
       const timeForDb = person.booking_time + ':00';
-      const deadline = cancellationDeadline(person.booking_date, person.booking_time);
+      const deadline = cancellationDeadlineHoursBefore(person.booking_date, person.booking_time, refundWindowHours);
       const policySnapshot = {
-        refund_window_hours: 48,
-        policy: 'Full refund if cancelled 48+ hours before. No refund within 48 hours or for no-shows.',
+        refund_window_hours: refundWindowHours,
+        policy: `Full refund if cancelled ${refundWindowHours}+ hours before appointment start. No refund within ${refundWindowHours} hours of the appointment or for no-shows.`,
       };
 
       const insert: Record<string, unknown> = {
@@ -200,6 +196,7 @@ export async function POST(request: NextRequest) {
         status: requiresDeposit ? 'Pending' : 'Confirmed',
         source,
         guest_email: email || null,
+        dietary_notes: dietary_notes?.trim() || null,
         deposit_amount_pence: person.deposit_pence > 0 ? person.deposit_pence : null,
         deposit_status: person.deposit_pence > 0 ? 'Pending' : 'Not Required',
         cancellation_deadline: deadline,
@@ -311,6 +308,7 @@ export async function POST(request: NextRequest) {
         client_secret: client_secret ?? undefined,
         stripe_account_id: requiresDeposit ? venue.stripe_connected_account_id : undefined,
         status: requiresDeposit ? 'Pending' : 'Confirmed',
+        cancellation_notice_hours: refundWindowHours,
       },
       { status: 201 }
     );

@@ -8,7 +8,13 @@ import { PaymentStep } from './PaymentStep';
 interface Practitioner {
   id: string;
   name: string;
-  services: Array<{ id: string; name: string; duration_minutes: number; price_pence: number | null }>;
+  services: Array<{
+    id: string;
+    name: string;
+    duration_minutes: number;
+    price_pence: number | null;
+    deposit_pence: number | null;
+  }>;
   slots: Array<{ start_time: string; service_id: string; duration_minutes: number; price_pence: number | null }>;
 }
 
@@ -23,6 +29,7 @@ interface PersonSelection {
   durationMinutes: number;
   bufferMinutes: number;
   pricePence: number | null;
+  depositPence: number;
 }
 
 type Step =
@@ -89,7 +96,12 @@ export function AppointmentBookingFlow({ venue, cancellationPolicy, embed, onHei
   const [selectedTime, setSelectedTime] = useState<string | null>(null);
   const [guestDetails, setGuestDetails] = useState<GuestDetails | null>(null);
   const [createResult, setCreateResult] = useState<{
-    booking_id: string; client_secret?: string; stripe_account_id?: string; requires_deposit: boolean;
+    booking_id: string;
+    client_secret?: string;
+    stripe_account_id?: string;
+    requires_deposit: boolean;
+    deposit_amount_pence: number;
+    cancellation_notice_hours: number;
   } | null>(null);
 
   // Group booking state
@@ -104,6 +116,7 @@ export function AppointmentBookingFlow({ venue, cancellationPolicy, embed, onHei
     stripe_account_id?: string;
     requires_deposit: boolean;
     total_deposit_pence: number;
+    cancellation_notice_hours: number;
   } | null>(null);
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -170,6 +183,8 @@ export function AppointmentBookingFlow({ venue, cancellationPolicy, embed, onHei
     return `${sym}${(pence / 100).toFixed(2)}`;
   }
 
+  const refundNoticeHours = venue.booking_rules?.cancellation_notice_hours ?? 48;
+
   // Single flow helpers
   const selectedPrac = practitioners.find((p) => p.id === selectedPractitionerId);
   const availableSlots = selectedPrac?.slots.filter((s) => !selectedServiceId || s.service_id === selectedServiceId) ?? [];
@@ -205,6 +220,8 @@ export function AppointmentBookingFlow({ venue, cancellationPolicy, embed, onHei
           source: 'booking_page',
           practitioner_id: selectedPractitionerId,
           appointment_service_id: selectedServiceId,
+          dietary_notes: details.dietary_notes,
+          occasion: details.occasion,
         }),
       });
       const data = await res.json();
@@ -214,12 +231,14 @@ export function AppointmentBookingFlow({ venue, cancellationPolicy, embed, onHei
         client_secret: data.client_secret,
         stripe_account_id: data.stripe_account_id,
         requires_deposit: data.requires_deposit ?? false,
+        deposit_amount_pence: typeof data.deposit_amount_pence === 'number' ? data.deposit_amount_pence : 0,
+        cancellation_notice_hours: typeof data.cancellation_notice_hours === 'number' ? data.cancellation_notice_hours : refundNoticeHours,
       });
       setStep(data.requires_deposit && data.client_secret ? 'payment' : 'confirmation');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Booking failed');
     }
-  }, [venue.id, date, selectedTime, selectedPractitionerId, selectedServiceId]);
+  }, [venue.id, date, selectedTime, selectedPractitionerId, selectedServiceId, refundNoticeHours]);
 
   const handlePaymentComplete = useCallback(async () => {
     if (createResult?.booking_id) {
@@ -254,6 +273,7 @@ export function AppointmentBookingFlow({ venue, cancellationPolicy, embed, onHei
         durationMinutes: svc.duration_minutes,
         bufferMinutes: 0,
         pricePence: svc.price_pence,
+        depositPence: svc.deposit_pence ?? 0,
       },
     ]);
     setGroupServiceId(null);
@@ -279,6 +299,7 @@ export function AppointmentBookingFlow({ venue, cancellationPolicy, embed, onHei
           email: details.email || undefined,
           phone: details.phone,
           source: 'booking_page',
+          dietary_notes: details.dietary_notes,
           people: groupPeople.map((p) => ({
             person_label: p.label,
             practitioner_id: p.practitionerId,
@@ -297,12 +318,13 @@ export function AppointmentBookingFlow({ venue, cancellationPolicy, embed, onHei
         stripe_account_id: data.stripe_account_id,
         requires_deposit: data.requires_deposit ?? false,
         total_deposit_pence: data.total_deposit_pence ?? 0,
+        cancellation_notice_hours: typeof data.cancellation_notice_hours === 'number' ? data.cancellation_notice_hours : refundNoticeHours,
       });
       setStep(data.requires_deposit && data.client_secret ? 'group_payment' : 'group_confirmation');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Group booking failed');
     }
-  }, [venue.id, groupPeople]);
+  }, [venue.id, groupPeople, refundNoticeHours]);
 
   const handleGroupPaymentComplete = useCallback(async () => {
     if (groupCreateResult?.booking_ids?.[0]) {
@@ -353,6 +375,9 @@ export function AppointmentBookingFlow({ venue, cancellationPolicy, embed, onHei
   }
 
   const totalGroupPrice = groupPeople.reduce((sum, p) => sum + (p.pricePence ?? 0), 0);
+  const totalGroupDepositPence = groupPeople.reduce((sum, p) => sum + (p.depositPence ?? 0), 0);
+
+  const paymentCancellationBlurb = `Cancel at least ${refundNoticeHours} hours before each appointment to receive a full refund of any deposit paid.`;
 
   return (
     <div ref={containerRef} className="mx-auto max-w-lg" style={accentColour ? { '--accent': accentColour } as React.CSSProperties : undefined}>
@@ -572,19 +597,39 @@ export function AppointmentBookingFlow({ venue, cancellationPolicy, embed, onHei
               {selectedService?.price_pence != null && (
                 <div className="flex justify-between border-t border-slate-100 pt-1.5 mt-1.5"><span className="font-medium text-slate-700">Price</span><span className="font-semibold text-brand-600">{formatPrice(selectedService.price_pence)}</span></div>
               )}
+              {(selectedService?.deposit_pence ?? 0) > 0 && (
+                <div className="flex justify-between border-t border-slate-100 pt-1.5 mt-1.5">
+                  <span className="font-medium text-slate-700">Deposit</span>
+                  <span className="font-semibold text-amber-700">{formatPrice(selectedService!.deposit_pence)}</span>
+                </div>
+              )}
             </div>
           </div>
           <DetailsStep
             slot={{ key: selectedTime, label: selectedTime, start_time: selectedTime, end_time: '', available_covers: 1 }}
-            date={date} partySize={1} onSubmit={handleDetailsSubmit}
+            date={date}
+            partySize={1}
+            onSubmit={handleDetailsSubmit}
             onBack={() => { setSelectedTime(null); setStep('slot'); }}
-            requiresDeposit={false}
+            variant="appointment"
+            appointmentDepositPence={selectedService?.deposit_pence ?? 0}
+            currencySymbol={sym}
+            refundNoticeHours={refundNoticeHours}
           />
         </div>
       )}
 
       {step === 'payment' && createResult?.client_secret && (
-        <PaymentStep clientSecret={createResult.client_secret} stripeAccountId={createResult.stripe_account_id} amountPence={selectedService?.price_pence ?? 0} partySize={1} onComplete={handlePaymentComplete} onBack={() => setStep('details')} cancellationPolicy={cancellationPolicy} />
+        <PaymentStep
+          clientSecret={createResult.client_secret}
+          stripeAccountId={createResult.stripe_account_id}
+          amountPence={createResult.deposit_amount_pence}
+          partySize={1}
+          onComplete={handlePaymentComplete}
+          onBack={() => setStep('details')}
+          cancellationPolicy={cancellationPolicy ?? paymentCancellationBlurb}
+          summaryMode="total"
+        />
       )}
 
       {step === 'confirmation' && (
@@ -594,6 +639,16 @@ export function AppointmentBookingFlow({ venue, cancellationPolicy, embed, onHei
           <p className="mt-2 text-sm text-green-700">{selectedService?.name} with {selectedPrac?.name}</p>
           <p className="mt-1 text-sm text-green-600">{formatDateHuman(date)} at {selectedTime}</p>
           {guestDetails?.name && <p className="mt-3 text-xs text-green-600">A confirmation will be sent to {guestDetails.email || guestDetails.phone}.</p>}
+          {(createResult?.deposit_amount_pence ?? 0) > 0 ? (
+            <p className="mt-4 max-w-sm mx-auto text-left text-xs text-green-800/90">
+              <span className="font-medium">Refund policy:</span> cancel at least {createResult?.cancellation_notice_hours ?? refundNoticeHours} hours before your appointment starts to receive a full refund of your {sym}
+              {((createResult?.deposit_amount_pence ?? 0) / 100).toFixed(2)} deposit.
+            </p>
+          ) : (
+            <p className="mt-4 max-w-sm mx-auto text-left text-xs text-green-800/90">
+              No deposit was taken. You can cancel or change this booking at any time before your appointment (subject to the venue&apos;s terms).
+            </p>
+          )}
         </div>
       )}
 
@@ -642,8 +697,16 @@ export function AppointmentBookingFlow({ venue, cancellationPolicy, embed, onHei
               {totalGroupPrice > 0 && (
                 <div className="rounded-xl border border-brand-100 bg-brand-50/50 px-4 py-2.5 text-sm">
                   <div className="flex justify-between">
-                    <span className="font-medium text-brand-700">Total</span>
+                    <span className="font-medium text-brand-700">Total (price)</span>
                     <span className="font-semibold text-brand-700">{formatPrice(totalGroupPrice)}</span>
+                  </div>
+                </div>
+              )}
+              {totalGroupDepositPence > 0 && (
+                <div className="rounded-xl border border-amber-100 bg-amber-50/60 px-4 py-2.5 text-sm">
+                  <div className="flex justify-between">
+                    <span className="font-medium text-amber-900">Total deposit due</span>
+                    <span className="font-semibold text-amber-900">{formatPrice(totalGroupDepositPence)}</span>
                   </div>
                 </div>
               )}
@@ -851,8 +914,14 @@ export function AppointmentBookingFlow({ venue, cancellationPolicy, embed, onHei
               ))}
               {totalGroupPrice > 0 && (
                 <div className="flex justify-between border-t border-slate-100 pt-2">
-                  <span className="font-medium text-slate-700">Total</span>
+                  <span className="font-medium text-slate-700">Total (price)</span>
                   <span className="font-semibold text-brand-600">{formatPrice(totalGroupPrice)}</span>
+                </div>
+              )}
+              {totalGroupDepositPence > 0 && (
+                <div className="flex justify-between border-t border-amber-100 pt-2">
+                  <span className="font-medium text-amber-900">Total deposit</span>
+                  <span className="font-semibold text-amber-800">{formatPrice(totalGroupDepositPence)}</span>
                 </div>
               )}
             </div>
@@ -863,7 +932,10 @@ export function AppointmentBookingFlow({ venue, cancellationPolicy, embed, onHei
             partySize={groupPeople.length}
             onSubmit={handleGroupDetailsSubmit}
             onBack={() => setStep('group_review')}
-            requiresDeposit={false}
+            variant="appointment"
+            appointmentDepositPence={totalGroupDepositPence}
+            currencySymbol={sym}
+            refundNoticeHours={refundNoticeHours}
           />
         </div>
       )}
@@ -877,7 +949,8 @@ export function AppointmentBookingFlow({ venue, cancellationPolicy, embed, onHei
           partySize={groupPeople.length}
           onComplete={handleGroupPaymentComplete}
           onBack={() => setStep('group_details')}
-          cancellationPolicy={cancellationPolicy}
+          cancellationPolicy={cancellationPolicy ?? paymentCancellationBlurb}
+          summaryMode="total"
         />
       )}
 
@@ -899,6 +972,17 @@ export function AppointmentBookingFlow({ venue, cancellationPolicy, embed, onHei
           {guestDetails?.name && (
             <p className="mt-3 text-xs text-green-600">
               A confirmation will be sent to {guestDetails.email || guestDetails.phone}.
+            </p>
+          )}
+          {(groupCreateResult?.total_deposit_pence ?? 0) > 0 ? (
+            <p className="mt-4 max-w-md mx-auto text-left text-xs text-green-800/90">
+              <span className="font-medium">Refund policy:</span> cancel at least {groupCreateResult?.cancellation_notice_hours ?? refundNoticeHours} hours before
+              each appointment start time to receive a full refund of that appointment&apos;s deposit ({sym}
+              {((groupCreateResult?.total_deposit_pence ?? 0) / 100).toFixed(2)} total paid).
+            </p>
+          ) : (
+            <p className="mt-4 max-w-md mx-auto text-left text-xs text-green-800/90">
+              No deposit was taken. You can cancel or change these appointments at any time before they start (subject to the venue&apos;s terms).
             </p>
           )}
         </div>
