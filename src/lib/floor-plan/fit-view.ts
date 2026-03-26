@@ -12,7 +12,7 @@ export interface FitViewTableLike {
 }
 
 export interface ComputeStageFitOptions {
-  /** Padding around the content bounding box (px). Default 32. */
+  /** Padding around the content bounding box (px). Default 48. */
   padding?: number;
   /** Upper cap on scale (matches wheel zoom max in canvases). Default 3. */
   maxScale?: number;
@@ -28,7 +28,7 @@ export function computeStageFitToView(
   canvasH: number,
   options?: ComputeStageFitOptions,
 ): { scale: number; x: number; y: number } {
-  const pad = options?.padding ?? 32;
+  const pad = options?.padding ?? 48;
   const maxScale = options?.maxScale ?? 3;
 
   if (tables.length === 0 || canvasW < 1 || canvasH < 1) {

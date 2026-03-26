@@ -1041,7 +1041,7 @@ export function TableGridView({ venueId }: { venueId: string }) {
   }, [gridData, date]);
 
   return (
-    <div className="flex h-[calc(100vh-120px)] flex-col space-y-4">
+    <div className="flex h-[calc(100dvh-72px)] flex-col space-y-2 md:h-[calc(100dvh-100px)] md:space-y-3 lg:h-[calc(100dvh-120px)] lg:space-y-4">
       {gridData && (
         <ViewToolbar
           title="Table grid"
@@ -1059,26 +1059,26 @@ export function TableGridView({ venueId }: { venueId: string }) {
               <button
                 type="button"
                 onClick={() => { void printDaySheet(); }}
-                className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 shadow-sm hover:bg-slate-50"
+                className="hidden rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 shadow-sm hover:bg-slate-50 sm:block"
               >
                 Print
               </button>
               <button
                 type="button"
                 onClick={() => { void exportCsv(); }}
-                className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 shadow-sm hover:bg-slate-50"
+                className="hidden rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 shadow-sm hover:bg-slate-50 sm:block"
               >
                 Export CSV
               </button>
             </>
           )}
         >
-          <div className="flex w-full flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+          <div className="flex w-full flex-col gap-2 lg:flex-row lg:items-center lg:justify-between lg:gap-3">
+            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5 sm:gap-2">
               <select
                 value={serviceId ?? ''}
                 onChange={(e) => setServiceId(e.target.value || null)}
-                className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 sm:px-3 sm:py-2 sm:text-sm"
               >
                 <option value="">All services</option>
                 {services.map((s) => (
@@ -1086,15 +1086,15 @@ export function TableGridView({ venueId }: { venueId: string }) {
                 ))}
               </select>
               {serviceId && (
-                <span className="inline-flex items-center rounded-full border border-violet-200 bg-violet-50 px-2.5 py-1 text-xs font-medium text-violet-800">
-                  Service filter on
+                <span className="inline-flex items-center rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-[10px] font-medium text-violet-800 sm:px-2.5 sm:py-1 sm:text-xs">
+                  Filtered
                 </span>
               )}
               {zones.length > 0 && (
                 <select
                   value={zoneFilter ?? ''}
                   onChange={(e) => setZoneFilter(e.target.value || null)}
-                  className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                  className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 sm:px-3 sm:py-2 sm:text-sm"
                 >
                   <option value="">All zones</option>
                   {zones.map((z) => (
@@ -1105,7 +1105,7 @@ export function TableGridView({ venueId }: { venueId: string }) {
               <select
                 value={statusFilter ?? ''}
                 onChange={(e) => setStatusFilter(e.target.value || null)}
-                className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 sm:px-3 sm:py-2 sm:text-sm"
               >
                 <option value="">All statuses</option>
                 <option value="Confirmed">Confirmed</option>
@@ -1115,37 +1115,37 @@ export function TableGridView({ venueId }: { venueId: string }) {
                 <option value="No-Show">No-Show</option>
                 <option value="Cancelled">Cancelled</option>
               </select>
-              <label className="inline-flex cursor-pointer items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 shadow-sm hover:bg-slate-50">
+              <label className="hidden cursor-pointer items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 shadow-sm hover:bg-slate-50 sm:inline-flex">
                 <input type="checkbox" checked={showCancelled} onChange={(e) => setShowCancelled(e.target.checked)} className="rounded border-slate-300 text-brand-600 focus:ring-brand-500" />
                 Cancelled
               </label>
-              <label className="inline-flex cursor-pointer items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 shadow-sm hover:bg-slate-50">
+              <label className="hidden cursor-pointer items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 shadow-sm hover:bg-slate-50 sm:inline-flex">
                 <input type="checkbox" checked={showNoShow} onChange={(e) => setShowNoShow(e.target.checked)} className="rounded border-slate-300 text-brand-600 focus:ring-brand-500" />
                 No-Show
               </label>
             </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="relative min-w-[12rem] flex-1 sm:min-w-[18rem]">
+            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+              <div className="relative min-w-0 flex-1 sm:min-w-[14rem]">
                 <input
                   type="text"
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Search guest, phone, or ref"
-                  className="w-full rounded-lg border border-slate-200 px-3 py-2 pl-9 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                  placeholder="Search guest"
+                  className="w-full rounded-lg border border-slate-200 px-2 py-1.5 pl-8 text-xs focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 sm:px-3 sm:py-2 sm:pl-9 sm:text-sm"
                 />
-                <svg className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <svg className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400 sm:left-3 sm:h-4 sm:w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
                 </svg>
               </div>
               <div className="flex items-center rounded-lg border border-slate-200 bg-white shadow-sm">
-                <button type="button" onClick={() => setSlotWidth((prev) => Math.max(30, prev - 5))} className="px-2.5 py-2 text-sm text-slate-500 hover:text-slate-700" title="Zoom out">−</button>
-                <span className="border-x border-slate-200 px-2 py-2 text-xs font-medium tabular-nums text-slate-600">{slotWidth}px</span>
-                <button type="button" onClick={() => setSlotWidth((prev) => Math.min(80, prev + 5))} className="px-2.5 py-2 text-sm text-slate-500 hover:text-slate-700" title="Zoom in">+</button>
+                <button type="button" onClick={() => setSlotWidth((prev) => Math.max(30, prev - 5))} className="px-2 py-1.5 text-sm text-slate-500 hover:text-slate-700 sm:px-2.5 sm:py-2" title="Zoom out">−</button>
+                <span className="hidden border-x border-slate-200 px-2 py-1.5 text-xs font-medium tabular-nums text-slate-600 sm:block sm:py-2">{slotWidth}px</span>
+                <button type="button" onClick={() => setSlotWidth((prev) => Math.min(80, prev + 5))} className="px-2 py-1.5 text-sm text-slate-500 hover:text-slate-700 sm:px-2.5 sm:py-2" title="Zoom in">+</button>
               </div>
               <button
                 type="button"
                 onClick={() => setShowLegend((prev) => !prev)}
-                className={`rounded-lg border px-3 py-2 text-sm font-medium shadow-sm transition-colors ${
+                className={`rounded-lg border px-2 py-1.5 text-xs font-medium shadow-sm transition-colors sm:px-3 sm:py-2 sm:text-sm ${
                   showLegend
                     ? 'border-brand-200 bg-brand-50 text-brand-800'
                     : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'

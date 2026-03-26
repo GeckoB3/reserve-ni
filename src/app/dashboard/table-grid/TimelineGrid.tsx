@@ -821,7 +821,7 @@ export function TimelineGrid({
       onDragEnd={handleDragEnd}
     >
       <div className="flex h-full">
-        <div className="flex w-28 shrink-0 flex-col border-r border-slate-200 bg-slate-50/50 sm:w-[140px]">
+        <div className="flex w-20 shrink-0 flex-col border-r border-slate-200 bg-slate-50/50 sm:w-28 md:w-[140px]">
           <div className="flex h-10 items-center border-b border-slate-200 px-3 text-xs font-semibold text-slate-500">
             Tables
           </div>
@@ -854,7 +854,7 @@ export function TimelineGrid({
             {unassignedBlocks.length > 0 && (
               <>
                 <div
-                  className="flex min-w-0 flex-col justify-center gap-1.5 border-b border-emerald-100 bg-emerald-50 px-2 py-2 sm:px-3"
+                  className="flex min-w-0 flex-col justify-center gap-1 border-b border-emerald-100 bg-emerald-50 px-1.5 py-1.5 sm:gap-1.5 sm:px-2 sm:py-2 md:px-3"
                   style={{ height: UNASSIGNED_HEADER_HEIGHT }}
                 >
                   <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700">Unassigned</span>
@@ -872,11 +872,11 @@ export function TimelineGrid({
                 {unassignedBlocks.map((block) => (
                   <div
                     key={block.id}
-                    className="flex min-w-0 flex-col justify-center border-b border-emerald-100 bg-emerald-50/60 px-2 py-0.5 sm:px-3"
+                    className="flex min-w-0 flex-col justify-center border-b border-emerald-100 bg-emerald-50/60 px-1.5 py-0.5 sm:px-2 md:px-3"
                     style={{ height: ROW_HEIGHT }}
                   >
-                    <span className="truncate text-xs font-semibold text-emerald-900">{block.guest_name}</span>
-                    <span className="truncate text-[10px] text-emerald-700">
+                    <span className="truncate text-[10px] font-semibold text-emerald-900 sm:text-xs">{block.guest_name}</span>
+                    <span className="truncate text-[9px] text-emerald-700 sm:text-[10px]">
                       {block.start_time.slice(0, 5)} · {block.party_size} pax
                     </span>
                   </div>
@@ -1260,16 +1260,16 @@ export function TimelineGrid({
 function TableRowHeader({ table, isValidTarget, comboLabel }: { table: VenueTable; isValidTarget: boolean | null; comboLabel?: string }) {
   return (
     <div
-      className={`flex flex-col justify-center border-b border-slate-100 px-3 transition-colors ${
+      className={`flex flex-col justify-center border-b border-slate-100 px-1.5 transition-colors sm:px-3 ${
         isValidTarget === true ? 'bg-green-100/80' :
         isValidTarget === false ? 'bg-slate-100/50 opacity-50' :
         ''
       }`}
       style={{ height: ROW_HEIGHT }}
     >
-      <div className="flex items-center gap-2">
-        <span className="text-xs font-semibold text-slate-900">{table.name}</span>
-        <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-500">
+      <div className="flex items-center gap-1 sm:gap-2">
+        <span className="truncate text-[10px] font-semibold text-slate-900 sm:text-xs">{table.name}</span>
+        <span className="hidden rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-500 sm:inline-block">
           {table.max_covers}
         </span>
       </div>

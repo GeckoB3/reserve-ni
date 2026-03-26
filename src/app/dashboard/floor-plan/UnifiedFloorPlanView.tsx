@@ -51,13 +51,13 @@ export function UnifiedFloorPlanView({ isAdmin, venueId }: { isAdmin: boolean; v
 
   if (mode === 'operational') {
     return (
-      <div className="space-y-3">
+      <div className="space-y-2 sm:space-y-3">
         <div className="flex items-center justify-end">
           {isAdmin && (
             <button
               type="button"
               onClick={() => setMode('edit')}
-              className="inline-flex items-center gap-2 rounded-lg bg-amber-500 px-3 py-2 text-sm font-medium text-white hover:bg-amber-600"
+              className="inline-flex items-center gap-2 rounded-lg bg-amber-500 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-amber-600 sm:px-3 sm:py-2 sm:text-sm"
             >
               Edit Layout
             </button>

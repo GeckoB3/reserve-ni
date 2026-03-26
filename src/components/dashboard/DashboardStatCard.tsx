@@ -37,11 +37,11 @@ export function DashboardStatCard({
   subValue2?: string;
 }) {
   return (
-    <div className={`rounded-xl border px-4 py-3 ${colorClasses[color]}`}>
-      <p className="text-2xl font-bold tabular-nums leading-tight">{value}</p>
-      {subValue && <p className="mt-0.5 text-xs font-medium opacity-80 tabular-nums">{subValue}</p>}
-      {subValue2 && <p className="mt-0.5 text-xs font-medium opacity-80 tabular-nums">{subValue2}</p>}
-      {label ? <p className="mt-1 text-xs font-medium opacity-75">{label}</p> : null}
+    <div className={`rounded-xl border px-2.5 py-2 sm:px-4 sm:py-3 ${colorClasses[color]}`}>
+      <p className="text-lg font-bold tabular-nums leading-tight sm:text-2xl">{value}</p>
+      {subValue && <p className="mt-0.5 text-[10px] font-medium opacity-80 tabular-nums sm:text-xs">{subValue}</p>}
+      {subValue2 && <p className="mt-0.5 text-[10px] font-medium opacity-80 tabular-nums sm:text-xs">{subValue2}</p>}
+      {label ? <p className="mt-0.5 text-[10px] font-medium opacity-75 sm:mt-1 sm:text-xs">{label}</p> : null}
     </div>
   );
 }

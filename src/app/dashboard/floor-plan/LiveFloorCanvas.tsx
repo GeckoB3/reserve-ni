@@ -112,6 +112,7 @@ export default function LiveFloorCanvas({
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
   const [scale, setScale] = useState(1);
   const [stagePos, setStagePos] = useState({ x: 0, y: 0 });
+  const baseScaleRef = useRef(1);
   const [draggingBookingId, setDraggingBookingId] = useState<string | null>(null);
   const [dragPointer, setDragPointer] = useState<{ x: number; y: number } | null>(null);
   const dragStartPosRef = useRef<{ x: number; y: number } | null>(null);
@@ -121,13 +122,18 @@ export default function LiveFloorCanvas({
     const updateSize = () => {
       if (containerRef.current) {
         const w = containerRef.current.offsetWidth;
-        const h = containerRef.current.offsetHeight || Math.round(w * 0.75);
-        setDimensions({ width: w, height: h });
+        const h = containerRef.current.offsetHeight || Math.min(Math.round(w * 0.75), window.innerHeight - 200);
+        setDimensions({ width: Math.max(1, w), height: Math.max(1, h) });
       }
     };
     updateSize();
     window.addEventListener('resize', updateSize);
-    return () => window.removeEventListener('resize', updateSize);
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(updateSize) : null;
+    if (ro && containerRef.current) ro.observe(containerRef.current);
+    return () => {
+      window.removeEventListener('resize', updateSize);
+      ro?.disconnect();
+    };
   }, []);
 
   const handleStageClick = useCallback((e: KonvaEventObject<MouseEvent | TouchEvent>) => {
@@ -291,15 +297,26 @@ export default function LiveFloorCanvas({
 
   const fitViewToStage = useCallback(() => {
     const fit = computeStageFitToView(tables, dimensions.width, dimensions.height);
+    baseScaleRef.current = fit.scale;
     setScale(fit.scale);
     setStagePos({ x: fit.x, y: fit.y });
   }, [tables, dimensions.width, dimensions.height]);
 
   const initialFitDone = useRef(false);
+  const prevDimensions = useRef({ width: 0, height: 0 });
   useEffect(() => {
-    if (!initialFitDone.current && tables.length > 0 && dimensions.width > 1) {
+    if (tables.length === 0 || dimensions.width <= 1) return;
+    if (!initialFitDone.current) {
       fitViewToStage();
       initialFitDone.current = true;
+      prevDimensions.current = { width: dimensions.width, height: dimensions.height };
+      return;
+    }
+    const dw = Math.abs(dimensions.width - prevDimensions.current.width);
+    const dh = Math.abs(dimensions.height - prevDimensions.current.height);
+    if (dw > 50 || dh > 50) {
+      fitViewToStage();
+      prevDimensions.current = { width: dimensions.width, height: dimensions.height };
     }
   }, [tables, dimensions.width, dimensions.height, fitViewToStage]);
 
@@ -330,23 +347,25 @@ export default function LiveFloorCanvas({
         <button
           type="button"
           onClick={() => zoomBy(0.2)}
-          className="flex h-9 w-9 items-center justify-center rounded border border-slate-300 bg-white text-sm text-slate-600 hover:bg-slate-50"
+          className="flex h-10 w-10 items-center justify-center rounded-lg border border-slate-300 bg-white text-base text-slate-600 shadow-sm hover:bg-slate-50 sm:h-9 sm:w-9 sm:text-sm"
+          aria-label="Zoom in"
         >+</button>
         <button
           type="button"
           onClick={() => zoomBy(-0.2)}
-          className="flex h-9 w-9 items-center justify-center rounded border border-slate-300 bg-white text-sm text-slate-600 hover:bg-slate-50"
+          className="flex h-10 w-10 items-center justify-center rounded-lg border border-slate-300 bg-white text-base text-slate-600 shadow-sm hover:bg-slate-50 sm:h-9 sm:w-9 sm:text-sm"
+          aria-label="Zoom out"
         >−</button>
         <button
           type="button"
           onClick={fitViewToStage}
-          className="flex h-9 min-w-[2.75rem] items-center justify-center rounded border border-slate-300 bg-white px-2 text-xs text-slate-600 hover:bg-slate-50"
-          title="Fit entire floor plan to this view (same as filling the canvas)"
-        >{Math.round(scale * 100)}%</button>
+          className="flex h-10 min-w-[3rem] items-center justify-center rounded-lg border border-slate-300 bg-white px-2 text-xs font-medium text-slate-600 shadow-sm hover:bg-slate-50 sm:h-9 sm:min-w-[2.75rem]"
+          title="Fit entire floor plan to view"
+        >{Math.round((baseScaleRef.current > 0 ? scale / baseScaleRef.current : scale) * 100)}%</button>
       </div>
 
       {isDragging && (
-        <div className="absolute left-2 top-2 z-10 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-800 shadow-sm">
+        <div className="absolute left-2 top-14 z-10 max-w-[calc(100%-4rem)] rounded-lg border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] font-medium text-amber-800 shadow-sm sm:top-2 sm:px-3 sm:py-1.5 sm:text-xs">
           {draggingBookingId
             ? 'Drop on a highlighted table to reassign'
             : `Select destination for ${reassignMode?.guestName ?? 'booking'}`}

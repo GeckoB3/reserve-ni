@@ -713,7 +713,7 @@ export function FloorPlanLiveView({ isAdmin = false, venueId }: { isAdmin?: bool
   }
 
   return (
-    <div className="flex h-[calc(100vh-120px)] flex-col space-y-3">
+    <div className="flex h-[calc(100dvh-72px)] flex-col space-y-2 md:h-[calc(100dvh-100px)] md:space-y-3 lg:h-[calc(100dvh-120px)]">
       <ViewToolbar
         title="Live floor"
         summary={summaryData}
@@ -725,23 +725,23 @@ export function FloorPlanLiveView({ isAdmin = false, venueId }: { isAdmin?: bool
         onWalkIn={() => setShowWalkInModal(true)}
       >
         <div className="flex flex-wrap items-center gap-2">
-          <label className="text-sm font-medium text-slate-600">Timeline</label>
+          <label className="text-xs font-medium text-slate-600 sm:text-sm">Timeline</label>
           <input
             type="time"
             value={selectedTime}
             onChange={(e) => setSelectedTime(e.target.value)}
-            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+            className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 sm:px-3 sm:py-2"
           />
-          <span className="text-xs text-slate-500">Drag and status use this clock position.</span>
+          <span className="hidden text-xs text-slate-500 sm:inline">Drag and status use this clock position.</span>
         </div>
       </ViewToolbar>
 
       {/* Canvas area */}
-      <div className="relative flex-1 overflow-hidden rounded-xl border border-slate-200 bg-slate-50 shadow-sm">
+      <div className="relative min-h-0 flex-1 overflow-hidden rounded-xl border border-slate-200 bg-slate-50 shadow-sm">
         {reassignMode && (
-          <div className="absolute left-4 right-4 top-4 z-30 flex items-center justify-between rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-900 shadow-sm">
-            <span>Click a highlighted table to move <strong>{reassignMode.guestName}</strong></span>
-            <button type="button" onClick={() => { setReassignMode(null); clearDragValidation(); }} className="font-semibold text-amber-700 underline">Cancel</button>
+          <div className="absolute left-2 right-2 top-2 z-30 flex items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-2 py-1.5 text-[11px] text-amber-900 shadow-sm sm:left-4 sm:right-4 sm:top-4 sm:px-4 sm:py-2 sm:text-xs">
+            <span>Tap a highlighted table to move <strong>{reassignMode.guestName}</strong></span>
+            <button type="button" onClick={() => { setReassignMode(null); clearDragValidation(); }} className="shrink-0 font-semibold text-amber-700 underline">Cancel</button>
           </div>
         )}
         <LiveFloorCanvas
@@ -761,7 +761,8 @@ export function FloorPlanLiveView({ isAdmin = false, venueId }: { isAdmin?: bool
 
       {/* Table detail bottom sheet */}
       {selectedTable && !detailBookingId && (
-        <div className="fixed bottom-0 left-0 right-0 z-40 mx-auto max-h-[60vh] max-w-lg overflow-y-auto rounded-t-2xl border border-slate-200 bg-white p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-2xl lg:bottom-6 lg:left-auto lg:right-6 lg:max-h-[calc(100vh-12rem)] lg:max-w-sm lg:rounded-2xl lg:p-5">
+        <div className="fixed bottom-0 left-0 right-0 z-40 mx-auto max-h-[60vh] max-w-lg overflow-y-auto rounded-t-2xl border border-slate-200 bg-white p-3 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-2xl sm:p-4 lg:bottom-6 lg:left-auto lg:right-6 lg:max-h-[calc(100vh-12rem)] lg:max-w-sm lg:rounded-2xl lg:p-5">
+          <div className="mx-auto mb-2 h-1 w-10 rounded-full bg-slate-300 lg:hidden" />
           <div className="flex items-center justify-between">
             <div>
               <h3 className="text-base font-semibold text-slate-900">{selectedTable.name}</h3>
