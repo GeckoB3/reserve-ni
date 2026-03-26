@@ -152,7 +152,7 @@ export function ResourceBookingFlow({ venue, cancellationPolicy }: { venue: Venu
                     </div>
                     <div className="text-right text-sm">
                       {r.price_per_slot_pence != null && (
-                        <span className="font-medium text-brand-600">£{(r.price_per_slot_pence / 100).toFixed(2)}/slot</span>
+                        <span className="font-medium text-brand-600">{venue.currency === 'EUR' ? '€' : '£'}{(r.price_per_slot_pence / 100).toFixed(2)}/slot</span>
                       )}
                       <div className="text-xs text-slate-400">{r.slots.length} times</div>
                     </div>
@@ -192,7 +192,7 @@ export function ResourceBookingFlow({ venue, cancellationPolicy }: { venue: Venu
           <div className="mb-4 rounded-xl border border-slate-200 bg-white p-4 text-sm">
             <div className="font-medium text-slate-900">{selectedResource?.name}</div>
             <div className="text-slate-500">{date} &middot; {selectedTime} – {computeEndTime(selectedTime, duration)}</div>
-            {totalPricePence > 0 && <div className="mt-1 font-medium text-brand-600">£{(totalPricePence / 100).toFixed(2)}</div>}
+            {totalPricePence > 0 && <div className="mt-1 font-medium text-brand-600">{venue.currency === 'EUR' ? '€' : '£'}{(totalPricePence / 100).toFixed(2)}</div>}
           </div>
           <DetailsStep
             slot={{ key: selectedTime, label: selectedTime, start_time: selectedTime, end_time: computeEndTime(selectedTime, duration), available_covers: 1 }}

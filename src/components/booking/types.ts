@@ -17,6 +17,7 @@ export interface VenuePublic {
   timezone: string;
   booking_model?: string;
   terminology?: { client: string; booking: string; staff: string };
+  currency?: string;
 }
 
 export interface DepositConfigPublic {

@@ -27,6 +27,7 @@ interface EventAvail {
 type Step = 'events' | 'tickets' | 'details' | 'payment' | 'confirmation';
 
 export function EventBookingFlow({ venue, cancellationPolicy }: { venue: VenuePublic; cancellationPolicy?: string }) {
+  const sym = venue.currency === 'EUR' ? '€' : '£';
   const [step, setStep] = useState<Step>('events');
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [events, setEvents] = useState<EventAvail[]>([]);
@@ -154,7 +155,7 @@ export function EventBookingFlow({ venue, cancellationPolicy }: { venue: VenuePu
               <div key={tt.id} className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
                 <div>
                   <div className="font-medium text-slate-900">{tt.name}</div>
-                  <div className="text-sm text-slate-500">£{(tt.price_pence / 100).toFixed(2)} &middot; {tt.remaining} left</div>
+                  <div className="text-sm text-slate-500">{sym}{(tt.price_pence / 100).toFixed(2)} &middot; {tt.remaining} left</div>
                 </div>
                 <div className="flex items-center gap-2">
                   <button
@@ -179,7 +180,7 @@ export function EventBookingFlow({ venue, cancellationPolicy }: { venue: VenuePu
           {totalTickets > 0 && (
             <div className="mt-6">
               <div className="mb-3 text-right text-sm font-medium text-slate-700">
-                Total: £{(totalPricePence / 100).toFixed(2)} ({totalTickets} ticket{totalTickets !== 1 ? 's' : ''})
+                Total: {sym}{(totalPricePence / 100).toFixed(2)} ({totalTickets} ticket{totalTickets !== 1 ? 's' : ''})
               </div>
               <button
                 onClick={() => setStep('details')}

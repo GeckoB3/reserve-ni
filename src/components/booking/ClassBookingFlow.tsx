@@ -119,7 +119,7 @@ export function ClassBookingFlow({ venue, cancellationPolicy }: { venue: VenuePu
                       <div className="font-semibold text-slate-900">{cls.class_name}</div>
                       <div className="text-sm text-slate-500">
                         {cls.start_time.slice(0, 5)} &middot; {cls.duration_minutes} min
-                        {cls.price_pence != null && ` · £${(cls.price_pence / 100).toFixed(2)}`}
+                        {cls.price_pence != null && ` · ${venue.currency === 'EUR' ? '€' : '£'}${(cls.price_pence / 100).toFixed(2)}`}
                       </div>
                     </div>
                     <span className={`text-xs font-medium ${cls.remaining > 3 ? 'text-green-600' : cls.remaining > 0 ? 'text-amber-600' : 'text-red-500'}`}>

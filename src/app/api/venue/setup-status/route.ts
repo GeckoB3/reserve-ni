@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { stripe } from '@/lib/stripe';
+import type { BookingModel } from '@/types/booking-models';
 
 export interface SetupStatus {
   profile_complete: boolean;
@@ -10,6 +11,51 @@ export interface SetupStatus {
   stripe_connected: boolean;
   first_booking_made: boolean;
   is_admin: boolean;
+  booking_model: BookingModel;
+}
+
+async function checkAvailabilitySet(
+  admin: ReturnType<typeof getSupabaseAdminClient>,
+  venueId: string,
+  model: BookingModel,
+): Promise<boolean> {
+  switch (model) {
+    case 'practitioner_appointment': {
+      const { count } = await admin
+        .from('practitioners')
+        .select('id', { count: 'exact', head: true })
+        .eq('venue_id', venueId);
+      return (count ?? 0) > 0;
+    }
+    case 'event_ticket': {
+      const { count } = await admin
+        .from('experience_events')
+        .select('id', { count: 'exact', head: true })
+        .eq('venue_id', venueId);
+      return (count ?? 0) > 0;
+    }
+    case 'class_session': {
+      const { count } = await admin
+        .from('class_types')
+        .select('id', { count: 'exact', head: true })
+        .eq('venue_id', venueId);
+      return (count ?? 0) > 0;
+    }
+    case 'resource_booking': {
+      const { count } = await admin
+        .from('venue_resources')
+        .select('id', { count: 'exact', head: true })
+        .eq('venue_id', venueId);
+      return (count ?? 0) > 0;
+    }
+    default: {
+      const { count } = await admin
+        .from('venue_services')
+        .select('id', { count: 'exact', head: true })
+        .eq('venue_id', venueId);
+      return (count ?? 0) > 0;
+    }
+  }
 }
 
 export async function GET() {
@@ -20,21 +66,17 @@ export async function GET() {
 
     const { data: venue } = await staff.db
       .from('venues')
-      .select('name, address, phone, stripe_connected_account_id')
+      .select('name, address, phone, stripe_connected_account_id, booking_model')
       .eq('id', staff.venue_id)
       .single();
 
     if (!venue) return NextResponse.json({ error: 'Venue not found' }, { status: 404 });
 
+    const bookingModel = (venue.booking_model as BookingModel) ?? 'table_reservation';
     const profileComplete = Boolean(venue.name && venue.address && venue.phone);
 
     const admin = getSupabaseAdminClient();
-    const { count: serviceCount } = await admin
-      .from('venue_services')
-      .select('id', { count: 'exact', head: true })
-      .eq('venue_id', staff.venue_id);
-
-    const availabilitySet = (serviceCount ?? 0) > 0;
+    const availabilitySet = await checkAvailabilitySet(admin, staff.venue_id, bookingModel);
 
     let stripeConnected = false;
     if (venue.stripe_connected_account_id) {
@@ -59,6 +101,7 @@ export async function GET() {
       stripe_connected: stripeConnected,
       first_booking_made: firstBookingMade,
       is_admin: staff.role === 'admin',
+      booking_model: bookingModel,
     };
 
     return NextResponse.json(status);

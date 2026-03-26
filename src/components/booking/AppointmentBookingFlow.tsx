@@ -99,9 +99,11 @@ export function AppointmentBookingFlow({ venue, cancellationPolicy }: { venue: V
     setStep('confirmation');
   }, [createResult?.booking_id]);
 
+  const sym = venue.currency === 'EUR' ? '€' : '£';
+
   function formatPrice(pence: number | null): string {
     if (pence == null) return 'POA';
-    return `£${(pence / 100).toFixed(2)}`;
+    return `${sym}${(pence / 100).toFixed(2)}`;
   }
 
   return (

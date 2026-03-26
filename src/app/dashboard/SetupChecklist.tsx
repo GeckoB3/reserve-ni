@@ -1,47 +1,89 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import type { SetupStatus } from '@/app/api/venue/setup-status/route';
+import type { BookingModel } from '@/types/booking-models';
 
 interface Step {
-  key: keyof Omit<SetupStatus, 'is_admin'>;
+  key: keyof Omit<SetupStatus, 'is_admin' | 'booking_model'>;
   label: string;
   description: string;
   href: string;
   actionLabel: string;
 }
 
-const STEPS: Step[] = [
-  {
-    key: 'profile_complete',
-    label: 'Venue profile',
-    description: 'Add your venue name, address, phone number, and cover photo.',
-    href: '/dashboard/settings',
-    actionLabel: 'Complete profile',
-  },
-  {
-    key: 'availability_set',
-    label: 'Services & availability',
-    description: 'Run the setup wizard to configure your service periods, capacity, and booking rules.',
-    href: '/dashboard/onboarding',
-    actionLabel: 'Run setup wizard',
-  },
-  {
-    key: 'stripe_connected',
-    label: 'Stripe payments',
-    description: 'Connect Stripe to collect guest deposits directly into your bank account.',
-    href: '/dashboard/settings?tab=payments',
-    actionLabel: 'Connect Stripe',
-  },
-  {
-    key: 'first_booking_made',
-    label: 'First test booking',
-    description: 'Make a test booking to confirm everything is working end-to-end.',
-    href: '/dashboard/bookings/new',
-    actionLabel: 'Create booking',
-  },
-];
+function getAvailabilityStep(model: BookingModel): Step {
+  switch (model) {
+    case 'practitioner_appointment':
+      return {
+        key: 'availability_set',
+        label: 'Team & services',
+        description: 'Review your team members and services, or add new ones.',
+        href: '/dashboard/appointment-services',
+        actionLabel: 'View services',
+      };
+    case 'event_ticket':
+      return {
+        key: 'availability_set',
+        label: 'Events',
+        description: 'Review your events and ticket types, or create new ones.',
+        href: '/dashboard/event-manager',
+        actionLabel: 'View events',
+      };
+    case 'class_session':
+      return {
+        key: 'availability_set',
+        label: 'Classes & timetable',
+        description: 'Review your class schedule, or add new classes.',
+        href: '/dashboard/class-timetable',
+        actionLabel: 'View timetable',
+      };
+    case 'resource_booking':
+      return {
+        key: 'availability_set',
+        label: 'Resources',
+        description: 'Review your bookable resources, or add new ones.',
+        href: '/dashboard/resource-timeline',
+        actionLabel: 'View resources',
+      };
+    default:
+      return {
+        key: 'availability_set',
+        label: 'Services & availability',
+        description: 'Run the setup wizard to configure your service periods, capacity, and booking rules.',
+        href: '/dashboard/onboarding',
+        actionLabel: 'Run setup wizard',
+      };
+  }
+}
+
+function getSteps(model: BookingModel): Step[] {
+  return [
+    {
+      key: 'profile_complete',
+      label: 'Business profile',
+      description: 'Add your business name, address, phone number, and cover photo.',
+      href: '/dashboard/settings',
+      actionLabel: 'Complete profile',
+    },
+    getAvailabilityStep(model),
+    {
+      key: 'stripe_connected',
+      label: 'Stripe payments',
+      description: 'Connect Stripe to collect payments directly into your bank account.',
+      href: '/dashboard/settings?tab=payments',
+      actionLabel: 'Connect Stripe',
+    },
+    {
+      key: 'first_booking_made',
+      label: 'First test booking',
+      description: 'Make a test booking to confirm everything is working end-to-end.',
+      href: '/dashboard/bookings/new',
+      actionLabel: 'Create booking',
+    },
+  ];
+}
 
 export function SetupChecklist() {
   const [status, setStatus] = useState<SetupStatus | null>(null);
@@ -70,6 +112,11 @@ export function SetupChecklist() {
       .catch(() => {});
   }, []);
 
+  const steps = useMemo(
+    () => getSteps(status?.booking_model ?? 'table_reservation'),
+    [status?.booking_model]
+  );
+
   function isComplete(s: SetupStatus) {
     return s.profile_complete && s.availability_set && s.stripe_connected && s.first_booking_made;
   }
@@ -81,8 +128,8 @@ export function SetupChecklist() {
 
   if (dismissed || !status) return null;
 
-  const completedCount = STEPS.filter((s) => status[s.key]).length;
-  const totalCount = STEPS.length;
+  const completedCount = steps.filter((s) => status[s.key]).length;
+  const totalCount = steps.length;
   if (completedCount === totalCount) return null;
 
   const progressPct = Math.round((completedCount / totalCount) * 100);
@@ -118,7 +165,7 @@ export function SetupChecklist() {
       </div>
 
       <ul className="divide-y divide-slate-50">
-        {STEPS.map((step) => {
+        {steps.map((step) => {
           const done = status[step.key];
           return (
             <li key={step.key} className={`flex items-center gap-4 px-5 py-3 ${done ? 'opacity-60' : ''}`}>

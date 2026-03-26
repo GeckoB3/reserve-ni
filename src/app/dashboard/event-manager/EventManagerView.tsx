@@ -23,11 +23,12 @@ interface ExperienceEvent {
   ticket_types: TicketType[];
 }
 
-function formatPrice(pence: number): string {
-  return `£${(pence / 100).toFixed(2)}`;
-}
+export function EventManagerView({ venueId, isAdmin, currency = 'GBP' }: { venueId: string; isAdmin: boolean; currency?: string }) {
+  const sym = currency === 'EUR' ? '€' : '£';
 
-export function EventManagerView({ venueId, isAdmin }: { venueId: string; isAdmin: boolean }) {
+  function formatPrice(pence: number): string {
+    return `${sym}${(pence / 100).toFixed(2)}`;
+  }
   const [events, setEvents] = useState<ExperienceEvent[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -72,7 +73,7 @@ export function EventManagerView({ venueId, isAdmin }: { venueId: string; isAdmi
               <h2 className="mb-3 text-lg font-medium text-slate-700">Upcoming</h2>
               <div className="space-y-3">
                 {upcoming.map((event) => (
-                  <EventCard key={event.id} event={event} />
+                  <EventCard key={event.id} event={event} formatPrice={formatPrice} />
                 ))}
               </div>
             </section>
@@ -82,7 +83,7 @@ export function EventManagerView({ venueId, isAdmin }: { venueId: string; isAdmi
               <h2 className="mb-3 text-lg font-medium text-slate-400">Past</h2>
               <div className="space-y-3 opacity-60">
                 {past.map((event) => (
-                  <EventCard key={event.id} event={event} />
+                  <EventCard key={event.id} event={event} formatPrice={formatPrice} />
                 ))}
               </div>
             </section>
@@ -93,7 +94,7 @@ export function EventManagerView({ venueId, isAdmin }: { venueId: string; isAdmi
   );
 }
 
-function EventCard({ event }: { event: ExperienceEvent }) {
+function EventCard({ event, formatPrice }: { event: ExperienceEvent; formatPrice: (pence: number) => string }) {
   return (
     <div className="rounded-xl border border-slate-200 bg-white px-5 py-4 shadow-sm">
       <div className="flex items-start justify-between">
@@ -117,7 +118,7 @@ function EventCard({ event }: { event: ExperienceEvent }) {
         <div className="mt-3 flex flex-wrap gap-2">
           {event.ticket_types.map((tt) => (
             <span key={tt.id} className="rounded-full bg-slate-50 px-3 py-1 text-xs text-slate-600">
-              {tt.name} — {formatPrice(tt.price_pence)}
+              {tt.name}: {formatPrice(tt.price_pence)}
               {tt.capacity && ` (${tt.capacity} max)`}
             </span>
           ))}

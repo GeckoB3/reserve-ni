@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
 import { getDashboardStaff } from '@/lib/venue-auth';
+import { getSupabaseAdminClient } from '@/lib/supabase';
 import { AppointmentServicesView } from './AppointmentServicesView';
 
 export default async function AppointmentServicesPage() {
@@ -19,10 +20,14 @@ export default async function AppointmentServicesPage() {
     );
   }
 
+  const admin = getSupabaseAdminClient();
+  const { data: venue } = await admin.from('venues').select('currency').eq('id', staff.venue_id).single();
+  const currency = (venue?.currency as string) ?? 'GBP';
+
   return (
     <div className="p-4 md:p-6 lg:p-8">
       <div className="mx-auto max-w-4xl">
-        <AppointmentServicesView venueId={staff.venue_id} isAdmin={staff.role === 'admin'} />
+        <AppointmentServicesView venueId={staff.venue_id} isAdmin={staff.role === 'admin'} currency={currency} />
       </div>
     </div>
   );

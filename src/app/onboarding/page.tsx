@@ -5,6 +5,27 @@ import { useRouter } from 'next/navigation';
 import type { BookingModel } from '@/types/booking-models';
 import { getBusinessConfig } from '@/lib/business-config';
 
+type Currency = 'GBP' | 'EUR';
+
+const CURRENCY_OPTIONS: { code: Currency; symbol: string; label: string }[] = [
+  { code: 'GBP', symbol: '£', label: 'GBP (£)' },
+  { code: 'EUR', symbol: '€', label: 'EUR (€)' },
+];
+
+function currencySymbol(c: Currency): string {
+  return c === 'EUR' ? '€' : '£';
+}
+
+function poundsToMinor(pounds: string): number {
+  const parsed = parseFloat(pounds);
+  if (Number.isNaN(parsed) || parsed < 0) return 0;
+  return Math.round(parsed * 100);
+}
+
+function minorToPounds(pence: number): string {
+  return (pence / 100).toFixed(2);
+}
+
 interface VenueOnboarding {
   id: string;
   name: string;
@@ -18,6 +39,7 @@ interface VenueOnboarding {
   calendar_count: number | null;
   onboarding_step: number;
   onboarding_completed: boolean;
+  currency: Currency;
 }
 
 interface PractitionerDraft {
@@ -28,7 +50,7 @@ interface PractitionerDraft {
 interface ServiceDraft {
   name: string;
   duration: number;
-  price: number;
+  price: string;
 }
 
 interface EventDraft {
@@ -37,6 +59,7 @@ interface EventDraft {
   start_time: string;
   end_time: string;
   capacity: number;
+  ticketPrice: string;
 }
 
 interface ClassDraft {
@@ -45,10 +68,12 @@ interface ClassDraft {
   start_time: string;
   duration_minutes: number;
   capacity: number;
+  price: string;
 }
 
 interface ResourceDraft {
   name: string;
+  pricePerSlot: string;
 }
 
 const DAY_LABELS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -66,6 +91,7 @@ export default function OnboardingPage() {
   const [name, setName] = useState('');
   const [address, setAddress] = useState('');
   const [phone, setPhone] = useState('');
+  const [currency, setCurrency] = useState<Currency>('GBP');
 
   // Model B: Practitioners + services
   const [practitioners, setPractitioners] = useState<PractitionerDraft[]>([{ name: '', email: '' }]);
@@ -78,15 +104,16 @@ export default function OnboardingPage() {
     start_time: '10:00',
     end_time: '12:00',
     capacity: 20,
+    ticketPrice: '0.00',
   });
 
   // Model D: Classes
   const [classes, setClasses] = useState<ClassDraft[]>([
-    { name: '', day_of_week: 1, start_time: '09:00', duration_minutes: 60, capacity: 15 },
+    { name: '', day_of_week: 1, start_time: '09:00', duration_minutes: 60, capacity: 15, price: '0.00' },
   ]);
 
   // Model E: Resources
-  const [resources, setResources] = useState<ResourceDraft[]>([{ name: '' }]);
+  const [resources, setResources] = useState<ResourceDraft[]>([{ name: '', pricePerSlot: '0.00' }]);
 
   useEffect(() => {
     async function loadVenue() {
@@ -111,13 +138,14 @@ export default function OnboardingPage() {
         setName(v.name === 'My Business' ? '' : v.name);
         setAddress(v.address ?? '');
         setPhone(v.phone ?? '');
+        setCurrency(v.currency ?? 'GBP');
 
         if (v.onboarding_completed) {
           router.push('/dashboard');
           return;
         }
 
-        // Pre-fill services from business config defaults
+        // Pre-fill services from business config defaults (stored in pence, display in pounds)
         if (v.business_type) {
           const config = getBusinessConfig(v.business_type);
           if (config.defaultServices?.length) {
@@ -125,7 +153,7 @@ export default function OnboardingPage() {
               config.defaultServices.map((ds) => ({
                 name: ds.name,
                 duration: ds.duration,
-                price: ds.price,
+                price: minorToPounds(ds.price),
               }))
             );
           }
@@ -140,7 +168,7 @@ export default function OnboardingPage() {
           }
           if (v.booking_model === 'resource_booking') {
             setResources(
-              Array.from({ length: v.calendar_count }, () => ({ name: '' }))
+              Array.from({ length: v.calendar_count }, () => ({ name: '', pricePerSlot: '0.00' }))
             );
           }
         }
@@ -224,13 +252,14 @@ export default function OnboardingPage() {
             address: address.trim(),
             phone: phone.trim(),
             slug: finalSlug,
+            currency,
             onboarding_step: nextStep,
           }),
         });
         if (!res.ok) throw new Error('Failed to save profile');
         setVenue((prev) =>
           prev
-            ? { ...prev, name: name.trim(), address: address.trim(), phone: phone.trim(), slug: finalSlug }
+            ? { ...prev, name: name.trim(), address: address.trim(), phone: phone.trim(), slug: finalSlug, currency }
             : prev
         );
       } catch {
@@ -293,7 +322,7 @@ export default function OnboardingPage() {
             body: JSON.stringify({
               name: s.name.trim(),
               duration_minutes: s.duration,
-              price_pence: s.price,
+              price_pence: poundsToMinor(s.price),
             }),
           });
           if (!res.ok) throw new Error('Failed to create service');
@@ -333,7 +362,7 @@ export default function OnboardingPage() {
             end_time: eventDraft.end_time,
             capacity: eventDraft.capacity,
             ticket_types: [
-              { name: 'General Admission', price_pence: 0, capacity: eventDraft.capacity },
+              { name: 'General Admission', price_pence: poundsToMinor(eventDraft.ticketPrice), capacity: eventDraft.capacity },
             ],
           }),
         });
@@ -368,6 +397,7 @@ export default function OnboardingPage() {
               name: c.name.trim(),
               duration_minutes: c.duration_minutes,
               capacity: c.capacity,
+              price_pence: poundsToMinor(c.price),
             }),
           });
           if (!typeRes.ok) throw new Error('Failed to create class type');
@@ -412,7 +442,10 @@ export default function OnboardingPage() {
           const res = await fetch('/api/venue/resources', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name: r.name.trim() }),
+            body: JSON.stringify({
+              name: r.name.trim(),
+              price_per_slot_pence: poundsToMinor(r.pricePerSlot),
+            }),
           });
           if (!res.ok) throw new Error('Failed to create resource');
         }
@@ -555,6 +588,22 @@ export default function OnboardingPage() {
                   className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
                 />
               </div>
+              <div>
+                <label className="mb-1.5 block text-sm font-medium text-slate-700">
+                  Currency
+                </label>
+                <select
+                  value={currency}
+                  onChange={(e) => setCurrency(e.target.value as Currency)}
+                  className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
+                >
+                  {CURRENCY_OPTIONS.map((opt) => (
+                    <option key={opt.code} value={opt.code}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
           </div>
         )}
@@ -666,19 +715,26 @@ export default function OnboardingPage() {
                     </div>
                     <div className="flex-1">
                       <label className="block text-[10px] font-medium text-slate-500">
-                        Price (pence)
+                        Price ({currencySymbol(currency)})
                       </label>
-                      <input
-                        type="number"
-                        value={s.price}
-                        onChange={(e) => {
-                          const updated = [...services];
-                          updated[i] = { ...s, price: parseInt(e.target.value) || 0 };
-                          setServices(updated);
-                        }}
-                        min={0}
-                        className="w-full rounded border border-slate-200 px-2 py-1.5 text-xs"
-                      />
+                      <div className="relative">
+                        <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-slate-400">
+                          {currencySymbol(currency)}
+                        </span>
+                        <input
+                          type="number"
+                          value={s.price}
+                          onChange={(e) => {
+                            const updated = [...services];
+                            updated[i] = { ...s, price: e.target.value };
+                            setServices(updated);
+                          }}
+                          min={0}
+                          step={0.01}
+                          placeholder="0.00"
+                          className="w-full rounded border border-slate-200 py-1.5 pl-5 pr-2 text-xs"
+                        />
+                      </div>
                     </div>
                     <div className="flex items-end">
                       <button
@@ -695,7 +751,7 @@ export default function OnboardingPage() {
               <button
                 type="button"
                 onClick={() =>
-                  setServices([...services, { name: '', duration: 30, price: 0 }])
+                  setServices([...services, { name: '', duration: 30, price: '0.00' }])
                 }
                 className="w-full rounded-xl border-2 border-dashed border-slate-200 py-3 text-sm text-slate-500 hover:border-brand-300 hover:text-brand-600"
               >
@@ -758,19 +814,42 @@ export default function OnboardingPage() {
                   className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
                 />
               </div>
-              <div>
-                <label className="mb-1.5 block text-sm font-medium text-slate-700">
-                  Capacity
-                </label>
-                <input
-                  type="number"
-                  value={eventDraft.capacity}
-                  onChange={(e) =>
-                    setEventDraft({ ...eventDraft, capacity: parseInt(e.target.value) || 20 })
-                  }
-                  min={1}
-                  className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
-                />
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="mb-1.5 block text-sm font-medium text-slate-700">
+                    Capacity
+                  </label>
+                  <input
+                    type="number"
+                    value={eventDraft.capacity}
+                    onChange={(e) =>
+                      setEventDraft({ ...eventDraft, capacity: parseInt(e.target.value) || 20 })
+                    }
+                    min={1}
+                    className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1.5 block text-sm font-medium text-slate-700">
+                    Ticket price ({currencySymbol(currency)})
+                  </label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-400">
+                      {currencySymbol(currency)}
+                    </span>
+                    <input
+                      type="number"
+                      value={eventDraft.ticketPrice}
+                      onChange={(e) =>
+                        setEventDraft({ ...eventDraft, ticketPrice: e.target.value })
+                      }
+                      min={0}
+                      step={0.01}
+                      placeholder="0.00"
+                      className="w-full rounded-xl border border-slate-200 py-2.5 pl-7 pr-4 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
+                    />
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -808,7 +887,7 @@ export default function OnboardingPage() {
                       </button>
                     )}
                   </div>
-                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
                     <div>
                       <label className="block text-[10px] font-medium text-slate-500">Day</label>
                       <select
@@ -876,6 +955,29 @@ export default function OnboardingPage() {
                         className="w-full rounded border border-slate-200 px-2 py-1.5 text-xs"
                       />
                     </div>
+                    <div className="col-span-2 sm:col-span-1">
+                      <label className="block text-[10px] font-medium text-slate-500">
+                        Price ({currencySymbol(currency)})
+                      </label>
+                      <div className="relative">
+                        <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-slate-400">
+                          {currencySymbol(currency)}
+                        </span>
+                        <input
+                          type="number"
+                          value={c.price}
+                          onChange={(e) => {
+                            const updated = [...classes];
+                            updated[i] = { ...c, price: e.target.value };
+                            setClasses(updated);
+                          }}
+                          min={0}
+                          step={0.01}
+                          placeholder="0.00"
+                          className="w-full rounded border border-slate-200 py-1.5 pl-5 pr-2 text-xs"
+                        />
+                      </div>
+                    </div>
                   </div>
                 </div>
               ))}
@@ -884,7 +986,7 @@ export default function OnboardingPage() {
                 onClick={() =>
                   setClasses([
                     ...classes,
-                    { name: '', day_of_week: 1, start_time: '09:00', duration_minutes: 60, capacity: 15 },
+                    { name: '', day_of_week: 1, start_time: '09:00', duration_minutes: 60, capacity: 15, price: '0.00' },
                   ])
                 }
                 className="w-full rounded-xl border-2 border-dashed border-slate-200 py-3 text-sm text-slate-500 hover:border-brand-300 hover:text-brand-600"
@@ -904,32 +1006,57 @@ export default function OnboardingPage() {
             </p>
             <div className="space-y-3">
               {resources.map((r, i) => (
-                <div key={i} className="flex gap-2">
-                  <input
-                    type="text"
-                    value={r.name}
-                    onChange={(e) => {
-                      const updated = [...resources];
-                      updated[i] = { name: e.target.value };
-                      setResources(updated);
-                    }}
-                    placeholder={`Resource name (e.g. Court 1)`}
-                    className="flex-1 rounded-xl border border-slate-200 px-4 py-2.5 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
-                  />
-                  {resources.length > 1 && (
-                    <button
-                      type="button"
-                      onClick={() => setResources(resources.filter((_, j) => j !== i))}
-                      className="text-sm text-slate-400 hover:text-red-500"
-                    >
-                      Remove
-                    </button>
-                  )}
+                <div key={i} className="rounded-xl border border-slate-200 p-4 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <input
+                      type="text"
+                      value={r.name}
+                      onChange={(e) => {
+                        const updated = [...resources];
+                        updated[i] = { ...r, name: e.target.value };
+                        setResources(updated);
+                      }}
+                      placeholder={`Resource name (e.g. Court 1)`}
+                      className="flex-1 border-0 bg-transparent p-0 text-sm font-medium text-slate-900 focus:ring-0"
+                    />
+                    {resources.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => setResources(resources.filter((_, j) => j !== i))}
+                        className="text-xs text-slate-400 hover:text-red-500"
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </div>
+                  <div className="max-w-[200px]">
+                    <label className="block text-[10px] font-medium text-slate-500">
+                      Price per slot ({currencySymbol(currency)})
+                    </label>
+                    <div className="relative">
+                      <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-slate-400">
+                        {currencySymbol(currency)}
+                      </span>
+                      <input
+                        type="number"
+                        value={r.pricePerSlot}
+                        onChange={(e) => {
+                          const updated = [...resources];
+                          updated[i] = { ...r, pricePerSlot: e.target.value };
+                          setResources(updated);
+                        }}
+                        min={0}
+                        step={0.01}
+                        placeholder="0.00"
+                        className="w-full rounded border border-slate-200 py-1.5 pl-5 pr-2 text-xs"
+                      />
+                    </div>
+                  </div>
                 </div>
               ))}
               <button
                 type="button"
-                onClick={() => setResources([...resources, { name: '' }])}
+                onClick={() => setResources([...resources, { name: '', pricePerSlot: '0.00' }])}
                 className="w-full rounded-xl border-2 border-dashed border-slate-200 py-3 text-sm text-slate-500 hover:border-brand-300 hover:text-brand-600"
               >
                 + Add another resource

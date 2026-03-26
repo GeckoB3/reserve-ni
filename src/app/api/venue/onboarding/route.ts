@@ -53,6 +53,10 @@ export async function PATCH(request: Request) {
       updates.slug = body.slug.trim().toLowerCase().replace(/[^a-z0-9-]/g, '-');
     }
 
+    if (typeof body.currency === 'string' && ['GBP', 'EUR'].includes(body.currency)) {
+      updates.currency = body.currency;
+    }
+
     if (Object.keys(updates).length === 0) {
       return NextResponse.json({ error: 'No valid fields to update' }, { status: 400 });
     }
@@ -103,7 +107,7 @@ export async function GET() {
     const { data: venue, error: venueError } = await admin
       .from('venues')
       .select(
-        'id, name, slug, address, phone, booking_model, business_type, business_category, terminology, pricing_tier, calendar_count, onboarding_step, onboarding_completed'
+        'id, name, slug, address, phone, booking_model, business_type, business_category, terminology, pricing_tier, calendar_count, onboarding_step, onboarding_completed, currency'
       )
       .eq('id', staffRow.venue_id)
       .single();

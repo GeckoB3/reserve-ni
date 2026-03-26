@@ -15,11 +15,6 @@ interface Service {
   sort_order: number;
 }
 
-function formatPrice(pence: number | null): string {
-  if (pence == null) return 'POA';
-  return `£${(pence / 100).toFixed(2)}`;
-}
-
 function formatDuration(mins: number): string {
   if (mins < 60) return `${mins}min`;
   const h = Math.floor(mins / 60);
@@ -27,7 +22,13 @@ function formatDuration(mins: number): string {
   return m > 0 ? `${h}h ${m}min` : `${h}h`;
 }
 
-export function AppointmentServicesView({ venueId, isAdmin }: { venueId: string; isAdmin: boolean }) {
+export function AppointmentServicesView({ venueId, isAdmin, currency = 'GBP' }: { venueId: string; isAdmin: boolean; currency?: string }) {
+  const sym = currency === 'EUR' ? '€' : '£';
+
+  function formatPrice(pence: number | null): string {
+    if (pence == null) return 'POA';
+    return `${sym}${(pence / 100).toFixed(2)}`;
+  }
   const [services, setServices] = useState<Service[]>([]);
   const [loading, setLoading] = useState(true);
 
