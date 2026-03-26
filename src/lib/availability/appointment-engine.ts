@@ -118,8 +118,8 @@ export function computeAppointmentAvailability(input: AppointmentEngineInput): A
       (b) => b.practitioner_id === practitioner.id && CAPACITY_CONSUMING_STATUSES.includes(b.status)
     );
 
-    const linkedServices = practitionerServices
-      .filter((ps) => ps.practitioner_id === practitioner.id)
+    const allLinksForPractitioner = practitionerServices.filter((ps) => ps.practitioner_id === practitioner.id);
+    const linkedServices = allLinksForPractitioner
       .map((ps) => {
         const svc = serviceMap.get(ps.service_id);
         if (!svc || !svc.is_active) return null;
@@ -131,8 +131,9 @@ export function computeAppointmentAvailability(input: AppointmentEngineInput): A
       })
       .filter(Boolean) as AppointmentService[];
 
-    // If no explicit practitioner_services links exist, offer all active services
-    const offeredServices = linkedServices.length > 0 ? linkedServices : services.filter((s) => s.is_active);
+    // Only fall back to all services when practitioner has zero configured links (unconfigured venue).
+    // If they have links but none match the queried services, they genuinely don't offer them.
+    const offeredServices = allLinksForPractitioner.length > 0 ? linkedServices : services.filter((s) => s.is_active);
 
     const allSlots: PractitionerSlot[] = [];
     const practitionerServiceList: Array<{ id: string; name: string; duration_minutes: number; price_pence: number | null }> = [];
@@ -228,7 +229,7 @@ export async function fetchAppointmentInput(params: {
   const [practitionersRes, servicesRes, psRes, bookingsRes] = await Promise.all([
     practitionerQuery,
     servicesQuery,
-    supabase.from('practitioner_services').select('*'),
+    supabase.from('practitioner_services').select('*, practitioners!inner(venue_id)').eq('practitioners.venue_id', venueId),
     supabase
       .from('bookings')
       .select('id, practitioner_id, booking_time, appointment_service_id, status')

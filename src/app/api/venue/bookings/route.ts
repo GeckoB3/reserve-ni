@@ -13,6 +13,7 @@ import { AVAILABILITY_SETUP_REQUIRED_MESSAGE } from '@/lib/availability/availabi
 import { getDayOfWeek, resolveDuration } from '@/lib/availability/engine';
 import { resolveVenueMode } from '@/lib/venue-mode';
 import { syncTableStatusesForBooking } from '@/lib/table-management/lifecycle';
+import { fetchAppointmentInput, computeAppointmentAvailability } from '@/lib/availability/appointment-engine';
 import { z } from 'zod';
 import { normalizeToE164 } from '@/lib/phone/e164';
 import { createHmac } from 'crypto';
@@ -28,6 +29,8 @@ const phoneBookingSchema = z.object({
   occasion: z.string().max(200).optional(),
   special_requests: z.string().max(500).optional(),
   require_deposit: z.boolean().optional(),
+  practitioner_id: z.string().uuid().optional(),
+  appointment_service_id: z.string().uuid().optional(),
 });
 
 function cancellationDeadline(bookingDate: string, bookingTime: string): string {
@@ -110,6 +113,155 @@ export async function POST(request: NextRequest) {
     const timeStr = timeForDb.slice(0, 5);
     const venueMode = await resolveVenueMode(admin, venueId);
 
+    // --- Model B: Practitioner appointment ---
+    if (venueMode.bookingModel === 'practitioner_appointment') {
+      const { practitioner_id, appointment_service_id } = parsed.data;
+      if (!practitioner_id || !appointment_service_id) {
+        return NextResponse.json(
+          { error: 'practitioner_id and appointment_service_id are required for appointment bookings' },
+          { status: 400 },
+        );
+      }
+
+      const appointmentInput = await fetchAppointmentInput({
+        supabase: admin,
+        venueId,
+        date: booking_date,
+        practitionerId: practitioner_id,
+        serviceId: appointment_service_id,
+      });
+
+      const availResult = computeAppointmentAvailability(appointmentInput);
+      const practitionerSlots = availResult.practitioners.find((p) => p.id === practitioner_id);
+      const matchingSlot = practitionerSlots?.slots.find(
+        (s) => s.start_time === timeStr && s.service_id === appointment_service_id,
+      );
+
+      if (!matchingSlot) {
+        return NextResponse.json({ error: 'Selected time is not available for this practitioner and service' }, { status: 409 });
+      }
+
+      const svc = appointmentInput.services.find((s) => s.id === appointment_service_id);
+      const durationMins = svc?.duration_minutes ?? matchingSlot.duration_minutes;
+      const bufferMins = svc?.buffer_minutes ?? 0;
+      const [y, mo, d] = booking_date.split('-').map(Number);
+      const [hh, mm] = timeStr.split(':').map(Number);
+      const endDate = new Date(Date.UTC(y!, mo! - 1, d!, hh!, mm!, 0));
+      endDate.setMinutes(endDate.getMinutes() + durationMins);
+      const estimatedEndTime = endDate.toISOString();
+      const bookingEndTime = `${String(endDate.getUTCHours()).padStart(2, '0')}:${String(endDate.getUTCMinutes()).padStart(2, '0')}:00`;
+
+      const depositPence = svc?.deposit_pence ?? null;
+      const requiresDeposit = (require_deposit ?? false) && depositPence != null && depositPence > 0;
+      const depositAmountPence = requiresDeposit ? depositPence : null;
+
+      if (requiresDeposit && !venue.stripe_connected_account_id) {
+        return NextResponse.json(
+          { error: 'Venue has not set up payments; deposits are required for this booking type.' },
+          { status: 400 },
+        );
+      }
+
+      const apptInsert = {
+        venue_id: venueId,
+        guest_id: guest.id,
+        booking_date,
+        booking_time: timeForDb,
+        booking_end_time: bookingEndTime,
+        party_size: 1,
+        status: requiresDeposit ? 'Pending' : 'Confirmed',
+        source: 'phone' as const,
+        guest_email: guest.email || null,
+        deposit_amount_pence: depositAmountPence,
+        deposit_status: requiresDeposit ? ('Pending' as const) : ('Not Required' as const),
+        cancellation_deadline: cancellationDeadline(booking_date, booking_time),
+        dietary_notes: dietary_notes?.trim() || null,
+        occasion: occasion?.trim() || null,
+        special_requests: special_requests?.trim() || null,
+        practitioner_id,
+        appointment_service_id,
+        estimated_end_time: estimatedEndTime,
+      };
+
+      const { data: apptBooking, error: apptErr } = await admin
+        .from('bookings')
+        .insert(apptInsert)
+        .select('id')
+        .single();
+
+      if (apptErr) {
+        console.error('Appointment booking insert failed:', apptErr);
+        return NextResponse.json({ error: 'Failed to create booking' }, { status: 500 });
+      }
+
+      let payment_url: string | undefined;
+      if (requiresDeposit && depositAmountPence != null && depositAmountPence > 0 && venue.stripe_connected_account_id) {
+        try {
+          const paymentIntent = await stripe.paymentIntents.create(
+            {
+              amount: depositAmountPence,
+              currency: 'gbp',
+              metadata: { booking_id: apptBooking.id, venue_id: venueId },
+              automatic_payment_methods: { enabled: true },
+            },
+            { stripeAccount: venue.stripe_connected_account_id },
+          );
+          await admin
+            .from('bookings')
+            .update({ stripe_payment_intent_id: paymentIntent.id, updated_at: new Date().toISOString() })
+            .eq('id', apptBooking.id);
+
+          const token = createPaymentToken(apptBooking.id);
+          const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : request.nextUrl.origin);
+          payment_url = `${baseUrl}/pay?t=${token}`;
+        } catch (stripeErr) {
+          console.error('PaymentIntent create failed for appointment:', stripeErr);
+          await admin.from('bookings').delete().eq('id', apptBooking.id);
+          return NextResponse.json({ error: 'Payment setup failed' }, { status: 500 });
+        }
+      } else {
+        const manageToken = generateConfirmToken();
+        await admin
+          .from('bookings')
+          .update({ confirm_token_hash: hashConfirmToken(manageToken), updated_at: new Date().toISOString() })
+          .eq('id', apptBooking.id);
+
+        const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : request.nextUrl.origin);
+        const manageBookingLink = `${baseUrl}/manage/${apptBooking.id}/${encodeURIComponent(manageToken)}`;
+
+        if (guest.email) {
+          after(async () => {
+            try {
+              const result = await sendBookingConfirmationEmail(
+                {
+                  id: apptBooking.id, guest_name: name, guest_email: guest.email!,
+                  booking_date, booking_time, party_size: 1,
+                  special_requests: special_requests ?? null,
+                  dietary_notes: dietary_notes ?? null,
+                  manage_booking_link: manageBookingLink,
+                },
+                { name: venue.name, address: venue.address ?? undefined },
+                venueId,
+              );
+              if (!result.sent) console.warn('[after] appointment confirmation email not sent:', result.reason);
+            } catch (err) {
+              console.error('[after] appointment confirmation email failed:', err);
+            }
+          });
+        }
+      }
+
+      return NextResponse.json(
+        {
+          booking_id: apptBooking.id,
+          payment_url: payment_url ?? undefined,
+          message: payment_url ? 'Appointment created. Deposit link sent.' : 'Appointment created.',
+        },
+        { status: 201 },
+      );
+    }
+
+    // --- Model A: Table reservation ---
     if (venueMode.availabilityEngine !== 'service') {
       return NextResponse.json({ error: AVAILABILITY_SETUP_REQUIRED_MESSAGE }, { status: 503 });
     }

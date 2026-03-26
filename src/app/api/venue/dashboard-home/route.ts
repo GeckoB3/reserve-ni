@@ -60,7 +60,7 @@ export async function GET() {
 
     const { data: venueRow, error: venueErr } = await admin
       .from('venues')
-      .select('availability_config, opening_hours, timezone')
+      .select('availability_config, opening_hours, timezone, booking_model')
       .eq('id', staff.venue_id)
       .single();
 
@@ -199,20 +199,22 @@ export async function GET() {
     const coversInHouseNow = coversOverlappingNow(todayLoadBookings, nowMinutes, todayDefaultDur);
     const arrivingWithin30 = coversArrivingWithin(todayLoadBookings, nowMinutes, 30, todayDefaultDur);
 
+    const venueBookingModel = (venueRow as Record<string, unknown>).booking_model as string ?? 'table_reservation';
+    const isAppt = venueBookingModel === 'practitioner_appointment';
     const alerts: Array<{ type: string; message: string }> = [];
-    if (todayHeat.fill_percent != null && todayHeat.fill_percent >= 80) {
+    if (!isAppt && todayHeat.fill_percent != null && todayHeat.fill_percent >= 80) {
       alerts.push({
         type: 'warning',
-        message: `Today is ${todayHeat.fill_percent}% full at the busiest time (${todayHeat.peak_in_house_covers ?? 0}${todayHeat.concurrent_cap != null ? ` of ${todayHeat.concurrent_cap}` : ''} covers) — walk-in availability may be limited.`,
+        message: `Today is ${todayHeat.fill_percent}% full at the busiest time (${todayHeat.peak_in_house_covers ?? 0}${todayHeat.concurrent_cap != null ? ` of ${todayHeat.concurrent_cap}` : ''} covers) - walk-in availability may be limited.`,
       });
     }
     if (todayBookings.some((b) => b.status === 'Pending')) {
       const pendingCount = todayBookings.filter((b) => b.status === 'Pending').length;
-      alerts.push({ type: 'info', message: `${pendingCount} pending booking${pendingCount > 1 ? 's' : ''} awaiting payment.` });
+      alerts.push({ type: 'info', message: `${pendingCount} pending ${isAppt ? 'appointment' : 'booking'}${pendingCount > 1 ? 's' : ''} awaiting payment.` });
     }
     const tomorrow = forecast[1];
     if (tomorrow && tomorrow.bookings === 0) {
-      alerts.push({ type: 'info', message: `No bookings yet for tomorrow (${tomorrow.day}).` });
+      alerts.push({ type: 'info', message: `No ${isAppt ? 'appointments' : 'bookings'} yet for tomorrow (${tomorrow.day}).` });
     }
 
     const guestIds = [...new Set(todayBookings.slice(0, 10).map((b) => b.guest_id).filter(Boolean))] as string[];
@@ -229,6 +231,7 @@ export async function GET() {
     );
 
     return NextResponse.json({
+      booking_model: (venueRow as Record<string, unknown>).booking_model ?? 'table_reservation',
       today: {
         covers: todayCovers ?? 0,
         bookings: todayBookingCount ?? 0,

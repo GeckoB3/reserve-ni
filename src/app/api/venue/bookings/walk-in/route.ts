@@ -3,6 +3,8 @@ import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { replaceBookingAssignments, syncTableStatusesForBooking } from '@/lib/table-management/lifecycle';
+import { resolveVenueMode } from '@/lib/venue-mode';
+import { fetchAppointmentInput, computeAppointmentAvailability } from '@/lib/availability/appointment-engine';
 import { z } from 'zod';
 import { normalizeToE164 } from '@/lib/phone/e164';
 
@@ -16,6 +18,8 @@ const walkInSchema = z.object({
   table_ids: z.array(z.string().uuid()).optional(),
   booking_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   booking_time: z.string().regex(/^([01]?[0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9])?$/).optional(),
+  practitioner_id: z.string().uuid().optional(),
+  appointment_service_id: z.string().uuid().optional(),
 });
 
 function venueLocalDateTime(timezone: string): { date: string; hours: number; minutes: number } {
@@ -84,6 +88,126 @@ export async function POST(request: NextRequest) {
     }
 
     const admin = getSupabaseAdminClient();
+    const venueMode = await resolveVenueMode(admin, staff.venue_id);
+
+    // --- Model B: Appointment walk-in ---
+    if (venueMode.bookingModel === 'practitioner_appointment') {
+      const { practitioner_id, appointment_service_id } = parsed.data;
+      if (!practitioner_id || !appointment_service_id) {
+        return NextResponse.json(
+          { error: 'practitioner_id and appointment_service_id are required for appointment walk-ins' },
+          { status: 400 },
+        );
+      }
+
+      const { data: pracCheck } = await admin
+        .from('practitioners')
+        .select('id')
+        .eq('id', practitioner_id)
+        .eq('venue_id', staff.venue_id)
+        .eq('is_active', true)
+        .single();
+      if (!pracCheck) {
+        return NextResponse.json({ error: 'Practitioner not found or inactive' }, { status: 400 });
+      }
+
+      const { data: venueRow } = await admin
+        .from('venues')
+        .select('timezone')
+        .eq('id', staff.venue_id)
+        .single();
+      const tz = venueRow?.timezone ?? 'Europe/London';
+      const localNow = venueLocalDateTime(tz);
+      const today = parsed.data.booking_date ?? localNow.date;
+      const exactTime = `${String(localNow.hours).padStart(2, '0')}:${String(localNow.minutes).padStart(2, '0')}:00`;
+      const walkInTime = parsed.data.booking_time
+        ? (parsed.data.booking_time.length === 5 ? `${parsed.data.booking_time}:00` : parsed.data.booking_time)
+        : exactTime;
+
+      const { data: svc } = await admin
+        .from('appointment_services')
+        .select('duration_minutes')
+        .eq('id', appointment_service_id)
+        .eq('venue_id', staff.venue_id)
+        .single();
+      if (!svc) {
+        return NextResponse.json({ error: 'Appointment service not found' }, { status: 400 });
+      }
+      const durationMins = svc.duration_minutes;
+
+      const walkInTimeStr = walkInTime.slice(0, 5);
+      const apptInput = await fetchAppointmentInput({
+        supabase: admin,
+        venueId: staff.venue_id,
+        date: today,
+        practitionerId: practitioner_id,
+        serviceId: appointment_service_id,
+      });
+      const apptResult = computeAppointmentAvailability(apptInput);
+      const practSlots = apptResult.practitioners.find((p) => p.id === practitioner_id);
+      const matchSlot = practSlots?.slots.find(
+        (s) => s.start_time === walkInTimeStr && s.service_id === appointment_service_id,
+      );
+      if (!matchSlot) {
+        return NextResponse.json(
+          { error: 'Selected time is not available for this practitioner' },
+          { status: 409 },
+        );
+      }
+
+      const [yy, mo, dd] = today.split('-').map(Number);
+      const [hh2, mm2] = walkInTime.slice(0, 5).split(':').map(Number);
+      const endDt = new Date(Date.UTC(yy!, mo! - 1, dd!, hh2!, mm2!, 0));
+      endDt.setMinutes(endDt.getMinutes() + durationMins);
+      const bookingEndTime = `${String(endDt.getUTCHours()).padStart(2, '0')}:${String(endDt.getUTCMinutes()).padStart(2, '0')}:00`;
+
+      const { data: apptGuest, error: apptGuestErr } = await admin
+        .from('guests')
+        .insert({
+          venue_id: staff.venue_id,
+          name: name?.trim() || 'Walk-in',
+          email: null,
+          phone: phoneE164,
+          visit_count: 1,
+        })
+        .select('id')
+        .single();
+
+      if (apptGuestErr) {
+        console.error('Walk-in guest insert failed:', apptGuestErr);
+        return NextResponse.json({ error: 'Failed to create guest' }, { status: 500 });
+      }
+
+      const { data: apptBooking, error: apptBookErr } = await admin
+        .from('bookings')
+        .insert({
+          venue_id: staff.venue_id,
+          guest_id: apptGuest.id,
+          booking_date: today,
+          booking_time: walkInTime,
+          booking_end_time: bookingEndTime,
+          party_size: 1,
+          status: 'Seated',
+          source: 'walk-in',
+          deposit_status: 'Not Required',
+          dietary_notes: dietary_notes?.trim() || null,
+          occasion: occasion?.trim() || null,
+          practitioner_id,
+          appointment_service_id,
+          estimated_end_time: endDt.toISOString(),
+        })
+        .select('id, booking_date, booking_time, booking_end_time, party_size, status, source')
+        .single();
+
+      if (apptBookErr) {
+        console.error('Walk-in appointment insert failed:', apptBookErr);
+        return NextResponse.json({ error: 'Failed to create booking' }, { status: 500 });
+      }
+
+      return NextResponse.json(apptBooking, { status: 201 });
+    }
+
+    // --- Model A: Table walk-in ---
     const { data: venueSettings } = await admin
       .from('venues')
       .select('timezone, table_management_enabled')

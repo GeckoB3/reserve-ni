@@ -5,6 +5,7 @@ import { getSupabaseAdminClient } from '@/lib/supabase';
 import { stripe } from '@/lib/stripe';
 import { computeAvailability, fetchEngineInput } from '@/lib/availability';
 import { AVAILABILITY_SETUP_REQUIRED_MESSAGE } from '@/lib/availability/availability-errors';
+import { fetchAppointmentInput, computeAppointmentAvailability } from '@/lib/availability/appointment-engine';
 import { autoAssignTable } from '@/lib/table-availability';
 import { BOOKING_MUTABLE_STATUSES } from '@/lib/table-management/constants';
 import {
@@ -22,6 +23,14 @@ import { z } from 'zod';
 import { normalizeToE164 } from '@/lib/phone/e164';
 
 const statusSchema = z.enum(BOOKING_MUTABLE_STATUSES);
+
+function cancellationDeadline(bookingDate: string, bookingTime: string): string {
+  const [y, m, d] = bookingDate.split('-').map(Number);
+  const [hh, mm] = bookingTime.slice(0, 5).split(':').map(Number);
+  const dt = new Date(Date.UTC(y!, m! - 1, d!, hh, mm, 0));
+  dt.setHours(dt.getHours() - 48);
+  return dt.toISOString();
+}
 
 /** GET /api/venue/bookings/[id] — full booking detail with guest and events timeline. */
 export async function GET(
@@ -144,7 +153,7 @@ export async function PATCH(
         }
       }
 
-      if (newStatus === 'Cancelled' && (booking.status === 'Confirmed' || booking.status === 'Pending')) {
+      if (newStatus === 'Cancelled' && (booking.status === 'Confirmed' || booking.status === 'Pending' || booking.status === 'Seated')) {
         const deadline = booking.cancellation_deadline ? new Date(booking.cancellation_deadline) : null;
         const canRefund = deadline && new Date() <= deadline && booking.deposit_status === 'Paid' && booking.stripe_payment_intent_id;
 
@@ -354,25 +363,52 @@ export async function PATCH(
       }
 
       const timeStr = newTime.slice(0, 5);
-      const venueMode = await resolveVenueMode(admin, staff.venue_id);
-      if (venueMode.availabilityEngine !== 'service') {
-        return NextResponse.json({ error: AVAILABILITY_SETUP_REQUIRED_MESSAGE }, { status: 503 });
-      }
+      const isAppointment = Boolean(booking.practitioner_id);
 
-      const engineInput = await fetchEngineInput({
-        supabase: admin,
-        venueId: staff.venue_id,
-        date: newDate,
-        partySize: newPartySize,
-      });
-      engineInput.bookings = engineInput.bookings.filter((b) => b.id !== id);
-      const slots = computeAvailability(engineInput).flatMap((result) => result.slots);
-      const slot = slots.find((s) => s.start_time === timeStr && (!booking.service_id || s.service_id === booking.service_id));
-      if (!slot || slot.available_covers < newPartySize) {
-        return NextResponse.json(
-          { error: 'Selected date/time is not available or has insufficient capacity' },
-          { status: 409 }
+      // --- Validate slot availability ---
+      if (isAppointment) {
+        const practId = (body.practitioner_id as string) ?? booking.practitioner_id;
+        const svcId = booking.appointment_service_id;
+        const apptInput = await fetchAppointmentInput({
+          supabase: admin,
+          venueId: staff.venue_id,
+          date: newDate,
+          practitionerId: practId ?? undefined,
+          serviceId: svcId ?? undefined,
+        });
+        apptInput.existingBookings = apptInput.existingBookings.filter((b) => b.id !== id);
+        const apptResult = computeAppointmentAvailability(apptInput);
+        const practSlots = apptResult.practitioners.find((p) => p.id === practId);
+        const matchSlot = practSlots?.slots.find(
+          (s) => s.start_time === timeStr && (!svcId || s.service_id === svcId),
         );
+        if (!matchSlot) {
+          return NextResponse.json(
+            { error: 'Selected date/time is not available for this practitioner' },
+            { status: 409 },
+          );
+        }
+      } else {
+        const venueMode = await resolveVenueMode(admin, staff.venue_id);
+        if (venueMode.availabilityEngine !== 'service') {
+          return NextResponse.json({ error: AVAILABILITY_SETUP_REQUIRED_MESSAGE }, { status: 503 });
+        }
+
+        const engineInput = await fetchEngineInput({
+          supabase: admin,
+          venueId: staff.venue_id,
+          date: newDate,
+          partySize: newPartySize,
+        });
+        engineInput.bookings = engineInput.bookings.filter((b) => b.id !== id);
+        const slots = computeAvailability(engineInput).flatMap((result) => result.slots);
+        const slot = slots.find((s) => s.start_time === timeStr && (!booking.service_id || s.service_id === booking.service_id));
+        if (!slot || slot.available_covers < newPartySize) {
+          return NextResponse.json(
+            { error: 'Selected date/time is not available or has insufficient capacity' },
+            { status: 409 },
+          );
+        }
       }
 
       const before = {
@@ -386,7 +422,27 @@ export async function PATCH(
         booking_time: newTime,
         party_size: newPartySize,
         updated_at: new Date().toISOString(),
+        cancellation_deadline: cancellationDeadline(newDate, timeStr),
       };
+
+      if (body.practitioner_id && isAppointment) {
+        bookingUpdate.practitioner_id = body.practitioner_id;
+      }
+
+      if (isAppointment && booking.appointment_service_id) {
+        const { data: svcRow } = await admin
+          .from('appointment_services')
+          .select('duration_minutes')
+          .eq('id', booking.appointment_service_id)
+          .single();
+        const svcDuration = svcRow?.duration_minutes ?? 30;
+        const [ry, rmo, rd] = newDate.split('-').map(Number);
+        const [rhh, rmm] = timeStr.split(':').map(Number);
+        const rEnd = new Date(Date.UTC(ry!, rmo! - 1, rd!, rhh!, rmm!, 0));
+        rEnd.setMinutes(rEnd.getMinutes() + svcDuration);
+        bookingUpdate.estimated_end_time = rEnd.toISOString();
+        bookingUpdate.booking_end_time = `${String(rEnd.getUTCHours()).padStart(2, '0')}:${String(rEnd.getUTCMinutes()).padStart(2, '0')}:00`;
+      }
 
       if (newPartySize > booking.party_size && booking.deposit_status === 'Paid' && booking.deposit_amount_pence) {
         const { data: venueForDeposit } = await admin

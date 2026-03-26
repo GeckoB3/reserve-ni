@@ -23,7 +23,7 @@ interface Props {
 export function BookingFlowRouter({ venue, embed, onHeightChange, cancellationPolicy, accentColour }: Props) {
   switch (venue.booking_model) {
     case 'practitioner_appointment':
-      return <AppointmentBookingFlow venue={venue} cancellationPolicy={cancellationPolicy} />;
+      return <AppointmentBookingFlow venue={venue} cancellationPolicy={cancellationPolicy} embed={embed} onHeightChange={onHeightChange} accentColour={accentColour} />;
     case 'event_ticket':
       return <EventBookingFlow venue={venue} cancellationPolicy={cancellationPolicy} />;
     case 'class_session':

@@ -15,6 +15,45 @@ interface Service {
   sort_order: number;
 }
 
+interface Practitioner {
+  id: string;
+  name: string;
+}
+
+interface PractitionerServiceLink {
+  practitioner_id: string;
+  service_id: string;
+}
+
+interface ServiceFormData {
+  name: string;
+  description: string;
+  duration_minutes: number;
+  buffer_minutes: number;
+  price: string;
+  deposit: string;
+  colour: string;
+  is_active: boolean;
+  practitioner_ids: string[];
+}
+
+const COLOUR_OPTIONS = [
+  '#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6',
+  '#EC4899', '#06B6D4', '#84CC16', '#F97316', '#6366F1',
+];
+
+const DEFAULT_FORM: ServiceFormData = {
+  name: '',
+  description: '',
+  duration_minutes: 30,
+  buffer_minutes: 0,
+  price: '',
+  deposit: '',
+  colour: '#3B82F6',
+  is_active: true,
+  practitioner_ids: [],
+};
+
 function formatDuration(mins: number): string {
   if (mins < 60) return `${mins}min`;
   const h = Math.floor(mins / 60);
@@ -22,78 +61,498 @@ function formatDuration(mins: number): string {
   return m > 0 ? `${h}h ${m}min` : `${h}h`;
 }
 
-export function AppointmentServicesView({ venueId, isAdmin, currency = 'GBP' }: { venueId: string; isAdmin: boolean; currency?: string }) {
+function penceToPounds(pence: number | null): string {
+  if (pence == null) return '';
+  return (pence / 100).toFixed(2);
+}
+
+function poundsToPence(pounds: string): number | null {
+  const trimmed = pounds.trim();
+  if (!trimmed) return null;
+  const num = parseFloat(trimmed);
+  if (Number.isNaN(num) || num < 0) return null;
+  return Math.round(num * 100);
+}
+
+export function AppointmentServicesView({
+  venueId,
+  isAdmin,
+  currency = 'GBP',
+}: {
+  venueId: string;
+  isAdmin: boolean;
+  currency?: string;
+}) {
   const sym = currency === 'EUR' ? '€' : '£';
 
   function formatPrice(pence: number | null): string {
     if (pence == null) return 'POA';
     return `${sym}${(pence / 100).toFixed(2)}`;
   }
-  const [services, setServices] = useState<Service[]>([]);
-  const [loading, setLoading] = useState(true);
 
-  const fetchServices = useCallback(async () => {
+  const [services, setServices] = useState<Service[]>([]);
+  const [practitioners, setPractitioners] = useState<Practitioner[]>([]);
+  const [links, setLinks] = useState<PractitionerServiceLink[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showModal, setShowModal] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [form, setForm] = useState<ServiceFormData>(DEFAULT_FORM);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+
+  const fetchAll = useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
-      const res = await fetch('/api/venue/appointment-services');
-      const data = await res.json();
-      setServices(data.services ?? []);
+      const [svcRes, practRes] = await Promise.all([
+        fetch('/api/venue/appointment-services'),
+        fetch('/api/venue/practitioners'),
+      ]);
+      if (!svcRes.ok || !practRes.ok) {
+        setError('Failed to load services. Please refresh the page.');
+        return;
+      }
+      const svcData = await svcRes.json();
+      const practData = await practRes.json();
+      setServices(svcData.services ?? []);
+      setLinks(svcData.practitioner_services ?? []);
+      setPractitioners(practData.practitioners ?? []);
     } catch {
-      console.error('Failed to load appointment services');
+      setError('Failed to load services. Please check your connection.');
     } finally {
       setLoading(false);
     }
   }, []);
 
-  useEffect(() => { fetchServices(); }, [fetchServices]);
+  useEffect(() => {
+    fetchAll();
+  }, [fetchAll]);
+
+  function openCreate() {
+    setForm(DEFAULT_FORM);
+    setEditingId(null);
+    setError(null);
+    setShowModal(true);
+  }
+
+  function openEdit(svc: Service) {
+    const svcLinks = links.filter((l) => l.service_id === svc.id).map((l) => l.practitioner_id);
+    setForm({
+      name: svc.name,
+      description: svc.description ?? '',
+      duration_minutes: svc.duration_minutes,
+      buffer_minutes: svc.buffer_minutes,
+      price: penceToPounds(svc.price_pence),
+      deposit: penceToPounds(svc.deposit_pence),
+      colour: svc.colour || '#3B82F6',
+      is_active: svc.is_active,
+      practitioner_ids: svcLinks,
+    });
+    setEditingId(svc.id);
+    setError(null);
+    setShowModal(true);
+  }
+
+  async function handleSave() {
+    if (!form.name.trim()) {
+      setError('Service name is required');
+      return;
+    }
+    if (form.duration_minutes < 5) {
+      setError('Duration must be at least 5 minutes');
+      return;
+    }
+
+    setSaving(true);
+    setError(null);
+    try {
+      const payload = {
+        ...(editingId ? { id: editingId } : {}),
+        name: form.name.trim(),
+        description: form.description.trim() || undefined,
+        duration_minutes: form.duration_minutes,
+        buffer_minutes: form.buffer_minutes,
+        price_pence: poundsToPence(form.price) ?? undefined,
+        deposit_pence: poundsToPence(form.deposit) ?? undefined,
+        colour: form.colour,
+        is_active: form.is_active,
+        practitioner_ids: form.practitioner_ids,
+      };
+
+      const res = await fetch('/api/venue/appointment-services', {
+        method: editingId ? 'PATCH' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error ?? 'Failed to save service');
+      }
+
+      setShowModal(false);
+      await fetchAll();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleDelete(id: string) {
+    try {
+      const res = await fetch('/api/venue/appointment-services', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id }),
+      });
+      if (!res.ok) {
+        setError('Failed to delete service. Please try again.');
+        return;
+      }
+      setDeleteConfirm(null);
+      await fetchAll();
+    } catch {
+      setError('Failed to delete service. Please try again.');
+    }
+  }
+
+  function togglePractitioner(pid: string) {
+    setForm((prev) => ({
+      ...prev,
+      practitioner_ids: prev.practitioner_ids.includes(pid)
+        ? prev.practitioner_ids.filter((p) => p !== pid)
+        : [...prev.practitioner_ids, pid],
+    }));
+  }
+
+  function practitionersForService(serviceId: string): Array<{ id: string; name: string }> {
+    return links.filter((l) => l.service_id === serviceId).map((l) => {
+      const p = practitioners.find((pr) => pr.id === l.practitioner_id);
+      return { id: l.practitioner_id, name: p?.name ?? 'Unknown' };
+    });
+  }
 
   return (
     <div>
       <div className="mb-6 flex items-center justify-between">
         <h1 className="text-2xl font-semibold text-slate-900">Services</h1>
+        {isAdmin && (
+          <button
+            onClick={openCreate}
+            className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition-colors"
+          >
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path d="M12 5v14m-7-7h14"/></svg>
+            Add Service
+          </button>
+        )}
       </div>
+
+      {!showModal && error && (
+        <div className="mb-4 rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700 flex items-center justify-between">
+          <span>{error}</span>
+          <button onClick={() => setError(null)} className="ml-2 text-red-400 hover:text-red-600">&times;</button>
+        </div>
+      )}
 
       {loading ? (
         <div className="space-y-3">
           {[1, 2, 3].map((i) => (
-            <div key={i} className="h-20 animate-pulse rounded-xl bg-slate-100" />
+            <div key={i} className="h-24 animate-pulse rounded-xl bg-slate-100" />
           ))}
         </div>
       ) : services.length === 0 ? (
         <div className="rounded-xl border border-slate-200 bg-white p-12 text-center">
-          <p className="text-slate-500">No services configured yet.</p>
+          <p className="mb-4 text-slate-500">No services configured yet.</p>
+          {isAdmin && (
+            <button
+              onClick={openCreate}
+              className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+            >
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path d="M12 5v14m-7-7h14"/></svg>
+              Add your first service
+            </button>
+          )}
         </div>
       ) : (
         <div className="space-y-3">
-          {services.map((svc) => (
-            <div
-              key={svc.id}
-              className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-5 py-4 shadow-sm"
-            >
-              <div className="flex items-center gap-4">
-                <div
-                  className="h-3 w-3 rounded-full"
-                  style={{ backgroundColor: svc.colour }}
-                />
-                <div>
-                  <div className="font-medium text-slate-900">{svc.name}</div>
-                  {svc.description && (
-                    <div className="text-sm text-slate-500">{svc.description}</div>
+          {services.map((svc) => {
+            const linkedPractitioners = practitionersForService(svc.id);
+            return (
+              <div
+                key={svc.id}
+                className={`rounded-xl border bg-white px-5 py-4 shadow-sm transition-colors ${
+                  svc.is_active ? 'border-slate-200' : 'border-slate-200 bg-slate-50 opacity-60'
+                }`}
+              >
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex items-start gap-3 min-w-0">
+                    <div
+                      className="mt-1 h-3 w-3 flex-shrink-0 rounded-full"
+                      style={{ backgroundColor: svc.colour }}
+                    />
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium text-slate-900">{svc.name}</span>
+                        {!svc.is_active && (
+                          <span className="rounded-full bg-slate-200 px-2 py-0.5 text-xs text-slate-500">
+                            Inactive
+                          </span>
+                        )}
+                      </div>
+                      {svc.description && (
+                        <p className="mt-0.5 text-sm text-slate-500 line-clamp-2">{svc.description}</p>
+                      )}
+                      <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-slate-600">
+                        <span>{formatDuration(svc.duration_minutes)}</span>
+                        {svc.buffer_minutes > 0 && (
+                          <span className="text-slate-400">+{svc.buffer_minutes}min buffer</span>
+                        )}
+                        <span className="font-medium">{formatPrice(svc.price_pence)}</span>
+                        {svc.deposit_pence != null && svc.deposit_pence > 0 && (
+                          <span className="text-slate-400">
+                            {formatPrice(svc.deposit_pence)} deposit
+                          </span>
+                        )}
+                      </div>
+                      {linkedPractitioners.length > 0 && (
+                        <div className="mt-1.5 flex flex-wrap gap-1">
+                          {linkedPractitioners.map((lp) => (
+                            <span
+                              key={lp.id}
+                              className="inline-block rounded-full bg-blue-50 px-2 py-0.5 text-xs text-blue-700"
+                            >
+                              {lp.name}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {isAdmin && (
+                    <div className="flex flex-shrink-0 items-center gap-1">
+                      <button
+                        onClick={() => openEdit(svc)}
+                        className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                        title="Edit"
+                      >
+                        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                      </button>
+                      {deleteConfirm === svc.id ? (
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => handleDelete(svc.id)}
+                            className="rounded-lg p-2 text-red-600 hover:bg-red-50"
+                            title="Confirm delete"
+                          >
+                            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path d="M5 13l4 4L19 7"/></svg>
+                          </button>
+                          <button
+                            onClick={() => setDeleteConfirm(null)}
+                            className="rounded-lg p-2 text-slate-400 hover:bg-slate-100"
+                            title="Cancel"
+                          >
+                            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path d="M6 18L18 6M6 6l12 12"/></svg>
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => setDeleteConfirm(svc.id)}
+                          className="rounded-lg p-2 text-slate-400 hover:bg-red-50 hover:text-red-600"
+                          title="Delete"
+                        >
+                          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14"/></svg>
+                        </button>
+                      )}
+                    </div>
                   )}
                 </div>
               </div>
-              <div className="flex items-center gap-6 text-sm text-slate-600">
-                <span>{formatDuration(svc.duration_minutes)}</span>
-                {svc.buffer_minutes > 0 && (
-                  <span className="text-xs text-slate-400">+{svc.buffer_minutes}min buffer</span>
-                )}
-                <span className="font-medium">{formatPrice(svc.price_pence)}</span>
-                {!svc.is_active && (
-                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-500">Inactive</span>
-                )}
-              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Create / Edit Modal */}
+      {showModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div role="dialog" aria-modal="true" aria-labelledby="service-modal-title" className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl max-h-[90vh] overflow-y-auto">
+            <div className="mb-5 flex items-center justify-between">
+              <h2 id="service-modal-title" className="text-lg font-semibold text-slate-900">
+                {editingId ? 'Edit Service' : 'Add Service'}
+              </h2>
+              <button onClick={() => setShowModal(false)} aria-label="Close" className="rounded-lg p-1 hover:bg-slate-100">
+                <svg className="h-5 w-5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path d="M6 18L18 6M6 6l12 12"/></svg>
+              </button>
             </div>
-          ))}
+
+            {error && (
+              <div className="mb-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
+            )}
+
+            <div className="space-y-4">
+              {/* Name */}
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-700">Name *</label>
+                <input
+                  type="text"
+                  value={form.name}
+                  onChange={(e) => setForm({ ...form, name: e.target.value })}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                  placeholder="e.g. Men's Haircut"
+                />
+              </div>
+
+              {/* Description */}
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-700">Description</label>
+                <textarea
+                  value={form.description}
+                  onChange={(e) => setForm({ ...form, description: e.target.value })}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                  rows={2}
+                  placeholder="Brief description of the service"
+                />
+              </div>
+
+              {/* Duration + Buffer */}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-slate-700">Duration (mins) *</label>
+                  <input
+                    type="number"
+                    value={form.duration_minutes}
+                    onChange={(e) => setForm({ ...form, duration_minutes: parseInt(e.target.value) || 0 })}
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                    min={5}
+                    max={480}
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-slate-700">Buffer (mins)</label>
+                  <input
+                    type="number"
+                    value={form.buffer_minutes}
+                    onChange={(e) => setForm({ ...form, buffer_minutes: parseInt(e.target.value) || 0 })}
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                    min={0}
+                    max={120}
+                  />
+                </div>
+              </div>
+
+              {/* Price + Deposit */}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-slate-700">Price ({sym})</label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-400">{sym}</span>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      value={form.price}
+                      onChange={(e) => setForm({ ...form, price: e.target.value })}
+                      className="w-full rounded-lg border border-slate-300 pl-7 pr-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                      placeholder="0.00"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-slate-700">Deposit ({sym})</label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-400">{sym}</span>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      value={form.deposit}
+                      onChange={(e) => setForm({ ...form, deposit: e.target.value })}
+                      className="w-full rounded-lg border border-slate-300 pl-7 pr-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                      placeholder="0.00"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Colour */}
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-700">Colour</label>
+                <div className="flex flex-wrap gap-2">
+                  {COLOUR_OPTIONS.map((c) => (
+                    <button
+                      key={c}
+                      type="button"
+                      onClick={() => setForm({ ...form, colour: c })}
+                      className={`h-8 w-8 rounded-full border-2 transition-all ${
+                        form.colour === c ? 'border-slate-900 scale-110' : 'border-transparent'
+                      }`}
+                      style={{ backgroundColor: c }}
+                    />
+                  ))}
+                </div>
+              </div>
+
+              {/* Active toggle */}
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => setForm({ ...form, is_active: !form.is_active })}
+                  className={`relative h-6 w-11 rounded-full transition-colors ${
+                    form.is_active ? 'bg-blue-600' : 'bg-slate-300'
+                  }`}
+                >
+                  <span
+                    className={`absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${
+                      form.is_active ? 'translate-x-5' : 'translate-x-0'
+                    }`}
+                  />
+                </button>
+                <span className="text-sm text-slate-700">Active (visible to clients)</span>
+              </div>
+
+              {/* Practitioner linking */}
+              {practitioners.length > 0 && (
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-slate-700">
+                    Team members who offer this service
+                  </label>
+                  <div className="space-y-2">
+                    {practitioners.map((p) => (
+                      <label
+                        key={p.id}
+                        className="flex cursor-pointer items-center gap-3 rounded-lg border border-slate-200 px-3 py-2 hover:bg-slate-50"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={form.practitioner_ids.includes(p.id)}
+                          onChange={() => togglePractitioner(p.id)}
+                          className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                        />
+                        <span className="text-sm text-slate-700">{p.name}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                onClick={() => setShowModal(false)}
+                className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSave}
+                disabled={saving}
+                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+              >
+                {saving ? 'Saving...' : editingId ? 'Save Changes' : 'Create Service'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

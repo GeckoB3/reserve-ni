@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { VenuePublic, GuestDetails } from './types';
 import { DetailsStep } from './DetailsStep';
 import { PaymentStep } from './PaymentStep';
@@ -15,11 +15,22 @@ interface Practitioner {
 
 type Step = 'service' | 'practitioner' | 'slot' | 'details' | 'payment' | 'confirmation';
 
-export function AppointmentBookingFlow({ venue, cancellationPolicy }: { venue: VenuePublic; cancellationPolicy?: string }) {
+interface AppointmentBookingFlowProps {
+  venue: VenuePublic;
+  cancellationPolicy?: string;
+  embed?: boolean;
+  onHeightChange?: (height: number) => void;
+  accentColour?: string;
+}
+
+export function AppointmentBookingFlow({ venue, cancellationPolicy, embed, onHeightChange, accentColour }: AppointmentBookingFlowProps) {
   const terms = venue.terminology ?? { client: 'Client', booking: 'Appointment', staff: 'Staff' };
 
   const [step, setStep] = useState<Step>('service');
-  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [date, setDate] = useState(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  });
   const [practitioners, setPractitioners] = useState<Practitioner[]>([]);
   const [selectedServiceId, setSelectedServiceId] = useState<string | null>(null);
   const [selectedPractitionerId, setSelectedPractitionerId] = useState<string | null>(null);
@@ -28,6 +39,16 @@ export function AppointmentBookingFlow({ venue, cancellationPolicy }: { venue: V
   const [createResult, setCreateResult] = useState<{ booking_id: string; client_secret?: string; stripe_account_id?: string; requires_deposit: boolean } | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const containerRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!onHeightChange || !containerRef.current) return;
+    const ro = new ResizeObserver(([entry]) => {
+      if (entry) onHeightChange(Math.ceil(entry.contentRect.height));
+    });
+    ro.observe(containerRef.current);
+    return () => ro.disconnect();
+  }, [onHeightChange]);
 
   const fetchAvailability = useCallback(async () => {
     setLoading(true);
@@ -46,7 +67,7 @@ export function AppointmentBookingFlow({ venue, cancellationPolicy }: { venue: V
   }, [venue.id, date, selectedServiceId, selectedPractitionerId]);
 
   useEffect(() => {
-    if (step === 'practitioner' || step === 'slot') fetchAvailability();
+    if (step === 'service' || step === 'practitioner' || step === 'slot') fetchAvailability();
   }, [fetchAvailability, step]);
 
   // Collect all unique services across all practitioners
@@ -107,7 +128,7 @@ export function AppointmentBookingFlow({ venue, cancellationPolicy }: { venue: V
   }
 
   return (
-    <div className="mx-auto max-w-lg">
+    <div ref={containerRef} className="mx-auto max-w-lg" style={accentColour ? { '--accent': accentColour } as React.CSSProperties : undefined}>
       {error && (
         <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
       )}
@@ -147,7 +168,7 @@ export function AppointmentBookingFlow({ venue, cancellationPolicy }: { venue: V
 
       {step === 'practitioner' && (
         <div>
-          <button onClick={() => setStep('service')} className="mb-4 text-sm text-brand-600 hover:underline">&larr; Back</button>
+          <button onClick={() => { setSelectedServiceId(null); setSelectedPractitionerId(null); setStep('service'); }} className="mb-4 text-sm text-brand-600 hover:underline">&larr; Back</button>
           <h2 className="mb-4 text-lg font-semibold text-slate-900">Choose {terms.staff.toLowerCase()}</h2>
           {loading ? (
             <div className="space-y-3">{[1, 2].map((i) => <div key={i} className="h-16 animate-pulse rounded-xl bg-slate-100" />)}</div>
@@ -171,7 +192,7 @@ export function AppointmentBookingFlow({ venue, cancellationPolicy }: { venue: V
 
       {step === 'slot' && (
         <div>
-          <button onClick={() => setStep('practitioner')} className="mb-4 text-sm text-brand-600 hover:underline">&larr; Back</button>
+          <button onClick={() => { setSelectedPractitionerId(null); setSelectedTime(null); setStep('practitioner'); }} className="mb-4 text-sm text-brand-600 hover:underline">&larr; Back</button>
           <h2 className="mb-4 text-lg font-semibold text-slate-900">Pick a time</h2>
           {loading ? (
             <div className="h-32 animate-pulse rounded-xl bg-slate-100" />
@@ -195,7 +216,7 @@ export function AppointmentBookingFlow({ venue, cancellationPolicy }: { venue: V
 
       {step === 'details' && selectedTime && (
         <div>
-          <button onClick={() => setStep('slot')} className="mb-4 text-sm text-brand-600 hover:underline">&larr; Back</button>
+          <button onClick={() => { setSelectedTime(null); setStep('slot'); }} className="mb-4 text-sm text-brand-600 hover:underline">&larr; Back</button>
           <div className="mb-4 rounded-xl border border-slate-200 bg-white p-4 text-sm">
             <div className="font-medium text-slate-900">{selectedService?.name}</div>
             <div className="text-slate-500">{date} at {selectedTime} &middot; {selectedPrac?.name}</div>
@@ -205,7 +226,7 @@ export function AppointmentBookingFlow({ venue, cancellationPolicy }: { venue: V
             date={date}
             partySize={1}
             onSubmit={handleDetailsSubmit}
-            onBack={() => setStep('slot')}
+            onBack={() => { setSelectedTime(null); setStep('slot'); }}
             requiresDeposit={false}
           />
         </div>

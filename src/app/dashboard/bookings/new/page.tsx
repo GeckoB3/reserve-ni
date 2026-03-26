@@ -23,11 +23,13 @@ export default async function NewBookingPage() {
 
   const { data: venue } = await staff.db
     .from('venues')
-    .select('table_management_enabled')
+    .select('table_management_enabled, booking_model, currency')
     .eq('id', venueId)
     .single();
 
   const advancedMode = Boolean(venue?.table_management_enabled);
+  const bookingModel = (venue?.booking_model as string) ?? 'table_reservation';
+  const currency = (venue?.currency as string) ?? 'GBP';
 
-  return <NewBookingPageClient venueId={venueId} advancedMode={advancedMode} />;
+  return <NewBookingPageClient venueId={venueId} advancedMode={advancedMode} bookingModel={bookingModel} currency={currency} />;
 }

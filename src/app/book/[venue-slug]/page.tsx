@@ -8,7 +8,7 @@ async function getVenue(slug: string): Promise<VenuePublic | null> {
   const supabase = getSupabaseAdminClient();
   const { data, error } = await supabase
     .from('venues')
-    .select('id, name, slug, cover_photo_url, address, phone, deposit_config, booking_rules, opening_hours, timezone, booking_model, terminology')
+    .select('id, name, slug, cover_photo_url, address, phone, deposit_config, booking_rules, opening_hours, timezone, booking_model, terminology, currency')
     .eq('slug', slug)
     .single();
   if (error || !data) return null;

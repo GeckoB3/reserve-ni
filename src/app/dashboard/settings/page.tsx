@@ -26,7 +26,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
   let hasServiceConfig = false;
   const { data: fullVenue, error: fullErr } = await staff.db
     .from('venues')
-    .select('id, name, slug, address, phone, email, cover_photo_url, cuisine_type, price_band, no_show_grace_minutes, kitchen_email, communication_templates, opening_hours, booking_rules, deposit_config, availability_config, stripe_connected_account_id, timezone, table_management_enabled, combination_threshold, pricing_tier, plan_status, calendar_count')
+    .select('id, name, slug, address, phone, email, cover_photo_url, cuisine_type, price_band, no_show_grace_minutes, kitchen_email, communication_templates, opening_hours, booking_rules, deposit_config, availability_config, stripe_connected_account_id, timezone, table_management_enabled, combination_threshold, pricing_tier, plan_status, calendar_count, booking_model')
     .eq('id', venueId)
     .single();
 
@@ -36,7 +36,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
     console.error('Settings page full venue query failed, trying basic columns:', fullErr?.message);
     const { data: basicVenue } = await staff.db
       .from('venues')
-      .select('id, name, slug, address, phone, email, cover_photo_url, opening_hours, booking_rules, deposit_config, availability_config, timezone, table_management_enabled, combination_threshold')
+      .select('id, name, slug, address, phone, email, cover_photo_url, opening_hours, booking_rules, deposit_config, availability_config, timezone, table_management_enabled, combination_threshold, booking_model')
       .eq('id', venueId)
       .single();
     if (basicVenue) {
@@ -54,13 +54,23 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
     }
   }
 
+  const bookingModel = ((venue as Record<string, unknown>)?.booking_model as string) ?? 'table_reservation';
   if (venueId) {
-    const { count } = await staff.db
-      .from('venue_services')
-      .select('id', { count: 'exact', head: true })
-      .eq('venue_id', venueId)
-      .eq('is_active', true);
-    hasServiceConfig = (count ?? 0) > 0;
+    if (bookingModel === 'practitioner_appointment') {
+      const { count } = await staff.db
+        .from('appointment_services')
+        .select('id', { count: 'exact', head: true })
+        .eq('venue_id', venueId)
+        .eq('is_active', true);
+      hasServiceConfig = (count ?? 0) > 0;
+    } else {
+      const { count } = await staff.db
+        .from('venue_services')
+        .select('id', { count: 'exact', head: true })
+        .eq('venue_id', venueId)
+        .eq('is_active', true);
+      hasServiceConfig = (count ?? 0) > 0;
+    }
   }
 
   const isAdmin = staff.role === 'admin';
@@ -72,7 +82,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
         <h1 className="mb-6 text-2xl font-semibold text-slate-900">
           {isAdmin ? 'Settings' : 'Account settings'}
         </h1>
-        <SettingsView initialVenue={venue ?? null} isAdmin={isAdmin} initialTab={tab} hasServiceConfig={hasServiceConfig} />
+        <SettingsView initialVenue={venue ?? null} isAdmin={isAdmin} initialTab={tab} hasServiceConfig={hasServiceConfig} bookingModel={bookingModel} />
       </div>
     </div>
   );

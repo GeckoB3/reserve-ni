@@ -20,6 +20,7 @@ interface SettingsViewProps {
   isAdmin: boolean;
   initialTab?: string;
   hasServiceConfig?: boolean;
+  bookingModel?: string;
 }
 
 const TABS = [
@@ -141,7 +142,8 @@ function PlanSection({ venue }: { venue: VenueSettings }) {
   );
 }
 
-export function SettingsView({ initialVenue, isAdmin, initialTab, hasServiceConfig = false }: SettingsViewProps) {
+export function SettingsView({ initialVenue, isAdmin, initialTab, hasServiceConfig = false, bookingModel = 'table_reservation' }: SettingsViewProps) {
+  const isAppointment = bookingModel === 'practitioner_appointment';
   const [venue, setVenue] = useState<VenueSettings | null>(initialVenue);
   const visibleTabs = useMemo(
     () => (isAdmin ? [...TABS] : TABS.filter((t) => t.key !== 'staff')),
@@ -200,23 +202,49 @@ export function SettingsView({ initialVenue, isAdmin, initialTab, hasServiceConf
             <ProfileSection />
             <VenueProfileSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} />
             <OpeningHoursSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} />
-            <TableManagementSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} />
-            {hasServiceConfig ? (
+            {!isAppointment && <TableManagementSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} />}
+            {!isAppointment && (
+              hasServiceConfig ? (
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-5 text-sm text-slate-700 shadow-sm">
+                  <p className="font-semibold text-slate-900">Dining services and capacity</p>
+                  <p className="mt-2">
+                    Slot times, capacity rules, blocks, and dining durations are managed under Dashboard &rarr; Availability.
+                    The legacy availability form below is hidden while you have at least one active service.
+                  </p>
+                  <Link
+                    href="/dashboard/availability"
+                    className="mt-3 inline-flex rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700"
+                  >
+                    Open Availability
+                  </Link>
+                </div>
+              ) : (
+                <AvailabilityConfigSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} />
+              )
+            )}
+            {isAppointment && (
               <div className="rounded-xl border border-slate-200 bg-slate-50 p-5 text-sm text-slate-700 shadow-sm">
-                <p className="font-semibold text-slate-900">Dining services and capacity</p>
+                <p className="font-semibold text-slate-900">Services and Availability</p>
                 <p className="mt-2">
-                  Slot times, capacity rules, blocks, and dining durations are managed under Dashboard → Availability.
-                  The legacy availability form below is hidden while you have at least one active service.
+                  {hasServiceConfig
+                    ? 'Manage your appointment services, team members, working hours, and booking availability.'
+                    : 'Set up your appointment services and team to start accepting bookings.'}
                 </p>
-                <Link
-                  href="/dashboard/availability"
-                  className="mt-3 inline-flex rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700"
-                >
-                  Open Availability
-                </Link>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <Link
+                    href="/dashboard/appointment-services"
+                    className="inline-flex rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700"
+                  >
+                    {hasServiceConfig ? 'Manage Services' : 'Create First Service'}
+                  </Link>
+                  <Link
+                    href="/dashboard/availability"
+                    className="inline-flex rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                  >
+                    Availability Settings
+                  </Link>
+                </div>
               </div>
-            ) : (
-              <AvailabilityConfigSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} />
             )}
             <BookingRulesSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} />
             <DepositConfigSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} />

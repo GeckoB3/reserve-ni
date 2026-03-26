@@ -35,7 +35,7 @@ const MODEL_NAV_ITEMS: Partial<Record<BookingModel, NavItem[]>> = {
   ],
 };
 
-const TABLE_RESERVATION_ONLY = new Set(['/dashboard/waitlist', '/dashboard/availability']);
+const TABLE_RESERVATION_ONLY = new Set(['/dashboard/waitlist']);
 
 interface Props {
   email: string;
@@ -65,15 +65,23 @@ export function DashboardSidebar({
 
   const navItems = useMemo(() => {
     const isTableReservation = bookingModel === 'table_reservation';
+    const isAppointment = bookingModel === 'practitioner_appointment';
 
-    // Start with base items, filtering out model-A-only items for other models
     let items = BASE_NAV_ITEMS.filter((item) => {
       if (!isTableReservation && TABLE_RESERVATION_ONLY.has(item.href)) return false;
       if (!isAdmin && ADMIN_ONLY_HREFS.has(item.href)) return false;
       return true;
     });
 
-    // Insert model-specific nav items after "New Booking"
+    // Rename nav items for appointment businesses
+    if (isAppointment) {
+      items = items.map((item) => {
+        if (item.href === '/dashboard/bookings') return { ...item, label: 'Appointments' };
+        if (item.href === '/dashboard/bookings/new') return { ...item, label: 'New Appointment' };
+        return item;
+      });
+    }
+
     const modelItems = MODEL_NAV_ITEMS[bookingModel];
     if (modelItems) {
       const insertIdx = items.findIndex((i) => i.href === '/dashboard/bookings/new');
@@ -142,6 +150,7 @@ export function DashboardSidebar({
           {navItems.map((item) => {
             if (item.href === '/dashboard/bookings' && !tableManagementEnabled) {
               const daySheetActive = pathname.startsWith('/dashboard/day-sheet');
+              const isAppt = bookingModel === 'practitioner_appointment';
               return (
                 <div key="reservations-with-day-sheet" className="space-y-1">
                   <Link
@@ -154,7 +163,7 @@ export function DashboardSidebar({
                     }`}
                   >
                     <ClipboardIcon className={`h-5 w-5 flex-shrink-0 ${daySheetActive ? 'text-brand-600' : 'text-slate-400'}`} />
-                    Day Sheet
+                    {isAppt ? "Today's Appointments" : 'Day Sheet'}
                   </Link>
                   <Link
                     href={item.href}

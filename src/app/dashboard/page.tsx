@@ -7,6 +7,7 @@ import { SetupChecklist } from './SetupChecklist';
 import { DashboardStatCard } from '@/components/dashboard/DashboardStatCard';
 
 interface DashboardData {
+  booking_model?: string;
   today: {
     covers: number;
     bookings: number;
@@ -152,6 +153,7 @@ export default function DashboardHomePage() {
   }
 
   const t = data.today;
+  const isAppointment = data.booking_model === 'practitioner_appointment';
   const covers = n(t.covers);
   const bookings = n(t.bookings);
   const confirmed = n(t.confirmed);
@@ -181,7 +183,7 @@ export default function DashboardHomePage() {
             <svg className="h-4 w-4 text-slate-400" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5" />
             </svg>
-            Day sheet
+            {isAppointment ? "Today's appointments" : 'Day sheet'}
           </Link>
           <Link
             href="/dashboard/bookings"
@@ -190,7 +192,7 @@ export default function DashboardHomePage() {
             <svg className="h-4 w-4 text-slate-400" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 6.75h12M8.25 12h12m-12 5.25h12M3.75 6.75h.007v.008H3.75V6.75Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0ZM3.75 12h.007v.008H3.75V12Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm-.375 5.25h.007v.008H3.75v-.008Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z" />
             </svg>
-            All bookings
+            {isAppointment ? 'All appointments' : 'All bookings'}
           </Link>
         </div>
       </div>
@@ -200,10 +202,13 @@ export default function DashboardHomePage() {
       {/* Key Metrics */}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <DashboardStatCard
-          label="Covers today"
-          value={covers}
+          label={isAppointment ? 'Appointments today' : 'Covers today'}
+          value={isAppointment ? bookings : covers}
           color="blue"
-          subValue={bookings > 0 ? `across ${bookings} booking${bookings !== 1 ? 's' : ''}` : 'no bookings yet'}
+          subValue={isAppointment
+            ? (bookings > 0 ? `${confirmed} confirmed` : 'no appointments yet')
+            : (bookings > 0 ? `across ${bookings} booking${bookings !== 1 ? 's' : ''}` : 'no bookings yet')
+          }
         />
         <DashboardStatCard
           label="Confirmed"
@@ -224,12 +229,12 @@ export default function DashboardHomePage() {
           label="Next up"
           value={t.next_booking ? t.next_booking.time : '—'}
           color="amber"
-          subValue={t.next_booking ? `party of ${t.next_booking.party_size}` : 'no upcoming bookings'}
+          subValue={t.next_booking ? (isAppointment ? 'next appointment' : `party of ${t.next_booking.party_size}`) : (isAppointment ? 'no upcoming appointments' : 'no upcoming bookings')}
         />
       </div>
 
-      {/* Today's Capacity */}
-      <div className="rounded-xl border border-slate-200 bg-white p-5">
+      {/* Today's Capacity (hidden for appointments) */}
+      {!isAppointment && <div className="rounded-xl border border-slate-200 bg-white p-5">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div className="flex-1">
             <div className="flex items-center gap-2">
@@ -290,7 +295,7 @@ export default function DashboardHomePage() {
             </div>
           </div>
         </div>
-      </div>
+      </div>}
 
       {/* Alerts */}
       {data.alerts.length > 0 && (
@@ -317,9 +322,9 @@ export default function DashboardHomePage() {
       )}
 
       {/* 7-Day outlook */}
-      <div className="grid gap-5 lg:grid-cols-2">
-        {/* Heatmap */}
-        <div className="rounded-xl border border-slate-200 bg-white p-5">
+      <div className={`grid gap-5 ${isAppointment ? 'lg:grid-cols-1' : 'lg:grid-cols-2'}`}>
+        {/* Heatmap (hidden for appointments) */}
+        {!isAppointment && <div className="rounded-xl border border-slate-200 bg-white p-5">
           <h2 className="text-sm font-semibold text-slate-700">7-day capacity outlook</h2>
           <p className="mb-4 mt-1 text-xs text-slate-400">
             How full each day gets at its busiest time.
@@ -366,12 +371,12 @@ export default function DashboardHomePage() {
             <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-amber-500" /> Very busy</span>
             <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-red-500" /> Full</span>
           </div>
-        </div>
+        </div>}
 
         {/* Forecast chart */}
         <div className="rounded-xl border border-slate-200 bg-white p-5">
-          <h2 className="text-sm font-semibold text-slate-700">7-day covers</h2>
-          <p className="mb-4 mt-1 text-xs text-slate-400">Total covers booked each day.</p>
+          <h2 className="text-sm font-semibold text-slate-700">{isAppointment ? '7-day appointments' : '7-day covers'}</h2>
+          <p className="mb-4 mt-1 text-xs text-slate-400">{isAppointment ? 'Total appointments booked each day.' : 'Total covers booked each day.'}</p>
           <div className="h-52">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={data.forecast} margin={{ top: 4, right: 4, left: -24, bottom: 0 }}>
@@ -395,10 +400,10 @@ export default function DashboardHomePage() {
                     fontSize: '12px',
                     boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.05)',
                   }}
-                  formatter={(value: number) => [`${value} covers`, 'Covers']}
+                  formatter={(value: number) => [isAppointment ? `${value} appointments` : `${value} covers`, isAppointment ? 'Appointments' : 'Covers']}
                   cursor={{ fill: '#f8fafc' }}
                 />
-                <Bar dataKey="covers" fill="#6366f1" radius={[6, 6, 0, 0]} maxBarSize={48} />
+                <Bar dataKey={isAppointment ? 'bookings' : 'covers'} fill="#6366f1" radius={[6, 6, 0, 0]} maxBarSize={48} />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -408,12 +413,12 @@ export default function DashboardHomePage() {
       {/* Today's Bookings */}
       <div className="rounded-xl border border-slate-200 bg-white">
         <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
-          <h2 className="text-sm font-semibold text-slate-700">Today&apos;s bookings</h2>
+          <h2 className="text-sm font-semibold text-slate-700">{isAppointment ? "Today's appointments" : "Today's bookings"}</h2>
           <Link
             href="/dashboard/day-sheet"
             className="text-xs font-medium text-brand-600 hover:text-brand-700 transition-colors"
           >
-            View day sheet &rarr;
+            {isAppointment ? 'View all' : 'View day sheet'} &rarr;
           </Link>
         </div>
 
@@ -424,8 +429,8 @@ export default function DashboardHomePage() {
                 <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5m-9-6h.008v.008H12v-.008ZM12 15h.008v.008H12V15Zm0 2.25h.008v.008H12v-.008ZM9.75 15h.008v.008H9.75V15Zm0 2.25h.008v.008H9.75v-.008ZM7.5 15h.008v.008H7.5V15Zm0 2.25h.008v.008H7.5v-.008Zm6.75-4.5h.008v.008h-.008v-.008Zm0 2.25h.008v.008h-.008V15Zm0 2.25h.008v.008h-.008v-.008Zm2.25-4.5h.008v.008H16.5v-.008Zm0 2.25h.008v.008H16.5V15Z" />
               </svg>
             </div>
-            <p className="text-sm font-medium text-slate-600">No bookings today</p>
-            <p className="mt-1 text-xs text-slate-400">Bookings will appear here as they come in.</p>
+            <p className="text-sm font-medium text-slate-600">No {isAppointment ? 'appointments' : 'bookings'} today</p>
+            <p className="mt-1 text-xs text-slate-400">{isAppointment ? 'Appointments' : 'Bookings'} will appear here as they come in.</p>
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -433,8 +438,8 @@ export default function DashboardHomePage() {
               <thead>
                 <tr className="border-b border-slate-100 bg-slate-50/60">
                   <th className="whitespace-nowrap px-5 py-2.5 text-left text-xs font-medium text-slate-500">Time</th>
-                  <th className="whitespace-nowrap px-5 py-2.5 text-left text-xs font-medium text-slate-500">Guest</th>
-                  <th className="whitespace-nowrap px-5 py-2.5 text-left text-xs font-medium text-slate-500">Covers</th>
+                  <th className="whitespace-nowrap px-5 py-2.5 text-left text-xs font-medium text-slate-500">{isAppointment ? 'Client' : 'Guest'}</th>
+                  {!isAppointment && <th className="whitespace-nowrap px-5 py-2.5 text-left text-xs font-medium text-slate-500">Covers</th>}
                   <th className="whitespace-nowrap px-5 py-2.5 text-left text-xs font-medium text-slate-500">Status</th>
                   <th className="whitespace-nowrap px-5 py-2.5 text-left text-xs font-medium text-slate-500">Deposit</th>
                 </tr>
@@ -444,7 +449,7 @@ export default function DashboardHomePage() {
                   <tr key={b.id} className="transition-colors hover:bg-slate-50/50">
                     <td className="whitespace-nowrap px-5 py-3 font-medium tabular-nums text-slate-800">{b.time}</td>
                     <td className="max-w-[180px] truncate px-5 py-3 text-slate-700" title={b.guest_name}>{b.guest_name}</td>
-                    <td className="whitespace-nowrap px-5 py-3 tabular-nums text-slate-600">{b.party_size}</td>
+                    {!isAppointment && <td className="whitespace-nowrap px-5 py-3 tabular-nums text-slate-600">{b.party_size}</td>}
                     <td className="whitespace-nowrap px-5 py-3">
                       <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset ${getStatusBadge(b.status)}`}>
                         {b.status}
@@ -468,7 +473,7 @@ export default function DashboardHomePage() {
               href="/dashboard/day-sheet"
               className="text-xs font-medium text-brand-600 hover:text-brand-700 transition-colors"
             >
-              {bookings - 10} more booking{bookings - 10 !== 1 ? 's' : ''} — view all &rarr;
+              {bookings - 10} more {isAppointment ? 'appointment' : 'booking'}{bookings - 10 !== 1 ? 's' : ''} — view all &rarr;
             </Link>
           </div>
         )}
