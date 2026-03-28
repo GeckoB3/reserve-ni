@@ -17,18 +17,19 @@ export async function GET() {
 
     const admin = getSupabaseAdminClient();
 
-    const { data, error } = await admin
+    const { data: existingRow, error: queryError } = await admin
       .from('communication_settings')
       .select('*')
       .eq('venue_id', staff.venue_id)
       .maybeSingle();
 
-    if (error) {
-      console.error('[comm-settings GET] query error:', error);
+    if (queryError) {
+      console.error('[comm-settings GET] query error:', queryError);
       return NextResponse.json({ error: 'Failed to load settings' }, { status: 500 });
     }
 
-    if (!data) {
+    let row = existingRow;
+    if (!row) {
       const { data: created, error: insertErr } = await admin
         .from('communication_settings')
         .insert({ venue_id: staff.venue_id })
@@ -39,10 +40,10 @@ export async function GET() {
         console.error('[comm-settings GET] insert error:', insertErr);
         return NextResponse.json({ error: 'Failed to create default settings' }, { status: 500 });
       }
-      data = created;
+      row = created;
     }
 
-    return NextResponse.json(normalizeCommunicationSettingsRow(data as Record<string, unknown>));
+    return NextResponse.json(normalizeCommunicationSettingsRow(row as Record<string, unknown>));
   } catch (err) {
     console.error('[comm-settings GET] unexpected error:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
