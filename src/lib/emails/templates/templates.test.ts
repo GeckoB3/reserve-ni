@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { renderBookingConfirmation } from './booking-confirmation';
 import { renderDepositRequestSms } from './deposit-request-sms';
+import { renderDepositRequestEmail } from './deposit-request-email';
 import { renderDepositConfirmation } from './deposit-confirmation';
 import { renderReminder56h } from './reminder-56h';
 import { renderDayOfReminderEmail } from './day-of-reminder-email';
@@ -114,6 +115,16 @@ describe('renderDepositRequestSms', () => {
   it('prepends custom message', () => {
     const result = renderDepositRequestSms(SAMPLE_BOOKING, SAMPLE_VENUE, 'https://pay.link', 'Hi! Deposit needed.');
     expect(result.body.startsWith('Hi! Deposit needed.')).toBe(true);
+  });
+});
+
+describe('renderDepositRequestEmail', () => {
+  it('includes payment link and deposit amount', () => {
+    const result = renderDepositRequestEmail(SAMPLE_BOOKING, SAMPLE_VENUE, 'https://pay.link/abc');
+    expect(result.subject.toLowerCase()).toContain('deposit');
+    expect(result.html).toContain('https://pay.link/abc');
+    expect(result.html).toContain('20.00');
+    expect(result.text).toContain('https://pay.link/abc');
   });
 });
 

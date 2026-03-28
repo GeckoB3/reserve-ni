@@ -28,7 +28,7 @@ export async function POST(request: Request) {
 
     const { data: venue } = await admin
       .from('venues')
-      .select('id, pricing_tier, stripe_customer_id, stripe_subscription_id')
+      .select('id, pricing_tier, stripe_customer_id, stripe_subscription_id, calendar_count, booking_model')
       .eq('id', staffRow.venue_id)
       .single();
 
@@ -60,7 +60,7 @@ export async function POST(request: Request) {
             action: 'upgrade',
             old_subscription_id: venue.stripe_subscription_id ?? '',
           },
-          success_url: `${origin}/dashboard/settings?upgraded=true`,
+          success_url: `${origin}/dashboard/settings?tab=plan&upgraded=true`,
           cancel_url: `${origin}/dashboard/settings`,
         });
 
@@ -74,7 +74,16 @@ export async function POST(request: Request) {
           return NextResponse.json({ error: 'Standard price not configured' }, { status: 500 });
         }
 
-        const qty = calendar_count ?? 1;
+        let minQty = 1;
+        if ((venue.booking_model as string) === 'practitioner_appointment') {
+          const { count: pracCount } = await admin
+            .from('practitioners')
+            .select('id', { count: 'exact', head: true })
+            .eq('venue_id', staffRow.venue_id)
+            .eq('is_active', true);
+          minQty = Math.max(1, pracCount ?? 0);
+        }
+        const qty = Math.max(minQty, calendar_count ?? minQty);
 
         const session = await stripe.checkout.sessions.create({
           customer: venue.stripe_customer_id as string,
@@ -106,25 +115,37 @@ export async function POST(request: Request) {
 
       case 'resubscribe': {
         // Re-create a checkout session for the current tier
-        const priceId =
-          (venue.pricing_tier as string) === 'standard'
-            ? process.env.STRIPE_STANDARD_PRICE_ID
-            : process.env.STRIPE_BUSINESS_PRICE_ID;
+        const isStandard = (venue.pricing_tier as string) === 'standard';
+        const priceId = isStandard ? process.env.STRIPE_STANDARD_PRICE_ID : process.env.STRIPE_BUSINESS_PRICE_ID;
 
         if (!priceId) {
           return NextResponse.json({ error: 'Price not configured' }, { status: 500 });
         }
 
+        let resubQty = 1;
+        if (isStandard) {
+          resubQty = Math.max(1, (venue.calendar_count as number | null) ?? 1);
+          if ((venue.booking_model as string) === 'practitioner_appointment') {
+            const { count: pracCount } = await admin
+              .from('practitioners')
+              .select('id', { count: 'exact', head: true })
+              .eq('venue_id', staffRow.venue_id)
+              .eq('is_active', true);
+            resubQty = Math.max(resubQty, pracCount ?? 0, 1);
+          }
+        }
+
         const session = await stripe.checkout.sessions.create({
           customer: venue.stripe_customer_id as string,
           mode: 'subscription',
-          line_items: [{ price: priceId, quantity: 1 }],
+          line_items: [{ price: priceId, quantity: resubQty }],
           metadata: {
             venue_id: venue.id,
             plan: venue.pricing_tier as string,
             action: 'resubscribe',
+            ...(isStandard ? { calendar_count: String(resubQty) } : {}),
           },
-          success_url: `${origin}/dashboard/settings?resubscribed=true`,
+          success_url: `${origin}/dashboard/settings?tab=plan&resubscribed=true`,
           cancel_url: `${origin}/dashboard/settings`,
         });
 

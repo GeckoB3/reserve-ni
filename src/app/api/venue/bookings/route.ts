@@ -6,7 +6,7 @@ import { stripe } from '@/lib/stripe';
 import { findOrCreateGuest } from '@/lib/guests';
 import { generateConfirmToken, hashConfirmToken } from '@/lib/confirm-token';
 
-import { sendBookingConfirmationEmail, sendDepositRequestSms } from '@/lib/communications/send-templated';
+import { sendBookingConfirmationEmail, sendDepositRequestNotifications } from '@/lib/communications/send-templated';
 import { autoAssignTable } from '@/lib/table-availability';
 import { computeAvailability, fetchEngineInput } from '@/lib/availability';
 import { AVAILABILITY_SETUP_REQUIRED_MESSAGE } from '@/lib/availability/availability-errors';
@@ -23,8 +23,9 @@ const phoneBookingSchema = z.object({
   booking_time: z.string().regex(/^([01]?[0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9])?$/),
   party_size: z.number().int().min(1).max(50),
   name: z.string().min(1).max(200),
-  phone: z.string().min(1).max(24),
-  email: z.string().email().optional().or(z.literal('')),
+  /** Required for table (Model A) phone bookings; optional for practitioner appointments (Model B). */
+  phone: z.string().max(24).optional(),
+  email: z.union([z.literal(''), z.string().email()]).optional(),
   dietary_notes: z.string().max(500).optional(),
   occasion: z.string().max(200).optional(),
   special_requests: z.string().max(500).optional(),
@@ -86,11 +87,6 @@ export async function POST(request: NextRequest) {
     const venueId = staff.venue_id;
     const admin = getSupabaseAdminClient();
 
-    const phoneE164 = normalizeToE164(phone, 'GB');
-    if (!phoneE164) {
-      return NextResponse.json({ error: 'Invalid phone number' }, { status: 400 });
-    }
-
     const { data: venue } = await admin
       .from('venues')
       .select('id, name, stripe_connected_account_id, booking_rules, deposit_config, table_management_enabled, show_table_in_confirmation, timezone, address')
@@ -101,6 +97,29 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Venue not found' }, { status: 404 });
     }
 
+    const venueMode = await resolveVenueMode(admin, venueId);
+
+    const phoneRaw = (phone ?? '').trim();
+    let phoneE164: string | null = null;
+    if (venueMode.bookingModel === 'practitioner_appointment') {
+      if (phoneRaw) {
+        const n = normalizeToE164(phoneRaw, 'GB');
+        if (!n) {
+          return NextResponse.json({ error: 'Invalid phone number' }, { status: 400 });
+        }
+        phoneE164 = n;
+      }
+    } else {
+      if (!phoneRaw) {
+        return NextResponse.json({ error: 'Phone number is required' }, { status: 400 });
+      }
+      const n = normalizeToE164(phoneRaw, 'GB');
+      if (!n) {
+        return NextResponse.json({ error: 'Invalid phone number' }, { status: 400 });
+      }
+      phoneE164 = n;
+    }
+
     const depositConfig = (venue.deposit_config as {
       enabled?: boolean;
       amount_per_person_gbp?: number;
@@ -108,10 +127,14 @@ export async function POST(request: NextRequest) {
     }) ?? {};
     const amountPerPersonGbp = depositConfig.amount_per_person_gbp ?? 5;
 
-    const { guest } = await findOrCreateGuest(admin, venueId, { name, email: email || null, phone: phoneE164 });
+    const emailNorm = email && email.trim() !== '' ? email.trim().toLowerCase() : null;
+    const { guest } = await findOrCreateGuest(admin, venueId, {
+      name,
+      email: emailNorm,
+      phone: phoneE164,
+    });
     const timeForDb = booking_time.length === 5 ? booking_time + ':00' : booking_time;
     const timeStr = timeForDb.slice(0, 5);
-    const venueMode = await resolveVenueMode(admin, venueId);
 
     // --- Model B: Practitioner appointment ---
     if (venueMode.bookingModel === 'practitioner_appointment') {
@@ -219,6 +242,37 @@ export async function POST(request: NextRequest) {
           await admin.from('bookings').delete().eq('id', apptBooking.id);
           return NextResponse.json({ error: 'Payment setup failed' }, { status: 500 });
         }
+
+        const depositBookingPayload = {
+          id: apptBooking.id,
+          guest_name: name,
+          guest_email: guest.email ?? null,
+          guest_phone: guest.phone ?? null,
+          booking_date,
+          booking_time,
+          party_size: 1,
+          special_requests: special_requests ?? null,
+          dietary_notes: dietary_notes ?? null,
+          deposit_amount_pence: depositAmountPence,
+        };
+        after(async () => {
+          try {
+            const results = await sendDepositRequestNotifications(
+              depositBookingPayload,
+              { name: venue.name, address: venue.address ?? undefined },
+              venueId,
+              payment_url!,
+            );
+            if (!results.email.sent && !results.sms.sent) {
+              console.warn('[after] deposit request notifications not sent:', {
+                email: results.email.reason,
+                sms: results.sms.reason,
+              });
+            }
+          } catch (err) {
+            console.error('[after] deposit request notifications failed:', err);
+          }
+        });
       } else {
         const manageToken = generateConfirmToken();
         await admin
@@ -396,23 +450,36 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'Payment setup failed' }, { status: 500 });
       }
 
-      if (guest.phone) {
-        const guestPhone = guest.phone;
-        after(async () => {
-          try {
-            const result = await sendDepositRequestSms(
-              { id: booking.id, guest_name: name, booking_date, booking_time, party_size, deposit_amount_pence: depositAmountPence ?? null },
-              { name: venue.name, address: venue.address ?? undefined },
-              venueId,
-              payment_url!,
-              guestPhone,
-            );
-            if (!result.sent) console.warn('[after] deposit SMS not sent:', result.reason);
-          } catch (err) {
-            console.error('[after] deposit SMS failed:', err);
+      const tableDepositPayload = {
+        id: booking.id,
+        guest_name: name,
+        guest_email: guest.email ?? null,
+        guest_phone: guest.phone ?? null,
+        booking_date,
+        booking_time,
+        party_size,
+        special_requests: special_requests ?? null,
+        dietary_notes: dietary_notes ?? null,
+        deposit_amount_pence: depositAmountPence ?? null,
+      };
+      after(async () => {
+        try {
+          const results = await sendDepositRequestNotifications(
+            tableDepositPayload,
+            { name: venue.name, address: venue.address ?? undefined },
+            venueId,
+            payment_url!,
+          );
+          if (!results.email.sent && !results.sms.sent) {
+            console.warn('[after] deposit request notifications not sent:', {
+              email: results.email.reason,
+              sms: results.sms.reason,
+            });
           }
-        });
-      }
+        } catch (err) {
+          console.error('[after] deposit request notifications failed:', err);
+        }
+      });
     } else {
       const manageToken = generateConfirmToken();
       await admin

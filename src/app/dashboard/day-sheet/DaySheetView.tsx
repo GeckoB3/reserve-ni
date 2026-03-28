@@ -1646,7 +1646,7 @@ export function DaySheetView({ venueId }: { venueId: string }) {
                           const depositAmtStr = b.deposit_amount_pence ? `£${(b.deposit_amount_pence / 100).toFixed(2)}` : null;
                           const tableNames = (b.table_assignments ?? []).map((t) => t.name);
                           return (
-                            // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions
+                             
                             <div
                               className="border-t border-slate-100 bg-slate-50/40"
                               onClick={(e) => e.stopPropagation()}

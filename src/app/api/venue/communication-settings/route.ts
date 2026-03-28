@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
-import { clearSettingsCache } from '@/lib/communications/service';
+import { clearSettingsCache, normalizeCommunicationSettingsRow } from '@/lib/communications/service';
 
 /**
  * GET /api/venue/communication-settings
@@ -17,7 +17,7 @@ export async function GET() {
 
     const admin = getSupabaseAdminClient();
 
-    let { data, error } = await admin
+    const { data, error } = await admin
       .from('communication_settings')
       .select('*')
       .eq('venue_id', staff.venue_id)
@@ -42,7 +42,7 @@ export async function GET() {
       data = created;
     }
 
-    return NextResponse.json(data);
+    return NextResponse.json(normalizeCommunicationSettingsRow(data as Record<string, unknown>));
   } catch (err) {
     console.error('[comm-settings GET] unexpected error:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
@@ -52,6 +52,8 @@ export async function GET() {
 const ALLOWED_FIELDS = new Set([
   'confirmation_email_enabled',
   'confirmation_email_custom_message',
+  'deposit_request_email_enabled',
+  'deposit_request_email_custom_message',
   'deposit_sms_enabled',
   'deposit_sms_custom_message',
   'deposit_confirmation_email_enabled',
@@ -132,7 +134,7 @@ export async function PUT(request: NextRequest) {
 
     clearSettingsCache(staff.venue_id);
 
-    return NextResponse.json(data);
+    return NextResponse.json(normalizeCommunicationSettingsRow(data as Record<string, unknown>));
   } catch (err) {
     console.error('[comm-settings PUT] unexpected error:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

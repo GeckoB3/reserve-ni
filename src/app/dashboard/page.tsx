@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { SetupChecklist } from './SetupChecklist';
 import { DashboardStatCard } from '@/components/dashboard/DashboardStatCard';
@@ -109,8 +110,15 @@ function formatTodayDate(): string {
 }
 
 export default function DashboardHomePage() {
+  const router = useRouter();
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (data?.booking_model === 'practitioner_appointment') {
+      router.replace('/dashboard/calendar');
+    }
+  }, [data, router]);
 
   useEffect(() => {
     async function load() {
@@ -152,8 +160,17 @@ export default function DashboardHomePage() {
     );
   }
 
+  if (data.booking_model === 'practitioner_appointment') {
+    return (
+      <div className="flex min-h-[50vh] flex-col items-center justify-center gap-3 p-8">
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-brand-600 border-t-transparent" />
+        <p className="text-sm text-slate-500">Opening calendar…</p>
+      </div>
+    );
+  }
+
   const t = data.today;
-  const isAppointment = data.booking_model === 'practitioner_appointment';
+  const isAppointment = false;
   const covers = n(t.covers);
   const bookings = n(t.bookings);
   const confirmed = n(t.confirmed);
@@ -177,13 +194,13 @@ export default function DashboardHomePage() {
         </div>
         <div className="flex gap-2 mt-2 sm:mt-0">
           <Link
-            href="/dashboard/day-sheet"
+            href={isAppointment ? '/dashboard/calendar' : '/dashboard/day-sheet'}
             className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50"
           >
             <svg className="h-4 w-4 text-slate-400" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5" />
             </svg>
-            {isAppointment ? "Today's appointments" : 'Day sheet'}
+            {isAppointment ? 'Calendar' : 'Day sheet'}
           </Link>
           <Link
             href="/dashboard/bookings"

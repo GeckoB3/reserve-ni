@@ -6,6 +6,7 @@ import { sendCommunication } from '@/lib/communications';
 import { generateConfirmToken, hashConfirmToken } from '@/lib/confirm-token';
 import { validateBookingStatusTransition } from '@/lib/table-management/lifecycle';
 import { sendBookingConfirmationEmail, sendDepositConfirmationEmail } from '@/lib/communications/send-templated';
+import { isSelfServeBookingSource } from '@/lib/booking-source';
 
 const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
 if (!webhookSecret) {
@@ -64,7 +65,7 @@ export async function POST(request: NextRequest) {
 
       const { data: booking } = await supabase
         .from('bookings')
-        .select('id, venue_id, guest_id, status, deposit_status')
+        .select('id, venue_id, guest_id, status, deposit_status, source')
         .eq('id', bookingId)
         .single();
 
@@ -135,6 +136,7 @@ export async function POST(request: NextRequest) {
 
       const venueIdForAfter = booking.venue_id;
       const hasDeposit = Boolean(recipientEmail && b?.deposit_amount_pence);
+      const skipDepositReceipt = isSelfServeBookingSource(booking.source as string | null);
       after(async () => {
         try {
           const confResult = await sendBookingConfirmationEmail(bookingData, venueData, venueIdForAfter);
@@ -143,7 +145,7 @@ export async function POST(request: NextRequest) {
           console.error('[after] webhook confirmation email failed:', err);
         }
 
-        if (hasDeposit) {
+        if (hasDeposit && !skipDepositReceipt) {
           try {
             const depResult = await sendDepositConfirmationEmail(bookingData, venueData, venueIdForAfter);
             if (!depResult.sent) console.warn('[after] webhook deposit email not sent:', depResult.reason);

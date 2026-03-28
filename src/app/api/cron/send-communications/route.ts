@@ -7,6 +7,7 @@ import { renderDayOfReminderSms } from '@/lib/emails/templates/day-of-reminder-s
 import { renderPostVisitEmail } from '@/lib/emails/templates/post-visit';
 import { sendEmail } from '@/lib/emails/send-email';
 import { sendSms } from '@/lib/emails/send-sms';
+import { isSmsAllowed } from '@/lib/tier-enforcement';
 import { createBookingHmac } from '@/lib/short-manage-link';
 import type { BookingEmailData, VenueEmailData } from '@/lib/emails/types';
 
@@ -247,6 +248,8 @@ async function sendDayOfReminders(results: { day_of_reminders: number; errors: n
       if (!settings.day_of_reminder_enabled) continue;
       if (!settings.day_of_reminder_sms_enabled && !settings.day_of_reminder_email_enabled) continue;
 
+      const dayOfSmsTierOk = await isSmsAllowed(venue.id);
+
       const sendTime = settings.day_of_reminder_time;
       const [sh, sm] = sendTime.split(':').map(Number);
       const sendMins = (sh ?? 9) * 60 + (sm ?? 0);
@@ -271,8 +274,8 @@ async function sendDayOfReminders(results: { day_of_reminders: number; errors: n
           const phone = getGuestPhone(b);
           const email = getGuestEmail(b);
 
-          // SMS reminder
-          if (settings.day_of_reminder_sms_enabled && phone) {
+          // SMS reminder (Business / Founding only)
+          if (settings.day_of_reminder_sms_enabled && phone && dayOfSmsTierOk) {
             const sms = renderDayOfReminderSms(bookingData, venueData, settings.day_of_reminder_custom_message);
             const canSend = await logToCommLogs({
               venue_id: venue.id,

@@ -26,7 +26,9 @@ export async function GET(request: NextRequest) {
 
     let query = staff.db
       .from('bookings')
-      .select('id, booking_date, booking_time, party_size, status, source, deposit_status, deposit_amount_pence, dietary_notes, occasion, estimated_end_time, created_at, guest_id, practitioner_id, appointment_service_id, experience_event_id, class_instance_id, resource_id, booking_end_time, group_booking_id, person_label')
+      .select(
+        'id, booking_date, booking_time, party_size, status, source, deposit_status, deposit_amount_pence, dietary_notes, occasion, special_requests, internal_notes, client_arrived_at, estimated_end_time, created_at, guest_id, practitioner_id, appointment_service_id, experience_event_id, class_instance_id, resource_id, booking_end_time, group_booking_id, person_label',
+      )
       .eq('venue_id', staff.venue_id)
       .order('booking_date', { ascending: true })
       .order('booking_time', { ascending: true });
@@ -56,9 +58,16 @@ export async function GET(request: NextRequest) {
 
     const guestIds = [...new Set((rows ?? []).map((r: { guest_id: string }) => r.guest_id))];
     const { data: guestsRows } = guestIds.length
-      ? await staff.db.from('guests').select('id, name, email, phone').in('id', guestIds)
+      ? await staff.db.from('guests').select('id, name, email, phone, visit_count').in('id', guestIds)
       : { data: [] };
-    const guestsMap = new Map((guestsRows ?? []).map((g: { id: string; name: string | null; email: string | null; phone: string | null }) => [g.id, g]));
+    const guestsMap = new Map(
+      (guestsRows ?? []).map(
+        (g: { id: string; name: string | null; email: string | null; phone: string | null; visit_count?: number | null }) => [
+          g.id,
+          g,
+        ],
+      ),
+    );
 
     let bookings = (rows ?? []).map((r: Record<string, unknown> & { guest_id: string }) => {
       const guest = guestsMap.get(r.guest_id);
@@ -73,12 +82,16 @@ export async function GET(request: NextRequest) {
         deposit_amount_pence: r.deposit_amount_pence,
         dietary_notes: r.dietary_notes,
         occasion: r.occasion,
+        special_requests: r.special_requests ?? null,
+        internal_notes: r.internal_notes ?? null,
+        client_arrived_at: r.client_arrived_at ?? null,
         estimated_end_time: r.estimated_end_time,
         booking_end_time: r.booking_end_time,
         created_at: r.created_at,
         guest_name: guest?.name ?? '—',
         guest_email: guest?.email ?? null,
         guest_phone: guest?.phone ?? null,
+        guest_visit_count: guest?.visit_count ?? null,
         practitioner_id: r.practitioner_id ?? null,
         appointment_service_id: r.appointment_service_id ?? null,
         experience_event_id: r.experience_event_id ?? null,

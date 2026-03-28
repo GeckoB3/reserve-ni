@@ -1,6 +1,18 @@
 'use client';
 
 import { useCallback, useEffect, useState, useMemo } from 'react';
+import Link from 'next/link';
+import { defaultPractitionerWorkingHours } from '@/lib/availability/practitioner-defaults';
+
+interface CalendarEntitlement {
+  pricing_tier: string;
+  calendar_count: number | null;
+  active_practitioners: number;
+  calendar_limit: number | null;
+  unlimited: boolean;
+  at_calendar_limit: boolean;
+  can_add_practitioner: boolean;
+}
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 interface Practitioner {
@@ -39,15 +51,11 @@ const DAY_LABELS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Sat
 const DAY_KEYS = ['1', '2', '3', '4', '5', '6', '0'];
 
 function defaultWorkingHours(): Record<string, Array<{ start: string; end: string }>> {
-  const hours: Record<string, Array<{ start: string; end: string }>> = {};
-  for (const key of ['1', '2', '3', '4', '5']) {
-    hours[key] = [{ start: '09:00', end: '17:00' }];
-  }
-  return hours;
+  return defaultPractitionerWorkingHours();
 }
 
 // ─── Component ──────────────────────────────────────────────────────────────
-export function AppointmentAvailabilitySettings({ venueId }: { venueId: string }) {
+export function AppointmentAvailabilitySettings({ isAdmin }: { isAdmin: boolean }) {
   const [tab, setTab] = useState<Tab>('team');
   const [practitioners, setPractitioners] = useState<Practitioner[]>([]);
   const [services, setServices] = useState<Service[]>([]);
@@ -65,6 +73,8 @@ export function AppointmentAvailabilitySettings({ venueId }: { venueId: string }
   const [formPhone, setFormPhone] = useState('');
   const [formActive, setFormActive] = useState(true);
   const [formServiceIds, setFormServiceIds] = useState<string[]>([]);
+  const [entitlement, setEntitlement] = useState<CalendarEntitlement | null>(null);
+  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
 
   // Selected practitioner for hours/breaks/daysoff tabs
   const [selectedPractitionerId, setSelectedPractitionerId] = useState<string>('');
@@ -114,12 +124,28 @@ export function AppointmentAvailabilitySettings({ venueId }: { venueId: string }
         setLoading(false);
       }
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+   
   }, []);
 
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  const fetchEntitlement = useCallback(async () => {
+    if (!isAdmin) return;
+    try {
+      const res = await fetch('/api/venue/calendar-entitlement');
+      if (!res.ok) return;
+      const data = (await res.json()) as CalendarEntitlement;
+      setEntitlement(data);
+    } catch {
+      // non-blocking
+    }
+  }, [isAdmin]);
+
+  useEffect(() => {
+    void fetchEntitlement();
+  }, [fetchEntitlement]);
 
   const selectedPrac = useMemo(
     () => practitioners.find((p) => p.id === selectedPractitionerId) ?? null,
@@ -133,6 +159,11 @@ export function AppointmentAvailabilitySettings({ venueId }: { venueId: string }
 
   // ─── Team Tab ───────────────────────────────────────────────────────
   function openAdd() {
+    if (!isAdmin) return;
+    if (entitlement && !entitlement.unlimited && entitlement.at_calendar_limit) {
+      setShowUpgradeModal(true);
+      return;
+    }
     setEditingId(null);
     setFormName('');
     setFormEmail('');
@@ -144,6 +175,7 @@ export function AppointmentAvailabilitySettings({ venueId }: { venueId: string }
   }
 
   function openEdit(p: Practitioner) {
+    if (!isAdmin) return;
     setEditingId(p.id);
     setFormName(p.name);
     setFormEmail(p.email ?? '');
@@ -155,6 +187,7 @@ export function AppointmentAvailabilitySettings({ venueId }: { venueId: string }
   }
 
   async function savePractitioner() {
+    if (!isAdmin) return;
     if (!formName.trim()) { setError('Name is required'); return; }
     setSaving(true);
     setError(null);
@@ -179,7 +212,20 @@ export function AppointmentAvailabilitySettings({ venueId }: { venueId: string }
         body: JSON.stringify(payload),
       });
       if (!res.ok) {
-        const d = await res.json();
+        const d = (await res.json().catch(() => ({}))) as {
+          error?: string;
+          upgrade_required?: boolean;
+          current?: number;
+          limit?: number;
+        };
+        if (d.upgrade_required || res.status === 403) {
+          void fetchEntitlement();
+          setShowUpgradeModal(true);
+          throw new Error(
+            d.error ??
+              'Your plan does not include another calendar. Upgrade your subscription to add more team members.',
+          );
+        }
         throw new Error(d.error ?? 'Failed to save');
       }
 
@@ -200,6 +246,7 @@ export function AppointmentAvailabilitySettings({ venueId }: { venueId: string }
       setShowForm(false);
       flash(editingId ? 'Team member updated' : 'Team member added');
       await fetchData();
+      await fetchEntitlement();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save');
     } finally {
@@ -208,6 +255,7 @@ export function AppointmentAvailabilitySettings({ venueId }: { venueId: string }
   }
 
   async function deletePractitioner(id: string) {
+    if (!isAdmin) return;
     if (!confirm('Delete this team member? This cannot be undone.')) return;
     try {
       const res = await fetch('/api/venue/practitioners', {
@@ -224,6 +272,7 @@ export function AppointmentAvailabilitySettings({ venueId }: { venueId: string }
         setSelectedPractitionerId('');
       }
       await fetchData();
+      await fetchEntitlement();
     } catch {
       setError('Failed to delete team member. Please try again.');
     }
@@ -231,7 +280,7 @@ export function AppointmentAvailabilitySettings({ venueId }: { venueId: string }
 
   // ─── Working Hours Tab ──────────────────────────────────────────────
   async function saveWorkingHours(hours: Record<string, Array<{ start: string; end: string }>>) {
-    if (!selectedPrac) return;
+    if (!isAdmin || !selectedPrac) return;
     setSaving(true);
     setError(null);
     try {
@@ -252,7 +301,7 @@ export function AppointmentAvailabilitySettings({ venueId }: { venueId: string }
 
   // ─── Breaks Tab ─────────────────────────────────────────────────────
   async function saveBreaks(breaks: Array<{ start: string; end: string }>) {
-    if (!selectedPrac) return;
+    if (!isAdmin || !selectedPrac) return;
     setSaving(true);
     setError(null);
     try {
@@ -273,7 +322,7 @@ export function AppointmentAvailabilitySettings({ venueId }: { venueId: string }
 
   // ─── Days Off Tab ───────────────────────────────────────────────────
   async function saveDaysOff(daysOff: string[]) {
-    if (!selectedPrac) return;
+    if (!isAdmin || !selectedPrac) return;
     setSaving(true);
     setError(null);
     try {
@@ -327,14 +376,31 @@ export function AppointmentAvailabilitySettings({ venueId }: { venueId: string }
           {/* ─── Team Tab ─── */}
           {tab === 'team' && (
             <div>
-              <div className="mb-4 flex items-center justify-between">
-                <p className="text-sm text-slate-500">Manage your team members who take appointments.</p>
-                <button
-                  onClick={openAdd}
-                  className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
-                >
-                  Add Team Member
-                </button>
+              <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="text-sm text-slate-500">
+                  <p>Manage your team members who take appointments.</p>
+                  {!isAdmin && (
+                    <p className="mt-1 text-slate-600">Only admins can add, edit, or remove team members.</p>
+                  )}
+                  {isAdmin && entitlement && !entitlement.unlimited && entitlement.calendar_limit != null && (
+                    <p className="mt-1 text-slate-600">
+                      Calendars in use:{' '}
+                      <span className="font-medium text-slate-800">
+                        {entitlement.active_practitioners} of {entitlement.calendar_limit}
+                      </span>
+                      {entitlement.at_calendar_limit ? ' (at plan limit)' : ''}
+                    </p>
+                  )}
+                </div>
+                {isAdmin && (
+                  <button
+                    type="button"
+                    onClick={openAdd}
+                    className="shrink-0 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+                  >
+                    Add Team Member
+                  </button>
+                )}
               </div>
 
               {practitioners.length === 0 ? (
@@ -374,20 +440,24 @@ export function AppointmentAvailabilitySettings({ venueId }: { venueId: string }
                               </div>
                             )}
                           </div>
-                          <div className="flex items-center gap-1">
-                            <button
-                              onClick={() => openEdit(p)}
-                              className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
-                            >
-                              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-                            </button>
-                            <button
-                              onClick={() => deletePractitioner(p.id)}
-                              className="rounded-lg p-2 text-slate-400 hover:bg-red-50 hover:text-red-600"
-                            >
-                              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14"/></svg>
-                            </button>
-                          </div>
+                          {isAdmin && (
+                            <div className="flex items-center gap-1">
+                              <button
+                                type="button"
+                                onClick={() => openEdit(p)}
+                                className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                              >
+                                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => deletePractitioner(p.id)}
+                                className="rounded-lg p-2 text-slate-400 hover:bg-red-50 hover:text-red-600"
+                              >
+                                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14"/></svg>
+                              </button>
+                            </div>
+                          )}
                         </div>
                       </div>
                     );
@@ -396,7 +466,7 @@ export function AppointmentAvailabilitySettings({ venueId }: { venueId: string }
               )}
 
               {/* Add/Edit modal */}
-              {showForm && (
+              {showForm && isAdmin && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
                   <div role="dialog" aria-modal="true" aria-labelledby="team-modal-title" className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
                     <h2 id="team-modal-title" className="mb-4 text-lg font-semibold text-slate-900">
@@ -486,6 +556,7 @@ export function AppointmentAvailabilitySettings({ venueId }: { venueId: string }
               practitioners={practitioners}
               services={services}
               links={pLinks}
+              isAdmin={isAdmin}
               onLinksChanged={() => fetchData({ silent: true })}
             />
           )}
@@ -518,6 +589,7 @@ export function AppointmentAvailabilitySettings({ venueId }: { venueId: string }
                       hours={selectedPrac.working_hours ?? {}}
                       onSave={saveWorkingHours}
                       saving={saving}
+                      readOnly={!isAdmin}
                     />
                   )}
 
@@ -526,6 +598,7 @@ export function AppointmentAvailabilitySettings({ venueId }: { venueId: string }
                       breaks={selectedPrac.break_times ?? []}
                       onSave={saveBreaks}
                       saving={saving}
+                      readOnly={!isAdmin}
                     />
                   )}
 
@@ -534,6 +607,7 @@ export function AppointmentAvailabilitySettings({ venueId }: { venueId: string }
                       daysOff={selectedPrac.days_off ?? []}
                       onSave={saveDaysOff}
                       saving={saving}
+                      readOnly={!isAdmin}
                     />
                   )}
                 </>
@@ -541,6 +615,49 @@ export function AppointmentAvailabilitySettings({ venueId }: { venueId: string }
             </div>
           )}
         </>
+      )}
+
+      {showUpgradeModal && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="upgrade-modal-title"
+            className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl"
+          >
+            <h2 id="upgrade-modal-title" className="text-lg font-semibold text-slate-900">
+              Upgrade to add more calendars
+            </h2>
+            <p className="mt-3 text-sm text-slate-600">
+              Your current subscription includes a limited number of calendars (team members). To add another practitioner,
+              increase your calendar count on the Standard plan or upgrade to Business for unlimited calendars.
+            </p>
+            {entitlement && !entitlement.unlimited && entitlement.calendar_limit != null && (
+              <p className="mt-2 text-sm text-slate-700">
+                You are using{' '}
+                <span className="font-semibold">
+                  {entitlement.active_practitioners} of {entitlement.calendar_limit}
+                </span>{' '}
+                calendar{entitlement.calendar_limit === 1 ? '' : 's'}.
+              </p>
+            )}
+            <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={() => setShowUpgradeModal(false)}
+                className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              >
+                Close
+              </button>
+              <Link
+                href="/dashboard/settings?tab=plan"
+                className="inline-flex justify-center rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700"
+              >
+                View plans &amp; upgrade
+              </Link>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
@@ -551,10 +668,12 @@ function WorkingHoursEditor({
   hours,
   onSave,
   saving,
+  readOnly = false,
 }: {
   hours: Record<string, Array<{ start: string; end: string }>>;
   onSave: (hours: Record<string, Array<{ start: string; end: string }>>) => void;
   saving: boolean;
+  readOnly?: boolean;
 }) {
   const [draft, setDraft] = useState(hours);
 
@@ -615,14 +734,15 @@ function WorkingHoursEditor({
                   type="checkbox"
                   checked={isWorking}
                   onChange={() => toggleDay(dayKey)}
-                  className="h-4 w-4 rounded border-slate-300 text-blue-600"
+                  disabled={readOnly}
+                  className="h-4 w-4 rounded border-slate-300 text-blue-600 disabled:opacity-50"
                 />
                 <span className={`text-sm font-medium ${isWorking ? 'text-slate-900' : 'text-slate-400'}`}>
                   {DAY_LABELS[i]}
                 </span>
               </label>
-              {isWorking && (
-                <button onClick={() => addRange(dayKey)} className="text-xs text-blue-600 hover:underline">
+              {isWorking && !readOnly && (
+                <button type="button" onClick={() => addRange(dayKey)} className="text-xs text-blue-600 hover:underline">
                   + Add split
                 </button>
               )}
@@ -635,17 +755,19 @@ function WorkingHoursEditor({
                       type="time"
                       value={r.start}
                       onChange={(e) => updateRange(dayKey, ri, 'start', e.target.value)}
-                      className="rounded-lg border border-slate-300 px-2 py-1 text-sm"
+                      disabled={readOnly}
+                      className="rounded-lg border border-slate-300 px-2 py-1 text-sm disabled:bg-slate-50"
                     />
                     <span className="text-sm text-slate-400">to</span>
                     <input
                       type="time"
                       value={r.end}
                       onChange={(e) => updateRange(dayKey, ri, 'end', e.target.value)}
-                      className="rounded-lg border border-slate-300 px-2 py-1 text-sm"
+                      disabled={readOnly}
+                      className="rounded-lg border border-slate-300 px-2 py-1 text-sm disabled:bg-slate-50"
                     />
-                    {ranges.length > 1 && (
-                      <button onClick={() => removeRange(dayKey, ri)} className="text-xs text-red-500 hover:underline">Remove</button>
+                    {ranges.length > 1 && !readOnly && (
+                      <button type="button" onClick={() => removeRange(dayKey, ri)} className="text-xs text-red-500 hover:underline">Remove</button>
                     )}
                   </div>
                 ))}
@@ -655,13 +777,19 @@ function WorkingHoursEditor({
         );
       })}
 
-      <button
-        onClick={() => onSave(draft)}
-        disabled={saving}
-        className="mt-4 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-      >
-        {saving ? 'Saving...' : 'Save Working Hours'}
-      </button>
+      {!readOnly && (
+        <button
+          type="button"
+          onClick={() => onSave(draft)}
+          disabled={saving}
+          className="mt-4 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+        >
+          {saving ? 'Saving...' : 'Save Working Hours'}
+        </button>
+      )}
+      {readOnly && (
+        <p className="mt-4 text-sm text-slate-500">Only admins can change working hours.</p>
+      )}
     </div>
   );
 }
@@ -671,10 +799,12 @@ function BreaksEditor({
   breaks,
   onSave,
   saving,
+  readOnly = false,
 }: {
   breaks: Array<{ start: string; end: string }>;
   onSave: (breaks: Array<{ start: string; end: string }>) => void;
   saving: boolean;
+  readOnly?: boolean;
 }) {
   const [draft, setDraft] = useState(breaks);
 
@@ -707,33 +837,41 @@ function BreaksEditor({
                 type="time"
                 value={b.start}
                 onChange={(e) => updateBreak(i, 'start', e.target.value)}
-                className="rounded-lg border border-slate-300 px-2 py-1 text-sm"
+                disabled={readOnly}
+                className="rounded-lg border border-slate-300 px-2 py-1 text-sm disabled:bg-slate-50"
               />
               <span className="text-sm text-slate-400">to</span>
               <input
                 type="time"
                 value={b.end}
                 onChange={(e) => updateBreak(i, 'end', e.target.value)}
-                className="rounded-lg border border-slate-300 px-2 py-1 text-sm"
+                disabled={readOnly}
+                className="rounded-lg border border-slate-300 px-2 py-1 text-sm disabled:bg-slate-50"
               />
-              <button onClick={() => removeBreak(i)} className="ml-auto text-xs text-red-500 hover:underline">Remove</button>
+              {!readOnly && (
+                <button type="button" onClick={() => removeBreak(i)} className="ml-auto text-xs text-red-500 hover:underline">Remove</button>
+              )}
             </div>
           ))}
         </div>
       )}
 
-      <div className="mt-3 flex gap-3">
-        <button onClick={addBreak} className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50">
-          Add Break
-        </button>
-        <button
-          onClick={() => onSave(draft)}
-          disabled={saving}
-          className="rounded-lg bg-blue-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-        >
-          {saving ? 'Saving...' : 'Save Breaks'}
-        </button>
-      </div>
+      {!readOnly && (
+        <div className="mt-3 flex gap-3">
+          <button type="button" onClick={addBreak} className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50">
+            Add Break
+          </button>
+          <button
+            type="button"
+            onClick={() => onSave(draft)}
+            disabled={saving}
+            className="rounded-lg bg-blue-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+          >
+            {saving ? 'Saving...' : 'Save Breaks'}
+          </button>
+        </div>
+      )}
+      {readOnly && <p className="mt-3 text-sm text-slate-500">Only admins can change breaks.</p>}
     </div>
   );
 }
@@ -743,10 +881,12 @@ function DaysOffEditor({
   daysOff,
   onSave,
   saving,
+  readOnly = false,
 }: {
   daysOff: string[];
   onSave: (daysOff: string[]) => void;
   saving: boolean;
+  readOnly?: boolean;
 }) {
   const [draft, setDraft] = useState(daysOff);
   const [newDate, setNewDate] = useState('');
@@ -777,16 +917,20 @@ function DaysOffEditor({
           type="date"
           value={newDate}
           onChange={(e) => setNewDate(e.target.value)}
-          className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+          disabled={readOnly}
+          className="rounded-lg border border-slate-300 px-3 py-2 text-sm disabled:bg-slate-50"
           min={new Date().toISOString().slice(0, 10)}
         />
-        <button
-          onClick={addDate}
-          disabled={!newDate}
-          className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-        >
-          Add Day Off
-        </button>
+        {!readOnly && (
+          <button
+            type="button"
+            onClick={addDate}
+            disabled={!newDate}
+            className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+          >
+            Add Day Off
+          </button>
+        )}
       </div>
 
       {futureDates.length === 0 && pastDates.length === 0 ? (
@@ -798,7 +942,9 @@ function DaysOffEditor({
               <span className="text-sm text-slate-900">
                 {new Date(d + 'T12:00:00').toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'long', year: 'numeric' })}
               </span>
-              <button onClick={() => removeDate(d)} className="text-xs text-red-500 hover:underline">Remove</button>
+              {!readOnly ? (
+                <button type="button" onClick={() => removeDate(d)} className="text-xs text-red-500 hover:underline">Remove</button>
+              ) : null}
             </div>
           ))}
           {pastDates.length > 0 && (
@@ -808,7 +954,9 @@ function DaysOffEditor({
                 {pastDates.map((d) => (
                   <div key={d} className="flex items-center justify-between rounded-lg bg-slate-50 px-4 py-1.5 text-sm text-slate-400">
                     <span>{new Date(d + 'T12:00:00').toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'long', year: 'numeric' })}</span>
-                    <button onClick={() => removeDate(d)} className="text-xs text-red-400 hover:underline">Remove</button>
+                    {!readOnly && (
+                      <button type="button" onClick={() => removeDate(d)} className="text-xs text-red-400 hover:underline">Remove</button>
+                    )}
                   </div>
                 ))}
               </div>
@@ -817,13 +965,17 @@ function DaysOffEditor({
         </div>
       )}
 
-      <button
-        onClick={() => onSave(draft)}
-        disabled={saving}
-        className="mt-4 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-      >
-        {saving ? 'Saving...' : 'Save Days Off'}
-      </button>
+      {!readOnly && (
+        <button
+          type="button"
+          onClick={() => onSave(draft)}
+          disabled={saving}
+          className="mt-4 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+        >
+          {saving ? 'Saving...' : 'Save Days Off'}
+        </button>
+      )}
+      {readOnly && <p className="mt-4 text-sm text-slate-500">Only admins can change days off.</p>}
     </div>
   );
 }
@@ -855,11 +1007,13 @@ function ServiceLinkingGrid({
   practitioners,
   services,
   links,
+  isAdmin,
   onLinksChanged,
 }: {
   practitioners: Practitioner[];
   services: Service[];
   links: PractitionerServiceLink[];
+  isAdmin: boolean;
   onLinksChanged: () => void | Promise<void>;
 }) {
   const baseline = useMemo(() => buildDraftFromLinks(practitioners, links), [practitioners, links]);
@@ -875,6 +1029,7 @@ function ServiceLinkingGrid({
   const dirty = useMemo(() => !areServiceDraftsEqual(draft, baseline), [draft, baseline]);
 
   function toggleCell(practitionerId: string, serviceId: string) {
+    if (!isAdmin) return;
     setDraft((prev) => {
       const cur = [...(prev[practitionerId] ?? [])];
       const idx = cur.indexOf(serviceId);
@@ -944,30 +1099,35 @@ function ServiceLinkingGrid({
         <p className="max-w-2xl text-sm text-slate-600">
           Tick the services each team member offers. Leave a row with <strong>no</strong> boxes ticked to offer{' '}
           <strong>all</strong> services for that person. Changes apply when you click Save.
-        </p>
-        <div className="flex flex-shrink-0 flex-wrap items-center gap-2">
-          {dirty && (
-            <span className="rounded-full bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-800 ring-1 ring-amber-200/80">
-              Unsaved changes
-            </span>
+          {!isAdmin && (
+            <span className="mt-2 block text-slate-500">Only admins can change which services each person offers.</span>
           )}
-          <button
-            type="button"
-            onClick={discard}
-            disabled={!dirty || saving}
-            className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40"
-          >
-            Discard
-          </button>
-          <button
-            type="button"
-            onClick={() => void save()}
-            disabled={!dirty || saving}
-            className="rounded-lg bg-blue-600 px-4 py-1.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 disabled:opacity-40"
-          >
-            {saving ? 'Saving…' : 'Save changes'}
-          </button>
-        </div>
+        </p>
+        {isAdmin && (
+          <div className="flex flex-shrink-0 flex-wrap items-center gap-2">
+            {dirty && (
+              <span className="rounded-full bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-800 ring-1 ring-amber-200/80">
+                Unsaved changes
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={discard}
+              disabled={!dirty || saving}
+              className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+            >
+              Discard
+            </button>
+            <button
+              type="button"
+              onClick={() => void save()}
+              disabled={!dirty || saving}
+              className="rounded-lg bg-blue-600 px-4 py-1.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 disabled:opacity-40"
+            >
+              {saving ? 'Saving…' : 'Save changes'}
+            </button>
+          </div>
+        )}
       </div>
 
       {saveError && (
@@ -1020,7 +1180,8 @@ function ServiceLinkingGrid({
                             type="checkbox"
                             checked={checked}
                             onChange={() => toggleCell(prac.id, svc.id)}
-                            className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-2 focus:ring-blue-500 focus:ring-offset-0"
+                            disabled={!isAdmin}
+                            className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-2 focus:ring-blue-500 focus:ring-offset-0 disabled:opacity-50"
                             aria-label={`${prac.name} — ${svc.name}`}
                           />
                         </label>

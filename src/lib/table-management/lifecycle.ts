@@ -238,16 +238,19 @@ export async function applyBookingLifecycleStatusEffects(
   const isRevert = isRevertTransition(previousStatus, nextStatus);
 
   if (previousStatus !== 'Seated' && nextStatus === 'Seated') {
-    const today = new Date().toISOString().slice(0, 10);
-    const { data: guestData } = await db.from('guests').select('visit_count').eq('id', guestId).single();
-    await db
-      .from('guests')
-      .update({
-        visit_count: (guestData?.visit_count ?? 0) + 1,
-        last_visit_date: today,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', guestId);
+    // Reopening from Completed should not count as another visit.
+    if (previousStatus !== 'Completed') {
+      const today = new Date().toISOString().slice(0, 10);
+      const { data: guestData } = await db.from('guests').select('visit_count').eq('id', guestId).single();
+      await db
+        .from('guests')
+        .update({
+          visit_count: (guestData?.visit_count ?? 0) + 1,
+          last_visit_date: today,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', guestId);
+    }
   }
 
   if (previousStatus === 'Seated' && isRevert) {

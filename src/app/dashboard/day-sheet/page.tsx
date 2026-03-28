@@ -1,7 +1,6 @@
 import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
 import { DaySheetView } from './DaySheetView';
-import { AppointmentDayView } from './AppointmentDayView';
 import { SwRegister } from './sw-register';
 import { getDashboardStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
@@ -38,19 +37,9 @@ export default async function DaySheetPage() {
   }
 
   const bookingModel = (venue?.booking_model as BookingModel) ?? 'table_reservation';
-  const currency = (venue?.currency as string) ?? 'GBP';
 
   if (bookingModel === 'practitioner_appointment') {
-    return (
-      <div className="p-3 md:p-6 lg:p-8">
-        <div className="mx-auto max-w-7xl">
-          <SwRegister />
-          <ToastProvider>
-            <AppointmentDayView venueId={venueId} currency={currency} />
-          </ToastProvider>
-        </div>
-      </div>
-    );
+    redirect('/dashboard/calendar');
   }
 
   return (

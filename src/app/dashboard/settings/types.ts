@@ -23,6 +23,7 @@ export interface VenueSettings {
   pricing_tier?: string;
   plan_status?: string;
   calendar_count?: number | null;
+  booking_model?: string;
 }
 
 export type OpeningHoursDaySettings =

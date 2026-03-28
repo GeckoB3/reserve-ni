@@ -231,10 +231,16 @@ export async function PATCH(
           .update({ status: 'No-Show', deposit_status: depositStatus, updated_at: new Date().toISOString() })
           .eq('id', id);
       } else {
-        await staff.db
-          .from('bookings')
-          .update({ status: newStatus, updated_at: new Date().toISOString() })
-          .eq('id', id);
+        const statusPayload: Record<string, unknown> = {
+          status: newStatus,
+          updated_at: new Date().toISOString(),
+        };
+        // Table bookings: clear "arrived" when seated. Appointment (practitioner) bookings keep client_arrived_at
+        // so staff can undo start and return to Confirmed with waiting state restored.
+        if (newStatus === 'Seated' && !booking.practitioner_id) {
+          statusPayload.client_arrived_at = null;
+        }
+        await staff.db.from('bookings').update(statusPayload).eq('id', id);
 
         if (booking.status === 'Pending' && newStatus === 'Confirmed') {
           const { sendBookingConfirmationEmail } = await import('@/lib/communications/send-templated');
@@ -281,6 +287,32 @@ export async function PATCH(
           await syncTableStatusesForBooking(admin, id, tableIds, newStatus, staff.id);
         }
       }
+
+      const updated = await staff.db.from('bookings').select('*').eq('id', id).single();
+      return NextResponse.json(updated.data);
+    }
+
+    /** Appointment bookings: staff marks client as arrived / waiting (optional; cleared when status → Seated). */
+    if (body.client_arrived !== undefined) {
+      if (!booking.practitioner_id) {
+        return NextResponse.json({ error: 'Arrived is only available for appointment bookings' }, { status: 400 });
+      }
+      const st = booking.status as string;
+      if (!['Pending', 'Confirmed'].includes(st)) {
+        return NextResponse.json(
+          { error: 'Arrived can only be set when the booking is pending or confirmed' },
+          { status: 400 },
+        );
+      }
+      const arrived = Boolean(body.client_arrived);
+      await staff.db
+        .from('bookings')
+        .update({
+          client_arrived_at: arrived ? new Date().toISOString() : null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', id)
+        .eq('venue_id', staff.venue_id);
 
       const updated = await staff.db.from('bookings').select('*').eq('id', id).single();
       return NextResponse.json(updated.data);
@@ -364,6 +396,7 @@ export async function PATCH(
 
       const timeStr = newTime.slice(0, 5);
       const isAppointment = Boolean(booking.practitioner_id);
+      const idLc = id.toLowerCase();
 
       // --- Validate slot availability ---
       if (isAppointment) {
@@ -376,7 +409,8 @@ export async function PATCH(
           practitionerId: practId ?? undefined,
           serviceId: svcId ?? undefined,
         });
-        apptInput.existingBookings = apptInput.existingBookings.filter((b) => b.id !== id);
+        apptInput.existingBookings = apptInput.existingBookings.filter((b) => b.id.toLowerCase() !== idLc);
+        apptInput.skipPastSlotFilter = true;
         const apptResult = computeAppointmentAvailability(apptInput);
         const practSlots = apptResult.practitioners.find((p) => p.id === practId);
         const matchSlot = practSlots?.slots.find(
@@ -400,7 +434,7 @@ export async function PATCH(
           date: newDate,
           partySize: newPartySize,
         });
-        engineInput.bookings = engineInput.bookings.filter((b) => b.id !== id);
+        engineInput.bookings = engineInput.bookings.filter((b) => b.id.toLowerCase() !== idLc);
         const slots = computeAvailability(engineInput).flatMap((result) => result.slots);
         const slot = slots.find((s) => s.start_time === timeStr && (!booking.service_id || s.service_id === booking.service_id));
         if (!slot || slot.available_covers < newPartySize) {

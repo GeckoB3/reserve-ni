@@ -7,8 +7,6 @@ import { createClient } from '@/lib/supabase/browser';
 import { BookingDetailPanel } from './BookingDetailPanel';
 import { WalkInModal } from './WalkInModal';
 import { UnifiedBookingForm } from '@/components/booking/UnifiedBookingForm';
-import { AppointmentBookingForm } from '@/components/booking/AppointmentBookingForm';
-import { AppointmentWalkInModal } from '@/components/booking/AppointmentWalkInModal';
 import { ExpandedBookingContent } from './ExpandedBookingContent';
 import { UndoToast } from '@/app/dashboard/table-grid/UndoToast';
 import type { UndoAction } from '@/types/table-management';
@@ -151,8 +149,7 @@ function buildCoversOccupancyMap(dayData: DaySheetForTableChange | null, exclude
   return map;
 }
 
-export function BookingsDashboard({ venueId, bookingModel = 'table_reservation', currency = 'GBP' }: { venueId: string; bookingModel?: string; currency?: string }) {
-  const isAppointment = bookingModel === 'practitioner_appointment';
+export function BookingsDashboard({ venueId, currency = 'GBP' }: { venueId: string; currency?: string }) {
   const { addToast } = useToast();
   const [viewMode, setViewMode] = useState<ViewMode>('day');
   const [anchorDate, setAnchorDate] = useState(todayISO);
@@ -284,7 +281,7 @@ export function BookingsDashboard({ venueId, bookingModel = 'table_reservation',
       const res = await fetch(`/api/venue/bookings/list?${params}`);
       if (!res.ok) {
         const json = await res.json().catch(() => ({}));
-        setError(json.error ?? `Failed to load ${isAppointment ? 'appointments' : 'reservations'}`);
+        setError(json.error ?? 'Failed to load reservations');
         return;
       }
       const data = await res.json();
@@ -299,7 +296,7 @@ export function BookingsDashboard({ venueId, bookingModel = 'table_reservation',
       });
       setSelectedIds((prev) => prev.filter((id) => next.some((b: BookingRow) => b.id === id) || !ids));
     } catch {
-      setError(`Network error loading ${isAppointment ? 'appointments' : 'reservations'}`);
+      setError('Network error loading reservations');
     } finally {
       if (silent) setIsRefreshing(false);
       else setLoading(false);
@@ -463,28 +460,23 @@ export function BookingsDashboard({ venueId, bookingModel = 'table_reservation',
 
   const exportCsv = useCallback(() => {
     const esc = (value: string) => `"${value.replace(/"/g, '""')}"`;
-    const rows = bookings.map((b) => {
-      const base = [
-        b.booking_date,
-        b.booking_time?.slice(0, 5) ?? '',
-        b.guest_name,
-        ...(!isAppointment ? [String(b.party_size)] : []),
-        b.status,
-        b.source,
-        b.deposit_status,
-        b.deposit_amount_pence != null ? (b.deposit_amount_pence / 100).toFixed(2) : '',
-        ...(!isAppointment ? [b.dietary_notes ?? '', b.occasion ?? ''] : []),
-        b.guest_phone ?? '',
-        b.guest_email ?? '',
-      ];
-      return base;
-    });
+    const rows = bookings.map((b) => [
+      b.booking_date,
+      b.booking_time?.slice(0, 5) ?? '',
+      b.guest_name,
+      String(b.party_size),
+      b.status,
+      b.source,
+      b.deposit_status,
+      b.deposit_amount_pence != null ? (b.deposit_amount_pence / 100).toFixed(2) : '',
+      b.dietary_notes ?? '',
+      b.occasion ?? '',
+      b.guest_phone ?? '',
+      b.guest_email ?? '',
+    ]);
     const header = [
-      'Date', 'Time', isAppointment ? 'Client' : 'Guest',
-      ...(!isAppointment ? ['Party Size'] : []),
-      'Status', 'Source', 'Deposit Status', 'Deposit Amount GBP',
-      ...(!isAppointment ? ['Dietary Notes', 'Occasion'] : []),
-      'Phone', 'Email',
+      'Date', 'Time', 'Guest', 'Party Size', 'Status', 'Source', 'Deposit Status', 'Deposit Amount GBP',
+      'Dietary Notes', 'Occasion', 'Phone', 'Email',
     ];
     const csv = [header, ...rows].map((row) => row.map((cell) => esc(String(cell))).join(',')).join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
@@ -708,7 +700,7 @@ export function BookingsDashboard({ venueId, bookingModel = 'table_reservation',
           </button>
           <button type="button" onClick={() => setNewBookingOpen(true)} className="flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-brand-700">
             <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
-            {isAppointment ? 'New Appointment' : 'New Booking'}
+            New Booking
           </button>
           <button type="button" onClick={() => setWalkInOpen(true)} className="flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-emerald-700">
             <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
@@ -747,8 +739,8 @@ export function BookingsDashboard({ venueId, bookingModel = 'table_reservation',
       )}
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <DashboardStatCard label={isAppointment ? 'Appointments' : 'Bookings'} value={stats.total} color="blue" />
-        {!isAppointment && <DashboardStatCard label="Total covers" value={stats.totalCovers} color="violet" />}
+        <DashboardStatCard label="Bookings" value={stats.total} color="blue" />
+        <DashboardStatCard label="Total covers" value={stats.totalCovers} color="violet" />
         <DashboardStatCard label="Confirmed" value={stats.confirmed} color="emerald" />
         <DashboardStatCard label="Pending" value={stats.pending} color="amber" />
       </div>
@@ -766,18 +758,20 @@ export function BookingsDashboard({ venueId, bookingModel = 'table_reservation',
                   : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
               }`}
             >
-              {isAppointment ? (APPOINTMENT_STATUS_LABELS[s] ?? s) : s}
+              {s}
             </button>
           ))}
         </div>
-        <div className="relative">
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(event) => setSearchQuery(event.target.value)}
-            placeholder={isAppointment ? 'Search client, phone, email, or ref' : 'Search guest, phone, email, or booking ref'}
-            className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm sm:w-72"
-          />
+        <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center sm:gap-3">
+          <div className="relative w-full sm:w-72">
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              placeholder="Search guest, phone, email, or booking ref"
+              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+            />
+          </div>
         </div>
       </div>
 
@@ -807,7 +801,7 @@ export function BookingsDashboard({ venueId, bookingModel = 'table_reservation',
       {loading ? (
         <LoadingSkeleton />
       ) : filteredBookings.length === 0 ? (
-        <EmptyState isAppointment={isAppointment} />
+        <EmptyState />
       ) : viewMode === 'day' ? (
         <BookingsAccordionList
           bookings={filteredBookings}
@@ -828,7 +822,6 @@ export function BookingsDashboard({ venueId, bookingModel = 'table_reservation',
           onSendMessage={sendMessageToBooking}
           onStatusAction={requestStatusChange}
           onDetailUpdated={handleDetailUpdated}
-          isAppointment={isAppointment}
         />
       ) : (
         <div className="space-y-4">
@@ -837,8 +830,10 @@ export function BookingsDashboard({ venueId, bookingModel = 'table_reservation',
               <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50/60 px-5 py-3">
                 <h3 className="text-sm font-semibold text-slate-700">{formatDayHeader(date)}</h3>
                 <div className="flex items-center gap-3 text-xs text-slate-500">
-                  <span>{dayBookings.length} {isAppointment ? 'appointment' : 'booking'}{dayBookings.length !== 1 ? 's' : ''}</span>
-                  {!isAppointment && <span>{dayBookings.reduce((s, b) => s + b.party_size, 0)} covers</span>}
+                  <span>
+                    {dayBookings.length} booking{dayBookings.length !== 1 ? 's' : ''}
+                  </span>
+                  <span>{dayBookings.reduce((s, b) => s + b.party_size, 0)} covers</span>
                 </div>
               </div>
               <BookingsAccordionList
@@ -860,7 +855,6 @@ export function BookingsDashboard({ venueId, bookingModel = 'table_reservation',
                 onSendMessage={sendMessageToBooking}
                 onStatusAction={requestStatusChange}
                 onDetailUpdated={handleDetailUpdated}
-                isAppointment={isAppointment}
               />
             </div>
           ))}
@@ -881,43 +875,23 @@ export function BookingsDashboard({ venueId, bookingModel = 'table_reservation',
             });
             void fetchBookings({ silent: true, ids: [selectedId] });
           }}
-          isAppointment={isAppointment}
         />
       )}
       {walkInOpen && (
-        isAppointment ? (
-          <AppointmentWalkInModal
-            open
-            onClose={() => setWalkInOpen(false)}
-            onCreated={handleWalkInCreated}
-            currency={currency}
-          />
-        ) : (
-          <WalkInModal
-            advancedMode={tableManagementEnabled}
-            onClose={() => setWalkInOpen(false)}
-            onCreated={handleWalkInCreated}
-          />
-        )
+        <WalkInModal
+          advancedMode={tableManagementEnabled}
+          onClose={() => setWalkInOpen(false)}
+          onCreated={handleWalkInCreated}
+        />
       )}
       {newBookingOpen && (
-        isAppointment ? (
-          <AppointmentBookingForm
-            open
-            onClose={() => setNewBookingOpen(false)}
-            onCreated={handleNewBookingCreated}
-            venueId={venueId}
-            currency={currency}
-          />
-        ) : (
-          <UnifiedBookingForm
-            asModal
-            venueId={venueId}
-            advancedMode={tableManagementEnabled}
-            onClose={() => setNewBookingOpen(false)}
-            onCreated={handleNewBookingCreated}
-          />
-        )
+        <UnifiedBookingForm
+          asModal
+          venueId={venueId}
+          advancedMode={tableManagementEnabled}
+          onClose={() => setNewBookingOpen(false)}
+          onCreated={handleNewBookingCreated}
+        />
       )}
       {changeTableBooking && (
         <div
@@ -1002,12 +976,7 @@ export function BookingsDashboard({ venueId, bookingModel = 'table_reservation',
   );
 }
 
-const APPOINTMENT_STATUS_LABELS: Record<string, string> = {
-  Seated: 'In Progress',
-  'No-Show': 'No Show',
-};
-
-function statusBadge(s: string, isAppointment = false) {
+function statusBadge(s: string) {
   const map: Record<string, { dot: string; bg: string; text: string }> = {
     Confirmed: { dot: 'bg-emerald-500', bg: 'bg-emerald-50', text: 'text-emerald-700' },
     Pending: { dot: 'bg-amber-500', bg: 'bg-amber-50', text: 'text-amber-700' },
@@ -1017,11 +986,10 @@ function statusBadge(s: string, isAppointment = false) {
     'No-Show': { dot: 'bg-red-600', bg: 'bg-red-50', text: 'text-red-700' },
   };
   const style = map[s] ?? { dot: 'bg-slate-400', bg: 'bg-slate-50', text: 'text-slate-600' };
-  const label = isAppointment ? (APPOINTMENT_STATUS_LABELS[s] ?? s) : s;
   return (
     <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${style.bg} ${style.text}`}>
       <span className={`h-1.5 w-1.5 rounded-full ${style.dot}`} />
-      {label}
+      {s}
     </span>
   );
 }
@@ -1075,7 +1043,6 @@ function BookingsAccordionList({
   onSendMessage,
   onStatusAction,
   onDetailUpdated,
-  isAppointment = false,
 }: {
   bookings: BookingRow[];
   selectedIds: string[];
@@ -1095,7 +1062,6 @@ function BookingsAccordionList({
   onSendMessage: (id: string, message: string) => void;
   onStatusAction: (booking: BookingRow, status: BookingStatus) => void;
   onDetailUpdated: (bookingId: string) => void;
-  isAppointment?: boolean;
 }) {
   const allSelected = bookings.length > 0 && bookings.every((b) => selectedIds.includes(b.id));
   return (
@@ -1114,7 +1080,7 @@ function BookingsAccordionList({
             />
             Select all
           </label>
-          <span className="text-xs text-slate-500">{bookings.length} {isAppointment ? 'appointments' : 'bookings'}</span>
+          <span className="text-xs text-slate-500">{bookings.length} bookings</span>
         </div>
       </div>
       <div className="divide-y divide-slate-100">
@@ -1136,7 +1102,7 @@ function BookingsAccordionList({
               className={`cursor-pointer px-3 py-3 transition-colors sm:px-4 ${expanded ? 'bg-slate-50/60' : 'hover:bg-slate-50/40'}`}
             >
               <div className="flex items-center gap-2">
-                {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions */}
+                { }
                 <div onClick={(e) => e.stopPropagation()} className="pt-0.5">
                   <input
                     type="checkbox"
@@ -1150,8 +1116,8 @@ function BookingsAccordionList({
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
                     <span className="font-semibold text-slate-900">{booking.guest_name}</span>
-                    {statusBadge(booking.status, isAppointment)}
-                    {!isAppointment && booking.dietary_notes && (
+                    {statusBadge(booking.status)}
+                    {booking.dietary_notes && (
                       <span className="hidden rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700 sm:inline-block" title={booking.dietary_notes}>
                         Dietary
                       </span>
@@ -1171,17 +1137,17 @@ function BookingsAccordionList({
                   </div>
                   <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-600">
                     <span className="font-medium tabular-nums">{booking.booking_time.slice(0, 5)}</span>
-                    {!isAppointment && <span>{booking.party_size} {booking.party_size === 1 ? 'cover' : 'covers'}</span>}
+                    <span>{booking.party_size} {booking.party_size === 1 ? 'cover' : 'covers'}</span>
                     {sourceBadge(booking.source)}
                     {depositBadge(booking.deposit_status, booking.deposit_amount_pence)}
                   </div>
                 </div>
                 {(() => {
                   const action = BOOKING_PRIMARY_ACTIONS[booking.status as BookingStatus];
-                  const showChangeTable = !isAppointment && coversChangeTableEnabled && booking.status === 'Seated';
+                  const showChangeTable = coversChangeTableEnabled && booking.status === 'Seated';
                   if (!action && !showChangeTable) return null;
                   return (
-                    /* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions */
+                     
                     <div onClick={(e) => e.stopPropagation()} className="flex flex-shrink-0 flex-wrap items-center justify-end gap-1.5">
                       {action && (
                         <button
@@ -1224,8 +1190,7 @@ function BookingsAccordionList({
                   onStatusAction={(status) => { onStatusAction(booking, status); }}
                   onOpenPanel={() => onOpenPanel(booking.id)}
                   onDetailUpdated={() => onDetailUpdated(booking.id)}
-                  onRequestChangeTable={!isAppointment && coversChangeTableEnabled && booking.status === 'Seated' ? () => onRequestChangeTable(booking) : undefined}
-                  isAppointment={isAppointment}
+                  onRequestChangeTable={coversChangeTableEnabled && booking.status === 'Seated' ? () => onRequestChangeTable(booking) : undefined}
                 />
               )}
             </div>
@@ -1254,14 +1219,14 @@ function LoadingSkeleton() {
   );
 }
 
-function EmptyState({ isAppointment = false }: { isAppointment?: boolean }) {
+function EmptyState() {
   return (
     <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
       <div className="flex flex-col items-center justify-center py-16 text-slate-400">
         <svg className="mb-3 h-10 w-10" fill="none" viewBox="0 0 24 24" strokeWidth={1} stroke="currentColor">
           <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5" />
         </svg>
-        <p className="text-sm font-medium">No {isAppointment ? 'appointments' : 'reservations'} for this period</p>
+        <p className="text-sm font-medium">No reservations for this period</p>
       </div>
     </div>
   );

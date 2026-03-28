@@ -37,6 +37,7 @@ export interface RenderedSms {
 export type CommMessageType =
   | 'booking_confirmation_email'
   | 'deposit_request_sms'
+  | 'deposit_request_email'
   | 'deposit_confirmation_email'
   | 'reminder_56h_email'
   | 'day_of_reminder_sms'

@@ -15,6 +15,8 @@ interface LogContext {
 export interface CommunicationSettings {
   confirmation_email_enabled: boolean;
   confirmation_email_custom_message: string | null;
+  deposit_request_email_enabled: boolean;
+  deposit_request_email_custom_message: string | null;
   deposit_sms_enabled: boolean;
   deposit_sms_custom_message: string | null;
   deposit_confirmation_email_enabled: boolean;
@@ -53,8 +55,15 @@ export async function getCommSettings(venueId: string): Promise<CommunicationSet
     .maybeSingle();
 
   if (data) {
-    SETTINGS_CACHE.set(venueId, { data: data as CommunicationSettings, ts: Date.now() });
-    return data as CommunicationSettings;
+    const row = data as Record<string, unknown>;
+    const normalized: CommunicationSettings = {
+      ...(data as CommunicationSettings),
+      deposit_request_email_enabled: row.deposit_request_email_enabled !== false,
+      deposit_request_email_custom_message:
+        (row.deposit_request_email_custom_message as string | null | undefined) ?? null,
+    };
+    SETTINGS_CACHE.set(venueId, { data: normalized, ts: Date.now() });
+    return normalized;
   }
 
   // Auto-create with defaults if not found
@@ -64,9 +73,23 @@ export async function getCommSettings(venueId: string): Promise<CommunicationSet
     .select('*')
     .single();
 
-  const settings = (created ?? {
+  if (created) {
+    const row = created as Record<string, unknown>;
+    const normalized: CommunicationSettings = {
+      ...(created as CommunicationSettings),
+      deposit_request_email_enabled: row.deposit_request_email_enabled !== false,
+      deposit_request_email_custom_message:
+        (row.deposit_request_email_custom_message as string | null | undefined) ?? null,
+    };
+    SETTINGS_CACHE.set(venueId, { data: normalized, ts: Date.now() });
+    return normalized;
+  }
+
+  const fallback: CommunicationSettings = {
     confirmation_email_enabled: true,
     confirmation_email_custom_message: null,
+    deposit_request_email_enabled: true,
+    deposit_request_email_custom_message: null,
     deposit_sms_enabled: true,
     deposit_sms_custom_message: null,
     deposit_confirmation_email_enabled: true,
@@ -88,15 +111,25 @@ export async function getCommSettings(venueId: string): Promise<CommunicationSet
     cancellation_email_enabled: true,
     cancellation_sms_enabled: false,
     cancellation_custom_message: null,
-  }) as CommunicationSettings;
+  };
 
-  SETTINGS_CACHE.set(venueId, { data: settings, ts: Date.now() });
-  return settings;
+  SETTINGS_CACHE.set(venueId, { data: fallback, ts: Date.now() });
+  return fallback;
 }
 
 export function clearSettingsCache(venueId?: string): void {
   if (venueId) SETTINGS_CACHE.delete(venueId);
   else SETTINGS_CACHE.clear();
+}
+
+/** Merge API row with safe defaults when columns are missing (pre-migration or partial select). */
+export function normalizeCommunicationSettingsRow(data: Record<string, unknown>): Record<string, unknown> {
+  return {
+    ...data,
+    deposit_request_email_enabled: data.deposit_request_email_enabled !== false,
+    deposit_request_email_custom_message:
+      (data.deposit_request_email_custom_message as string | null | undefined) ?? null,
+  };
 }
 
 /**

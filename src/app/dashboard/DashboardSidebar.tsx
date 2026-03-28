@@ -20,10 +20,7 @@ const BASE_NAV_ITEMS: NavItem[] = [
 ];
 
 const MODEL_NAV_ITEMS: Partial<Record<BookingModel, NavItem[]>> = {
-  practitioner_appointment: [
-    { href: '/dashboard/practitioner-calendar', label: 'Calendar', icon: CalendarIcon },
-    { href: '/dashboard/appointment-services', label: 'Services', icon: ClockIcon },
-  ],
+  practitioner_appointment: [{ href: '/dashboard/appointment-services', label: 'Services', icon: ClockIcon }],
   event_ticket: [
     { href: '/dashboard/event-manager', label: 'Events', icon: CalendarIcon },
   ],
@@ -48,7 +45,7 @@ interface Props {
   isAdmin?: boolean;
 }
 
-const ADMIN_ONLY_HREFS = new Set(['/dashboard/reports', '/dashboard/availability']);
+const ADMIN_ONLY_HREFS = new Set(['/dashboard/reports', '/dashboard/settings']);
 
 export function DashboardSidebar({
   email,
@@ -69,6 +66,7 @@ export function DashboardSidebar({
 
     let items = BASE_NAV_ITEMS.filter((item) => {
       if (!isTableReservation && TABLE_RESERVATION_ONLY.has(item.href)) return false;
+      if (!isAdmin && item.href === '/dashboard/availability' && !isAppointment) return false;
       if (!isAdmin && ADMIN_ONLY_HREFS.has(item.href)) return false;
       return true;
     });
@@ -92,6 +90,21 @@ export function DashboardSidebar({
       }
     }
 
+    // Model B: Availability directly under Services, before Reports (not at the bottom with Settings).
+    if (isAppointment) {
+      const availIdx = items.findIndex((i) => i.href === '/dashboard/availability');
+      const avail = availIdx >= 0 ? items[availIdx] : undefined;
+      if (avail) {
+        items = items.filter((i) => i.href !== '/dashboard/availability');
+        const svcIdx = items.findIndex((i) => i.href === '/dashboard/appointment-services');
+        if (svcIdx >= 0) {
+          items.splice(svcIdx + 1, 0, avail);
+        } else {
+          items.push(avail);
+        }
+      }
+    }
+
     return items;
   }, [isAdmin, bookingModel]);
 
@@ -108,6 +121,9 @@ export function DashboardSidebar({
     }
     if (href === '/dashboard/bookings') {
       return pathname === '/dashboard/bookings';
+    }
+    if (href === '/dashboard/calendar') {
+      return pathname.startsWith('/dashboard/calendar') || pathname.startsWith('/dashboard/practitioner-calendar');
     }
     return pathname.startsWith(href);
   };
@@ -149,21 +165,27 @@ export function DashboardSidebar({
         <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-1">
           {navItems.map((item) => {
             if (item.href === '/dashboard/bookings' && !tableManagementEnabled) {
-              const daySheetActive = pathname.startsWith('/dashboard/day-sheet');
+              const scheduleActive = bookingModel === 'practitioner_appointment'
+                ? pathname.startsWith('/dashboard/calendar') || pathname.startsWith('/dashboard/practitioner-calendar')
+                : pathname.startsWith('/dashboard/day-sheet');
               const isAppt = bookingModel === 'practitioner_appointment';
               return (
                 <div key="reservations-with-day-sheet" className="space-y-1">
                   <Link
-                    href="/dashboard/day-sheet"
+                    href={isAppt ? '/dashboard/calendar' : '/dashboard/day-sheet'}
                     onClick={() => setMobileOpen(false)}
                     className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
-                      daySheetActive
+                      scheduleActive
                         ? 'bg-brand-50 text-brand-700'
                         : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
                     }`}
                   >
-                    <ClipboardIcon className={`h-5 w-5 flex-shrink-0 ${daySheetActive ? 'text-brand-600' : 'text-slate-400'}`} />
-                    {isAppt ? "Today's Appointments" : 'Day Sheet'}
+                    {isAppt ? (
+                      <CalendarIcon className={`h-5 w-5 flex-shrink-0 ${scheduleActive ? 'text-brand-600' : 'text-slate-400'}`} />
+                    ) : (
+                      <ClipboardIcon className={`h-5 w-5 flex-shrink-0 ${scheduleActive ? 'text-brand-600' : 'text-slate-400'}`} />
+                    )}
+                    {isAppt ? 'Calendar' : 'Day Sheet'}
                   </Link>
                   <Link
                     href={item.href}
@@ -185,8 +207,22 @@ export function DashboardSidebar({
 
             if (item.href === '/dashboard/bookings' && tableManagementEnabled) {
               const reservationsActive = isActive(item.href);
+              const isApptTm = bookingModel === 'practitioner_appointment';
+              const calActive = pathname.startsWith('/dashboard/calendar') || pathname.startsWith('/dashboard/practitioner-calendar');
               return (
                 <div key="reservations-with-table-views" className="space-y-1">
+                  {isApptTm && (
+                    <Link
+                      href="/dashboard/calendar"
+                      onClick={() => setMobileOpen(false)}
+                      className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
+                        calActive ? 'bg-brand-50 text-brand-700' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                      }`}
+                    >
+                      <CalendarIcon className={`h-5 w-5 flex-shrink-0 ${calActive ? 'text-brand-600' : 'text-slate-400'}`} />
+                      Calendar
+                    </Link>
+                  )}
                   <Link
                     href={item.href}
                     onClick={() => setMobileOpen(false)}

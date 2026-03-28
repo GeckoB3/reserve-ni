@@ -26,8 +26,8 @@ const personEntrySchema = z.object({
 const createGroupSchema = z.object({
   venue_id: z.string().uuid(),
   name: z.string().min(1).max(200),
-  email: z.string().email().optional().or(z.literal('')),
-  phone: z.string().min(1).max(24),
+  email: z.union([z.literal(''), z.string().email()]).optional(),
+  phone: z.string().max(24).optional(),
   source: z.enum(['online', 'phone', 'walk-in', 'widget', 'booking_page']),
   people: z.array(personEntrySchema).min(1).max(10),
   dietary_notes: z.string().max(1000).optional(),
@@ -51,9 +51,14 @@ export async function POST(request: NextRequest) {
 
     const { venue_id, name, email, phone, source, people, dietary_notes } = parsed.data;
 
-    const phoneE164 = normalizeToE164(phone, 'GB');
-    if (!phoneE164) {
-      return NextResponse.json({ error: 'Invalid phone number' }, { status: 400 });
+    const phoneRaw = (phone ?? '').trim();
+    let phoneE164: string | null = null;
+    if (phoneRaw) {
+      const n = normalizeToE164(phoneRaw, 'GB');
+      if (!n) {
+        return NextResponse.json({ error: 'Invalid phone number' }, { status: 400 });
+      }
+      phoneE164 = n;
     }
 
     const supabase = getSupabaseAdminClient();
@@ -164,9 +169,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const emailNorm = email && email.trim() !== '' ? email.trim().toLowerCase() : null;
     const { guest } = await findOrCreateGuest(supabase, venue_id, {
       name,
-      email: email || null,
+      email: emailNorm,
       phone: phoneE164,
     });
 
@@ -195,7 +201,7 @@ export async function POST(request: NextRequest) {
         party_size: 1,
         status: requiresDeposit ? 'Pending' : 'Confirmed',
         source,
-        guest_email: email || null,
+        guest_email: guest.email,
         dietary_notes: dietary_notes?.trim() || null,
         deposit_amount_pence: person.deposit_pence > 0 ? person.deposit_pence : null,
         deposit_status: person.deposit_pence > 0 ? 'Pending' : 'Not Required',

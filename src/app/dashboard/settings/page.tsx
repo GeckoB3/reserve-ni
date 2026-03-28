@@ -2,8 +2,18 @@ import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
 import { SettingsView } from './SettingsView';
 import { getDashboardStaff } from '@/lib/venue-auth';
+import { getSupabaseAdminClient } from '@/lib/supabase';
 
-export default async function SettingsPage({ searchParams }: { searchParams: Promise<{ tab?: string }> }) {
+export default async function SettingsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{
+    tab?: string;
+    upgraded?: string;
+    downgraded?: string;
+    resubscribed?: string;
+  }>;
+}) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) {
@@ -11,6 +21,10 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
   }
 
   const staff = await getDashboardStaff(supabase);
+  if (staff.role !== 'admin') {
+    redirect('/dashboard');
+  }
+
   const venueId = staff.venue_id;
   if (!venueId) {
     return (
@@ -73,16 +87,38 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
     }
   }
 
-  const isAdmin = staff.role === 'admin';
-  const { tab } = await searchParams;
+  const isAdmin = true;
+  let activePractitionerCount = 0;
+  if (venueId && bookingModel === 'practitioner_appointment') {
+    const adminClient = getSupabaseAdminClient();
+    const { count } = await adminClient
+      .from('practitioners')
+      .select('id', { count: 'exact', head: true })
+      .eq('venue_id', venueId)
+      .eq('is_active', true);
+    activePractitionerCount = count ?? 0;
+  }
+
+  const sp = await searchParams;
+  const { tab } = sp;
+  let planCheckoutReturn: 'upgraded' | 'downgraded' | 'resubscribed' | undefined;
+  if (sp.upgraded === 'true') planCheckoutReturn = 'upgraded';
+  else if (sp.downgraded === 'true') planCheckoutReturn = 'downgraded';
+  else if (sp.resubscribed === 'true') planCheckoutReturn = 'resubscribed';
 
   return (
     <div className="p-4 md:p-6 lg:p-8">
       <div className="mx-auto max-w-3xl">
-        <h1 className="mb-6 text-2xl font-semibold text-slate-900">
-          {isAdmin ? 'Settings' : 'Account settings'}
-        </h1>
-        <SettingsView initialVenue={venue ?? null} isAdmin={isAdmin} initialTab={tab} hasServiceConfig={hasServiceConfig} bookingModel={bookingModel} />
+        <h1 className="mb-6 text-2xl font-semibold text-slate-900">Settings</h1>
+        <SettingsView
+          initialVenue={venue ?? null}
+          isAdmin={isAdmin}
+          initialTab={tab}
+          planCheckoutReturn={planCheckoutReturn}
+          hasServiceConfig={hasServiceConfig}
+          bookingModel={bookingModel}
+          activePractitionerCount={activePractitionerCount}
+        />
       </div>
     </div>
   );

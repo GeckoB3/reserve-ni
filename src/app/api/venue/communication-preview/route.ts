@@ -5,6 +5,7 @@ import { getSupabaseAdminClient } from '@/lib/supabase';
 import type { BookingEmailData, VenueEmailData, CommMessageType } from '@/lib/emails/types';
 import { renderBookingConfirmation } from '@/lib/emails/templates/booking-confirmation';
 import { renderDepositRequestSms } from '@/lib/emails/templates/deposit-request-sms';
+import { renderDepositRequestEmail } from '@/lib/emails/templates/deposit-request-email';
 import { renderDepositConfirmation } from '@/lib/emails/templates/deposit-confirmation';
 import { renderReminder56h } from '@/lib/emails/templates/reminder-56h';
 import { renderDayOfReminderEmail } from '@/lib/emails/templates/day-of-reminder-email';
@@ -68,6 +69,9 @@ export async function POST(request: NextRequest) {
         break;
       case 'deposit_request_sms':
         preview = renderDepositRequestSms(SAMPLE_BOOKING, venueData, 'https://www.reserveni.com/pay?t=preview', customMessage);
+        break;
+      case 'deposit_request_email':
+        preview = renderDepositRequestEmail(SAMPLE_BOOKING, venueData, 'https://www.reserveni.com/pay?t=preview', customMessage);
         break;
       case 'deposit_confirmation_email':
         preview = renderDepositConfirmation(SAMPLE_BOOKING, venueData, customMessage);

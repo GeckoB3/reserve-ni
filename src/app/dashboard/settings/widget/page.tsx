@@ -10,7 +10,7 @@ export default async function WidgetPage() {
 
   const staff = await getDashboardStaff(supabase);
   if (staff.role !== 'admin') {
-    redirect('/dashboard/settings');
+    redirect('/dashboard');
   }
 
   const venueId = staff.venue_id;

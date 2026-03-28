@@ -4,6 +4,7 @@
  */
 import type { BookingEmailData, VenueEmailData, CommMessageType } from '@/lib/emails/types';
 import { renderBookingConfirmation } from '@/lib/emails/templates/booking-confirmation';
+import { renderDepositRequestEmail } from '@/lib/emails/templates/deposit-request-email';
 import { renderDepositRequestSms } from '@/lib/emails/templates/deposit-request-sms';
 import { renderDepositConfirmation } from '@/lib/emails/templates/deposit-confirmation';
 import { renderBookingModification, renderBookingModificationSms } from '@/lib/emails/templates/booking-modification';
@@ -12,6 +13,7 @@ import { sendEmail } from '@/lib/emails/send-email';
 import { sendSms } from '@/lib/emails/send-sms';
 import { getCommSettings, logToCommLogs, updateCommLogStatus } from './service';
 import { getSupabaseAdminClient } from '@/lib/supabase';
+import { isSmsAllowed } from '@/lib/tier-enforcement';
 
 interface SendResult {
   sent: boolean;
@@ -88,6 +90,56 @@ export async function sendBookingConfirmationEmail(
   }
 }
 
+export async function sendDepositRequestEmail(
+  booking: BookingEmailData,
+  venue: VenueEmailData,
+  venueId: string,
+  paymentLink: string,
+): Promise<SendResult> {
+  if (!booking.guest_email) return { sent: false, reason: 'no_email' };
+
+  try {
+    const settings = await getCommSettings(venueId);
+    if (!settings.deposit_request_email_enabled) return { sent: false, reason: 'disabled' };
+
+    const rendered = renderDepositRequestEmail(
+      booking,
+      venue,
+      paymentLink,
+      settings.deposit_request_email_custom_message,
+    );
+
+    return trySendWithDedup({
+      venueId,
+      bookingId: booking.id,
+      messageType: 'deposit_request_email',
+      channel: 'email',
+      recipient: booking.guest_email,
+      sendFn: () => sendEmail({ to: booking.guest_email!, ...rendered }),
+    });
+  } catch (err) {
+    console.error('[send-templated] deposit request email error:', err);
+    return { sent: false, reason: 'error' };
+  }
+}
+
+/**
+ * Staff / pay-by-link flows only: send deposit request email and/or SMS per settings and tier.
+ */
+export async function sendDepositRequestNotifications(
+  booking: BookingEmailData,
+  venue: VenueEmailData,
+  venueId: string,
+  paymentLink: string,
+): Promise<{ email: SendResult; sms: SendResult }> {
+  const email = await sendDepositRequestEmail(booking, venue, venueId, paymentLink);
+  let sms: SendResult = { sent: false, reason: 'no_phone' };
+  if (booking.guest_phone) {
+    sms = await sendDepositRequestSms(booking, venue, venueId, paymentLink, booking.guest_phone);
+  }
+  return { email, sms };
+}
+
 export async function sendDepositRequestSms(
   booking: BookingEmailData,
   venue: VenueEmailData,
@@ -98,6 +150,9 @@ export async function sendDepositRequestSms(
   if (!guestPhone) return { sent: false, reason: 'no_phone' };
 
   try {
+    const tierOk = await isSmsAllowed(venueId);
+    if (!tierOk) return { sent: false, reason: 'tier' };
+
     const settings = await getCommSettings(venueId);
     if (!settings.deposit_sms_enabled) return { sent: false, reason: 'disabled' };
 
@@ -230,7 +285,7 @@ export async function sendBookingModificationNotification(
       results.email = { sent: false, reason: 'disabled' };
     }
 
-    if (settings.modification_sms_enabled && booking.guest_phone) {
+    if (settings.modification_sms_enabled && booking.guest_phone && (await isSmsAllowed(venueId))) {
       try {
         const rendered = renderBookingModificationSms(booking, venue, settings.modification_custom_message);
         await sendSms(booking.guest_phone, rendered.body);
@@ -322,7 +377,7 @@ export async function sendCancellationNotification(
       results.email = { sent: false, reason: 'disabled' };
     }
 
-    if (settings.cancellation_sms_enabled && booking.guest_phone) {
+    if (settings.cancellation_sms_enabled && booking.guest_phone && (await isSmsAllowed(venueId))) {
       try {
         const rendered = renderBookingCancellationSms(booking, venue, refundMessage);
         await sendSms(booking.guest_phone, rendered.body);
@@ -351,8 +406,10 @@ export async function sendCancellationNotification(
       }
     } else if (!booking.guest_phone) {
       results.sms = { sent: false, reason: 'no_phone' };
-    } else {
+    } else if (!settings.cancellation_sms_enabled) {
       results.sms = { sent: false, reason: 'disabled' };
+    } else {
+      results.sms = { sent: false, reason: 'tier' };
     }
   } catch (err) {
     console.error('[send-templated] cancellation notification error:', err);

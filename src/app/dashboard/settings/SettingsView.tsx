@@ -1,7 +1,8 @@
 'use client';
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import type { VenueSettings } from './types';
 import { ProfileSection } from './sections/ProfileSection';
 import { VenueProfileSection } from './sections/VenueProfileSection';
@@ -12,14 +13,17 @@ import { StripeConnectSection } from './sections/StripeConnectSection';
 import { TableManagementSection } from './sections/TableManagementSection';
 import { AvailabilityConfigSection } from './sections/AvailabilityConfigSection';
 import { BookingRulesSection } from './sections/BookingRulesSection';
-import { StaffPersonalSettingsSection } from './sections/StaffPersonalSettingsSection';
 
 interface SettingsViewProps {
   initialVenue: VenueSettings | null;
   isAdmin: boolean;
   initialTab?: string;
+  /** Set after Stripe checkout for plan changes (webhook may lag behind redirect). */
+  planCheckoutReturn?: 'upgraded' | 'downgraded' | 'resubscribed';
   hasServiceConfig?: boolean;
   bookingModel?: string;
+  /** Active appointment practitioners (Model B); used for plan calendar minimums. */
+  activePractitionerCount?: number;
 }
 
 const TABS = [
@@ -32,32 +36,55 @@ const TABS = [
 
 type TabKey = typeof TABS[number]['key'];
 
-function resolveInitialTab(initialTab: string | undefined, admin: boolean): TabKey {
-  const allowedKeys = (admin ? TABS : TABS.filter((t) => t.key !== 'staff')).map((t) => t.key) as TabKey[];
+function resolveInitialTab(initialTab: string | undefined): TabKey {
   const t = initialTab as TabKey | undefined;
-  if (t && allowedKeys.includes(t)) {
+  if (t && TABS.some((x) => x.key === t)) {
     return t;
   }
   return 'profile';
 }
 
-function PlanSection({ venue }: { venue: VenueSettings }) {
+const MAX_STANDARD_CALENDARS = 30;
+
+function PlanSection({
+  venue,
+  activePractitionerCount = 0,
+}: {
+  venue: VenueSettings;
+  activePractitionerCount?: number;
+}) {
   const [loading, setLoading] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [calSaving, setCalSaving] = useState(false);
+  const [calendarDraft, setCalendarDraft] = useState(venue.calendar_count ?? 1);
+  const [calError, setCalError] = useState<string | null>(null);
+  const minCalendars = Math.max(1, activePractitionerCount);
+  const [downgradeQty, setDowngradeQty] = useState(minCalendars);
 
   const tier = venue.pricing_tier ?? 'standard';
   const planStatus = venue.plan_status ?? 'active';
   const calendarCount = venue.calendar_count ?? null;
   const tierLabel = tier === 'founding' ? 'Founding Partner' : tier === 'business' ? 'Business' : 'Standard';
 
-  async function handleAction(action: string) {
+  useEffect(() => {
+    setCalendarDraft(venue.calendar_count ?? 1);
+  }, [venue.calendar_count]);
+
+  useEffect(() => {
+    setDowngradeQty((q) => Math.max(minCalendars, q));
+  }, [minCalendars]);
+
+  async function handleAction(action: string, opts?: { calendar_count?: number }) {
     setLoading(true);
     setActionError(null);
     try {
       const res = await fetch('/api/venue/change-plan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action }),
+        body: JSON.stringify({
+          action,
+          ...(opts?.calendar_count != null ? { calendar_count: opts.calendar_count } : {}),
+        }),
       });
       const data = await res.json();
       if (data.redirect_url) {
@@ -74,6 +101,31 @@ function PlanSection({ venue }: { venue: VenueSettings }) {
     }
     setLoading(false);
   }
+
+  async function saveStandardCalendarCount() {
+    setCalSaving(true);
+    setCalError(null);
+    try {
+      const res = await fetch('/api/venue/update-subscription', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ calendar_count: calendarDraft }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setCalError(typeof data.error === 'string' ? data.error : 'Could not update your plan. Try again or contact support.');
+        return;
+      }
+      window.location.reload();
+    } catch {
+      setCalError('Network error. Check your connection and try again.');
+    } finally {
+      setCalSaving(false);
+    }
+  }
+
+  const calendarDirty = tier === 'standard' && calendarDraft !== (venue.calendar_count ?? 1);
+  const isAppointmentVenue = venue.booking_model === 'practitioner_appointment';
 
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm space-y-4">
@@ -95,33 +147,140 @@ function PlanSection({ venue }: { venue: VenueSettings }) {
           {actionError}
         </div>
       )}
-      {tier === 'standard' && calendarCount && (
-        <p className="text-sm text-slate-500">{calendarCount} calendar{calendarCount > 1 ? 's' : ''} at &pound;{calendarCount * 10}/month</p>
+      {tier === 'standard' && calendarCount != null && (
+        <p className="text-sm text-slate-600">
+          {isAppointmentVenue ? (
+            <>
+              Your plan covers up to{' '}
+              <span className="font-semibold text-slate-900">{calendarCount}</span> team member
+              {calendarCount === 1 ? '' : 's'} (&pound;{calendarCount * 10}/month total).{' '}
+              {planStatus === 'active' && (
+                <>
+                  You have{' '}
+                  <span className="font-semibold text-slate-900">{activePractitionerCount}</span> active.
+                </>
+              )}
+            </>
+          ) : (
+            <>
+              {calendarCount} slot{calendarCount === 1 ? '' : 's'} on Standard — &pound;{calendarCount * 10}/month
+              total.
+            </>
+          )}
+        </p>
+      )}
+      {tier === 'standard' && planStatus === 'active' && (
+        <div className="rounded-lg border border-slate-200 bg-slate-50/80 p-4 space-y-3">
+          <p className="text-sm font-medium text-slate-800">
+            {isAppointmentVenue ? 'How many team members?' : 'Slots on your Standard plan'}
+          </p>
+          <p className="text-xs text-slate-600">
+            {isAppointmentVenue ? (
+              <>
+                One team member uses one slot. Each slot is &pound;10/month. Raise the number to add more people; lower it after removing team
+                members.
+              </>
+            ) : (
+              <>Each slot is &pound;10/month. Change the number if your plan includes more than one.</>
+            )}
+          </p>
+          <div className="flex flex-wrap items-end gap-3">
+            <div>
+              <label htmlFor="plan-calendar-count" className="mb-1 block text-xs font-medium text-slate-600">
+                {isAppointmentVenue ? 'Team members included' : 'Slots included'}
+              </label>
+              <input
+                id="plan-calendar-count"
+                type="number"
+                min={minCalendars}
+                max={MAX_STANDARD_CALENDARS}
+                value={calendarDraft}
+                onChange={(e) => setCalendarDraft(Math.max(minCalendars, Math.min(MAX_STANDARD_CALENDARS, parseInt(e.target.value, 10) || minCalendars)))}
+                className="w-24 rounded-lg border border-slate-300 px-3 py-2 text-sm"
+              />
+            </div>
+            <button
+              type="button"
+              disabled={calSaving || !calendarDirty}
+              onClick={() => void saveStandardCalendarCount()}
+              className="rounded-lg bg-slate-900 px-4 py-2 text-xs font-semibold text-white hover:bg-slate-800 disabled:opacity-50"
+            >
+              {calSaving ? 'Saving…' : 'Update billing'}
+            </button>
+          </div>
+          {minCalendars > 1 && isAppointmentVenue && (
+            <p className="text-xs text-amber-800">
+              Minimum {minCalendars} — you still have {activePractitionerCount} active team member
+              {activePractitionerCount === 1 ? '' : 's'}.
+            </p>
+          )}
+          {minCalendars > 1 && !isAppointmentVenue && (
+            <p className="text-xs text-amber-800">Minimum {minCalendars} for your current use.</p>
+          )}
+          {calError && (
+            <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{calError}</div>
+          )}
+        </div>
       )}
       {tier === 'business' && (
-        <p className="text-sm text-slate-500">Unlimited calendars, SMS, table management. &pound;79/month</p>
+        <p className="text-sm text-slate-500">
+          {isAppointmentVenue ? (
+            <>Unlimited team members and SMS. Configure SMS under Communications. &pound;79/month</>
+          ) : (
+            <>Unlimited team members, SMS, and table management. &pound;79/month</>
+          )}
+        </p>
       )}
       {tier === 'founding' && (
-        <p className="text-sm text-slate-500">Full Business-tier access, free during founding period</p>
+        <p className="text-sm text-slate-500">
+          {isAppointmentVenue ? (
+            <>Founding Partner: unlimited team, SMS, and appointments features — free during the founding period.</>
+          ) : (
+            <>Full Business-tier access (including table management), free during founding period.</>
+          )}
+        </p>
       )}
       <div className="flex flex-wrap gap-2 pt-2">
         {tier === 'standard' && (
-          <button type="button" disabled={loading} onClick={() => handleAction('upgrade')} className="rounded-lg bg-brand-600 px-4 py-2 text-xs font-semibold text-white hover:bg-brand-700 disabled:opacity-50">
+          <button type="button" disabled={loading} onClick={() => void handleAction('upgrade')} className="rounded-lg bg-brand-600 px-4 py-2 text-xs font-semibold text-white hover:bg-brand-700 disabled:opacity-50">
             Upgrade to Business
           </button>
         )}
         {tier === 'business' && (
-          <button type="button" disabled={loading} onClick={() => handleAction('downgrade')} className="rounded-lg border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50">
-            Switch to Standard
-          </button>
+          <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-end">
+            <div>
+              <label htmlFor="downgrade-calendars" className="mb-1 block text-xs font-medium text-slate-600">
+                Team members on Standard after switch
+              </label>
+              <input
+                id="downgrade-calendars"
+                type="number"
+                min={minCalendars}
+                max={MAX_STANDARD_CALENDARS}
+                value={downgradeQty}
+                onChange={(e) =>
+                  setDowngradeQty(Math.max(minCalendars, Math.min(MAX_STANDARD_CALENDARS, parseInt(e.target.value, 10) || minCalendars)))
+                }
+                className="w-24 rounded-lg border border-slate-300 px-3 py-2 text-sm"
+              />
+            </div>
+            <button
+              type="button"
+              disabled={loading}
+              onClick={() => void handleAction('downgrade', { calendar_count: downgradeQty })}
+              className="rounded-lg border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+            >
+              Switch to Standard
+            </button>
+          </div>
         )}
         {planStatus === 'active' && tier !== 'founding' && (
-          <button type="button" disabled={loading} onClick={() => handleAction('cancel')} className="rounded-lg border border-red-200 px-4 py-2 text-xs font-semibold text-red-600 hover:bg-red-50 disabled:opacity-50">
+          <button type="button" disabled={loading} onClick={() => void handleAction('cancel')} className="rounded-lg border border-red-200 px-4 py-2 text-xs font-semibold text-red-600 hover:bg-red-50 disabled:opacity-50">
             Cancel plan
           </button>
         )}
         {planStatus === 'cancelled' && (
-          <button type="button" disabled={loading} onClick={() => handleAction('resubscribe')} className="rounded-lg bg-brand-600 px-4 py-2 text-xs font-semibold text-white hover:bg-brand-700 disabled:opacity-50">
+          <button type="button" disabled={loading} onClick={() => void handleAction('resubscribe')} className="rounded-lg bg-brand-600 px-4 py-2 text-xs font-semibold text-white hover:bg-brand-700 disabled:opacity-50">
             Resubscribe
           </button>
         )}
@@ -131,7 +290,7 @@ function PlanSection({ venue }: { venue: VenueSettings }) {
           <p className="text-sm font-medium text-brand-800">Upgrade to unlock more</p>
           <ul className="mt-2 space-y-1 text-xs text-brand-700">
             <li>&bull; SMS communications</li>
-            <li>&bull; Unlimited calendars</li>
+            <li>&bull; Unlimited team members</li>
             <li>&bull; Table management (restaurants)</li>
             <li>&bull; Priority support</li>
           </ul>
@@ -141,30 +300,52 @@ function PlanSection({ venue }: { venue: VenueSettings }) {
   );
 }
 
-export function SettingsView({ initialVenue, isAdmin, initialTab, hasServiceConfig = false, bookingModel = 'table_reservation' }: SettingsViewProps) {
+export function SettingsView({
+  initialVenue,
+  isAdmin,
+  initialTab,
+  planCheckoutReturn,
+  hasServiceConfig = false,
+  bookingModel = 'table_reservation',
+  activePractitionerCount = 0,
+}: SettingsViewProps) {
+  const router = useRouter();
   const isAppointment = bookingModel === 'practitioner_appointment';
   const [venue, setVenue] = useState<VenueSettings | null>(initialVenue);
-  const visibleTabs = useMemo(
-    () => (isAdmin ? [...TABS] : TABS.filter((t) => t.key !== 'staff')),
-    [isAdmin],
-  );
-  const [activeTab, setActiveTab] = useState<TabKey>(() => resolveInitialTab(initialTab, isAdmin));
+  const visibleTabs = useMemo(() => [...TABS], []);
+  const [activeTab, setActiveTab] = useState<TabKey>(() => resolveInitialTab(initialTab));
+  const [planBannerDismissed, setPlanBannerDismissed] = useState(false);
+
+  useEffect(() => {
+    setVenue(initialVenue);
+  }, [initialVenue]);
+
+  useEffect(() => {
+    if (!planCheckoutReturn) return;
+    setActiveTab('plan');
+    setPlanBannerDismissed(false);
+    const delays = [400, 2500, 5000];
+    const timeouts = delays.map((ms) => setTimeout(() => router.refresh(), ms));
+    const cleanUrl = setTimeout(() => {
+      router.replace('/dashboard/settings?tab=plan', { scroll: false });
+    }, 5200);
+    return () => {
+      timeouts.forEach(clearTimeout);
+      clearTimeout(cleanUrl);
+    };
+  }, [planCheckoutReturn, router]);
 
   const onUpdate = useCallback((patch: Partial<VenueSettings>) => {
     setVenue((v) => (v ? { ...v, ...patch } : null));
   }, []);
 
-  if (!isAdmin) {
-    return (
-      <div className="space-y-6">
-        <p className="text-sm text-slate-600">
-          Manage your personal details and password. Venue settings (payments, communications, opening hours, and
-          more) are only visible to admins — ask an admin if something needs to change.
-        </p>
-        <StaffPersonalSettingsSection />
-      </div>
-    );
-  }
+  const showPlanCheckoutBanner = Boolean(planCheckoutReturn) && !planBannerDismissed;
+  const planBannerMessage =
+    planCheckoutReturn === 'upgraded'
+      ? 'Payment received. We are confirming your upgrade — the Plan tab will update in a few seconds. You can also refresh the page if it still shows your old plan.'
+      : planCheckoutReturn === 'downgraded'
+        ? 'We are confirming your plan change. Details on the Plan tab will update shortly.'
+        : 'We are confirming your subscription. The Plan tab will update shortly.';
 
   if (!venue) {
     return (
@@ -176,6 +357,21 @@ export function SettingsView({ initialVenue, isAdmin, initialTab, hasServiceConf
 
   return (
     <div className="space-y-6">
+      {showPlanCheckoutBanner && (
+        <div className="flex items-start justify-between gap-3 rounded-xl border border-brand-200 bg-brand-50 px-4 py-3 text-sm text-brand-900 shadow-sm">
+          <p className="min-w-0 flex-1">{planBannerMessage}</p>
+          <button
+            type="button"
+            onClick={() => {
+              setPlanBannerDismissed(true);
+              router.replace('/dashboard/settings?tab=plan', { scroll: false });
+            }}
+            className="flex-shrink-0 rounded-lg px-2 py-1 text-xs font-medium text-brand-800 hover:bg-brand-100"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
       {/* Tab navigation */}
       <div className="flex gap-1 overflow-x-auto rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
         {visibleTabs.map((tab) => (
@@ -243,13 +439,17 @@ export function SettingsView({ initialVenue, isAdmin, initialTab, hasServiceConf
           </>
         )}
         {activeTab === 'plan' && (
-          <PlanSection venue={venue} />
+          <PlanSection venue={venue} activePractitionerCount={activePractitionerCount} />
         )}
         {activeTab === 'payments' && (
           <StripeConnectSection stripeAccountId={venue.stripe_connected_account_id} isAdmin={isAdmin} />
         )}
         {activeTab === 'comms' && (
-          <CommunicationTemplatesSection venue={venue} isAdmin={isAdmin} />
+          <CommunicationTemplatesSection
+            venue={venue}
+            isAdmin={isAdmin}
+            pricingTier={venue.pricing_tier ?? 'standard'}
+          />
         )}
         {activeTab === 'staff' && isAdmin && <StaffSection venueId={venue.id} isAdmin={isAdmin} />}
       </div>

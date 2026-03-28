@@ -7,6 +7,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Practitioner, AppointmentService, PractitionerService } from '@/types/booking-models';
 import { timeToMinutes, minutesToTime } from '@/lib/availability';
+import { getDayOfWeek } from '@/lib/availability/engine';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -19,6 +20,13 @@ export interface PhantomBooking {
   buffer_minutes: number;
 }
 
+/** Staff blocks on the practitioner calendar (breaks / blocked time). Minutes from midnight. */
+export interface PractitionerCalendarBlockedRange {
+  practitioner_id: string;
+  start: number;
+  end: number;
+}
+
 export interface AppointmentEngineInput {
   date: string; // "YYYY-MM-DD"
   practitioners: Practitioner[];
@@ -26,6 +34,13 @@ export interface AppointmentEngineInput {
   practitionerServices: PractitionerService[];
   existingBookings: AppointmentBooking[];
   phantomBookings?: PhantomBooking[];
+  practitionerBlockedRanges?: PractitionerCalendarBlockedRange[];
+  /**
+   * When true, do not hide today's slots before the current clock time.
+   * Used for staff reschedule validation — the guest booking may move to a time
+   * that is already "past" relative to when staff edit (same-day corrections).
+   */
+  skipPastSlotFilter?: boolean;
 }
 
 export interface AppointmentBooking {
@@ -68,15 +83,13 @@ export interface AppointmentAvailabilityResult {
 
 const DAY_NAMES = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const;
 
+/** Align with dashboard working-hours keys (JS getDay, 0=Sun) — same as getDayOfWeek() in engine.ts. */
 function dayKeyForDate(dateStr: string): string {
-  const [y, m, d] = dateStr.split('-').map(Number);
-  const dow = new Date(Date.UTC(y!, m! - 1, d!)).getUTCDay();
-  return String(dow);
+  return String(getDayOfWeek(dateStr));
 }
 
 function dayNameForDate(dateStr: string): string {
-  const [y, m, d] = dateStr.split('-').map(Number);
-  const dow = new Date(Date.UTC(y!, m! - 1, d!)).getUTCDay();
+  const dow = getDayOfWeek(dateStr);
   return DAY_NAMES[dow]!;
 }
 
@@ -115,7 +128,16 @@ const CAPACITY_CONSUMING_STATUSES = ['Confirmed', 'Pending', 'Seated'];
 // ---------------------------------------------------------------------------
 
 export function computeAppointmentAvailability(input: AppointmentEngineInput, nowMinutes?: number): AppointmentAvailabilityResult {
-  const { date, practitioners, services, practitionerServices, existingBookings, phantomBookings = [] } = input;
+  const {
+    date,
+    practitioners,
+    services,
+    practitionerServices,
+    existingBookings,
+    phantomBookings = [],
+    practitionerBlockedRanges = [],
+    skipPastSlotFilter = false,
+  } = input;
   const serviceMap = new Map(services.map((s) => [s.id, s]));
 
   // Determine the earliest bookable minute for today (past slots are unavailable)
@@ -141,6 +163,8 @@ export function computeAppointmentAvailability(input: AppointmentEngineInput, no
     const practitionerPhantoms = phantomBookings.filter(
       (p) => p.practitioner_id === practitioner.id
     );
+
+    const dayBlocks = practitionerBlockedRanges.filter((b) => b.practitioner_id === practitioner.id);
 
     const allLinksForPractitioner = practitionerServices.filter((ps) => ps.practitioner_id === practitioner.id);
     const linkedServices = allLinksForPractitioner
@@ -182,14 +206,18 @@ export function computeAppointmentAvailability(input: AppointmentEngineInput, no
 
       for (const range of workingRanges) {
         for (let t = range.start; t + totalDuration <= range.end; t += 15) {
-          // Skip slots in the past for today
-          if (isToday && t < currentMinute) continue;
+          // Skip slots in the past for today (guest booking flow only)
+          if (isToday && t < currentMinute && !skipPastSlotFilter) continue;
 
           const slotEnd = t + totalDuration;
 
           // Check breaks
           const hitsBreak = breakRanges.some((b) => overlaps(t, slotEnd, b.start, b.end));
           if (hitsBreak) continue;
+
+          // Staff calendar blocks (blocked time ranges)
+          const hitsCalendarBlock = dayBlocks.some((b) => overlaps(t, slotEnd, b.start, b.end));
+          if (hitsCalendarBlock) continue;
 
           // Check existing bookings
           const hitsBooking = practitionerBookings.some((b) => {
@@ -258,19 +286,14 @@ export async function fetchAppointmentInput(params: {
     practitionerQuery = practitionerQuery.eq('id', practitionerId);
   }
 
-  let servicesQuery = supabase
-    .from('appointment_services')
-    .select('*')
-    .eq('venue_id', venueId)
-    .eq('is_active', true)
-    .order('sort_order');
-  if (serviceId) {
-    servicesQuery = servicesQuery.eq('id', serviceId);
-  }
-
-  const [practitionersRes, servicesRes, psRes, bookingsRes] = await Promise.all([
+  const [practitionersRes, allServicesRes, psRes, bookingsRes, blocksRes] = await Promise.all([
     practitionerQuery,
-    servicesQuery,
+    supabase
+      .from('appointment_services')
+      .select('*')
+      .eq('venue_id', venueId)
+      .eq('is_active', true)
+      .order('sort_order'),
     supabase.from('practitioner_services').select('*, practitioners!inner(venue_id)').eq('practitioners.venue_id', venueId),
     supabase
       .from('bookings')
@@ -279,24 +302,50 @@ export async function fetchAppointmentInput(params: {
       .eq('booking_date', date)
       .not('practitioner_id', 'is', null)
       .in('status', CAPACITY_CONSUMING_STATUSES),
+    supabase
+      .from('practitioner_calendar_blocks')
+      .select('practitioner_id, start_time, end_time')
+      .eq('venue_id', venueId)
+      .eq('block_date', date),
   ]);
 
   const practitioners = (practitionersRes.data ?? []) as Practitioner[];
-  const services = (servicesRes.data ?? []) as AppointmentService[];
+  const allServices = (allServicesRes.data ?? []) as AppointmentService[];
+  const services = serviceId ? allServices.filter((s) => s.id === serviceId) : allServices;
   const practitionerServices = (psRes.data ?? []) as PractitionerService[];
-  const serviceMap = new Map(services.map((s) => [s.id, s]));
+  const serviceMapForBookings = new Map(allServices.map((s) => [s.id, s]));
 
   const existingBookings: AppointmentBooking[] = (bookingsRes.data ?? []).map((b) => {
-    const svc = b.appointment_service_id ? serviceMap.get(b.appointment_service_id) : null;
+    const sid = b.appointment_service_id as string | null;
+    const svc = sid ? serviceMapForBookings.get(sid) : null;
+    const ps = sid
+      ? practitionerServices.find((row) => row.practitioner_id === b.practitioner_id && row.service_id === sid)
+      : undefined;
+    const durationMinutes =
+      ps?.custom_duration_minutes != null ? ps.custom_duration_minutes : (svc?.duration_minutes ?? 30);
     return {
       id: b.id,
       practitioner_id: b.practitioner_id!,
       booking_time: (b.booking_time as string).slice(0, 5),
-      duration_minutes: svc?.duration_minutes ?? 30,
+      duration_minutes: durationMinutes,
       buffer_minutes: svc?.buffer_minutes ?? 0,
       status: b.status,
     };
   });
 
-  return { date, practitioners, services, practitionerServices, existingBookings };
+  const practitionerBlockedRanges: PractitionerCalendarBlockedRange[] = blocksRes.error
+    ? []
+    : (blocksRes.data ?? [])
+        .map((row: { practitioner_id: string; start_time: string; end_time: string }) => ({
+          practitioner_id: row.practitioner_id,
+          start: timeToMinutes(String(row.start_time).slice(0, 5)),
+          end: timeToMinutes(String(row.end_time).slice(0, 5)),
+        }))
+        .filter((b) => b.end > b.start);
+
+  if (blocksRes.error) {
+    console.warn('[fetchAppointmentInput] practitioner_calendar_blocks:', blocksRes.error.message);
+  }
+
+  return { date, practitioners, services, practitionerServices, existingBookings, practitionerBlockedRanges };
 }

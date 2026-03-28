@@ -14,9 +14,6 @@ export default async function AvailabilitySettingsPage() {
   if (!user) redirect('/login?redirectTo=/dashboard/availability');
 
   const staff = await getDashboardStaff(supabase);
-  if (staff.role !== 'admin') {
-    redirect('/dashboard');
-  }
   if (!staff.venue_id) {
     redirect('/dashboard');
   }
@@ -26,13 +23,18 @@ export default async function AvailabilitySettingsPage() {
   const bookingModel = (venue?.booking_model as BookingModel) ?? 'table_reservation';
 
   if (bookingModel === 'practitioner_appointment') {
+    const isAdmin = staff.role === 'admin';
     return (
       <div className="p-4 md:p-6 lg:p-8">
         <div className="mx-auto max-w-4xl">
-          <AppointmentAvailabilitySettings venueId={staff.venue_id} />
+          <AppointmentAvailabilitySettings isAdmin={isAdmin} />
         </div>
       </div>
     );
+  }
+
+  if (staff.role !== 'admin') {
+    redirect('/dashboard');
   }
 
   return <AvailabilitySettingsClient />;

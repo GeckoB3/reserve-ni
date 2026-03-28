@@ -1,7 +1,7 @@
 import { getTwilioClient } from '@/lib/twilio';
 
 function normaliseToE164(phone: string): string {
-  let cleaned = phone.replace(/[\s\-()]/g, '');
+  const cleaned = phone.replace(/[\s\-()]/g, '');
   if (cleaned.startsWith('+')) return cleaned;
   if (cleaned.startsWith('00')) return '+' + cleaned.slice(2);
   if (cleaned.startsWith('0')) return '+44' + cleaned.slice(1);

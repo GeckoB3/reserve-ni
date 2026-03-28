@@ -163,7 +163,7 @@ export function ExpandedBookingContent({
   };
 
   return (
-    // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions
+     
     <div id={`booking-expand-${booking.id}`} className="mt-3 space-y-3 px-1" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
       {/* Row 1: Guest card + Booking summary */}
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">

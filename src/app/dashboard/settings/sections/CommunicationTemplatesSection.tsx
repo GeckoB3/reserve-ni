@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CommunicationSettings } from '@/lib/communications/service';
 import type { CommMessageType } from '@/lib/emails/types';
 
@@ -22,100 +22,140 @@ interface CommCardConfig {
   requireOneSubToggle?: boolean;
 }
 
-const CARDS: CommCardConfig[] = [
-  {
-    messageType: 'booking_confirmation_email',
-    label: 'Booking Confirmation',
-    description: 'Sent immediately when a booking is confirmed. Includes booking details and a manage-booking link.',
-    channel: 'email',
-    enabledKey: 'confirmation_email_enabled',
-    customMessageKey: 'confirmation_email_custom_message',
-    locked: true,
-    maxChars: 500,
-  },
-  {
-    messageType: 'deposit_request_sms',
-    label: 'Deposit Request',
-    description: 'SMS sent to the guest with a payment link when a deposit is required.',
-    channel: 'sms',
-    enabledKey: 'deposit_sms_enabled',
-    customMessageKey: 'deposit_sms_custom_message',
-    maxChars: 160,
-  },
-  {
-    messageType: 'deposit_confirmation_email',
-    label: 'Deposit Confirmation',
-    description: 'Email sent after the guest pays their deposit. Includes receipt and refund policy.',
-    channel: 'email',
-    enabledKey: 'deposit_confirmation_email_enabled',
-    customMessageKey: 'deposit_confirmation_email_custom_message',
-    maxChars: 500,
-  },
-  {
-    messageType: 'reminder_56h_email',
-    label: 'Confirm or Cancel Email',
-    description: 'Asks guests to confirm or cancel their booking. Includes a confirm button, cancel button, and manage booking link.',
-    channel: 'email',
-    enabledKey: 'reminder_email_enabled',
-    customMessageKey: 'reminder_email_custom_message',
-    hoursBeforeKey: 'reminder_hours_before',
-    maxChars: 500,
-  },
-  {
-    messageType: 'day_of_reminder_email',
-    label: 'Day-of Reminder',
-    description: 'Reminder sent on the day of the booking. Choose which channels to use.',
-    channel: 'both',
-    enabledKey: 'day_of_reminder_enabled',
-    customMessageKey: 'day_of_reminder_custom_message',
-    timeKey: 'day_of_reminder_time',
-    maxChars: 500,
-    subToggles: [
-      { key: 'day_of_reminder_email_enabled', label: 'Email' },
-      { key: 'day_of_reminder_sms_enabled', label: 'SMS' },
-    ],
-  },
-  {
-    messageType: 'post_visit_email',
-    label: 'Post-Visit Thank You',
-    description: 'Thank-you email sent the morning after the guest\'s visit.',
-    channel: 'email',
-    enabledKey: 'post_visit_email_enabled',
-    customMessageKey: 'post_visit_email_custom_message',
-    timeKey: 'post_visit_email_time',
-    maxChars: 500,
-  },
-  {
-    messageType: 'booking_modification_email',
-    label: 'Booking Modification',
-    description: 'Sent when a booking\'s date, time, or party size is changed. Includes updated details and a manage-booking link.',
-    channel: 'both',
-    enabledKey: 'modification_email_enabled',
-    customMessageKey: 'modification_custom_message',
-    locked: true,
-    maxChars: 500,
-    requireOneSubToggle: true,
-    subToggles: [
-      { key: 'modification_email_enabled', label: 'Email' },
-      { key: 'modification_sms_enabled', label: 'SMS' },
-    ],
-  },
-  {
-    messageType: 'cancellation_email',
-    label: 'Booking Cancellation',
-    description: 'Sent when a booking is cancelled. Includes booking details and refund information if applicable.',
-    channel: 'both',
-    enabledKey: 'cancellation_email_enabled',
-    customMessageKey: 'cancellation_custom_message',
-    locked: true,
-    maxChars: 500,
-    requireOneSubToggle: true,
-    subToggles: [
-      { key: 'cancellation_email_enabled', label: 'Email' },
-      { key: 'cancellation_sms_enabled', label: 'SMS' },
-    ],
-  },
-];
+function buildCommunicationCards(isStandardTier: boolean): CommCardConfig[] {
+  const daySub: CommCardConfig['subToggles'] = isStandardTier
+    ? [{ key: 'day_of_reminder_email_enabled', label: 'Email' }]
+    : [
+        { key: 'day_of_reminder_email_enabled', label: 'Email' },
+        { key: 'day_of_reminder_sms_enabled', label: 'SMS' },
+      ];
+
+  const modSub: CommCardConfig['subToggles'] = isStandardTier
+    ? [{ key: 'modification_email_enabled', label: 'Email' }]
+    : [
+        { key: 'modification_email_enabled', label: 'Email' },
+        { key: 'modification_sms_enabled', label: 'SMS' },
+      ];
+
+  const cancelSub: CommCardConfig['subToggles'] = isStandardTier
+    ? [{ key: 'cancellation_email_enabled', label: 'Email' }]
+    : [
+        { key: 'cancellation_email_enabled', label: 'Email' },
+        { key: 'cancellation_sms_enabled', label: 'SMS' },
+      ];
+
+  const cards: CommCardConfig[] = [
+    {
+      messageType: 'booking_confirmation_email',
+      label: 'Booking Confirmation',
+      description: 'Sent immediately when a booking is confirmed. Includes booking details and a manage-booking link.',
+      channel: 'email',
+      enabledKey: 'confirmation_email_enabled',
+      customMessageKey: 'confirmation_email_custom_message',
+      locked: true,
+      maxChars: 500,
+    },
+    {
+      messageType: 'deposit_request_email',
+      label: 'Deposit request (email)',
+      description:
+        'Email with a payment link when staff create a booking that requires a separate deposit payment. Not used when guests pay a deposit during online booking.',
+      channel: 'email',
+      enabledKey: 'deposit_request_email_enabled',
+      customMessageKey: 'deposit_request_email_custom_message',
+      maxChars: 500,
+    },
+  ];
+
+  if (!isStandardTier) {
+    cards.push({
+      messageType: 'deposit_request_sms',
+      label: 'Deposit request (SMS)',
+      description:
+        'SMS with a payment link for staff pay-by-link deposits. Standard plan uses email only for deposit requests.',
+      channel: 'sms',
+      enabledKey: 'deposit_sms_enabled',
+      customMessageKey: 'deposit_sms_custom_message',
+      maxChars: 160,
+    });
+  }
+
+  cards.push(
+    {
+      messageType: 'deposit_confirmation_email',
+      label: 'Deposit Confirmation',
+      description:
+        'Email after a deposit is paid via pay-by-link (e.g. staff booking). Guests who pay a deposit during online checkout get booking confirmation only.',
+      channel: 'email',
+      enabledKey: 'deposit_confirmation_email_enabled',
+      customMessageKey: 'deposit_confirmation_email_custom_message',
+      maxChars: 500,
+    },
+    {
+      messageType: 'reminder_56h_email',
+      label: 'Confirm or Cancel Email',
+      description: 'Asks guests to confirm or cancel their booking. Includes a confirm button, cancel button, and manage booking link.',
+      channel: 'email',
+      enabledKey: 'reminder_email_enabled',
+      customMessageKey: 'reminder_email_custom_message',
+      hoursBeforeKey: 'reminder_hours_before',
+      maxChars: 500,
+    },
+    {
+      messageType: 'day_of_reminder_email',
+      label: 'Day-of Reminder',
+      description: isStandardTier
+        ? 'Reminder on the day of the booking. Standard plan: email only (SMS on Business).'
+        : 'Reminder sent on the day of the booking. Choose email and/or SMS.',
+      channel: isStandardTier ? 'email' : 'both',
+      enabledKey: 'day_of_reminder_enabled',
+      customMessageKey: 'day_of_reminder_custom_message',
+      timeKey: 'day_of_reminder_time',
+      maxChars: 500,
+      subToggles: daySub,
+    },
+    {
+      messageType: 'post_visit_email',
+      label: 'Post-Visit Thank You',
+      description: 'Thank-you email sent the morning after the guest\'s visit.',
+      channel: 'email',
+      enabledKey: 'post_visit_email_enabled',
+      customMessageKey: 'post_visit_email_custom_message',
+      timeKey: 'post_visit_email_time',
+      maxChars: 500,
+    },
+    {
+      messageType: 'booking_modification_email',
+      label: 'Booking Modification',
+      description: isStandardTier
+        ? 'Sent when a booking is changed. Standard plan: email only (SMS on Business).'
+        : 'Sent when a booking\'s date, time, or party size is changed. Choose email and/or SMS.',
+      channel: isStandardTier ? 'email' : 'both',
+      enabledKey: 'modification_email_enabled',
+      customMessageKey: 'modification_custom_message',
+      locked: true,
+      maxChars: 500,
+      requireOneSubToggle: true,
+      subToggles: modSub,
+    },
+    {
+      messageType: 'cancellation_email',
+      label: 'Booking Cancellation',
+      description: isStandardTier
+        ? 'Sent when a booking is cancelled. Standard plan: email only (SMS on Business).'
+        : 'Sent when a booking is cancelled. Choose email and/or SMS.',
+      channel: isStandardTier ? 'email' : 'both',
+      enabledKey: 'cancellation_email_enabled',
+      customMessageKey: 'cancellation_custom_message',
+      locked: true,
+      maxChars: 500,
+      requireOneSubToggle: true,
+      subToggles: cancelSub,
+    },
+  );
+
+  return cards;
+}
 
 const CHANNEL_BADGE: Record<string, { label: string; className: string }> = {
   email: { label: 'EMAIL', className: 'bg-blue-100 text-blue-700' },
@@ -126,10 +166,18 @@ const CHANNEL_BADGE: Record<string, { label: string; className: string }> = {
 interface CommunicationTemplatesSectionProps {
   venue: { id: string };
   isAdmin: boolean;
+  /** Standard tier: email-only deposit request; SMS comms hidden for several message types. */
+  pricingTier?: string;
   onUpdate?: (patch: Record<string, unknown>) => void;
 }
 
-export function CommunicationTemplatesSection({ venue, isAdmin }: CommunicationTemplatesSectionProps) {
+export function CommunicationTemplatesSection({
+  venue,
+  isAdmin,
+  pricingTier = 'standard',
+}: CommunicationTemplatesSectionProps) {
+  const isStandardTier = pricingTier === 'standard';
+  const cards = useMemo(() => buildCommunicationCards(isStandardTier), [isStandardTier]);
   const [settings, setSettings] = useState<CommunicationSettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
@@ -232,6 +280,11 @@ export function CommunicationTemplatesSection({ venue, isAdmin }: CommunicationT
           <p className="mt-0.5 text-sm text-slate-500">
             Control what messages your guests receive and when they are sent.
           </p>
+          {isStandardTier && (
+            <p className="mt-2 text-xs text-slate-500">
+              Standard plan: automated SMS to guests is off. Upgrade to Business for SMS on deposit requests, day-of reminders, and booking change/cancel notices.
+            </p>
+          )}
         </div>
         <SaveIndicator status={saveStatus} />
       </div>
@@ -259,7 +312,7 @@ export function CommunicationTemplatesSection({ venue, isAdmin }: CommunicationT
 
       {/* Message cards */}
       <div className="space-y-4">
-        {CARDS.map((card) => (
+        {cards.map((card) => (
           <CommCard
             key={card.messageType}
             card={card}
@@ -275,6 +328,7 @@ export function CommunicationTemplatesSection({ venue, isAdmin }: CommunicationT
       {previewType && (
         <PreviewModal
           messageType={previewType}
+          cardLabel={cards.find((c) => c.messageType === previewType)?.label}
           html={previewHtml}
           text={previewText}
           loading={previewLoading}
@@ -456,12 +510,14 @@ function CommCard({
 
 function PreviewModal({
   messageType,
+  cardLabel,
   html,
   text,
   loading,
   onClose,
 }: {
   messageType: CommMessageType;
+  cardLabel?: string;
   html: string | null;
   text: string | null;
   loading: boolean;
@@ -474,7 +530,7 @@ function PreviewModal({
       <div className="relative w-full max-w-2xl rounded-2xl border border-slate-200 bg-white shadow-xl">
         <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4">
           <h3 className="text-sm font-semibold text-slate-900">
-            Preview: {CARDS.find((c) => c.messageType === messageType)?.label ?? messageType}
+            Preview: {cardLabel ?? messageType}
           </h3>
           <button type="button" onClick={onClose} className="rounded-lg p-1 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600">
             <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">

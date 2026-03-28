@@ -4,7 +4,7 @@ import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { stripe } from '@/lib/stripe';
-import { sendDepositRequestSms } from '@/lib/communications/send-templated';
+import { sendDepositRequestNotifications } from '@/lib/communications/send-templated';
 import { createHmac } from 'crypto';
 
 const schema = z.object({
@@ -79,32 +79,46 @@ export async function POST(
 
   const { data: guest } = await admin.from('guests').select('name, email, phone').eq('id', booking.guest_id).single();
   const { data: venue } = await admin.from('venues').select('name, address').eq('id', staff.venue_id).single();
-  if (!guest?.phone || !venue?.name) return NextResponse.json({ error: 'Guest phone or venue not found' }, { status: 400 });
+  if (!venue?.name) return NextResponse.json({ error: 'Venue not found' }, { status: 400 });
+  if (!guest?.email && !guest?.phone) {
+    return NextResponse.json(
+      { error: 'Guest needs an email or phone number to send a payment link' },
+      { status: 400 },
+    );
+  }
 
   const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || request.nextUrl.origin;
   const paymentToken = createPaymentToken(id);
   const paymentLink = `${baseUrl}/pay?t=${paymentToken}`;
 
-  // Clear any existing dedup entry so manual resend works
-  await admin
-    .from('communication_logs')
-    .delete()
-    .eq('booking_id', id)
-    .eq('message_type', 'deposit_request_sms');
+  await admin.from('communication_logs').delete().eq('booking_id', id).eq('message_type', 'deposit_request_sms');
+  await admin.from('communication_logs').delete().eq('booking_id', id).eq('message_type', 'deposit_request_email');
 
-  await sendDepositRequestSms(
+  const results = await sendDepositRequestNotifications(
     {
       id,
       guest_name: guest.name ?? 'Guest',
-      booking_date: booking.booking_date,
+      guest_email: guest.email ?? null,
+      guest_phone: guest.phone ?? null,
+      booking_date: booking.booking_date as string,
       booking_time: typeof booking.booking_time === 'string' ? booking.booking_time.slice(0, 5) : '',
-      party_size: booking.party_size,
+      party_size: booking.party_size as number,
       deposit_amount_pence: booking.deposit_amount_pence ?? null,
     },
     { name: venue.name, address: venue.address ?? undefined },
     staff.venue_id,
     paymentLink,
-    guest.phone,
   );
+
+  if (!results.email.sent && !results.sms.sent) {
+    return NextResponse.json(
+      {
+        error: 'Could not send payment link',
+        details: { email: results.email.reason, sms: results.sms.reason },
+      },
+      { status: 422 },
+    );
+  }
+
   return NextResponse.json({ success: true });
 }

@@ -4,7 +4,6 @@ import { getVenueStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { replaceBookingAssignments, syncTableStatusesForBooking } from '@/lib/table-management/lifecycle';
 import { resolveVenueMode } from '@/lib/venue-mode';
-import { fetchAppointmentInput, computeAppointmentAvailability } from '@/lib/availability/appointment-engine';
 import { z } from 'zod';
 import { normalizeToE164 } from '@/lib/phone/e164';
 
@@ -20,6 +19,7 @@ const walkInSchema = z.object({
   booking_time: z.string().regex(/^([01]?[0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9])?$/).optional(),
   practitioner_id: z.string().uuid().optional(),
   appointment_service_id: z.string().uuid().optional(),
+  email: z.union([z.literal(''), z.string().email()]).optional(),
 });
 
 function venueLocalDateTime(timezone: string): { date: string; hours: number; minutes: number } {
@@ -54,6 +54,15 @@ function extractTime(value: string): string {
   return value.slice(0, 5);
 }
 
+/** Wall-clock end time (HH:MM:SS) from a start time and duration; does not enforce bookable slots. */
+function addMinutesToBookingEnd(startHhMmSs: string, addMins: number): string {
+  const [h, m] = startHhMmSs.slice(0, 5).split(':').map(Number);
+  const total = (h ?? 0) * 60 + (m ?? 0) + addMins;
+  const hh = Math.floor(total / 60) % 24;
+  const mm = total % 60;
+  return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}:00`;
+}
+
 /**
  * POST /api/venue/bookings/walk-in
  * Quick add walk-in: source walk-in, status Seated, no deposit.
@@ -76,7 +85,18 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { party_size, name, phone, dietary_notes, occasion, table_id, table_ids: rawTableIds, booking_date, booking_time } = parsed.data;
+    const {
+      party_size,
+      name,
+      phone,
+      email: rawEmail,
+      dietary_notes,
+      occasion,
+      table_id,
+      table_ids: rawTableIds,
+      booking_date,
+      booking_time,
+    } = parsed.data;
 
     let phoneE164: string | null = null;
     if (phone?.trim()) {
@@ -135,38 +155,20 @@ export async function POST(request: NextRequest) {
       }
       const durationMins = svc.duration_minutes;
 
-      const walkInTimeStr = walkInTime.slice(0, 5);
-      const apptInput = await fetchAppointmentInput({
-        supabase: admin,
-        venueId: staff.venue_id,
-        date: today,
-        practitionerId: practitioner_id,
-        serviceId: appointment_service_id,
-      });
-      const apptResult = computeAppointmentAvailability(apptInput);
-      const practSlots = apptResult.practitioners.find((p) => p.id === practitioner_id);
-      const matchSlot = practSlots?.slots.find(
-        (s) => s.start_time === walkInTimeStr && s.service_id === appointment_service_id,
-      );
-      if (!matchSlot) {
-        return NextResponse.json(
-          { error: 'Selected time is not available for this practitioner' },
-          { status: 409 },
-        );
-      }
-
-      const [yy, mo, dd] = today.split('-').map(Number);
-      const [hh2, mm2] = walkInTime.slice(0, 5).split(':').map(Number);
-      const endDt = new Date(Date.UTC(yy!, mo! - 1, dd!, hh2!, mm2!, 0));
-      endDt.setMinutes(endDt.getMinutes() + durationMins);
-      const bookingEndTime = `${String(endDt.getUTCHours()).padStart(2, '0')}:${String(endDt.getUTCMinutes()).padStart(2, '0')}:00`;
+      // Walk-ins use the venue-local moment of confirmation, not the public availability grid.
+      const bookingEndTime = addMinutesToBookingEnd(walkInTime, durationMins);
+      const emailNorm = rawEmail?.trim() ? rawEmail.trim().toLowerCase() : null;
+      const estimatedEndIso = (() => {
+        const d = new Date(`${today}T${bookingEndTime.slice(0, 5)}:00`);
+        return Number.isNaN(d.getTime()) ? null : d.toISOString();
+      })();
 
       const { data: apptGuest, error: apptGuestErr } = await admin
         .from('guests')
         .insert({
           venue_id: staff.venue_id,
           name: name?.trim() || 'Walk-in',
-          email: null,
+          email: emailNorm,
           phone: phoneE164,
           visit_count: 1,
         })
@@ -194,7 +196,7 @@ export async function POST(request: NextRequest) {
           occasion: occasion?.trim() || null,
           practitioner_id,
           appointment_service_id,
-          estimated_end_time: endDt.toISOString(),
+          estimated_end_time: estimatedEndIso,
         })
         .select('id, booking_date, booking_time, booking_end_time, party_size, status, source')
         .single();

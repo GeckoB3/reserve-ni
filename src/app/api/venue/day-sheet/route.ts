@@ -177,7 +177,7 @@ export async function GET(request: NextRequest) {
 
     // Resolve service periods
     const venueMode = await resolveVenueMode(staff.db, staff.venue_id);
-    let periods: DaySheetPeriod[] = [];
+    const periods: DaySheetPeriod[] = [];
     let capacityConfigured = false;
     let serviceDurationMin: number | null = null;
 
@@ -386,7 +386,7 @@ export async function GET(request: NextRequest) {
 
     // Fetch table assignments for today's bookings
     const bookingIds = allBookings.map((b) => b.id);
-    let assignmentsMap = new Map<string, Array<{ id: string; name: string }>>();
+    const assignmentsMap = new Map<string, Array<{ id: string; name: string }>>();
     if (bookingIds.length > 0 && activeTables.length > 0) {
       const { data: assignRows } = await staff.db
         .from('booking_table_assignments')

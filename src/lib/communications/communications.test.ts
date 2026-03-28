@@ -22,6 +22,7 @@ function setupSupabaseMock(returnData: unknown, error: { code: string } | null =
 
 // Import after mocking
 import { logToCommLogs } from './service';
+import { isSelfServeBookingSource } from '@/lib/booking-source';
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -131,6 +132,7 @@ describe('settings toggle logic', () => {
   it('maps message types to correct enabled keys', () => {
     const settingsKeys = {
       booking_confirmation_email: 'confirmation_email_enabled',
+      deposit_request_email: 'deposit_request_email_enabled',
       deposit_request_sms: 'deposit_sms_enabled',
       deposit_confirmation_email: 'deposit_confirmation_email_enabled',
       reminder_56h_email: 'reminder_email_enabled',
@@ -139,7 +141,7 @@ describe('settings toggle logic', () => {
       post_visit_email: 'post_visit_email_enabled',
     };
 
-    expect(Object.keys(settingsKeys)).toHaveLength(7);
+    expect(Object.keys(settingsKeys)).toHaveLength(8);
     for (const [messageType, settingsKey] of Object.entries(settingsKeys)) {
       expect(settingsKey).toBeTruthy();
       expect(messageType).toBeTruthy();
@@ -159,6 +161,21 @@ describe('settings toggle logic', () => {
     };
 
     expect(defaults.confirmation_email_enabled).toBe(true);
+  });
+});
+
+describe('isSelfServeBookingSource', () => {
+  it('returns true for public booking sources', () => {
+    expect(isSelfServeBookingSource('online')).toBe(true);
+    expect(isSelfServeBookingSource('widget')).toBe(true);
+    expect(isSelfServeBookingSource('booking_page')).toBe(true);
+  });
+
+  it('returns false for staff or walk-in sources', () => {
+    expect(isSelfServeBookingSource('phone')).toBe(false);
+    expect(isSelfServeBookingSource('walk-in')).toBe(false);
+    expect(isSelfServeBookingSource(null)).toBe(false);
+    expect(isSelfServeBookingSource(undefined)).toBe(false);
   });
 });
 

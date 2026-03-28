@@ -4,6 +4,7 @@ import { stripe } from '@/lib/stripe';
 import { generateConfirmToken, hashConfirmToken } from '@/lib/confirm-token';
 import { validateBookingStatusTransition } from '@/lib/table-management/lifecycle';
 import { sendBookingConfirmationEmail, sendDepositConfirmationEmail } from '@/lib/communications/send-templated';
+import { isSelfServeBookingSource } from '@/lib/booking-source';
 
 /**
  * POST /api/booking/confirm-payment
@@ -28,7 +29,7 @@ export async function POST(request: NextRequest) {
 
     const { data: booking, error: bookErr } = await supabase
       .from('bookings')
-      .select('id, venue_id, guest_id, status, deposit_status, stripe_payment_intent_id, booking_date, booking_time, party_size, cancellation_deadline, deposit_amount_pence, dietary_notes, occasion, confirm_token_hash')
+      .select('id, venue_id, guest_id, status, deposit_status, stripe_payment_intent_id, booking_date, booking_time, party_size, cancellation_deadline, deposit_amount_pence, dietary_notes, occasion, confirm_token_hash, source')
       .eq('id', bookingId)
       .single();
 
@@ -161,7 +162,8 @@ export async function POST(request: NextRequest) {
         console.error('[after] confirm-payment confirmation email failed:', err);
       }
 
-      if (recipientEmail && booking.deposit_amount_pence) {
+      const skipDepositReceipt = isSelfServeBookingSource(booking.source as string | null);
+      if (recipientEmail && booking.deposit_amount_pence && !skipDepositReceipt) {
         try {
           const depResult = await sendDepositConfirmationEmail(bookingData, venueData, booking.venue_id);
           if (!depResult.sent) console.warn('[after] confirm-payment deposit email not sent:', depResult.reason);

@@ -115,12 +115,14 @@ export function AppointmentBookingForm({
   // Reset on open
   useEffect(() => {
     if (open) {
-      setStep(1);
+      const now = new Date();
+      const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+      const slotPrefill =
+        Boolean(preselectedPractitionerId && preselectedDate && preselectedTime);
+      setStep(slotPrefill ? 2 : 1);
       setIsGroupMode(false);
       setSelectedPractitioner(preselectedPractitionerId ?? '');
       setSelectedService('');
-      const now = new Date();
-      const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
       setSelectedDate(preselectedDate ?? today);
       setSelectedTime(preselectedTime ?? '');
       setClientName(''); setClientPhone(''); setClientEmail(''); setNotes('');
@@ -238,7 +240,6 @@ export function AppointmentBookingForm({
   // ── Single: submit ──
   async function handleSubmit() {
     if (!clientName.trim()) { setError('Client name is required'); return; }
-    if (!clientPhone.trim()) { setError('Phone number is required'); return; }
     setSubmitting(true);
     setError(null);
     try {
@@ -250,7 +251,7 @@ export function AppointmentBookingForm({
           booking_time: selectedTime,
           party_size: 1,
           name: clientName.trim(),
-          phone: clientPhone.trim(),
+          phone: clientPhone.trim() || undefined,
           email: clientEmail.trim() || undefined,
           special_requests: notes.trim() || undefined,
           require_deposit: requireDeposit,
@@ -300,7 +301,6 @@ export function AppointmentBookingForm({
   // ── Group: submit ──
   async function handleGroupSubmit() {
     if (!groupClientName.trim()) { setError('Client name is required'); return; }
-    if (!groupClientPhone.trim()) { setError('Phone number is required'); return; }
     setSubmitting(true);
     setError(null);
     try {
@@ -310,7 +310,7 @@ export function AppointmentBookingForm({
         body: JSON.stringify({
           venue_id: venueId,
           name: groupClientName.trim(),
-          phone: groupClientPhone.trim(),
+          phone: groupClientPhone.trim() || undefined,
           email: groupClientEmail.trim() || undefined,
           source: 'phone',
           people: groupPeople.map((p) => ({
@@ -383,20 +383,7 @@ export function AppointmentBookingForm({
           </div>
         ) : !isGroupMode ? (
           <>
-            {/* ── SINGLE BOOKING FLOW ── */}
-            <div className="mb-5 flex items-center gap-2">
-              {[1, 2, 3, 4].map((s) => (
-                <div key={s} className="flex items-center gap-2">
-                  <div className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-semibold ${
-                    step === s ? 'bg-blue-600 text-white' : step > s ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-400'
-                  }`}>
-                    {step > s ? <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path d="M5 13l4 4L19 7"/></svg> : s}
-                  </div>
-                  {s < 4 && <div className={`h-0.5 w-8 ${step > s ? 'bg-blue-200' : 'bg-slate-100'}`} />}
-                </div>
-              ))}
-            </div>
-
+            {/* ── SINGLE BOOKING FLOW: staff → service → date & time → confirm & contact ── */}
             {step === 1 && (
               <div className="space-y-3">
                 <p className="text-sm font-medium text-slate-700">Select team member</p>
@@ -416,7 +403,13 @@ export function AppointmentBookingForm({
               <div className="space-y-3">
                 <p className="text-sm font-medium text-slate-700">Select service</p>
                 {servicesForPractitioner.map((s) => (
-                  <button key={s.id} onClick={() => { setSelectedService(s.id); setStep(3); setSelectedTime(''); }}
+                  <button
+                    key={s.id}
+                    onClick={() => {
+                      setSelectedService(s.id);
+                      setStep(3);
+                      if (!preselectedTime) setSelectedTime('');
+                    }}
                     className={`w-full rounded-lg border px-4 py-3 text-left transition-colors ${selectedService === s.id ? 'border-blue-500 bg-blue-50' : 'border-slate-200 hover:bg-slate-50'}`}>
                     <div className="flex items-center gap-3">
                       <div className="h-2.5 w-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: s.colour }} />
@@ -435,6 +428,7 @@ export function AppointmentBookingForm({
 
             {step === 3 && (
               <div className="space-y-4">
+                <p className="text-sm font-medium text-slate-700">Select date and time</p>
                 <div>
                   <label className="mb-1 block text-sm font-medium text-slate-700">Date</label>
                   <input type="date" value={selectedDate}
@@ -470,6 +464,7 @@ export function AppointmentBookingForm({
 
             {step === 4 && (
               <div className="space-y-4">
+                <p className="text-sm font-medium text-slate-700">Confirm appointment and contact</p>
                 <div className="rounded-lg bg-slate-50 p-3 text-sm space-y-1">
                   <div className="flex justify-between"><span className="text-slate-500">Team member</span><span className="font-medium">{activePractitioners.find((p) => p.id === selectedPractitioner)?.name}</span></div>
                   <div className="flex justify-between"><span className="text-slate-500">Service</span><span className="font-medium">{selectedSvc?.name}</span></div>
@@ -477,8 +472,8 @@ export function AppointmentBookingForm({
                   {selectedSvc?.price_pence != null && <div className="flex justify-between"><span className="text-slate-500">Price</span><span className="font-medium">{sym}{(selectedSvc.price_pence / 100).toFixed(2)}</span></div>}
                 </div>
                 <div><label className="mb-1 block text-sm font-medium text-slate-700">Client name *</label><input type="text" value={clientName} onChange={(e) => setClientName(e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500" placeholder="Full name" /></div>
-                <div><label className="mb-1 block text-sm font-medium text-slate-700">Phone *</label><input type="tel" value={clientPhone} onChange={(e) => setClientPhone(e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500" placeholder="07123 456789" /></div>
-                <div><label className="mb-1 block text-sm font-medium text-slate-700">Email</label><input type="email" value={clientEmail} onChange={(e) => setClientEmail(e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500" placeholder="client@example.com" /></div>
+                <div><label className="mb-1 block text-sm font-medium text-slate-700">Email <span className="text-slate-400 font-normal">(optional)</span></label><input type="email" value={clientEmail} onChange={(e) => setClientEmail(e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500" placeholder="client@example.com" /></div>
+                <div><label className="mb-1 block text-sm font-medium text-slate-700">Phone <span className="text-slate-400 font-normal">(optional)</span></label><input type="tel" value={clientPhone} onChange={(e) => setClientPhone(e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500" placeholder="07123 456789" /></div>
                 <div><label className="mb-1 block text-sm font-medium text-slate-700">Notes</label><textarea value={notes} onChange={(e) => setNotes(e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500" rows={2} placeholder="Special requests or notes" /></div>
                 {selectedSvc?.deposit_pence != null && selectedSvc.deposit_pence > 0 && (
                   <label className="flex items-center gap-3 rounded-lg border border-slate-200 px-3 py-2 cursor-pointer hover:bg-slate-50">
@@ -638,8 +633,8 @@ export function AppointmentBookingForm({
                   )}
                 </div>
                 <div><label className="mb-1 block text-sm font-medium text-slate-700">Contact name *</label><input type="text" value={groupClientName} onChange={(e) => setGroupClientName(e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500" placeholder="Full name" /></div>
-                <div><label className="mb-1 block text-sm font-medium text-slate-700">Phone *</label><input type="tel" value={groupClientPhone} onChange={(e) => setGroupClientPhone(e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500" placeholder="07123 456789" /></div>
-                <div><label className="mb-1 block text-sm font-medium text-slate-700">Email</label><input type="email" value={groupClientEmail} onChange={(e) => setGroupClientEmail(e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500" placeholder="client@example.com" /></div>
+                <div><label className="mb-1 block text-sm font-medium text-slate-700">Email <span className="text-slate-400 font-normal">(optional)</span></label><input type="email" value={groupClientEmail} onChange={(e) => setGroupClientEmail(e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500" placeholder="client@example.com" /></div>
+                <div><label className="mb-1 block text-sm font-medium text-slate-700">Phone <span className="text-slate-400 font-normal">(optional)</span></label><input type="tel" value={groupClientPhone} onChange={(e) => setGroupClientPhone(e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500" placeholder="07123 456789" /></div>
                 <div className="flex justify-between">
                   <button onClick={() => setGroupStep('list')} className="text-sm text-blue-600 hover:underline">&larr; Back</button>
                   <button onClick={handleGroupSubmit} disabled={submitting} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">{submitting ? 'Creating...' : 'Create Group Booking'}</button>

@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
 import { BookingsDashboard } from './BookingsDashboard';
+import { AppointmentBookingsDashboard } from './AppointmentBookingsDashboard';
 import { getDashboardStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { ToastProvider } from '@/components/ui/Toast';
@@ -36,7 +37,11 @@ export default async function BookingsPage() {
       <div className="mx-auto max-w-6xl">
         <h1 className="mb-6 text-2xl font-semibold text-slate-900">{title}</h1>
         <ToastProvider>
-          <BookingsDashboard venueId={venueId} bookingModel={bookingModel} currency={currency} />
+          {isAppointment ? (
+            <AppointmentBookingsDashboard venueId={venueId} currency={currency} />
+          ) : (
+            <BookingsDashboard venueId={venueId} currency={currency} />
+          )}
         </ToastProvider>
       </div>
     </div>
