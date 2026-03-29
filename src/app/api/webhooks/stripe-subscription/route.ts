@@ -8,6 +8,11 @@ import {
   subscriptionPeriodEndIso,
 } from '@/lib/stripe/subscription-fields';
 
+/**
+ * Configure in Stripe Dashboard: endpoint URL /api/webhooks/stripe-subscription,
+ * events: checkout.session.completed, customer.subscription.updated, customer.subscription.deleted,
+ * invoice.payment_succeeded, invoice.payment_failed. Secret: STRIPE_ONBOARDING_WEBHOOK_SECRET.
+ */
 const webhookSecret = process.env.STRIPE_ONBOARDING_WEBHOOK_SECRET;
 if (!webhookSecret) {
   console.warn('STRIPE_ONBOARDING_WEBHOOK_SECRET is not set; subscription webhook verification will fail');

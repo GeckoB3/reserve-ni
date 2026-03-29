@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import type { VenueSettings } from './types';
@@ -56,6 +56,8 @@ function PlanSection({
 }) {
   const [loading, setLoading] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [planSuccess, setPlanSuccess] = useState<string | null>(null);
+  const planSuccessLoaded = useRef(false);
   const [calSaving, setCalSaving] = useState(false);
   const [calendarDraft, setCalendarDraft] = useState(venue.calendar_count ?? 1);
   const [calError, setCalError] = useState<string | null>(null);
@@ -84,9 +86,24 @@ function PlanSection({
     setDowngradeQty((q) => Math.max(minCalendars, q));
   }, [minCalendars]);
 
+  useEffect(() => {
+    if (planSuccessLoaded.current) return;
+    planSuccessLoaded.current = true;
+    try {
+      const msg = sessionStorage.getItem('planSuccess');
+      if (msg) {
+        sessionStorage.removeItem('planSuccess');
+        setPlanSuccess(msg);
+      }
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
   async function handleAction(action: string, opts?: { calendar_count?: number }) {
     setLoading(true);
     setActionError(null);
+    setPlanSuccess(null);
     try {
       const res = await fetch('/api/venue/change-plan', {
         method: 'POST',
@@ -102,6 +119,13 @@ function PlanSection({
         return;
       }
       if (data.ok) {
+        if (typeof data.message === 'string' && data.message.length > 0) {
+          try {
+            sessionStorage.setItem('planSuccess', data.message);
+          } catch {
+            /* ignore */
+          }
+        }
         window.location.reload();
         return;
       }
@@ -140,6 +164,18 @@ function PlanSection({
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm space-y-4">
       <h2 className="text-base font-semibold text-slate-900">Your Plan</h2>
+      <p className="text-xs text-slate-600 leading-relaxed">
+        Billing runs through Stripe. Upgrades, downgrades, and seat changes use{' '}
+        <span className="font-medium text-slate-700">proration</span>: unused time on your current price is credited and
+        only the net difference is charged for the rest of this billing period (see your Stripe invoice and customer
+        portal). If you cancel, you keep full access until the end of the period shown below; no further charges after
+        that.
+      </p>
+      {planSuccess && (
+        <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
+          {planSuccess}
+        </div>
+      )}
       <div className="flex items-center gap-3">
         <span className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${
           tier === 'founding' ? 'bg-emerald-100 text-emerald-700' :
@@ -164,6 +200,9 @@ function PlanSection({
                   : planStatus}
         </span>
       </div>
+      {periodEndLabel && tier !== 'founding' && billingActive && !isCancelling && (
+        <p className="text-xs text-slate-500">Current billing period ends on {periodEndLabel}.</p>
+      )}
       {actionError && (
         <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
           {actionError}
@@ -283,7 +322,7 @@ function PlanSection({
       {tier === 'founding' && (
         <p className="text-sm text-slate-500">
           {isAppointmentVenue ? (
-            <>Founding Partner: unlimited team, SMS, and appointments features — free during the founding period.</>
+            <>Founding Partner: unlimited team, SMS, and appointments features, free during the founding period.</>
           ) : (
             <>Full Business-tier access (including table management), free during founding period.</>
           )}
@@ -391,7 +430,7 @@ export function SettingsView({
   const showPlanCheckoutBanner = Boolean(planCheckoutReturn) && !planBannerDismissed;
   const planBannerMessage =
     planCheckoutReturn === 'upgraded'
-      ? 'Payment received. We are confirming your upgrade — the Plan tab will update in a few seconds. You can also refresh the page if it still shows your old plan.'
+      ? 'Payment received. We are confirming your upgrade. The Plan tab will update in a few seconds. You can also refresh the page if it still shows your old plan.'
       : planCheckoutReturn === 'downgraded'
         ? 'We are confirming your plan change. Details on the Plan tab will update shortly.'
         : 'We are confirming your subscription. The Plan tab will update shortly.';
