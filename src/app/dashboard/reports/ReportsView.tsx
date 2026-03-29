@@ -6,6 +6,7 @@ import {
   PieChart, Pie, Cell, Legend, LineChart, Line, CartesianGrid,
 } from 'recharts';
 import { DataExportSection } from './DataExportSection';
+import type { BookingModel, VenueTerminology } from '@/types/booking-models';
 
 interface Report1 {
   total_bookings_created: number;
@@ -45,9 +46,25 @@ interface Report6Row {
   bookings_in_period: number;
 }
 
+interface AppointmentInsightsPayload {
+  by_practitioner: Array<{
+    practitioner_id: string;
+    practitioner_name: string;
+    booking_count: number;
+    completed_count: number;
+  }>;
+  by_service: Array<{
+    service_id: string;
+    service_name: string;
+    booking_count: number;
+  }>;
+  by_booking_source: Record<string, number>;
+}
+
 interface ReportsData {
   from: string;
   to: string;
+  booking_model?: BookingModel;
   table_management_enabled?: boolean;
   report1_booking_summary: Report1 | null;
   report2_no_show_series: Report2Row[];
@@ -61,6 +78,7 @@ interface ReportsData {
     available_hours: number;
   }>;
   report6_frequent_visitors?: Report6Row[];
+  report7_appointment_insights?: AppointmentInsightsPayload | null;
 }
 
 const COLORS = ['#4E6B78', '#059669', '#f59e0b', '#ef4444', '#8b5cf6', '#6b7280'];
@@ -84,7 +102,35 @@ function downloadCsv(filename: string, rows: string[][]) {
 
 type ExportFlash = { variant: 'success' | 'notice'; message: string };
 
-export function ReportsView() {
+function formatBookingSourceLabel(source: string): string {
+  const map: Record<string, string> = {
+    online: 'Online',
+    phone: 'Phone',
+    'walk-in': 'Walk-in',
+    widget: 'Website widget',
+    booking_page: 'Booking page',
+  };
+  return map[source] ?? source;
+}
+
+/** Merge raw event source keys onto display labels (matches pie + CSV). */
+function aggregateBookingSourcesByLabel(bySource: Record<string, number>): Array<{ name: string; value: number }> {
+  const acc = new Map<string, number>();
+  for (const [k, v] of Object.entries(bySource)) {
+    const label = formatBookingSourceLabel(k);
+    acc.set(label, (acc.get(label) ?? 0) + v);
+  }
+  return [...acc.entries()]
+    .map(([name, value]) => ({ name, value }))
+    .sort((a, b) => b.value - a.value);
+}
+
+export interface ReportsViewProps {
+  bookingModel: BookingModel;
+  terminology: VenueTerminology;
+}
+
+export function ReportsView({ bookingModel, terminology }: ReportsViewProps) {
   const [range, setRange] = useState(last7Days);
   const [data, setData] = useState<ReportsData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -122,37 +168,67 @@ export function ReportsView() {
   const exportReport1 = useCallback(() => {
     if (!data?.report1_booking_summary) return;
     const r = data.report1_booking_summary;
+    const model = (data.booking_model as BookingModel | undefined) ?? bookingModel;
+    const appt = model === 'practitioner_appointment';
     downloadCsv(`report1-booking-summary-${data.from}-${data.to}.csv`, [
       ['Metric', 'Value'],
-      ['Total bookings created', String(r.total_bookings_created)],
-      ['Covers booked', String(r.covers_booked)],
-      ['Covers seated', String(r.covers_seated)],
-      ['By source', ''],
-      ...Object.entries(r.by_source).map(([k, v]) => [k, String(v)]),
+      [
+        appt ? `${terminology.booking}s created in period` : 'Total bookings created',
+        String(r.total_bookings_created),
+      ],
+      [
+        appt
+          ? `Total ${terminology.client.toLowerCase()} places booked (headcount)`
+          : 'Covers booked',
+        String(r.covers_booked),
+      ],
+      [
+        appt
+          ? `${terminology.client}s arrived, seated, or completed (headcount)`
+          : 'Covers seated',
+        String(r.covers_seated),
+      ],
+      ['By source (created)', ''],
+      ...aggregateBookingSourcesByLabel(r.by_source).map(({ name, value }) => [name, String(value)]),
       ['By status', ''],
       ...Object.entries(r.by_status).map(([k, v]) => [k, String(v)]),
     ]);
-  }, [data]);
+  }, [data, bookingModel, terminology]);
 
   const exportReport2 = useCallback(() => {
     if (!data?.report2_no_show_series?.length) return;
+    const model = (data.booking_model as BookingModel | undefined) ?? bookingModel;
+    const appt = model === 'practitioner_appointment';
+    const headerRow = appt
+      ? ['Date', 'No-shows', 'Attended or no-show (count)', 'Rate %']
+      : ['Date', 'No-shows', 'Denominator', 'Rate %'];
     downloadCsv(`report2-no-show-rate-${data.from}-${data.to}.csv`, [
-      ['Date', 'No-shows', 'Denominator', 'Rate %'],
+      headerRow,
       ...data.report2_no_show_series.map((row) => [row.period_start, String(row.no_show_count), String(row.confirmed_at_time_count), String(row.rate_pct)]),
     ]);
-  }, [data]);
+  }, [data, bookingModel]);
 
   const exportReport3 = useCallback(() => {
     if (!data?.report3_cancellation) return;
     const r = data.report3_cancellation;
+    const model = (data.booking_model as BookingModel | undefined) ?? bookingModel;
+    const appt = model === 'practitioner_appointment';
     downloadCsv(`report3-cancellation-${data.from}-${data.to}.csv`, [
       ['Metric', 'Value'],
-      ['Total bookings created', String(r.total_bookings_created)],
-      ['Cancelled (guest-initiated)', String(r.cancelled_guest_initiated)],
+      [
+        appt ? `${terminology.booking}s created in period` : 'Total bookings created',
+        String(r.total_bookings_created),
+      ],
+      [
+        appt
+          ? `Cancelled (${terminology.client.toLowerCase()}-initiated)`
+          : 'Cancelled (guest-initiated)',
+        String(r.cancelled_guest_initiated),
+      ],
       ['Cancelled (auto)', String(r.cancelled_auto)],
       ['Cancellation rate %', String(r.cancellation_rate_pct)],
     ]);
-  }, [data]);
+  }, [data, bookingModel, terminology]);
 
   const exportReport4 = useCallback(() => {
     if (!data?.report4_deposit) return;
@@ -181,8 +257,17 @@ export function ReportsView() {
   const exportReport6 = useCallback(() => {
     if (!data) return;
     const rows = data.report6_frequent_visitors ?? [];
+    const model = (data.booking_model as BookingModel | undefined) ?? bookingModel;
+    const appt = model === 'practitioner_appointment';
     downloadCsv(`report6-frequent-visitors-${data.from}-${data.to}.csv`, [
-      ['Name', 'Email', 'Phone', 'Lifetime visits', 'Last visit', 'Bookings in period'],
+      [
+        'Name',
+        'Email',
+        'Phone',
+        appt ? 'Lifetime appointments attended' : 'Lifetime visits',
+        appt ? 'Last appointment' : 'Last visit',
+        appt ? `${terminology.booking}s in period` : 'Bookings in period',
+      ],
       ...rows.map((row) => [
         row.name ?? '',
         row.email ?? '',
@@ -192,7 +277,27 @@ export function ReportsView() {
         String(row.bookings_in_period),
       ]),
     ]);
-  }, [data]);
+  }, [data, bookingModel, terminology]);
+
+  const exportReport7 = useCallback(() => {
+    if (!data?.report7_appointment_insights) return;
+    const r = data.report7_appointment_insights;
+    const bookingPlural = `${terminology.booking}s`;
+    downloadCsv(`report7-appointment-insights-${data.from}-${data.to}.csv`, [
+      [terminology.staff, bookingPlural, 'Arrived or completed'],
+      ...r.by_practitioner.map((row) => [
+        row.practitioner_name,
+        String(row.booking_count),
+        String(row.completed_count),
+      ]),
+      [],
+      ['Service', bookingPlural],
+      ...r.by_service.map((row) => [row.service_name, String(row.booking_count)]),
+      [],
+      ['Channel', `${bookingPlural} in period`],
+      ...aggregateBookingSourcesByLabel(r.by_booking_source).map(({ name, value }) => [name, String(value)]),
+    ]);
+  }, [data, terminology]);
 
   if (loading && !data) {
     return (
@@ -219,12 +324,47 @@ export function ReportsView() {
   const r4 = data?.report4_deposit;
   const r5 = data?.report5_table_utilisation ?? [];
   const r6 = data?.report6_frequent_visitors ?? [];
+  const r7 = data?.report7_appointment_insights;
 
-  const sourcePieData = r1?.by_source ? Object.entries(r1.by_source).map(([name, value]) => ({ name, value })) : [];
+  const resolvedBookingModel =
+    (data?.booking_model as BookingModel | undefined) ?? bookingModel;
+  const isAppointment = resolvedBookingModel === 'practitioner_appointment';
+  const client = terminology.client;
+  const clientLower = client.toLowerCase();
+  const bookingWord = terminology.booking;
+  const staffWord = terminology.staff;
+
+  const sourcePieData = r1?.by_source ? aggregateBookingSourcesByLabel(r1.by_source) : [];
   const statusBarData = r1?.by_status ? Object.entries(r1.by_status).map(([source, count]) => ({ source, count })) : [];
   const noShowRateOverall = r2.length > 0
     ? (r2.reduce((a, d) => a + d.no_show_count, 0) / Math.max(1, r2.reduce((a, d) => a + d.confirmed_at_time_count, 0))) * 100
     : 0;
+
+  const pracPerformanceData = (r7?.by_practitioner ?? []).map((row) => ({
+    key: row.practitioner_id,
+    shortName:
+      row.practitioner_name.length > 20
+        ? `${row.practitioner_name.slice(0, 18)}…`
+        : row.practitioner_name,
+    fullName: row.practitioner_name,
+    bookings: row.booking_count,
+    completed: row.completed_count,
+  }));
+
+  const svcVolumeData = (r7?.by_service ?? []).map((row) => ({
+    key: row.service_id,
+    name:
+      row.service_name.length > 28
+        ? `${row.service_name.slice(0, 26)}…`
+        : row.service_name,
+    fullName: row.service_name,
+    count: row.booking_count,
+  }));
+
+  const channelPieData = r7?.by_booking_source ? aggregateBookingSourcesByLabel(r7.by_booking_source) : [];
+
+  const hasAppointmentInsights =
+    pracPerformanceData.length > 0 || svcVolumeData.length > 0 || channelPieData.length > 0;
 
   return (
     <div className="space-y-6">
@@ -274,23 +414,61 @@ export function ReportsView() {
 
       {/* Report 1 */}
       <ReportSection
-        title="Booking Summary"
+        title={isAppointment ? 'Appointment activity' : 'Booking summary'}
         onExport={exportReport1}
         exportBlocked={!r1}
-        exportBlockedMessage="There is no booking summary to export for this period."
-        onExportSuccess={() => notifyExport('success', 'Booking summary CSV download started — check your downloads folder.')}
+        exportBlockedMessage={
+          isAppointment
+            ? 'There is no appointment activity to export for this period.'
+            : 'There is no booking summary to export for this period.'
+        }
+        onExportSuccess={() =>
+          notifyExport(
+            'success',
+            `${isAppointment ? 'Appointment activity' : 'Booking summary'} CSV download started — check your downloads folder.`,
+          )
+        }
         onExportBlocked={(msg) => notifyExport('notice', msg)}
       >
         {r1 && (
           <>
+            {isAppointment && (
+              <p className="mb-4 text-sm text-slate-500">
+                Headcount comes from party size on each {bookingWord.toLowerCase()}: the middle figure is total{' '}
+                <strong>{clientLower} places</strong> booked in range (each person in a group counts once). The
+                right-hand figure is how many of those places reached arrived, seated, or completed status.
+              </p>
+            )}
             <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-3">
-              <MetricCard label="Total bookings" value={String(r1.total_bookings_created)} accent="teal" />
-              <MetricCard label="Covers booked" value={String(r1.covers_booked)} accent="teal" />
-              <MetricCard label="Covers seated" value={String(r1.covers_seated)} accent="emerald" />
+              <MetricCard
+                label={isAppointment ? `${bookingWord}s created` : `Total ${bookingWord.toLowerCase()}s`}
+                value={String(r1.total_bookings_created)}
+                accent="teal"
+              />
+              <MetricCard
+                label={
+                  isAppointment
+                    ? `${client} places booked`
+                    : 'Covers booked'
+                }
+                value={String(r1.covers_booked)}
+                accent="teal"
+              />
+              <MetricCard
+                label={
+                  isAppointment
+                    ? `${client}s seen (arrived / completed)`
+                    : 'Covers seated'
+                }
+                value={String(r1.covers_seated)}
+                accent="emerald"
+              />
             </div>
             <div className="grid gap-6 md:grid-cols-2">
               <div className="h-64">
-                <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">By source</p>
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">
+                  {isAppointment ? 'How they booked (when created)' : 'By source (when created)'}
+                </p>
                 {sourcePieData.length > 0 ? (
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
@@ -304,7 +482,9 @@ export function ReportsView() {
                 ) : <p className="text-sm text-slate-400">No data</p>}
               </div>
               <div className="h-64">
-                <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">By status</p>
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">
+                  {isAppointment ? 'Appointment status (latest)' : 'By status (latest)'}
+                </p>
                 {statusBarData.length > 0 ? (
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={statusBarData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
@@ -322,15 +502,128 @@ export function ReportsView() {
         )}
       </ReportSection>
 
+      {isAppointment && (
+        <ReportSection
+          title="Team, services & channels"
+          onExport={exportReport7}
+          exportBlocked={!hasAppointmentInsights}
+          exportBlockedMessage="There is no appointment breakdown to export for this period."
+          onExportSuccess={() =>
+            notifyExport('success', 'Team & services report CSV download started — check your downloads folder.')
+          }
+          onExportBlocked={(msg) => notifyExport('notice', msg)}
+        >
+          <p className="mb-4 text-sm text-slate-500">
+            Non-cancelled {bookingWord.toLowerCase()}s in this date range: volume by {staffWord.toLowerCase()},
+            by service, and booking source (online, phone, widget, and other channels).
+          </p>
+          {!r7 || (pracPerformanceData.length === 0 && svcVolumeData.length === 0 && channelPieData.length === 0) ? (
+            <p className="text-sm text-slate-400">
+              No appointment data in this range yet. After {bookingWord.toLowerCase()}s are created, you will see
+              performance by {staffWord.toLowerCase()} and service here.
+            </p>
+          ) : (
+            <div className="space-y-8">
+              {pracPerformanceData.length > 0 && (
+                <div>
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">
+                    By {staffWord.toLowerCase()}
+                  </p>
+                  <div className="h-72">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={pracPerformanceData} margin={{ top: 8, right: 8, left: 0, bottom: 8 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                        <XAxis dataKey="shortName" tick={{ fontSize: 11 }} interval={0} angle={-25} textAnchor="end" height={70} />
+                        <YAxis tick={{ fontSize: 12 }} allowDecimals={false} />
+                        <Tooltip formatter={(value: number, name: string) => [value, name]} />
+                        <Legend />
+                        <Bar dataKey="bookings" name={`${bookingWord}s`} fill="#4E6B78" radius={[6, 6, 0, 0]} />
+                        <Bar
+                          dataKey="completed"
+                          name="Arrived or completed"
+                          fill="#059669"
+                          radius={[6, 6, 0, 0]}
+                        />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+              )}
+              {svcVolumeData.length > 0 && (
+                <div>
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">
+                    Top services by volume
+                  </p>
+                  <div className="h-64">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart
+                        layout="vertical"
+                        data={svcVolumeData}
+                        margin={{ top: 8, right: 24, left: 8, bottom: 8 }}
+                      >
+                        <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" horizontal={false} />
+                        <XAxis type="number" tick={{ fontSize: 12 }} allowDecimals={false} />
+                        <YAxis
+                          type="category"
+                          dataKey="name"
+                          width={120}
+                          tick={{ fontSize: 11 }}
+                        />
+                        <Tooltip formatter={(value: number) => [value, `${bookingWord}s`]} />
+                        <Bar dataKey="count" fill="#6366f1" radius={[0, 6, 6, 0]} name={`${bookingWord}s`} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+              )}
+              {channelPieData.length > 0 && (
+                <div>
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">
+                    How {clientLower}s booked (channel mix)
+                  </p>
+                  <div className="h-64">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie
+                          data={channelPieData}
+                          dataKey="value"
+                          nameKey="name"
+                          cx="50%"
+                          cy="50%"
+                          outerRadius={88}
+                          label={(e) => `${e.name}: ${e.value}`}
+                        >
+                          {channelPieData.map((_, i) => (
+                            <Cell key={i} fill={COLORS[i % COLORS.length]} />
+                          ))}
+                        </Pie>
+                        <Tooltip />
+                        <Legend />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </ReportSection>
+      )}
+
       {/* Report 2 */}
       <ReportSection
-        title="No-Show Rate"
+        title="No-show rate"
         onExport={exportReport2}
         exportBlocked={r2.length === 0}
         exportBlockedMessage="There is no no-show rate data to export for this period."
         onExportSuccess={() => notifyExport('success', 'No-show rate CSV download started — check your downloads folder.')}
         onExportBlocked={(msg) => notifyExport('notice', msg)}
       >
+        {isAppointment && (
+          <p className="mb-3 text-sm text-slate-500">
+            {client}s who confirmed an online {bookingWord.toLowerCase()} but did not attend (walk-ins excluded from
+            the denominator). Use this to track reliability and follow-up.
+          </p>
+        )}
         <p className="mb-3 text-sm text-slate-500">
           Overall: <span className="font-semibold text-slate-900">{noShowRateOverall.toFixed(1)}%</span>
         </p>
@@ -351,7 +644,7 @@ export function ReportsView() {
 
       {/* Report 3 */}
       <ReportSection
-        title="Cancellation Rate"
+        title="Cancellation rate"
         onExport={exportReport3}
         exportBlocked={!r3}
         exportBlockedMessage="There is no cancellation data to export for this period."
@@ -359,22 +652,43 @@ export function ReportsView() {
         onExportBlocked={(msg) => notifyExport('notice', msg)}
       >
         {r3 && (
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <MetricCard label="Total created" value={String(r3.total_bookings_created)} />
-            <MetricCard label="Guest-initiated" value={String(r3.cancelled_guest_initiated)} />
+          <>
+            {isAppointment && (
+              <p className="mb-3 text-sm text-slate-500">
+                Auto (unpaid) counts {bookingWord.toLowerCase()}s that moved from Pending to Cancelled — for example
+                when a required deposit was not completed in time.
+              </p>
+            )}
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <MetricCard
+              label={isAppointment ? `${bookingWord}s created` : 'Total created'}
+              value={String(r3.total_bookings_created)}
+            />
+            <MetricCard
+              label={isAppointment ? `${client}-initiated` : 'Guest-initiated'}
+              value={String(r3.cancelled_guest_initiated)}
+            />
             <MetricCard label="Auto (unpaid)" value={String(r3.cancelled_auto)} />
             <MetricCard label="Cancellation rate" value={`${r3.cancellation_rate_pct}%`} accent={r3.cancellation_rate_pct > 10 ? 'red' : 'emerald'} />
-          </div>
+            </div>
+          </>
         )}
       </ReportSection>
 
       {/* Report 4 */}
       <ReportSection
-        title="Deposit Summary"
+        title={isAppointment ? 'Payments & deposits' : 'Deposit summary'}
         onExport={exportReport4}
         exportBlocked={!r4}
-        exportBlockedMessage="There is no deposit summary to export for this period."
-        onExportSuccess={() => notifyExport('success', 'Deposit summary CSV download started — check your downloads folder.')}
+        exportBlockedMessage={
+          isAppointment ? 'There is no payment summary to export for this period.' : 'There is no deposit summary to export for this period.'
+        }
+        onExportSuccess={() =>
+          notifyExport(
+            'success',
+            `${isAppointment ? 'Payment' : 'Deposit'} summary CSV download started — check your downloads folder.`,
+          )
+        }
         onExportBlocked={(msg) => notifyExport('notice', msg)}
       >
         {r4 && (
@@ -387,7 +701,7 @@ export function ReportsView() {
       </ReportSection>
 
       <ReportSection
-        title="Identifiable frequent guests"
+        title={isAppointment ? `Returning ${clientLower}s` : 'Identifiable frequent guests'}
         onExport={exportReport6}
         exportBlocked={!data}
         exportBlockedMessage="Reports are still loading or unavailable."
@@ -395,15 +709,27 @@ export function ReportsView() {
           notifyExport(
             'success',
             r6.length > 0
-              ? 'Frequent guests CSV download started — check your downloads folder.'
-              : 'CSV with headers only was downloaded (no guests matched this period).',
+              ? `${isAppointment ? `Returning ${clientLower}s` : 'Frequent guests'} CSV download started — check your downloads folder.`
+              : 'CSV with headers only was downloaded (no rows matched this period).',
           )
         }
         onExportBlocked={(msg) => notifyExport('notice', msg)}
       >
         <p className="mb-4 text-sm text-slate-500">
-          Guests with an email or phone on file who have been seated at least once before. Walk-ins without contact details are not listed.
-          Ranked by lifetime visits (each time a booking is marked seated). Only guests with at least one non-cancelled booking in the selected date range appear here.
+          {isAppointment ? (
+            <>
+              {client}s with email or phone who have completed or been seated at least once. Walk-ins without
+              contact details are excluded. Ranked by how many times they have attended. Only {clientLower}s with at
+              least one non-cancelled {bookingWord.toLowerCase()} in the selected range are listed — useful for
+              retention and follow-up.
+            </>
+          ) : (
+            <>
+              Guests with an email or phone on file who have been seated at least once before. Walk-ins without
+              contact details are not listed. Ranked by lifetime visits (each time a booking is marked seated).
+              Only guests with at least one non-cancelled booking in the selected date range appear here.
+            </>
+          )}
         </p>
         {r6.length > 0 ? (
           <div className="overflow-x-auto rounded-lg border border-slate-100">
@@ -413,9 +739,15 @@ export function ReportsView() {
                   <th className="px-3 py-2 text-left text-xs font-medium text-slate-500">Name</th>
                   <th className="px-3 py-2 text-left text-xs font-medium text-slate-500">Email</th>
                   <th className="px-3 py-2 text-left text-xs font-medium text-slate-500">Phone</th>
-                  <th className="px-3 py-2 text-right text-xs font-medium text-slate-500">Lifetime visits</th>
-                  <th className="px-3 py-2 text-left text-xs font-medium text-slate-500">Last visit</th>
-                  <th className="px-3 py-2 text-right text-xs font-medium text-slate-500">Bookings (period)</th>
+                  <th className="px-3 py-2 text-right text-xs font-medium text-slate-500">
+                    {isAppointment ? 'Lifetime appointments' : 'Lifetime visits'}
+                  </th>
+                  <th className="px-3 py-2 text-left text-xs font-medium text-slate-500">
+                    {isAppointment ? 'Last appointment' : 'Last visit'}
+                  </th>
+                  <th className="px-3 py-2 text-right text-xs font-medium text-slate-500">
+                    {isAppointment ? `${bookingWord}s (period)` : 'Bookings (period)'}
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -433,13 +765,17 @@ export function ReportsView() {
             </table>
           </div>
         ) : (
-          <p className="text-sm text-slate-400">No identifiable guests match this period. Try a wider date range or add email/phone to guest profiles.</p>
+          <p className="text-sm text-slate-400">
+            {isAppointment
+              ? `No identifiable ${clientLower}s match this period. Try a wider date range or capture email/phone on ${bookingWord.toLowerCase()}s.`
+              : 'No identifiable guests match this period. Try a wider date range or add email/phone to guest profiles.'}
+          </p>
         )}
       </ReportSection>
 
-      {data?.table_management_enabled && (
+      {!isAppointment && data?.table_management_enabled && (
         <ReportSection
-          title="Table Utilisation"
+          title="Table utilisation"
           onExport={exportReport5}
           exportBlocked={r5.length === 0}
           exportBlockedMessage="There is no table utilisation data to export for this period."
@@ -478,7 +814,12 @@ export function ReportsView() {
         </ReportSection>
       )}
 
-      <DataExportSection onExportFlash={notifyExport} />
+      <DataExportSection
+        onExportFlash={notifyExport}
+        isAppointment={isAppointment}
+        clientLabel={client}
+        bookingWord={bookingWord}
+      />
     </div>
   );
 }

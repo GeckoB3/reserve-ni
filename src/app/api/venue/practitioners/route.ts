@@ -5,9 +5,14 @@ import { getSupabaseAdminClient } from '@/lib/supabase';
 import { checkCalendarLimit } from '@/lib/tier-enforcement';
 import { z } from 'zod';
 
+const optionalEmail = z.preprocess(
+  (val) => (val === '' || val === null || val === undefined ? undefined : val),
+  z.string().email().optional(),
+);
+
 const practitionerSchema = z.object({
   name: z.string().min(1).max(200),
-  email: z.string().email().optional().or(z.literal('')),
+  email: optionalEmail,
   phone: z.string().max(24).optional().or(z.literal('')),
   working_hours: z.record(z.string(), z.array(z.object({ start: z.string(), end: z.string() }))).optional(),
   break_times: z.array(z.object({ start: z.string(), end: z.string() })).optional(),

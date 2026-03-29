@@ -160,18 +160,40 @@ export default function OnboardingPage() {
           }
         }
 
-        // Pre-fill practitioners/resources based on calendar count
-        if (v.calendar_count && v.calendar_count > 1) {
-          if (v.booking_model === 'practitioner_appointment') {
-            setPractitioners(
-              Array.from({ length: v.calendar_count }, () => ({ name: '', email: '' }))
-            );
+        // Model B: one row per paid calendar slot; merge existing practitioners (retry / refresh after partial save).
+        if (v.booking_model === 'practitioner_appointment') {
+          const slots = Math.max(1, v.calendar_count ?? 1);
+          try {
+            const prRes = await fetch('/api/venue/practitioners');
+            if (prRes.ok) {
+              const body = (await prRes.json()) as {
+                practitioners?: Array<{ name: string; email: string | null; sort_order: number }>;
+              };
+              const list = body.practitioners ?? [];
+              const sorted = [...list].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+              setPractitioners(
+                Array.from({ length: slots }, (_, i) =>
+                  sorted[i]
+                    ? {
+                        name: sorted[i].name ?? '',
+                        email: sorted[i].email?.trim() ? sorted[i].email : '',
+                      }
+                    : { name: '', email: '' },
+                ),
+              );
+            } else {
+              setPractitioners(Array.from({ length: slots }, () => ({ name: '', email: '' })));
+            }
+          } catch {
+            setPractitioners(Array.from({ length: slots }, () => ({ name: '', email: '' })));
           }
-          if (v.booking_model === 'resource_booking') {
-            setResources(
-              Array.from({ length: v.calendar_count }, () => ({ name: '', pricePerSlot: '0.00' }))
-            );
-          }
+        }
+
+        // Model E: pre-fill resources when plan includes more than one slot
+        if (v.calendar_count && v.calendar_count > 1 && v.booking_model === 'resource_booking') {
+          setResources(
+            Array.from({ length: v.calendar_count }, () => ({ name: '', pricePerSlot: '0.00' }))
+          );
         }
       } catch {
         setError('Failed to load venue data.');
@@ -279,28 +301,85 @@ export default function OnboardingPage() {
         setStep((s) => s + 1);
         return;
       }
-      const validPractitioners = practitioners.filter((p) => p.name.trim());
-      if (validPractitioners.length === 0) {
-        setError(`Please add at least one ${terms.staff.toLowerCase()}.`);
+      const slots = Math.max(1, venue?.calendar_count ?? 1);
+      if (practitioners.length !== slots) {
+        setError('Team size does not match your plan. Refresh the page or continue from Settings if you changed your subscription.');
+        return;
+      }
+      const unnamed = practitioners.find((p) => !p.name.trim());
+      if (unnamed) {
+        setError(
+          `Enter a name for each ${terms.staff.toLowerCase()} — your plan includes ${slots} calendar slot${slots === 1 ? '' : 's'}.`,
+        );
         return;
       }
       setSaving(true);
       try {
-        for (const p of validPractitioners) {
-          const res = await fetch('/api/venue/practitioners', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              name: p.name.trim(),
-              ...(p.email.trim() ? { email: p.email.trim() } : {}),
-            }),
-          });
-          if (!res.ok) throw new Error(`Failed to create ${terms.staff.toLowerCase()}`);
+        const listRes = await fetch('/api/venue/practitioners');
+        if (!listRes.ok) {
+          const errBody = (await listRes.json().catch(() => ({}))) as { error?: string };
+          throw new Error(errBody.error ?? 'Could not load your team. Please refresh and try again.');
+        }
+        const listBody = (await listRes.json()) as {
+          practitioners?: Array<{ id: string; sort_order: number }>;
+        };
+        const sortedExisting = [...(listBody.practitioners ?? [])].sort(
+          (a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0),
+        );
+
+        for (let i = 0; i < practitioners.length; i++) {
+          const p = practitioners[i];
+          const existing = sortedExisting[i];
+          if (existing?.id) {
+            const res = await fetch('/api/venue/practitioners', {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                id: existing.id,
+                name: p.name.trim(),
+                ...(p.email.trim() ? { email: p.email.trim() } : {}),
+              }),
+            });
+            if (!res.ok) {
+              const errBody = (await res.json().catch(() => ({}))) as { error?: string; details?: unknown };
+              throw new Error(
+                typeof errBody.error === 'string'
+                  ? errBody.error
+                  : `Could not update ${terms.staff.toLowerCase()} ${i + 1}.`,
+              );
+            }
+          } else {
+            const res = await fetch('/api/venue/practitioners', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                name: p.name.trim(),
+                ...(p.email.trim() ? { email: p.email.trim() } : {}),
+              }),
+            });
+            if (!res.ok) {
+              const errBody = (await res.json().catch(() => ({}))) as {
+                error?: string;
+                upgrade_required?: boolean;
+                limit?: number;
+              };
+              if (errBody.upgrade_required) {
+                throw new Error(
+                  `Your plan includes ${errBody.limit ?? slots} calendar slot${(errBody.limit ?? slots) === 1 ? '' : 's'}. You already have that many team members saved — edit the rows above, or change your plan under Settings → Plan.`,
+                );
+              }
+              throw new Error(
+                typeof errBody.error === 'string'
+                  ? errBody.error
+                  : `Could not add ${terms.staff.toLowerCase()} ${i + 1}.`,
+              );
+            }
+          }
         }
         await saveProgress(step + 1);
         setMaxCompletedStep((prev) => Math.max(prev, step + 1));
-      } catch {
-        setError('Failed to save team. Please try again.');
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Failed to save team. Please try again.');
         setSaving(false);
         return;
       }
@@ -623,13 +702,23 @@ export default function OnboardingPage() {
         )}
 
         {/* Model B: Team */}
-        {currentStepKey === 'team' && (
+        {currentStepKey === 'team' && venue && (
           <div>
             <h2 className="mb-1 text-lg font-bold text-slate-900">
-              Add your {terms.staff.toLowerCase()}s
+              Your {terms.staff.toLowerCase()} ({Math.max(1, venue.calendar_count ?? 1)} calendar slot
+              {Math.max(1, venue.calendar_count ?? 1) === 1 ? '' : 's'})
             </h2>
             <p className="mb-6 text-sm text-slate-500">
-              Each {terms.staff.toLowerCase()} gets their own bookable calendar. After onboarding, set{' '}
+              Each person below gets their own bookable calendar — this matches the number of slots on your current
+              plan. After onboarding, change calendar count under{' '}
+              <Link href="/dashboard/settings?tab=plan" className="font-medium text-brand-600 underline hover:text-brand-700">
+                Settings → Plan
+              </Link>{' '}
+              and manage {terms.staff.toLowerCase()} under{' '}
+              <Link href="/dashboard/settings?tab=staff" className="font-medium text-brand-600 underline hover:text-brand-700">
+                Settings → Staff
+              </Link>
+              . Set{' '}
               <strong>working hours, breaks, and days off</strong> under{' '}
               <Link href="/dashboard/availability" className="font-medium text-brand-600 underline hover:text-brand-700">
                 Availability
@@ -638,7 +727,7 @@ export default function OnboardingPage() {
             </p>
             <div className="space-y-3">
               {practitioners.map((p, i) => (
-                <div key={i} className="flex gap-2">
+                <div key={i} className="flex flex-col gap-2 sm:flex-row sm:gap-2">
                   <input
                     type="text"
                     value={p.name}
@@ -647,7 +736,7 @@ export default function OnboardingPage() {
                       updated[i] = { ...p, name: e.target.value };
                       setPractitioners(updated);
                     }}
-                    placeholder={`${terms.staff} name`}
+                    placeholder={`${terms.staff} name (required)`}
                     className="flex-1 rounded-xl border border-slate-200 px-4 py-2.5 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
                   />
                   <input
@@ -661,24 +750,8 @@ export default function OnboardingPage() {
                     placeholder="Email (optional)"
                     className="flex-1 rounded-xl border border-slate-200 px-4 py-2.5 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
                   />
-                  {practitioners.length > 1 && (
-                    <button
-                      type="button"
-                      onClick={() => setPractitioners(practitioners.filter((_, j) => j !== i))}
-                      className="text-sm text-slate-400 hover:text-red-500"
-                    >
-                      Remove
-                    </button>
-                  )}
                 </div>
               ))}
-              <button
-                type="button"
-                onClick={() => setPractitioners([...practitioners, { name: '', email: '' }])}
-                className="w-full rounded-xl border-2 border-dashed border-slate-200 py-3 text-sm text-slate-500 hover:border-brand-300 hover:text-brand-600"
-              >
-                + Add another {terms.staff.toLowerCase()}
-              </button>
             </div>
           </div>
         )}

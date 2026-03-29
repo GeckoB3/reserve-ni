@@ -5,9 +5,18 @@ import { useState } from 'react';
 export interface DataExportSectionProps {
   /** Shown after successful download or when export is blocked (e.g. API error). */
   onExportFlash?: (variant: 'success' | 'notice', message: string) => void;
+  /** Model B: tailor copy to appointments / clients. */
+  isAppointment?: boolean;
+  clientLabel?: string;
+  bookingWord?: string;
 }
 
-export function DataExportSection({ onExportFlash }: DataExportSectionProps) {
+export function DataExportSection({
+  onExportFlash,
+  isAppointment = false,
+  clientLabel = 'Guest',
+  bookingWord = 'Booking',
+}: DataExportSectionProps) {
   const [downloading, setDownloading] = useState<'bookings' | 'guests' | null>(null);
 
   async function handleDownload(type: 'bookings' | 'guests') {
@@ -33,7 +42,12 @@ export function DataExportSection({ onExportFlash }: DataExportSectionProps) {
       a.click();
       a.remove();
       URL.revokeObjectURL(url);
-      const label = type === 'bookings' ? 'Bookings' : 'Guest list';
+      const label =
+        type === 'bookings'
+          ? `${bookingWord}s`
+          : isAppointment
+            ? `${clientLabel} list`
+            : 'Guest list';
       onExportFlash?.(
         'success',
         `${label} CSV download started — check your downloads folder.`,
@@ -52,8 +66,18 @@ export function DataExportSection({ onExportFlash }: DataExportSectionProps) {
       <div className="mb-4">
         <h2 className="text-base font-semibold text-slate-900">Export your data</h2>
         <p className="mt-1 text-sm text-slate-500">
-          Download a full CSV export of your bookings or guest records. Exports include all records for your venue
-          (not limited to the date range above). You are entitled to your data at any time.
+          {isAppointment ? (
+            <>
+              Download a full CSV of all {bookingWord.toLowerCase()}s or your {clientLabel.toLowerCase()} records.
+              Exports cover your whole venue (not limited to the date range above). You are entitled to your data at
+              any time.
+            </>
+          ) : (
+            <>
+              Download a full CSV export of your bookings or guest records. Exports include all records for your
+              venue (not limited to the date range above). You are entitled to your data at any time.
+            </>
+          )}
         </p>
       </div>
 
@@ -69,7 +93,7 @@ export function DataExportSection({ onExportFlash }: DataExportSectionProps) {
           ) : (
             <DownloadIcon className="h-4 w-4 text-slate-400" />
           )}
-          Export all bookings
+          Export all {bookingWord.toLowerCase()}s
         </button>
 
         <button
@@ -83,7 +107,7 @@ export function DataExportSection({ onExportFlash }: DataExportSectionProps) {
           ) : (
             <DownloadIcon className="h-4 w-4 text-slate-400" />
           )}
-          Export guest list
+          Export {isAppointment ? `${clientLabel.toLowerCase()} list` : 'guest list'}
         </button>
       </div>
 

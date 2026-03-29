@@ -1,10 +1,123 @@
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff } from '@/lib/venue-auth';
+import type { BookingModel } from '@/types/booking-models';
+
+export interface AppointmentInsightsRow {
+  practitioner_id: string;
+  practitioner_name: string;
+  booking_count: number;
+  completed_count: number;
+}
+
+export interface AppointmentServiceInsightsRow {
+  service_id: string;
+  service_name: string;
+  booking_count: number;
+}
+
+async function buildAppointmentInsights(
+  supabase: SupabaseClient,
+  venueId: string,
+  from: string,
+  to: string,
+): Promise<{
+  by_practitioner: AppointmentInsightsRow[];
+  by_service: AppointmentServiceInsightsRow[];
+  by_booking_source: Record<string, number>;
+}> {
+  const empty = {
+    by_practitioner: [] as AppointmentInsightsRow[],
+    by_service: [] as AppointmentServiceInsightsRow[],
+    by_booking_source: {} as Record<string, number>,
+  };
+
+  const { data: rows, error } = await supabase
+    .from('bookings')
+    .select('id, status, source, practitioner_id, appointment_service_id')
+    .eq('venue_id', venueId)
+    .gte('booking_date', from)
+    .lte('booking_date', to)
+    .neq('status', 'Cancelled');
+
+  if (error) {
+    console.error('[reports] appointment insights bookings query failed:', error);
+    return empty;
+  }
+
+  if (!rows?.length) return empty;
+
+  const pracIds = [...new Set(rows.map((r) => r.practitioner_id).filter(Boolean))] as string[];
+  const svcIds = [...new Set(rows.map((r) => r.appointment_service_id).filter(Boolean))] as string[];
+
+  const [pracRes, svcRes] = await Promise.all([
+    pracIds.length
+      ? supabase.from('practitioners').select('id, name').in('id', pracIds)
+      : Promise.resolve({ data: [] as { id: string; name: string }[], error: null }),
+    svcIds.length
+      ? supabase.from('appointment_services').select('id, name').in('id', svcIds)
+      : Promise.resolve({ data: [] as { id: string; name: string }[], error: null }),
+  ]);
+
+  if (pracRes.error) console.error('[reports] practitioners lookup:', pracRes.error);
+  if (svcRes.error) console.error('[reports] services lookup:', svcRes.error);
+
+  const pracName = new Map((pracRes.data ?? []).map((p) => [p.id, p.name]));
+  const svcName = new Map((svcRes.data ?? []).map((s) => [s.id, s.name]));
+
+  const byPrac = new Map<string, { name: string; booking_count: number; completed_count: number }>();
+  const bySvc = new Map<string, { name: string; booking_count: number }>();
+  const bySource = new Map<string, number>();
+
+  const UNASSIGNED = '__unassigned__';
+  const NO_SERVICE = '__no_service__';
+
+  for (const r of rows) {
+    const src = String(r.source ?? 'unknown');
+    bySource.set(src, (bySource.get(src) ?? 0) + 1);
+
+    const pid = r.practitioner_id;
+    const pkey = pid ?? UNASSIGNED;
+    const pname = pid ? (pracName.get(pid) ?? 'Unknown') : 'Unassigned';
+    const pcur = byPrac.get(pkey) ?? { name: pname, booking_count: 0, completed_count: 0 };
+    pcur.booking_count += 1;
+    if (r.status === 'Seated' || r.status === 'Completed') pcur.completed_count += 1;
+    byPrac.set(pkey, pcur);
+
+    const sid = r.appointment_service_id;
+    const skey = sid ?? NO_SERVICE;
+    const sname = sid ? (svcName.get(sid) ?? 'Unknown') : 'No service linked';
+    const scur = bySvc.get(skey) ?? { name: sname, booking_count: 0 };
+    scur.booking_count += 1;
+    bySvc.set(skey, scur);
+  }
+
+  return {
+    by_practitioner: [...byPrac.entries()]
+      .map(([practitioner_id, v]) => ({
+        practitioner_id,
+        practitioner_name: v.name,
+        booking_count: v.booking_count,
+        completed_count: v.completed_count,
+      }))
+      .sort((a, b) => b.booking_count - a.booking_count),
+    by_service: [...bySvc.entries()]
+      .map(([service_id, v]) => ({
+        service_id,
+        service_name: v.name,
+        booking_count: v.booking_count,
+      }))
+      .sort((a, b) => b.booking_count - a.booking_count),
+    by_booking_source: Object.fromEntries(
+      [...bySource.entries()].sort((a, b) => b[1] - a[1]),
+    ),
+  };
+}
 
 /**
  * GET /api/venue/reports?from=YYYY-MM-DD&to=YYYY-MM-DD
- * Returns all four report payloads for the authenticated venue (events as source of truth).
+ * Returns report payloads for the authenticated venue (events as source of truth where applicable).
  */
 export async function GET(request: NextRequest) {
   try {
@@ -46,7 +159,11 @@ export async function GET(request: NextRequest) {
         p_end: to,
         p_limit: 100,
       }),
-      supabase.from('venues').select('table_management_enabled').eq('id', staff.venue_id).single(),
+      staff.db
+        .from('venues')
+        .select('table_management_enabled, booking_model')
+        .eq('id', staff.venue_id)
+        .single(),
     ]);
 
     if (e1 || e2 || e3 || e4 || e5) {
@@ -54,12 +171,14 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to load reports' }, { status: 500 });
     }
 
+    const bookingModel = (venueFlags?.booking_model as BookingModel | undefined) ?? 'table_reservation';
+
     const summaryObj = Array.isArray(summary) ? summary[0] : summary;
     const cancellationObj = Array.isArray(cancellation) ? cancellation[0] : cancellation;
     const depositObj = Array.isArray(deposit) ? deposit[0] : deposit;
     let tableUtilisation: Array<{ table_id: string; table_name: string; utilisation_pct: number; occupied_hours: number; available_hours: number }> = [];
 
-    if (venueFlags?.table_management_enabled) {
+    if (venueFlags?.table_management_enabled && bookingModel !== 'practitioner_appointment') {
       const [{ data: tables }, { data: assignments }] = await Promise.all([
         supabase.from('venue_tables').select('id, name').eq('venue_id', staff.venue_id).eq('is_active', true),
         supabase
@@ -103,9 +222,15 @@ export async function GET(request: NextRequest) {
       });
     }
 
+    let report7_appointment_insights: Awaited<ReturnType<typeof buildAppointmentInsights>> | null = null;
+    if (bookingModel === 'practitioner_appointment') {
+      report7_appointment_insights = await buildAppointmentInsights(supabase, staff.venue_id, from, to);
+    }
+
     return NextResponse.json({
       from,
       to,
+      booking_model: bookingModel,
       table_management_enabled: venueFlags?.table_management_enabled ?? false,
       report1_booking_summary: summaryObj ?? null,
       report2_no_show_series: noShowSeries ?? [],
@@ -113,6 +238,7 @@ export async function GET(request: NextRequest) {
       report4_deposit: depositObj ?? null,
       report5_table_utilisation: tableUtilisation,
       report6_frequent_visitors: frequentVisitors ?? [],
+      report7_appointment_insights: report7_appointment_insights,
     });
   } catch (err) {
     console.error('GET /api/venue/reports failed:', err);

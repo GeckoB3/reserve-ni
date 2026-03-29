@@ -103,6 +103,31 @@ function sourceLabelForCsv(source: string): string {
   return source;
 }
 
+function filterRegistryAppointments(
+  list: RegistryAppointment[],
+  practitionerFilter: 'all' | string,
+  serviceFilter: 'all' | string,
+  searchQuery: string,
+): RegistryAppointment[] {
+  let result = list;
+  if (practitionerFilter !== 'all') {
+    result = result.filter((b) => b.practitioner_id === practitionerFilter);
+  }
+  if (serviceFilter !== 'all') {
+    result = result.filter((b) => b.appointment_service_id === serviceFilter);
+  }
+  const q = searchQuery.trim().toLowerCase();
+  if (!q) return result;
+  return result.filter(
+    (b) =>
+      b.guest_name.toLowerCase().includes(q) ||
+      (b.guest_phone ?? '').toLowerCase().includes(q) ||
+      (b.guest_email ?? '').toLowerCase().includes(q) ||
+      b.id.toLowerCase().includes(q) ||
+      b.id.replace(/-/g, '').toLowerCase().includes(q.replace(/-/g, '')),
+  );
+}
+
 function registryToPrefetch(b: RegistryAppointment): AppointmentDetailPrefetch {
   return {
     id: b.id,
@@ -147,6 +172,8 @@ export function AppointmentBookingsDashboard({
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [searchQuery, setSearchQuery] = useState('');
   const [bookings, setBookings] = useState<RegistryAppointment[]>([]);
+  /** All statuses in range — used for summary tiles (list may be status-filtered). */
+  const [allStatusBookings, setAllStatusBookings] = useState<RegistryAppointment[]>([]);
   const [practitioners, setPractitioners] = useState<Practitioner[]>([]);
   const [services, setServices] = useState<AppointmentService[]>([]);
   const [practitionerServiceLinks, setPractitionerServiceLinks] = useState<PractitionerServiceLink[]>([]);
@@ -238,9 +265,31 @@ export function AppointmentBookingsDashboard({
     [from, to, viewMode, selectedStatusApi, invalidCustomRange],
   );
 
+
+  const fetchBookingsForStats = useCallback(async () => {
+    if (invalidCustomRange) {
+      setAllStatusBookings([]);
+      return;
+    }
+    try {
+      const params = new URLSearchParams(viewMode === 'day' ? { date: from } : { from, to });
+      const res = await fetch(`/api/venue/bookings/list?${params}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      const raw = (data.bookings ?? []) as RegistryAppointment[];
+      setAllStatusBookings(raw.filter((b) => b.practitioner_id));
+    } catch {
+      setAllStatusBookings([]);
+    }
+  }, [from, to, viewMode, invalidCustomRange]);
+
   useEffect(() => {
     void fetchBookings();
   }, [fetchBookings]);
+
+  useEffect(() => {
+    void fetchBookingsForStats();
+  }, [fetchBookingsForStats]);
 
   useEffect(() => {
     let cancelled = false;
@@ -287,6 +336,7 @@ export function AppointmentBookingsDashboard({
         { event: '*', schema: 'public', table: 'bookings', filter: `venue_id=eq.${venueId}` },
         () => {
           void fetchBookings({ silent: true });
+          void fetchBookingsForStats();
         },
       )
       .subscribe((status) => {
@@ -295,27 +345,18 @@ export function AppointmentBookingsDashboard({
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [venueId, fetchBookings]);
+  }, [venueId, fetchBookings, fetchBookingsForStats]);
 
-  const filteredBookings = useMemo(() => {
-    let list = bookings;
-    if (practitionerFilter !== 'all') {
-      list = list.filter((b) => b.practitioner_id === practitionerFilter);
-    }
-    if (serviceFilter !== 'all') {
-      list = list.filter((b) => b.appointment_service_id === serviceFilter);
-    }
-    const q = searchQuery.trim().toLowerCase();
-    if (!q) return list;
-    return list.filter(
-      (b) =>
-        b.guest_name.toLowerCase().includes(q) ||
-        (b.guest_phone ?? '').toLowerCase().includes(q) ||
-        (b.guest_email ?? '').toLowerCase().includes(q) ||
-        b.id.toLowerCase().includes(q) ||
-        b.id.replace(/-/g, '').toLowerCase().includes(q.replace(/-/g, '')),
-    );
-  }, [bookings, practitionerFilter, serviceFilter, searchQuery]);
+  const filteredBookings = useMemo(
+    () => filterRegistryAppointments(bookings, practitionerFilter, serviceFilter, searchQuery),
+    [bookings, practitionerFilter, serviceFilter, searchQuery],
+  );
+
+  const statsBookings = useMemo(
+    () =>
+      filterRegistryAppointments(allStatusBookings, practitionerFilter, serviceFilter, searchQuery),
+    [allStatusBookings, practitionerFilter, serviceFilter, searchQuery],
+  );
 
   const sortedBookings = useMemo(() => {
     const dir = sortDir === 'asc' ? 1 : -1;
@@ -386,6 +427,7 @@ export function AppointmentBookingsDashboard({
         return;
       }
       void fetchBookings({ silent: true });
+      void fetchBookingsForStats();
     } catch {
       addToast('Could not update status', 'error');
       setBookings((rows) => rows.map((r) => (r.id === bookingId ? prev : r)));
@@ -404,12 +446,12 @@ export function AppointmentBookingsDashboard({
   }, [sortedBookings, viewMode]);
 
   const stats = useMemo(() => {
-    const total = filteredBookings.length;
-    const pending = filteredBookings.filter((b) => b.status === 'Pending').length;
-    const active = filteredBookings.filter((b) => b.status === 'Confirmed' || b.status === 'Seated').length;
-    const completed = filteredBookings.filter((b) => b.status === 'Completed').length;
-    return { total, pending, active, completed };
-  }, [filteredBookings]);
+    const total = statsBookings.length;
+    const confirmed = statsBookings.filter((b) => b.status === 'Confirmed').length;
+    const completed = statsBookings.filter((b) => b.status === 'Completed').length;
+    const noShows = statsBookings.filter((b) => b.status === 'No-Show').length;
+    return { total, confirmed, completed, noShows };
+  }, [statsBookings]);
 
   const detailPrefetch = useMemo((): AppointmentDetailPrefetch | null => {
     if (!detailBookingId) return null;
@@ -771,10 +813,10 @@ export function AppointmentBookingsDashboard({
       )}
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <DashboardStatCard label="In range" value={stats.total} color="blue" />
-        <DashboardStatCard label="Pending" value={stats.pending} color="amber" />
-        <DashboardStatCard label="Confirmed / In progress" value={stats.active} color="emerald" />
+        <DashboardStatCard label="Appointments" value={stats.total} color="blue" />
+        <DashboardStatCard label="Confirmed" value={stats.confirmed} color="emerald" />
         <DashboardStatCard label="Completed" value={stats.completed} color="violet" />
+        <DashboardStatCard label="No-shows" value={stats.noShows} color="slate" />
       </div>
 
       <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -989,6 +1031,7 @@ export function AppointmentBookingsDashboard({
         onCreated={() => {
           setNewBookingOpen(false);
           void fetchBookings({ silent: true });
+          void fetchBookingsForStats();
         }}
         venueId={venueId}
         currency={currency}
@@ -1000,6 +1043,7 @@ export function AppointmentBookingsDashboard({
         onCreated={() => {
           setWalkInOpen(false);
           void fetchBookings({ silent: true });
+          void fetchBookingsForStats();
         }}
         currency={currency}
       />
@@ -1008,7 +1052,10 @@ export function AppointmentBookingsDashboard({
         open={detailBookingId !== null}
         bookingId={detailBookingId}
         onClose={() => setDetailBookingId(null)}
-        onUpdated={() => void fetchBookings({ silent: true })}
+        onUpdated={() => {
+          void fetchBookings({ silent: true });
+          void fetchBookingsForStats();
+        }}
         currency={currency}
         practitioners={activePractitioners}
         prefetchedBooking={detailPrefetch}
