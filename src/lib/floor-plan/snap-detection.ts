@@ -170,7 +170,6 @@ export function buildSnapGroup(
   allTables: SnapTableBounds[],
 ): SnapGroupUpdate {
   const target = allTables.find((t) => t.id === snapResult.targetTableId)!;
-  const dragged = allTables.find((t) => t.id === draggedId)!;
 
   // Always prefer the target's group. If dragged is switching groups, it leaves
   // its old group (the caller handles cleanup of the old group separately).

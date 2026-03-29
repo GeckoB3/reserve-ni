@@ -192,7 +192,7 @@ export function TimelineGrid({
   onResizeBooking,
   onAssign,
   onUnassign,
-  onRefresh,
+  onRefresh: _onRefresh,
   onDragValidation,
   onError,
   onBookingClick,

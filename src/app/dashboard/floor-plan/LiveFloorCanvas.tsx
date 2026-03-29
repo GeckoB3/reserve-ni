@@ -207,7 +207,7 @@ export default function LiveFloorCanvas({
     return lines;
   }, [combinedTableGroups, tables, dimensions]);
 
-  const handleTableMouseDown = useCallback((tableId: string, e: KonvaEventObject<MouseEvent | TouchEvent>) => {
+  const handleTableMouseDown = useCallback((tableId: string, _e: KonvaEventObject<MouseEvent | TouchEvent>) => {
     const table = tables.find((t) => t.id === tableId);
     if (!table?.booking) return;
 
@@ -453,8 +453,6 @@ export default function LiveFloorCanvas({
             const hidden = blockedToHiddenSet(blocked);
 
             const fb = getTableDimensions(table.max_covers, table.shape);
-            const x = table.position_x != null ? (table.position_x / 100) * dimensions.width : dimensions.width / 2;
-            const y = table.position_y != null ? (table.position_y / 100) * dimensions.height : dimensions.height / 2;
             const w = ((table.width ?? fb.width) / 100) * dimensions.width;
             const h = ((table.height ?? fb.height) / 100) * dimensions.height;
 
@@ -466,6 +464,7 @@ export default function LiveFloorCanvas({
                 isSelected={isSelected || (isValidTarget ?? false)}
                 isEditorMode={false}
                 statusColour={statusColor}
+                groupOpacity={opacity}
                 booking={isDragging && isSource ? null : table.booking}
                 canvasWidth={dimensions.width}
                 canvasHeight={dimensions.height}

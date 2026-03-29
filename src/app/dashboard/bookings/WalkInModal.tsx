@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { NumericInput } from '@/components/ui/NumericInput';
 import { PhoneWithCountryField } from '@/components/phone/PhoneWithCountryField';
 import { normalizeToE164 } from '@/lib/phone/e164';
+import { defaultPhoneCountryForVenueCurrency } from '@/lib/phone/default-country';
+import type { CountryCode } from 'libphonenumber-js';
 import type { TableForSelector, OccupancyMap } from '@/components/table-tracking/TableSelector';
 import MiniFloorPlanPicker, { type MiniFloorTableRow } from '@/components/floor-plan/MiniFloorPlanPicker';
 
@@ -24,15 +26,21 @@ export function WalkInModal({
   advancedMode = false,
   initialDate,
   initialTime,
+  venueCurrency,
   onClose,
   onCreated,
 }: {
   advancedMode?: boolean;
   initialDate?: string;
   initialTime?: string;
+  venueCurrency?: string;
   onClose: () => void;
   onCreated: () => void;
 }) {
+  const phoneDefaultCountry: CountryCode = useMemo(
+    () => defaultPhoneCountryForVenueCurrency(venueCurrency),
+    [venueCurrency],
+  );
   const [partySize, setPartySize] = useState(2);
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
@@ -161,7 +169,7 @@ export function WalkInModal({
     setError(null);
     setLoading(true);
     try {
-      const walkinPhone = normalizeToE164(phone, 'GB');
+      const walkinPhone = normalizeToE164(phone, phoneDefaultCountry);
       if (phone.trim() && !walkinPhone) {
         setError('Enter a valid phone number or leave phone blank');
         setLoading(false);
@@ -309,6 +317,7 @@ export function WalkInModal({
               id="walkin-phone"
               value={phone}
               onChange={setPhone}
+              defaultCountry={phoneDefaultCountry}
               inputClassName="w-full min-w-0 rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm transition-colors focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
             />
           </div>

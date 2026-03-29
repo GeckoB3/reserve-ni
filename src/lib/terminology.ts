@@ -18,12 +18,15 @@ function pluralise(word: string): string {
   return word + 's';
 }
 
-const TRANSLATION_KEYS = [
-  'client', 'clients', 'booking', 'bookings',
-  'staff_member', 'staff_members', 'no_show', 'covers',
-] as const;
-
-export type TermKey = (typeof TRANSLATION_KEYS)[number];
+export type TermKey =
+  | 'client'
+  | 'clients'
+  | 'booking'
+  | 'bookings'
+  | 'staff_member'
+  | 'staff_members'
+  | 'no_show'
+  | 'covers';
 
 export function t(key: TermKey, terminology: VenueTerminology): string {
   const translations: Record<TermKey, string> = {

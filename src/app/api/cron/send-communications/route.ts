@@ -9,6 +9,7 @@ import { sendEmail } from '@/lib/emails/send-email';
 import { sendSms } from '@/lib/emails/send-sms';
 import { isSmsAllowed } from '@/lib/tier-enforcement';
 import { createBookingHmac } from '@/lib/short-manage-link';
+import { enrichBookingEmailForAppointment } from '@/lib/emails/booking-email-enrichment';
 import type { BookingEmailData, VenueEmailData } from '@/lib/emails/types';
 
 /**
@@ -268,9 +269,18 @@ async function sendDayOfReminders(results: { day_of_reminders: number; errors: n
 
       const venueData = buildVenueData(venue);
 
+      const baseUrlDay = process.env.NEXT_PUBLIC_BASE_URL || 'https://www.reserveni.com';
+
       for (const b of normalizeBookings(bookings)) {
         try {
-          const bookingData = buildBookingData(b);
+          const hmacDay = createBookingHmac(b.id);
+          const manageLinkDay = `${baseUrlDay}/manage/${b.id}?hmac=${encodeURIComponent(hmacDay)}`;
+          const confirmLinkDay = `${baseUrlDay}/confirm/${b.id}?hmac=${encodeURIComponent(hmacDay)}`;
+          let bookingData = buildBookingData(b);
+          bookingData.manage_booking_link = manageLinkDay;
+          bookingData.confirm_cancel_link = confirmLinkDay;
+          bookingData = await enrichBookingEmailForAppointment(supabase, b.id, bookingData);
+
           const phone = getGuestPhone(b);
           const email = getGuestEmail(b);
 
@@ -367,7 +377,8 @@ async function sendPostVisitEmails(results: { post_visit: number; errors: number
           const email = getGuestEmail(b);
           if (!email) continue;
 
-          const bookingData = buildBookingData(b);
+          let bookingData = buildBookingData(b);
+          bookingData = await enrichBookingEmailForAppointment(supabase, b.id, bookingData);
           const rendered = renderPostVisitEmail(bookingData, venueData, settings.post_visit_email_custom_message);
 
           const canSend = await logToCommLogs({

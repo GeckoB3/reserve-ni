@@ -14,16 +14,18 @@ export default async function TableGridPage() {
 
   const { data: venue } = await staff.db
     .from('venues')
-    .select('table_management_enabled')
+    .select('table_management_enabled, currency')
     .eq('id', staff.venue_id)
     .single();
 
   if (!venue?.table_management_enabled) redirect('/dashboard/day-sheet');
 
+  const currency = ((venue as { currency?: string }).currency as string) ?? 'GBP';
+
   return (
     <ToastProvider>
       <div className="p-2 md:p-4 lg:p-6">
-        <TableGridView venueId={staff.venue_id} />
+        <TableGridView venueId={staff.venue_id} currency={currency} />
       </div>
     </ToastProvider>
   );

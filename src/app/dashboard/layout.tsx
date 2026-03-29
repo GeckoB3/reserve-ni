@@ -20,7 +20,6 @@ export default async function DashboardLayout({ children }: { children: React.Re
   let bookingModel: BookingModel = 'table_reservation';
   let venueId: string | undefined;
   let isAdmin = false;
-  let pricingTier: string = 'business';
   let planStatus: string = 'active';
   let onboardingCompleted = true;
   try {
@@ -42,14 +41,13 @@ export default async function DashboardLayout({ children }: { children: React.Re
     if (venueId) {
       const { data: venue } = await admin
         .from('venues')
-        .select('name, slug, table_management_enabled, booking_model, pricing_tier, plan_status, onboarding_completed')
+        .select('name, slug, table_management_enabled, booking_model, plan_status, onboarding_completed')
         .eq('id', venueId)
         .single();
       venueName = venue?.name ?? undefined;
       venueSlug = venue?.slug ?? undefined;
       tableManagementEnabled = venue?.table_management_enabled ?? false;
       bookingModel = (venue?.booking_model as BookingModel) ?? 'table_reservation';
-      pricingTier = (venue?.pricing_tier as string) ?? 'business';
       planStatus = (venue?.plan_status as string) ?? 'active';
       onboardingCompleted = (venue?.onboarding_completed as boolean) ?? true;
 

@@ -1,6 +1,9 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { mergeAppointmentServiceWithPractitionerLink } from '@/lib/appointments/merge-service-with-overrides';
+import type { AppointmentService, PractitionerService } from '@/types/booking-models';
+import { StaffServiceOverrideModal } from './StaffServiceOverrideModal';
 
 interface Service {
   id: string;
@@ -13,6 +16,13 @@ interface Service {
   colour: string;
   is_active: boolean;
   sort_order: number;
+  staff_may_customize_name?: boolean;
+  staff_may_customize_description?: boolean;
+  staff_may_customize_duration?: boolean;
+  staff_may_customize_buffer?: boolean;
+  staff_may_customize_price?: boolean;
+  staff_may_customize_deposit?: boolean;
+  staff_may_customize_colour?: boolean;
 }
 
 interface Practitioner {
@@ -23,6 +33,13 @@ interface Practitioner {
 interface PractitionerServiceLink {
   practitioner_id: string;
   service_id: string;
+  custom_duration_minutes?: number | null;
+  custom_price_pence?: number | null;
+  custom_name?: string | null;
+  custom_description?: string | null;
+  custom_buffer_minutes?: number | null;
+  custom_deposit_pence?: number | null;
+  custom_colour?: string | null;
 }
 
 interface ServiceFormData {
@@ -36,12 +53,31 @@ interface ServiceFormData {
   colour: string;
   is_active: boolean;
   practitioner_ids: string[];
+  staffMay: {
+    name: boolean;
+    description: boolean;
+    duration: boolean;
+    buffer: boolean;
+    price: boolean;
+    deposit: boolean;
+    colour: boolean;
+  };
 }
 
 const COLOUR_OPTIONS = [
   '#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6',
   '#EC4899', '#06B6D4', '#84CC16', '#F97316', '#6366F1',
 ];
+
+const DEFAULT_STAFF_MAY: ServiceFormData['staffMay'] = {
+  name: false,
+  description: false,
+  duration: false,
+  buffer: false,
+  price: false,
+  deposit: false,
+  colour: false,
+};
 
 const DEFAULT_FORM: ServiceFormData = {
   name: '',
@@ -54,6 +90,7 @@ const DEFAULT_FORM: ServiceFormData = {
   colour: '#3B82F6',
   is_active: true,
   practitioner_ids: [],
+  staffMay: { ...DEFAULT_STAFF_MAY },
 };
 
 function formatDuration(mins: number): string {
@@ -78,9 +115,11 @@ function poundsToPence(pounds: string): number | null {
 
 export function AppointmentServicesView({
   isAdmin,
+  linkedPractitionerId = null,
   currency = 'GBP',
 }: {
   isAdmin: boolean;
+  linkedPractitionerId?: string | null;
   currency?: string;
 }) {
   const sym = currency === 'EUR' ? '€' : '£';
@@ -103,6 +142,7 @@ export function AppointmentServicesView({
   const [showBulkDeposit, setShowBulkDeposit] = useState(false);
   const [bulkDepositAmount, setBulkDepositAmount] = useState('');
   const [bulkSaving, setBulkSaving] = useState(false);
+  const [overrideService, setOverrideService] = useState<Service | null>(null);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
@@ -110,7 +150,7 @@ export function AppointmentServicesView({
     try {
       const [svcRes, practRes] = await Promise.all([
         fetch('/api/venue/appointment-services'),
-        fetch('/api/venue/practitioners'),
+        fetch('/api/venue/practitioners?roster=1'),
       ]);
       if (!svcRes.ok || !practRes.ok) {
         setError('Failed to load services. Please refresh the page.');
@@ -132,8 +172,52 @@ export function AppointmentServicesView({
     fetchAll();
   }, [fetchAll]);
 
+  /** Admins manage definitions for everyone. Staff see the full venue list read-only; they edit what they offer under Availability. */
+  const visibleServices = useMemo(() => {
+    if (isAdmin) return services;
+    if (!linkedPractitionerId) return [];
+    return services;
+  }, [isAdmin, services, linkedPractitionerId]);
+
+  function staffMayCustomizeAny(svc: Service): boolean {
+    return Boolean(
+      svc.staff_may_customize_name ||
+        svc.staff_may_customize_description ||
+        svc.staff_may_customize_duration ||
+        svc.staff_may_customize_buffer ||
+        svc.staff_may_customize_price ||
+        svc.staff_may_customize_deposit ||
+        svc.staff_may_customize_colour,
+    );
+  }
+
+  function staffOffersService(serviceId: string): boolean {
+    if (!linkedPractitionerId) return false;
+    const mine = links.filter((l) => l.practitioner_id === linkedPractitionerId);
+    if (mine.length === 0) return true;
+    return mine.some((l) => l.service_id === serviceId);
+  }
+
+  function myLinkForService(serviceId: string): PractitionerService | null {
+    if (!linkedPractitionerId) return null;
+    const row = links.find((l) => l.practitioner_id === linkedPractitionerId && l.service_id === serviceId);
+    if (!row) return null;
+    return {
+      id: '',
+      practitioner_id: row.practitioner_id,
+      service_id: row.service_id,
+      custom_duration_minutes: row.custom_duration_minutes ?? null,
+      custom_price_pence: row.custom_price_pence ?? null,
+      custom_name: row.custom_name ?? null,
+      custom_description: row.custom_description ?? null,
+      custom_buffer_minutes: row.custom_buffer_minutes ?? null,
+      custom_deposit_pence: row.custom_deposit_pence ?? null,
+      custom_colour: row.custom_colour ?? null,
+    };
+  }
+
   function openCreate() {
-    setForm(DEFAULT_FORM);
+    setForm({ ...DEFAULT_FORM, staffMay: { ...DEFAULT_STAFF_MAY } });
     setEditingId(null);
     setError(null);
     setShowModal(true);
@@ -152,6 +236,15 @@ export function AppointmentServicesView({
       colour: svc.colour || '#3B82F6',
       is_active: svc.is_active,
       practitioner_ids: svcLinks,
+      staffMay: {
+        name: svc.staff_may_customize_name ?? false,
+        description: svc.staff_may_customize_description ?? false,
+        duration: svc.staff_may_customize_duration ?? false,
+        buffer: svc.staff_may_customize_buffer ?? false,
+        price: svc.staff_may_customize_price ?? false,
+        deposit: svc.staff_may_customize_deposit ?? false,
+        colour: svc.staff_may_customize_colour ?? false,
+      },
     });
     setEditingId(svc.id);
     setError(null);
@@ -183,6 +276,13 @@ export function AppointmentServicesView({
         colour: form.colour,
         is_active: form.is_active,
         practitioner_ids: form.practitioner_ids,
+        staff_may_customize_name: form.staffMay.name,
+        staff_may_customize_description: form.staffMay.description,
+        staff_may_customize_duration: form.staffMay.duration,
+        staff_may_customize_buffer: form.staffMay.buffer,
+        staff_may_customize_price: form.staffMay.price,
+        staff_may_customize_deposit: form.staffMay.deposit,
+        staff_may_customize_colour: form.staffMay.colour,
       };
 
       const res = await fetch('/api/venue/appointment-services', {
@@ -260,16 +360,27 @@ export function AppointmentServicesView({
   }
 
   function practitionersForService(serviceId: string): Array<{ id: string; name: string }> {
-    return links.filter((l) => l.service_id === serviceId).map((l) => {
-      const p = practitioners.find((pr) => pr.id === l.practitioner_id);
-      return { id: l.practitioner_id, name: p?.name ?? 'Unknown' };
-    });
+    return links
+      .filter((l) => l.service_id === serviceId)
+      .map((l) => {
+        const p = practitioners.find((pr) => pr.id === l.practitioner_id);
+        return { id: l.practitioner_id, name: p?.name ?? 'Unknown' };
+      });
   }
 
   return (
     <div>
       <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <h1 className="text-2xl font-semibold text-slate-900">Services</h1>
+        <div>
+          <h1 className="text-2xl font-semibold text-slate-900">Services</h1>
+          {!isAdmin && (
+            <p className="mt-1 text-sm text-slate-500">
+              Venue-wide service details and who offers each service are shown for reference. Only an admin can add,
+              edit, or remove services. Use <span className="font-medium text-slate-700">Availability → Services</span> to
+              choose which services you offer. When your admin allows it, use <span className="font-medium text-slate-700">Edit your settings</span> on a service to customise your own price, duration, and other fields for your calendar only.
+            </p>
+          )}
+        </div>
         {isAdmin && (
           <div className="flex items-center gap-2">
             {services.length > 0 && (
@@ -362,10 +473,21 @@ export function AppointmentServicesView({
             </button>
           )}
         </div>
+      ) : !isAdmin && !linkedPractitionerId ? (
+        <div className="rounded-xl border border-amber-200 bg-amber-50/80 p-8 text-center">
+          <p className="text-sm text-amber-950">
+            Your account is not linked to a calendar profile yet. Ask an admin to connect your staff login to your
+            practitioner row in Availability → Team, then return here.
+          </p>
+        </div>
       ) : (
         <div className="space-y-3">
-          {services.map((svc) => {
+          {visibleServices.map((svc) => {
             const linkedPractitioners = practitionersForService(svc.id);
+            const display = mergeAppointmentServiceWithPractitionerLink(
+              svc as unknown as AppointmentService,
+              !isAdmin && linkedPractitionerId ? myLinkForService(svc.id) ?? undefined : undefined,
+            );
             return (
               <div
                 key={svc.id}
@@ -377,42 +499,61 @@ export function AppointmentServicesView({
                   <div className="flex items-start gap-3 min-w-0">
                     <div
                       className="mt-1 h-3 w-3 flex-shrink-0 rounded-full"
-                      style={{ backgroundColor: svc.colour }}
+                      style={{ backgroundColor: display.colour }}
                     />
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
-                        <span className="font-medium text-slate-900">{svc.name}</span>
+                        <span className="font-medium text-slate-900">{display.name}</span>
                         {!svc.is_active && (
                           <span className="rounded-full bg-slate-200 px-2 py-0.5 text-xs text-slate-500">
                             Inactive
                           </span>
                         )}
                       </div>
-                      {svc.description && (
-                        <p className="mt-0.5 text-sm text-slate-500 line-clamp-2">{svc.description}</p>
+                      {display.description && (
+                        <p className="mt-0.5 text-sm text-slate-500 line-clamp-2">{display.description}</p>
                       )}
                       <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-slate-600">
-                        <span>{formatDuration(svc.duration_minutes)}</span>
-                        {svc.buffer_minutes > 0 && (
-                          <span className="text-slate-400">+{svc.buffer_minutes}min buffer</span>
+                        <span>{formatDuration(display.duration_minutes)}</span>
+                        {display.buffer_minutes > 0 && (
+                          <span className="text-slate-400">+{display.buffer_minutes}min buffer</span>
                         )}
-                        <span className="font-medium">{formatPrice(svc.price_pence)}</span>
-                        {svc.deposit_pence != null && svc.deposit_pence > 0 && (
+                        <span className="font-medium">{formatPrice(display.price_pence)}</span>
+                        {display.deposit_pence != null && display.deposit_pence > 0 && (
                           <span className="text-slate-400">
-                            {formatPrice(svc.deposit_pence)} deposit
+                            {formatPrice(display.deposit_pence)} deposit
                           </span>
                         )}
                       </div>
+                      {!isAdmin && linkedPractitionerId && staffOffersService(svc.id) && staffMayCustomizeAny(svc) && (
+                        <button
+                          type="button"
+                          onClick={() => setOverrideService(svc)}
+                          className="mt-3 rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white shadow-sm hover:bg-blue-700"
+                        >
+                          Edit your settings
+                        </button>
+                      )}
                       {linkedPractitioners.length > 0 && (
                         <div className="mt-1.5 flex flex-wrap gap-1">
-                          {linkedPractitioners.map((lp) => (
-                            <span
-                              key={lp.id}
-                              className="inline-block rounded-full bg-blue-50 px-2 py-0.5 text-xs text-blue-700"
-                            >
-                              {lp.name}
-                            </span>
-                          ))}
+                          {linkedPractitioners.map((lp) => {
+                            const isSelf = Boolean(!isAdmin && linkedPractitionerId && lp.id === linkedPractitionerId);
+                            const chipClass = isAdmin
+                              ? 'inline-block rounded-full bg-blue-50 px-2 py-0.5 text-xs text-blue-700'
+                              : isSelf
+                                ? 'inline-block rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-900 ring-1 ring-emerald-200/80'
+                                : 'inline-block rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600';
+                            return (
+                              <span key={lp.id} className={chipClass}>
+                                {lp.name}
+                                {!isAdmin && linkedPractitionerId && (
+                                  <span className="ml-1 font-normal text-slate-500">
+                                    {lp.id === linkedPractitionerId ? '(you)' : '(view only)'}
+                                  </span>
+                                )}
+                              </span>
+                            );
+                          })}
                         </div>
                       )}
                     </div>
@@ -618,6 +759,43 @@ export function AppointmentServicesView({
                 <span className="text-sm text-slate-700">Active (visible to clients)</span>
               </div>
 
+              {/* Per-staff overrides (Model B) */}
+              <div className="rounded-lg border border-slate-200 bg-slate-50/90 p-4 space-y-3">
+                <p className="text-sm font-medium text-slate-800">Staff can customise (their calendar only)</p>
+                <p className="text-xs text-slate-500">
+                  When ticked, linked staff can set their own value for that field; it does not change the venue default
+                  or other team members.
+                </p>
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  {(
+                    [
+                      ['name', 'Display name'],
+                      ['description', 'Description'],
+                      ['duration', 'Duration'],
+                      ['buffer', 'Buffer time'],
+                      ['price', 'Price'],
+                      ['deposit', 'Deposit'],
+                      ['colour', 'Colour'],
+                    ] as const
+                  ).map(([key, label]) => (
+                    <label key={key} className="flex items-center gap-2 text-sm text-slate-700">
+                      <input
+                        type="checkbox"
+                        checked={form.staffMay[key]}
+                        onChange={(e) =>
+                          setForm((prev) => ({
+                            ...prev,
+                            staffMay: { ...prev.staffMay, [key]: e.target.checked },
+                          }))
+                        }
+                        className="h-4 w-4 rounded border-slate-300 text-blue-600"
+                      />
+                      {label}
+                    </label>
+                  ))}
+                </div>
+              </div>
+
               {/* Practitioner linking */}
               {practitioners.length > 0 && (
                 <div>
@@ -661,6 +839,17 @@ export function AppointmentServicesView({
             </div>
           </div>
         </div>
+      )}
+
+      {overrideService && linkedPractitionerId && (
+        <StaffServiceOverrideModal
+          open={Boolean(overrideService)}
+          onClose={() => setOverrideService(null)}
+          onSaved={() => void fetchAll()}
+          service={overrideService}
+          link={myLinkForService(overrideService.id)}
+          currency={currency}
+        />
       )}
     </div>
   );

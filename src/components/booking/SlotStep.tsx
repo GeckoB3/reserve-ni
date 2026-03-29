@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import type { AvailableSlot, ServiceGroup } from './types';
+import type { CountryCode } from 'libphonenumber-js';
 import { PhoneWithCountryField } from '@/components/phone/PhoneWithCountryField';
 import { normalizeToE164 } from '@/lib/phone/e164';
 
@@ -14,6 +15,7 @@ interface SlotStepProps {
   largePartyMessage?: string | null;
   venueId?: string;
   partySize?: number;
+  phoneDefaultCountry?: CountryCode;
   onSelect: (slot: AvailableSlot) => void;
   onBack: () => void;
   onDateChange?: (date: string) => void;
@@ -27,7 +29,7 @@ function formatDateStr(date: string): string {
   return `${WEEKDAYS[d.getDay()]} ${d.getDate()} ${MONTHS[d.getMonth()]}`;
 }
 
-export function SlotStep({ date, slots, serviceGroups, loading, largePartyRedirect, largePartyMessage, venueId, partySize, onSelect, onBack, onDateChange }: SlotStepProps) {
+export function SlotStep({ date, slots, serviceGroups, loading, largePartyRedirect, largePartyMessage, venueId, partySize, phoneDefaultCountry = 'GB', onSelect, onBack, onDateChange }: SlotStepProps) {
   const dateStr = formatDateStr(date);
   const [nearbyDates, setNearbyDates] = useState<Array<{ date: string; label: string; slotCount: number }>>([]);
   const [nearbyLoading, setNearbyLoading] = useState(false);
@@ -162,7 +164,7 @@ export function SlotStep({ date, slots, serviceGroups, loading, largePartyRedire
           )}
 
           {venueId && partySize && (
-            <WaitlistForm venueId={venueId} date={date} partySize={partySize} />
+            <WaitlistForm venueId={venueId} date={date} partySize={partySize} phoneDefaultCountry={phoneDefaultCountry} />
           )}
 
           <button type="button" onClick={onBack} className="mt-4 text-sm font-medium text-brand-600 hover:text-brand-700">Choose another date</button>
@@ -183,7 +185,17 @@ function getMergedSlots(slots: AvailableSlot[], serviceGroups?: ServiceGroup[]):
   return [...slots].sort((a, b) => a.start_time.localeCompare(b.start_time));
 }
 
-function WaitlistForm({ venueId, date, partySize }: { venueId: string; date: string; partySize: number }) {
+function WaitlistForm({
+  venueId,
+  date,
+  partySize,
+  phoneDefaultCountry,
+}: {
+  venueId: string;
+  date: string;
+  partySize: number;
+  phoneDefaultCountry: CountryCode;
+}) {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
@@ -194,7 +206,7 @@ function WaitlistForm({ venueId, date, partySize }: { venueId: string; date: str
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    const guestPhone = normalizeToE164(phone, 'GB');
+    const guestPhone = normalizeToE164(phone, phoneDefaultCountry);
     if (!name.trim() || !guestPhone) return;
     setStatus('submitting');
     try {
@@ -255,12 +267,13 @@ function WaitlistForm({ venueId, date, partySize }: { venueId: string; date: str
       <PhoneWithCountryField
         value={phone}
         onChange={setPhone}
+        defaultCountry={phoneDefaultCountry}
         inputClassName="w-full min-w-0 rounded-lg border border-slate-200 px-3 py-2 text-sm placeholder:text-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
       />
       <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email (optional)" className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm placeholder:text-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
       <input type="time" value={desiredTime} onChange={(e) => setDesiredTime(e.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
       <div className="flex gap-2">
-        <button type="submit" disabled={status === 'submitting' || !name.trim() || !normalizeToE164(phone, 'GB')} className="flex-1 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50">
+        <button type="submit" disabled={status === 'submitting' || !name.trim() || !normalizeToE164(phone, phoneDefaultCountry)} className="flex-1 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50">
           {status === 'submitting' ? 'Adding...' : 'Join Standby'}
         </button>
         <button type="button" onClick={() => setOpen(false)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-500 hover:bg-slate-50">Cancel</button>

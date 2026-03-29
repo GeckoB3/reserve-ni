@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import type { VenuePublic, GuestDetails } from './types';
+import { defaultPhoneCountryForVenueCurrency } from '@/lib/phone/default-country';
 import { DetailsStep } from './DetailsStep';
 import { PaymentStep } from './PaymentStep';
 
@@ -21,6 +22,7 @@ interface ClassSlot {
 type Step = 'classes' | 'details' | 'payment' | 'confirmation';
 
 export function ClassBookingFlow({ venue, cancellationPolicy }: { venue: VenuePublic; cancellationPolicy?: string }) {
+  const phoneDefaultCountry = defaultPhoneCountryForVenueCurrency(venue.currency);
   const terms = venue.terminology ?? { client: 'Member', booking: 'Booking', staff: 'Instructor' };
 
   const [step, setStep] = useState<Step>('classes');
@@ -157,6 +159,7 @@ export function ClassBookingFlow({ venue, cancellationPolicy }: { venue: VenuePu
             onSubmit={handleDetailsSubmit}
             onBack={() => setStep('classes')}
             requiresDeposit={(selectedClass.price_pence ?? 0) > 0}
+            phoneDefaultCountry={phoneDefaultCountry}
           />
         </div>
       )}

@@ -13,6 +13,7 @@ import { StripeConnectSection } from './sections/StripeConnectSection';
 import { TableManagementSection } from './sections/TableManagementSection';
 import { AvailabilityConfigSection } from './sections/AvailabilityConfigSection';
 import { BookingRulesSection } from './sections/BookingRulesSection';
+import { StaffPersonalSettingsSection } from './sections/StaffPersonalSettingsSection';
 
 interface SettingsViewProps {
   initialVenue: VenueSettings | null;
@@ -442,7 +443,17 @@ export function SettingsView({
       <div className="space-y-6">
         {activeTab === 'profile' && (
           <>
-            <ProfileSection />
+            {isAppointment && isAdmin ? (
+              <div className="space-y-4">
+                <p className="text-sm text-slate-500">
+                  <span className="font-medium text-slate-700">Your login</span> — display name, sign-in email, phone, and
+                  password apply to you. Business details in the sections below apply to your venue and public booking page.
+                </p>
+                <StaffPersonalSettingsSection />
+              </div>
+            ) : (
+              <ProfileSection />
+            )}
             <VenueProfileSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} bookingModel={bookingModel} />
             <OpeningHoursSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} />
             {!isAppointment && <TableManagementSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} />}
@@ -499,7 +510,9 @@ export function SettingsView({
             pricingTier={venue.pricing_tier ?? 'standard'}
           />
         )}
-        {activeTab === 'staff' && isAdmin && <StaffSection venueId={venue.id} isAdmin={isAdmin} />}
+        {activeTab === 'staff' && isAdmin && (
+          <StaffSection venueId={venue.id} isAdmin={isAdmin} bookingModel={bookingModel} />
+        )}
       </div>
     </div>
   );

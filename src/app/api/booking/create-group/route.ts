@@ -7,13 +7,16 @@ import { generateConfirmToken, hashConfirmToken } from '@/lib/confirm-token';
 import { normalizeToE164 } from '@/lib/phone/e164';
 import { resolveVenueMode } from '@/lib/venue-mode';
 import {
+  attachVenueClockToAppointmentInput,
   fetchAppointmentInput,
   computeAppointmentAvailability,
   type PhantomBooking,
 } from '@/lib/availability/appointment-engine';
+import { mergeAppointmentServiceWithPractitionerLink } from '@/lib/appointments/merge-service-with-overrides';
 import { z } from 'zod';
 import { randomUUID } from 'crypto';
 import { cancellationDeadlineHoursBefore } from '@/lib/booking/cancellation-deadline';
+import type { GroupAppointmentLine } from '@/lib/emails/types';
 
 const personEntrySchema = z.object({
   person_label: z.string().min(1).max(100),
@@ -65,7 +68,7 @@ export async function POST(request: NextRequest) {
 
     const { data: venue, error: venueErr } = await supabase
       .from('venues')
-      .select('id, name, stripe_connected_account_id, address, booking_rules')
+      .select('id, name, stripe_connected_account_id, address, booking_rules, timezone, opening_hours')
       .eq('id', venue_id)
       .single();
 
@@ -89,6 +92,8 @@ export async function POST(request: NextRequest) {
       buffer_minutes: number;
       deposit_pence: number;
       estimated_end_time: string | null;
+      service_display_name: string;
+      service_price_pence: number | null;
     }> = [];
 
     const phantoms: PhantomBooking[] = [];
@@ -108,6 +113,7 @@ export async function POST(request: NextRequest) {
       // Inject phantom bookings from earlier people in this group (overlap checks)
       input.phantomBookings = [...phantoms];
 
+      attachVenueClockToAppointmentInput(input, venue as { timezone?: string | null; booking_rules?: unknown; opening_hours?: unknown });
       const result = computeAppointmentAvailability(input);
       const prac = result.practitioners.find((p) => p.id === person.practitioner_id);
       const slotAvailable = prac?.slots.some(
@@ -121,7 +127,11 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      const svc = input.services.find((s) => s.id === person.appointment_service_id);
+      const baseSvc = input.services.find((s) => s.id === person.appointment_service_id);
+      const ps = input.practitionerServices.find(
+        (row) => row.practitioner_id === person.practitioner_id && row.service_id === person.appointment_service_id,
+      );
+      const svc = baseSvc ? mergeAppointmentServiceWithPractitionerLink(baseSvc, ps) : undefined;
       const durationMins = svc?.duration_minutes ?? 30;
       const bufferMins = svc?.buffer_minutes ?? 0;
       let estimatedEndTime: string | null = null;
@@ -149,6 +159,8 @@ export async function POST(request: NextRequest) {
         buffer_minutes: bufferMins,
         deposit_pence: depositPence,
         estimated_end_time: estimatedEndTime,
+        service_display_name: svc?.name ?? 'Treatment',
+        service_price_pence: svc?.price_pence ?? null,
       });
 
       phantoms.push({
@@ -158,6 +170,20 @@ export async function POST(request: NextRequest) {
         buffer_minutes: bufferMins,
       });
     }
+
+    const { data: prRows } = await supabase.from('practitioners').select('id, name').eq('venue_id', venue_id);
+    const prMap = new Map((prRows ?? []).map((p: { id: string; name: string }) => [p.id, p.name]));
+    const groupAppointmentLines: GroupAppointmentLine[] = validatedPeople.map((p) => {
+      return {
+        person_label: p.person_label,
+        booking_date: p.booking_date,
+        booking_time: p.booking_time,
+        practitioner_name: prMap.get(p.practitioner_id) ?? 'Staff',
+        service_name: p.service_display_name,
+        price_display:
+          p.service_price_pence != null ? `£${(p.service_price_pence / 100).toFixed(2)}` : null,
+      };
+    });
 
     const totalDepositPence = validatedPeople.reduce((sum, p) => sum + p.deposit_pence, 0);
     const requiresDeposit = totalDepositPence > 0;
@@ -295,6 +321,12 @@ export async function POST(request: NextRequest) {
               deposit_amount_pence: null,
               deposit_status: 'Not Required',
               manage_booking_link: manageBookingLink,
+              email_variant: 'appointment',
+              group_appointments: groupAppointmentLines,
+              practitioner_name: groupAppointmentLines[0]?.practitioner_name ?? null,
+              appointment_service_name:
+                groupAppointmentLines.length === 1 ? groupAppointmentLines[0]!.service_name : 'Group booking',
+              appointment_price_display: null,
             },
             { name: venue.name, address: venue.address ?? undefined },
             venue_id,

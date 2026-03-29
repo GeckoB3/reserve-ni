@@ -160,7 +160,7 @@ export function coversArrivingWithin(
   bookings: DashboardLoadBooking[],
   nowMinutes: number,
   withinMinutes: number,
-  defaultDurationMinutes: number,
+  _defaultDurationMinutes: number,
 ): number {
   const end = nowMinutes + withinMinutes;
   let total = 0;

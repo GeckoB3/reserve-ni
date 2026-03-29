@@ -5,6 +5,7 @@ import { getSupabaseAdminClient } from '@/lib/supabase';
 import { sendEmail } from '@/lib/emails/send-email';
 import { renderStaffWelcomeEmail } from '@/lib/emails/templates/staff-welcome-email';
 import { z } from 'zod';
+import { setStaffPractitionerLink } from '@/lib/staff-practitioner-link';
 
 const createSchema = z
   .object({
@@ -13,6 +14,8 @@ const createSchema = z
     password_confirm: z.string().min(1, 'Please confirm the password'),
     name: z.string().max(200).optional(),
     role: z.enum(['admin', 'staff']),
+    /** Optional: link this login to a practitioner calendar (Model B). */
+    practitioner_id: z.string().uuid().nullable().optional(),
   })
   .refine((d) => d.password === d.password_confirm, {
     message: 'Passwords do not match',
@@ -36,17 +39,36 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { email, password, password_confirm: _passwordConfirm, name, role } = parsed.data;
+    const { email, password, name, role, practitioner_id: practitionerIdOpt } = parsed.data;
     const normalisedEmail = email.trim().toLowerCase();
 
     const admin = getSupabaseAdminClient();
 
     const { data: venueRow } = await admin
       .from('venues')
-      .select('name')
+      .select('name, booking_model')
       .eq('id', staff.venue_id)
       .single();
     const venueName = venueRow?.name?.trim() || 'Your venue';
+    const bookingModel = (venueRow?.booking_model as string) ?? 'table_reservation';
+
+    if (practitionerIdOpt && bookingModel !== 'practitioner_appointment') {
+      return NextResponse.json(
+        { error: 'Calendar linking is only available for appointment businesses' },
+        { status: 400 },
+      );
+    }
+    if (practitionerIdOpt) {
+      const { data: prCheck } = await admin
+        .from('practitioners')
+        .select('id')
+        .eq('id', practitionerIdOpt)
+        .eq('venue_id', staff.venue_id)
+        .maybeSingle();
+      if (!prCheck) {
+        return NextResponse.json({ error: 'Calendar not found' }, { status: 400 });
+      }
+    }
 
     const baseUrl =
       process.env.NEXT_PUBLIC_BASE_URL ||
@@ -120,6 +142,32 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to add staff member' }, { status: 500 });
     }
 
+    let linkedPractitionerId: string | null = null;
+    let linkedPractitionerName: string | null = null;
+    if (practitionerIdOpt && bookingModel === 'practitioner_appointment') {
+      const linkResult = await setStaffPractitionerLink(
+        admin,
+        staff.venue_id,
+        newStaff.id,
+        practitionerIdOpt,
+      );
+      if (!linkResult.ok) {
+        console.error('[staff/create] calendar link failed:', linkResult.error);
+        return NextResponse.json(
+          { error: `User was created but linking to the calendar failed: ${linkResult.error}. You can assign the calendar from Settings → Staff.` },
+          { status: 500 },
+        );
+      }
+      linkedPractitionerId = practitionerIdOpt;
+      const { data: prNamed } = await admin
+        .from('practitioners')
+        .select('name')
+        .eq('id', practitionerIdOpt)
+        .eq('venue_id', staff.venue_id)
+        .maybeSingle();
+      linkedPractitionerName = prNamed?.name ?? null;
+    }
+
     const { html, text } = renderStaffWelcomeEmail({
       venueName,
       email: normalisedEmail,
@@ -150,7 +198,17 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    return NextResponse.json({ staff: newStaff, welcome_email_sent: welcomeEmailSent }, { status: 201 });
+    return NextResponse.json(
+      {
+        staff: {
+          ...newStaff,
+          linked_practitioner_id: linkedPractitionerId,
+          linked_practitioner_name: linkedPractitionerName,
+        },
+        welcome_email_sent: welcomeEmailSent,
+      },
+      { status: 201 },
+    );
   } catch (err) {
     console.error('POST /api/venue/staff/create failed:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

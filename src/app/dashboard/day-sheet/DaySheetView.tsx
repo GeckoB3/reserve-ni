@@ -25,8 +25,10 @@ import {
 } from '@/lib/table-management/next-bookings-slot';
 import { TableSelector } from '@/components/table-tracking/TableSelector';
 import type { OccupancyMap } from '@/components/table-tracking/TableSelector';
+import type { CountryCode } from 'libphonenumber-js';
 import { PhoneWithCountryField } from '@/components/phone/PhoneWithCountryField';
 import { normalizeToE164 } from '@/lib/phone/e164';
+import { defaultPhoneCountryForVenueCurrency } from '@/lib/phone/default-country';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -832,7 +834,7 @@ function DepositActions({ booking, onAction }: { booking: DaySheetBooking; onAct
 
 // ─── Main: DaySheetView ─────────────────────────────────────────────────────
 
-export function DaySheetView({ venueId }: { venueId: string }) {
+export function DaySheetView({ venueId, currency }: { venueId: string; currency?: string }) {
   const { addToast } = useToast();
 
   // Core state

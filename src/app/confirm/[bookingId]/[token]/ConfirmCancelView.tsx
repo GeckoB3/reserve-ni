@@ -13,6 +13,9 @@ interface BookingDetails {
   deposit_paid: boolean;
   deposit_amount_pence: number | null;
   status: string;
+  is_appointment?: boolean;
+  practitioner_name?: string | null;
+  appointment_service_name?: string | null;
 }
 
 type View = 'main' | 'cancel_confirm' | 'done';
@@ -118,7 +121,11 @@ export function ConfirmCancelView({ bookingId, token, hmac }: { bookingId: strin
             {details.deposit_paid && details.deposit_amount_pence ? (
               <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
                 <p className="font-medium">Deposit Policy</p>
-                <p className="mt-1 text-xs">Full refund if cancelled 48+ hours before your reservation. No refund within 48 hours or for no-shows.</p>
+                <p className="mt-1 text-xs">
+                  {details.is_appointment
+                    ? 'Refund rules depend on the venue policy — check your confirmation email or contact the venue.'
+                    : 'Full refund if cancelled 48+ hours before your reservation. No refund within 48 hours or for no-shows.'}
+                </p>
               </div>
             ) : (
               <p className="text-sm text-slate-600">Are you sure you want to cancel your booking?</p>
@@ -173,7 +180,7 @@ export function ConfirmCancelView({ bookingId, token, hmac }: { bookingId: strin
               disabled={actionLoading}
               className="w-full rounded-xl bg-brand-600 px-4 py-3.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 disabled:opacity-50"
             >
-              {actionLoading ? 'Updating...' : "Confirm I'm Coming"}
+              {actionLoading ? 'Updating...' : details.is_appointment ? "I'll be there" : "Confirm I'm Coming"}
             </button>
             <button
               type="button"
@@ -181,7 +188,7 @@ export function ConfirmCancelView({ bookingId, token, hmac }: { bookingId: strin
               disabled={actionLoading}
               className="w-full rounded-xl border border-red-200 bg-white px-4 py-3.5 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-50"
             >
-              Cancel My Booking
+              {details.is_appointment ? 'Cancel appointment' : 'Cancel My Booking'}
             </button>
           </div>
         </div>

@@ -31,7 +31,7 @@ interface ClassInstance {
 
 const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
-export function ClassTimetableView({ venueId, isAdmin }: { venueId: string; isAdmin: boolean }) {
+export function ClassTimetableView({ venueId: _venueId, isAdmin: _isAdmin }: { venueId: string; isAdmin: boolean }) {
   const [classTypes, setClassTypes] = useState<ClassType[]>([]);
   const [timetable, setTimetable] = useState<TimetableEntry[]>([]);
   const [instances, setInstances] = useState<ClassInstance[]>([]);

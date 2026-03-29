@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { AvailabilityResponse, AvailableSlot, BookingRulesPublic, GuestDetails, ServiceGroup, VenuePublic } from './types';
+import { defaultPhoneCountryForVenueCurrency } from '@/lib/phone/default-country';
 import { DateStep } from './DateStep';
 import { SlotStep } from './SlotStep';
 import { DetailsStep } from './DetailsStep';
@@ -36,6 +37,7 @@ export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, 
 
   const step = steps[stepIndex];
   const rules: BookingRulesPublic = venue.booking_rules ?? { min_party_size: 1, max_party_size: 20 };
+  const phoneDefaultCountry = defaultPhoneCountryForVenueCurrency(venue.currency);
 
   const requiresDeposit = useMemo(() => {
     if (!selectedSlot) return false;
@@ -236,6 +238,7 @@ export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, 
           largePartyMessage={largePartyMessage}
           venueId={venue.id}
           partySize={partySize}
+          phoneDefaultCountry={phoneDefaultCountry}
           onSelect={handleSlotSelect}
           onBack={goBack}
           onDateChange={(newDate) => {
@@ -246,7 +249,7 @@ export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, 
         />
       )}
       {step === 'details' && selectedSlot && (
-        <DetailsStep slot={selectedSlot} date={selectedDate!} partySize={partySize} onSubmit={handleDetailsSubmit} onBack={goBack} requiresDeposit={requiresDeposit} depositPerPerson={venue.deposit_config?.amount_per_person_gbp} />
+        <DetailsStep slot={selectedSlot} date={selectedDate!} partySize={partySize} onSubmit={handleDetailsSubmit} onBack={goBack} requiresDeposit={requiresDeposit} depositPerPerson={venue.deposit_config?.amount_per_person_gbp} phoneDefaultCountry={phoneDefaultCountry} />
       )}
       {step === 'payment' && createResult?.client_secret && (
         <PaymentStep clientSecret={createResult.client_secret} stripeAccountId={createResult.stripe_account_id} amountPence={(venue.deposit_config?.amount_per_person_gbp ?? 0) * partySize * 100} partySize={partySize} onComplete={handlePaymentComplete} onBack={goBack} cancellationPolicy={cancellationPolicy} />

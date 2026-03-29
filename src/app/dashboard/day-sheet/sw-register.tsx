@@ -1,9 +1,23 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useSyncExternalStore } from 'react';
+
+function subscribeOnlineStatus(cb: () => void) {
+  window.addEventListener('online', cb);
+  window.addEventListener('offline', cb);
+  return () => {
+    window.removeEventListener('online', cb);
+    window.removeEventListener('offline', cb);
+  };
+}
+
+function getOnlineSnapshot() {
+  return navigator.onLine;
+}
 
 export function SwRegister() {
-  const [offline, setOffline] = useState(false);
+  const online = useSyncExternalStore(subscribeOnlineStatus, getOnlineSnapshot, () => true);
+  const offline = !online;
 
   useEffect(() => {
     if ('serviceWorker' in navigator) {
@@ -11,21 +25,6 @@ export function SwRegister() {
         console.error('SW registration failed:', err);
       });
     }
-
-    const goOffline = () => setOffline(true);
-    const goOnline = () => setOffline(false);
-
-    if (!navigator.onLine) {
-      setOffline(true);
-    }
-
-    window.addEventListener('offline', goOffline);
-    window.addEventListener('online', goOnline);
-
-    return () => {
-      window.removeEventListener('offline', goOffline);
-      window.removeEventListener('online', goOnline);
-    };
   }, []);
 
   if (!offline) return null;

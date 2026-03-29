@@ -5,6 +5,8 @@ import { BOOKING_STATUS_TRANSITIONS, BOOKING_REVERT_ACTIONS, canMarkNoShowForSlo
 import { NumericInput } from '@/components/ui/NumericInput';
 import { PhoneWithCountryField } from '@/components/phone/PhoneWithCountryField';
 import { normalizeToE164 } from '@/lib/phone/e164';
+import { defaultPhoneCountryForVenueCurrency } from '@/lib/phone/default-country';
+import type { CountryCode } from 'libphonenumber-js';
 import { ModifyBookingInline } from '@/components/booking/ModifyBookingInline';
 import { BookingNotesEditablePanel } from '@/components/booking/BookingNotesEditablePanel';
 
@@ -162,6 +164,7 @@ export function BookingDetailPanel({
   onClose,
   onUpdated,
   venueId,
+  venueCurrency,
   initialSnapshot,
   isAppointment = false,
 }: {
@@ -170,9 +173,14 @@ export function BookingDetailPanel({
   onUpdated: () => void;
   /** Required for optimistic placeholder from grid/floor views. */
   venueId?: string;
+  venueCurrency?: string;
   initialSnapshot?: BookingDetailPanelSnapshot | null;
   isAppointment?: boolean;
 }) {
+  const guestPhoneDefaultCountry: CountryCode = useMemo(
+    () => defaultPhoneCountryForVenueCurrency(venueCurrency),
+    [venueCurrency],
+  );
   const [detail, setDetail] = useState<BookingDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -314,6 +322,29 @@ export function BookingDetailPanel({
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [onClose]);
 
+  const executeStatusChange = useCallback(async (newStatus: string) => {
+    if (!detail) return;
+    const previous = detail.status;
+    setActionLoading(true);
+    setDetail((prev) => prev ? { ...prev, status: newStatus } : prev);
+    try {
+      const res = await fetch(`/api/venue/bookings/${bookingId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        setError(j.error ?? 'Failed');
+        setDetail((prev) => prev ? { ...prev, status: previous } : prev);
+        return;
+      }
+      setError(null);
+      await load();
+      onUpdated();
+    } finally { setActionLoading(false); }
+  }, [bookingId, detail, load, onUpdated]);
+
   const updateStatus = useCallback(async (newStatus: string) => {
     if (!detail) return;
     if (newStatus === 'No-Show' && !canMarkNoShowForSlot(detail.booking_date, detail.booking_time?.slice(0, 5) ?? '12:00', 0)) {
@@ -342,30 +373,7 @@ export function BookingDetailPanel({
       return;
     }
     void executeStatusChange(newStatus);
-  }, [detail]);
-
-  const executeStatusChange = useCallback(async (newStatus: string) => {
-    if (!detail) return;
-    const previous = detail.status;
-    setActionLoading(true);
-    setDetail((prev) => prev ? { ...prev, status: newStatus } : prev);
-    try {
-      const res = await fetch(`/api/venue/bookings/${bookingId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: newStatus }),
-      });
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        setError(j.error ?? 'Failed');
-        setDetail((prev) => prev ? { ...prev, status: previous } : prev);
-        return;
-      }
-      setError(null);
-      await load();
-      onUpdated();
-    } finally { setActionLoading(false); }
-  }, [bookingId, detail, load, onUpdated]);
+  }, [detail, executeStatusChange]);
 
   const submitModify = useCallback(async () => {
     if (!detail) return;
@@ -374,7 +382,7 @@ export function BookingDetailPanel({
       const currentTime = detail.booking_time?.slice(0, 5) ?? '12:00';
 
       const phoneTrim = modifyGuestPhone.trim();
-      const guestPhoneNormalized = phoneTrim ? normalizeToE164(modifyGuestPhone, 'GB') : null;
+      const guestPhoneNormalized = phoneTrim ? normalizeToE164(modifyGuestPhone, guestPhoneDefaultCountry) : null;
       if (phoneTrim && !guestPhoneNormalized) {
         setError('Enter a valid phone number');
         setActionLoading(false);
@@ -982,6 +990,7 @@ export function BookingDetailPanel({
                   <PhoneWithCountryField
                     value={modifyGuestPhone}
                     onChange={setModifyGuestPhone}
+                    defaultCountry={guestPhoneDefaultCountry}
                     inputClassName="w-full min-w-0 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
                   />
                 </div>

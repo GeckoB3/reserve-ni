@@ -118,7 +118,9 @@ export function AppointmentDayBookingRow({
   const [notesDraft, setNotesDraft] = useState(b.internal_notes ?? '');
 
   useEffect(() => {
-    if (expanded) setNotesDraft(b.internal_notes ?? '');
+    if (!expanded) return;
+    const id = requestAnimationFrame(() => setNotesDraft(b.internal_notes ?? ''));
+    return () => cancelAnimationFrame(id);
   }, [expanded, b.internal_notes]);
 
   const arrived = Boolean(b.client_arrived_at);

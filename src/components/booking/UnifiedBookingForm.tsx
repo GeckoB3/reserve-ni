@@ -1,9 +1,11 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { CountryCode } from 'libphonenumber-js';
 import { useToast } from '@/components/ui/Toast';
 import { PhoneWithCountryField } from '@/components/phone/PhoneWithCountryField';
 import { normalizeToE164 } from '@/lib/phone/e164';
+import { defaultPhoneCountryForVenueCurrency } from '@/lib/phone/default-country';
 import MiniFloorPlanPicker, { type MiniFloorTableRow } from '@/components/floor-plan/MiniFloorPlanPicker';
 
 // ── Helpers ───────────────────────────────────────────────────────────────
@@ -55,6 +57,8 @@ export interface UnifiedBookingFormProps {
   initialDate?: string;
   initialTime?: string;
   asModal?: boolean;
+  /** ISO 4217; used to default phone country (+44 for GBP, +353 for EUR). If omitted, loaded from GET /api/venue. */
+  venueCurrency?: string;
   onCreated: (result?: { booking_id: string; payment_url?: string }) => void;
   onClose?: () => void;
 }
@@ -65,10 +69,34 @@ export function UnifiedBookingForm({
   initialDate,
   initialTime,
   asModal = false,
+  venueCurrency: venueCurrencyProp,
   onCreated,
   onClose,
 }: UnifiedBookingFormProps) {
   const { addToast } = useToast();
+  const [venueCurrencyResolved, setVenueCurrencyResolved] = useState<string | null>(venueCurrencyProp ?? null);
+
+  useEffect(() => {
+    if (venueCurrencyProp != null) {
+      setVenueCurrencyResolved(venueCurrencyProp);
+      return;
+    }
+    let cancelled = false;
+    void fetch('/api/venue')
+      .then((r) => r.json())
+      .then((data: { currency?: string }) => {
+        if (!cancelled && data?.currency) setVenueCurrencyResolved(data.currency);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [venueCurrencyProp]);
+
+  const phoneDefaultCountry: CountryCode = useMemo(
+    () => defaultPhoneCountryForVenueCurrency(venueCurrencyResolved ?? undefined),
+    [venueCurrencyResolved],
+  );
 
   const [date, setDate] = useState(initialDate ?? new Date().toISOString().slice(0, 10));
   const [partySize, setPartySize] = useState(2);
@@ -268,7 +296,7 @@ export function UnifiedBookingForm({
     return null;
   }, [manualTableIds, selectedSuggestion, tableAssignMode]);
 
-  const phoneE164 = normalizeToE164(phone, 'GB');
+  const phoneE164 = normalizeToE164(phone, phoneDefaultCountry);
   const canSubmit = Boolean(date && selectedTime && name.trim() && phoneE164 && !saving);
 
   const timeOptions = useMemo(() => {
@@ -340,7 +368,7 @@ export function UnifiedBookingForm({
     e.preventDefault();
     setError(null);
 
-    const resolvedPhone = normalizeToE164(phone, 'GB');
+    const resolvedPhone = normalizeToE164(phone, phoneDefaultCountry);
     if (!date || !selectedTime || !name.trim() || !resolvedPhone) {
       setError('Date, time, guest name, and a valid phone number are required.');
       return;
@@ -768,6 +796,7 @@ export function UnifiedBookingForm({
             id="ubf-phone"
             value={phone}
             onChange={setPhone}
+            defaultCountry={phoneDefaultCountry}
             inputClassName="w-full min-w-0 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm transition-colors focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20 sm:rounded-xl sm:px-3.5 sm:py-2.5"
           />
         </div>

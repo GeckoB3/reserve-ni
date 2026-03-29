@@ -24,7 +24,7 @@ const timetableEntrySchema = z.object({
 });
 
 /** GET /api/venue/classes — list class types, timetable, and upcoming instances. */
-export async function GET(request: NextRequest) {
+export async function GET() {
   try {
     const supabase = await createClient();
     const staff = await getVenueStaff(supabase);

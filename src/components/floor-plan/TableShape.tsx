@@ -46,6 +46,8 @@ export interface TableShapeProps {
    * inside the table so labels stay within the shape at small scales.
    */
   compactLabels?: boolean;
+  /** Whole-table opacity (e.g. drag ghost on live floor). */
+  groupOpacity?: number;
   /** Override the computed pixel position during drag. */
   overrideX?: number;
   overrideY?: number;
@@ -100,6 +102,7 @@ export default function TableShape({
   canvasWidth,
   canvasHeight,
   compactLabels = false,
+  groupOpacity = 1,
   overrideX,
   overrideY,
   onDragEnd,
@@ -166,7 +169,6 @@ export default function TableShape({
   const HANDLE = 6;
 
   const minDim = Math.min(w, h);
-  const insetX = clamp(w * 0.06, 3, 10);
   const topEdge = isCircular ? -Math.min(w, h) / 2 : -h / 2;
   const bottomEdge = isCircular ? Math.min(w, h) / 2 : h / 2;
 
@@ -335,6 +337,7 @@ export default function TableShape({
     <Group
       x={x}
       y={y}
+      opacity={groupOpacity}
       rotation={table.rotation ?? 0}
       draggable={isEditorMode}
       onDragEnd={onDragEnd}

@@ -95,7 +95,7 @@ async function run() {
     console.log('RPC not available. Trying direct pg_query approach...');
 
     // Fall back: use the Supabase management SQL endpoint
-    const sqlRes = await fetch(`${url}/rest/v1/`, {
+    await fetch(`${url}/rest/v1/`, {
       method: 'GET',
       headers: { 'apikey': key, 'Authorization': `Bearer ${key}` },
     });

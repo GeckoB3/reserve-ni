@@ -62,7 +62,7 @@ function formatIsoTimeUk(iso: string): string {
 const BLOCK_DURATION_PRESETS = [30, 45, 60, 90, 120, 180] as const;
 
 
-export function FloorPlanLiveView({ isAdmin = false, venueId }: { isAdmin?: boolean; venueId: string }) {
+export function FloorPlanLiveView({ isAdmin = false, venueId, currency }: { isAdmin?: boolean; venueId: string; currency?: string }) {
   const { addToast } = useToast();
   const [tables, setTables] = useState<VenueTable[]>([]);
   const [gridData, setGridData] = useState<TableGridData | null>(null);
@@ -881,6 +881,7 @@ export function FloorPlanLiveView({ isAdmin = false, venueId }: { isAdmin?: bool
         <BookingDetailPanel
           bookingId={detailBookingId}
           venueId={venueId}
+          venueCurrency={currency}
           initialSnapshot={floorBookingDetailSnapshot}
           onClose={() => setDetailBookingId(null)}
           onUpdated={() => { fetchData(); }}
@@ -892,6 +893,7 @@ export function FloorPlanLiveView({ isAdmin = false, venueId }: { isAdmin?: bool
         <UnifiedBookingForm
           asModal
           venueId={venueId}
+          venueCurrency={currency}
           advancedMode
           initialDate={selectedDate}
           onCreated={() => { setShowNewBookingForm(false); fetchData(); }}
@@ -904,6 +906,7 @@ export function FloorPlanLiveView({ isAdmin = false, venueId }: { isAdmin?: bool
         <WalkInModal
           advancedMode
           initialDate={selectedDate}
+          venueCurrency={currency}
           onClose={() => setShowWalkInModal(false)}
           onCreated={() => { setShowWalkInModal(false); fetchData(); }}
         />

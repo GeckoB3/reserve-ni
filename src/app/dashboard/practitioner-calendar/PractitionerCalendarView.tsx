@@ -456,9 +456,13 @@ const DraggableBookingShell = memo(function DraggableBookingShell({
 export function PractitionerCalendarView({
   venueId,
   currency = 'GBP',
+  defaultPractitionerFilter = 'all',
+  linkedPractitionerId = null,
 }: {
   venueId: string;
   currency?: string;
+  defaultPractitionerFilter?: 'all' | string;
+  linkedPractitionerId?: string | null;
 }) {
   const { addToast } = useToast();
   const [viewMode, setViewMode] = useState<ViewMode>('day');
@@ -538,7 +542,7 @@ export function PractitionerCalendarView({
         const { from, to } = listFromTo;
         const params = from === to ? `date=${from}` : `from=${from}&to=${to}`;
         const [pracRes, bookRes, svcRes, blockRes] = await Promise.all([
-          fetch('/api/venue/practitioners'),
+          fetch('/api/venue/practitioners?roster=1'),
           fetch(`/api/venue/bookings/list?${params}`),
           fetch('/api/venue/appointment-services'),
           fetch(
@@ -969,11 +973,24 @@ export function PractitionerCalendarView({
             className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
           >
             <option value="all">All appointments</option>
-            {activePractitioners.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
+            {linkedPractitionerId === null ? (
+              activePractitioners.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))
+            ) : (
+              <>
+                <option value={linkedPractitionerId}>My appointments</option>
+                {activePractitioners
+                  .filter((p) => p.id !== linkedPractitionerId)
+                  .map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+              </>
+            )}
           </select>
           <select
             value={filterStatus}

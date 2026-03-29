@@ -8,6 +8,8 @@ import type { VenueSettings } from '../types';
 import { useNumericField } from '@/hooks/useNumericField';
 import { PhoneWithCountryField } from '@/components/phone/PhoneWithCountryField';
 import { normalizeToE164 } from '@/lib/phone/e164';
+import { isValidWebsiteUrlInput } from '@/lib/urls/website-url';
+import { buildAddress, parseAddress } from '@/lib/venue/address-format';
 
 const profileSchema = z.object({
   name: z.string().min(1, 'Name is required').max(200),
@@ -24,6 +26,13 @@ const profileSchema = z.object({
       message: 'Enter a valid phone number',
     }),
   email: z.string().email().optional().or(z.literal('')),
+  website_url: z
+    .string()
+    .max(2000)
+    .optional()
+    .refine((v) => isValidWebsiteUrlInput(v ?? ''), {
+      message: 'Enter a valid web address (e.g. example.com or https://example.com)',
+    }),
   cuisine_type: z.string().max(100).optional(),
   price_band: z.string().max(50).optional(),
   no_show_grace_minutes: z.number().int().min(10).max(60).optional(),
@@ -32,30 +41,6 @@ const profileSchema = z.object({
 });
 
 type ProfileForm = z.infer<typeof profileSchema>;
-
-function parseAddress(address: string | null): { name: string; street: string; town: string; postcode: string } {
-  if (!address) return { name: '', street: '', town: '', postcode: '' };
-  const parts = address.split(',').map(p => p.trim());
-  const postcodeMatch = parts[parts.length - 1]?.match(/^[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}$/i);
-  if (postcodeMatch && parts.length >= 2) {
-    const postcode = parts.pop()!;
-    const town = parts.pop() ?? '';
-    const name = parts.shift() ?? '';
-    const street = parts.join(', ');
-    return { name, street, town, postcode };
-  }
-  if (parts.length >= 4) return { name: parts[0]!, street: parts[1]!, town: parts[2]!, postcode: parts.slice(3).join(', ') };
-  if (parts.length === 3) return { name: '', street: parts[0]!, town: parts[1]!, postcode: parts[2]! };
-  if (parts.length === 2) return { name: '', street: parts[0]!, town: parts[1]!, postcode: '' };
-  return { name: '', street: address, town: '', postcode: '' };
-}
-
-function buildAddress(fields: { name: string; street: string; town: string; postcode: string }): string {
-  return [fields.name, fields.street, fields.town, fields.postcode]
-    .map(s => s.trim())
-    .filter(Boolean)
-    .join(', ');
-}
 
 interface VenueProfileSectionProps {
   venue: VenueSettings;
@@ -93,6 +78,7 @@ export function VenueProfileSection({ venue, onUpdate, isAdmin, bookingModel = '
       address_postcode: parsedAddr.postcode,
       phone: venue.phone ?? '',
       email: venue.email ?? '',
+      website_url: venue.website_url ?? '',
       cuisine_type: venue.cuisine_type ?? '',
       price_band: venue.price_band ?? '',
       no_show_grace_minutes: venue.no_show_grace_minutes ?? 15,
@@ -124,6 +110,7 @@ export function VenueProfileSection({ venue, onUpdate, isAdmin, bookingModel = '
         address: combinedAddress || undefined,
         phone: data.phone?.trim() ? normalizeToE164(data.phone.trim(), 'GB') ?? undefined : undefined,
         email: data.email || undefined,
+        website_url: data.website_url?.trim() ?? '',
         cuisine_type: data.cuisine_type || undefined,
         price_band: data.price_band || undefined,
         no_show_grace_minutes: data.no_show_grace_minutes ?? 15,
@@ -135,13 +122,27 @@ export function VenueProfileSection({ venue, onUpdate, isAdmin, bookingModel = '
       const j = await res.json().catch(() => ({}));
       throw new Error(j.error ?? 'Failed to save');
     }
-    const updated = await res.json();
+    const updated = (await res.json()) as {
+      name: string;
+      slug: string;
+      address: string | null;
+      phone: string | null;
+      email: string | null;
+      website_url: string | null;
+      cuisine_type: string | null;
+      price_band: string | null;
+      no_show_grace_minutes: number;
+      kitchen_email: string | null;
+      timezone: string;
+    };
+    setValue('website_url', updated.website_url ?? '');
     onUpdate({
       name: updated.name,
       slug: updated.slug,
       address: updated.address ?? null,
       phone: updated.phone ?? null,
       email: updated.email ?? null,
+      website_url: updated.website_url ?? null,
       cuisine_type: updated.cuisine_type ?? null,
       price_band: updated.price_band ?? null,
       no_show_grace_minutes: updated.no_show_grace_minutes ?? 15,
@@ -262,6 +263,23 @@ export function VenueProfileSection({ venue, onUpdate, isAdmin, bookingModel = '
             <label htmlFor="email" className="block text-sm font-medium text-neutral-700 mb-1">Email</label>
             <input id="email" type="email" {...register('email')} disabled={!isAdmin} className="w-full rounded border border-neutral-300 px-3 py-2 disabled:bg-neutral-50" />
           </div>
+        </div>
+        <div>
+          <label htmlFor="website_url" className="block text-sm font-medium text-neutral-700 mb-1">Business website</label>
+          <input
+            id="website_url"
+            type="text"
+            inputMode="url"
+            autoComplete="url"
+            placeholder="example.com or https://example.com"
+            {...register('website_url')}
+            disabled={!isAdmin}
+            className="w-full rounded border border-neutral-300 px-3 py-2 disabled:bg-neutral-50"
+          />
+          <p className="mt-1 text-xs text-neutral-500">
+            Shown on your public booking page when set. You can enter a domain without https:// — we will save a secure link.
+          </p>
+          {errors.website_url && <p className="mt-1 text-sm text-red-600">{errors.website_url.message}</p>}
         </div>
         {!isAppointment && (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

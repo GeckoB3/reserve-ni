@@ -103,11 +103,13 @@ export function ExpandedBookingContent({
   const [linkedBookings, setLinkedBookings] = useState<Array<{ id: string; person_label: string | null; booking_time: string; status: string }>>([]);
 
   useEffect(() => {
-    if (!booking.group_booking_id) { setLinkedBookings([]); return; }
+    if (!booking.group_booking_id) return;
+    let cancelled = false;
     fetch(`/api/venue/bookings/list?group_booking_id=${booking.group_booking_id}`)
       .then(async (res) => {
         if (!res.ok) return;
         const data = await res.json();
+        if (cancelled) return;
         const others = (data.bookings ?? [])
           .filter((b: { id: string }) => b.id !== booking.id)
           .map((b: { id: string; person_label: string | null; booking_time: string; status: string }) => ({
@@ -119,7 +121,12 @@ export function ExpandedBookingContent({
         setLinkedBookings(others);
       })
       .catch(() => { /* ignore */ });
+    return () => {
+      cancelled = true;
+    };
   }, [booking.group_booking_id, booking.id]);
+
+  const displayLinkedBookings = booking.group_booking_id ? linkedBookings : [];
 
   if (detailLoading) {
     return (
@@ -251,10 +258,10 @@ export function ExpandedBookingContent({
             <span className="text-xs font-semibold text-purple-800">Group Booking</span>
             {booking.person_label && <span className="text-xs text-purple-600">&middot; {booking.person_label}</span>}
           </div>
-          {linkedBookings.length > 0 && (
+          {displayLinkedBookings.length > 0 && (
             <div className="space-y-1.5">
               <p className="text-[10px] font-semibold uppercase tracking-wider text-purple-400">Other people in this group</p>
-              {linkedBookings.map((lb) => (
+              {displayLinkedBookings.map((lb) => (
                 <div key={lb.id} className="flex items-center justify-between text-xs">
                   <span className="text-purple-700 font-medium">{lb.person_label ?? 'Unknown'}</span>
                   <div className="flex items-center gap-2">

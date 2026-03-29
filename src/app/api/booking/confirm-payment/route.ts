@@ -5,6 +5,7 @@ import { generateConfirmToken, hashConfirmToken } from '@/lib/confirm-token';
 import { validateBookingStatusTransition } from '@/lib/table-management/lifecycle';
 import { sendBookingConfirmationEmail, sendDepositConfirmationEmail } from '@/lib/communications/send-templated';
 import { isSelfServeBookingSource } from '@/lib/booking-source';
+import { enrichBookingEmailForAppointment } from '@/lib/emails/booking-email-enrichment';
 
 /**
  * POST /api/booking/confirm-payment
@@ -156,7 +157,8 @@ export async function POST(request: NextRequest) {
 
     after(async () => {
       try {
-        const confResult = await sendBookingConfirmationEmail(bookingData, venueData, booking.venue_id);
+        const enriched = await enrichBookingEmailForAppointment(supabase, bookingId, bookingData);
+        const confResult = await sendBookingConfirmationEmail(enriched, venueData, booking.venue_id);
         if (!confResult.sent) console.warn('[after] confirm-payment confirmation email not sent:', confResult.reason);
       } catch (err) {
         console.error('[after] confirm-payment confirmation email failed:', err);
@@ -165,7 +167,8 @@ export async function POST(request: NextRequest) {
       const skipDepositReceipt = isSelfServeBookingSource(booking.source as string | null);
       if (recipientEmail && booking.deposit_amount_pence && !skipDepositReceipt) {
         try {
-          const depResult = await sendDepositConfirmationEmail(bookingData, venueData, booking.venue_id);
+          const enrichedDep = await enrichBookingEmailForAppointment(supabase, bookingId, bookingData);
+          const depResult = await sendDepositConfirmationEmail(enrichedDep, venueData, booking.venue_id);
           if (!depResult.sent) console.warn('[after] confirm-payment deposit email not sent:', depResult.reason);
         } catch (err) {
           console.error('[after] confirm-payment deposit email failed:', err);

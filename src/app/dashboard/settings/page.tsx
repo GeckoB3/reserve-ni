@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
 import { SettingsView } from './SettingsView';
+import { StaffPersonalSettingsSection } from './sections/StaffPersonalSettingsSection';
 import { getDashboardStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 
@@ -21,12 +22,9 @@ export default async function SettingsPage({
   }
 
   const staff = await getDashboardStaff(supabase);
-  if (staff.role !== 'admin') {
-    redirect('/dashboard');
-  }
 
   const venueId = staff.venue_id;
-  if (!venueId) {
+  if (!venueId || !staff.id) {
     return (
       <div className="flex items-center justify-center p-12">
         <div className="rounded-xl border border-slate-200 bg-white p-8 text-center shadow-sm">
@@ -36,11 +34,41 @@ export default async function SettingsPage({
     );
   }
 
+  const { data: venueMetaForRole } = await staff.db
+    .from('venues')
+    .select('booking_model')
+    .eq('id', venueId)
+    .single();
+  const bookingModelForAccess =
+    ((venueMetaForRole as { booking_model?: string } | null)?.booking_model as string) ?? 'table_reservation';
+
+  /** Model B: staff users only get personal account settings (not venue-wide configuration). */
+  if (staff.role === 'staff') {
+    if (bookingModelForAccess !== 'practitioner_appointment') {
+      redirect('/dashboard');
+    }
+    return (
+      <div className="p-4 md:p-6 lg:p-8">
+        <div className="mx-auto max-w-3xl">
+          <h1 className="mb-2 text-2xl font-semibold text-slate-900">Account settings</h1>
+          <p className="mb-6 text-sm text-slate-500">
+            Update your name, email, phone, and password. Other venue settings are managed by an administrator.
+          </p>
+          <StaffPersonalSettingsSection />
+        </div>
+      </div>
+    );
+  }
+
+  if (staff.role !== 'admin') {
+    redirect('/dashboard');
+  }
+
   let venue = null;
   let hasServiceConfig = false;
   const { data: fullVenue, error: fullErr } = await staff.db
     .from('venues')
-    .select('id, name, slug, address, phone, email, cover_photo_url, cuisine_type, price_band, no_show_grace_minutes, kitchen_email, communication_templates, opening_hours, booking_rules, deposit_config, availability_config, stripe_connected_account_id, timezone, table_management_enabled, combination_threshold, pricing_tier, plan_status, subscription_current_period_end, calendar_count, booking_model')
+    .select('id, name, slug, address, phone, email, website_url, cover_photo_url, cuisine_type, price_band, no_show_grace_minutes, kitchen_email, communication_templates, opening_hours, booking_rules, deposit_config, availability_config, stripe_connected_account_id, timezone, table_management_enabled, combination_threshold, pricing_tier, plan_status, subscription_current_period_end, calendar_count, booking_model')
     .eq('id', venueId)
     .single();
 
@@ -50,7 +78,7 @@ export default async function SettingsPage({
     console.error('Settings page full venue query failed, trying basic columns:', fullErr?.message);
     const { data: basicVenue } = await staff.db
       .from('venues')
-      .select('id, name, slug, address, phone, email, cover_photo_url, opening_hours, booking_rules, deposit_config, availability_config, timezone, table_management_enabled, combination_threshold, booking_model')
+      .select('id, name, slug, address, phone, email, website_url, cover_photo_url, opening_hours, booking_rules, deposit_config, availability_config, timezone, table_management_enabled, combination_threshold, booking_model')
       .eq('id', venueId)
       .single();
     if (basicVenue) {
@@ -87,7 +115,7 @@ export default async function SettingsPage({
     }
   }
 
-  const isAdmin = true;
+  const isAdmin = staff.role === 'admin';
   let activePractitionerCount = 0;
   if (venueId && bookingModel === 'practitioner_appointment') {
     const adminClient = getSupabaseAdminClient();

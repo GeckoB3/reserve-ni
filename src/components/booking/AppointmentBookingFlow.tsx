@@ -4,6 +4,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { VenuePublic, GuestDetails } from './types';
 import { DetailsStep } from './DetailsStep';
 import { PaymentStep } from './PaymentStep';
+import { APPOINTMENT_BOOKING_RESET_EVENT } from './appointment-booking-events';
+import {
+  cancellationDeadlineHoursBefore,
+  classifyGroupDepositRefunds,
+  isDepositRefundAvailableAt,
+} from '@/lib/booking/cancellation-deadline';
+import { defaultPhoneCountryForVenueCurrency } from '@/lib/phone/default-country';
 
 interface Practitioner {
   id: string;
@@ -13,7 +20,7 @@ interface Practitioner {
     name: string;
     duration_minutes: number;
     price_pence: number | null;
-    deposit_pence: number | null;
+    deposit_pence?: number | null;
   }>;
   slots: Array<{ start_time: string; service_id: string; duration_minutes: number; price_pence: number | null }>;
 }
@@ -129,6 +136,28 @@ export function AppointmentBookingFlow({ venue, cancellationPolicy, onHeightChan
     return () => ro.disconnect();
   }, [onHeightChange]);
 
+  useEffect(() => {
+    function onReset() {
+      setStep('mode_choice');
+      setDate(todayStr());
+      setPractitioners([]);
+      setLoading(false);
+      setError(null);
+      setSelectedServiceId(null);
+      setSelectedPractitionerId(null);
+      setSelectedTime(null);
+      setGuestDetails(null);
+      setCreateResult(null);
+      setGroupPeople([]);
+      setCurrentPersonLabel('');
+      setGroupServiceId(null);
+      setGroupPractitionerId(null);
+      setGroupCreateResult(null);
+    }
+    window.addEventListener(APPOINTMENT_BOOKING_RESET_EVENT, onReset);
+    return () => window.removeEventListener(APPOINTMENT_BOOKING_RESET_EVENT, onReset);
+  }, []);
+
   // Build phantom bookings from already-selected group people
   const phantomBookings = useMemo(() => {
     return groupPeople
@@ -177,18 +206,50 @@ export function AppointmentBookingFlow({ venue, cancellationPolicy, onHeightChan
   const allServices = practitioners.flatMap((p) => p.services);
   const uniqueServices = Array.from(new Map(allServices.map((s) => [s.id, s])).values());
 
+  const servicesWithFromPrice = useMemo(() => {
+    const map = new Map<
+      string,
+      { id: string; name: string; duration_minutes: number; minPricePence: number | null }
+    >();
+    for (const p of practitioners) {
+      for (const s of p.services) {
+        const price = s.price_pence;
+        const existing = map.get(s.id);
+        if (!existing) {
+          map.set(s.id, {
+            id: s.id,
+            name: s.name,
+            duration_minutes: s.duration_minutes,
+            minPricePence: price,
+          });
+        } else if (price != null && (existing.minPricePence == null || price < existing.minPricePence)) {
+          existing.minPricePence = price;
+        }
+      }
+    }
+    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
+  }, [practitioners]);
+
   const sym = venue.currency === 'EUR' ? '€' : '£';
   function formatPrice(pence: number | null): string {
     if (pence == null) return 'POA';
     return `${sym}${(pence / 100).toFixed(2)}`;
   }
 
+  function formatFromPrice(pence: number | null): string {
+    if (pence == null) return 'POA';
+    return `From ${sym}${(pence / 100).toFixed(2)}`;
+  }
+
   const refundNoticeHours = venue.booking_rules?.cancellation_notice_hours ?? 48;
+  const phoneDefaultCountry = defaultPhoneCountryForVenueCurrency(venue.currency);
 
   // Single flow helpers
   const selectedPrac = practitioners.find((p) => p.id === selectedPractitionerId);
   const availableSlots = selectedPrac?.slots.filter((s) => !selectedServiceId || s.service_id === selectedServiceId) ?? [];
   const selectedService = uniqueServices.find((s) => s.id === selectedServiceId);
+  const selectedServiceForPractitioner =
+    selectedPrac?.services.find((s) => s.id === selectedServiceId) ?? selectedService;
   const groupedSlots = groupSlotsByPeriod(availableSlots);
 
   // Group flow helpers
@@ -260,20 +321,21 @@ export function AppointmentBookingFlow({ venue, cancellationPolicy, onHeightChan
     const prac = practitioners.find((p) => p.id === groupPractitionerId);
     if (!svc || !prac) return;
 
+    const svcOffer = prac.services.find((s) => s.id === groupServiceId);
     setGroupPeople((prev) => [
       ...prev,
       {
         label: currentPersonLabel,
         serviceId: svc.id,
-        serviceName: svc.name,
+        serviceName: svcOffer?.name ?? svc.name,
         practitionerId: prac.id,
         practitionerName: prac.name,
         date,
         time,
-        durationMinutes: svc.duration_minutes,
+        durationMinutes: svcOffer?.duration_minutes ?? svc.duration_minutes,
         bufferMinutes: 0,
-        pricePence: svc.price_pence,
-        depositPence: svc.deposit_pence ?? 0,
+        pricePence: svcOffer?.price_pence ?? svc.price_pence,
+        depositPence: svcOffer?.deposit_pence ?? svc.deposit_pence ?? 0,
       },
     ]);
     setGroupServiceId(null);
@@ -377,7 +439,54 @@ export function AppointmentBookingFlow({ venue, cancellationPolicy, onHeightChan
   const totalGroupPrice = groupPeople.reduce((sum, p) => sum + (p.pricePence ?? 0), 0);
   const totalGroupDepositPence = groupPeople.reduce((sum, p) => sum + (p.depositPence ?? 0), 0);
 
-  const paymentCancellationBlurb = `Cancel at least ${refundNoticeHours} hours before each appointment to receive a full refund of any deposit paid.`;
+  const paymentCancellationBlurb = `Full deposit refund if you cancel ≥${refundNoticeHours}h before each appointment.`;
+
+  const singleAppointmentPaymentPolicy = useMemo(() => {
+    if (!selectedTime) return paymentCancellationBlurb;
+    const iso = cancellationDeadlineHoursBefore(date, selectedTime, refundNoticeHours);
+    if (isDepositRefundAvailableAt(iso)) {
+      return cancellationPolicy ?? `Full deposit refund if you cancel ≥${refundNoticeHours}h before start.`;
+    }
+    return `Refund cut-off has passed — this deposit is not refundable if you cancel.`;
+  }, [date, selectedTime, refundNoticeHours, cancellationPolicy]);
+
+  const groupAppointmentPaymentPolicy = useMemo(() => {
+    if (groupPeople.length === 0) return paymentCancellationBlurb;
+    const slots = groupPeople.map((p) => ({ date: p.date, time: p.time }));
+    const cls = classifyGroupDepositRefunds(slots, refundNoticeHours);
+    if (cls === 'all_refundable') {
+      return cancellationPolicy ?? paymentCancellationBlurb;
+    }
+    if (cls === 'none_refundable') {
+      return `Refund cut-off has passed for at least one appointment — not all of this deposit is refundable if you cancel.`;
+    }
+    return `Refund is per appointment (≥${refundNoticeHours}h before each start). Some cut-offs have passed — those shares are not refundable.`;
+  }, [groupPeople, refundNoticeHours, cancellationPolicy]);
+
+  const singleConfirmationDepositCopy = useMemo(() => {
+    if (!selectedTime) return null;
+    const iso = cancellationDeadlineHoursBefore(date, selectedTime, refundNoticeHours);
+    const hrs = createResult?.cancellation_notice_hours ?? refundNoticeHours;
+    const amt = ((createResult?.deposit_amount_pence ?? 0) / 100).toFixed(2);
+    if (isDepositRefundAvailableAt(iso)) {
+      return `Full refund of ${sym}${amt} if you cancel ≥${hrs}h before start.`;
+    }
+    return `${sym}${amt} deposit not refundable — the refund cut-off for this appointment has passed.`;
+  }, [date, selectedTime, refundNoticeHours, createResult, sym]);
+
+  const groupConfirmationDepositCopy = useMemo(() => {
+    const slots = groupPeople.map((p) => ({ date: p.date, time: p.time }));
+    const cls = classifyGroupDepositRefunds(slots, refundNoticeHours);
+    const hrs = groupCreateResult?.cancellation_notice_hours ?? refundNoticeHours;
+    const amt = ((groupCreateResult?.total_deposit_pence ?? 0) / 100).toFixed(2);
+    if (cls === 'all_refundable') {
+      return `Full refund of each share (${sym}${amt} total) if you cancel ≥${hrs}h before each start.`;
+    }
+    if (cls === 'none_refundable') {
+      return `${sym}${amt} total not fully refundable — refund cut-off has passed for every appointment.`;
+    }
+    return `${sym}${amt} total: refund per appointment (≥${hrs}h before start); cut-off passed for some — those shares are not refundable.`;
+  }, [groupPeople, refundNoticeHours, groupCreateResult, sym]);
 
   return (
     <div ref={containerRef} className="mx-auto max-w-lg" style={accentColour ? { '--accent': accentColour } as React.CSSProperties : undefined}>
@@ -424,7 +533,7 @@ export function AppointmentBookingFlow({ venue, cancellationPolicy, onHeightChan
       {step === 'mode_choice' && (
         <div>
           <h2 className="mb-2 text-lg font-semibold text-slate-900">How would you like to book?</h2>
-          <p className="mb-5 text-sm text-slate-500">You can book for just yourself, or for multiple people in one go.</p>
+          <p className="mb-5 text-sm text-slate-500">Choose a single appointment or a group booking for several people.</p>
           <div className="space-y-3">
             <button
               onClick={() => setStep('service')}
@@ -435,8 +544,8 @@ export function AppointmentBookingFlow({ venue, cancellationPolicy, onHeightChan
                   <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z" /></svg>
                 </div>
                 <div className="min-w-0 flex-1">
-                  <div className="font-medium text-slate-900">Book for myself</div>
-                  <div className="text-sm text-slate-500">Select a service, staff member, and time</div>
+                  <div className="font-medium text-slate-900">Book an appointment</div>
+                  <div className="text-sm text-slate-500">Schedule an appointment for yourself</div>
                 </div>
                 <svg className="h-5 w-5 text-slate-300 flex-shrink-0" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" /></svg>
               </div>
@@ -450,8 +559,8 @@ export function AppointmentBookingFlow({ venue, cancellationPolicy, onHeightChan
                   <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M15 19.128a9.38 9.38 0 0 0 2.625.372 9.337 9.337 0 0 0 4.121-.952 4.125 4.125 0 0 0-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 0 1 8.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0 1 11.964-3.07M12 6.375a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0Zm8.25 2.25a2.625 2.625 0 1 1-5.25 0 2.625 2.625 0 0 1 5.25 0Z" /></svg>
                 </div>
                 <div className="min-w-0 flex-1">
-                  <div className="font-medium text-slate-900">Book for a group</div>
-                  <div className="text-sm text-slate-500">Book different services for multiple people</div>
+                  <div className="font-medium text-slate-900">Group appointment</div>
+                  <div className="text-sm text-slate-500">Different services for multiple people</div>
                 </div>
                 <svg className="h-5 w-5 text-slate-300 flex-shrink-0" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" /></svg>
               </div>
@@ -470,22 +579,18 @@ export function AppointmentBookingFlow({ venue, cancellationPolicy, onHeightChan
             <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" /></svg>
             Back
           </button>
-          <h2 className="mb-1 text-lg font-semibold text-slate-900">What would you like?</h2>
-          <p className="mb-4 text-sm text-slate-500">Select a service to get started.</p>
-          <div className="mb-4">
-            <label className="mb-1 block text-xs font-medium text-slate-500 uppercase tracking-wider">Preferred date</label>
-            <input type="date" value={date} min={todayStr()} onChange={(e) => setDate(e.target.value)} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm shadow-sm focus:border-brand-400 focus:ring-2 focus:ring-brand-100 focus:outline-none" />
-          </div>
+          <h2 className="mb-1 text-lg font-semibold text-slate-900">Select a service</h2>
+          <p className="mb-4 text-sm text-slate-500">Choose the service you want. You will pick a date and time in a later step.</p>
           {loading ? (
             <div className="space-y-3">{[1, 2, 3].map((i) => <div key={i} className="h-[72px] animate-pulse rounded-xl bg-slate-100" />)}</div>
-          ) : uniqueServices.length === 0 ? (
+          ) : servicesWithFromPrice.length === 0 ? (
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-8 text-center">
-              <p className="text-sm font-medium text-slate-600">No services available on {formatDateHuman(date)}</p>
-              <p className="mt-1 text-xs text-slate-400">Try selecting a different date above.</p>
+              <p className="text-sm font-medium text-slate-600">No services are available right now</p>
+              <p className="mt-1 text-xs text-slate-400">Try again later or contact the venue.</p>
             </div>
           ) : (
             <div className="space-y-2">
-              {uniqueServices.map((svc) => (
+              {servicesWithFromPrice.map((svc) => (
                 <button key={svc.id} onClick={() => { setSelectedServiceId(svc.id); setStep('practitioner'); }} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3.5 text-left shadow-sm transition-all hover:border-brand-300 hover:shadow-md active:scale-[0.99]">
                   <div className="flex items-center justify-between gap-3">
                     <div className="min-w-0">
@@ -493,7 +598,7 @@ export function AppointmentBookingFlow({ venue, cancellationPolicy, onHeightChan
                       <div className="mt-0.5 text-xs text-slate-500">{svc.duration_minutes} min</div>
                     </div>
                     <div className="flex items-center gap-2 flex-shrink-0">
-                      <span className="text-sm font-semibold text-brand-600">{formatPrice(svc.price_pence)}</span>
+                      <span className="text-sm font-semibold text-brand-600">{formatFromPrice(svc.minPricePence)}</span>
                       <svg className="h-4 w-4 text-slate-300" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" /></svg>
                     </div>
                   </div>
@@ -513,11 +618,11 @@ export function AppointmentBookingFlow({ venue, cancellationPolicy, onHeightChan
           {selectedService && (
             <div className="mb-4 flex items-center gap-3 rounded-xl border border-brand-100 bg-brand-50/50 px-4 py-2.5">
               <svg className="h-5 w-5 flex-shrink-0 text-brand-500" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" /></svg>
-              <div className="text-sm"><span className="font-medium text-brand-700">{selectedService.name}</span><span className="text-brand-500"> &middot; {selectedService.duration_minutes} min &middot; {formatPrice(selectedService.price_pence)}</span></div>
+              <div className="text-sm"><span className="font-medium text-brand-700">{selectedService.name}</span><span className="text-brand-500"> &middot; {selectedService.duration_minutes} min &middot; {formatFromPrice(servicesWithFromPrice.find((s) => s.id === selectedService.id)?.minPricePence ?? selectedService.price_pence)}</span></div>
             </div>
           )}
           <h2 className="mb-1 text-lg font-semibold text-slate-900">Who would you like to see?</h2>
-          <p className="mb-4 text-sm text-slate-500">Choose your preferred {terms.staff.toLowerCase()} for {formatDateHuman(date)}.</p>
+          <p className="mb-4 text-sm text-slate-500">Choose your preferred {terms.staff.toLowerCase()}. Prices shown are what they charge for this service.</p>
           {loading ? (
             <div className="space-y-3">{[1, 2].map((i) => <div key={i} className="h-16 animate-pulse rounded-xl bg-slate-100" />)}</div>
           ) : practitioners.length === 0 ? (
@@ -527,18 +632,18 @@ export function AppointmentBookingFlow({ venue, cancellationPolicy, onHeightChan
           ) : (
             <div className="space-y-2">
               {practitioners.map((prac) => {
-                const pracSlots = prac.slots.filter((s) => !selectedServiceId || s.service_id === selectedServiceId);
+                const offer = prac.services.find((s) => s.id === selectedServiceId);
                 return (
                   <button key={prac.id} onClick={() => { setSelectedPractitionerId(prac.id); setStep('slot'); }} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3.5 text-left shadow-sm transition-all hover:border-brand-300 hover:shadow-md active:scale-[0.99]">
                     <div className="flex items-center justify-between gap-3">
                       <div className="flex items-center gap-3">
                         <div className="flex h-10 w-10 items-center justify-center rounded-full bg-brand-100 text-sm font-bold text-brand-700">{prac.name.charAt(0).toUpperCase()}</div>
-                        <div>
-                          <div className="font-medium text-slate-900">{prac.name}</div>
-                          <div className="text-xs text-slate-500">{pracSlots.length} {pracSlots.length === 1 ? 'time' : 'times'} available</div>
-                        </div>
+                        <div className="font-medium text-slate-900">{prac.name}</div>
                       </div>
-                      <svg className="h-4 w-4 text-slate-300 flex-shrink-0" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" /></svg>
+                      <div className="flex flex-shrink-0 items-center gap-2">
+                        <span className="text-sm font-semibold text-brand-600">{formatPrice(offer?.price_pence ?? null)}</span>
+                        <svg className="h-4 w-4 text-slate-300" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" /></svg>
+                      </div>
                     </div>
                   </button>
                 );
@@ -561,10 +666,10 @@ export function AppointmentBookingFlow({ venue, cancellationPolicy, onHeightChan
               <span>{selectedPrac?.name}</span>
             </div>
           </div>
-          <h2 className="mb-1 text-lg font-semibold text-slate-900">Pick a time</h2>
-          <p className="mb-4 text-sm text-slate-500">Showing availability for {formatDateHuman(date)}</p>
+          <h2 className="mb-1 text-lg font-semibold text-slate-900">Date and time</h2>
+          <p className="mb-4 text-sm text-slate-500">Select a date first. Available times for that day will appear below.</p>
           <div className="mb-4">
-            <label className="mb-1 block text-xs font-medium text-slate-500 uppercase tracking-wider">Change date</label>
+            <label className="mb-1 block text-xs font-medium text-slate-500 uppercase tracking-wider">Date</label>
             <input type="date" value={date} min={todayStr()} onChange={(e) => { setDate(e.target.value); setSelectedTime(null); }} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm shadow-sm focus:border-brand-400 focus:ring-2 focus:ring-brand-100 focus:outline-none" />
           </div>
           {loading ? (
@@ -593,14 +698,22 @@ export function AppointmentBookingFlow({ venue, cancellationPolicy, onHeightChan
               <div className="flex justify-between"><span className="text-slate-500">{terms.staff}</span><span className="font-medium text-slate-900">{selectedPrac?.name}</span></div>
               <div className="flex justify-between"><span className="text-slate-500">Date</span><span className="font-medium text-slate-900">{formatDateHuman(date)}</span></div>
               <div className="flex justify-between"><span className="text-slate-500">Time</span><span className="font-medium text-slate-900">{selectedTime}</span></div>
-              {selectedService?.duration_minutes && <div className="flex justify-between"><span className="text-slate-500">Duration</span><span className="font-medium text-slate-900">{selectedService.duration_minutes} min</span></div>}
-              {selectedService?.price_pence != null && (
-                <div className="flex justify-between border-t border-slate-100 pt-1.5 mt-1.5"><span className="font-medium text-slate-700">Price</span><span className="font-semibold text-brand-600">{formatPrice(selectedService.price_pence)}</span></div>
+              {selectedServiceForPractitioner?.duration_minutes != null && (
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Duration</span>
+                  <span className="font-medium text-slate-900">{selectedServiceForPractitioner.duration_minutes} min</span>
+                </div>
               )}
-              {(selectedService?.deposit_pence ?? 0) > 0 && (
-                <div className="flex justify-between border-t border-slate-100 pt-1.5 mt-1.5">
+              {selectedServiceForPractitioner?.price_pence != null && (
+                <div className="mt-1.5 flex justify-between border-t border-slate-100 pt-1.5">
+                  <span className="font-medium text-slate-700">Price</span>
+                  <span className="font-semibold text-brand-600">{formatPrice(selectedServiceForPractitioner.price_pence)}</span>
+                </div>
+              )}
+              {(selectedServiceForPractitioner?.deposit_pence ?? 0) > 0 && (
+                <div className="mt-1.5 flex justify-between border-t border-slate-100 pt-1.5">
                   <span className="font-medium text-slate-700">Deposit</span>
-                  <span className="font-semibold text-amber-700">{formatPrice(selectedService!.deposit_pence)}</span>
+                  <span className="font-semibold text-amber-700">{formatPrice(selectedServiceForPractitioner?.deposit_pence ?? null)}</span>
                 </div>
               )}
             </div>
@@ -612,9 +725,10 @@ export function AppointmentBookingFlow({ venue, cancellationPolicy, onHeightChan
             onSubmit={handleDetailsSubmit}
             onBack={() => { setSelectedTime(null); setStep('slot'); }}
             variant="appointment"
-            appointmentDepositPence={selectedService?.deposit_pence ?? 0}
+            appointmentDepositPence={selectedServiceForPractitioner?.deposit_pence ?? 0}
             currencySymbol={sym}
             refundNoticeHours={refundNoticeHours}
+            phoneDefaultCountry={phoneDefaultCountry}
           />
         </div>
       )}
@@ -627,7 +741,7 @@ export function AppointmentBookingFlow({ venue, cancellationPolicy, onHeightChan
           partySize={1}
           onComplete={handlePaymentComplete}
           onBack={() => setStep('details')}
-          cancellationPolicy={cancellationPolicy ?? paymentCancellationBlurb}
+          cancellationPolicy={singleAppointmentPaymentPolicy}
           summaryMode="total"
         />
       )}
@@ -641,8 +755,9 @@ export function AppointmentBookingFlow({ venue, cancellationPolicy, onHeightChan
           {guestDetails?.name && <p className="mt-3 text-xs text-green-600">A confirmation will be sent to {guestDetails.email || guestDetails.phone}.</p>}
           {(createResult?.deposit_amount_pence ?? 0) > 0 ? (
             <p className="mt-4 max-w-sm mx-auto text-left text-xs text-green-800/90">
-              <span className="font-medium">Refund policy:</span> cancel at least {createResult?.cancellation_notice_hours ?? refundNoticeHours} hours before your appointment starts to receive a full refund of your {sym}
-              {((createResult?.deposit_amount_pence ?? 0) / 100).toFixed(2)} deposit.
+              <span className="font-medium">Refund policy:</span>{' '}
+              {singleConfirmationDepositCopy ??
+                `Full refund if you cancel ≥${createResult?.cancellation_notice_hours ?? refundNoticeHours}h before start (see venue terms).`}
             </p>
           ) : (
             <p className="mt-4 max-w-sm mx-auto text-left text-xs text-green-800/90">
@@ -797,13 +912,13 @@ export function AppointmentBookingFlow({ venue, cancellationPolicy, onHeightChan
           <p className="mb-4 text-sm text-slate-500">What would {currentPersonLabel} like?</p>
           {loading ? (
             <div className="space-y-3">{[1, 2, 3].map((i) => <div key={i} className="h-[72px] animate-pulse rounded-xl bg-slate-100" />)}</div>
-          ) : uniqueServices.length === 0 ? (
+          ) : servicesWithFromPrice.length === 0 ? (
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-8 text-center">
-              <p className="text-sm font-medium text-slate-600">No services available on {formatDateHuman(date)}</p>
+              <p className="text-sm font-medium text-slate-600">No services are available right now</p>
             </div>
           ) : (
             <div className="space-y-2">
-              {uniqueServices.map((svc) => (
+              {servicesWithFromPrice.map((svc) => (
                 <button key={svc.id} onClick={() => { setGroupServiceId(svc.id); setStep('group_practitioner'); }} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3.5 text-left shadow-sm transition-all hover:border-brand-300 hover:shadow-md active:scale-[0.99]">
                   <div className="flex items-center justify-between gap-3">
                     <div className="min-w-0">
@@ -811,7 +926,7 @@ export function AppointmentBookingFlow({ venue, cancellationPolicy, onHeightChan
                       <div className="mt-0.5 text-xs text-slate-500">{svc.duration_minutes} min</div>
                     </div>
                     <div className="flex items-center gap-2 flex-shrink-0">
-                      <span className="text-sm font-semibold text-brand-600">{formatPrice(svc.price_pence)}</span>
+                      <span className="text-sm font-semibold text-brand-600">{formatFromPrice(svc.minPricePence)}</span>
                       <svg className="h-4 w-4 text-slate-300" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" /></svg>
                     </div>
                   </div>
@@ -844,18 +959,18 @@ export function AppointmentBookingFlow({ venue, cancellationPolicy, onHeightChan
           ) : (
             <div className="space-y-2">
               {practitioners.map((prac) => {
-                const pracSlots = prac.slots.filter((s) => !groupServiceId || s.service_id === groupServiceId);
+                const offer = prac.services.find((s) => s.id === groupServiceId);
                 return (
                   <button key={prac.id} onClick={() => { setGroupPractitionerId(prac.id); setStep('group_slot'); }} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3.5 text-left shadow-sm transition-all hover:border-brand-300 hover:shadow-md active:scale-[0.99]">
                     <div className="flex items-center justify-between gap-3">
                       <div className="flex items-center gap-3">
                         <div className="flex h-10 w-10 items-center justify-center rounded-full bg-brand-100 text-sm font-bold text-brand-700">{prac.name.charAt(0).toUpperCase()}</div>
-                        <div>
-                          <div className="font-medium text-slate-900">{prac.name}</div>
-                          <div className="text-xs text-slate-500">{pracSlots.length} {pracSlots.length === 1 ? 'time' : 'times'} available</div>
-                        </div>
+                        <div className="font-medium text-slate-900">{prac.name}</div>
                       </div>
-                      <svg className="h-4 w-4 text-slate-300 flex-shrink-0" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" /></svg>
+                      <div className="flex flex-shrink-0 items-center gap-2">
+                        <span className="text-sm font-semibold text-brand-600">{formatPrice(offer?.price_pence ?? null)}</span>
+                        <svg className="h-4 w-4 text-slate-300" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" /></svg>
+                      </div>
                     </div>
                   </button>
                 );
@@ -877,9 +992,9 @@ export function AppointmentBookingFlow({ venue, cancellationPolicy, onHeightChan
             <span className="text-purple-500"> &middot; {groupSelectedService?.name} &middot; {groupSelectedPrac?.name}</span>
           </div>
           <h2 className="mb-1 text-lg font-semibold text-slate-900">Pick a time for {currentPersonLabel}</h2>
-          <p className="mb-4 text-sm text-slate-500">Showing availability for {formatDateHuman(date)}</p>
+          <p className="mb-4 text-sm text-slate-500">Select a date, then choose an available time.</p>
           <div className="mb-4">
-            <label className="mb-1 block text-xs font-medium text-slate-500 uppercase tracking-wider">Change date</label>
+            <label className="mb-1 block text-xs font-medium text-slate-500 uppercase tracking-wider">Date</label>
             <input type="date" value={date} min={todayStr()} onChange={(e) => setDate(e.target.value)} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm shadow-sm focus:border-brand-400 focus:ring-2 focus:ring-brand-100 focus:outline-none" />
           </div>
           {loading ? (
@@ -936,6 +1051,8 @@ export function AppointmentBookingFlow({ venue, cancellationPolicy, onHeightChan
             appointmentDepositPence={totalGroupDepositPence}
             currencySymbol={sym}
             refundNoticeHours={refundNoticeHours}
+            multiAppointmentSlots={groupPeople.map((p) => ({ date: p.date, time: p.time }))}
+            phoneDefaultCountry={phoneDefaultCountry}
           />
         </div>
       )}
@@ -949,7 +1066,7 @@ export function AppointmentBookingFlow({ venue, cancellationPolicy, onHeightChan
           partySize={groupPeople.length}
           onComplete={handleGroupPaymentComplete}
           onBack={() => setStep('group_details')}
-          cancellationPolicy={cancellationPolicy ?? paymentCancellationBlurb}
+          cancellationPolicy={groupAppointmentPaymentPolicy}
           summaryMode="total"
         />
       )}
@@ -976,9 +1093,9 @@ export function AppointmentBookingFlow({ venue, cancellationPolicy, onHeightChan
           )}
           {(groupCreateResult?.total_deposit_pence ?? 0) > 0 ? (
             <p className="mt-4 max-w-md mx-auto text-left text-xs text-green-800/90">
-              <span className="font-medium">Refund policy:</span> cancel at least {groupCreateResult?.cancellation_notice_hours ?? refundNoticeHours} hours before
-              each appointment start time to receive a full refund of that appointment&apos;s deposit ({sym}
-              {((groupCreateResult?.total_deposit_pence ?? 0) / 100).toFixed(2)} total paid).
+              <span className="font-medium">Refund policy:</span>{' '}
+              {groupConfirmationDepositCopy ??
+                `Full refund per appointment if you cancel ≥${groupCreateResult?.cancellation_notice_hours ?? refundNoticeHours}h before each start (see venue terms).`}
             </p>
           ) : (
             <p className="mt-4 max-w-md mx-auto text-left text-xs text-green-800/90">

@@ -83,7 +83,7 @@ function textToHtml(text: string): string {
 }
 
 export class EmailChannel implements MessageChannel {
-  async send(recipient: Recipient, template: CompiledTemplate, variables: TemplateVariables): Promise<void> {
+  async send(recipient: Recipient, template: CompiledTemplate, _variables: TemplateVariables): Promise<void> {
     const email = recipient.email;
     if (!email?.trim()) return;
 

@@ -93,3 +93,24 @@ export async function getDashboardStaff(
 export function requireAdmin(staff: VenueStaff | null): staff is VenueStaff {
   return staff !== null && staff.role === 'admin';
 }
+
+/** Practitioner row linked to this staff member for Model B (one calendar per staff). */
+export async function getLinkedPractitionerId(
+  admin: SupabaseClient,
+  venueId: string,
+  staffId: string,
+): Promise<string | null> {
+  const { data, error } = await admin
+    .from('practitioners')
+    .select('id')
+    .eq('venue_id', venueId)
+    .eq('staff_id', staffId)
+    .maybeSingle();
+
+  if (error) {
+    console.error('[getLinkedPractitionerId] lookup failed:', error.message, { venueId, staffId });
+    return null;
+  }
+
+  return data?.id ?? null;
+}

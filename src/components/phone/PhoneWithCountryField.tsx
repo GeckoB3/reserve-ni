@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 import { parsePhoneNumberFromString, type CountryCode } from 'libphonenumber-js';
 import {
@@ -8,7 +8,6 @@ import {
   getDialCodeForCountry,
   parseStoredPhoneForUi,
 } from '@/lib/phone/e164';
-import { useDefaultPhoneCountry } from '@/hooks/useDefaultPhoneCountry';
 
 export function nationalToE164Client(national: string, country: CountryCode): string | null {
   const t = national.trim();
@@ -91,8 +90,8 @@ export function PhoneWithCountryField({
 }: PhoneWithCountryFieldProps) {
   const reactId = useId();
   const id = idProp ?? `phone-${reactId}`;
-  const detectedCountry = useDefaultPhoneCountry();
-  const baseDefault = defaultCountryProp ?? detectedCountry;
+  /** Venue/booking region (+44 for GB); explicit prop overrides. */
+  const baseDefault = defaultCountryProp ?? 'GB';
 
   const [countryCode, setCountryCode] = useState<CountryCode>(baseDefault);
   const [national, setNational] = useState('');
@@ -103,7 +102,11 @@ export function PhoneWithCountryField({
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [highlighted, setHighlighted] = useState(0);
-  const [mounted, setMounted] = useState(false);
+  const mounted = useSyncExternalStore(
+    () => () => {},
+    () => true,
+    () => false,
+  );
   const [pos, setPos] = useState({ top: 0, left: 0, width: 280 });
 
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -113,23 +116,25 @@ export function PhoneWithCountryField({
 
   const countries = useMemo(() => getSortedCountryCodes(), []);
 
-  useEffect(() => setMounted(true), []);
-
   /* sync from external value */
   useEffect(() => {
-    if (isFirstSyncRef.current) {
-      isFirstSyncRef.current = false;
+    const apply = () => {
+      if (isFirstSyncRef.current) {
+        isFirstSyncRef.current = false;
+        const parts = parseStoredPhoneForUi(value || null, baseDefault);
+        setCountryCode(parts.countryCode);
+        setNational(parts.nationalNumber);
+        prevExternalValueRef.current = value;
+        return;
+      }
+      if (prevExternalValueRef.current === value) return;
+      prevExternalValueRef.current = value;
       const parts = parseStoredPhoneForUi(value || null, baseDefault);
       setCountryCode(parts.countryCode);
       setNational(parts.nationalNumber);
-      prevExternalValueRef.current = value;
-      return;
-    }
-    if (prevExternalValueRef.current === value) return;
-    prevExternalValueRef.current = value;
-    const parts = parseStoredPhoneForUi(value || null, baseDefault);
-    setCountryCode(parts.countryCode);
-    setNational(parts.nationalNumber);
+    };
+    const id = requestAnimationFrame(apply);
+    return () => cancelAnimationFrame(id);
   }, [value, baseDefault]);
 
   /* emit to parent */

@@ -11,6 +11,8 @@ export interface VenuePublic {
   cover_photo_url: string | null;
   address: string | null;
   phone: string | null;
+  /** Business website; shown in booking header when set. */
+  website_url?: string | null;
   deposit_config: DepositConfigPublic | null;
   booking_rules: BookingRulesPublic | null;
   opening_hours: OpeningHours | null;

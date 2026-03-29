@@ -47,7 +47,7 @@ export default async function DaySheetPage() {
       <div className="mx-auto max-w-5xl">
         <SwRegister />
         <ToastProvider>
-          <DaySheetView venueId={venueId} />
+          <DaySheetView venueId={venueId} currency={(venue?.currency as string) ?? 'GBP'} />
         </ToastProvider>
       </div>
     </div>

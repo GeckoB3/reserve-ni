@@ -22,7 +22,7 @@ interface ConfirmationStepProps {
   requiresDeposit?: boolean;
 }
 
-export function ConfirmationStep({ venue, date, slot, partySize, guest, bookingId, requiresDeposit }: ConfirmationStepProps) {
+export function ConfirmationStep({ venue, date, slot, partySize, guest, requiresDeposit }: ConfirmationStepProps) {
   const dateStr = formatDateLong(date);
   const [showCheck, setShowCheck] = useState(false);
 

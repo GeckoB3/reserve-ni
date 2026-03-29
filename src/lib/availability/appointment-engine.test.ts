@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import type { OpeningHours } from '@/types/availability';
 import { getDayOfWeek } from '@/lib/availability/engine';
 import { computeAppointmentAvailability, type AppointmentEngineInput } from './appointment-engine';
 
@@ -13,6 +14,111 @@ function workingHoursDayKey(dateStr: string): string {
 }
 
 describe('computeAppointmentAvailability', () => {
+  it('clips appointment slots to venue opening hours when configured (intersection with staff hours)', () => {
+    const date = '2030-06-02';
+    const dk = workingHoursDayKey(date);
+    const venueOpeningHours = {
+      [dk]: { periods: [{ open: '10:00', close: '16:00' }] },
+    } as OpeningHours;
+    const input: AppointmentEngineInput = {
+      date,
+      venueOpeningHours,
+      practitioners: [
+        {
+          id: 'p1',
+          name: 'Alex',
+          is_active: true,
+          working_hours: { [dk]: [{ start: '09:00', end: '17:00' }] },
+          break_times: [],
+          days_off: [],
+        } as unknown as import('@/types/booking-models').Practitioner,
+      ],
+      services: [
+        {
+          id: 's1',
+          name: 'Cut',
+          duration_minutes: 30,
+          buffer_minutes: 0,
+          is_active: true,
+        } as import('@/types/booking-models').AppointmentService,
+      ],
+      practitionerServices: [],
+      existingBookings: [],
+    };
+    const r = computeAppointmentAvailability(input);
+    expect(r.practitioners[0]?.slots.some((s) => s.start_time === '09:00')).toBe(false);
+    expect(r.practitioners[0]?.slots.some((s) => s.start_time === '09:30')).toBe(false);
+    expect(r.practitioners[0]?.slots.some((s) => s.start_time === '10:00')).toBe(true);
+    expect(r.practitioners[0]?.slots.some((s) => s.start_time === '15:30')).toBe(true);
+    expect(r.practitioners[0]?.slots.some((s) => s.start_time === '16:00')).toBe(false);
+  });
+
+  it('applies min_notice_hours on top of current time for guest flow', () => {
+    const date = todayYmd();
+    const dk = workingHoursDayKey(date);
+    const input: AppointmentEngineInput = {
+      date,
+      practitioners: [
+        {
+          id: 'p1',
+          name: 'Alex',
+          is_active: true,
+          working_hours: { [dk]: [{ start: '09:00', end: '17:00' }] },
+          break_times: [],
+          days_off: [],
+        } as unknown as import('@/types/booking-models').Practitioner,
+      ],
+      services: [
+        {
+          id: 's1',
+          name: 'Cut',
+          duration_minutes: 30,
+          buffer_minutes: 0,
+          is_active: true,
+        } as import('@/types/booking-models').AppointmentService,
+      ],
+      practitionerServices: [],
+      existingBookings: [],
+      minNoticeHours: 2,
+    };
+    const r = computeAppointmentAvailability(input, 10 * 60);
+    expect(r.practitioners[0]?.slots.find((s) => s.start_time === '10:00')).toBeUndefined();
+    expect(r.practitioners[0]?.slots.find((s) => s.start_time === '11:30')).toBeUndefined();
+    expect(r.practitioners[0]?.slots.find((s) => s.start_time === '12:00')).toBeDefined();
+  });
+
+  it('returns no slots for venue-local today when allowSameDayBooking is false', () => {
+    const date = todayYmd();
+    const dk = workingHoursDayKey(date);
+    const input: AppointmentEngineInput = {
+      date,
+      practitioners: [
+        {
+          id: 'p1',
+          name: 'Alex',
+          is_active: true,
+          working_hours: { [dk]: [{ start: '09:00', end: '17:00' }] },
+          break_times: [],
+          days_off: [],
+        } as unknown as import('@/types/booking-models').Practitioner,
+      ],
+      services: [
+        {
+          id: 's1',
+          name: 'Cut',
+          duration_minutes: 30,
+          buffer_minutes: 0,
+          is_active: true,
+        } as import('@/types/booking-models').AppointmentService,
+      ],
+      practitionerServices: [],
+      existingBookings: [],
+      allowSameDayBooking: false,
+    };
+    const r = computeAppointmentAvailability(input, 9 * 60);
+    expect(r.practitioners[0]?.slots.length ?? 0).toBe(0);
+  });
+
   it('hides today slots before current time for guest flow (default)', () => {
     const date = todayYmd();
     const dk = workingHoursDayKey(date);
@@ -160,5 +266,38 @@ describe('computeAppointmentAvailability', () => {
     };
     const r = computeAppointmentAvailability(staffInput);
     expect(r.practitioners[0]?.slots.some((s) => s.start_time === '13:00' && s.service_id === 's1')).toBe(true);
+  });
+
+  it('uses break_times_by_day for that weekday when set (ignores same-day break_times)', () => {
+    const date = '2030-06-04';
+    const dk = workingHoursDayKey(date);
+    const input: AppointmentEngineInput = {
+      date,
+      practitioners: [
+        {
+          id: 'p1',
+          name: 'Alex',
+          is_active: true,
+          working_hours: { [dk]: [{ start: '09:00', end: '17:00' }] },
+          break_times: [{ start: '12:00', end: '13:00' }],
+          break_times_by_day: { [dk]: [] },
+          days_off: [],
+        } as unknown as import('@/types/booking-models').Practitioner,
+      ],
+      services: [
+        {
+          id: 's1',
+          name: 'Cut',
+          duration_minutes: 30,
+          buffer_minutes: 0,
+          is_active: true,
+        } as import('@/types/booking-models').AppointmentService,
+      ],
+      practitionerServices: [],
+      existingBookings: [],
+    };
+    const r = computeAppointmentAvailability(input);
+    const slot1200 = r.practitioners[0]?.slots.find((s) => s.start_time === '12:00' && s.service_id === 's1');
+    expect(slot1200).toBeDefined();
   });
 });

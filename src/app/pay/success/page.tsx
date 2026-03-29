@@ -1,30 +1,23 @@
 'use client';
 
-import { useEffect, useState, Suspense } from 'react';
+import { Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Image from 'next/image';
 import Link from 'next/link';
 
-type Status = 'loading' | 'succeeded' | 'failed' | 'pending';
+type Status = 'succeeded' | 'failed' | 'pending';
+
+function redirectStatusFromParams(redirectStatus: string | null): Status {
+  if (redirectStatus === 'succeeded') return 'succeeded';
+  if (redirectStatus === 'failed') return 'failed';
+  if (redirectStatus === 'processing') return 'pending';
+  // No Stripe redirect params — could be a direct visit or non-redirect payment completion.
+  return 'succeeded';
+}
 
 function SuccessContent() {
   const searchParams = useSearchParams();
-  const [status, setStatus] = useState<Status>('loading');
-
-  useEffect(() => {
-    const redirectStatus = searchParams.get('redirect_status');
-    if (redirectStatus === 'succeeded') {
-      setStatus('succeeded');
-    } else if (redirectStatus === 'failed') {
-      setStatus('failed');
-    } else if (redirectStatus === 'processing') {
-      setStatus('pending');
-    } else {
-      // No Stripe redirect params — could be a direct visit or non-redirect
-      // payment method completion. Treat as succeeded.
-      setStatus('succeeded');
-    }
-  }, [searchParams]);
+  const status = redirectStatusFromParams(searchParams.get('redirect_status'));
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center px-4">
@@ -35,12 +28,6 @@ function SuccessContent() {
             <Image src="/Logo.png" alt="Reserve NI" width={140} height={42} className="h-10 w-auto" />
           </Link>
         </div>
-
-        {status === 'loading' && (
-          <div className="flex justify-center">
-            <div className="h-8 w-8 animate-spin rounded-full border-2 border-brand-600 border-t-transparent" />
-          </div>
-        )}
 
         {status === 'succeeded' && (
           <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm text-center">

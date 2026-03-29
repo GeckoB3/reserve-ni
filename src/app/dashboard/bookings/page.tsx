@@ -2,7 +2,7 @@ import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
 import { BookingsDashboard } from './BookingsDashboard';
 import { AppointmentBookingsDashboard } from './AppointmentBookingsDashboard';
-import { getDashboardStaff } from '@/lib/venue-auth';
+import { getDashboardStaff, getLinkedPractitionerId } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { ToastProvider } from '@/components/ui/Toast';
 import type { BookingModel } from '@/types/booking-models';
@@ -32,13 +32,24 @@ export default async function BookingsPage() {
   const isAppointment = bookingModel === 'practitioner_appointment';
   const title = isAppointment ? 'Appointments' : 'Reservations';
 
+  const linkedPractitionerId =
+    isAppointment && staff.role === 'staff' && staff.id
+      ? await getLinkedPractitionerId(admin, venueId, staff.id)
+      : null;
+  const defaultAppointmentPractitionerFilter: 'all' | string = linkedPractitionerId ?? 'all';
+
   return (
-    <div className="p-4 md:p-6 lg:p-8">
-      <div className="mx-auto max-w-6xl">
-        <h1 className="mb-6 text-2xl font-semibold text-slate-900">{title}</h1>
+    <div className="min-h-0 min-w-0 px-3 pb-[max(1rem,env(safe-area-inset-bottom))] pt-[max(1rem,env(safe-area-inset-top))] sm:px-4 md:p-6 md:pb-8 md:pt-6 lg:p-8">
+      <div className="mx-auto max-w-6xl min-w-0">
+        <h1 className="mb-4 text-xl font-semibold tracking-tight text-slate-900 sm:mb-6 sm:text-2xl">{title}</h1>
         <ToastProvider>
           {isAppointment ? (
-            <AppointmentBookingsDashboard venueId={venueId} currency={currency} />
+            <AppointmentBookingsDashboard
+              venueId={venueId}
+              currency={currency}
+              defaultPractitionerFilter={defaultAppointmentPractitionerFilter}
+              linkedPractitionerId={linkedPractitionerId}
+            />
           ) : (
             <BookingsDashboard venueId={venueId} currency={currency} />
           )}

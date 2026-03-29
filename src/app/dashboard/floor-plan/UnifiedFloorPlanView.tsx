@@ -9,7 +9,7 @@ import type { TableCombination, VenueTable } from '@/types/table-management';
 
 type EditTab = 'layout' | 'tables' | 'combinations' | 'areas';
 
-export function UnifiedFloorPlanView({ isAdmin, venueId }: { isAdmin: boolean; venueId: string }) {
+export function UnifiedFloorPlanView({ isAdmin, venueId, currency }: { isAdmin: boolean; venueId: string; currency?: string }) {
   const [mode, setMode] = useState<'operational' | 'edit'>('operational');
   const [tab, setTab] = useState<EditTab>('layout');
   const [tables, setTables] = useState<VenueTable[]>([]);
@@ -63,7 +63,7 @@ export function UnifiedFloorPlanView({ isAdmin, venueId }: { isAdmin: boolean; v
             </button>
           )}
         </div>
-        <FloorPlanLiveView isAdmin={isAdmin} venueId={venueId} />
+        <FloorPlanLiveView isAdmin={isAdmin} venueId={venueId} currency={currency} />
       </div>
     );
   }

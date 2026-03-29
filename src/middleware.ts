@@ -34,9 +34,6 @@ export async function middleware(request: NextRequest) {
   // Refresh session; required so server and client stay in sync
   const { data: { user } } = await supabase.auth.getUser();
 
-  const isAuthRoute =
-    request.nextUrl.pathname.startsWith('/login') ||
-    request.nextUrl.pathname.startsWith('/auth');
   const isDashboard = request.nextUrl.pathname.startsWith('/dashboard');
 
   if (!user && isDashboard) {

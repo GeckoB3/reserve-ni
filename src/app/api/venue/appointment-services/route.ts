@@ -4,6 +4,16 @@ import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { z } from 'zod';
 
+const staffMaySchema = {
+  staff_may_customize_name: z.boolean().optional(),
+  staff_may_customize_description: z.boolean().optional(),
+  staff_may_customize_duration: z.boolean().optional(),
+  staff_may_customize_buffer: z.boolean().optional(),
+  staff_may_customize_price: z.boolean().optional(),
+  staff_may_customize_deposit: z.boolean().optional(),
+  staff_may_customize_colour: z.boolean().optional(),
+};
+
 const serviceSchema = z.object({
   name: z.string().min(1).max(200),
   description: z.string().max(1000).optional(),
@@ -14,6 +24,7 @@ const serviceSchema = z.object({
   colour: z.string().max(20).optional(),
   is_active: z.boolean().optional(),
   sort_order: z.number().int().optional(),
+  ...staffMaySchema,
 });
 
 /** GET /api/venue/appointment-services — list appointment services for the venue. */
@@ -40,10 +51,17 @@ export async function GET() {
       console.error('GET /api/venue/appointment-services failed:', servicesRes.error);
       return NextResponse.json({ error: 'Failed to fetch services' }, { status: 500 });
     }
+    if (linksRes.error) {
+      console.error('GET /api/venue/appointment-services practitioner_services failed:', linksRes.error);
+      return NextResponse.json({ error: 'Failed to fetch service links' }, { status: 500 });
+    }
+
+    /** Full venue links for read-only team visibility; writes remain admin or per-own-calendar (practitioner-services PUT). */
+    const practitioner_services = linksRes.data ?? [];
 
     return NextResponse.json({
       services: servicesRes.data,
-      practitioner_services: linksRes.data ?? [],
+      practitioner_services,
     });
   } catch (err) {
     console.error('GET /api/venue/appointment-services failed:', err);

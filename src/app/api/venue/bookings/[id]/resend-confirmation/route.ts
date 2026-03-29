@@ -4,6 +4,7 @@ import { getVenueStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { generateConfirmToken, hashConfirmToken } from '@/lib/confirm-token';
 import { sendBookingConfirmationEmail } from '@/lib/communications/send-templated';
+import { enrichBookingEmailForAppointment } from '@/lib/emails/booking-email-enrichment';
 
 export async function POST(
   request: NextRequest,
@@ -52,23 +53,21 @@ export async function POST(
     .eq('booking_id', booking.id)
     .eq('message_type', 'booking_confirmation_email');
 
-  await sendBookingConfirmationEmail(
-    {
-      id: booking.id,
-      guest_name: guest.name ?? 'Guest',
-      guest_email: guest.email,
-      booking_date: booking.booking_date,
-      booking_time: booking.booking_time?.slice(0, 5) ?? '00:00',
-      party_size: booking.party_size,
-      special_requests: booking.special_requests ?? null,
-      dietary_notes: booking.dietary_notes ?? null,
-      deposit_amount_pence: booking.deposit_amount_pence ?? null,
-      deposit_status: booking.deposit_status ?? null,
-      manage_booking_link: manageBookingLink,
-    },
-    { name: venue.name, address: venue.address ?? undefined },
-    staff.venue_id,
-  );
+  const basePayload = {
+    id: booking.id,
+    guest_name: guest.name ?? 'Guest',
+    guest_email: guest.email,
+    booking_date: booking.booking_date,
+    booking_time: booking.booking_time?.slice(0, 5) ?? '00:00',
+    party_size: booking.party_size,
+    special_requests: booking.special_requests ?? null,
+    dietary_notes: booking.dietary_notes ?? null,
+    deposit_amount_pence: booking.deposit_amount_pence ?? null,
+    deposit_status: booking.deposit_status ?? null,
+    manage_booking_link: manageBookingLink,
+  };
+  const enriched = await enrichBookingEmailForAppointment(admin, booking.id, basePayload);
+  await sendBookingConfirmationEmail(enriched, { name: venue.name, address: venue.address ?? undefined }, staff.venue_id);
 
   return NextResponse.json({ success: true });
 }

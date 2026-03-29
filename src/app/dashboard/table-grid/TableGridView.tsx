@@ -29,13 +29,6 @@ function timeToMinutes(t: string): number {
   return (h ?? 0) * 60 + (m ?? 0);
 }
 
-function shiftDate(isoDate: string, deltaDays: number): string {
-  const base = new Date(`${isoDate}T00:00:00`);
-  base.setDate(base.getDate() + deltaDays);
-  return formatDateInput(base);
-}
-
-
 function withOptimisticBookingMove(
   prev: TableGridData | null,
   bookingId: string,
@@ -107,7 +100,7 @@ interface FetchGridOptions {
   silent?: boolean;
 }
 
-export function TableGridView({ venueId }: { venueId: string }) {
+export function TableGridView({ venueId, currency }: { venueId: string; currency?: string }) {
   const [date, setDate] = useState(formatDateInput(new Date()));
   const [serviceId, setServiceId] = useState<string | null>(null);
   const [services, setServices] = useState<Array<{ id: string; name: string; start_time: string; end_time: string }>>([]);
@@ -458,6 +451,7 @@ export function TableGridView({ venueId }: { venueId: string }) {
   }, [date]);
 
   const viewToolbarSummary = useMemo((): ViewToolbarSummary | null => {
+    void coversClockTick;
     if (!gridData) return null;
     const today = formatDateInput(new Date());
     const isToday = date === today;
@@ -1291,6 +1285,7 @@ export function TableGridView({ venueId }: { venueId: string }) {
         <BookingDetailPanel
           bookingId={selectedBookingId}
           venueId={venueId}
+          venueCurrency={currency}
           initialSnapshot={selectedBookingSnapshot}
           onClose={() => setSelectedBookingId(null)}
           onUpdated={() => {
@@ -1463,6 +1458,7 @@ export function TableGridView({ venueId }: { venueId: string }) {
         <WalkInModal
           advancedMode
           initialDate={date}
+          venueCurrency={currency}
           onClose={() => setWalkInCell(null)}
           onCreated={() => { setWalkInCell(null); fetchGrid(); }}
         />

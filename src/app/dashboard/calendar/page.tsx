@@ -1,6 +1,6 @@
 import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
-import { getDashboardStaff } from '@/lib/venue-auth';
+import { getDashboardStaff, getLinkedPractitionerId } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { ToastProvider } from '@/components/ui/Toast';
 import { PractitionerCalendarView } from '../practitioner-calendar/PractitionerCalendarView';
@@ -31,11 +31,22 @@ export default async function CalendarPage() {
 
   const currency = (venue?.currency as string) ?? 'GBP';
 
+  const linkedPractitionerId =
+    staff.role === 'staff' && staff.id
+      ? await getLinkedPractitionerId(admin, staff.venue_id, staff.id)
+      : null;
+  const defaultPractitionerFilter: 'all' | string = linkedPractitionerId ?? 'all';
+
   return (
     <ToastProvider>
       <div className="p-4 md:p-6 lg:p-8">
         <div className="mx-auto max-w-[1600px]">
-          <PractitionerCalendarView venueId={staff.venue_id} currency={currency} />
+          <PractitionerCalendarView
+            venueId={staff.venue_id}
+            currency={currency}
+            defaultPractitionerFilter={defaultPractitionerFilter}
+            linkedPractitionerId={linkedPractitionerId}
+          />
         </div>
       </div>
     </ToastProvider>

@@ -58,6 +58,10 @@ function getAvailabilityStep(model: BookingModel): Step {
   }
 }
 
+function isSetupComplete(s: SetupStatus) {
+  return s.profile_complete && s.availability_set && s.stripe_connected && s.first_booking_made;
+}
+
 function getSteps(model: BookingModel): Step[] {
   return [
     {
@@ -91,35 +95,34 @@ export function SetupChecklist() {
 
   useEffect(() => {
     const key = 'setup_checklist_dismissed';
-    if (sessionStorage.getItem(key) === '1') {
-      setDismissed(true);
-      return;
-    }
-    fetch('/api/venue/setup-status')
-      .then((r) => r.ok ? r.json() : null)
-      .then((data: SetupStatus | null) => {
-        if (!data) return;
-        if (!data.is_admin) {
-          setDismissed(true);
-          return;
-        }
-        setStatus(data);
-        if (isComplete(data)) {
-          sessionStorage.setItem(key, '1');
-          setDismissed(true);
-        }
-      })
-      .catch(() => {});
+    const id = requestAnimationFrame(() => {
+      if (sessionStorage.getItem(key) === '1') {
+        setDismissed(true);
+        return;
+      }
+      fetch('/api/venue/setup-status')
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data: SetupStatus | null) => {
+          if (!data) return;
+          if (!data.is_admin) {
+            setDismissed(true);
+            return;
+          }
+          setStatus(data);
+          if (isSetupComplete(data)) {
+            sessionStorage.setItem(key, '1');
+            setDismissed(true);
+          }
+        })
+        .catch(() => {});
+    });
+    return () => cancelAnimationFrame(id);
   }, []);
 
   const steps = useMemo(
     () => getSteps(status?.booking_model ?? 'table_reservation'),
     [status?.booking_model]
   );
-
-  function isComplete(s: SetupStatus) {
-    return s.profile_complete && s.availability_set && s.stripe_connected && s.first_booking_made;
-  }
 
   function dismiss() {
     sessionStorage.setItem('setup_checklist_dismissed', '1');

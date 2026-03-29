@@ -1,6 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useState, useMemo } from 'react';
+import type { AppointmentService, PractitionerService } from '@/types/booking-models';
+import { effectiveAppointmentServiceForPractitioner } from '@/lib/appointments/effective-service-for-practitioner';
 
 interface Practitioner {
   id: string;
@@ -19,10 +21,6 @@ interface Service {
   is_active: boolean;
 }
 
-interface PractitionerServiceLink {
-  practitioner_id: string;
-  service_id: string;
-}
 
 interface AvailSlot {
   start_time: string;
@@ -70,7 +68,7 @@ export function AppointmentBookingForm({
   // Shared data
   const [practitioners, setPractitioners] = useState<Practitioner[]>([]);
   const [services, setServices] = useState<Service[]>([]);
-  const [links, setLinks] = useState<PractitionerServiceLink[]>([]);
+  const [links, setLinks] = useState<PractitionerService[]>([]);
   const [dataLoading, setDataLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -137,7 +135,7 @@ export function AppointmentBookingForm({
   useEffect(() => {
     if (!open) return;
     setDataLoading(true);
-    Promise.all([fetch('/api/venue/practitioners'), fetch('/api/venue/appointment-services')])
+    Promise.all([fetch('/api/venue/practitioners?roster=1'), fetch('/api/venue/appointment-services')])
       .then(async ([pracRes, svcRes]) => {
         if (!pracRes.ok || !svcRes.ok) { setError('Failed to load form data.'); return; }
         const [pracData, svcData] = await Promise.all([pracRes.json(), svcRes.json()]);
@@ -162,15 +160,44 @@ export function AppointmentBookingForm({
     [services, links],
   );
 
-  const servicesForPractitioner = useMemo(
-    () => getServicesForPractitioner(selectedPractitioner),
-    [selectedPractitioner, getServicesForPractitioner],
+  const getMergedServicesForPractitioner = useCallback(
+    (pracId: string) => {
+      return getServicesForPractitioner(pracId).map((s) =>
+        effectiveAppointmentServiceForPractitioner(s as AppointmentService, pracId, links),
+      );
+    },
+    [getServicesForPractitioner, links],
   );
 
-  const groupServicesForPrac = useMemo(
-    () => getServicesForPractitioner(groupPracId),
-    [groupPracId, getServicesForPractitioner],
-  );
+  const servicePickerOptions = useMemo(() => {
+    const byId = new Map<string, { service: Service; minPricePence: number | null }>();
+    for (const p of activePractitioners) {
+      for (const s of getMergedServicesForPractitioner(p.id)) {
+        const price = s.price_pence;
+        const existing = byId.get(s.id);
+        if (!existing) {
+          byId.set(s.id, { service: s as Service, minPricePence: price });
+        } else if (price != null && (existing.minPricePence == null || price < existing.minPricePence)) {
+          existing.minPricePence = price;
+        }
+      }
+    }
+    return Array.from(byId.values()).sort((a, b) => a.service.name.localeCompare(b.service.name));
+  }, [activePractitioners, getMergedServicesForPractitioner]);
+
+  const practitionersForSelectedService = useMemo(() => {
+    if (!selectedService) return [];
+    return activePractitioners.filter((p) =>
+      getMergedServicesForPractitioner(p.id).some((s) => s.id === selectedService),
+    );
+  }, [activePractitioners, selectedService, getMergedServicesForPractitioner]);
+
+  const groupPractitionersForService = useMemo(() => {
+    if (!groupSvcId) return [];
+    return activePractitioners.filter((p) =>
+      getMergedServicesForPractitioner(p.id).some((s) => s.id === groupSvcId),
+    );
+  }, [activePractitioners, groupSvcId, getMergedServicesForPractitioner]);
 
   // ── Single: fetch slots ──
   const fetchSlots = useCallback(async () => {
@@ -196,7 +223,7 @@ export function AppointmentBookingForm({
   }, [selectedPractitioner, selectedService, selectedDate, venueId]);
 
   useEffect(() => {
-    if (!isGroupMode && step === 3) fetchSlots();
+    if (!isGroupMode && step === 4) fetchSlots();
   }, [step, fetchSlots, isGroupMode]);
 
   // ── Group: fetch slots ──
@@ -238,7 +265,12 @@ export function AppointmentBookingForm({
     if (isGroupMode && groupStep === 'time') fetchGroupSlots();
   }, [groupStep, fetchGroupSlots, isGroupMode]);
 
-  const selectedSvc = services.find((s) => s.id === selectedService);
+  const selectedSvcMerged = useMemo(() => {
+    if (!selectedService || !selectedPractitioner) return null;
+    const base = services.find((s) => s.id === selectedService);
+    if (!base) return null;
+    return effectiveAppointmentServiceForPractitioner(base as AppointmentService, selectedPractitioner, links);
+  }, [selectedService, selectedPractitioner, services, links]);
 
   // ── Single: submit ──
   async function handleSubmit() {
@@ -278,21 +310,22 @@ export function AppointmentBookingForm({
   // ── Group: add person ──
   function addGroupPerson(time: string) {
     const prac = activePractitioners.find((p) => p.id === groupPracId);
-    const svc = services.find((s) => s.id === groupSvcId);
-    if (!prac || !svc) return;
+    const base = services.find((s) => s.id === groupSvcId);
+    if (!prac || !base) return;
+    const merged = effectiveAppointmentServiceForPractitioner(base as AppointmentService, groupPracId, links);
     setGroupPeople((prev) => [
       ...prev,
       {
         label: groupPersonLabel,
         practitionerId: prac.id,
         practitionerName: prac.name,
-        serviceId: svc.id,
-        serviceName: svc.name,
+        serviceId: base.id,
+        serviceName: merged.name,
         date: groupDate,
         time,
-        durationMinutes: svc.duration_minutes,
-        bufferMinutes: svc.buffer_minutes,
-        pricePence: svc.price_pence,
+        durationMinutes: merged.duration_minutes,
+        bufferMinutes: merged.buffer_minutes,
+        pricePence: merged.price_pence,
       },
     ]);
     setGroupPersonLabel('');
@@ -358,24 +391,6 @@ export function AppointmentBookingForm({
           </button>
         </div>
 
-        {/* Mode toggle */}
-        {((isGroupMode && groupStep === 'list' && groupPeople.length === 0) || (!isGroupMode && step === 1)) && (
-          <div className="mb-4 flex rounded-lg border border-slate-200 p-1">
-            <button
-              onClick={() => { setIsGroupMode(false); setStep(1); }}
-              className={`flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${!isGroupMode ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
-            >
-              Single
-            </button>
-            <button
-              onClick={() => { setIsGroupMode(true); setGroupStep('list'); }}
-              className={`flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${isGroupMode ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
-            >
-              Group
-            </button>
-          </div>
-        )}
-
         {error && (
           <div className="mb-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
         )}
@@ -386,107 +401,257 @@ export function AppointmentBookingForm({
           </div>
         ) : !isGroupMode ? (
           <>
-            {/* ── SINGLE BOOKING FLOW: staff → service → date & time → confirm & contact ── */}
+            {/* ── SINGLE: mode → service → staff → date & time → confirm ── */}
             {step === 1 && (
               <div className="space-y-3">
-                <p className="text-sm font-medium text-slate-700">Select team member</p>
-                {activePractitioners.map((p) => (
-                  <button key={p.id} onClick={() => { setSelectedPractitioner(p.id); setStep(2); setSelectedService(''); }}
-                    className={`w-full rounded-lg border px-4 py-3 text-left text-sm font-medium transition-colors ${
-                      selectedPractitioner === p.id ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-200 hover:bg-slate-50 text-slate-900'
-                    }`}>
-                    {p.name}
-                  </button>
-                ))}
-                {activePractitioners.length === 0 && <p className="text-sm text-slate-500">No team members available.</p>}
+                <p className="text-sm font-medium text-slate-700">What would you like to book?</p>
+                <button
+                  type="button"
+                  onClick={() => { setIsGroupMode(false); setStep(2); }}
+                  className="w-full rounded-lg border border-slate-200 px-4 py-3 text-left text-sm font-medium text-slate-900 hover:bg-slate-50"
+                >
+                  Book an appointment
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setIsGroupMode(true); setGroupStep('list'); }}
+                  className="w-full rounded-lg border border-slate-200 px-4 py-3 text-left text-sm font-medium text-slate-900 hover:bg-slate-50"
+                >
+                  Group appointment
+                </button>
               </div>
             )}
 
             {step === 2 && (
               <div className="space-y-3">
                 <p className="text-sm font-medium text-slate-700">Select service</p>
-                {servicesForPractitioner.map((s) => (
+                {servicePickerOptions.map(({ service: s, minPricePence }) => (
                   <button
                     key={s.id}
+                    type="button"
                     onClick={() => {
                       setSelectedService(s.id);
+                      setSelectedTime('');
+                      if (
+                        preselectedPractitionerId &&
+                        preselectedDate &&
+                        preselectedTime &&
+                        getMergedServicesForPractitioner(preselectedPractitionerId).some((x) => x.id === s.id)
+                      ) {
+                        setSelectedPractitioner(preselectedPractitionerId);
+                        setStep(4);
+                        return;
+                      }
+                      setSelectedPractitioner('');
                       setStep(3);
-                      if (!preselectedTime) setSelectedTime('');
                     }}
-                    className={`w-full rounded-lg border px-4 py-3 text-left transition-colors ${selectedService === s.id ? 'border-blue-500 bg-blue-50' : 'border-slate-200 hover:bg-slate-50'}`}>
+                    className={`w-full rounded-lg border px-4 py-3 text-left transition-colors ${selectedService === s.id ? 'border-blue-500 bg-blue-50' : 'border-slate-200 hover:bg-slate-50'}`}
+                  >
                     <div className="flex items-center gap-3">
-                      <div className="h-2.5 w-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: s.colour }} />
-                      <div className="flex-1 min-w-0">
+                      <div className="h-2.5 w-2.5 flex-shrink-0 rounded-full" style={{ backgroundColor: s.colour }} />
+                      <div className="min-w-0 flex-1">
                         <div className="text-sm font-medium text-slate-900">{s.name}</div>
-                        <div className="text-xs text-slate-500">{s.duration_minutes} mins{s.buffer_minutes > 0 ? ` + ${s.buffer_minutes}min buffer` : ''}</div>
+                        <div className="text-xs text-slate-500">
+                          {s.duration_minutes} mins{s.buffer_minutes > 0 ? ` + ${s.buffer_minutes}min buffer` : ''}
+                        </div>
                       </div>
-                      <div className="text-sm font-medium text-slate-700">{s.price_pence != null ? `${sym}${(s.price_pence / 100).toFixed(2)}` : 'POA'}</div>
+                      <div className="text-sm font-medium text-slate-700">
+                        {minPricePence != null ? `From ${sym}${(minPricePence / 100).toFixed(2)}` : 'POA'}
+                      </div>
                     </div>
                   </button>
                 ))}
-                {servicesForPractitioner.length === 0 && <p className="text-sm text-slate-500">No services available for this team member.</p>}
-                <button onClick={() => setStep(1)} className="text-sm text-blue-600 hover:underline">&larr; Back</button>
+                {servicePickerOptions.length === 0 && <p className="text-sm text-slate-500">No services available.</p>}
+                <button type="button" onClick={() => setStep(1)} className="text-sm text-blue-600 hover:underline">&larr; Back</button>
               </div>
             )}
 
             {step === 3 && (
+              <div className="space-y-3">
+                <p className="text-sm font-medium text-slate-700">Select team member</p>
+                {practitionersForSelectedService.map((p) => {
+                  const merged = getMergedServicesForPractitioner(p.id).find((s) => s.id === selectedService);
+                  return (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => {
+                        setSelectedPractitioner(p.id);
+                        setStep(4);
+                        setSelectedTime('');
+                      }}
+                      className={`w-full rounded-lg border px-4 py-3 text-left text-sm font-medium transition-colors ${
+                        selectedPractitioner === p.id ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-200 hover:bg-slate-50 text-slate-900'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span>{p.name}</span>
+                        <span className="text-slate-600">
+                          {merged?.price_pence != null ? `${sym}${(merged.price_pence / 100).toFixed(2)}` : 'POA'}
+                        </span>
+                      </div>
+                    </button>
+                  );
+                })}
+                {practitionersForSelectedService.length === 0 && <p className="text-sm text-slate-500">No team members offer this service.</p>}
+                <button type="button" onClick={() => setStep(2)} className="text-sm text-blue-600 hover:underline">&larr; Back</button>
+              </div>
+            )}
+
+            {step === 4 && (
               <div className="space-y-4">
                 <p className="text-sm font-medium text-slate-700">Select date and time</p>
                 <div>
                   <label className="mb-1 block text-sm font-medium text-slate-700">Date</label>
-                  <input type="date" value={selectedDate}
-                    min={(() => { const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}-${String(n.getDate()).padStart(2,'0')}`; })()}
-                    onChange={(e) => { setSelectedDate(e.target.value); setSelectedTime(''); }}
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500" />
+                  <input
+                    type="date"
+                    value={selectedDate}
+                    min={(() => {
+                      const n = new Date();
+                      return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-${String(n.getDate()).padStart(2, '0')}`;
+                    })()}
+                    onChange={(e) => {
+                      setSelectedDate(e.target.value);
+                      setSelectedTime('');
+                    }}
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                  />
                 </div>
                 <div>
                   <p className="mb-2 text-sm font-medium text-slate-700">Available times</p>
                   {slotsLoading ? (
-                    <div className="flex items-center justify-center py-6"><div className="h-5 w-5 animate-spin rounded-full border-2 border-blue-600 border-t-transparent" /></div>
+                    <div className="flex items-center justify-center py-6">
+                      <div className="h-5 w-5 animate-spin rounded-full border-2 border-blue-600 border-t-transparent" />
+                    </div>
                   ) : availableSlots.length === 0 ? (
                     <p className="text-sm text-slate-500">No available times for this date.</p>
                   ) : (
-                    <div className="grid grid-cols-4 gap-2 max-h-48 overflow-y-auto">
-                      {availableSlots.map((s) => (
-                        <button key={s.start_time} onClick={() => setSelectedTime(s.start_time)}
+                    <div className="grid max-h-48 grid-cols-4 gap-2 overflow-y-auto">
+                      {availableSlots.map((sl) => (
+                        <button
+                          key={sl.start_time}
+                          type="button"
+                          onClick={() => setSelectedTime(sl.start_time)}
                           className={`rounded-lg border px-2 py-2 text-sm font-medium transition-colors ${
-                            selectedTime === s.start_time ? 'border-blue-500 bg-blue-600 text-white' : 'border-slate-200 hover:bg-slate-50 text-slate-900'
-                          }`}>
-                          {s.start_time}
+                            selectedTime === sl.start_time
+                              ? 'border-blue-500 bg-blue-600 text-white'
+                              : 'border-slate-200 text-slate-900 hover:bg-slate-50'
+                          }`}
+                        >
+                          {sl.start_time}
                         </button>
                       ))}
                     </div>
                   )}
                 </div>
                 <div className="flex justify-between">
-                  <button onClick={() => setStep(2)} className="text-sm text-blue-600 hover:underline">&larr; Back</button>
-                  <button onClick={() => { if (selectedTime) setStep(4); }} disabled={!selectedTime} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">Next</button>
+                  <button type="button" onClick={() => setStep(3)} className="text-sm text-blue-600 hover:underline">&larr; Back</button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (selectedTime) setStep(5);
+                    }}
+                    disabled={!selectedTime}
+                    className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+                  >
+                    Next
+                  </button>
                 </div>
               </div>
             )}
 
-            {step === 4 && (
+            {step === 5 && (
               <div className="space-y-4">
                 <p className="text-sm font-medium text-slate-700">Confirm appointment and contact</p>
-                <div className="rounded-lg bg-slate-50 p-3 text-sm space-y-1">
-                  <div className="flex justify-between"><span className="text-slate-500">Team member</span><span className="font-medium">{activePractitioners.find((p) => p.id === selectedPractitioner)?.name}</span></div>
-                  <div className="flex justify-between"><span className="text-slate-500">Service</span><span className="font-medium">{selectedSvc?.name}</span></div>
-                  <div className="flex justify-between"><span className="text-slate-500">Date & time</span><span className="font-medium">{selectedDate} at {selectedTime}</span></div>
-                  {selectedSvc?.price_pence != null && <div className="flex justify-between"><span className="text-slate-500">Price</span><span className="font-medium">{sym}{(selectedSvc.price_pence / 100).toFixed(2)}</span></div>}
+                <div className="space-y-1 rounded-lg bg-slate-50 p-3 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Team member</span>
+                    <span className="font-medium">{activePractitioners.find((p) => p.id === selectedPractitioner)?.name}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Service</span>
+                    <span className="font-medium">{selectedSvcMerged?.name}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Date & time</span>
+                    <span className="font-medium">
+                      {selectedDate} at {selectedTime}
+                    </span>
+                  </div>
+                  {selectedSvcMerged?.price_pence != null && (
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Price</span>
+                      <span className="font-medium">{sym}{(selectedSvcMerged.price_pence / 100).toFixed(2)}</span>
+                    </div>
+                  )}
                 </div>
-                <div><label className="mb-1 block text-sm font-medium text-slate-700">Client name *</label><input type="text" value={clientName} onChange={(e) => setClientName(e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500" placeholder="Full name" /></div>
-                <div><label className="mb-1 block text-sm font-medium text-slate-700">Email <span className="text-slate-400 font-normal">(optional)</span></label><input type="email" value={clientEmail} onChange={(e) => setClientEmail(e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500" placeholder="client@example.com" /></div>
-                <div><label className="mb-1 block text-sm font-medium text-slate-700">Phone <span className="text-slate-400 font-normal">(optional)</span></label><input type="tel" value={clientPhone} onChange={(e) => setClientPhone(e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500" placeholder="07123 456789" /></div>
-                <div><label className="mb-1 block text-sm font-medium text-slate-700">Notes</label><textarea value={notes} onChange={(e) => setNotes(e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500" rows={2} placeholder="Special requests or notes" /></div>
-                {selectedSvc?.deposit_pence != null && selectedSvc.deposit_pence > 0 && (
-                  <label className="flex items-center gap-3 rounded-lg border border-slate-200 px-3 py-2 cursor-pointer hover:bg-slate-50">
-                    <input type="checkbox" checked={requireDeposit} onChange={(e) => setRequireDeposit(e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
-                    <span className="text-sm text-slate-700">Require deposit ({sym}{(selectedSvc.deposit_pence / 100).toFixed(2)})</span>
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-slate-700">Client name *</label>
+                  <input
+                    type="text"
+                    value={clientName}
+                    onChange={(e) => setClientName(e.target.value)}
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                    placeholder="Full name"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-slate-700">
+                    Email <span className="font-normal text-slate-400">(optional)</span>
+                  </label>
+                  <input
+                    type="email"
+                    value={clientEmail}
+                    onChange={(e) => setClientEmail(e.target.value)}
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                    placeholder="client@example.com"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-slate-700">
+                    Phone <span className="font-normal text-slate-400">(optional)</span>
+                  </label>
+                  <input
+                    type="tel"
+                    value={clientPhone}
+                    onChange={(e) => setClientPhone(e.target.value)}
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                    placeholder="07123 456789"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-slate-700">Notes</label>
+                  <textarea
+                    value={notes}
+                    onChange={(e) => setNotes(e.target.value)}
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                    rows={2}
+                    placeholder="Special requests or notes"
+                  />
+                </div>
+                {selectedSvcMerged?.deposit_pence != null && selectedSvcMerged.deposit_pence > 0 && (
+                  <label className="flex cursor-pointer items-center gap-3 rounded-lg border border-slate-200 px-3 py-2 hover:bg-slate-50">
+                    <input
+                      type="checkbox"
+                      checked={requireDeposit}
+                      onChange={(e) => setRequireDeposit(e.target.checked)}
+                      className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    <span className="text-sm text-slate-700">
+                      Require deposit ({sym}{(selectedSvcMerged.deposit_pence / 100).toFixed(2)})
+                    </span>
                   </label>
                 )}
                 <div className="flex justify-between">
-                  <button onClick={() => setStep(3)} className="text-sm text-blue-600 hover:underline">&larr; Back</button>
-                  <button onClick={handleSubmit} disabled={submitting} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">{submitting ? 'Creating...' : 'Create Appointment'}</button>
+                  <button type="button" onClick={() => setStep(4)} className="text-sm text-blue-600 hover:underline">&larr; Back</button>
+                  <button
+                    type="button"
+                    onClick={handleSubmit}
+                    disabled={submitting}
+                    className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+                  >
+                    {submitting ? 'Creating...' : 'Create Appointment'}
+                  </button>
                 </div>
               </div>
             )}
@@ -524,17 +689,47 @@ export function AppointmentBookingForm({
                   </div>
                 )}
 
+                {groupPeople.length === 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsGroupMode(false);
+                      setStep(1);
+                    }}
+                    className="w-full rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                  >
+                    &larr; Back to booking type
+                  </button>
+                )}
+
                 {groupPeople.length < 10 && (
-                  <button onClick={() => { setGroupPersonLabel(''); setGroupPracId(''); setGroupSvcId(''); setGroupStep('label'); }}
-                    className="w-full rounded-lg border-2 border-dashed border-slate-300 px-4 py-3 text-sm font-medium text-slate-600 hover:border-blue-300 hover:text-blue-600">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setGroupPersonLabel('');
+                      setGroupPracId('');
+                      setGroupSvcId('');
+                      setGroupStep('label');
+                    }}
+                    className="w-full rounded-lg border-2 border-dashed border-slate-300 px-4 py-3 text-sm font-medium text-slate-600 hover:border-blue-300 hover:text-blue-600"
+                  >
                     + Add a person
                   </button>
                 )}
 
                 {groupPeople.length >= 1 && (
                   <div className="flex gap-3 pt-2">
-                    <button onClick={() => { setGroupPeople([]); setIsGroupMode(false); setStep(1); }}
-                      className="flex-1 rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Cancel</button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setGroupPeople([]);
+                        setIsGroupMode(false);
+                        setStep(1);
+                      }}
+                      className="flex-1 rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                    >
+                      Cancel
+                    </button>
                     <button onClick={() => setGroupStep('details')}
                       className="flex-1 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">Continue</button>
                   </div>
@@ -549,42 +744,84 @@ export function AppointmentBookingForm({
                   className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500" />
                 <div className="flex justify-between">
                   <button onClick={() => setGroupStep('list')} className="text-sm text-blue-600 hover:underline">&larr; Back</button>
-                  <button disabled={!groupPersonLabel.trim()} onClick={() => setGroupStep('practitioner')}
-                    className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">Next</button>
+                  <button
+                    type="button"
+                    disabled={!groupPersonLabel.trim()}
+                    onClick={() => {
+                      setGroupPracId('');
+                      setGroupSvcId('');
+                      setGroupStep('service');
+                    }}
+                    className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+                  >
+                    Next
+                  </button>
                 </div>
-              </div>
-            )}
-
-            {groupStep === 'practitioner' && (
-              <div className="space-y-3">
-                <div className="rounded-lg bg-purple-50 px-3 py-2 text-sm text-purple-700 font-medium">Booking for: {groupPersonLabel}</div>
-                <p className="text-sm font-medium text-slate-700">Select team member</p>
-                {activePractitioners.map((p) => (
-                  <button key={p.id} onClick={() => { setGroupPracId(p.id); setGroupSvcId(''); setGroupStep('service'); }}
-                    className="w-full rounded-lg border border-slate-200 px-4 py-3 text-left text-sm font-medium hover:bg-slate-50 text-slate-900">{p.name}</button>
-                ))}
-                <button onClick={() => setGroupStep('label')} className="text-sm text-blue-600 hover:underline">&larr; Back</button>
               </div>
             )}
 
             {groupStep === 'service' && (
               <div className="space-y-3">
-                <div className="rounded-lg bg-purple-50 px-3 py-2 text-sm">
-                  <span className="font-medium text-purple-700">{groupPersonLabel}</span>
-                  <span className="text-purple-500"> &middot; {activePractitioners.find((p) => p.id === groupPracId)?.name}</span>
-                </div>
+                <div className="rounded-lg bg-purple-50 px-3 py-2 text-sm font-medium text-purple-700">Booking for: {groupPersonLabel}</div>
                 <p className="text-sm font-medium text-slate-700">Select service</p>
-                {groupServicesForPrac.map((s) => (
-                  <button key={s.id} onClick={() => { setGroupSvcId(s.id); setGroupStep('time'); }}
-                    className="w-full rounded-lg border border-slate-200 px-4 py-3 text-left hover:bg-slate-50">
+                {servicePickerOptions.map(({ service: s, minPricePence }) => (
+                  <button
+                    key={s.id}
+                    type="button"
+                    onClick={() => {
+                      setGroupSvcId(s.id);
+                      setGroupPracId('');
+                      setGroupStep('practitioner');
+                    }}
+                    className="w-full rounded-lg border border-slate-200 px-4 py-3 text-left hover:bg-slate-50"
+                  >
                     <div className="flex items-center gap-3">
-                      <div className="h-2.5 w-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: s.colour }} />
-                      <div className="flex-1 min-w-0"><div className="text-sm font-medium text-slate-900">{s.name}</div><div className="text-xs text-slate-500">{s.duration_minutes} min</div></div>
-                      <div className="text-sm font-medium text-slate-700">{s.price_pence != null ? `${sym}${(s.price_pence / 100).toFixed(2)}` : 'POA'}</div>
+                      <div className="h-2.5 w-2.5 flex-shrink-0 rounded-full" style={{ backgroundColor: s.colour }} />
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm font-medium text-slate-900">{s.name}</div>
+                        <div className="text-xs text-slate-500">{s.duration_minutes} min</div>
+                      </div>
+                      <div className="text-sm font-medium text-slate-700">
+                        {minPricePence != null ? `From ${sym}${(minPricePence / 100).toFixed(2)}` : 'POA'}
+                      </div>
                     </div>
                   </button>
                 ))}
-                <button onClick={() => setGroupStep('practitioner')} className="text-sm text-blue-600 hover:underline">&larr; Back</button>
+                {servicePickerOptions.length === 0 && <p className="text-sm text-slate-500">No services available.</p>}
+                <button type="button" onClick={() => setGroupStep('label')} className="text-sm text-blue-600 hover:underline">&larr; Back</button>
+              </div>
+            )}
+
+            {groupStep === 'practitioner' && (
+              <div className="space-y-3">
+                <div className="rounded-lg bg-purple-50 px-3 py-2 text-sm">
+                  <span className="font-medium text-purple-700">{groupPersonLabel}</span>
+                  <span className="text-purple-500"> &middot; {services.find((s) => s.id === groupSvcId)?.name}</span>
+                </div>
+                <p className="text-sm font-medium text-slate-700">Select team member</p>
+                {groupPractitionersForService.map((p) => {
+                  const merged = getMergedServicesForPractitioner(p.id).find((s) => s.id === groupSvcId);
+                  return (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => {
+                        setGroupPracId(p.id);
+                        setGroupStep('time');
+                      }}
+                      className="w-full rounded-lg border border-slate-200 px-4 py-3 text-left text-sm font-medium text-slate-900 hover:bg-slate-50"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span>{p.name}</span>
+                        <span className="text-slate-600">
+                          {merged?.price_pence != null ? `${sym}${(merged.price_pence / 100).toFixed(2)}` : 'POA'}
+                        </span>
+                      </div>
+                    </button>
+                  );
+                })}
+                {groupPractitionersForService.length === 0 && <p className="text-sm text-slate-500">No team members offer this service.</p>}
+                <button type="button" onClick={() => setGroupStep('service')} className="text-sm text-blue-600 hover:underline">&larr; Back</button>
               </div>
             )}
 
@@ -618,7 +855,7 @@ export function AppointmentBookingForm({
                     </div>
                   )}
                 </div>
-                <button onClick={() => setGroupStep('service')} className="text-sm text-blue-600 hover:underline">&larr; Back</button>
+                <button type="button" onClick={() => setGroupStep('practitioner')} className="text-sm text-blue-600 hover:underline">&larr; Back</button>
               </div>
             )}
 

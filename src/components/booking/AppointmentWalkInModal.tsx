@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import type { AppointmentService, PractitionerService } from '@/types/booking-models';
+import { effectiveAppointmentServiceForPractitioner } from '@/lib/appointments/effective-service-for-practitioner';
 
 interface Practitioner {
   id: string;
@@ -18,11 +20,6 @@ interface Service {
   is_active: boolean;
 }
 
-interface PractitionerServiceLink {
-  practitioner_id: string;
-  service_id: string;
-}
-
 interface Props {
   open: boolean;
   onClose: () => void;
@@ -30,17 +27,19 @@ interface Props {
   currency?: string;
 }
 
+type WalkStep = 'mode' | 'group_hint' | 'service' | 'staff' | 'confirm';
+
 /**
- * Walk-in appointments: same stepped UI as New Appointment (staff → service → confirm & contact).
- * Booking time is set server-side when the user confirms (no date/time step).
+ * Walk-in: booking type → service (from price) → staff (their price) → confirm with optional contact.
+ * Time is set server-side when the user confirms.
  */
 export function AppointmentWalkInModal({ open, onClose, onCreated, currency = 'GBP' }: Props) {
   const sym = currency === 'EUR' ? '€' : '£';
 
-  const [step, setStep] = useState(1);
+  const [walkStep, setWalkStep] = useState<WalkStep>('mode');
   const [practitioners, setPractitioners] = useState<Practitioner[]>([]);
   const [services, setServices] = useState<Service[]>([]);
-  const [links, setLinks] = useState<PractitionerServiceLink[]>([]);
+  const [links, setLinks] = useState<PractitionerService[]>([]);
   const [dataLoading, setDataLoading] = useState(true);
 
   const [selectedPractitioner, setSelectedPractitioner] = useState('');
@@ -54,7 +53,7 @@ export function AppointmentWalkInModal({ open, onClose, onCreated, currency = 'G
 
   useEffect(() => {
     if (open) {
-      setStep(1);
+      setWalkStep('mode');
       setSelectedPractitioner('');
       setSelectedService('');
       setClientName('');
@@ -63,7 +62,7 @@ export function AppointmentWalkInModal({ open, onClose, onCreated, currency = 'G
       setError(null);
 
       setDataLoading(true);
-      Promise.all([fetch('/api/venue/practitioners'), fetch('/api/venue/appointment-services')])
+      Promise.all([fetch('/api/venue/practitioners?roster=1'), fetch('/api/venue/appointment-services')])
         .then(async ([pracRes, svcRes]) => {
           if (!pracRes.ok || !svcRes.ok) {
             setError('Failed to load data. Please close and try again.');
@@ -84,23 +83,69 @@ export function AppointmentWalkInModal({ open, onClose, onCreated, currency = 'G
     [practitioners],
   );
 
-  const servicesForPractitioner = useMemo(() => {
-    if (!selectedPractitioner) return services.filter((s) => s.is_active);
-    const linkedIds = new Set(
-      links.filter((l) => l.practitioner_id === selectedPractitioner).map((l) => l.service_id),
-    );
-    return services.filter((s) => s.is_active && linkedIds.has(s.id));
-  }, [selectedPractitioner, services, links]);
+  const getServicesForPractitioner = useMemo(
+    () => (pracId: string) => {
+      if (!pracId) return services.filter((s) => s.is_active);
+      const pracLinks = links.filter((l) => l.practitioner_id === pracId);
+      if (pracLinks.length === 0) return services.filter((s) => s.is_active);
+      const linkedIds = new Set(pracLinks.map((l) => l.service_id));
+      return services.filter((s) => s.is_active && linkedIds.has(s.id));
+    },
+    [services, links],
+  );
 
-  const selectedSvc = services.find((s) => s.id === selectedService);
+  const getMergedServicesForPractitioner = useMemo(
+    () => (pracId: string) => {
+      return getServicesForPractitioner(pracId).map((s) =>
+        effectiveAppointmentServiceForPractitioner(s as AppointmentService, pracId, links),
+      );
+    },
+    [getServicesForPractitioner, links],
+  );
+
+  const servicePickerOptions = useMemo(() => {
+    const byId = new Map<string, { service: Service; minPricePence: number | null }>();
+    for (const p of activePractitioners) {
+      for (const s of getMergedServicesForPractitioner(p.id)) {
+        const price = s.price_pence;
+        const existing = byId.get(s.id);
+        if (!existing) {
+          byId.set(s.id, { service: s as Service, minPricePence: price });
+        } else if (price != null && (existing.minPricePence == null || price < existing.minPricePence)) {
+          existing.minPricePence = price;
+        }
+      }
+    }
+    return Array.from(byId.values()).sort((a, b) => a.service.name.localeCompare(b.service.name));
+  }, [activePractitioners, getMergedServicesForPractitioner]);
+
+  const practitionersForSelectedService = useMemo(() => {
+    if (!selectedService) return [];
+    return activePractitioners.filter((p) =>
+      getMergedServicesForPractitioner(p.id).some((s) => s.id === selectedService),
+    );
+  }, [activePractitioners, selectedService, getMergedServicesForPractitioner]);
+
+  const selectedSvcMerged = useMemo(() => {
+    if (!selectedService || !selectedPractitioner) return null;
+    const base = services.find((s) => s.id === selectedService);
+    if (!base) return null;
+    return effectiveAppointmentServiceForPractitioner(base as AppointmentService, selectedPractitioner, links);
+  }, [selectedService, selectedPractitioner, services, links]);
+
+  function formatFromPrice(pence: number | null): string {
+    if (pence == null) return 'POA';
+    return `From ${sym}${(pence / 100).toFixed(2)}`;
+  }
+
+  function formatPrice(pence: number | null): string {
+    if (pence == null) return 'POA';
+    return `${sym}${(pence / 100).toFixed(2)}`;
+  }
 
   async function handleSubmit() {
     if (!selectedPractitioner || !selectedService) {
-      setError('Select a team member and a service');
-      return;
-    }
-    if (!clientName.trim()) {
-      setError('Client name is required');
+      setError('Select a service and a team member');
       return;
     }
 
@@ -112,7 +157,7 @@ export function AppointmentWalkInModal({ open, onClose, onCreated, currency = 'G
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           party_size: 1,
-          name: clientName.trim(),
+          name: clientName.trim() || undefined,
           email: clientEmail.trim() || undefined,
           phone: clientPhone.trim() || undefined,
           practitioner_id: selectedPractitioner,
@@ -169,37 +214,46 @@ export function AppointmentWalkInModal({ open, onClose, onCreated, currency = 'G
           </div>
         ) : (
           <>
-            {step === 1 && (
+            {walkStep === 'mode' && (
               <div className="space-y-3">
-                <p className="text-sm font-medium text-slate-700">Select team member</p>
-                {activePractitioners.map((p) => (
-                  <button
-                    key={p.id}
-                    type="button"
-                    onClick={() => {
-                      setSelectedPractitioner(p.id);
-                      setSelectedService('');
-                      setStep(2);
-                    }}
-                    className={`w-full rounded-lg border px-4 py-3 text-left text-sm font-medium transition-colors ${
-                      selectedPractitioner === p.id
-                        ? 'border-blue-500 bg-blue-50 text-blue-700'
-                        : 'border-slate-200 text-slate-900 hover:bg-slate-50'
-                    }`}
-                  >
-                    {p.name}
-                  </button>
-                ))}
-                {activePractitioners.length === 0 && (
-                  <p className="text-sm text-slate-500">No team members available.</p>
-                )}
+                <p className="text-sm font-medium text-slate-700">What would you like to book?</p>
+                <button
+                  type="button"
+                  onClick={() => setWalkStep('service')}
+                  className="w-full rounded-lg border border-slate-200 px-4 py-3 text-left text-sm font-medium text-slate-900 hover:bg-slate-50"
+                >
+                  Book an appointment
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setWalkStep('group_hint')}
+                  className="w-full rounded-lg border border-slate-200 px-4 py-3 text-left text-sm font-medium text-slate-900 hover:bg-slate-50"
+                >
+                  Group appointment
+                </button>
               </div>
             )}
 
-            {step === 2 && (
+            {walkStep === 'group_hint' && (
+              <div className="space-y-4">
+                <p className="text-sm text-slate-600">
+                  Walk-in is for one guest at a time. To add a group booking, use <span className="font-medium">New appointment</span>{' '}
+                  on the calendar.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setWalkStep('mode')}
+                  className="text-sm text-blue-600 hover:underline"
+                >
+                  &larr; Back
+                </button>
+              </div>
+            )}
+
+            {walkStep === 'service' && (
               <div className="space-y-3">
                 <p className="text-sm font-medium text-slate-700">Select service</p>
-                {servicesForPractitioner.map((s) => {
+                {servicePickerOptions.map(({ service: s, minPricePence }) => {
                   const buf = s.buffer_minutes ?? 0;
                   return (
                     <button
@@ -207,7 +261,8 @@ export function AppointmentWalkInModal({ open, onClose, onCreated, currency = 'G
                       type="button"
                       onClick={() => {
                         setSelectedService(s.id);
-                        setStep(3);
+                        setSelectedPractitioner('');
+                        setWalkStep('staff');
                       }}
                       className={`w-full rounded-lg border px-4 py-3 text-left transition-colors ${
                         selectedService === s.id ? 'border-blue-500 bg-blue-50' : 'border-slate-200 hover:bg-slate-50'
@@ -221,30 +276,63 @@ export function AppointmentWalkInModal({ open, onClose, onCreated, currency = 'G
                             {s.duration_minutes} mins{buf > 0 ? ` + ${buf}min buffer` : ''}
                           </div>
                         </div>
-                        <div className="text-sm font-medium text-slate-700">
-                          {s.price_pence != null ? `${sym}${(s.price_pence / 100).toFixed(2)}` : 'POA'}
-                        </div>
+                        <div className="text-sm font-medium text-slate-700">{formatFromPrice(minPricePence)}</div>
                       </div>
                     </button>
                   );
                 })}
-                {servicesForPractitioner.length === 0 && (
-                  <p className="text-sm text-slate-500">No services available for this team member.</p>
+                {servicePickerOptions.length === 0 && (
+                  <p className="text-sm text-slate-500">No services available.</p>
                 )}
-                <button
-                  type="button"
-                  onClick={() => setStep(1)}
-                  className="text-sm text-blue-600 hover:underline"
-                >
+                <button type="button" onClick={() => setWalkStep('mode')} className="text-sm text-blue-600 hover:underline">
                   &larr; Back
                 </button>
               </div>
             )}
 
-            {step === 3 && (
+            {walkStep === 'staff' && (
+              <div className="space-y-3">
+                <p className="text-sm font-medium text-slate-700">Select team member</p>
+                {practitionersForSelectedService.map((p) => {
+                  const merged = getMergedServicesForPractitioner(p.id).find((s) => s.id === selectedService);
+                  return (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => {
+                        setSelectedPractitioner(p.id);
+                        setWalkStep('confirm');
+                      }}
+                      className={`w-full rounded-lg border px-4 py-3 text-left text-sm font-medium transition-colors ${
+                        selectedPractitioner === p.id
+                          ? 'border-blue-500 bg-blue-50 text-blue-700'
+                          : 'border-slate-200 text-slate-900 hover:bg-slate-50'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span>{p.name}</span>
+                        <span className="text-slate-600">{formatPrice(merged?.price_pence ?? null)}</span>
+                      </div>
+                    </button>
+                  );
+                })}
+                {practitionersForSelectedService.length === 0 && (
+                  <p className="text-sm text-slate-500">No team members offer this service.</p>
+                )}
+                <button type="button" onClick={() => setWalkStep('service')} className="text-sm text-blue-600 hover:underline">
+                  &larr; Back
+                </button>
+              </div>
+            )}
+
+            {walkStep === 'confirm' && (
               <div className="space-y-4">
-                <p className="text-sm font-medium text-slate-700">Confirm appointment and contact</p>
+                <p className="text-sm font-medium text-slate-700">Confirm appointment</p>
                 <div className="space-y-1 rounded-lg bg-slate-50 p-3 text-sm">
+                  <div className="flex justify-between gap-2">
+                    <span className="text-slate-500">Service</span>
+                    <span className="max-w-[60%] text-right font-medium">{selectedSvcMerged?.name}</span>
+                  </div>
                   <div className="flex justify-between gap-2">
                     <span className="text-slate-500">Team member</span>
                     <span className="max-w-[60%] text-right font-medium">
@@ -252,26 +340,20 @@ export function AppointmentWalkInModal({ open, onClose, onCreated, currency = 'G
                     </span>
                   </div>
                   <div className="flex justify-between gap-2">
-                    <span className="text-slate-500">Service</span>
-                    <span className="max-w-[60%] text-right font-medium">{selectedSvc?.name}</span>
-                  </div>
-                  <div className="flex justify-between gap-2">
                     <span className="text-slate-500">Date and time</span>
-                    <span className="max-w-[60%] text-right font-medium text-slate-700">
-                      Now (when you confirm)
-                    </span>
+                    <span className="max-w-[60%] text-right font-medium text-slate-700">Now (when you confirm)</span>
                   </div>
-                  {selectedSvc?.price_pence != null && (
+                  {selectedSvcMerged?.price_pence != null && (
                     <div className="flex justify-between gap-2">
                       <span className="text-slate-500">Price</span>
-                      <span className="font-medium">{sym}{(selectedSvc.price_pence / 100).toFixed(2)}</span>
+                      <span className="font-medium">{formatPrice(selectedSvcMerged.price_pence)}</span>
                     </div>
                   )}
                 </div>
 
                 <div>
                   <label htmlFor="walkin-client-name" className="mb-1 block text-sm font-medium text-slate-700">
-                    Client name *
+                    Client name <span className="font-normal text-slate-400">(optional)</span>
                   </label>
                   <input
                     id="walkin-client-name"
@@ -315,7 +397,7 @@ export function AppointmentWalkInModal({ open, onClose, onCreated, currency = 'G
                 <div className="flex justify-between pt-2">
                   <button
                     type="button"
-                    onClick={() => setStep(2)}
+                    onClick={() => setWalkStep('staff')}
                     className="text-sm text-blue-600 hover:underline"
                   >
                     &larr; Back

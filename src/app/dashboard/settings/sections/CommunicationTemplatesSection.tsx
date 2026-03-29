@@ -172,7 +172,7 @@ interface CommunicationTemplatesSectionProps {
 }
 
 export function CommunicationTemplatesSection({
-  venue,
+  venue: _venue,
   isAdmin,
   pricingTier = 'standard',
 }: CommunicationTemplatesSectionProps) {
@@ -433,7 +433,7 @@ function CommCard({
                   value={(settings[card.hoursBeforeKey] as number) ?? 56}
                   onChange={(e) => {
                     const val = Math.min(168, Math.max(12, parseInt(e.target.value, 10) || 56));
-                    isAdmin && onUpdate(card.hoursBeforeKey!, val);
+                    if (isAdmin) onUpdate(card.hoursBeforeKey!, val);
                   }}
                   disabled={!isAdmin}
                   className="w-16 rounded-lg border border-slate-200 px-2 py-1 text-center text-xs text-slate-700 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500/20"
@@ -448,7 +448,9 @@ function CommCard({
                 <input
                   type="time"
                   value={(settings[card.timeKey] as string)?.slice(0, 5) ?? '09:00'}
-                  onChange={(e) => isAdmin && onUpdate(card.timeKey!, e.target.value + ':00')}
+                  onChange={(e) => {
+                    if (isAdmin) onUpdate(card.timeKey!, `${e.target.value}:00`);
+                  }}
                   disabled={!isAdmin}
                   className="rounded-lg border border-slate-200 px-2 py-1 text-xs text-slate-700 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500/20"
                 />

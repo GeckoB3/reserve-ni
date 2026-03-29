@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import type { BookingModel } from '@/types/booking-models';
 import { getBusinessConfig } from '@/lib/business-config';
+import { buildAddress, parseAddress } from '@/lib/venue/address-format';
 
 type Currency = 'GBP' | 'EUR';
 
@@ -88,9 +89,12 @@ export default function OnboardingPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Step 1: Business profile
+  // Step 1: Business profile (address fields match Settings → Venue profile)
   const [name, setName] = useState('');
-  const [address, setAddress] = useState('');
+  const [addressName, setAddressName] = useState('');
+  const [addressStreet, setAddressStreet] = useState('');
+  const [addressTown, setAddressTown] = useState('');
+  const [addressPostcode, setAddressPostcode] = useState('');
   const [phone, setPhone] = useState('');
   const [currency, setCurrency] = useState<Currency>('GBP');
 
@@ -137,7 +141,11 @@ export default function OnboardingPage() {
         setStep(v.onboarding_step);
         setMaxCompletedStep(v.onboarding_step);
         setName(v.name === 'My Business' ? '' : v.name);
-        setAddress(v.address ?? '');
+        const parsed = parseAddress(v.address);
+        setAddressName(parsed.name);
+        setAddressStreet(parsed.street);
+        setAddressTown(parsed.town);
+        setAddressPostcode(parsed.postcode);
         setPhone(v.phone ?? '');
         setCurrency(v.currency ?? 'GBP');
 
@@ -160,8 +168,12 @@ export default function OnboardingPage() {
           }
         }
 
-        // Model B: one row per paid calendar slot; merge existing practitioners (retry / refresh after partial save).
+        // Model B: merge existing practitioners (retry / refresh after partial save).
+        // Business / Founding: unlimited calendars — start from one row, add as many as needed.
+        // Standard: one row per paid calendar slot (fixed count).
         if (v.booking_model === 'practitioner_appointment') {
+          const unlimitedCalendars =
+            v.pricing_tier === 'business' || v.pricing_tier === 'founding';
           const slots = Math.max(1, v.calendar_count ?? 1);
           try {
             const prRes = await fetch('/api/venue/practitioners');
@@ -171,21 +183,40 @@ export default function OnboardingPage() {
               };
               const list = body.practitioners ?? [];
               const sorted = [...list].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
-              setPractitioners(
-                Array.from({ length: slots }, (_, i) =>
-                  sorted[i]
-                    ? {
-                        name: sorted[i].name ?? '',
-                        email: sorted[i].email?.trim() ? sorted[i].email : '',
-                      }
-                    : { name: '', email: '' },
-                ),
-              );
+              if (unlimitedCalendars) {
+                if (sorted.length === 0) {
+                  setPractitioners([{ name: '', email: '' }]);
+                } else {
+                  setPractitioners(
+                    sorted.map((row) => ({
+                      name: row.name ?? '',
+                      email: row.email?.trim() ? row.email : '',
+                    })),
+                  );
+                }
+              } else {
+                setPractitioners(
+                  Array.from({ length: slots }, (_, i) =>
+                    sorted[i]
+                      ? {
+                          name: sorted[i].name ?? '',
+                          email: sorted[i].email?.trim() ? sorted[i].email : '',
+                        }
+                      : { name: '', email: '' },
+                  ),
+                );
+              }
+            } else if (unlimitedCalendars) {
+              setPractitioners([{ name: '', email: '' }]);
             } else {
               setPractitioners(Array.from({ length: slots }, () => ({ name: '', email: '' })));
             }
           } catch {
-            setPractitioners(Array.from({ length: slots }, () => ({ name: '', email: '' })));
+            if (unlimitedCalendars) {
+              setPractitioners([{ name: '', email: '' }]);
+            } else {
+              setPractitioners(Array.from({ length: slots }, () => ({ name: '', email: '' })));
+            }
           }
         }
 
@@ -261,6 +292,19 @@ export default function OnboardingPage() {
         setError('Please enter your business name.');
         return;
       }
+      const street = addressStreet.trim();
+      const town = addressTown.trim();
+      const postcode = addressPostcode.trim();
+      if (!street || !town || !postcode) {
+        setError('Please enter street, town or city, and postcode for your business address.');
+        return;
+      }
+      const combinedAddress = buildAddress({
+        name: addressName.trim(),
+        street,
+        town,
+        postcode,
+      });
       setSaving(true);
       try {
         const slug = name
@@ -275,7 +319,7 @@ export default function OnboardingPage() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             name: name.trim(),
-            address: address.trim(),
+            address: combinedAddress,
             phone: phone.trim(),
             slug: finalSlug,
             currency,
@@ -285,7 +329,14 @@ export default function OnboardingPage() {
         if (!res.ok) throw new Error('Failed to save profile');
         setVenue((prev) =>
           prev
-            ? { ...prev, name: name.trim(), address: address.trim(), phone: phone.trim(), slug: finalSlug, currency }
+            ? {
+                ...prev,
+                name: name.trim(),
+                address: combinedAddress,
+                phone: phone.trim(),
+                slug: finalSlug,
+                currency,
+              }
             : prev
         );
       } catch {
@@ -302,14 +353,20 @@ export default function OnboardingPage() {
         return;
       }
       const slots = Math.max(1, venue?.calendar_count ?? 1);
-      if (practitioners.length !== slots) {
-        setError('Team size does not match your plan. Refresh the page or continue from Settings if you changed your subscription.');
+      const unlimitedCalendars =
+        venue?.pricing_tier === 'business' || venue?.pricing_tier === 'founding';
+      if (!unlimitedCalendars && practitioners.length !== slots) {
+        setError(
+          'Team size does not match your plan. Refresh the page or continue from Settings if you changed your subscription.',
+        );
         return;
       }
       const unnamed = practitioners.find((p) => !p.name.trim());
       if (unnamed) {
         setError(
-          `Enter a name for each ${terms.staff.toLowerCase()} — your plan includes ${slots} calendar slot${slots === 1 ? '' : 's'}.`,
+          unlimitedCalendars
+            ? `Enter a name for each ${terms.staff.toLowerCase()}.`
+            : `Enter a name for each ${terms.staff.toLowerCase()} — your plan includes ${slots} calendar slot${slots === 1 ? '' : 's'}.`,
         );
         return;
       }
@@ -337,6 +394,7 @@ export default function OnboardingPage() {
               body: JSON.stringify({
                 id: existing.id,
                 name: p.name.trim(),
+                sort_order: i,
                 ...(p.email.trim() ? { email: p.email.trim() } : {}),
               }),
             });
@@ -354,6 +412,7 @@ export default function OnboardingPage() {
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 name: p.name.trim(),
+                sort_order: i,
                 ...(p.email.trim() ? { email: p.email.trim() } : {}),
               }),
             });
@@ -376,6 +435,27 @@ export default function OnboardingPage() {
             }
           }
         }
+
+        if (unlimitedCalendars && sortedExisting.length > practitioners.length) {
+          const toRemove = sortedExisting.slice(practitioners.length);
+          for (const row of toRemove) {
+            if (!row?.id) continue;
+            const delRes = await fetch('/api/venue/practitioners', {
+              method: 'DELETE',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ id: row.id }),
+            });
+            if (!delRes.ok) {
+              const errBody = (await delRes.json().catch(() => ({}))) as { error?: string };
+              throw new Error(
+                typeof errBody.error === 'string'
+                  ? errBody.error
+                  : `Could not remove an extra ${terms.staff.toLowerCase()} record. Try again or manage team under Settings.`,
+              );
+            }
+          }
+        }
+
         await saveProgress(step + 1);
         setMaxCompletedStep((prev) => Math.max(prev, step + 1));
       } catch (e) {
@@ -647,18 +727,55 @@ export default function OnboardingPage() {
                   className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
                 />
               </div>
-              <div>
-                <label className="mb-1.5 block text-sm font-medium text-slate-700">
-                  Address
-                </label>
-                <input
-                  type="text"
-                  value={address}
-                  onChange={(e) => setAddress(e.target.value)}
-                  placeholder="123 Main Street, Belfast"
-                  className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
-                />
-              </div>
+              <fieldset className="space-y-3">
+                <legend className="mb-1.5 block text-sm font-medium text-slate-700">Business address</legend>
+                <p className="text-xs text-slate-500">
+                  Same format as Settings → Venue profile. You can add a building name if you like.
+                </p>
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-slate-600">Building / venue name (optional)</label>
+                  <input
+                    type="text"
+                    value={addressName}
+                    onChange={(e) => setAddressName(e.target.value)}
+                    placeholder="e.g. The Old Mill"
+                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-slate-600">Street *</label>
+                  <input
+                    type="text"
+                    value={addressStreet}
+                    onChange={(e) => setAddressStreet(e.target.value)}
+                    placeholder="e.g. 12 Main Street"
+                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
+                  />
+                </div>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-slate-600">Town / city *</label>
+                    <input
+                      type="text"
+                      value={addressTown}
+                      onChange={(e) => setAddressTown(e.target.value)}
+                      placeholder="e.g. Belfast"
+                      className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-slate-600">Postcode *</label>
+                    <input
+                      type="text"
+                      value={addressPostcode}
+                      onChange={(e) => setAddressPostcode(e.target.value)}
+                      placeholder="e.g. BT1 1AA"
+                      className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
+                      autoComplete="postal-code"
+                    />
+                  </div>
+                </div>
+              </fieldset>
               <div>
                 <label className="mb-1.5 block text-sm font-medium text-slate-700">
                   Phone
@@ -704,55 +821,158 @@ export default function OnboardingPage() {
         {/* Model B: Team */}
         {currentStepKey === 'team' && venue && (
           <div>
-            <h2 className="mb-1 text-lg font-bold text-slate-900">
-              Your {terms.staff.toLowerCase()} ({Math.max(1, venue.calendar_count ?? 1)} calendar slot
-              {Math.max(1, venue.calendar_count ?? 1) === 1 ? '' : 's'})
-            </h2>
-            <p className="mb-6 text-sm text-slate-500">
-              Each person below gets their own bookable calendar — this matches the number of slots on your current
-              plan. After onboarding, change calendar count under{' '}
-              <Link href="/dashboard/settings?tab=plan" className="font-medium text-brand-600 underline hover:text-brand-700">
-                Settings → Plan
-              </Link>{' '}
-              and manage {terms.staff.toLowerCase()} under{' '}
-              <Link href="/dashboard/settings?tab=staff" className="font-medium text-brand-600 underline hover:text-brand-700">
-                Settings → Staff
-              </Link>
-              . Set{' '}
-              <strong>working hours, breaks, and days off</strong> under{' '}
-              <Link href="/dashboard/availability" className="font-medium text-brand-600 underline hover:text-brand-700">
-                Availability
-              </Link>{' '}
-              in the dashboard.
-            </p>
-            <div className="space-y-3">
-              {practitioners.map((p, i) => (
-                <div key={i} className="flex flex-col gap-2 sm:flex-row sm:gap-2">
-                  <input
-                    type="text"
-                    value={p.name}
-                    onChange={(e) => {
-                      const updated = [...practitioners];
-                      updated[i] = { ...p, name: e.target.value };
-                      setPractitioners(updated);
-                    }}
-                    placeholder={`${terms.staff} name (required)`}
-                    className="flex-1 rounded-xl border border-slate-200 px-4 py-2.5 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
-                  />
-                  <input
-                    type="email"
-                    value={p.email}
-                    onChange={(e) => {
-                      const updated = [...practitioners];
-                      updated[i] = { ...p, email: e.target.value };
-                      setPractitioners(updated);
-                    }}
-                    placeholder="Email (optional)"
-                    className="flex-1 rounded-xl border border-slate-200 px-4 py-2.5 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
-                  />
+            {venue.pricing_tier === 'business' || venue.pricing_tier === 'founding' ? (
+              <>
+                <h2 className="mb-1 text-lg font-bold text-slate-900">
+                  Your {terms.staff.toLowerCase()}
+                </h2>
+                <p className="mb-4 text-sm text-slate-500">
+                  Your Business plan includes <strong>unlimited bookable calendars</strong> and{' '}
+                  <strong>unlimited team members</strong> — add everyone you need. Each person below gets their own
+                  calendar and staff settings. Set{' '}
+                  <strong>working hours, breaks, and days off</strong> under{' '}
+                  <Link
+                    href="/dashboard/availability"
+                    className="font-medium text-brand-600 underline hover:text-brand-700"
+                  >
+                    Availability
+                  </Link>{' '}
+                  after onboarding. You can also manage {terms.staff.toLowerCase()} under{' '}
+                  <Link
+                    href="/dashboard/settings?tab=staff"
+                    className="font-medium text-brand-600 underline hover:text-brand-700"
+                  >
+                    Settings → Staff
+                  </Link>
+                  .
+                </p>
+                <div className="mb-6 space-y-3">
+                  {practitioners.map((p, i) => (
+                    <div
+                      key={i}
+                      className="rounded-xl border border-slate-200 p-4 transition-shadow hover:shadow-sm"
+                    >
+                      <div className="mb-3 flex items-start justify-between gap-2">
+                        <span className="text-xs font-medium uppercase tracking-wide text-slate-400">
+                          {terms.staff} {i + 1}
+                        </span>
+                        {practitioners.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => setPractitioners(practitioners.filter((_, j) => j !== i))}
+                            className="shrink-0 text-xs font-medium text-slate-400 hover:text-red-600"
+                          >
+                            Remove
+                          </button>
+                        )}
+                      </div>
+                      <div className="flex flex-col gap-3 sm:flex-row sm:gap-3">
+                        <div className="flex-1">
+                          <label className="mb-1 block text-xs font-medium text-slate-600">
+                            Name <span className="text-red-500">*</span>
+                          </label>
+                          <input
+                            type="text"
+                            value={p.name}
+                            onChange={(e) => {
+                              const updated = [...practitioners];
+                              updated[i] = { ...p, name: e.target.value };
+                              setPractitioners(updated);
+                            }}
+                            placeholder={`${terms.staff} name`}
+                            className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
+                          />
+                        </div>
+                        <div className="flex-1">
+                          <label className="mb-1 block text-xs font-medium text-slate-600">
+                            Email <span className="font-normal text-slate-400">(optional)</span>
+                          </label>
+                          <input
+                            type="email"
+                            value={p.email}
+                            onChange={(e) => {
+                              const updated = [...practitioners];
+                              updated[i] = { ...p, email: e.target.value };
+                              setPractitioners(updated);
+                            }}
+                            placeholder="name@example.com"
+                            className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => setPractitioners([...practitioners, { name: '', email: '' }])}
+                    className="w-full rounded-xl border-2 border-dashed border-slate-200 py-3 text-sm font-medium text-slate-500 transition-colors hover:border-brand-300 hover:text-brand-600"
+                  >
+                    + Add {terms.staff.toLowerCase()}
+                  </button>
                 </div>
-              ))}
-            </div>
+              </>
+            ) : (
+              <>
+                <h2 className="mb-1 text-lg font-bold text-slate-900">
+                  Your {terms.staff.toLowerCase()} ({Math.max(1, venue.calendar_count ?? 1)} calendar slot
+                  {Math.max(1, venue.calendar_count ?? 1) === 1 ? '' : 's'})
+                </h2>
+                <p className="mb-6 text-sm text-slate-500">
+                  Each person below gets their own bookable calendar — this matches the number of slots on your
+                  current plan. After onboarding, change calendar count under{' '}
+                  <Link
+                    href="/dashboard/settings?tab=plan"
+                    className="font-medium text-brand-600 underline hover:text-brand-700"
+                  >
+                    Settings → Plan
+                  </Link>{' '}
+                  and manage {terms.staff.toLowerCase()} under{' '}
+                  <Link
+                    href="/dashboard/settings?tab=staff"
+                    className="font-medium text-brand-600 underline hover:text-brand-700"
+                  >
+                    Settings → Staff
+                  </Link>
+                  . Set{' '}
+                  <strong>working hours, breaks, and days off</strong> under{' '}
+                  <Link
+                    href="/dashboard/availability"
+                    className="font-medium text-brand-600 underline hover:text-brand-700"
+                  >
+                    Availability
+                  </Link>{' '}
+                  in the dashboard.
+                </p>
+                <div className="space-y-3">
+                  {practitioners.map((p, i) => (
+                    <div key={i} className="flex flex-col gap-2 sm:flex-row sm:gap-2">
+                      <input
+                        type="text"
+                        value={p.name}
+                        onChange={(e) => {
+                          const updated = [...practitioners];
+                          updated[i] = { ...p, name: e.target.value };
+                          setPractitioners(updated);
+                        }}
+                        placeholder={`${terms.staff} name (required)`}
+                        className="flex-1 rounded-xl border border-slate-200 px-4 py-2.5 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
+                      />
+                      <input
+                        type="email"
+                        value={p.email}
+                        onChange={(e) => {
+                          const updated = [...practitioners];
+                          updated[i] = { ...p, email: e.target.value };
+                          setPractitioners(updated);
+                        }}
+                        placeholder="Email (optional)"
+                        className="flex-1 rounded-xl border border-slate-200 px-4 py-2.5 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
+                      />
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
           </div>
         )}
 

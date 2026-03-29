@@ -14,17 +14,20 @@ export default function PaymentPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const bt = sessionStorage.getItem('signup_business_type');
-    const p = sessionStorage.getItem('signup_plan');
-    const cc = sessionStorage.getItem('signup_calendar_count');
-    if (!bt || !p) {
-      router.push('/signup/business-type');
-      return;
-    }
-    setBusinessType(bt);
-    setPlan(p);
-    const parsed = cc ? parseInt(cc, 10) : 1;
-    setCalendarCount(Number.isNaN(parsed) || parsed < 1 ? 1 : parsed);
+    const id = requestAnimationFrame(() => {
+      const bt = sessionStorage.getItem('signup_business_type');
+      const p = sessionStorage.getItem('signup_plan');
+      const cc = sessionStorage.getItem('signup_calendar_count');
+      if (!bt || !p) {
+        router.push('/signup/business-type');
+        return;
+      }
+      setBusinessType(bt);
+      setPlan(p);
+      const parsed = cc ? parseInt(cc, 10) : 1;
+      setCalendarCount(Number.isNaN(parsed) || parsed < 1 ? 1 : parsed);
+    });
+    return () => cancelAnimationFrame(id);
   }, [router]);
 
   const config = useMemo(

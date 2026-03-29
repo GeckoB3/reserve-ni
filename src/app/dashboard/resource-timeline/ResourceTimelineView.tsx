@@ -2,13 +2,6 @@
 
 import { useCallback, useEffect, useState } from 'react';
 
-interface Resource {
-  id: string;
-  name: string;
-  resource_type: string | null;
-  is_active: boolean;
-}
-
 interface ResourceSlot {
   resource_id: string;
   resource_name: string;

@@ -13,11 +13,17 @@ import { normalizeToE164 } from '@/lib/phone/e164';
 import { autoAssignTable } from '@/lib/table-availability';
 import { resolveVenueMode } from '@/lib/venue-mode';
 import { syncTableStatusesForBooking } from '@/lib/table-management/lifecycle';
-import { fetchAppointmentInput, computeAppointmentAvailability } from '@/lib/availability/appointment-engine';
+import {
+  attachVenueClockToAppointmentInput,
+  fetchAppointmentInput,
+  computeAppointmentAvailability,
+} from '@/lib/availability/appointment-engine';
+import { mergeAppointmentServiceWithPractitionerLink } from '@/lib/appointments/merge-service-with-overrides';
 import { fetchEventInput, computeEventAvailability } from '@/lib/availability/event-ticket-engine';
 import { fetchClassInput, computeClassAvailability } from '@/lib/availability/class-session-engine';
 import { fetchResourceInput, computeResourceAvailability } from '@/lib/availability/resource-booking-engine';
 import { cancellationDeadlineHoursBefore } from '@/lib/booking/cancellation-deadline';
+import type { BookingEmailData } from '@/lib/emails/types';
 
 const createBookingSchema = z.object({
   venue_id: z.string().uuid(),
@@ -93,7 +99,7 @@ export async function POST(request: NextRequest) {
 
     const { data: venue, error: venueErr } = await supabase
       .from('venues')
-      .select('id, name, stripe_connected_account_id, booking_rules, deposit_config, timezone, table_management_enabled, show_table_in_confirmation, address')
+      .select('id, name, stripe_connected_account_id, booking_rules, deposit_config, timezone, table_management_enabled, show_table_in_confirmation, address, opening_hours')
       .eq('id', venue_id)
       .single();
 
@@ -245,7 +251,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to create booking' }, { status: 500 });
     }
 
-    let assignedTableLabel: string | null = null;
     if (venueMode.tableManagementEnabled && estimatedEndTime) {
       const durationMs = new Date(estimatedEndTime).getTime() - new Date(`${booking_date}T${timeForDb}`).getTime();
       const durationMins = Math.round(durationMs / 60000);
@@ -271,7 +276,6 @@ export async function POST(request: NextRequest) {
         party_size,
       );
       if (assigned) {
-        assignedTableLabel = assigned.table_names.join(' + ');
         await syncTableStatusesForBooking(
           supabase,
           booking.id,
@@ -389,19 +393,33 @@ async function handleNonTableBooking(
   let estimatedEndTime: string | null = null;
   let depositAmountPence: number | null = null;
   let requiresDeposit = false;
+  let appointmentEmailExtras: Partial<BookingEmailData> = {};
 
   if (venueMode.bookingModel === 'practitioner_appointment') {
     if (!practitioner_id || !appointment_service_id) {
       return NextResponse.json({ error: 'practitioner_id and appointment_service_id are required' }, { status: 400 });
     }
     const input = await fetchAppointmentInput({ supabase, venueId: venue_id, date: booking_date, practitionerId: practitioner_id, serviceId: appointment_service_id });
+    attachVenueClockToAppointmentInput(input, venue as { timezone?: string | null; booking_rules?: unknown; opening_hours?: unknown });
     const result = computeAppointmentAvailability(input);
     const prac = result.practitioners.find((p) => p.id === practitioner_id);
     const slotAvailable = prac?.slots.some((s) => s.start_time === timeStr && s.service_id === appointment_service_id);
     if (!slotAvailable) {
       return NextResponse.json({ error: 'This appointment slot is no longer available' }, { status: 409 });
     }
-    const svc = input.services.find((s) => s.id === appointment_service_id);
+    const baseSvc = input.services.find((s) => s.id === appointment_service_id);
+    const ps = input.practitionerServices.find(
+      (row) => row.practitioner_id === practitioner_id && row.service_id === appointment_service_id,
+    );
+    const svc = baseSvc ? mergeAppointmentServiceWithPractitionerLink(baseSvc, ps) : undefined;
+    const practRow = input.practitioners.find((p) => p.id === practitioner_id);
+    appointmentEmailExtras = {
+      email_variant: 'appointment',
+      practitioner_name: practRow?.name ?? null,
+      appointment_service_name: svc?.name ?? null,
+      appointment_price_display:
+        svc?.price_pence != null ? `£${(svc.price_pence / 100).toFixed(2)}` : null,
+    };
     if (svc) {
       const [y, mo, d] = booking_date.split('-').map(Number);
       const [hh, mm] = timeStr.split(':').map(Number);
@@ -588,6 +606,7 @@ async function handleNonTableBooking(
               deposit_amount_pence: depositAmountPence ?? null,
               deposit_status: requiresDeposit ? 'Pending' : 'Not Required',
               manage_booking_link: manageBookingLink,
+              ...appointmentEmailExtras,
             },
             { name: venue.name as string, address: (venue.address as string) ?? undefined },
             venue_id,

@@ -6,6 +6,7 @@ import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-
 import { loadStripe } from '@stripe/stripe-js';
 import type { Stripe } from '@stripe/stripe-js';
 import Image from 'next/image';
+import { isDepositRefundAvailableAt } from '@/lib/booking/cancellation-deadline';
 
 const stripeCache = new Map<string, Promise<Stripe | null>>();
 
@@ -97,13 +98,31 @@ function BookingDetailsCard({ info }: { info: BookingInfo }) {
 }
 
 function RefundPolicy({ refundCutoff }: { refundCutoff: string | null }) {
+  const body = (() => {
+    if (refundCutoff) {
+      if (isDepositRefundAvailableAt(refundCutoff)) {
+        return (
+          <>
+            Your deposit is fully refundable if you cancel before <strong>{formatRefundCutoff(refundCutoff)}</strong>. After this time, the deposit is non-refundable. Deposits are non-refundable for no-shows.
+          </>
+        );
+      }
+      return (
+        <>
+          Under this venue&apos;s policy, the time by which you needed to cancel for a full deposit refund has already passed. Your deposit is not refundable if you cancel. Deposits are non-refundable for no-shows.
+        </>
+      );
+    }
+    return (
+      <>
+        Deposit refund rules are set by the venue (typically based on how far in advance you cancel). Check your booking confirmation for the exact refund deadline. Deposits are non-refundable for no-shows.
+      </>
+    );
+  })();
+
   return (
     <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-xs text-blue-700 leading-relaxed">
-      <span className="font-semibold">Refund policy:</span>{' '}
-      {refundCutoff
-        ? <>Your deposit is fully refundable if you cancel before <strong>{formatRefundCutoff(refundCutoff)}</strong>. After this time, the deposit is non-refundable. Deposits are non-refundable for no-shows.</>
-        : <>Your deposit is fully refundable if you cancel at least 48 hours before your reservation. After this time, the deposit is non-refundable. Deposits are non-refundable for no-shows.</>
-      }
+      <span className="font-semibold">Refund policy:</span> {body}
     </div>
   );
 }
@@ -227,15 +246,13 @@ function PayContent() {
   const [stripeAccountId, setStripeAccountId] = useState<string | undefined>(undefined);
   const [bookingInfo, setBookingInfo] = useState<BookingInfo | null>(null);
   const [email, setEmail] = useState('');
-  const [status, setStatus] = useState<'loading' | 'ready' | 'success' | 'error'>('loading');
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [status, setStatus] = useState<'loading' | 'ready' | 'success' | 'error'>(() =>
+    token ? 'loading' : 'error',
+  );
+  const [errorMsg, setErrorMsg] = useState<string | null>(() => (!token ? 'Invalid link' : null));
 
   useEffect(() => {
-    if (!token) {
-      setStatus('error');
-      setErrorMsg('Invalid link');
-      return;
-    }
+    if (!token) return;
     fetch(`/api/booking/pay?t=${encodeURIComponent(token)}`)
       .then((r) => {
         if (!r.ok) return r.json().then((j) => Promise.reject(new Error(j.error ?? 'Failed')));

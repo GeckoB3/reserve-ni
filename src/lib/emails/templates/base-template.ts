@@ -1,3 +1,9 @@
+import type { GroupAppointmentLine } from '../types';
+import {
+  formatRefundDeadlineIso,
+  isDepositRefundAvailableAt,
+} from '@/lib/booking/cancellation-deadline';
+
 const BRAND = '#4E6B78';
 const GREY_BG = '#F5F5F5';
 const AMBER_BG = '#FFF3CD';
@@ -26,7 +32,16 @@ interface BaseTemplateOptions {
   customMessage?: string | null;
   ctaLabel?: string;
   ctaUrl?: string | null;
+  /** Second button (e.g. Manage Booking alongside Pay deposit). */
+  secondaryCtaLabel?: string;
+  secondaryCtaUrl?: string | null;
   footerNote?: string;
+  /** Detail card: table reservation vs appointment business */
+  emailVariant?: 'table' | 'appointment';
+  practitionerName?: string | null;
+  serviceName?: string | null;
+  priceDisplay?: string | null;
+  groupAppointments?: GroupAppointmentLine[];
 }
 
 function baseUrl(): string {
@@ -39,21 +54,86 @@ export function buildBookingDetailsCard(opts: {
   partySize?: number;
   venueAddress?: string | null;
   specialRequests?: string | null;
+  emailVariant?: 'table' | 'appointment';
+  practitionerName?: string | null;
+  serviceName?: string | null;
+  priceDisplay?: string | null;
+  groupAppointments?: GroupAppointmentLine[];
 }): string {
+  const variant = opts.emailVariant ?? 'table';
   const rows: string[] = [];
-  if (opts.bookingDate) rows.push(`<tr><td style="padding:4px 0;font-size:14px;color:#333">&#128197; ${escapeHtml(opts.bookingDate)}</td></tr>`);
-  if (opts.bookingTime) rows.push(`<tr><td style="padding:4px 0;font-size:14px;color:#333">&#128336; ${escapeHtml(opts.bookingTime)}</td></tr>`);
-  if (opts.partySize) rows.push(`<tr><td style="padding:4px 0;font-size:14px;color:#333">&#128101; ${opts.partySize} guest${opts.partySize !== 1 ? 's' : ''}</td></tr>`);
-  if (opts.venueAddress) rows.push(`<tr><td style="padding:4px 0;font-size:14px;color:#333">&#128205; ${escapeHtml(opts.venueAddress)}</td></tr>`);
-  if (opts.specialRequests) rows.push(`<tr><td style="padding:4px 0;font-size:14px;color:#333">&#128221; ${escapeHtml(opts.specialRequests)}</td></tr>`);
+
+  if (opts.groupAppointments && opts.groupAppointments.length > 0) {
+    const header =
+      '<tr><td style="padding:0 0 8px 0;font-size:13px;font-weight:600;color:#0f172a">Appointments in this booking</td></tr>';
+    const tableRows = opts.groupAppointments.map((g) => {
+      const dt = formatDateShort(g.booking_date);
+      const tm = formatTime(g.booking_time);
+      const price = g.price_display ? escapeHtml(g.price_display) : '—';
+      return (
+        `<tr><td style="padding:10px 0;border-top:1px solid #e5e5e5;font-size:13px;color:#333">` +
+        `<strong>${escapeHtml(g.person_label)}</strong><br/>` +
+        `<span style="color:#64748b">${dt} at ${tm}</span><br/>` +
+        `${escapeHtml(g.service_name)} · ${escapeHtml(g.practitioner_name)} · ${price}` +
+        `</td></tr>`
+      );
+    });
+    return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color:${GREY_BG};border:1px solid #E5E5E5;border-radius:8px;margin:16px 0"><tr><td style="padding:16px">${header}${tableRows.join('')}</td></tr></table>`;
+  }
+
+  if (variant === 'appointment') {
+    if (opts.bookingDate) rows.push(`<tr><td style="padding:4px 0;font-size:14px;color:#333"><strong>Date</strong> — ${escapeHtml(opts.bookingDate)}</td></tr>`);
+    if (opts.bookingTime) rows.push(`<tr><td style="padding:4px 0;font-size:14px;color:#333"><strong>Time</strong> — ${escapeHtml(opts.bookingTime)}</td></tr>`);
+    if (opts.serviceName) rows.push(`<tr><td style="padding:4px 0;font-size:14px;color:#333"><strong>Treatment</strong> — ${escapeHtml(opts.serviceName)}</td></tr>`);
+    if (opts.practitionerName) rows.push(`<tr><td style="padding:4px 0;font-size:14px;color:#333"><strong>Staff</strong> — ${escapeHtml(opts.practitionerName)}</td></tr>`);
+    if (opts.priceDisplay) rows.push(`<tr><td style="padding:4px 0;font-size:14px;color:#333"><strong>Price</strong> — ${escapeHtml(opts.priceDisplay)}</td></tr>`);
+    if (opts.partySize && opts.partySize > 1) {
+      rows.push(`<tr><td style="padding:4px 0;font-size:14px;color:#333"><strong>People</strong> — ${opts.partySize}</td></tr>`);
+    }
+    if (opts.venueAddress) rows.push(`<tr><td style="padding:4px 0;font-size:14px;color:#333"><strong>Location</strong> — ${escapeHtml(opts.venueAddress)}</td></tr>`);
+    if (opts.specialRequests) rows.push(`<tr><td style="padding:4px 0;font-size:14px;color:#333"><strong>Notes</strong> — ${escapeHtml(opts.specialRequests)}</td></tr>`);
+  } else {
+    if (opts.bookingDate) rows.push(`<tr><td style="padding:4px 0;font-size:14px;color:#333">&#128197; ${escapeHtml(opts.bookingDate)}</td></tr>`);
+    if (opts.bookingTime) rows.push(`<tr><td style="padding:4px 0;font-size:14px;color:#333">&#128336; ${escapeHtml(opts.bookingTime)}</td></tr>`);
+    if (opts.partySize) rows.push(`<tr><td style="padding:4px 0;font-size:14px;color:#333">&#128101; ${opts.partySize} guest${opts.partySize !== 1 ? 's' : ''}</td></tr>`);
+    if (opts.venueAddress) rows.push(`<tr><td style="padding:4px 0;font-size:14px;color:#333">&#128205; ${escapeHtml(opts.venueAddress)}</td></tr>`);
+    if (opts.specialRequests) rows.push(`<tr><td style="padding:4px 0;font-size:14px;color:#333">&#128221; ${escapeHtml(opts.specialRequests)}</td></tr>`);
+  }
+
   if (rows.length === 0) return '';
   return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color:${GREY_BG};border:1px solid #E5E5E5;border-radius:8px;margin:16px 0"><tr><td style="padding:16px">${rows.join('')}</td></tr></table>`;
 }
 
-export function buildDepositCallout(amount: string, refundCutoff?: string | null): string {
+/** Compact date for group lines (reuse full formatDate if needed). */
+function formatDateShort(dateStr: string): string {
+  try {
+    const d = new Date(dateStr + 'T12:00:00');
+    if (isNaN(d.getTime())) return dateStr;
+    return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+  } catch {
+    return dateStr;
+  }
+}
+
+/**
+ * @param refundCutoffIso - `bookings.cancellation_deadline` (ISO). When the email is sent at `at`,
+ *   copy reflects whether that deadline is still in the future (refund available) or already passed.
+ */
+export function buildDepositCallout(
+  amount: string,
+  refundCutoffIso?: string | null,
+  at: Date = new Date(),
+): string {
   let text = `Your deposit of £${escapeHtml(amount)} has been received.`;
-  if (refundCutoff) {
-    text += ` Your deposit is fully refundable if you cancel before ${escapeHtml(refundCutoff)}. After this time, the deposit is non-refundable.`;
+  if (refundCutoffIso) {
+    const fmt = formatRefundDeadlineIso(refundCutoffIso);
+    const refundable = isDepositRefundAvailableAt(refundCutoffIso, at);
+    if (refundable) {
+      text += ` Your deposit is fully refundable if you cancel before ${escapeHtml(fmt)}. After this time, the deposit is non-refundable.`;
+    } else {
+      text +=
+        ' Under this venue\'s policy, deposits are only refunded if you cancel before a set time before your appointment. That deadline has already passed, so this deposit is not refundable if you cancel.';
+    }
   }
   return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color:${AMBER_BG};border:1px solid #FFE69C;border-radius:8px;margin:16px 0"><tr><td style="padding:16px;font-size:14px;color:${AMBER_TEXT}">${text}</td></tr></table>`;
 }
@@ -69,9 +149,6 @@ export function buildCtaButton(label: string, url: string): string {
 
 export function renderBaseTemplate(opts: BaseTemplateOptions): string {
   const base = baseUrl();
-  const logoHtml = opts.venueLogoUrl
-    ? `<img src="${escapeHtml(opts.venueLogoUrl)}" alt="${escapeHtml(opts.venueName)}" width="140" style="height:auto;display:block;margin-bottom:8px" />`
-    : `<span style="font-size:18px;font-weight:700;color:${BRAND}">${escapeHtml(opts.venueName)}</span>`;
 
   const bookingCard = buildBookingDetailsCard({
     bookingDate: opts.bookingDate,
@@ -79,6 +156,11 @@ export function renderBaseTemplate(opts: BaseTemplateOptions): string {
     partySize: opts.partySize,
     venueAddress: opts.venueAddress,
     specialRequests: opts.specialRequests,
+    emailVariant: opts.emailVariant,
+    practitionerName: opts.practitionerName,
+    serviceName: opts.serviceName,
+    priceDisplay: opts.priceDisplay,
+    groupAppointments: opts.groupAppointments,
   });
 
   const depositSection = opts.depositInfoHtml ?? '';
@@ -88,6 +170,8 @@ export function renderBaseTemplate(opts: BaseTemplateOptions): string {
     : '';
 
   const ctaSection = opts.ctaUrl && opts.ctaLabel ? buildCtaButton(opts.ctaLabel, opts.ctaUrl) : '';
+  const secondaryCtaSection =
+    opts.secondaryCtaUrl && opts.secondaryCtaLabel ? buildCtaButton(opts.secondaryCtaLabel, opts.secondaryCtaUrl) : '';
 
   const footer = opts.footerNote ?? `You received this email because you have a booking at ${escapeHtml(opts.venueName)}.`;
 
@@ -117,6 +201,7 @@ export function renderBaseTemplate(opts: BaseTemplateOptions): string {
     depositSection,
     customSection,
     ctaSection,
+    secondaryCtaSection,
     '</td></tr>',
 
     // Footer

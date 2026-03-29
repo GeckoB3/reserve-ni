@@ -13,7 +13,12 @@ import {
   type CombinationTable,
   type ManualCombination,
 } from '@/lib/table-management/combination-engine';
-import { computeAppointmentAvailability, fetchAppointmentInput, type PhantomBooking } from '@/lib/availability/appointment-engine';
+import {
+  attachVenueClockToAppointmentInput,
+  computeAppointmentAvailability,
+  fetchAppointmentInput,
+  type PhantomBooking,
+} from '@/lib/availability/appointment-engine';
 import { computeEventAvailability, fetchEventInput } from '@/lib/availability/event-ticket-engine';
 import { computeClassAvailability, fetchClassInput } from '@/lib/availability/class-session-engine';
 import { computeResourceAvailability, fetchResourceInput } from '@/lib/availability/resource-booking-engine';
@@ -268,6 +273,12 @@ async function handleAppointmentAvailability(
   if (phantomBookings.length > 0) {
     input.phantomBookings = phantomBookings;
   }
+  const { data: venueClock } = await supabase
+    .from('venues')
+    .select('timezone, booking_rules, opening_hours')
+    .eq('id', venueId)
+    .single();
+  attachVenueClockToAppointmentInput(input, venueClock ?? {});
   const result = computeAppointmentAvailability(input);
 
   return NextResponse.json({ date, venue_id: venueId, ...result });

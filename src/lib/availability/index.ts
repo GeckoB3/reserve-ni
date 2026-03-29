@@ -11,7 +11,6 @@ import type {
   NamedSitting,
   NamedSittingsConfig,
   OpeningHours,
-  OpeningHoursDay,
   OpeningHoursDayLegacy,
   OpeningHoursPeriod,
   VenueForAvailability,
@@ -83,7 +82,7 @@ export function isSlotBlocked(
 }
 
 /** Normalize day config to array of periods (supports legacy single range or new periods format). */
-function getPeriodsForDay(openingHours: OpeningHours | null, day: number): OpeningHoursPeriod[] {
+export function getOpeningPeriodsForDay(openingHours: OpeningHours | null | undefined, day: number): OpeningHoursPeriod[] {
   if (!openingHours) return [];
   const key = String(day);
   const dayHours = openingHours[key];
@@ -102,7 +101,7 @@ function getFixedSlotKeys(
   intervalMinutes: 15 | 30
 ): Array<{ start_time: string; end_time: string }> {
   const day = getDayOfWeek(dateStr);
-  const periods = getPeriodsForDay(openingHours, day);
+  const periods = getOpeningPeriodsForDay(openingHours, day);
   const slots: Array<{ start_time: string; end_time: string }> = [];
   for (const range of periods) {
     const openMin = timeToMinutes(range.open);

@@ -3,10 +3,10 @@ import { getSupabaseAdminClient } from '@/lib/supabase';
 import { stripe } from '@/lib/stripe';
 import { sendCancellationNotification } from '@/lib/communications/send-templated';
 import type { BookingEmailData, VenueEmailData } from '@/lib/emails/types';
+import { enrichBookingEmailForAppointment } from '@/lib/emails/booking-email-enrichment';
 import { verifyConfirmToken } from '@/lib/confirm-token';
 import { verifyBookingHmac } from '@/lib/short-manage-link';
 import { validateBookingStatusTransition, applyBookingLifecycleStatusEffects } from '@/lib/table-management/lifecycle';
-import type { BookingStatus } from '@/lib/table-management/booking-status';
 import { computeAvailability, fetchEngineInput } from '@/lib/availability';
 import { AVAILABILITY_SETUP_REQUIRED_MESSAGE } from '@/lib/availability/availability-errors';
 import { resolveVenueMode } from '@/lib/venue-mode';
@@ -28,7 +28,9 @@ export async function GET(request: NextRequest) {
     const supabase = getSupabaseAdminClient();
     const { data: booking, error: bookErr } = await supabase
       .from('bookings')
-      .select('id, venue_id, guest_id, booking_date, booking_time, party_size, status, deposit_status, deposit_amount_pence, confirm_token_hash, confirm_token_used_at')
+      .select(
+        'id, venue_id, guest_id, booking_date, booking_time, party_size, status, deposit_status, deposit_amount_pence, confirm_token_hash, confirm_token_used_at, practitioner_id, appointment_service_id',
+      )
       .eq('id', bookingId)
       .single();
 
@@ -53,6 +55,18 @@ export async function GET(request: NextRequest) {
     const depositPaid = booking.deposit_status === 'Paid';
     const timeStr = typeof booking.booking_time === 'string' ? booking.booking_time.slice(0, 5) : '';
 
+    let practitioner_name: string | null = null;
+    let appointment_service_name: string | null = null;
+    const isAppointment = Boolean(booking.practitioner_id && booking.appointment_service_id);
+    if (isAppointment) {
+      const [{ data: pr }, { data: svc }] = await Promise.all([
+        supabase.from('practitioners').select('name').eq('id', booking.practitioner_id as string).maybeSingle(),
+        supabase.from('appointment_services').select('name').eq('id', booking.appointment_service_id as string).maybeSingle(),
+      ]);
+      practitioner_name = pr?.name ?? null;
+      appointment_service_name = svc?.name ?? null;
+    }
+
     return NextResponse.json({
       booking_id: booking.id,
       venue_id: booking.venue_id,
@@ -65,6 +79,9 @@ export async function GET(request: NextRequest) {
       deposit_paid: depositPaid,
       deposit_amount_pence: booking.deposit_amount_pence,
       status: booking.status,
+      is_appointment: isAppointment,
+      practitioner_name,
+      appointment_service_name,
     });
   } catch (err) {
     console.error('GET /api/confirm failed:', err);
@@ -228,7 +245,8 @@ export async function POST(request: NextRequest) {
         const refundMsg = refund_message || null;
         after(async () => {
           try {
-            await sendCancellationNotification(cancelBookingEmail, cancelVenueEmail, vid, refundMsg);
+            const enriched = await enrichBookingEmailForAppointment(supabase, bookingId, cancelBookingEmail);
+            await sendCancellationNotification(enriched, cancelVenueEmail, vid, refundMsg);
           } catch (commsErr) {
             console.error('Cancellation confirmation comms failed:', commsErr);
           }

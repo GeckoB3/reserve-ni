@@ -184,7 +184,7 @@ describe('renderPostVisitEmail', () => {
     const result = renderPostVisitEmail(SAMPLE_BOOKING, SAMPLE_VENUE);
     expect(result.subject).toContain('Thanks');
     expect(result.html).toContain('enjoyed your visit');
-    expect(result.html).toContain('Book Again');
+    expect(result.html).toContain('Book again');
   });
 });
 

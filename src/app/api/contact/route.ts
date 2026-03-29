@@ -13,15 +13,6 @@ const FROM = { email: 'hello@reserveni.com', name: 'Reserve NI' };
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MAX_MESSAGE_LENGTH = 2000;
 
-interface ContactBody {
-  name?: string;
-  email?: string;
-  phone?: string;
-  restaurantName?: string;
-  message?: string;
-  company_website?: string;
-}
-
 /** Validated payload: name and email are set. */
 interface ContactPayload {
   name: string;

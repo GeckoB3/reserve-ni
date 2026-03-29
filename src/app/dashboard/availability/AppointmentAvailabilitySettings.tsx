@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useState, useMemo } from 'react';
 import Link from 'next/link';
 import { defaultPractitionerWorkingHours } from '@/lib/availability/practitioner-defaults';
+import type { TimeRange, WorkingHours } from '@/types/booking-models';
+import { StaffLeaveCalendarPanel } from '@/app/dashboard/availability/StaffLeaveCalendarPanel';
 
 interface CalendarEntitlement {
   pricing_tier: string;
@@ -20,8 +22,10 @@ interface Practitioner {
   name: string;
   email: string | null;
   phone: string | null;
+  staff_id: string | null;
   working_hours: Record<string, Array<{ start: string; end: string }>>;
   break_times: Array<{ start: string; end: string }>;
+  break_times_by_day?: WorkingHours | null;
   days_off: string[];
   is_active: boolean;
   sort_order: number;
@@ -39,12 +43,12 @@ interface PractitionerServiceLink {
 
 type Tab = 'team' | 'services' | 'hours' | 'breaks' | 'daysoff';
 
-const TABS: Array<{ key: Tab; label: string }> = [
+const ALL_TABS: Array<{ key: Tab; label: string }> = [
   { key: 'team', label: 'Team' },
   { key: 'services', label: 'Services' },
   { key: 'hours', label: 'Working Hours' },
   { key: 'breaks', label: 'Breaks' },
-  { key: 'daysoff', label: 'Days Off' },
+  { key: 'daysoff', label: 'Time off' },
 ];
 
 const DAY_LABELS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
@@ -54,9 +58,25 @@ function defaultWorkingHours(): Record<string, Array<{ start: string; end: strin
   return defaultPractitionerWorkingHours();
 }
 
+function canEditBreaksFor(p: Practitioner | null, isAdmin: boolean, staffId: string | null): boolean {
+  if (!p) return false;
+  if (isAdmin) return true;
+  return staffId != null && p.staff_id === staffId;
+}
+
+function canEditWorkingHoursFor(p: Practitioner | null, isAdmin: boolean, staffId: string | null): boolean {
+  return canEditBreaksFor(p, isAdmin, staffId);
+}
+
 // ─── Component ──────────────────────────────────────────────────────────────
-export function AppointmentAvailabilitySettings({ isAdmin }: { isAdmin: boolean }) {
-  const [tab, setTab] = useState<Tab>('team');
+export function AppointmentAvailabilitySettings({
+  isAdmin,
+  currentStaffId,
+}: {
+  isAdmin: boolean;
+  currentStaffId: string | null;
+}) {
+  const [tab, setTab] = useState<Tab>(() => (isAdmin ? 'team' : 'services'));
   const [practitioners, setPractitioners] = useState<Practitioner[]>([]);
   const [services, setServices] = useState<Service[]>([]);
   const [pLinks, setPLinks] = useState<PractitionerServiceLink[]>([]);
@@ -76,8 +96,17 @@ export function AppointmentAvailabilitySettings({ isAdmin }: { isAdmin: boolean 
   const [entitlement, setEntitlement] = useState<CalendarEntitlement | null>(null);
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
 
-  // Selected practitioner for hours/breaks/daysoff tabs
+  // Selected practitioner for hours / breaks tabs
   const [selectedPractitionerId, setSelectedPractitionerId] = useState<string>('');
+
+  const visibleTabs = useMemo(() => {
+    if (isAdmin) return ALL_TABS;
+    return ALL_TABS.filter((t) => t.key !== 'team');
+  }, [isAdmin]);
+
+  useEffect(() => {
+    if (!isAdmin && tab === 'team') setTab('services');
+  }, [isAdmin, tab]);
 
   const fetchData = useCallback(async (options?: { silent?: boolean }) => {
     const silent = options?.silent === true;
@@ -99,7 +128,7 @@ export function AppointmentAvailabilitySettings({ isAdmin }: { isAdmin: boolean 
       }
 
       const [pracRes, svcRes] = await Promise.all([
-        fetch('/api/venue/practitioners'),
+        fetch('/api/venue/practitioners?roster=1'),
         fetch('/api/venue/appointment-services'),
       ]);
       if (!pracRes.ok || !svcRes.ok) {
@@ -112,8 +141,12 @@ export function AppointmentAvailabilitySettings({ isAdmin }: { isAdmin: boolean 
       setServices(svcData.services ?? []);
       setPLinks(svcData.practitioner_services ?? []);
       setSelectedPractitionerId((prev) => {
-        if (prev && pracs.some((p: Practitioner) => p.id === prev)) return prev;
-        return pracs.length > 0 ? pracs[0].id : '';
+        const pool = pracs;
+        const own = currentStaffId
+          ? pracs.find((p: Practitioner) => p.staff_id === currentStaffId)
+          : undefined;
+        if (prev && pool.some((p: Practitioner) => p.id === prev)) return prev;
+        return own?.id ?? pool[0]?.id ?? '';
       });
     } catch {
       if (!silent) {
@@ -125,7 +158,7 @@ export function AppointmentAvailabilitySettings({ isAdmin }: { isAdmin: boolean 
       }
     }
    
-  }, []);
+  }, [isAdmin, currentStaffId]);
 
   useEffect(() => {
     fetchData();
@@ -151,6 +184,9 @@ export function AppointmentAvailabilitySettings({ isAdmin }: { isAdmin: boolean 
     () => practitioners.find((p) => p.id === selectedPractitionerId) ?? null,
     [practitioners, selectedPractitionerId],
   );
+
+  /** All calendars for viewing; saves still use canEdit* for own calendar only (unless admin). */
+  const practitionersForScheduleTabs = useMemo(() => practitioners, [practitioners]);
 
   function flash(msg: string) {
     setSuccess(msg);
@@ -280,7 +316,7 @@ export function AppointmentAvailabilitySettings({ isAdmin }: { isAdmin: boolean 
 
   // ─── Working Hours Tab ──────────────────────────────────────────────
   async function saveWorkingHours(hours: Record<string, Array<{ start: string; end: string }>>) {
-    if (!isAdmin || !selectedPrac) return;
+    if (!selectedPrac || !canEditWorkingHoursFor(selectedPrac, isAdmin, currentStaffId)) return;
     setSaving(true);
     setError(null);
     try {
@@ -300,15 +336,18 @@ export function AppointmentAvailabilitySettings({ isAdmin }: { isAdmin: boolean 
   }
 
   // ─── Breaks Tab ─────────────────────────────────────────────────────
-  async function saveBreaks(breaks: Array<{ start: string; end: string }>) {
-    if (!isAdmin || !selectedPrac) return;
+  async function saveBreakSchedule(payload: {
+    break_times: TimeRange[];
+    break_times_by_day: WorkingHours | null;
+  }) {
+    if (!selectedPrac || !canEditBreaksFor(selectedPrac, isAdmin, currentStaffId)) return;
     setSaving(true);
     setError(null);
     try {
       const res = await fetch('/api/venue/practitioners', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: selectedPrac.id, break_times: breaks }),
+        body: JSON.stringify({ id: selectedPrac.id, ...payload }),
       });
       if (!res.ok) throw new Error('Failed to save');
       flash('Breaks saved');
@@ -320,30 +359,16 @@ export function AppointmentAvailabilitySettings({ isAdmin }: { isAdmin: boolean 
     }
   }
 
-  // ─── Days Off Tab ───────────────────────────────────────────────────
-  async function saveDaysOff(daysOff: string[]) {
-    if (!isAdmin || !selectedPrac) return;
-    setSaving(true);
-    setError(null);
-    try {
-      const res = await fetch('/api/venue/practitioners', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: selectedPrac.id, days_off: daysOff }),
-      });
-      if (!res.ok) throw new Error('Failed to save');
-      flash('Days off saved');
-      await fetchData();
-    } catch {
-      setError('Failed to save days off');
-    } finally {
-      setSaving(false);
-    }
-  }
-
   return (
     <div>
-      <h1 className="mb-6 text-2xl font-semibold text-slate-900">Availability Settings</h1>
+      <h1 className={`text-2xl font-semibold text-slate-900 ${isAdmin ? 'mb-6' : 'mb-2'}`}>Availability Settings</h1>
+
+      {!isAdmin && (
+        <p className="mb-6 text-sm text-slate-600">
+          Browse any team member for reference; only <strong>your</strong> calendar can be changed here. Venue admins
+          can adjust everyone.
+        </p>
+      )}
 
       {success && (
         <div className="mb-4 rounded-lg bg-green-50 px-4 py-3 text-sm text-green-700">{success}</div>
@@ -354,7 +379,7 @@ export function AppointmentAvailabilitySettings({ isAdmin }: { isAdmin: boolean 
 
       {/* Tabs */}
       <div className="mb-6 flex gap-1 rounded-lg bg-slate-100 p-1">
-        {TABS.map((t) => (
+        {visibleTabs.map((t) => (
           <button
             key={t.key}
             onClick={() => setTab(t.key)}
@@ -557,14 +582,49 @@ export function AppointmentAvailabilitySettings({ isAdmin }: { isAdmin: boolean 
               services={services}
               links={pLinks}
               isAdmin={isAdmin}
+              currentStaffId={currentStaffId}
               onLinksChanged={() => fetchData({ silent: true })}
             />
           )}
 
-          {/* ─── Working Hours / Breaks / Days Off ─── */}
-          {(tab === 'hours' || tab === 'breaks' || tab === 'daysoff') && (
+          {/* ─── Working Hours / Breaks / Time off ─── */}
+          {tab === 'daysoff' && (
             <div>
-              {/* Practitioner selector */}
+              {practitioners.length === 0 ? (
+                <div className="rounded-xl border border-slate-200 bg-white p-12 text-center">
+                  <p className="text-slate-500">Add team members first to plan time off.</p>
+                </div>
+              ) : (
+                <>
+                  {practitioners.some((p) =>
+                    (p.days_off ?? []).some((d) => /^\d{4}-\d{2}-\d{2}$/.test(d)),
+                  ) && (
+                    <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+                      <p className="font-medium">Legacy blocked dates</p>
+                      <p className="mt-1 text-amber-900/90">
+                        Some team members still have dates saved under the older per-person “days off” list. Those
+                        dates still block booking. Use this calendar for new annual leave and sick leave so everything
+                        stays visible in one place.
+                      </p>
+                    </div>
+                  )}
+                  <StaffLeaveCalendarPanel
+                    practitioners={practitioners.map((p) => ({ id: p.id, name: p.name }))}
+                    isAdmin={isAdmin}
+                    selfPractitionerId={
+                      !isAdmin && currentStaffId
+                        ? practitioners.find((p) => p.staff_id === currentStaffId)?.id ?? null
+                        : null
+                    }
+                    onError={setError}
+                  />
+                </>
+              )}
+            </div>
+          )}
+
+          {(tab === 'hours' || tab === 'breaks') && (
+            <div>
               {practitioners.length === 0 ? (
                 <div className="rounded-xl border border-slate-200 bg-white p-12 text-center">
                   <p className="text-slate-500">Add team members first to configure their schedule.</p>
@@ -578,10 +638,21 @@ export function AppointmentAvailabilitySettings({ isAdmin }: { isAdmin: boolean 
                       onChange={(e) => setSelectedPractitionerId(e.target.value)}
                       className="w-full max-w-xs rounded-lg border border-slate-300 px-3 py-2 text-sm"
                     >
-                      {practitioners.map((p) => (
-                        <option key={p.id} value={p.id}>{p.name}</option>
+                      {practitionersForScheduleTabs.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name}
+                          {currentStaffId && p.staff_id === currentStaffId ? ' (you)' : ''}
+                        </option>
                       ))}
                     </select>
+                    {!isAdmin &&
+                      selectedPrac &&
+                      !canEditWorkingHoursFor(selectedPrac, isAdmin, currentStaffId) && (
+                        <p className="mt-2 text-sm text-slate-600">
+                          View only — you can change hours and breaks for your own calendar; ask an admin to edit someone
+                          else’s schedule.
+                        </p>
+                      )}
                   </div>
 
                   {selectedPrac && tab === 'hours' && (
@@ -589,26 +660,36 @@ export function AppointmentAvailabilitySettings({ isAdmin }: { isAdmin: boolean 
                       hours={selectedPrac.working_hours ?? {}}
                       onSave={saveWorkingHours}
                       saving={saving}
-                      readOnly={!isAdmin}
+                      readOnly={!canEditWorkingHoursFor(selectedPrac, isAdmin, currentStaffId)}
+                      readOnlyHint={
+                        !canEditWorkingHoursFor(selectedPrac, isAdmin, currentStaffId) && !isAdmin
+                          ? 'View only — this is another team member’s schedule. You can edit working hours on your own calendar, or ask an admin.'
+                          : undefined
+                      }
                     />
                   )}
 
                   {selectedPrac && tab === 'breaks' && (
-                    <BreaksEditor
-                      breaks={selectedPrac.break_times ?? []}
-                      onSave={saveBreaks}
-                      saving={saving}
-                      readOnly={!isAdmin}
-                    />
-                  )}
-
-                  {selectedPrac && tab === 'daysoff' && (
-                    <DaysOffEditor
-                      daysOff={selectedPrac.days_off ?? []}
-                      onSave={saveDaysOff}
-                      saving={saving}
-                      readOnly={!isAdmin}
-                    />
+                    <>
+                      {!isAdmin && canEditBreaksFor(selectedPrac, isAdmin, currentStaffId) && (
+                        <p className="mb-4 text-sm text-slate-600">
+                          Set breaks for each day you work. Guests cannot book during these times. Only an admin can
+                          change working hours.
+                        </p>
+                      )}
+                      <BreaksScheduleEditor
+                        key={`${selectedPrac.id}:${JSON.stringify(selectedPrac.break_times)}:${JSON.stringify(selectedPrac.break_times_by_day ?? null)}`}
+                        practitioner={selectedPrac}
+                        onSave={saveBreakSchedule}
+                        saving={saving}
+                        readOnly={!canEditBreaksFor(selectedPrac, isAdmin, currentStaffId)}
+                        readOnlyHint={
+                          !canEditBreaksFor(selectedPrac, isAdmin, currentStaffId) && !isAdmin
+                            ? 'View only — you can edit breaks for your own calendar only.'
+                            : undefined
+                        }
+                      />
+                    </>
                   )}
                 </>
               )}
@@ -669,11 +750,13 @@ function WorkingHoursEditor({
   onSave,
   saving,
   readOnly = false,
+  readOnlyHint,
 }: {
   hours: Record<string, Array<{ start: string; end: string }>>;
   onSave: (hours: Record<string, Array<{ start: string; end: string }>>) => void;
   saving: boolean;
   readOnly?: boolean;
+  readOnlyHint?: string;
 }) {
   const [draft, setDraft] = useState(hours);
 
@@ -788,194 +871,200 @@ function WorkingHoursEditor({
         </button>
       )}
       {readOnly && (
-        <p className="mt-4 text-sm text-slate-500">Only admins can change working hours.</p>
+        <p className="mt-4 text-sm text-slate-500">
+          {readOnlyHint ?? 'Only admins can change working hours.'}
+        </p>
       )}
     </div>
   );
 }
 
-// ─── Breaks Editor ────────────────────────────────────────────────────────
-function BreaksEditor({
-  breaks,
-  onSave,
-  saving,
-  readOnly = false,
-}: {
-  breaks: Array<{ start: string; end: string }>;
-  onSave: (breaks: Array<{ start: string; end: string }>) => void;
-  saving: boolean;
-  readOnly?: boolean;
-}) {
-  const [draft, setDraft] = useState(breaks);
-
-  useEffect(() => {
-    setDraft(breaks);
-  }, [breaks]);
-
-  function addBreak() {
-    setDraft((prev) => [...prev, { start: '12:00', end: '13:00' }]);
-  }
-
-  function removeBreak(i: number) {
-    setDraft((prev) => prev.filter((_, idx) => idx !== i));
-  }
-
-  function updateBreak(i: number, field: 'start' | 'end', value: string) {
-    setDraft((prev) => prev.map((b, idx) => idx === i ? { ...b, [field]: value } : b));
-  }
-
-  return (
-    <div>
-      <p className="mb-3 text-sm text-slate-500">Regular break times for this team member (applied every working day).</p>
-      {draft.length === 0 ? (
-        <p className="text-sm text-slate-400">No breaks configured.</p>
-      ) : (
-        <div className="space-y-2">
-          {draft.map((b, i) => (
-            <div key={i} className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2">
-              <input
-                type="time"
-                value={b.start}
-                onChange={(e) => updateBreak(i, 'start', e.target.value)}
-                disabled={readOnly}
-                className="rounded-lg border border-slate-300 px-2 py-1 text-sm disabled:bg-slate-50"
-              />
-              <span className="text-sm text-slate-400">to</span>
-              <input
-                type="time"
-                value={b.end}
-                onChange={(e) => updateBreak(i, 'end', e.target.value)}
-                disabled={readOnly}
-                className="rounded-lg border border-slate-300 px-2 py-1 text-sm disabled:bg-slate-50"
-              />
-              {!readOnly && (
-                <button type="button" onClick={() => removeBreak(i)} className="ml-auto text-xs text-red-500 hover:underline">Remove</button>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-
-      {!readOnly && (
-        <div className="mt-3 flex gap-3">
-          <button type="button" onClick={addBreak} className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50">
-            Add Break
-          </button>
-          <button
-            type="button"
-            onClick={() => onSave(draft)}
-            disabled={saving}
-            className="rounded-lg bg-blue-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-          >
-            {saving ? 'Saving...' : 'Save Breaks'}
-          </button>
-        </div>
-      )}
-      {readOnly && <p className="mt-3 text-sm text-slate-500">Only admins can change breaks.</p>}
-    </div>
-  );
+function emptyBreaksByDay(): WorkingHours {
+  const o: WorkingHours = {};
+  for (const k of DAY_KEYS) o[k] = [];
+  return o;
 }
 
-// ─── Days Off Editor ──────────────────────────────────────────────────────
-function DaysOffEditor({
-  daysOff,
+function breaksByDayFromPractitioner(p: Practitioner): WorkingHours {
+  const src = p.break_times_by_day;
+  const o = emptyBreaksByDay();
+  if (src && typeof src === 'object' && !Array.isArray(src)) {
+    for (const k of DAY_KEYS) {
+      const r = src[k];
+      o[k] = Array.isArray(r) ? r.map((x) => ({ ...x })) : [];
+    }
+  }
+  return o;
+}
+
+/** Prefer stored per-day breaks; otherwise repeat legacy `break_times` on every weekday key. */
+function initialBreaksByDayFromPractitioner(p: Practitioner): WorkingHours {
+  const hasPerDay =
+    p.break_times_by_day &&
+    typeof p.break_times_by_day === 'object' &&
+    !Array.isArray(p.break_times_by_day) &&
+    Object.keys(p.break_times_by_day).length > 0;
+
+  if (hasPerDay) {
+    return breaksByDayFromPractitioner(p);
+  }
+
+  const daily = Array.isArray(p.break_times) ? p.break_times.map((x) => ({ ...x })) : [];
+  const o = emptyBreaksByDay();
+  for (const k of DAY_KEYS) {
+    o[k] = daily.map((x) => ({ ...x }));
+  }
+  return o;
+}
+
+const MONDAY_DAY_KEY = DAY_KEYS[0]!;
+
+// ─── Breaks: one row per weekday (same as Working hours layout) ───────────
+function BreaksScheduleEditor({
+  practitioner,
   onSave,
   saving,
   readOnly = false,
+  readOnlyHint,
 }: {
-  daysOff: string[];
-  onSave: (daysOff: string[]) => void;
+  practitioner: Practitioner;
+  onSave: (payload: { break_times: TimeRange[]; break_times_by_day: WorkingHours | null }) => void;
   saving: boolean;
   readOnly?: boolean;
+  readOnlyHint?: string;
 }) {
-  const [draft, setDraft] = useState(daysOff);
-  const [newDate, setNewDate] = useState('');
+  const [byDayBreaks, setByDayBreaks] = useState<WorkingHours>(() => initialBreaksByDayFromPractitioner(practitioner));
 
-  useEffect(() => {
-    setDraft(daysOff);
-  }, [daysOff]);
-
-  function addDate() {
-    if (!newDate || draft.includes(newDate)) return;
-    setDraft([...draft, newDate].sort());
-    setNewDate('');
+  function addBreakForDay(dayKey: string) {
+    setByDayBreaks((prev) => ({
+      ...prev,
+      [dayKey]: [...(prev[dayKey] ?? []), { start: '12:00', end: '13:00' }],
+    }));
   }
 
-  function removeDate(d: string) {
-    setDraft((prev) => prev.filter((x) => x !== d));
+  function updateBreakForDay(dayKey: string, index: number, field: 'start' | 'end', value: string) {
+    setByDayBreaks((prev) => {
+      const ranges = [...(prev[dayKey] ?? [])];
+      ranges[index] = { ...ranges[index]!, [field]: value };
+      return { ...prev, [dayKey]: ranges };
+    });
   }
 
-  const futureDates = draft.filter((d) => d >= new Date().toISOString().slice(0, 10));
-  const pastDates = draft.filter((d) => d < new Date().toISOString().slice(0, 10));
+  function removeBreakForDay(dayKey: string, index: number) {
+    setByDayBreaks((prev) => {
+      const ranges = [...(prev[dayKey] ?? [])];
+      ranges.splice(index, 1);
+      return { ...prev, [dayKey]: ranges };
+    });
+  }
+
+  function copyMondayToAllDays() {
+    const template = (byDayBreaks[MONDAY_DAY_KEY] ?? []).map((b) => ({ ...b }));
+    setByDayBreaks((prev) => {
+      const next: WorkingHours = { ...prev };
+      for (const k of DAY_KEYS) {
+        next[k] = template.map((b) => ({ ...b }));
+      }
+      return next;
+    });
+  }
+
+  function handleSave() {
+    const full: WorkingHours = {};
+    for (const k of DAY_KEYS) full[k] = [...(byDayBreaks[k] ?? [])];
+    onSave({ break_times: [], break_times_by_day: full });
+  }
 
   return (
-    <div>
-      <p className="mb-3 text-sm text-slate-500">Individual days off for this team member (holidays, sick days, etc.).</p>
-
-      <div className="mb-4 flex items-center gap-2">
-        <input
-          type="date"
-          value={newDate}
-          onChange={(e) => setNewDate(e.target.value)}
-          disabled={readOnly}
-          className="rounded-lg border border-slate-300 px-3 py-2 text-sm disabled:bg-slate-50"
-          min={new Date().toISOString().slice(0, 10)}
-        />
-        {!readOnly && (
-          <button
-            type="button"
-            onClick={addDate}
-            disabled={!newDate}
-            className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-          >
-            Add Day Off
-          </button>
-        )}
-      </div>
-
-      {futureDates.length === 0 && pastDates.length === 0 ? (
-        <p className="text-sm text-slate-400">No days off configured.</p>
-      ) : (
-        <div className="space-y-2">
-          {futureDates.map((d) => (
-            <div key={d} className="flex items-center justify-between rounded-lg border border-slate-200 bg-white px-4 py-2">
-              <span className="text-sm text-slate-900">
-                {new Date(d + 'T12:00:00').toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'long', year: 'numeric' })}
-              </span>
-              {!readOnly ? (
-                <button type="button" onClick={() => removeDate(d)} className="text-xs text-red-500 hover:underline">Remove</button>
-              ) : null}
-            </div>
-          ))}
-          {pastDates.length > 0 && (
-            <details className="mt-3">
-              <summary className="cursor-pointer text-xs text-slate-400">Past days off ({pastDates.length})</summary>
-              <div className="mt-2 space-y-1">
-                {pastDates.map((d) => (
-                  <div key={d} className="flex items-center justify-between rounded-lg bg-slate-50 px-4 py-1.5 text-sm text-slate-400">
-                    <span>{new Date(d + 'T12:00:00').toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'long', year: 'numeric' })}</span>
-                    {!readOnly && (
-                      <button type="button" onClick={() => removeDate(d)} className="text-xs text-red-400 hover:underline">Remove</button>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </details>
-          )}
-        </div>
-      )}
+    <div className="space-y-4">
+      <p className="text-sm text-slate-600">
+        For each day of the week, add one or more breaks when appointments should not be offered. Leave a day with no
+        breaks if you are available for the full working day. If several days share the same pattern, set Monday first
+        and use <span className="font-medium text-slate-800">Copy Monday to all days</span>.
+      </p>
 
       {!readOnly && (
         <button
           type="button"
-          onClick={() => onSave(draft)}
-          disabled={saving}
-          className="mt-4 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+          onClick={copyMondayToAllDays}
+          className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
         >
-          {saving ? 'Saving...' : 'Save Days Off'}
+          Copy Monday to all days
         </button>
       )}
-      {readOnly && <p className="mt-4 text-sm text-slate-500">Only admins can change days off.</p>}
+
+      <div className="space-y-3">
+        {DAY_KEYS.map((dayKey, i) => {
+          const ranges = byDayBreaks[dayKey] ?? [];
+          return (
+            <div key={dayKey} className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-sm font-medium text-slate-900">{DAY_LABELS[i]}</span>
+                {!readOnly && (
+                  <button
+                    type="button"
+                    onClick={() => addBreakForDay(dayKey)}
+                    className="text-xs font-medium text-blue-600 hover:underline"
+                  >
+                    + Add break
+                  </button>
+                )}
+              </div>
+              {ranges.length === 0 ? (
+                <p className="mt-1 text-xs text-slate-400">No breaks — bookable for the full working hours</p>
+              ) : (
+                <div className="mt-2 space-y-2">
+                  {ranges.map((r, ri) => (
+                    <div key={ri} className="flex flex-wrap items-center gap-2">
+                      <input
+                        type="time"
+                        value={r.start}
+                        onChange={(e) => updateBreakForDay(dayKey, ri, 'start', e.target.value)}
+                        disabled={readOnly}
+                        className="rounded-lg border border-slate-300 px-2 py-1 text-sm disabled:bg-slate-50"
+                      />
+                      <span className="text-sm text-slate-400">to</span>
+                      <input
+                        type="time"
+                        value={r.end}
+                        onChange={(e) => updateBreakForDay(dayKey, ri, 'end', e.target.value)}
+                        disabled={readOnly}
+                        className="rounded-lg border border-slate-300 px-2 py-1 text-sm disabled:bg-slate-50"
+                      />
+                      {!readOnly && (
+                        <button
+                          type="button"
+                          onClick={() => removeBreakForDay(dayKey, ri)}
+                          className="text-xs text-red-500 hover:underline"
+                        >
+                          Remove
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {!readOnly && (
+        <button
+          type="button"
+          onClick={handleSave}
+          disabled={saving}
+          className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+        >
+          {saving ? 'Saving...' : 'Save breaks'}
+        </button>
+      )}
+      {readOnly && (
+        <p className="text-sm text-slate-500">
+          {readOnlyHint ??
+            'You can only edit breaks for the calendar linked to your account. Ask an admin if you need a different profile selected.'}
+        </p>
+      )}
     </div>
   );
 }
@@ -1008,12 +1097,14 @@ function ServiceLinkingGrid({
   services,
   links,
   isAdmin,
+  currentStaffId,
   onLinksChanged,
 }: {
   practitioners: Practitioner[];
   services: Service[];
   links: PractitionerServiceLink[];
   isAdmin: boolean;
+  currentStaffId: string | null;
   onLinksChanged: () => void | Promise<void>;
 }) {
   const baseline = useMemo(() => buildDraftFromLinks(practitioners, links), [practitioners, links]);
@@ -1028,8 +1119,14 @@ function ServiceLinkingGrid({
 
   const dirty = useMemo(() => !areServiceDraftsEqual(draft, baseline), [draft, baseline]);
 
+  function canEditPractitionerRow(practitionerId: string): boolean {
+    if (isAdmin) return true;
+    const row = practitioners.find((p) => p.id === practitionerId);
+    return Boolean(currentStaffId && row?.staff_id === currentStaffId);
+  }
+
   function toggleCell(practitionerId: string, serviceId: string) {
-    if (!isAdmin) return;
+    if (!canEditPractitionerRow(practitionerId)) return;
     setDraft((prev) => {
       const cur = [...(prev[practitionerId] ?? [])];
       const idx = cur.indexOf(serviceId);
@@ -1052,8 +1149,16 @@ function ServiceLinkingGrid({
     setSaving(true);
     setSaveError(null);
     try {
+      const rowsToSave = isAdmin
+        ? practitioners
+        : practitioners.filter((p) => canEditPractitionerRow(p.id));
+      if (rowsToSave.length === 0) {
+        setSaveError('No calendar linked to your account to update.');
+        setSaving(false);
+        return;
+      }
       const results = await Promise.all(
-        practitioners.map((p) =>
+        rowsToSave.map((p) =>
           fetch('/api/venue/practitioner-services', {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
@@ -1097,13 +1202,21 @@ function ServiceLinkingGrid({
     <div className="space-y-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <p className="max-w-2xl text-sm text-slate-600">
-          Tick the services each team member offers. Leave a row with <strong>no</strong> boxes ticked to offer{' '}
-          <strong>all</strong> services for that person. Changes apply when you click Save.
-          {!isAdmin && (
-            <span className="mt-2 block text-slate-500">Only admins can change which services each person offers.</span>
+          {isAdmin ? (
+            <>
+              Tick the services each team member offers (including any admin-linked calendars). Leave a row with{' '}
+              <strong>no</strong> boxes ticked to offer <strong>all</strong> services for that person. Changes apply when
+              you click Save.
+            </>
+          ) : (
+            <>
+              See which services each person offers. Tick boxes only on <strong>your</strong> row; other team members
+              are <strong>view only</strong>. Leave <strong>no</strong> boxes ticked on your row to offer{' '}
+              <strong>all</strong> services. Changes apply when you click Save.
+            </>
           )}
         </p>
-        {isAdmin && (
+        {(isAdmin || practitioners.some((p) => canEditPractitionerRow(p.id))) && (
           <div className="flex flex-shrink-0 flex-wrap items-center gap-2">
             {dirty && (
               <span className="rounded-full bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-800 ring-1 ring-amber-200/80">
@@ -1162,8 +1275,19 @@ function ServiceLinkingGrid({
                   className="group border-b border-slate-50 bg-white transition-colors hover:bg-slate-50/90"
                 >
                   <td className="sticky left-0 z-10 border-r border-slate-100 bg-white px-4 py-3 font-medium text-slate-900 shadow-[2px_0_8px_-2px_rgba(0,0,0,0.06)] group-hover:bg-slate-50/90">
-                    <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <span>{prac.name}</span>
+                      {!isAdmin && currentStaffId && (
+                        <span
+                          className={`w-fit rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
+                            prac.staff_id === currentStaffId
+                              ? 'bg-emerald-100 text-emerald-800'
+                              : 'bg-slate-100 text-slate-500'
+                          }`}
+                        >
+                          {prac.staff_id === currentStaffId ? 'You' : 'View only'}
+                        </span>
+                      )}
                       {offersAllImplicit && (
                         <span className="w-fit rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-slate-500">
                           All services
@@ -1175,12 +1299,16 @@ function ServiceLinkingGrid({
                     const checked = ids.includes(svc.id);
                     return (
                       <td key={svc.id} className="px-2 py-2 text-center align-middle">
-                        <label className="inline-flex cursor-pointer items-center justify-center p-2">
+                        <label
+                          className={`inline-flex items-center justify-center p-2 ${
+                            canEditPractitionerRow(prac.id) ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'
+                          }`}
+                        >
                           <input
                             type="checkbox"
                             checked={checked}
                             onChange={() => toggleCell(prac.id, svc.id)}
-                            disabled={!isAdmin}
+                            disabled={!canEditPractitionerRow(prac.id)}
                             className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-2 focus:ring-blue-500 focus:ring-offset-0 disabled:opacity-50"
                             aria-label={`${prac.name} — ${svc.name}`}
                           />

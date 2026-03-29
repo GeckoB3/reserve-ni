@@ -322,7 +322,7 @@ export default function KonvaCanvas({
       dragPosRef.current = { id: tableId, x: newX, y: newY };
       forceRender((c) => c + 1);
     },
-    [tables, dimensions, getBounds],
+    [tables, dimensions, getBounds, alignmentGuidesEnabled, joinSnapEnabled],
   );
 
   const handleDragEnd = useCallback(

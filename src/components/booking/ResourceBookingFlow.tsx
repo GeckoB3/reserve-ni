@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import type { VenuePublic, GuestDetails } from './types';
+import { defaultPhoneCountryForVenueCurrency } from '@/lib/phone/default-country';
 import { DetailsStep } from './DetailsStep';
 import { PaymentStep } from './PaymentStep';
 
@@ -26,6 +27,7 @@ interface ResourceAvail {
 type Step = 'resource' | 'slot' | 'details' | 'payment' | 'confirmation';
 
 export function ResourceBookingFlow({ venue, cancellationPolicy }: { venue: VenuePublic; cancellationPolicy?: string }) {
+  const phoneDefaultCountry = defaultPhoneCountryForVenueCurrency(venue.currency);
   const terms = venue.terminology ?? { client: 'Booker', booking: 'Booking', staff: 'Manager' };
 
   const [step, setStep] = useState<Step>('resource');
@@ -201,6 +203,7 @@ export function ResourceBookingFlow({ venue, cancellationPolicy }: { venue: Venu
             onSubmit={handleDetailsSubmit}
             onBack={() => setStep('slot')}
             requiresDeposit={totalPricePence > 0}
+            phoneDefaultCountry={phoneDefaultCountry}
           />
         </div>
       )}

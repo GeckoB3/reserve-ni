@@ -46,7 +46,7 @@ export function TableSettingsView({ isAdmin }: Props) {
       if (tablesRes.ok) {
         const data = await tablesRes.json();
         setTables(data.tables ?? []);
-        setSettings(data.settings ?? settings);
+        setSettings((prev) => data.settings ?? prev);
       }
 
       if (combosRes.ok) {

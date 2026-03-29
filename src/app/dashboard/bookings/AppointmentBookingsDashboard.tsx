@@ -85,6 +85,20 @@ function formatDateLabel(date: string, mode: ViewMode): string {
   return '';
 }
 
+/** Shorter label for narrow screens (avoids truncation in date navigator). */
+function formatDateLabelCompact(date: string, mode: ViewMode): string {
+  const d = new Date(`${date}T12:00:00`);
+  if (mode === 'day') {
+    return `${WEEKDAYS_SHORT[d.getDay()]} ${d.getDate()} ${MONTHS_SHORT[d.getMonth()]} ${d.getFullYear()}`;
+  }
+  if (mode === 'week') {
+    const end = new Date(`${addDays(date, 6)}T12:00:00`);
+    return `${d.getDate()} ${MONTHS_SHORT[d.getMonth()]} – ${end.getDate()} ${MONTHS_SHORT[end.getMonth()]} ${String(end.getFullYear()).slice(-2)}`;
+  }
+  if (mode === 'month') return `${MONTHS_SHORT[d.getMonth()]} ${d.getFullYear()}`;
+  return '';
+}
+
 function formatDayHeader(date: string): string {
   const d = new Date(`${date}T12:00:00`);
   return `${WEEKDAYS_SHORT[d.getDay()]} ${d.getDate()} ${MONTHS_SHORT[d.getMonth()]}`;
@@ -155,13 +169,18 @@ type SortKey = 'date' | 'time' | 'client' | 'service' | 'practitioner' | 'status
 export function AppointmentBookingsDashboard({
   venueId,
   currency = 'GBP',
+  defaultPractitionerFilter = 'all',
+  linkedPractitionerId = null,
 }: {
   venueId: string;
   currency?: string;
+  /** Server-resolved: staff linked to a calendar default to their practitioner id; admins use `all`. */
+  defaultPractitionerFilter?: 'all' | string;
+  linkedPractitionerId?: string | null;
 }) {
   const { addToast } = useToast();
   const sym = currency === 'EUR' ? '€' : '£';
-  const [viewMode, setViewMode] = useState<ViewMode>('week');
+  const [viewMode, setViewMode] = useState<ViewMode>('day');
   const [anchorDate, setAnchorDate] = useState(todayISO);
   const [customFrom, setCustomFrom] = useState(todayISO);
   const [customTo, setCustomTo] = useState(addDays(todayISO(), 7));
@@ -293,7 +312,7 @@ export function AppointmentBookingsDashboard({
 
   useEffect(() => {
     let cancelled = false;
-    void fetch('/api/venue/practitioners')
+    void fetch('/api/venue/practitioners?roster=1')
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
         if (cancelled || !data) return;
@@ -622,32 +641,31 @@ export function AppointmentBookingsDashboard({
         {list.map((b) => {
           const pracName = b.practitioner_id ? practitionerMap.get(b.practitioner_id)?.name ?? '—' : '—';
           const svcName = b.appointment_service_id ? serviceMap.get(b.appointment_service_id)?.name ?? '—' : '—';
+          const dep =
+            b.deposit_amount_pence != null
+              ? `${formatMoneyPence(b.deposit_amount_pence, sym)} (${b.deposit_status})`
+              : b.deposit_status;
           return (
-            <div key={b.id} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <p className="font-semibold text-slate-900">{b.guest_name}</p>
-                  <p className="text-sm text-slate-600">
-                    {b.booking_date} · {b.booking_time.slice(0, 5)}
-                  </p>
-                  <p className="mt-1 text-xs text-slate-500">
-                    {svcName} · {pracName}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setDetailBookingId(b.id)}
-                  className="shrink-0 text-sm font-medium text-brand-600"
-                >
-                  View
-                </button>
+            <div
+              key={b.id}
+              className="rounded-xl border border-slate-200 bg-white p-3.5 shadow-sm ring-1 ring-slate-100/80 sm:p-4"
+            >
+              <div className="min-w-0">
+                <p className="break-words font-semibold leading-snug text-slate-900">{b.guest_name}</p>
+                <p className="mt-0.5 text-sm tabular-nums text-slate-600">
+                  {b.booking_date} · {b.booking_time.slice(0, 5)}
+                </p>
+                <p className="mt-1.5 break-words text-xs leading-relaxed text-slate-500">
+                  {svcName} · {pracName}
+                </p>
+                <p className="mt-1.5 text-xs font-medium text-slate-600">Deposit: {dep}</p>
               </div>
               <label className="mt-3 block text-xs font-medium text-slate-500">Status</label>
               <select
                 value={b.status}
                 disabled={statusUpdatingId === b.id}
                 onChange={(e) => void updateRowStatus(b.id, e.target.value)}
-                className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50"
+                className="mt-1 min-h-[48px] w-full touch-manipulation rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-base text-slate-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30 disabled:opacity-50 sm:min-h-[44px] sm:text-sm"
               >
                 {BOOKING_MUTABLE_STATUSES.map((st) => (
                   <option key={st} value={st}>
@@ -655,6 +673,13 @@ export function AppointmentBookingsDashboard({
                   </option>
                 ))}
               </select>
+              <button
+                type="button"
+                onClick={() => setDetailBookingId(b.id)}
+                className="mt-3 flex min-h-[48px] w-full touch-manipulation items-center justify-center rounded-lg border border-brand-200 bg-brand-50 px-4 text-sm font-semibold text-brand-700 active:bg-brand-100 sm:min-h-[44px]"
+              >
+                View details
+              </button>
             </div>
           );
         })}
@@ -663,29 +688,30 @@ export function AppointmentBookingsDashboard({
   }
 
   return (
-    <div className="space-y-5">
+    <div className="min-w-0 space-y-4 sm:space-y-5">
       {realtimeConnected === false && (
-        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-800 sm:px-4">
           Updates may be delayed. Reconnecting…
         </div>
       )}
       {error && (
-        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          {error}
+        <div className="flex flex-col gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-3 text-sm text-red-700 sm:flex-row sm:items-center sm:justify-between sm:px-4">
+          <span className="min-w-0">{error}</span>
           <button
             type="button"
             onClick={() => setError(null)}
-            className="ml-3 text-red-500 underline hover:text-red-700"
+            className="shrink-0 self-start rounded-lg px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-100 sm:self-auto sm:py-1"
           >
             Dismiss
           </button>
         </div>
       )}
 
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-        <div className="min-w-0 flex-1 overflow-x-auto pb-1">
+      {/* Grid keeps columns in separate tracks so intrinsic widths cannot overlap (flex + w-max on the period control caused overflow into the actions column). */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start lg:gap-x-8 lg:gap-y-4">
+        <div className="min-w-0 max-w-full">
           <p className="mb-2 text-xs font-medium text-slate-500">View period</p>
-          <div className="flex w-max rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
+          <div className="grid w-full max-w-full grid-cols-2 gap-1 rounded-xl border border-slate-200 bg-white p-1 shadow-sm sm:grid-cols-4">
             {(['day', 'week', 'month', 'custom'] as ViewMode[]).map((mode) => (
               <button
                 key={mode}
@@ -694,7 +720,7 @@ export function AppointmentBookingsDashboard({
                   setViewMode(mode);
                   if (mode !== 'custom') setAnchorDate(todayISO());
                 }}
-                className={`rounded-lg px-3 py-2.5 text-sm font-medium capitalize transition-all sm:px-4 ${
+                className={`min-w-0 touch-manipulation rounded-lg px-2 py-3 text-sm font-medium capitalize transition-all sm:px-3 sm:py-2.5 md:px-4 ${
                   viewMode === mode ? 'bg-brand-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50'
                 }`}
               >
@@ -704,78 +730,83 @@ export function AppointmentBookingsDashboard({
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={goToday}
-            className="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
-          >
-            Today
-          </button>
-          <button
-            type="button"
-            onClick={goTomorrow}
-            className="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
-          >
-            Tomorrow
-          </button>
-          <button
-            type="button"
-            onClick={openCsvModal}
-            className="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
-          >
-            Export CSV
-          </button>
-          <button
-            type="button"
-            onClick={() => setNewBookingOpen(true)}
-            className="flex min-h-[44px] items-center gap-2 rounded-xl bg-brand-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-brand-700"
-          >
-            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-            </svg>
-            New appointment
-          </button>
-          <button
-            type="button"
-            onClick={() => setWalkInOpen(true)}
-            className="flex min-h-[44px] items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-emerald-700"
-          >
-            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-            </svg>
-            Walk-in
-          </button>
+        <div className="flex min-w-0 max-w-full flex-col gap-3 lg:max-w-none lg:shrink-0">
+          <div className="grid grid-cols-3 gap-2">
+            <button
+              type="button"
+              onClick={goToday}
+              className="touch-manipulation min-h-[44px] rounded-lg border border-slate-200 bg-white px-2 py-2.5 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50 sm:px-3 sm:text-sm"
+            >
+              Today
+            </button>
+            <button
+              type="button"
+              onClick={goTomorrow}
+              className="touch-manipulation min-h-[44px] rounded-lg border border-slate-200 bg-white px-2 py-2.5 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50 sm:px-3 sm:text-sm"
+            >
+              Tomorrow
+            </button>
+            <button
+              type="button"
+              onClick={openCsvModal}
+              className="touch-manipulation min-h-[44px] rounded-lg border border-slate-200 bg-white px-2 py-2.5 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50 sm:px-3 sm:text-sm"
+            >
+              Export
+            </button>
+          </div>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-3">
+            <button
+              type="button"
+              onClick={() => setNewBookingOpen(true)}
+              className="flex min-h-[48px] touch-manipulation items-center justify-center gap-2 rounded-xl bg-brand-600 px-4 py-3 text-sm font-medium text-white shadow-sm active:bg-brand-800 sm:min-h-[44px] hover:bg-brand-700"
+            >
+              <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+              </svg>
+              New appointment
+            </button>
+            <button
+              type="button"
+              onClick={() => setWalkInOpen(true)}
+              className="flex min-h-[48px] touch-manipulation items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-3 text-sm font-medium text-white shadow-sm active:bg-emerald-800 sm:min-h-[44px] hover:bg-emerald-700"
+            >
+              <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+              </svg>
+              Walk-in
+            </button>
+          </div>
         </div>
       </div>
 
       {viewMode !== 'custom' ? (
-        <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-2 py-2 shadow-sm sm:px-4 sm:py-3">
+        <div className="flex items-stretch justify-between gap-1 rounded-xl border border-slate-200 bg-white px-1 py-2 shadow-sm sm:px-4 sm:py-3">
           <button
             type="button"
             onClick={() => navigate(-1)}
-            className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg text-slate-400 hover:bg-slate-50 hover:text-slate-600"
+            className="flex min-h-[48px] min-w-[48px] shrink-0 touch-manipulation items-center justify-center rounded-lg text-slate-500 hover:bg-slate-50 hover:text-slate-700 active:bg-slate-100 sm:min-h-[44px] sm:min-w-[44px]"
             aria-label="Previous period"
           >
-            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+            <svg className="h-6 w-6 sm:h-5 sm:w-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" />
             </svg>
           </button>
-          <div className="min-w-0 flex-1 px-2 text-center">
-            <h2 className="truncate text-sm font-semibold text-slate-900 sm:text-base">
-              {formatDateLabel(anchorDate, viewMode)}
+          <div className="min-w-0 flex-1 px-1 text-center sm:px-2">
+            <h2 className="text-sm font-semibold leading-snug text-slate-900 sm:text-base">
+              <span className="sm:hidden">{formatDateLabelCompact(anchorDate, viewMode)}</span>
+              <span className="hidden sm:inline">{formatDateLabel(anchorDate, viewMode)}</span>
             </h2>
             {anchorDate === todayISO() && (
-              <span className="text-xs font-medium text-brand-600">Today</span>
+              <span className="mt-0.5 inline-block text-xs font-medium text-brand-600">Today</span>
             )}
           </div>
           <button
             type="button"
             onClick={() => navigate(1)}
-            className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg text-slate-400 hover:bg-slate-50 hover:text-slate-600"
+            className="flex min-h-[48px] min-w-[48px] shrink-0 touch-manipulation items-center justify-center rounded-lg text-slate-500 hover:bg-slate-50 hover:text-slate-700 active:bg-slate-100 sm:min-h-[44px] sm:min-w-[44px]"
             aria-label="Next period"
           >
-            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+            <svg className="h-6 w-6 sm:h-5 sm:w-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
             </svg>
           </button>
@@ -812,22 +843,22 @@ export function AppointmentBookingsDashboard({
         </div>
       )}
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div className="grid min-w-0 grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-3">
         <DashboardStatCard label="Appointments" value={stats.total} color="blue" />
         <DashboardStatCard label="Confirmed" value={stats.confirmed} color="emerald" />
         <DashboardStatCard label="Completed" value={stats.completed} color="violet" />
         <DashboardStatCard label="No-shows" value={stats.noShows} color="slate" />
       </div>
 
-      <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
         <p className="text-xs font-medium text-slate-500">Status</p>
-        <div className="-mx-1 flex gap-1.5 overflow-x-auto pb-1">
+        <div className="-mx-0.5 flex snap-x snap-mandatory gap-2 overflow-x-auto overscroll-x-contain pb-1 pt-0.5 [scrollbar-width:thin] touch-pan-x sm:-mx-1">
           {STATUS_FILTERS.map((f) => (
             <button
               key={f.label}
               type="button"
               onClick={() => setStatusKey(f.label)}
-              className={`flex-shrink-0 rounded-full px-3 py-2 text-xs font-medium transition-colors sm:text-sm ${
+              className={`snap-start flex-shrink-0 touch-manipulation rounded-full px-3.5 py-2.5 text-xs font-medium transition-colors sm:py-2 sm:text-sm ${
                 statusKey === f.label
                   ? 'bg-brand-600 text-white shadow-sm'
                   : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
@@ -844,14 +875,27 @@ export function AppointmentBookingsDashboard({
             <select
               value={practitionerFilter}
               onChange={(e) => setPractitionerFilter(e.target.value as 'all' | string)}
-              className="min-h-[44px] w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+              className="min-h-[48px] w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-base text-slate-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30 sm:min-h-[44px] sm:text-sm"
             >
-              <option value="all">All staff</option>
-              {activePractitioners.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
+              <option value="all">All appointments</option>
+              {linkedPractitionerId === null ? (
+                activePractitioners.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))
+              ) : (
+                <>
+                  <option value={linkedPractitionerId}>My appointments</option>
+                  {activePractitioners
+                    .filter((p) => p.id !== linkedPractitionerId)
+                    .map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                </>
+              )}
             </select>
           </label>
           <label className="flex min-w-0 flex-1 flex-col gap-1 sm:max-w-xs">
@@ -859,7 +903,7 @@ export function AppointmentBookingsDashboard({
             <select
               value={serviceFilter}
               onChange={(e) => setServiceFilter(e.target.value as 'all' | string)}
-              className="min-h-[44px] w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+              className="min-h-[48px] w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-base text-slate-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30 sm:min-h-[44px] sm:text-sm"
             >
               <option value="all">All services</option>
               {services.map((s) => (
@@ -876,7 +920,7 @@ export function AppointmentBookingsDashboard({
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Name, phone, email, or booking reference"
-              className="min-h-[44px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+              className="min-h-[48px] w-full rounded-lg border border-slate-200 px-3 py-2.5 text-base text-slate-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30 sm:min-h-[44px] sm:text-sm"
               autoComplete="off"
             />
           </label>
@@ -891,7 +935,7 @@ export function AppointmentBookingsDashboard({
           ))}
         </div>
       ) : filteredBookings.length === 0 ? (
-        <div className="rounded-xl border border-slate-200 bg-white py-16 text-center shadow-sm">
+        <div className="rounded-xl border border-slate-200 bg-white px-4 py-14 text-center shadow-sm sm:py-16">
           <p className="text-sm font-medium text-slate-500">No appointments match this period and filters.</p>
           <p className="mt-1 text-xs text-slate-400">Try another date range or clear search.</p>
         </div>
@@ -928,13 +972,13 @@ export function AppointmentBookingsDashboard({
                 className="overflow-hidden rounded-xl border border-slate-200 bg-slate-50/40 shadow-sm"
                 aria-label={`Appointments on ${date}`}
               >
-                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200/80 bg-white/80 px-4 py-3">
-                  <h3 className="text-sm font-semibold text-slate-800">{formatDayHeader(date)}</h3>
-                  <span className="text-xs text-slate-500">
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200/80 bg-white/80 px-3 py-2.5 sm:px-4 sm:py-3">
+                  <h3 className="min-w-0 text-sm font-semibold text-slate-800">{formatDayHeader(date)}</h3>
+                  <span className="shrink-0 text-xs tabular-nums text-slate-500">
                     {dayBookings.length} appointment{dayBookings.length !== 1 ? 's' : ''}
                   </span>
                 </div>
-                <div className="p-2 sm:p-3">
+                <div className="min-w-0 p-2.5 sm:p-3">
                   {renderMobileCards(dayBookings)}
                   <div className="hidden overflow-x-auto md:block">
                     <table className="w-full min-w-[720px] border-collapse text-left">
@@ -971,7 +1015,7 @@ export function AppointmentBookingsDashboard({
             role="dialog"
             aria-modal="true"
             aria-labelledby="csv-export-title"
-            className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-t-2xl bg-white p-6 shadow-2xl sm:rounded-2xl"
+            className="max-h-[min(90vh,100dvh)] w-full max-w-md overflow-y-auto rounded-t-2xl bg-white px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-6 shadow-2xl sm:rounded-2xl sm:p-6 sm:pb-6"
             onClick={(e) => e.stopPropagation()}
           >
             <h3 id="csv-export-title" className="text-lg font-semibold text-slate-900">

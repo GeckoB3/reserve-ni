@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 import { z } from 'zod';
 import { normalizeToE164 } from '@/lib/phone/e164';
+import { normalizeWebsiteUrlForStorage } from '@/lib/urls/website-url';
 
 const venueProfileSchema = z.object({
   name: z.string().min(1).max(200).optional(),
@@ -16,6 +17,8 @@ const venueProfileSchema = z.object({
   no_show_grace_minutes: z.number().int().min(10).max(60).optional(),
   kitchen_email: z.string().email().max(255).optional().or(z.literal('')),
   timezone: z.string().max(50).optional(),
+  /** Public booking page link; empty clears. Stored as https URL or null. */
+  website_url: z.string().max(2000).optional(),
 }).refine((data) => Object.keys(data).filter((k) => data[k as keyof typeof data] !== undefined).length > 0, { message: 'At least one field required' });
 
 /** GET /api/venue — return the authenticated user's venue profile. */
@@ -30,7 +33,7 @@ export async function GET() {
     let venue = null;
     const { data: fullVenue, error } = await staff.db
       .from('venues')
-      .select('id, name, slug, address, phone, email, cover_photo_url, cuisine_type, price_band, no_show_grace_minutes, kitchen_email, communication_templates, opening_hours, booking_rules, deposit_config, availability_config, stripe_connected_account_id, timezone')
+      .select('id, name, slug, address, phone, email, cover_photo_url, cuisine_type, price_band, no_show_grace_minutes, kitchen_email, communication_templates, opening_hours, booking_rules, deposit_config, availability_config, stripe_connected_account_id, timezone, currency, website_url')
       .eq('id', staff.venue_id)
       .single();
 
@@ -39,11 +42,11 @@ export async function GET() {
     } else {
       const { data: basicVenue } = await staff.db
         .from('venues')
-        .select('id, name, slug, address, phone, email, cover_photo_url, opening_hours, booking_rules, deposit_config, availability_config, stripe_connected_account_id, timezone')
+        .select('id, name, slug, address, phone, email, cover_photo_url, opening_hours, booking_rules, deposit_config, availability_config, stripe_connected_account_id, timezone, currency, website_url')
         .eq('id', staff.venue_id)
         .single();
       if (basicVenue) {
-        venue = { ...basicVenue, cuisine_type: null, price_band: null, no_show_grace_minutes: 15, kitchen_email: null, communication_templates: null };
+        venue = { ...basicVenue, cuisine_type: null, price_band: null, no_show_grace_minutes: 15, kitchen_email: null, communication_templates: null, website_url: (basicVenue as { website_url?: string | null }).website_url ?? null };
       }
     }
 
@@ -104,12 +107,20 @@ export async function PATCH(request: NextRequest) {
     if (data.no_show_grace_minutes !== undefined) update.no_show_grace_minutes = data.no_show_grace_minutes;
     if (data.kitchen_email !== undefined) update.kitchen_email = data.kitchen_email === '' ? null : data.kitchen_email;
     if (data.timezone !== undefined) update.timezone = data.timezone;
+    if (data.website_url !== undefined) {
+      const raw = typeof data.website_url === 'string' ? data.website_url : '';
+      const normalized = normalizeWebsiteUrlForStorage(raw);
+      if (raw.trim() && !normalized) {
+        return NextResponse.json({ error: 'Invalid website URL' }, { status: 400 });
+      }
+      update.website_url = normalized;
+    }
 
     const { data: venue, error } = await staff.db
       .from('venues')
       .update(update)
       .eq('id', staff.venue_id)
-      .select('id, name, slug, address, phone, email, cover_photo_url, cuisine_type, price_band, no_show_grace_minutes, kitchen_email, timezone')
+      .select('id, name, slug, address, phone, email, cover_photo_url, cuisine_type, price_band, no_show_grace_minutes, kitchen_email, timezone, website_url')
       .single();
 
     if (error) {

@@ -5,7 +5,12 @@ import { getSupabaseAdminClient } from '@/lib/supabase';
 import { stripe } from '@/lib/stripe';
 import { computeAvailability, fetchEngineInput } from '@/lib/availability';
 import { AVAILABILITY_SETUP_REQUIRED_MESSAGE } from '@/lib/availability/availability-errors';
-import { fetchAppointmentInput, computeAppointmentAvailability } from '@/lib/availability/appointment-engine';
+import {
+  attachVenueClockToAppointmentInput,
+  fetchAppointmentInput,
+  computeAppointmentAvailability,
+} from '@/lib/availability/appointment-engine';
+import { enrichBookingEmailForAppointment } from '@/lib/emails/booking-email-enrichment';
 import { autoAssignTable } from '@/lib/table-availability';
 import { BOOKING_MUTABLE_STATUSES } from '@/lib/table-management/constants';
 import {
@@ -218,7 +223,8 @@ export async function PATCH(
           const refundMsg = refund_message;
           after(async () => {
             try {
-              await sendCancellationNotification(cancelBookingEmail, cancelVenueEmail, vid, refundMsg);
+              const enriched = await enrichBookingEmailForAppointment(admin, id, cancelBookingEmail);
+              await sendCancellationNotification(enriched, cancelVenueEmail, vid, refundMsg);
             } catch (commsErr) {
               console.error('Staff cancellation notification failed:', commsErr);
             }
@@ -411,6 +417,12 @@ export async function PATCH(
         });
         apptInput.existingBookings = apptInput.existingBookings.filter((b) => b.id.toLowerCase() !== idLc);
         apptInput.skipPastSlotFilter = true;
+        const { data: venueClock } = await admin
+          .from('venues')
+          .select('timezone, booking_rules, opening_hours')
+          .eq('id', staff.venue_id)
+          .single();
+        attachVenueClockToAppointmentInput(apptInput, venueClock ?? {});
         const apptResult = computeAppointmentAvailability(apptInput);
         const practSlots = apptResult.practitioners.find((p) => p.id === practId);
         const matchSlot = practSlots?.slots.find(
@@ -568,7 +580,8 @@ export async function PATCH(
         const vid = staff.venue_id;
         after(async () => {
           try {
-            await sendBookingModificationNotification(bookingEmail, venueEmail, vid);
+            const enriched = await enrichBookingEmailForAppointment(admin, id, bookingEmail);
+            await sendBookingModificationNotification(enriched, venueEmail, vid);
           } catch (commsErr) {
             console.error('Booking modification notification failed:', commsErr);
           }

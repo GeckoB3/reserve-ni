@@ -57,9 +57,28 @@ export interface Practitioner {
   phone: string | null;
   working_hours: WorkingHours;
   break_times: TimeRange[];
+  /**
+   * When set to a non-empty object, breaks use these weekday keys ("0"–"6", or sun–sat) instead of `break_times`.
+   * When null/undefined, `break_times` applies to every working day.
+   */
+  break_times_by_day?: WorkingHours | null;
   days_off: string[]; // recurring day names or "YYYY-MM-DD" dates
   is_active: boolean;
   sort_order: number;
+  created_at: string;
+}
+
+/** Dated time off (annual / sick) — stored in `practitioner_leave_periods`. */
+export type PractitionerLeaveType = 'annual' | 'sick' | 'other';
+
+export interface PractitionerLeavePeriod {
+  id: string;
+  venue_id: string;
+  practitioner_id: string;
+  start_date: string;
+  end_date: string;
+  leave_type: PractitionerLeaveType;
+  notes: string | null;
   created_at: string;
 }
 
@@ -76,6 +95,14 @@ export interface AppointmentService {
   is_active: boolean;
   sort_order: number;
   created_at: string;
+  /** Admin: which fields individual staff may override for their own calendar. */
+  staff_may_customize_name?: boolean;
+  staff_may_customize_description?: boolean;
+  staff_may_customize_duration?: boolean;
+  staff_may_customize_buffer?: boolean;
+  staff_may_customize_price?: boolean;
+  staff_may_customize_deposit?: boolean;
+  staff_may_customize_colour?: boolean;
 }
 
 export interface PractitionerService {
@@ -84,6 +111,11 @@ export interface PractitionerService {
   service_id: string;
   custom_duration_minutes: number | null;
   custom_price_pence: number | null;
+  custom_name?: string | null;
+  custom_description?: string | null;
+  custom_buffer_minutes?: number | null;
+  custom_deposit_pence?: number | null;
+  custom_colour?: string | null;
 }
 
 // ---------------------------------------------------------------------------

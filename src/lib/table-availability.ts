@@ -125,9 +125,6 @@ export async function getAvailableTablesForBooking(
     }
   }
 
-  const requestStart = timeToMinutes(startTime);
-  const requestEnd = requestStart + durationMinutes + bufferMinutes;
-
   const blockRangesByTable = new Map<string, Array<{ startMin: number; endMin: number }>>();
   for (const block of blocks) {
     const range = {

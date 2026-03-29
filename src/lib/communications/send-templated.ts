@@ -287,7 +287,7 @@ export async function sendBookingModificationNotification(
 
     if (settings.modification_sms_enabled && booking.guest_phone && (await isSmsAllowed(venueId))) {
       try {
-        const rendered = renderBookingModificationSms(booking, venue, settings.modification_custom_message);
+        const rendered = renderBookingModificationSms(booking, venue);
         await sendSms(booking.guest_phone, rendered.body);
         await upsertCommLog({
           venue_id: venueId,

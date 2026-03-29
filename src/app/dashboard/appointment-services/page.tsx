@@ -24,10 +24,25 @@ export default async function AppointmentServicesPage() {
   const { data: venue } = await admin.from('venues').select('currency').eq('id', staff.venue_id).single();
   const currency = (venue?.currency as string) ?? 'GBP';
 
+  let linkedPractitionerId: string | null = null;
+  if (staff.role !== 'admin' && staff.id) {
+    const { data: prRow } = await admin
+      .from('practitioners')
+      .select('id')
+      .eq('venue_id', staff.venue_id)
+      .eq('staff_id', staff.id)
+      .maybeSingle();
+    linkedPractitionerId = prRow?.id ?? null;
+  }
+
   return (
     <div className="p-4 md:p-6 lg:p-8">
       <div className="mx-auto max-w-4xl">
-        <AppointmentServicesView isAdmin={staff.role === 'admin'} currency={currency} />
+        <AppointmentServicesView
+          isAdmin={staff.role === 'admin'}
+          linkedPractitionerId={linkedPractitionerId}
+          currency={currency}
+        />
       </div>
     </div>
   );

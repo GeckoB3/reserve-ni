@@ -1,12 +1,19 @@
 'use client';
 
+import { useMemo } from 'react';
 import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import type { AvailableSlot, GuestDetails } from './types';
+import type { CountryCode } from 'libphonenumber-js';
 import { normalizeToE164 } from '@/lib/phone/e164';
 import { PhoneWithCountryField } from '@/components/phone/PhoneWithCountryField';
-import { formatRefundDeadlineDisplay } from '@/lib/booking/cancellation-deadline';
+import {
+  cancellationDeadlineHoursBefore,
+  classifyGroupDepositRefunds,
+  formatRefundDeadlineDisplay,
+  isDepositRefundAvailableAt,
+} from '@/lib/booking/cancellation-deadline';
 
 const SHORT_WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const SHORT_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -16,24 +23,28 @@ function formatDate(dateStr: string): string {
   return `${SHORT_WEEKDAYS[d.getDay()]} ${d.getDate()} ${SHORT_MONTHS[d.getMonth()]}`;
 }
 
-const detailsSchema = z.object({
-  name: z.string().min(1, 'Name is required').max(200),
-  email: z.string().min(1, 'Email is required').email('Valid email required'),
-  phone: z
-    .string()
-    .min(1, 'Phone is required')
-    .max(24)
-    .refine((v) => normalizeToE164(v, 'GB') !== null, 'Enter a valid mobile number'),
-  dietary_notes: z.string().max(1000).optional(),
-  occasion: z.string().max(200).optional(),
-  /** Model B: shown as “Comments or requests”, stored as booking dietary_notes */
-  comments_requests: z.string().max(1000).optional(),
-});
-
-const detailsSchemaWithTerms = detailsSchema.and(
-  z.object({ acceptTerms: z.boolean().refine((v) => v === true, { message: 'You must accept the booking terms' }) })
-);
-type FormDataWithTerms = z.infer<typeof detailsSchemaWithTerms>;
+function buildDetailsSchemaWithTerms(phoneCc: CountryCode) {
+  return z
+    .object({
+      name: z.string().min(1, 'Name is required').max(200),
+      email: z.string().min(1, 'Email is required').email('Valid email required'),
+      phone: z
+        .string()
+        .min(1, 'Phone is required')
+        .max(24)
+        .refine((v) => normalizeToE164(v, phoneCc) !== null, 'Enter a valid mobile number'),
+      dietary_notes: z.string().max(1000).optional(),
+      occasion: z.string().max(200).optional(),
+      /** Model B: shown as “Comments or requests”, stored as booking dietary_notes */
+      comments_requests: z.string().max(1000).optional(),
+    })
+    .and(
+      z.object({
+        acceptTerms: z.boolean().refine((v) => v === true, { message: 'You must accept the booking terms' }),
+      }),
+    );
+}
+type FormDataWithTerms = z.infer<ReturnType<typeof buildDetailsSchemaWithTerms>>;
 
 interface DetailsStepProps {
   slot: AvailableSlot;
@@ -47,6 +58,10 @@ interface DetailsStepProps {
   appointmentDepositPence?: number | null;
   currencySymbol?: string;
   refundNoticeHours?: number;
+  /** Group appointments: one slot per person so refund messaging matches each start time. */
+  multiAppointmentSlots?: Array<{ date: string; time: string }>;
+  /** Defaults country code (+44 for GB) from venue currency; falls back to GB. */
+  phoneDefaultCountry?: CountryCode;
 }
 
 export function DetailsStep({
@@ -61,7 +76,13 @@ export function DetailsStep({
   appointmentDepositPence = null,
   currencySymbol = '£',
   refundNoticeHours = 48,
+  multiAppointmentSlots,
+  phoneDefaultCountry = 'GB',
 }: DetailsStepProps) {
+  const detailsSchemaWithTerms = useMemo(
+    () => buildDetailsSchemaWithTerms(phoneDefaultCountry),
+    [phoneDefaultCountry],
+  );
   const { register, control, handleSubmit, formState: { errors, isSubmitting } } = useForm<FormDataWithTerms>({
     resolver: zodResolver(detailsSchemaWithTerms),
     defaultValues: {
@@ -79,8 +100,21 @@ export function DetailsStep({
   const isAppointment = variant === 'appointment';
   const depositPence = appointmentDepositPence ?? 0;
   const hasDeposit = isAppointment && depositPence > 0;
+
+  const refundClassification = (() => {
+    if (!hasDeposit || !slot.start_time) return null;
+    const slots =
+      multiAppointmentSlots && multiAppointmentSlots.length > 0
+        ? multiAppointmentSlots
+        : [{ date, time: slot.start_time }];
+    const groupClass = classifyGroupDepositRefunds(slots, refundNoticeHours);
+    const singleIso = cancellationDeadlineHoursBefore(date, slot.start_time, refundNoticeHours);
+    const singleRefundable = isDepositRefundAvailableAt(singleIso);
+    return { groupClass, singleIso, singleRefundable, slots };
+  })();
+
   const refundDeadlineLabel =
-    hasDeposit && slot.start_time
+    hasDeposit && slot.start_time && refundClassification
       ? formatRefundDeadlineDisplay(date, slot.start_time, refundNoticeHours)
       : null;
 
@@ -115,22 +149,40 @@ export function DetailsStep({
                 {(depositPence / 100).toFixed(2)}
                 {partySize > 1 ? ` (total for ${partySize} appointments)` : ''}
               </p>
-              {partySize <= 1 && refundDeadlineLabel && (
-                <p className="text-sm text-amber-900">
-                  <span className="font-medium">Refund if you cancel in time:</span> full refund of this deposit if you cancel by{' '}
-                  <span className="font-semibold">{refundDeadlineLabel}</span> (at least {refundNoticeHours} hours before your appointment starts).
-                </p>
+              {partySize <= 1 && refundDeadlineLabel && refundClassification && (
+                <>
+                  {refundClassification.singleRefundable ? (
+                    <p className="text-sm text-amber-900">
+                      Full refund if you cancel by <span className="font-semibold">{refundDeadlineLabel}</span> ({refundNoticeHours}h before start).
+                    </p>
+                  ) : (
+                    <p className="text-sm text-amber-900">
+                      Refund cut-off was <span className="font-semibold">{refundDeadlineLabel}</span> ({refundNoticeHours}h before start). That time has passed —
+                      this deposit is not refundable if you cancel.
+                    </p>
+                  )}
+                </>
               )}
-              {partySize > 1 && (
-                <p className="text-sm text-amber-900">
-                  <span className="font-medium">Refund if you cancel in time:</span> each appointment has its own deadline — cancel at least{' '}
-                  <span className="font-semibold">{refundNoticeHours} hours</span> before that appointment&apos;s start time to receive a full refund of that
-                  appointment&apos;s share of the deposit.
-                </p>
+              {partySize > 1 && refundClassification && (
+                <>
+                  {refundClassification.groupClass === 'all_refundable' && (
+                    <p className="text-sm text-amber-900">
+                      Full refund of each share if you cancel ≥{refundNoticeHours}h before that appointment&apos;s start.
+                    </p>
+                  )}
+                  {refundClassification.groupClass === 'none_refundable' && (
+                    <p className="text-sm text-amber-900">
+                      Refund cut-off has passed for at least one appointment — the matching share of this deposit isn&apos;t refundable if you cancel.
+                    </p>
+                  )}
+                  {refundClassification.groupClass === 'mixed' && (
+                    <p className="text-sm text-amber-900">
+                      Rules apply per appointment (≥{refundNoticeHours}h before start). Cut-off has passed for some slots — those shares aren&apos;t refundable.
+                    </p>
+                  )}
+                </>
               )}
-              <p className="text-xs text-amber-800/90">
-                After the deadline for each appointment, that share of the deposit is non-refundable. No-shows are not refunded.
-              </p>
+              <p className="text-xs text-amber-800/90">No refund after the deadline above. No-shows aren&apos;t refunded.</p>
             </div>
           )}
         </div>
@@ -159,7 +211,7 @@ export function DetailsStep({
           onSubmit({
             name: d.name,
             email: d.email || '',
-            phone: normalizeToE164(d.phone, 'GB') ?? d.phone,
+            phone: normalizeToE164(d.phone, phoneDefaultCountry) ?? d.phone,
             dietary_notes: isAppointment
               ? (d.comments_requests?.trim() ? d.comments_requests.trim() : undefined)
               : (d.dietary_notes?.trim() ? d.dietary_notes.trim() : undefined),
@@ -186,6 +238,7 @@ export function DetailsStep({
                 name={field.name}
                 value={field.value}
                 onChange={field.onChange}
+                defaultCountry={phoneDefaultCountry}
                 inputClassName="w-full min-w-0 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm placeholder:text-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
               />
             )}

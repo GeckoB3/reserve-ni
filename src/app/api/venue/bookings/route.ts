@@ -13,7 +13,11 @@ import { AVAILABILITY_SETUP_REQUIRED_MESSAGE } from '@/lib/availability/availabi
 import { getDayOfWeek, resolveDuration } from '@/lib/availability/engine';
 import { resolveVenueMode } from '@/lib/venue-mode';
 import { syncTableStatusesForBooking } from '@/lib/table-management/lifecycle';
-import { fetchAppointmentInput, computeAppointmentAvailability } from '@/lib/availability/appointment-engine';
+import {
+  attachVenueClockToAppointmentInput,
+  fetchAppointmentInput,
+  computeAppointmentAvailability,
+} from '@/lib/availability/appointment-engine';
 import { z } from 'zod';
 import { normalizeToE164 } from '@/lib/phone/e164';
 import { createHmac } from 'crypto';
@@ -89,7 +93,7 @@ export async function POST(request: NextRequest) {
 
     const { data: venue } = await admin
       .from('venues')
-      .select('id, name, stripe_connected_account_id, booking_rules, deposit_config, table_management_enabled, show_table_in_confirmation, timezone, address')
+      .select('id, name, stripe_connected_account_id, booking_rules, deposit_config, table_management_enabled, show_table_in_confirmation, timezone, address, opening_hours')
       .eq('id', venueId)
       .single();
 
@@ -154,6 +158,7 @@ export async function POST(request: NextRequest) {
         serviceId: appointment_service_id,
       });
 
+      attachVenueClockToAppointmentInput(appointmentInput, venue as { timezone?: string | null; booking_rules?: unknown; opening_hours?: unknown });
       const availResult = computeAppointmentAvailability(appointmentInput);
       const practitionerSlots = availResult.practitioners.find((p) => p.id === practitioner_id);
       const matchingSlot = practitionerSlots?.slots.find(
@@ -165,8 +170,15 @@ export async function POST(request: NextRequest) {
       }
 
       const svc = appointmentInput.services.find((s) => s.id === appointment_service_id);
+      const practRow = appointmentInput.practitioners.find((p) => p.id === practitioner_id);
+      const apptEmailExtras = {
+        email_variant: 'appointment' as const,
+        practitioner_name: practRow?.name ?? null,
+        appointment_service_name: svc?.name ?? null,
+        appointment_price_display:
+          svc?.price_pence != null ? `£${(svc.price_pence / 100).toFixed(2)}` : null,
+      };
       const durationMins = svc?.duration_minutes ?? matchingSlot.duration_minutes;
-      const bufferMins = svc?.buffer_minutes ?? 0;
       const [y, mo, d] = booking_date.split('-').map(Number);
       const [hh, mm] = timeStr.split(':').map(Number);
       const endDate = new Date(Date.UTC(y!, mo! - 1, d!, hh!, mm!, 0));
@@ -293,6 +305,7 @@ export async function POST(request: NextRequest) {
                   special_requests: special_requests ?? null,
                   dietary_notes: dietary_notes ?? null,
                   manage_booking_link: manageBookingLink,
+                  ...apptEmailExtras,
                 },
                 { name: venue.name, address: venue.address ?? undefined },
                 venueId,
@@ -385,7 +398,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to create booking' }, { status: 500 });
     }
 
-    let assignedTableLabel: string | null = null;
     if (venueMode.tableManagementEnabled) {
       const { data: defaultRule } = await admin
         .from('service_capacity_rules')
@@ -408,7 +420,6 @@ export async function POST(request: NextRequest) {
         party_size,
       );
       if (assigned) {
-        assignedTableLabel = assigned.table_names.join(' + ');
         await syncTableStatusesForBooking(
           admin,
           booking.id,

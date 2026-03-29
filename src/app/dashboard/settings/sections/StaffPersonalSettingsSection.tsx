@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { PhoneWithCountryField } from '@/components/phone/PhoneWithCountryField';
 import { normalizeToE164 } from '@/lib/phone/e164';
 
@@ -16,6 +17,7 @@ interface StaffProfileRow {
  * Settings for non-admin venue staff: display name, sign-in email, phone, password.
  */
 export function StaffPersonalSettingsSection() {
+  const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [profile, setProfile] = useState<StaffProfileRow | null>(null);
@@ -127,13 +129,14 @@ export function StaffPersonalSettingsSection() {
       setNewPassword('');
       setConfirmPassword('');
       setPasswordSuccess('Password updated.');
+      router.refresh();
       setTimeout(() => setPasswordSuccess(null), 4000);
     } catch (err) {
       setPasswordError(err instanceof Error ? err.message : 'Password change failed');
     } finally {
       setChangingPassword(false);
     }
-  }, [newPassword, confirmPassword]);
+  }, [newPassword, confirmPassword, router]);
 
   if (loading) {
     return (

@@ -7,6 +7,17 @@ export interface VenueEmailData {
   timezone?: string;
 }
 
+/** One line in a group appointment booking (shared guest, multiple treatments). */
+export interface GroupAppointmentLine {
+  person_label: string;
+  booking_date: string;
+  booking_time: string;
+  practitioner_name: string;
+  service_name: string;
+  /** e.g. "£45.00" or "Price on enquiry" */
+  price_display?: string | null;
+}
+
 export interface BookingEmailData {
   id: string;
   guest_name: string;
@@ -22,6 +33,19 @@ export interface BookingEmailData {
   refund_cutoff?: string | null;
   manage_booking_link?: string | null;
   confirm_cancel_link?: string | null;
+  /**
+   * `appointment`: Model B — copy and detail rows use treatment / staff / price wording.
+   * Omit or `table`: restaurant / table reservations (covers, guests).
+   */
+  email_variant?: 'table' | 'appointment';
+  /** Model B single booking: staff member name */
+  practitioner_name?: string | null;
+  /** Model B: treatment / service name */
+  appointment_service_name?: string | null;
+  /** Model B: formatted price, e.g. "£45.00"; omit if POA */
+  appointment_price_display?: string | null;
+  /** Model B group: one row per person/treatment (omit for single appointment). */
+  group_appointments?: GroupAppointmentLine[];
 }
 
 export interface RenderedEmail {

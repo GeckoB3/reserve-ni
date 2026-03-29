@@ -113,13 +113,6 @@ function formatDayHeader(date: string): string {
   return `${WEEKDAYS_SHORT[d.getDay()]} ${d.getDate()} ${MONTHS_SHORT[d.getMonth()]}`;
 }
 
-function formatDateTime(value: string | null | undefined): string {
-  if (!value) return '—';
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return value;
-  return d.toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' });
-}
-
 interface DaySheetForTableChange {
   periods: Array<{
     bookings: Array<{
@@ -149,7 +142,7 @@ function buildCoversOccupancyMap(dayData: DaySheetForTableChange | null, exclude
   return map;
 }
 
-export function BookingsDashboard({ venueId, currency = 'GBP' }: { venueId: string; currency?: string }) {
+export function BookingsDashboard({ venueId, currency }: { venueId: string; currency?: string }) {
   const { addToast } = useToast();
   const [viewMode, setViewMode] = useState<ViewMode>('day');
   const [anchorDate, setAnchorDate] = useState(todayISO);
@@ -865,6 +858,7 @@ export function BookingsDashboard({ venueId, currency = 'GBP' }: { venueId: stri
         <BookingDetailPanel
           bookingId={selectedId}
           venueId={venueId}
+          venueCurrency={currency}
           onClose={() => setSelectedId(null)}
           onUpdated={() => {
             if (!selectedId) return;
@@ -880,6 +874,7 @@ export function BookingsDashboard({ venueId, currency = 'GBP' }: { venueId: stri
       {walkInOpen && (
         <WalkInModal
           advancedMode={tableManagementEnabled}
+          venueCurrency={currency}
           onClose={() => setWalkInOpen(false)}
           onCreated={handleWalkInCreated}
         />
@@ -888,6 +883,7 @@ export function BookingsDashboard({ venueId, currency = 'GBP' }: { venueId: stri
         <UnifiedBookingForm
           asModal
           venueId={venueId}
+          venueCurrency={currency}
           advancedMode={tableManagementEnabled}
           onClose={() => setNewBookingOpen(false)}
           onCreated={handleNewBookingCreated}

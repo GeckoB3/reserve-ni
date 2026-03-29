@@ -1,19 +1,21 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useSyncExternalStore } from 'react';
+
+function subscribeTouchPreference(onStoreChange: () => void) {
+  const mq = window.matchMedia('(pointer: coarse)');
+  mq.addEventListener('change', onStoreChange);
+  return () => mq.removeEventListener('change', onStoreChange);
+}
+
+function getTouchSnapshot() {
+  return window.matchMedia('(pointer: coarse)').matches;
+}
 
 /**
  * Detects whether the current device has a touch-primary input.
- * Returns false during SSR and on the first render (safe for hydration),
- * then flips to true on touch devices after mount.
+ * Returns false during SSR (server snapshot); updates when the coarse-pointer media query changes.
  */
 export function useIsTouchDevice(): boolean {
-  const [isTouch, setIsTouch] = useState(false);
-
-  useEffect(() => {
-    const touch = window.matchMedia('(pointer: coarse)').matches;
-    setIsTouch(touch);
-  }, []);
-
-  return isTouch;
+  return useSyncExternalStore(subscribeTouchPreference, getTouchSnapshot, () => false);
 }

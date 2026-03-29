@@ -13,19 +13,22 @@ export default function PlanPage() {
   const [calendarCount, setCalendarCount] = useState(1);
 
   useEffect(() => {
-    const bt = sessionStorage.getItem('signup_business_type');
-    if (!bt) {
-      router.push('/signup/business-type');
-      return;
-    }
-    setBusinessType(bt);
-
-    if (searchParams.get('plan') === 'founding') {
-      const btConfig = getBusinessConfig(bt);
-      if (btConfig.model === 'table_reservation') {
-        setPlan('founding');
+    const id = requestAnimationFrame(() => {
+      const bt = sessionStorage.getItem('signup_business_type');
+      if (!bt) {
+        router.push('/signup/business-type');
+        return;
       }
-    }
+      setBusinessType(bt);
+
+      if (searchParams.get('plan') === 'founding') {
+        const btConfig = getBusinessConfig(bt);
+        if (btConfig.model === 'table_reservation') {
+          setPlan('founding');
+        }
+      }
+    });
+    return () => cancelAnimationFrame(id);
   }, [router, searchParams]);
 
   const config = useMemo(

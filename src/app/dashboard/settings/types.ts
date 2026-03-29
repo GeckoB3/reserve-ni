@@ -6,6 +6,8 @@ export interface VenueSettings {
   address: string | null;
   phone: string | null;
   email: string | null;
+  /** Public https URL for the business website; shown on the booking page when set. */
+  website_url: string | null;
   cover_photo_url: string | null;
   cuisine_type: string | null;
   price_band: string | null;
@@ -87,4 +89,7 @@ export interface StaffMember {
   phone?: string | null;
   role: string;
   created_at: string;
+  /** Model B: practitioner calendar linked to this login, if any. */
+  linked_practitioner_id?: string | null;
+  linked_practitioner_name?: string | null;
 }

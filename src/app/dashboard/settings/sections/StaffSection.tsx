@@ -6,9 +6,17 @@ import type { StaffMember } from '../types';
 interface StaffSectionProps {
   venueId: string;
   isAdmin: boolean;
+  bookingModel?: string;
 }
 
-export function StaffSection({ venueId, isAdmin }: StaffSectionProps) {
+interface PractitionerOption {
+  id: string;
+  name: string;
+}
+
+export function StaffSection({ venueId: _venueId, isAdmin, bookingModel }: StaffSectionProps) {
+  const isAppointmentVenue = bookingModel === 'practitioner_appointment';
+
   const [staff, setStaff] = useState<StaffMember[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -19,6 +27,14 @@ export function StaffSection({ venueId, isAdmin }: StaffSectionProps) {
   const [createPasswordConfirm, setCreatePasswordConfirm] = useState('');
   const [createName, setCreateName] = useState('');
   const [createRole, setCreateRole] = useState<'admin' | 'staff'>('staff');
+  const [createPractitionerId, setCreatePractitionerId] = useState('');
+  const [practitioners, setPractitioners] = useState<PractitionerOption[]>([]);
+  const [calendarNameDrafts, setCalendarNameDrafts] = useState<Record<string, string>>({});
+  const [savingPractitionerNameId, setSavingPractitionerNameId] = useState<string | null>(null);
+  const [calendarRenameError, setCalendarRenameError] = useState<string | null>(null);
+  const [calendarRenameSuccess, setCalendarRenameSuccess] = useState<string | null>(null);
+  const [calendarSavingId, setCalendarSavingId] = useState<string | null>(null);
+  const [calendarError, setCalendarError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [createSuccess, setCreateSuccess] = useState<string | null>(null);
@@ -70,10 +86,60 @@ export function StaffSection({ venueId, isAdmin }: StaffSectionProps) {
     } catch { /* ignore */ }
   }, []);
 
+  const loadPractitioners = useCallback(async () => {
+    if (!isAppointmentVenue || !isAdmin) return;
+    try {
+      const res = await fetch('/api/venue/practitioners');
+      if (!res.ok) return;
+      const data = (await res.json()) as { practitioners?: Array<{ id: string; name: string }> };
+      const list = data.practitioners ?? [];
+      setPractitioners(list.map((p) => ({ id: p.id, name: p.name })));
+    } catch {
+      /* ignore */
+    }
+  }, [isAppointmentVenue, isAdmin]);
+
   useEffect(() => {
     setLoading(true);
-    Promise.all([load(), loadSessionSettings()]).finally(() => setLoading(false));
-  }, [load, loadSessionSettings]);
+    Promise.all([load(), loadSessionSettings(), loadPractitioners()]).finally(() => setLoading(false));
+  }, [load, loadSessionSettings, loadPractitioners]);
+
+  useEffect(() => {
+    setCalendarNameDrafts(Object.fromEntries(practitioners.map((p) => [p.id, p.name])));
+  }, [practitioners]);
+
+  const onSaveCalendarName = useCallback(
+    async (practitionerId: string) => {
+      const name = calendarNameDrafts[practitionerId]?.trim() ?? '';
+      if (!name) {
+        setCalendarRenameError('Enter a name for this calendar.');
+        return;
+      }
+      setCalendarRenameError(null);
+      setCalendarRenameSuccess(null);
+      setSavingPractitionerNameId(practitionerId);
+      try {
+        const res = await fetch('/api/venue/practitioners', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: practitionerId, name }),
+        });
+        if (!res.ok) {
+          const j = await res.json().catch(() => ({}));
+          throw new Error(typeof j.error === 'string' ? j.error : 'Could not update calendar name');
+        }
+        await loadPractitioners();
+        await load();
+        setCalendarRenameSuccess('Calendar name saved.');
+        setTimeout(() => setCalendarRenameSuccess(null), 4000);
+      } catch (e) {
+        setCalendarRenameError(e instanceof Error ? e.message : 'Save failed');
+      } finally {
+        setSavingPractitionerNameId(null);
+      }
+    },
+    [calendarNameDrafts, load, loadPractitioners],
+  );
 
   // Create user handler
   const onCreateUser = useCallback(async (e: React.FormEvent) => {
@@ -101,6 +167,9 @@ export function StaffSection({ venueId, isAdmin }: StaffSectionProps) {
           password_confirm: createPasswordConfirm,
           name: createName.trim() || undefined,
           role: createRole,
+          ...(isAppointmentVenue && createPractitionerId
+            ? { practitioner_id: createPractitionerId }
+            : {}),
         }),
       });
       if (!res.ok) {
@@ -117,6 +186,7 @@ export function StaffSection({ venueId, isAdmin }: StaffSectionProps) {
       setCreatePasswordConfirm('');
       setCreateName('');
       setCreateRole('staff');
+      setCreatePractitionerId('');
       setCreateSuccess(
         welcomeSent
           ? `User ${email} created. They have been emailed their login details.`
@@ -129,7 +199,45 @@ export function StaffSection({ venueId, isAdmin }: StaffSectionProps) {
     } finally {
       setCreating(false);
     }
-  }, [createEmail, createPassword, createPasswordConfirm, createName, createRole]);
+  }, [createEmail, createPassword, createPasswordConfirm, createName, createRole, createPractitionerId, isAppointmentVenue]);
+
+  const onCalendarLinkChange = useCallback(async (member: StaffMember, practitionerId: string) => {
+    setCalendarError(null);
+    setCalendarSavingId(member.id);
+    try {
+      const res = await fetch(`/api/venue/staff/${member.id}/calendar`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ practitioner_id: practitionerId || null }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(typeof j.error === 'string' ? j.error : 'Failed to update calendar link');
+      }
+      const data = (await res.json()) as {
+        linked_practitioner_id: string | null;
+        linked_practitioner_name: string | null;
+      };
+      setStaff((prev) =>
+        prev.map((s) =>
+          s.id === member.id
+            ? {
+                ...s,
+                linked_practitioner_id: data.linked_practitioner_id,
+                linked_practitioner_name: data.linked_practitioner_name,
+              }
+            : s,
+        ),
+      );
+      setCalendarError(null);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to update calendar link';
+      setCalendarError(msg);
+      console.error('Calendar link update failed:', err);
+    } finally {
+      setCalendarSavingId(null);
+    }
+  }, []);
 
   // Own password change handler
   const onChangePassword = useCallback(async (e: React.FormEvent) => {
@@ -336,6 +444,77 @@ export function StaffSection({ venueId, isAdmin }: StaffSectionProps) {
         </div>
       </section>
 
+      {/* Calendar names (Model B — admin): practitioner display names */}
+      {isAppointmentVenue && isAdmin && (
+        <section className="rounded-xl border border-slate-200 bg-white shadow-sm">
+          <div className="border-b border-slate-100 px-6 py-4">
+            <h2 className="text-base font-semibold text-slate-900">Calendar names</h2>
+            <p className="mt-0.5 text-sm text-slate-500">
+              Each bookable calendar has a name shown on your booking page, in the dashboard calendar, and when linking
+              staff accounts. Rename them here without changing login details.
+            </p>
+          </div>
+          <div className="px-6 py-4 space-y-4">
+            {calendarRenameSuccess && (
+              <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm text-emerald-700">
+                {calendarRenameSuccess}
+              </div>
+            )}
+            {calendarRenameError && (
+              <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-700">
+                {calendarRenameError}
+              </div>
+            )}
+            {practitioners.length === 0 ? (
+              <p className="text-sm text-slate-600">
+                No calendars yet. Add team members and calendars from{' '}
+                <span className="font-medium text-slate-800">onboarding</span> or{' '}
+                <a href="/dashboard/availability" className="font-medium text-brand-600 hover:text-brand-700">
+                  Availability
+                </a>
+                .
+              </p>
+            ) : (
+              <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
+                {practitioners.map((p) => (
+                  <li key={p.id} className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                    <label htmlFor={`calendar-name-${p.id}`} className="sr-only">
+                      Calendar name for {p.name}
+                    </label>
+                    <input
+                      id={`calendar-name-${p.id}`}
+                      type="text"
+                      value={calendarNameDrafts[p.id] ?? ''}
+                      onChange={(e) =>
+                        setCalendarNameDrafts((prev) => ({
+                          ...prev,
+                          [p.id]: e.target.value,
+                        }))
+                      }
+                      maxLength={200}
+                      className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+                      placeholder="Calendar display name"
+                    />
+                    <button
+                      type="button"
+                      disabled={
+                        savingPractitionerNameId === p.id ||
+                        !(calendarNameDrafts[p.id]?.trim()) ||
+                        (calendarNameDrafts[p.id]?.trim() ?? '') === p.name
+                      }
+                      onClick={() => void onSaveCalendarName(p.id)}
+                      className="shrink-0 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
+                    >
+                      {savingPractitionerNameId === p.id ? 'Saving…' : 'Save'}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </section>
+      )}
+
       {/* Staff Members */}
       <section className="rounded-xl border border-slate-200 bg-white shadow-sm">
         <div className="border-b border-slate-100 px-6 py-4 flex items-center justify-between">
@@ -363,6 +542,9 @@ export function StaffSection({ venueId, isAdmin }: StaffSectionProps) {
         </div>
 
         <div className="px-6 py-4 space-y-4">
+          {isAppointmentVenue && isAdmin && calendarError && (
+            <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-700">{calendarError}</div>
+          )}
           {createSuccess && (
             <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-4 py-2.5 text-sm text-emerald-700">{createSuccess}</div>
           )}
@@ -433,6 +615,29 @@ export function StaffSection({ venueId, isAdmin }: StaffSectionProps) {
                     <option value="admin">Admin</option>
                   </select>
                 </div>
+                {isAppointmentVenue && (
+                  <div className="sm:col-span-2">
+                    <label className="mb-1 block text-sm font-medium text-slate-700">
+                      Link to calendar <span className="font-normal text-slate-400">(optional)</span>
+                    </label>
+                    <select
+                      value={createPractitionerId}
+                      onChange={(e) => setCreatePractitionerId(e.target.value)}
+                      className="w-full max-w-md rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+                    >
+                      <option value="">No calendar — assign later from this list</option>
+                      {practitioners.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="mt-1 text-xs text-slate-500">
+                      Admins and staff can be linked to a bookable calendar so they can manage their own availability and
+                      services in the dashboard.
+                    </p>
+                  </div>
+                )}
               </div>
               {createError && <p className="text-sm text-red-600">{createError}</p>}
               <div className="flex gap-2">
@@ -449,29 +654,52 @@ export function StaffSection({ venueId, isAdmin }: StaffSectionProps) {
           {/* Staff List */}
           <div className="divide-y divide-slate-100 rounded-lg border border-slate-200">
             {staff.map((s) => (
-              <div key={s.id} className="flex items-center justify-between px-4 py-3">
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-brand-50 text-sm font-semibold text-brand-700">
-                    {(s.name ?? s.email).charAt(0).toUpperCase()}
-                  </div>
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <p className="text-sm font-medium text-slate-900 truncate">{s.name || s.email}</p>
-                      <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
-                        s.role === 'admin'
-                          ? 'bg-purple-50 text-purple-700'
-                          : 'bg-slate-100 text-slate-600'
-                      }`}>
-                        {s.role}
-                      </span>
+              <div key={s.id} className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+                  <div className="flex items-start gap-3 min-w-0">
+                    <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-brand-50 text-sm font-semibold text-brand-700">
+                      {(s.name ?? s.email).charAt(0).toUpperCase()}
                     </div>
-                    {s.name && <p className="text-xs text-slate-500 truncate">{s.email}</p>}
-                    <p className="text-[10px] text-slate-400">Joined {new Date(s.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</p>
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="text-sm font-medium text-slate-900 truncate">{s.name || s.email}</p>
+                        <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
+                          s.role === 'admin'
+                            ? 'bg-purple-50 text-purple-700'
+                            : 'bg-slate-100 text-slate-600'
+                        }`}>
+                          {s.role}
+                        </span>
+                      </div>
+                      {s.name && <p className="text-xs text-slate-500 truncate">{s.email}</p>}
+                      <p className="text-[10px] text-slate-400">Joined {new Date(s.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</p>
+                    </div>
                   </div>
+                  {isAppointmentVenue && isAdmin && (
+                    <div className="flex flex-col gap-1 sm:ml-2 sm:min-w-[14rem]">
+                      <label htmlFor={`calendar-${s.id}`} className="text-xs font-medium text-slate-600">
+                        Appointment calendar
+                      </label>
+                      <select
+                        id={`calendar-${s.id}`}
+                        value={s.linked_practitioner_id ?? ''}
+                        onChange={(e) => void onCalendarLinkChange(s, e.target.value)}
+                        disabled={calendarSavingId === s.id}
+                        className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 disabled:opacity-50"
+                      >
+                        <option value="">No calendar</option>
+                        {practitioners.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
                 </div>
 
                 {isAdmin && (
-                  <div className="flex items-center gap-1 flex-shrink-0">
+                  <div className="flex items-center gap-1 flex-shrink-0 self-end sm:self-center">
                     {/* Role toggle */}
                     {editingRole === s.id ? (
                       <select
@@ -531,6 +759,13 @@ export function StaffSection({ venueId, isAdmin }: StaffSectionProps) {
               <div><span className="font-medium text-purple-700">Admin:</span> Full access to all settings, staff management, reports, and bookings</div>
               <div><span className="font-medium text-slate-700">Staff:</span> View dashboard, manage bookings and walk-ins, view day sheet</div>
             </div>
+            {isAppointmentVenue && (
+              <p className="mt-3 text-xs text-slate-600 border-t border-slate-200 pt-3">
+                <span className="font-medium text-slate-700">Appointments:</span> Link a user to a calendar so they can
+                edit their own availability, services, and time off. Admins can be linked too if they take appointments.
+                Reassigning a calendar moves it from the previous user.
+              </p>
+            )}
           </div>
         </div>
       </section>

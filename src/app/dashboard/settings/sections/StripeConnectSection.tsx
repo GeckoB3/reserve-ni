@@ -33,6 +33,46 @@ const PendingIcon = ({ active }: { active?: boolean }) => (
   </div>
 );
 
+function StripeStepIndicator({ step1Done, step2Done }: { step1Done: boolean; step2Done: boolean }) {
+  return (
+    <div className="mb-5 rounded-xl border border-slate-100 bg-slate-50 p-4">
+      <div className="flex items-start gap-3">
+        <div className="flex flex-col items-center">
+          <div className="flex h-6 w-6 items-center justify-center rounded-full bg-white shadow-sm">
+            {step1Done ? <CheckIcon /> : <PendingIcon active={!step1Done} />}
+          </div>
+          <div className={`h-6 w-0.5 ${step1Done ? 'bg-green-300' : 'bg-slate-200'}`} />
+          <div className="flex h-6 w-6 items-center justify-center rounded-full bg-white shadow-sm">
+            {step2Done ? <CheckIcon /> : <PendingIcon active={step1Done && !step2Done} />}
+          </div>
+        </div>
+        <div className="flex-1 space-y-3 pt-0.5">
+          <div>
+            <p className={`text-sm font-medium ${step1Done ? 'text-green-700' : 'text-slate-800'}`}>
+              Step 1: Business &amp; bank details
+            </p>
+            <p className="text-xs text-slate-500">
+              {step1Done ? 'Completed' : 'Provide your business information and bank account details'}
+            </p>
+          </div>
+          <div>
+            <p className={`text-sm font-medium ${step2Done ? 'text-green-700' : step1Done ? 'text-slate-800' : 'text-slate-400'}`}>
+              Step 2: Identity verification
+            </p>
+            <p className="text-xs text-slate-500">
+              {step2Done
+                ? 'Completed'
+                : step1Done
+                  ? 'Verify the identity of the account representative'
+                  : 'Available after Step 1 is complete'}
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function StripeConnectSection({ stripeAccountId, isAdmin }: StripeConnectSectionProps) {
   const [state, setState] = useState<ViewState>(
     stripeAccountId ? { kind: 'loading' } : { kind: 'not_connected' },
@@ -89,46 +129,6 @@ export function StripeConnectSection({ stripeAccountId, isAdmin }: StripeConnect
     }
   }, []);
 
-  function StepIndicator({ step1Done, step2Done }: { step1Done: boolean; step2Done: boolean }) {
-    return (
-      <div className="mb-5 rounded-xl border border-slate-100 bg-slate-50 p-4">
-        <div className="flex items-start gap-3">
-          <div className="flex flex-col items-center">
-            <div className="flex h-6 w-6 items-center justify-center rounded-full bg-white shadow-sm">
-              {step1Done ? <CheckIcon /> : <PendingIcon active={!step1Done} />}
-            </div>
-            <div className={`h-6 w-0.5 ${step1Done ? 'bg-green-300' : 'bg-slate-200'}`} />
-            <div className="flex h-6 w-6 items-center justify-center rounded-full bg-white shadow-sm">
-              {step2Done ? <CheckIcon /> : <PendingIcon active={step1Done && !step2Done} />}
-            </div>
-          </div>
-          <div className="flex-1 space-y-3 pt-0.5">
-            <div>
-              <p className={`text-sm font-medium ${step1Done ? 'text-green-700' : 'text-slate-800'}`}>
-                Step 1: Business &amp; bank details
-              </p>
-              <p className="text-xs text-slate-500">
-                {step1Done ? 'Completed' : 'Provide your business information and bank account details'}
-              </p>
-            </div>
-            <div>
-              <p className={`text-sm font-medium ${step2Done ? 'text-green-700' : step1Done ? 'text-slate-800' : 'text-slate-400'}`}>
-                Step 2: Identity verification
-              </p>
-              <p className="text-xs text-slate-500">
-                {step2Done
-                  ? 'Completed'
-                  : step1Done
-                    ? 'Verify the identity of the account representative'
-                    : 'Available after Step 1 is complete'}
-              </p>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <section className="rounded-lg border border-neutral-200 bg-white p-6 shadow-sm">
       <h2 className="mb-4 text-lg font-semibold text-neutral-900">Stripe payments</h2>
@@ -146,7 +146,7 @@ export function StripeConnectSection({ stripeAccountId, isAdmin }: StripeConnect
             Connect your Stripe account to start accepting guest deposits directly into your bank account.
             The setup is a two-step process:
           </p>
-          <StepIndicator step1Done={false} step2Done={false} />
+          <StripeStepIndicator step1Done={false} step2Done={false} />
           {isAdmin ? (
             <button
               onClick={startOnboarding}
@@ -163,7 +163,7 @@ export function StripeConnectSection({ stripeAccountId, isAdmin }: StripeConnect
 
       {state.kind === 'step1_pending' && (
         <div>
-          <StepIndicator step1Done={false} step2Done={false} />
+          <StripeStepIndicator step1Done={false} step2Done={false} />
           <div className="mb-4 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-4">
             <svg className="mt-0.5 h-5 w-5 flex-shrink-0 text-amber-600" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" />
@@ -190,7 +190,7 @@ export function StripeConnectSection({ stripeAccountId, isAdmin }: StripeConnect
 
       {state.kind === 'step2_pending' && (
         <div>
-          <StepIndicator step1Done={true} step2Done={false} />
+          <StripeStepIndicator step1Done={true} step2Done={false} />
           <div className="mb-4 flex items-start gap-2 rounded-xl border border-blue-200 bg-blue-50 p-4">
             <svg className="mt-0.5 h-5 w-5 flex-shrink-0 text-blue-600" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" d="m11.25 11.25.041-.02a.75.75 0 0 1 1.063.852l-.708 2.836a.75.75 0 0 0 1.063.853l.041-.021M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9-3.75h.008v.008H12V8.25Z" />
@@ -223,7 +223,7 @@ export function StripeConnectSection({ stripeAccountId, isAdmin }: StripeConnect
 
       {state.kind === 'active' && (
         <div>
-          <StepIndicator step1Done={true} step2Done={true} />
+          <StripeStepIndicator step1Done={true} step2Done={true} />
           <div className="flex items-center gap-2">
             <svg className="h-5 w-5 text-green-600" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />

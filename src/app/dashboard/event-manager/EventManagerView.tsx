@@ -23,7 +23,7 @@ interface ExperienceEvent {
   ticket_types: TicketType[];
 }
 
-export function EventManagerView({ venueId, isAdmin, currency = 'GBP' }: { venueId: string; isAdmin: boolean; currency?: string }) {
+export function EventManagerView({ venueId: _venueId, isAdmin: _isAdmin, currency = 'GBP' }: { venueId: string; isAdmin: boolean; currency?: string }) {
   const sym = currency === 'EUR' ? '€' : '£';
 
   function formatPrice(pence: number): string {

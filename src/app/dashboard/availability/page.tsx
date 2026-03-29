@@ -27,7 +27,7 @@ export default async function AvailabilitySettingsPage() {
     return (
       <div className="p-4 md:p-6 lg:p-8">
         <div className="mx-auto max-w-4xl">
-          <AppointmentAvailabilitySettings isAdmin={isAdmin} />
+          <AppointmentAvailabilitySettings isAdmin={isAdmin} currentStaffId={staff.id} />
         </div>
       </div>
     );

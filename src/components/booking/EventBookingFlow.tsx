@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import type { VenuePublic, GuestDetails } from './types';
+import { defaultPhoneCountryForVenueCurrency } from '@/lib/phone/default-country';
 import { DetailsStep } from './DetailsStep';
 import { PaymentStep } from './PaymentStep';
 
@@ -27,13 +28,13 @@ interface EventAvail {
 type Step = 'events' | 'tickets' | 'details' | 'payment' | 'confirmation';
 
 export function EventBookingFlow({ venue, cancellationPolicy }: { venue: VenuePublic; cancellationPolicy?: string }) {
+  const phoneDefaultCountry = defaultPhoneCountryForVenueCurrency(venue.currency);
   const sym = venue.currency === 'EUR' ? '€' : '£';
   const [step, setStep] = useState<Step>('events');
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [events, setEvents] = useState<EventAvail[]>([]);
   const [selectedEvent, setSelectedEvent] = useState<EventAvail | null>(null);
   const [ticketSelections, setTicketSelections] = useState<Record<string, number>>({});
-  const [guestDetails, setGuestDetails] = useState<GuestDetails | null>(null);
   const [createResult, setCreateResult] = useState<{ booking_id: string; client_secret?: string; stripe_account_id?: string; requires_deposit: boolean } | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -59,7 +60,6 @@ export function EventBookingFlow({ venue, cancellationPolicy }: { venue: VenuePu
     : 0;
 
   const handleDetailsSubmit = useCallback(async (details: GuestDetails) => {
-    setGuestDetails(details);
     setError(null);
     if (!selectedEvent) return;
     try {
@@ -203,6 +203,7 @@ export function EventBookingFlow({ venue, cancellationPolicy }: { venue: VenuePu
             onSubmit={handleDetailsSubmit}
             onBack={() => setStep('tickets')}
             requiresDeposit={totalPricePence > 0}
+            phoneDefaultCountry={phoneDefaultCountry}
           />
         </div>
       )}

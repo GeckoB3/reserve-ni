@@ -6,16 +6,14 @@ import { useRouter, useSearchParams } from 'next/navigation';
 export default function SignupSuccessPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [status, setStatus] = useState<'loading' | 'error'>('loading');
-  const [error, setError] = useState<string | null>(null);
+  const sessionId = searchParams.get('session_id');
+  const [status, setStatus] = useState<'loading' | 'error'>(() => (sessionId ? 'loading' : 'error'));
+  const [error, setError] = useState<string | null>(() =>
+    sessionId ? null : 'No session ID found. Please try again.',
+  );
 
   useEffect(() => {
-    const sessionId = searchParams.get('session_id');
-    if (!sessionId) {
-      setStatus('error');
-      setError('No session ID found. Please try again.');
-      return;
-    }
+    if (!sessionId) return;
 
     async function completeSignup(sid: string) {
       try {
@@ -45,8 +43,8 @@ export default function SignupSuccessPage() {
       }
     }
 
-    completeSignup(sessionId);
-  }, [searchParams, router]);
+    void completeSignup(sessionId);
+  }, [sessionId, router]);
 
   if (status === 'error') {
     return (

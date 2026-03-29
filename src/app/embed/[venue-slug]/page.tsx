@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
 import { BookingFlowRouter } from '@/components/booking/BookingFlowRouter';
 import type { VenuePublic } from '@/components/booking/types';
+import { displayLabelForWebsiteUrl } from '@/lib/urls/website-url';
 
 let lastSentHeight = 0;
 function sendHeight(height: number) {
@@ -19,24 +20,33 @@ export default function EmbedPage() {
   const slug = params['venue-slug'] as string;
   const accentColour = searchParams.get('accent') ?? null;
   const [venue, setVenue] = useState<VenuePublic | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [fetchState, setFetchState] = useState<'idle' | 'loading' | 'done'>('idle');
   const [error, setError] = useState<string | null>(null);
   const contentRef = useRef<HTMLElement>(null);
+  const slugError = !slug ? 'Missing venue' : null;
+  const showLoading = Boolean(slug) && fetchState !== 'done';
 
   useEffect(() => {
-    if (!slug) {
-      setLoading(false);
-      setError('Missing venue');
-      return;
-    }
-    fetch(`/api/booking/venue?slug=${encodeURIComponent(slug)}`)
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error('Not found'))))
-      .then(setVenue)
-      .catch(() => setError('Venue not found'))
-      .finally(() => setLoading(false));
+    if (!slug) return;
+    let cancelled = false;
+    const id = requestAnimationFrame(() => {
+      if (cancelled) return;
+      setFetchState('loading');
+      fetch(`/api/booking/venue?slug=${encodeURIComponent(slug)}`)
+        .then((r) => (r.ok ? r.json() : Promise.reject(new Error('Not found'))))
+        .then(setVenue)
+        .catch(() => setError('Venue not found'))
+        .finally(() => {
+          if (!cancelled) setFetchState('done');
+        });
+    });
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(id);
+    };
   }, [slug]);
 
-  const onHeightChange = useCallback((_height: number) => {
+  const onHeightChange = useCallback(() => {
     sendHeight(document.documentElement.scrollHeight);
   }, []);
 
@@ -51,7 +61,7 @@ export default function EmbedPage() {
     return () => observer.disconnect();
   }, []);
 
-  if (loading) {
+  if (showLoading) {
     return (
       <main ref={contentRef} className="bg-white p-6">
         <div className="flex justify-center py-12">
@@ -61,10 +71,11 @@ export default function EmbedPage() {
     );
   }
 
-  if (error || !venue) {
+  const displayError = slugError ?? error;
+  if (displayError || !venue) {
     return (
       <main ref={contentRef} className="bg-white p-6">
-        <p className="text-sm text-red-600">{error ?? 'Venue not found'}</p>
+        <p className="text-sm text-red-600">{displayError ?? 'Venue not found'}</p>
       </main>
     );
   }
@@ -73,6 +84,18 @@ export default function EmbedPage() {
 
   return (
     <main ref={contentRef} className="bg-white p-4" style={accentStyle}>
+      {venue.website_url ? (
+        <p className="mb-3 text-center">
+          <a
+            href={venue.website_url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-sm font-semibold text-brand-600 underline decoration-brand-600/30 underline-offset-2 hover:text-brand-800"
+          >
+            Visit {displayLabelForWebsiteUrl(venue.website_url)}
+          </a>
+        </p>
+      ) : null}
       <BookingFlowRouter venue={venue} embed onHeightChange={onHeightChange} accentColour={accentColour ?? undefined} cancellationPolicy="Full refund if cancelled 48+ hours before your reservation. No refund within 48 hours or for no-shows." />
     </main>
   );

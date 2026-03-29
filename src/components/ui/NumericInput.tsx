@@ -99,10 +99,10 @@ const MobileFriendlyNumericInput = forwardRef<
   useImperativeHandle(ref, () => inputRef.current as HTMLInputElement);
 
   useEffect(() => {
-    if (value !== lastPropRef.current) {
-      lastPropRef.current = value;
-      setDisplay(toString(value));
-    }
+    if (value === lastPropRef.current) return;
+    lastPropRef.current = value;
+    const id = requestAnimationFrame(() => setDisplay(toString(value)));
+    return () => cancelAnimationFrame(id);
   }, [value]);
 
   const parse = (s: string): number | null => {
