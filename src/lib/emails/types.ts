@@ -34,7 +34,7 @@ export interface BookingEmailData {
   manage_booking_link?: string | null;
   confirm_cancel_link?: string | null;
   /**
-   * `appointment`: Model B — copy and detail rows use treatment / staff / price wording.
+   * `appointment`: Model B. Copy and detail rows use service / staff / price wording.
    * Omit or `table`: restaurant / table reservations (covers, guests).
    */
   email_variant?: 'table' | 'appointment';

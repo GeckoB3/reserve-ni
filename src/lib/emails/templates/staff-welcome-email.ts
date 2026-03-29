@@ -21,7 +21,7 @@ export function renderStaffWelcomeEmail(params: StaffWelcomeEmailParams): { html
     `<p style="margin:0 0 8px"><strong>Sign-in email:</strong> ${escapeHtml(params.email)}</p>`,
     `<p style="margin:0 0 8px"><strong>Password:</strong> ${escapeHtml(params.password)}</p>`,
     `<p style="margin:0 0 16px"><strong>Access level:</strong> ${escapeHtml(roleLabel)}</p>`,
-    '<p style="margin:0 0 16px;font-size:14px;color:#64748b">You can sign in straight away — you do not need to confirm your email address first. For security, consider changing your password after you log in.</p>',
+    '<p style="margin:0 0 16px;font-size:14px;color:#64748b">You can sign in straight away. You do not need to confirm your email address first. For security, consider changing your password after you log in.</p>',
     buildCtaButton('Log in to dashboard', params.loginUrl),
   ].join('\n');
 

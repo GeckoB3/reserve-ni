@@ -34,7 +34,7 @@ export function renderBookingCancellation(
   const html = renderBaseTemplate({
     venueName: venue.name,
     venueLogoUrl: venue.logo_url,
-    heading: appt ? `Appointment cancelled — ${venue.name}` : `Booking cancelled — ${venue.name}`,
+    heading: appt ? `Appointment cancelled: ${venue.name}` : `Booking cancelled: ${venue.name}`,
     mainContent,
     bookingDate: date,
     bookingTime: time,
@@ -53,7 +53,7 @@ export function renderBookingCancellation(
   const textParts = [`Hi ${booking.guest_name},`, ''];
   if (appt) {
     textParts.push(`Your appointment at ${venue.name} has been cancelled.`, '');
-    if (booking.appointment_service_name) textParts.push(`Treatment was: ${booking.appointment_service_name}`);
+    if (booking.appointment_service_name) textParts.push(`Service was: ${booking.appointment_service_name}`);
   } else {
     textParts.push(`Your reservation at ${venue.name} has been cancelled.`, '');
   }
@@ -64,7 +64,7 @@ export function renderBookingCancellation(
   textParts.push('', 'We hope to see you another time.', venue.name);
 
   return {
-    subject: appt ? `Appointment cancelled — ${venue.name}` : `Booking cancelled — ${venue.name}`,
+    subject: appt ? `Appointment cancelled: ${venue.name}` : `Booking cancelled: ${venue.name}`,
     html,
     text: textParts.join('\n'),
   };

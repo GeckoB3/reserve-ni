@@ -20,11 +20,11 @@ export function renderPostVisitEmail(
   const mainContent = appt
     ? [
         '<p style="margin:0 0 12px 0">We hope you were happy with your visit.</p>',
-        '<p style="margin:0 0 12px 0">We\'d love to see you again — book your next appointment anytime.</p>',
+        '<p style="margin:0 0 12px 0">We would love to see you again. Book your next appointment anytime.</p>',
       ].join('')
     : [
         '<p style="margin:0 0 12px 0">We hope you enjoyed your visit.</p>',
-        '<p style="margin:0 0 12px 0">We\'d love to welcome you back — book your next visit anytime.</p>',
+        '<p style="margin:0 0 12px 0">We would love to welcome you back. Book your next visit anytime.</p>',
       ].join('');
 
   const html = renderBaseTemplate({
@@ -44,7 +44,7 @@ export function renderPostVisitEmail(
   if (appt) {
     textParts.push(`We hope you were happy with your appointment at ${venue.name}.`, '', `Book again: ${bookAgainUrl}`);
   } else {
-    textParts.push(`We hope you enjoyed your visit to ${venue.name}.`, '', `We'd love to welcome you back — book your next visit anytime.`, '', `Book again: ${bookAgainUrl}`);
+    textParts.push(`We hope you enjoyed your visit to ${venue.name}.`, '', `We would love to welcome you back. Book your next visit anytime.`, '', `Book again: ${bookAgainUrl}`);
   }
   if (customMessage) textParts.push('', customMessage);
   textParts.push('', venue.name);

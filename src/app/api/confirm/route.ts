@@ -10,6 +10,13 @@ import { validateBookingStatusTransition, applyBookingLifecycleStatusEffects } f
 import { computeAvailability, fetchEngineInput } from '@/lib/availability';
 import { AVAILABILITY_SETUP_REQUIRED_MESSAGE } from '@/lib/availability/availability-errors';
 import { resolveVenueMode } from '@/lib/venue-mode';
+import {
+  attachVenueClockToAppointmentInput,
+  computeAppointmentAvailability,
+  fetchAppointmentInput,
+} from '@/lib/availability/appointment-engine';
+import { mergeAppointmentServiceWithPractitionerLink } from '@/lib/appointments/merge-service-with-overrides';
+import { cancellationDeadlineHoursBefore } from '@/lib/booking/cancellation-deadline';
 
 /**
  * GET /api/confirm?booking_id=uuid&token=xxx  (token-based)
@@ -51,7 +58,11 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    const { data: venue } = await supabase.from('venues').select('name, address, phone').eq('id', booking.venue_id).single();
+    const { data: venue } = await supabase
+      .from('venues')
+      .select('name, address, phone, booking_model, booking_rules')
+      .eq('id', booking.venue_id)
+      .single();
     const depositPaid = booking.deposit_status === 'Paid';
     const timeStr = typeof booking.booking_time === 'string' ? booking.booking_time.slice(0, 5) : '';
 
@@ -67,6 +78,13 @@ export async function GET(request: NextRequest) {
       appointment_service_name = svc?.name ?? null;
     }
 
+    const rules = (venue?.booking_rules as { cancellation_notice_hours?: number } | null) ?? null;
+    const refundNoticeHours =
+      (venue?.booking_model as string) === 'practitioner_appointment' &&
+      typeof rules?.cancellation_notice_hours === 'number'
+        ? rules.cancellation_notice_hours
+        : 48;
+
     return NextResponse.json({
       booking_id: booking.id,
       venue_id: booking.venue_id,
@@ -80,8 +98,11 @@ export async function GET(request: NextRequest) {
       deposit_amount_pence: booking.deposit_amount_pence,
       status: booking.status,
       is_appointment: isAppointment,
+      practitioner_id: isAppointment ? (booking.practitioner_id as string) : null,
+      appointment_service_id: isAppointment ? (booking.appointment_service_id as string) : null,
       practitioner_name,
       appointment_service_name,
+      refund_notice_hours: refundNoticeHours,
     });
   } catch (err) {
     console.error('GET /api/confirm failed:', err);
@@ -98,9 +119,26 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { booking_id: bookingId, token, hmac, action, booking_date, booking_time, party_size } = body as {
-      booking_id?: string; token?: string; hmac?: string; action?: string;
-      booking_date?: string; booking_time?: string; party_size?: number;
+    const {
+      booking_id: bookingId,
+      token,
+      hmac,
+      action,
+      booking_date,
+      booking_time,
+      party_size,
+      practitioner_id: bodyPractitionerId,
+      appointment_service_id: bodyAppointmentServiceId,
+    } = body as {
+      booking_id?: string;
+      token?: string;
+      hmac?: string;
+      action?: string;
+      booking_date?: string;
+      booking_time?: string;
+      party_size?: number;
+      practitioner_id?: string;
+      appointment_service_id?: string;
     };
 
     if (!bookingId || (!token && !hmac) || (action !== 'confirm' && action !== 'cancel' && action !== 'modify')) {
@@ -110,7 +148,9 @@ export async function POST(request: NextRequest) {
     const supabase = getSupabaseAdminClient();
     const { data: booking, error: bookErr } = await supabase
       .from('bookings')
-      .select('id, venue_id, guest_id, booking_date, booking_time, party_size, status, deposit_status, deposit_amount_pence, stripe_payment_intent_id, cancellation_deadline, confirm_token_hash, confirm_token_used_at, service_id')
+      .select(
+        'id, venue_id, guest_id, booking_date, booking_time, party_size, status, deposit_status, deposit_amount_pence, stripe_payment_intent_id, cancellation_deadline, confirm_token_hash, confirm_token_used_at, service_id, practitioner_id, appointment_service_id',
+      )
       .eq('id', bookingId)
       .single();
 
@@ -215,7 +255,7 @@ export async function POST(request: NextRequest) {
 
       let refund_message: string;
       if (refundSucceeded) {
-        refund_message = `Your deposit of ${depositAmountStr} will be refunded to your original payment method within 5\u201310 business days.`;
+        refund_message = `Your deposit of ${depositAmountStr} will be refunded to your original payment method within 5-10 business days.`;
       } else if (booking.deposit_status === 'Paid' && !canRefund) {
         refund_message = `Your deposit of ${depositAmountStr} is non-refundable as the cancellation was made less than 48 hours before the reservation.`;
       } else if (booking.deposit_status === 'Paid' && canRefund && !refundSucceeded) {
@@ -268,7 +308,107 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'This booking cannot be modified.' }, { status: 400 });
       }
 
-      if (!booking_date || !booking_time || !party_size) {
+      const venueMode = await resolveVenueMode(supabase, booking.venue_id);
+
+      if (venueMode.bookingModel === 'practitioner_appointment') {
+        if (!booking_date || !booking_time || !bodyPractitionerId || !bodyAppointmentServiceId) {
+          return NextResponse.json(
+            {
+              error:
+                'booking_date, booking_time, practitioner_id, and appointment_service_id are required for appointment changes.',
+            },
+            { status: 400 },
+          );
+        }
+
+        const newDate = booking_date;
+        const newTimeRaw = booking_time;
+        const newTime = newTimeRaw.length === 5 ? newTimeRaw + ':00' : newTimeRaw;
+        const timeStr = newTime.slice(0, 5);
+        const newPartySize = Number(party_size ?? booking.party_size);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(newDate) || newPartySize < 1 || newPartySize > 50) {
+          return NextResponse.json({ error: 'Invalid date or party size.' }, { status: 400 });
+        }
+
+        const { data: venueAppt } = await supabase
+          .from('venues')
+          .select('timezone, booking_rules, opening_hours')
+          .eq('id', booking.venue_id)
+          .single();
+
+        const input = await fetchAppointmentInput({
+          supabase,
+          venueId: booking.venue_id,
+          date: newDate,
+          practitionerId: bodyPractitionerId,
+          serviceId: bodyAppointmentServiceId,
+        });
+        input.existingBookings = input.existingBookings.filter((b) => b.id !== bookingId);
+        attachVenueClockToAppointmentInput(input, venueAppt ?? {});
+        const result = computeAppointmentAvailability(input);
+        const prac = result.practitioners.find((p) => p.id === bodyPractitionerId);
+        const slotAvailable = prac?.slots.some(
+          (s) => s.start_time === timeStr && s.service_id === bodyAppointmentServiceId,
+        );
+        if (!slotAvailable) {
+          return NextResponse.json(
+            { error: 'This appointment slot is no longer available. Please choose another time or service.' },
+            { status: 409 },
+          );
+        }
+
+        const baseSvc = input.services.find((s) => s.id === bodyAppointmentServiceId);
+        const ps = input.practitionerServices.find(
+          (row) => row.practitioner_id === bodyPractitionerId && row.service_id === bodyAppointmentServiceId,
+        );
+        const svc = baseSvc ? mergeAppointmentServiceWithPractitionerLink(baseSvc, ps) : undefined;
+
+        let estimatedEndTime: string | null = null;
+        if (svc) {
+          const [y, mo, d] = newDate.split('-').map(Number);
+          const [hh, mm] = timeStr.split(':').map(Number);
+          const endDate = new Date(Date.UTC(y!, mo! - 1, d!, hh!, mm!, 0));
+          endDate.setMinutes(endDate.getMinutes() + svc.duration_minutes);
+          estimatedEndTime = endDate.toISOString();
+        }
+
+        const bookingRulesJson = (venueAppt?.booking_rules as { cancellation_notice_hours?: number } | null) ?? {};
+        const refundWindowHours =
+          typeof bookingRulesJson.cancellation_notice_hours === 'number' ? bookingRulesJson.cancellation_notice_hours : 48;
+        const cancellation_deadline = cancellationDeadlineHoursBefore(newDate, newTime, refundWindowHours);
+        const cancellation_policy_snapshot = {
+          refund_window_hours: refundWindowHours,
+          policy: `Full refund if cancelled ${refundWindowHours}+ hours before appointment start. No refund within ${refundWindowHours} hours of the appointment or for no-shows.`,
+        };
+
+        const nowIso = new Date().toISOString();
+        await supabase
+          .from('bookings')
+          .update({
+            booking_date: newDate,
+            booking_time: newTime,
+            party_size: newPartySize,
+            practitioner_id: bodyPractitionerId,
+            appointment_service_id: bodyAppointmentServiceId,
+            estimated_end_time: estimatedEndTime,
+            cancellation_deadline,
+            cancellation_policy_snapshot,
+            updated_at: nowIso,
+          })
+          .eq('id', bookingId);
+
+        return NextResponse.json({
+          success: true,
+          message: 'Your appointment has been updated.',
+          booking_date: newDate,
+          booking_time: timeStr,
+          party_size: newPartySize,
+          practitioner_id: bodyPractitionerId,
+          appointment_service_id: bodyAppointmentServiceId,
+        });
+      }
+
+      if (!booking_date || !booking_time || party_size == null) {
         return NextResponse.json({ error: 'booking_date, booking_time and party_size are required for modification.' }, { status: 400 });
       }
 
@@ -282,7 +422,6 @@ export async function POST(request: NextRequest) {
       }
 
       const timeStr = newTime.slice(0, 5);
-      const venueMode = await resolveVenueMode(supabase, booking.venue_id);
 
       if (venueMode.availabilityEngine !== 'service') {
         return NextResponse.json({ error: AVAILABILITY_SETUP_REQUIRED_MESSAGE }, { status: 503 });

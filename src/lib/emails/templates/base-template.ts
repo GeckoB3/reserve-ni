@@ -69,7 +69,7 @@ export function buildBookingDetailsCard(opts: {
     const tableRows = opts.groupAppointments.map((g) => {
       const dt = formatDateShort(g.booking_date);
       const tm = formatTime(g.booking_time);
-      const price = g.price_display ? escapeHtml(g.price_display) : '—';
+      const price = g.price_display ? escapeHtml(g.price_display) : 'N/A';
       return (
         `<tr><td style="padding:10px 0;border-top:1px solid #e5e5e5;font-size:13px;color:#333">` +
         `<strong>${escapeHtml(g.person_label)}</strong><br/>` +
@@ -82,16 +82,46 @@ export function buildBookingDetailsCard(opts: {
   }
 
   if (variant === 'appointment') {
-    if (opts.bookingDate) rows.push(`<tr><td style="padding:4px 0;font-size:14px;color:#333"><strong>Date</strong> — ${escapeHtml(opts.bookingDate)}</td></tr>`);
-    if (opts.bookingTime) rows.push(`<tr><td style="padding:4px 0;font-size:14px;color:#333"><strong>Time</strong> — ${escapeHtml(opts.bookingTime)}</td></tr>`);
-    if (opts.serviceName) rows.push(`<tr><td style="padding:4px 0;font-size:14px;color:#333"><strong>Treatment</strong> — ${escapeHtml(opts.serviceName)}</td></tr>`);
-    if (opts.practitionerName) rows.push(`<tr><td style="padding:4px 0;font-size:14px;color:#333"><strong>Staff</strong> — ${escapeHtml(opts.practitionerName)}</td></tr>`);
-    if (opts.priceDisplay) rows.push(`<tr><td style="padding:4px 0;font-size:14px;color:#333"><strong>Price</strong> — ${escapeHtml(opts.priceDisplay)}</td></tr>`);
-    if (opts.partySize && opts.partySize > 1) {
-      rows.push(`<tr><td style="padding:4px 0;font-size:14px;color:#333"><strong>People</strong> — ${opts.partySize}</td></tr>`);
+    if (opts.bookingDate) {
+      rows.push(
+        `<tr><td style="padding:8px 0;border-bottom:1px solid #e2e8f0"><span style="display:block;font-size:11px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:0.04em">Date</span><span style="display:block;margin-top:4px;font-size:15px;color:#0f172a;font-weight:500">${escapeHtml(opts.bookingDate)}</span></td></tr>`,
+      );
     }
-    if (opts.venueAddress) rows.push(`<tr><td style="padding:4px 0;font-size:14px;color:#333"><strong>Location</strong> — ${escapeHtml(opts.venueAddress)}</td></tr>`);
-    if (opts.specialRequests) rows.push(`<tr><td style="padding:4px 0;font-size:14px;color:#333"><strong>Notes</strong> — ${escapeHtml(opts.specialRequests)}</td></tr>`);
+    if (opts.bookingTime) {
+      rows.push(
+        `<tr><td style="padding:8px 0;border-bottom:1px solid #e2e8f0"><span style="display:block;font-size:11px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:0.04em">Time</span><span style="display:block;margin-top:4px;font-size:15px;color:#0f172a;font-weight:500">${escapeHtml(opts.bookingTime)}</span></td></tr>`,
+      );
+    }
+    if (opts.serviceName) {
+      rows.push(
+        `<tr><td style="padding:8px 0;border-bottom:1px solid #e2e8f0"><span style="display:block;font-size:11px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:0.04em">Service</span><span style="display:block;margin-top:4px;font-size:15px;color:#0f172a;font-weight:500">${escapeHtml(opts.serviceName)}</span></td></tr>`,
+      );
+    }
+    if (opts.practitionerName) {
+      rows.push(
+        `<tr><td style="padding:8px 0;border-bottom:1px solid #e2e8f0"><span style="display:block;font-size:11px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:0.04em">Staff</span><span style="display:block;margin-top:4px;font-size:15px;color:#0f172a;font-weight:500">${escapeHtml(opts.practitionerName)}</span></td></tr>`,
+      );
+    }
+    if (opts.priceDisplay) {
+      rows.push(
+        `<tr><td style="padding:8px 0;border-bottom:1px solid #e2e8f0"><span style="display:block;font-size:11px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:0.04em">Price</span><span style="display:block;margin-top:4px;font-size:15px;color:#0f172a;font-weight:500">${escapeHtml(opts.priceDisplay)}</span></td></tr>`,
+      );
+    }
+    if (opts.partySize && opts.partySize > 1) {
+      rows.push(
+        `<tr><td style="padding:8px 0;border-bottom:1px solid #e2e8f0"><span style="display:block;font-size:11px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:0.04em">People</span><span style="display:block;margin-top:4px;font-size:15px;color:#0f172a;font-weight:500">${opts.partySize}</span></td></tr>`,
+      );
+    }
+    if (opts.venueAddress) {
+      rows.push(
+        `<tr><td style="padding:8px 0;border-bottom:1px solid #e2e8f0"><span style="display:block;font-size:11px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:0.04em">Location</span><span style="display:block;margin-top:4px;font-size:15px;color:#0f172a;font-weight:500">${escapeHtml(opts.venueAddress)}</span></td></tr>`,
+      );
+    }
+    if (opts.specialRequests) {
+      rows.push(
+        `<tr><td style="padding:8px 0"><span style="display:block;font-size:11px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:0.04em">Notes</span><span style="display:block;margin-top:4px;font-size:15px;color:#0f172a;font-weight:500">${escapeHtml(opts.specialRequests)}</span></td></tr>`,
+      );
+    }
   } else {
     if (opts.bookingDate) rows.push(`<tr><td style="padding:4px 0;font-size:14px;color:#333">&#128197; ${escapeHtml(opts.bookingDate)}</td></tr>`);
     if (opts.bookingTime) rows.push(`<tr><td style="padding:4px 0;font-size:14px;color:#333">&#128336; ${escapeHtml(opts.bookingTime)}</td></tr>`);
@@ -101,7 +131,7 @@ export function buildBookingDetailsCard(opts: {
   }
 
   if (rows.length === 0) return '';
-  return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color:${GREY_BG};border:1px solid #E5E5E5;border-radius:8px;margin:16px 0"><tr><td style="padding:16px">${rows.join('')}</td></tr></table>`;
+  return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color:${GREY_BG};border:1px solid #e2e8f0;border-radius:10px;margin:16px 0;box-shadow:0 1px 2px rgba(15,23,42,0.06)"><tr><td style="padding:18px 20px">${rows.join('')}</td></tr></table>`;
 }
 
 /** Compact date for group lines (reuse full formatDate if needed). */

@@ -31,7 +31,7 @@ function buildRefundNotice(amount: string, refundCutoffIso: string, at: Date = n
 
 function buildActionButtons(confirmCancelLink: string, manageLink: string | null | undefined, appt: boolean): string {
   const cancelLabel = appt ? 'Cancel appointment' : 'Cancel booking';
-  const manageLabel = appt ? 'Manage appointment (change date or time)' : 'Manage booking';
+  const manageLabel = appt ? 'Manage appointment' : 'Manage booking';
   const buttons: string[] = [
     '<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin:24px 0">',
     '<tr><td>',
@@ -74,8 +74,8 @@ export function renderReminder56h(
   }
 
   const introTable = appt
-    ? `<p style="margin:0 0 12px 0">You have an upcoming appointment. If you can, let us know you’re still coming or cancel if your plans have changed — it helps us manage the diary. <strong>If you don’t reply, your appointment stays booked</strong> (we won’t cancel it automatically).</p>`
-    : `<p style="margin:0 0 12px 0">You have an upcoming booking. If you can, please confirm you’re still coming or cancel if your plans have changed, so we can offer the table to someone else. <strong>If you don’t reply, your booking stays in place</strong> — we won’t cancel it automatically.</p>`;
+    ? `<p style="margin:0 0 12px 0">You have an upcoming appointment. If you can, let us know you are still coming or cancel if your plans have changed. It helps us manage the diary. <strong>If you do not reply, your appointment stays booked</strong> (we will not cancel it automatically).</p>`
+    : `<p style="margin:0 0 12px 0">You have an upcoming booking. If you can, please confirm you are still coming or cancel if your plans have changed, so we can offer the table to someone else. <strong>If you do not reply, your booking stays in place</strong>. We will not cancel it automatically.</p>`;
 
   const confirmCancelLink = booking.confirm_cancel_link ?? booking.manage_booking_link ?? '';
 
@@ -84,7 +84,7 @@ export function renderReminder56h(
   const html = renderBaseTemplate({
     venueName: venue.name,
     venueLogoUrl: venue.logo_url,
-    heading: appt ? `Quick check — your appointment at ${venue.name}` : `Please confirm or cancel your booking`,
+    heading: appt ? `Quick check: your appointment at ${venue.name}` : `Please confirm or cancel your booking`,
     mainContent: introTable + actionButtonsHtml,
     bookingDate: date,
     bookingTime: time,
@@ -98,7 +98,7 @@ export function renderReminder56h(
     priceDisplay: booking.appointment_price_display ?? null,
     groupAppointments: booking.group_appointments,
     footerNote: appt
-      ? 'You can change the date or time from Manage appointment. No reply needed to keep your appointment.'
+      ? 'You can update service, staff, date, or time from Manage appointment. No reply needed to keep your appointment.'
       : undefined,
   });
 
@@ -113,7 +113,7 @@ export function renderReminder56h(
   }
   textParts.push(`Date: ${date}`, `Time: ${time}`);
   if (!appt) textParts.push(`Party size: ${booking.party_size}`);
-  if (appt && booking.appointment_service_name) textParts.push(`Treatment: ${booking.appointment_service_name}`);
+  if (appt && booking.appointment_service_name) textParts.push(`Service: ${booking.appointment_service_name}`);
   if (appt && booking.practitioner_name) textParts.push(`Staff: ${booking.practitioner_name}`);
   if (venue.address) textParts.push(`Address: ${venue.address}`);
   if (hasDeposit && booking.refund_cutoff) {

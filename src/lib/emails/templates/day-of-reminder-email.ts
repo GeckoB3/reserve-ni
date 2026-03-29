@@ -50,13 +50,13 @@ export function renderDayOfReminderEmail(
     if (booking.group_appointments && booking.group_appointments.length > 0) {
       for (const g of booking.group_appointments) {
         textParts.push(
-          `— ${g.person_label}: ${formatDate(g.booking_date)} ${formatTime(g.booking_time)} — ${g.service_name} with ${g.practitioner_name}`,
+          `* ${g.person_label}: ${formatDate(g.booking_date)} ${formatTime(g.booking_time)}. ${g.service_name} with ${g.practitioner_name}`,
         );
       }
       textParts.push('');
     } else {
       textParts.push(`Date: ${date}`, `Time: ${time}`);
-      if (booking.appointment_service_name) textParts.push(`Treatment: ${booking.appointment_service_name}`);
+      if (booking.appointment_service_name) textParts.push(`Service: ${booking.appointment_service_name}`);
       if (booking.practitioner_name) textParts.push(`Staff: ${booking.practitioner_name}`);
       textParts.push('');
     }

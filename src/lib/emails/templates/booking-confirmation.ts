@@ -69,13 +69,13 @@ export function renderBookingConfirmation(
     if (booking.group_appointments && booking.group_appointments.length > 0) {
       for (const g of booking.group_appointments) {
         textParts.push(
-          `— ${g.person_label}: ${formatDate(g.booking_date)} at ${formatTime(g.booking_time)} — ${g.service_name} with ${g.practitioner_name}${g.price_display ? ` (${g.price_display})` : ''}`,
+          `* ${g.person_label}: ${formatDate(g.booking_date)} at ${formatTime(g.booking_time)}. ${g.service_name} with ${g.practitioner_name}${g.price_display ? ` (${g.price_display})` : ''}`,
         );
       }
       textParts.push('');
     } else {
       textParts.push(`Date: ${date}`, `Time: ${time}`);
-      if (booking.appointment_service_name) textParts.push(`Treatment: ${booking.appointment_service_name}`);
+      if (booking.appointment_service_name) textParts.push(`Service: ${booking.appointment_service_name}`);
       if (booking.practitioner_name) textParts.push(`Staff: ${booking.practitioner_name}`);
       if (booking.appointment_price_display) textParts.push(`Price: ${booking.appointment_price_display}`);
       textParts.push('');
@@ -96,7 +96,7 @@ export function renderBookingConfirmation(
         textParts.push(`Full refund if you cancel before ${fmt}. No refund after that or for no-shows.`);
       } else {
         textParts.push(
-          'This deposit is not refundable if you cancel — the deadline to cancel for a refund has already passed under the venue\'s policy.',
+          'This deposit is not refundable if you cancel. The deadline to cancel for a refund has already passed under the venue\'s policy.',
         );
       }
     }

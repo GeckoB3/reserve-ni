@@ -226,6 +226,23 @@ export async function DELETE(request: NextRequest) {
     if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 });
 
     const admin = getSupabaseAdminClient();
+
+    const { count: practitionerCount, error: countErr } = await admin
+      .from('practitioners')
+      .select('id', { count: 'exact', head: true })
+      .eq('venue_id', staff.venue_id);
+
+    if (countErr) {
+      console.error('DELETE /api/venue/practitioners count failed:', countErr);
+      return NextResponse.json({ error: 'Failed to verify calendars' }, { status: 500 });
+    }
+    if ((practitionerCount ?? 0) <= 1) {
+      return NextResponse.json(
+        { error: 'You must keep at least one bookable calendar for appointment bookings.' },
+        { status: 400 },
+      );
+    }
+
     const { error } = await admin
       .from('practitioners')
       .delete()

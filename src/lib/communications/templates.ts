@@ -144,7 +144,7 @@ Party size: {{party_size}}
 {{venue_name}}`,
   },
   dietary_digest: {
-    subject: 'Dietary requirements for today — {{venue_name}}',
+    subject: 'Dietary requirements for today: {{venue_name}}',
     body: `Here are today's dietary requirements and allergies for {{booking_date}}:
 
 {{dietary_summary}}

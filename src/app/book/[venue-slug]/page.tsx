@@ -4,8 +4,6 @@ import { BookingFlowRouter } from '@/components/booking/BookingFlowRouter';
 import { BookVenueTitle } from '@/components/booking/BookVenueTitle';
 import { hasServiceConfig } from '@/lib/availability';
 import type { VenuePublic, OpeningHours } from '@/components/booking/types';
-import { displayLabelForWebsiteUrl } from '@/lib/urls/website-url';
-
 async function getVenue(slug: string): Promise<VenuePublic | null> {
   const supabase = getSupabaseAdminClient();
   const { data, error } = await supabase
@@ -169,21 +167,6 @@ export default async function BookPage({ params }: { params: Promise<{ 'venue-sl
 
       {/* Booking flow */}
       <div className="mx-auto max-w-lg px-4 py-8 pb-24">
-        {venue.website_url ? (
-          <div className="mb-6 rounded-xl border border-slate-200 bg-white px-4 py-3 text-center shadow-sm">
-            <a
-              href={venue.website_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center justify-center gap-2 text-sm font-semibold text-brand-600 underline decoration-brand-600/30 underline-offset-2 hover:text-brand-800"
-            >
-              <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" aria-hidden>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622l1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244" />
-              </svg>
-              Visit {displayLabelForWebsiteUrl(venue.website_url)}
-            </a>
-          </div>
-        ) : null}
         <BookingFlowRouter venue={venue} cancellationPolicy={CANCELLATION_POLICY} />
       </div>
 

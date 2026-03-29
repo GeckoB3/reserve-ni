@@ -24,8 +24,8 @@ export function renderDepositConfirmation(
   const html = renderBaseTemplate({
     venueName: venue.name,
     venueLogoUrl: venue.logo_url,
-    heading: appt ? `Deposit received — your appointment at ${venue.name}` : `Deposit confirmed for your booking at ${venue.name}`,
-    mainContent: `<p style="margin:0 0 12px 0">Thank you — your deposit of £${amount} has been received.</p>`,
+    heading: appt ? `Deposit received: your appointment at ${venue.name}` : `Deposit confirmed for your booking at ${venue.name}`,
+    mainContent: `<p style="margin:0 0 12px 0">Thank you. Your deposit of £${amount} has been received.</p>`,
     bookingDate: date,
     bookingTime: time,
     partySize: booking.party_size,
@@ -44,14 +44,14 @@ export function renderDepositConfirmation(
   const textParts = [`Hi ${booking.guest_name},`, ''];
   textParts.push(
     appt
-      ? `Thank you — your deposit of £${amount} has been received for your appointment at ${venue.name}.`
-      : `Thank you — your deposit of £${amount} has been received for your booking at ${venue.name}.`,
+      ? `Thank you. Your deposit of £${amount} has been received for your appointment at ${venue.name}.`
+      : `Thank you. Your deposit of £${amount} has been received for your booking at ${venue.name}.`,
     '',
     `Date: ${date}`,
     `Time: ${time}`,
   );
   if (!appt) textParts.push(`Party size: ${booking.party_size}`);
-  if (appt && booking.appointment_service_name) textParts.push(`Treatment: ${booking.appointment_service_name}`);
+  if (appt && booking.appointment_service_name) textParts.push(`Service: ${booking.appointment_service_name}`);
   if (booking.refund_cutoff) {
     const fmt = formatRefundDeadlineIso(booking.refund_cutoff);
     if (isDepositRefundAvailableAt(booking.refund_cutoff)) {
@@ -59,7 +59,7 @@ export function renderDepositConfirmation(
     } else {
       textParts.push(
         '',
-        'Under the venue\'s policy, this deposit is not refundable if you cancel — the deadline to cancel for a refund has already passed.',
+        'Under the venue\'s policy, this deposit is not refundable if you cancel. The deadline to cancel for a refund has already passed.',
       );
     }
   }
@@ -70,7 +70,7 @@ export function renderDepositConfirmation(
   textParts.push('', venue.name);
 
   return {
-    subject: appt ? `Deposit received — ${venue.name}` : `Deposit confirmed for your booking at ${venue.name}`,
+    subject: appt ? `Deposit received: ${venue.name}` : `Deposit confirmed for your booking at ${venue.name}`,
     html,
     text: textParts.join('\n'),
   };

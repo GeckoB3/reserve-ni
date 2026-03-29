@@ -14,6 +14,13 @@ interface PractitionerOption {
   name: string;
 }
 
+interface CalendarEntitlementState {
+  can_add_practitioner: boolean;
+  unlimited: boolean;
+  calendar_limit: number | null;
+  pricing_tier: string;
+}
+
 export function StaffSection({ venueId: _venueId, isAdmin, bookingModel }: StaffSectionProps) {
   const isAppointmentVenue = bookingModel === 'practitioner_appointment';
 
@@ -35,6 +42,14 @@ export function StaffSection({ venueId: _venueId, isAdmin, bookingModel }: Staff
   const [calendarRenameSuccess, setCalendarRenameSuccess] = useState<string | null>(null);
   const [calendarSavingId, setCalendarSavingId] = useState<string | null>(null);
   const [calendarError, setCalendarError] = useState<string | null>(null);
+  const [calendarEntitlement, setCalendarEntitlement] = useState<CalendarEntitlementState | null>(null);
+  const [showAddCalendarForm, setShowAddCalendarForm] = useState(false);
+  const [newCalendarName, setNewCalendarName] = useState('');
+  const [addCalendarSaving, setAddCalendarSaving] = useState(false);
+  const [addCalendarError, setAddCalendarError] = useState<string | null>(null);
+  const [deleteCalendarTarget, setDeleteCalendarTarget] = useState<PractitionerOption | null>(null);
+  const [deletingCalendar, setDeletingCalendar] = useState(false);
+  const [deleteCalendarError, setDeleteCalendarError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [createSuccess, setCreateSuccess] = useState<string | null>(null);
@@ -99,10 +114,34 @@ export function StaffSection({ venueId: _venueId, isAdmin, bookingModel }: Staff
     }
   }, [isAppointmentVenue, isAdmin]);
 
+  const loadCalendarEntitlement = useCallback(async () => {
+    if (!isAppointmentVenue || !isAdmin) return;
+    try {
+      const res = await fetch('/api/venue/calendar-entitlement');
+      if (!res.ok) return;
+      const data = (await res.json()) as {
+        can_add_practitioner?: boolean;
+        unlimited?: boolean;
+        calendar_limit?: number | null;
+        pricing_tier?: string;
+      };
+      setCalendarEntitlement({
+        can_add_practitioner: data.can_add_practitioner ?? false,
+        unlimited: data.unlimited ?? false,
+        calendar_limit: data.calendar_limit ?? null,
+        pricing_tier: data.pricing_tier ?? 'standard',
+      });
+    } catch {
+      /* ignore */
+    }
+  }, [isAppointmentVenue, isAdmin]);
+
   useEffect(() => {
     setLoading(true);
-    Promise.all([load(), loadSessionSettings(), loadPractitioners()]).finally(() => setLoading(false));
-  }, [load, loadSessionSettings, loadPractitioners]);
+    Promise.all([load(), loadSessionSettings(), loadPractitioners(), loadCalendarEntitlement()]).finally(() =>
+      setLoading(false),
+    );
+  }, [load, loadSessionSettings, loadPractitioners, loadCalendarEntitlement]);
 
   useEffect(() => {
     setCalendarNameDrafts(Object.fromEntries(practitioners.map((p) => [p.id, p.name])));
@@ -140,6 +179,72 @@ export function StaffSection({ venueId: _venueId, isAdmin, bookingModel }: Staff
     },
     [calendarNameDrafts, load, loadPractitioners],
   );
+
+  const onAddCalendar = useCallback(
+    async (e: React.FormEvent) => {
+      e.preventDefault();
+      const name = newCalendarName.trim();
+      if (!name) {
+        setAddCalendarError('Enter a name for the new calendar.');
+        return;
+      }
+      setAddCalendarError(null);
+      setAddCalendarSaving(true);
+      try {
+        const res = await fetch('/api/venue/practitioners', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name }),
+        });
+        const j = (await res.json().catch(() => ({}))) as { error?: string; upgrade_required?: boolean };
+        if (!res.ok) {
+          throw new Error(
+            typeof j.error === 'string'
+              ? j.error
+              : 'Could not add calendar',
+          );
+        }
+        setNewCalendarName('');
+        setShowAddCalendarForm(false);
+        await loadPractitioners();
+        await loadCalendarEntitlement();
+        setCalendarRenameSuccess('Calendar added.');
+        setTimeout(() => setCalendarRenameSuccess(null), 4000);
+      } catch (err) {
+        setAddCalendarError(err instanceof Error ? err.message : 'Could not add calendar');
+      } finally {
+        setAddCalendarSaving(false);
+      }
+    },
+    [newCalendarName, loadPractitioners, loadCalendarEntitlement],
+  );
+
+  const onDeleteCalendar = useCallback(async () => {
+    if (!deleteCalendarTarget) return;
+    setDeleteCalendarError(null);
+    setDeletingCalendar(true);
+    try {
+      const res = await fetch('/api/venue/practitioners', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: deleteCalendarTarget.id }),
+      });
+      const j = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) {
+        throw new Error(typeof j.error === 'string' ? j.error : 'Could not remove calendar');
+      }
+      setDeleteCalendarTarget(null);
+      await loadPractitioners();
+      await load();
+      await loadCalendarEntitlement();
+      setCalendarRenameSuccess('Calendar removed.');
+      setTimeout(() => setCalendarRenameSuccess(null), 4000);
+    } catch (err) {
+      setDeleteCalendarError(err instanceof Error ? err.message : 'Could not remove calendar');
+    } finally {
+      setDeletingCalendar(false);
+    }
+  }, [deleteCalendarTarget, loadPractitioners, load, loadCalendarEntitlement]);
 
   // Create user handler
   const onCreateUser = useCallback(async (e: React.FormEvent) => {
@@ -444,17 +549,44 @@ export function StaffSection({ venueId: _venueId, isAdmin, bookingModel }: Staff
         </div>
       </section>
 
-      {/* Calendar names (Model B — admin): practitioner display names */}
+      {/* Bookable calendars (Model B — admin): add/remove/rename practitioner rows */}
       {isAppointmentVenue && isAdmin && (
         <section className="rounded-xl border border-slate-200 bg-white shadow-sm">
-          <div className="border-b border-slate-100 px-6 py-4">
-            <h2 className="text-base font-semibold text-slate-900">Calendar names</h2>
-            <p className="mt-0.5 text-sm text-slate-500">
-              Each bookable calendar has a name shown on your booking page, in the dashboard calendar, and when linking
-              staff accounts. Rename them here without changing login details.
-            </p>
+          <div className="border-b border-slate-100 px-6 py-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h2 className="text-base font-semibold text-slate-900">Bookable calendars</h2>
+              <p className="mt-0.5 text-sm text-slate-500">
+                Each calendar appears on your booking page and in the dashboard. Add or remove calendars here (Business and
+                Founding plans have no limit). Rename without changing staff logins.
+              </p>
+            </div>
+            {calendarEntitlement?.can_add_practitioner && (
+              <button
+                type="button"
+                onClick={() => {
+                  setShowAddCalendarForm((v) => !v);
+                  setAddCalendarError(null);
+                  setNewCalendarName('');
+                }}
+                className="inline-flex shrink-0 items-center gap-1.5 self-start rounded-lg bg-brand-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-brand-700"
+              >
+                <PlusIcon className="h-4 w-4" />
+                Add calendar
+              </button>
+            )}
           </div>
           <div className="px-6 py-4 space-y-4">
+            {calendarEntitlement && !calendarEntitlement.can_add_practitioner && !calendarEntitlement.unlimited && (
+              <p className="text-sm text-amber-800 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
+                You have reached your plan&apos;s calendar limit
+                {calendarEntitlement.calendar_limit != null ? ` (${calendarEntitlement.calendar_limit})` : ''}. Increase
+                your calendar count on the Standard plan or upgrade to Business for unlimited calendars — see the{' '}
+                <a href="/dashboard/settings?tab=plan" className="font-medium text-brand-700 underline underline-offset-2">
+                  Plan
+                </a>{' '}
+                tab.
+              </p>
+            )}
             {calendarRenameSuccess && (
               <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm text-emerald-700">
                 {calendarRenameSuccess}
@@ -465,14 +597,66 @@ export function StaffSection({ venueId: _venueId, isAdmin, bookingModel }: Staff
                 {calendarRenameError}
               </div>
             )}
+            {showAddCalendarForm && calendarEntitlement?.can_add_practitioner && (
+              <form onSubmit={onAddCalendar} className="rounded-lg border border-slate-200 bg-slate-50/50 p-4 space-y-3">
+                <h3 className="text-sm font-semibold text-slate-800">New calendar</h3>
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                  <div className="min-w-0 flex-1">
+                    <label htmlFor="new-calendar-name" className="mb-1 block text-sm font-medium text-slate-700">
+                      Display name
+                    </label>
+                    <input
+                      id="new-calendar-name"
+                      type="text"
+                      value={newCalendarName}
+                      onChange={(e) => setNewCalendarName(e.target.value)}
+                      maxLength={200}
+                      placeholder="e.g. Sarah — Senior stylist"
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+                    />
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      type="submit"
+                      disabled={addCalendarSaving || !newCalendarName.trim()}
+                      className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
+                    >
+                      {addCalendarSaving ? 'Adding…' : 'Create calendar'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowAddCalendarForm(false);
+                        setAddCalendarError(null);
+                        setNewCalendarName('');
+                      }}
+                      className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+                {addCalendarError && <p className="text-sm text-red-600">{addCalendarError}</p>}
+              </form>
+            )}
             {practitioners.length === 0 ? (
               <p className="text-sm text-slate-600">
-                No calendars yet. Add team members and calendars from{' '}
-                <span className="font-medium text-slate-800">onboarding</span> or{' '}
-                <a href="/dashboard/availability" className="font-medium text-brand-600 hover:text-brand-700">
-                  Availability
-                </a>
-                .
+                No calendars yet. {calendarEntitlement?.can_add_practitioner ? (
+                  <>Use <span className="font-medium text-slate-800">Add calendar</span> above, or add them during{' '}
+                  <span className="font-medium text-slate-800">onboarding</span> or from{' '}
+                  <a href="/dashboard/availability" className="font-medium text-brand-600 hover:text-brand-700">
+                    Availability
+                  </a>
+                  .</>
+                ) : (
+                  <>
+                    Add calendars from <span className="font-medium text-slate-800">onboarding</span> or{' '}
+                    <a href="/dashboard/availability" className="font-medium text-brand-600 hover:text-brand-700">
+                      Availability
+                    </a>
+                    , or adjust your plan on the Plan tab.
+                  </>
+                )}
               </p>
             ) : (
               <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
@@ -495,18 +679,33 @@ export function StaffSection({ venueId: _venueId, isAdmin, bookingModel }: Staff
                       className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
                       placeholder="Calendar display name"
                     />
-                    <button
-                      type="button"
-                      disabled={
-                        savingPractitionerNameId === p.id ||
-                        !(calendarNameDrafts[p.id]?.trim()) ||
-                        (calendarNameDrafts[p.id]?.trim() ?? '') === p.name
-                      }
-                      onClick={() => void onSaveCalendarName(p.id)}
-                      className="shrink-0 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
-                    >
-                      {savingPractitionerNameId === p.id ? 'Saving…' : 'Save'}
-                    </button>
+                    <div className="flex shrink-0 items-center gap-2 self-end sm:self-center">
+                      <button
+                        type="button"
+                        disabled={
+                          savingPractitionerNameId === p.id ||
+                          !(calendarNameDrafts[p.id]?.trim()) ||
+                          (calendarNameDrafts[p.id]?.trim() ?? '') === p.name
+                        }
+                        onClick={() => void onSaveCalendarName(p.id)}
+                        className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
+                      >
+                        {savingPractitionerNameId === p.id ? 'Saving…' : 'Save'}
+                      </button>
+                      {practitioners.length > 1 && (
+                        <button
+                          type="button"
+                          title="Remove calendar"
+                          onClick={() => {
+                            setDeleteCalendarTarget(p);
+                            setDeleteCalendarError(null);
+                          }}
+                          className="rounded-lg border border-slate-200 p-2 text-slate-400 hover:bg-red-50 hover:text-red-600"
+                        >
+                          <TrashIcon className="h-4 w-4" />
+                        </button>
+                      )}
+                    </div>
                   </li>
                 ))}
               </ul>
@@ -800,6 +999,41 @@ export function StaffSection({ venueId: _venueId, isAdmin, bookingModel }: Staff
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Remove calendar (Model B — admin) */}
+      {deleteCalendarTarget && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm"
+          onClick={() => setDeleteCalendarTarget(null)}
+        >
+          <div className="w-full max-w-sm rounded-xl bg-white p-6 shadow-lg" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-base font-semibold text-slate-900 mb-1">Remove calendar</h3>
+            <p className="text-sm text-slate-500 mb-4">
+              Remove <span className="font-medium text-slate-700">{deleteCalendarTarget.name}</span>? Staff linked to this
+              calendar will no longer be assigned to it. Existing bookings stay on your diary; the practitioner on each
+              booking may be cleared.
+            </p>
+            {deleteCalendarError && <p className="mb-3 text-sm text-red-600">{deleteCalendarError}</p>}
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => void onDeleteCalendar()}
+                disabled={deletingCalendar}
+                className="flex-1 rounded-lg bg-red-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
+              >
+                {deletingCalendar ? 'Removing…' : 'Remove calendar'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setDeleteCalendarTarget(null)}
+                className="flex-1 rounded-lg border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+            </div>
           </div>
         </div>
       )}

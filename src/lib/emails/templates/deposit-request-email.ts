@@ -35,7 +35,7 @@ export function renderDepositRequestEmail(
   const html = renderBaseTemplate({
     venueName: venue.name,
     venueLogoUrl: venue.logo_url,
-    heading: appt ? `Deposit required — ${venue.name}` : `Deposit required — ${venue.name}`,
+    heading: `Deposit required: ${venue.name}`,
     mainContent: lead + depositPolicyHtml,
     bookingDate: date,
     bookingTime: time,
@@ -68,14 +68,14 @@ export function renderDepositRequestEmail(
       '',
       isDepositRefundAvailableAt(booking.refund_cutoff)
         ? `Deposit refund: cancel before ${fmt} for a full refund.`
-        : 'Note: the deadline to cancel for a deposit refund has already passed — this deposit will not be refundable if you cancel.',
+        : 'Note: the deadline to cancel for a deposit refund has already passed. This deposit will not be refundable if you cancel.',
     );
   }
   if (venue.address) textParts.push('', `Address: ${venue.address}`);
   textParts.push('', venue.name);
 
   return {
-    subject: appt ? `Pay your deposit to confirm your appointment — ${venue.name}` : `Pay your deposit for ${venue.name}`,
+    subject: appt ? `Pay your deposit to confirm your appointment at ${venue.name}` : `Pay your deposit for ${venue.name}`,
     html,
     text: textParts.join('\n'),
   };
