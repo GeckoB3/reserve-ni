@@ -80,7 +80,7 @@ function groupSlotsByPeriod(slots: Array<{ start_time: string }>) {
   return { morning, afternoon, evening };
 }
 
-export function AppointmentBookingFlow({ venue, cancellationPolicy, embed, onHeightChange, accentColour }: AppointmentBookingFlowProps) {
+export function AppointmentBookingFlow({ venue, cancellationPolicy, onHeightChange, accentColour }: AppointmentBookingFlowProps) {
   const terms = venue.terminology ?? { client: 'Client', booking: 'Appointment', staff: 'Staff' };
 
   // Shared state

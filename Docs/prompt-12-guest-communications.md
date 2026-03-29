@@ -4,7 +4,7 @@
 
 You are building the guest communications system for ReserveNI, a restaurant reservation and table management SaaS platform. The tech stack is Next.js App Router, Supabase (Postgres with RLS), Stripe Connect, Twilio (SMS), and SendGrid (email), deployed on Vercel.
 
-Booking confirmation emails and SMS messages are already functional and integrated with Twilio and SendGrid. The sender email is `noreply@reserveni.com`. The brand colour is `#4E6B78`.
+Booking confirmation emails and SMS messages are already functional and integrated with Twilio and SendGrid. The sender email is `hello@reserveni.com`. The brand colour is `#4E6B78`.
 
 This prompt covers two interconnected pieces:
 

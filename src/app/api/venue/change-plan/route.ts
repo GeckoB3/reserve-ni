@@ -2,11 +2,12 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { stripe } from '@/lib/stripe';
+import { subscriptionPeriodEndIso, subscriptionStatus } from '@/lib/stripe/subscription-fields';
 
 /**
  * POST /api/venue/change-plan
  * Handle plan changes: upgrade (standard->business), downgrade (business->standard), cancel.
- * Body: { action: 'upgrade' | 'downgrade' | 'cancel' | 'resubscribe', calendar_count?: number }
+ * Body: { action: 'upgrade' | 'downgrade' | 'cancel' | 'resubscribe' | 'resume_subscription', calendar_count?: number }
  */
 export async function POST(request: Request) {
   try {
@@ -36,14 +37,27 @@ export async function POST(request: Request) {
 
     const body = await request.json();
     const { action, calendar_count } = body as {
-      action: 'upgrade' | 'downgrade' | 'cancel' | 'resubscribe';
+      action: 'upgrade' | 'downgrade' | 'cancel' | 'resubscribe' | 'resume_subscription';
       calendar_count?: number;
     };
 
     const origin = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
 
+    const requireStripeCustomer = () => {
+      const cid = venue.stripe_customer_id as string | null;
+      if (!cid?.trim()) {
+        return NextResponse.json(
+          { error: 'No billing customer on file. Contact support or complete signup billing first.' },
+          { status: 400 },
+        );
+      }
+      return null;
+    };
+
     switch (action) {
       case 'upgrade': {
+        const custErr = requireStripeCustomer();
+        if (custErr) return custErr;
         // Standard -> Business: create new Checkout Session for Business price
         const businessPriceId = process.env.STRIPE_BUSINESS_PRICE_ID;
         if (!businessPriceId) {
@@ -61,13 +75,15 @@ export async function POST(request: Request) {
             old_subscription_id: venue.stripe_subscription_id ?? '',
           },
           success_url: `${origin}/dashboard/settings?tab=plan&upgraded=true`,
-          cancel_url: `${origin}/dashboard/settings`,
+          cancel_url: `${origin}/dashboard/settings?tab=plan`,
         });
 
         return NextResponse.json({ redirect_url: session.url });
       }
 
       case 'downgrade': {
+        const custErr = requireStripeCustomer();
+        if (custErr) return custErr;
         // Business -> Standard
         const standardPriceId = process.env.STRIPE_STANDARD_PRICE_ID;
         if (!standardPriceId) {
@@ -96,8 +112,8 @@ export async function POST(request: Request) {
             calendar_count: String(qty),
             old_subscription_id: venue.stripe_subscription_id ?? '',
           },
-          success_url: `${origin}/dashboard/settings?downgraded=true`,
-          cancel_url: `${origin}/dashboard/settings`,
+          success_url: `${origin}/dashboard/settings?tab=plan&downgraded=true`,
+          cancel_url: `${origin}/dashboard/settings?tab=plan`,
         });
 
         return NextResponse.json({ redirect_url: session.url });
@@ -107,13 +123,42 @@ export async function POST(request: Request) {
         if (!venue.stripe_subscription_id) {
           return NextResponse.json({ error: 'No active subscription' }, { status: 400 });
         }
-        await stripe.subscriptions.update(venue.stripe_subscription_id as string, {
+        const sub = await stripe.subscriptions.update(venue.stripe_subscription_id as string, {
           cancel_at_period_end: true,
         });
+        const periodEndIso = subscriptionPeriodEndIso(sub);
+        await admin
+          .from('venues')
+          .update({
+            plan_status: 'cancelling',
+            subscription_current_period_end: periodEndIso,
+          })
+          .eq('id', venue.id);
         return NextResponse.json({ ok: true, message: 'Subscription will cancel at end of billing period' });
       }
 
+      case 'resume_subscription': {
+        if (!venue.stripe_subscription_id) {
+          return NextResponse.json({ error: 'No subscription to resume' }, { status: 400 });
+        }
+        const sub = await stripe.subscriptions.update(venue.stripe_subscription_id as string, {
+          cancel_at_period_end: false,
+        });
+        const periodEndIso = subscriptionPeriodEndIso(sub);
+        const st = subscriptionStatus(sub);
+        await admin
+          .from('venues')
+          .update({
+            plan_status: st === 'trialing' ? 'trialing' : 'active',
+            subscription_current_period_end: periodEndIso,
+          })
+          .eq('id', venue.id);
+        return NextResponse.json({ ok: true, message: 'Subscription will continue' });
+      }
+
       case 'resubscribe': {
+        const custErr = requireStripeCustomer();
+        if (custErr) return custErr;
         // Re-create a checkout session for the current tier
         const isStandard = (venue.pricing_tier as string) === 'standard';
         const priceId = isStandard ? process.env.STRIPE_STANDARD_PRICE_ID : process.env.STRIPE_BUSINESS_PRICE_ID;
@@ -146,7 +191,7 @@ export async function POST(request: Request) {
             ...(isStandard ? { calendar_count: String(resubQty) } : {}),
           },
           success_url: `${origin}/dashboard/settings?tab=plan&resubscribed=true`,
-          cancel_url: `${origin}/dashboard/settings`,
+          cancel_url: `${origin}/dashboard/settings?tab=plan`,
         });
 
         return NextResponse.json({ redirect_url: session.url });

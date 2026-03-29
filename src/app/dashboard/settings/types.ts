@@ -22,6 +22,8 @@ export interface VenueSettings {
   combination_threshold?: number;
   pricing_tier?: string;
   plan_status?: string;
+  /** End of current Stripe billing period (ISO), for cancel-at-period-end messaging. */
+  subscription_current_period_end?: string | null;
   calendar_count?: number | null;
   booking_model?: string;
 }

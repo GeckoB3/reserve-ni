@@ -3,6 +3,10 @@ import Stripe from 'stripe';
 import { stripe } from '@/lib/stripe';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { getBusinessConfig } from '@/lib/business-config';
+import {
+  subscriptionCancelAtPeriodEnd,
+  subscriptionPeriodEndIso,
+} from '@/lib/stripe/subscription-fields';
 
 const webhookSecret = process.env.STRIPE_ONBOARDING_WEBHOOK_SECRET;
 if (!webhookSecret) {
@@ -51,7 +55,7 @@ export async function POST(request: NextRequest) {
       }
 
       case 'customer.subscription.updated': {
-        await handleSubscriptionUpdated(supabase, event.data.object as Stripe.Subscription);
+        await handleSubscriptionUpdated(supabase, event.data.object);
         break;
       }
 
@@ -78,10 +82,12 @@ export async function POST(request: NextRequest) {
         if (invoice.customer) {
           const customerId =
             typeof invoice.customer === 'string' ? invoice.customer : invoice.customer.id;
+          // Only clear past_due — do not overwrite plan_status 'cancelling' (cancel_at_period_end).
           await supabase
             .from('venues')
             .update({ plan_status: 'active' })
-            .eq('stripe_customer_id', customerId);
+            .eq('stripe_customer_id', customerId)
+            .eq('plan_status', 'past_due');
         }
         break;
       }
@@ -129,10 +135,15 @@ async function handleCheckoutCompleted(
       typeof session.subscription === 'string' ? session.subscription : null;
 
     let subscriptionItemId: string | null = null;
+    let periodEndIso: string | null = null;
+    let cancelAtPeriodEnd = false;
     if (subscriptionId) {
       try {
         const sub = await stripe.subscriptions.retrieve(subscriptionId);
-        subscriptionItemId = sub.items.data[0]?.id ?? null;
+        const items = (sub as { items?: { data?: Array<{ id?: string }> } }).items;
+        subscriptionItemId = items?.data?.[0]?.id ?? null;
+        periodEndIso = subscriptionPeriodEndIso(sub);
+        cancelAtPeriodEnd = subscriptionCancelAtPeriodEnd(sub);
       } catch {
         console.warn('[Subscription webhook] Could not retrieve new subscription item');
       }
@@ -141,7 +152,8 @@ async function handleCheckoutCompleted(
     const changePlanUpdates: Record<string, unknown> = {
       stripe_subscription_id: subscriptionId,
       stripe_subscription_item_id: subscriptionItemId,
-      plan_status: 'active',
+      subscription_current_period_end: periodEndIso,
+      plan_status: cancelAtPeriodEnd ? 'cancelling' : 'active',
     };
     if (newPlan === 'standard' || newPlan === 'business') {
       changePlanUpdates.pricing_tier = newPlan;
@@ -206,10 +218,15 @@ async function handleCheckoutCompleted(
     typeof session.subscription === 'string' ? session.subscription : null;
 
   let subscriptionItemId: string | null = null;
+  let periodEndIso: string | null = null;
+  let cancelAtPeriodEnd = false;
   if (subscriptionId) {
     try {
       const sub = await stripe.subscriptions.retrieve(subscriptionId);
-      subscriptionItemId = sub.items.data[0]?.id ?? null;
+      const items = (sub as { items?: { data?: Array<{ id?: string }> } }).items;
+      subscriptionItemId = items?.data?.[0]?.id ?? null;
+      periodEndIso = subscriptionPeriodEndIso(sub);
+      cancelAtPeriodEnd = subscriptionCancelAtPeriodEnd(sub);
     } catch {
       console.warn('[Subscription webhook] Could not retrieve subscription item');
     }
@@ -227,10 +244,11 @@ async function handleCheckoutCompleted(
       business_category: config.category,
       terminology: config.terms,
       pricing_tier: plan,
-      plan_status: 'active',
+      plan_status: cancelAtPeriodEnd ? 'cancelling' : 'active',
       stripe_customer_id: customerId,
       stripe_subscription_id: subscriptionId,
       stripe_subscription_item_id: subscriptionItemId,
+      subscription_current_period_end: periodEndIso,
       calendar_count: plan === 'standard' ? calendarCount : null,
       onboarding_step: 0,
       onboarding_completed: false,
@@ -260,48 +278,53 @@ async function handleCheckoutCompleted(
 
 async function handleSubscriptionUpdated(
   supabase: ReturnType<typeof getSupabaseAdminClient>,
-  subscription: Stripe.Subscription
+  subscriptionRaw: unknown
 ) {
+  const subscription = subscriptionRaw as {
+    id?: string;
+    customer?: string | { id: string };
+    items?: { data?: Array<{ id?: string; price?: { id?: string }; quantity?: number }> };
+    status?: string;
+    cancel_at_period_end?: boolean;
+  };
   const customerId =
     typeof subscription.customer === 'string'
       ? subscription.customer
-      : subscription.customer.id;
+      : subscription.customer?.id;
+  if (!customerId || !subscription.id) return;
 
+  const firstItem = subscription.items?.data?.[0];
   const updates: Record<string, unknown> = {
     stripe_subscription_id: subscription.id,
-    stripe_subscription_item_id: subscription.items.data[0]?.id ?? null,
+    stripe_subscription_item_id: firstItem?.id ?? null,
+    subscription_current_period_end: subscriptionPeriodEndIso(subscriptionRaw),
   };
 
-  switch (subscription.status) {
-    case 'active':
-      updates.plan_status = 'active';
-      break;
-    case 'past_due':
-      updates.plan_status = 'past_due';
-      break;
-    case 'canceled':
-    case 'unpaid':
-      updates.plan_status = 'cancelled';
-      break;
-    case 'trialing':
-      updates.plan_status = 'trialing';
-      break;
-  }
-
-  // Map price ID to tier so pricing_tier stays in sync after Stripe changes
-  const priceId = subscription.items.data[0]?.price?.id;
+  const priceId = firstItem?.price?.id;
   if (priceId === process.env.STRIPE_STANDARD_PRICE_ID) {
     updates.pricing_tier = 'standard';
-    updates.calendar_count = subscription.items.data[0]?.quantity ?? 1;
+    updates.calendar_count = firstItem?.quantity ?? 1;
   } else if (priceId === process.env.STRIPE_BUSINESS_PRICE_ID) {
     updates.pricing_tier = 'business';
     updates.calendar_count = null;
   }
 
-  await supabase
-    .from('venues')
-    .update(updates)
-    .eq('stripe_customer_id', customerId);
+  const st = subscription.status;
+  if (st === 'canceled' || st === 'unpaid') {
+    updates.plan_status = 'cancelled';
+  } else if (st === 'past_due') {
+    updates.plan_status = 'past_due';
+  } else if (subscriptionCancelAtPeriodEnd(subscriptionRaw)) {
+    updates.plan_status = 'cancelling';
+  } else if (st === 'trialing') {
+    updates.plan_status = 'trialing';
+  } else if (st === 'active') {
+    updates.plan_status = 'active';
+  } else {
+    updates.plan_status = 'active';
+  }
+
+  await supabase.from('venues').update(updates).eq('stripe_customer_id', customerId);
 }
 
 async function handleSubscriptionDeleted(
@@ -319,6 +342,7 @@ async function handleSubscriptionDeleted(
       plan_status: 'cancelled',
       stripe_subscription_id: null,
       stripe_subscription_item_id: null,
+      subscription_current_period_end: null,
     })
     .eq('stripe_customer_id', customerId);
 }

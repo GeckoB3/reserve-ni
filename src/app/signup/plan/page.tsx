@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { getBusinessConfig } from '@/lib/business-config';
+import { getBusinessConfig, formatSignupBusinessTypeLabel } from '@/lib/business-config';
 import { STANDARD_PRICE_PER_CALENDAR, BUSINESS_PRICE } from '@/lib/pricing-constants';
 
 export default function PlanPage() {
@@ -72,8 +72,10 @@ export default function PlanPage() {
       <div className="mb-8 text-center">
         <h1 className="text-2xl font-bold text-slate-900">Choose your plan</h1>
         <p className="mt-2 text-sm text-slate-500">
-          Pick the plan that fits your{' '}
-          {businessType.replace(/_/g, ' ')} business.
+          Pick the plan that fits your business.
+        </p>
+        <p className="mt-1 text-xs text-slate-400">
+          Your selection: {formatSignupBusinessTypeLabel(businessType)}
         </p>
       </div>
 

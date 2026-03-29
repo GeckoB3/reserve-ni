@@ -26,7 +26,7 @@ describe('computeAppointmentAvailability', () => {
           working_hours: { [dk]: [{ start: '09:00', end: '17:00' }] },
           break_times: [],
           days_off: [],
-        } as import('@/types/booking-models').Practitioner,
+        } as unknown as import('@/types/booking-models').Practitioner,
       ],
       services: [
         {
@@ -60,7 +60,7 @@ describe('computeAppointmentAvailability', () => {
           working_hours: { [dk]: [{ start: '09:00', end: '17:00' }] },
           break_times: [],
           days_off: [],
-        } as import('@/types/booking-models').Practitioner,
+        } as unknown as import('@/types/booking-models').Practitioner,
       ],
       services: [
         {
@@ -94,7 +94,7 @@ describe('computeAppointmentAvailability', () => {
           working_hours: { [dk]: [{ start: '09:00', end: '17:00' }] },
           break_times: [],
           days_off: [],
-        } as import('@/types/booking-models').Practitioner,
+        } as unknown as import('@/types/booking-models').Practitioner,
       ],
       services: [
         {
@@ -130,7 +130,7 @@ describe('computeAppointmentAvailability', () => {
           working_hours: { [dk]: [{ start: '09:00', end: '17:00' }] },
           break_times: [],
           days_off: [],
-        } as import('@/types/booking-models').Practitioner,
+        } as unknown as import('@/types/booking-models').Practitioner,
       ],
       services: [
         {

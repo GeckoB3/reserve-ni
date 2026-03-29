@@ -73,6 +73,21 @@ export default async function DashboardLayout({ children }: { children: React.Re
         isAdmin={isAdmin}
       />
       <main className="flex-1 overflow-y-auto pt-14 lg:pt-0">
+        {planStatus === 'cancelling' && (
+          <div className="border-b border-amber-200 bg-amber-50 px-6 py-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-sm text-amber-900">
+                Your subscription is set to end at the close of this billing period. You can keep full access until then, or resume billing below.
+              </p>
+              <a
+                href="/dashboard/settings?tab=plan"
+                className="shrink-0 rounded-lg bg-amber-700 px-4 py-1.5 text-xs font-semibold text-white hover:bg-amber-800"
+              >
+                Manage plan
+              </a>
+            </div>
+          </div>
+        )}
         {planStatus === 'cancelled' && (
           <div className="border-b border-amber-200 bg-amber-50 px-6 py-3">
             <div className="flex items-center justify-between">

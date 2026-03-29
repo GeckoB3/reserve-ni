@@ -27,7 +27,7 @@ export default async function AppointmentServicesPage() {
   return (
     <div className="p-4 md:p-6 lg:p-8">
       <div className="mx-auto max-w-4xl">
-        <AppointmentServicesView venueId={staff.venue_id} isAdmin={staff.role === 'admin'} currency={currency} />
+        <AppointmentServicesView isAdmin={staff.role === 'admin'} currency={currency} />
       </div>
     </div>
   );

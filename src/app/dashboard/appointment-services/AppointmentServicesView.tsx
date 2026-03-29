@@ -77,11 +77,9 @@ function poundsToPence(pounds: string): number | null {
 }
 
 export function AppointmentServicesView({
-  venueId,
   isAdmin,
   currency = 'GBP',
 }: {
-  venueId: string;
   isAdmin: boolean;
   currency?: string;
 }) {

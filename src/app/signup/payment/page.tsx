@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { getBusinessConfig } from '@/lib/business-config';
+import { getBusinessConfig, formatSignupBusinessTypeLabel, isDirectModelBusinessType } from '@/lib/business-config';
 import { STANDARD_PRICE_PER_CALENDAR, BUSINESS_PRICE } from '@/lib/pricing-constants';
 
 export default function PaymentPage() {
@@ -95,11 +95,19 @@ export default function PaymentPage() {
       <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
         <div className="space-y-4">
           <div className="flex justify-between text-sm">
-            <span className="text-slate-500">Business type</span>
-            <span className="font-medium text-slate-900">
-              {businessType.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())}
+            <span className="text-slate-500">
+              {isDirectModelBusinessType(businessType) ? 'Booking type' : 'Business type'}
+            </span>
+            <span className="max-w-[60%] text-right font-medium text-slate-900">
+              {formatSignupBusinessTypeLabel(businessType)}
             </span>
           </div>
+          {isDirectModelBusinessType(businessType) && (
+            <p className="text-xs text-slate-500">
+              You chose a general booking pattern. Labels and services can be customised in onboarding and
+              settings.
+            </p>
+          )}
           <div className="flex justify-between text-sm">
             <span className="text-slate-500">Plan</span>
             <span className="font-medium text-slate-900">{planLabel}</span>

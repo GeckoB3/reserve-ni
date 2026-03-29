@@ -65,6 +65,15 @@ function PlanSection({
   const planStatus = venue.plan_status ?? 'active';
   const calendarCount = venue.calendar_count ?? null;
   const tierLabel = tier === 'founding' ? 'Founding Partner' : tier === 'business' ? 'Business' : 'Standard';
+  const periodEndLabel = venue.subscription_current_period_end
+    ? new Date(venue.subscription_current_period_end).toLocaleDateString('en-GB', {
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric',
+      })
+    : null;
+  const billingActive = planStatus === 'active' || planStatus === 'trialing';
+  const isCancelling = planStatus === 'cancelling';
 
   useEffect(() => {
     setCalendarDraft(venue.calendar_count ?? 1);
@@ -138,13 +147,43 @@ function PlanSection({
         }`}>
           {tierLabel}
         </span>
-        <span className={`text-xs font-medium ${planStatus === 'active' ? 'text-green-600' : planStatus === 'past_due' ? 'text-red-600' : 'text-amber-600'}`}>
-          {planStatus === 'active' ? 'Active' : planStatus === 'past_due' ? 'Payment due' : planStatus === 'cancelled' ? 'Cancelled' : planStatus}
+        <span
+          className={`text-xs font-medium ${
+            billingActive ? 'text-green-600' : planStatus === 'past_due' ? 'text-red-600' : planStatus === 'cancelling' ? 'text-amber-700' : 'text-amber-600'
+          }`}
+        >
+          {billingActive
+            ? 'Active'
+            : planStatus === 'past_due'
+              ? 'Payment due'
+              : planStatus === 'cancelling'
+                ? 'Cancelling'
+                : planStatus === 'cancelled'
+                  ? 'Cancelled'
+                  : planStatus}
         </span>
       </div>
       {actionError && (
         <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
           {actionError}
+        </div>
+      )}
+      {isCancelling && tier !== 'founding' && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          <p className="font-medium">Subscription ending</p>
+          <p className="mt-1 text-amber-800">
+            {periodEndLabel
+              ? `Access continues until the end of your billing period (${periodEndLabel}). Stripe will not charge again after that.`
+              : 'Access continues until the end of your current billing period. Stripe will not charge again after that.'}
+          </p>
+          <button
+            type="button"
+            disabled={loading}
+            onClick={() => void handleAction('resume_subscription')}
+            className="mt-3 rounded-lg bg-amber-700 px-4 py-2 text-xs font-semibold text-white hover:bg-amber-800 disabled:opacity-50"
+          >
+            Keep my plan
+          </button>
         </div>
       )}
       {tier === 'standard' && calendarCount != null && (
@@ -154,7 +193,7 @@ function PlanSection({
               Your plan covers up to{' '}
               <span className="font-semibold text-slate-900">{calendarCount}</span> team member
               {calendarCount === 1 ? '' : 's'} (&pound;{calendarCount * 10}/month total).{' '}
-              {planStatus === 'active' && (
+              {billingActive && (
                 <>
                   You have{' '}
                   <span className="font-semibold text-slate-900">{activePractitionerCount}</span> active.
@@ -169,7 +208,7 @@ function PlanSection({
           )}
         </p>
       )}
-      {tier === 'standard' && planStatus === 'active' && (
+      {tier === 'standard' && billingActive && !isCancelling && (
         <div className="rounded-lg border border-slate-200 bg-slate-50/80 p-4 space-y-3">
           <p className="text-sm font-medium text-slate-800">
             {isAppointmentVenue ? 'How many team members?' : 'Slots on your Standard plan'}
@@ -208,10 +247,19 @@ function PlanSection({
               {calSaving ? 'Saving…' : 'Update billing'}
             </button>
           </div>
-          {minCalendars > 1 && isAppointmentVenue && (
-            <p className="text-xs text-amber-800">
-              Minimum {minCalendars} — you still have {activePractitionerCount} active team member
-              {activePractitionerCount === 1 ? '' : 's'}.
+          {minCalendars > 1 && isAppointmentVenue && calendarCount != null && (
+            <p className="text-xs text-slate-600">
+              Your current plan includes{' '}
+              <span className="font-semibold text-slate-900">{calendarCount}</span> calendar
+              {calendarCount === 1 ? '' : 's'}.
+              {minCalendars < calendarCount ? (
+                <>
+                  {' '}
+                  You can reduce the number for billing, but not below{' '}
+                  <span className="font-semibold text-slate-900">{minCalendars}</span> while that many team members
+                  are active.
+                </>
+              ) : null}
             </p>
           )}
           {minCalendars > 1 && !isAppointmentVenue && (
@@ -241,12 +289,12 @@ function PlanSection({
         </p>
       )}
       <div className="flex flex-wrap gap-2 pt-2">
-        {tier === 'standard' && (
+        {tier === 'standard' && !isCancelling && (
           <button type="button" disabled={loading} onClick={() => void handleAction('upgrade')} className="rounded-lg bg-brand-600 px-4 py-2 text-xs font-semibold text-white hover:bg-brand-700 disabled:opacity-50">
             Upgrade to Business
           </button>
         )}
-        {tier === 'business' && (
+        {tier === 'business' && !isCancelling && (
           <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-end">
             <div>
               <label htmlFor="downgrade-calendars" className="mb-1 block text-xs font-medium text-slate-600">
@@ -274,7 +322,7 @@ function PlanSection({
             </button>
           </div>
         )}
-        {planStatus === 'active' && tier !== 'founding' && (
+        {billingActive && tier !== 'founding' && !isCancelling && (
           <button type="button" disabled={loading} onClick={() => void handleAction('cancel')} className="rounded-lg border border-red-200 px-4 py-2 text-xs font-semibold text-red-600 hover:bg-red-50 disabled:opacity-50">
             Cancel plan
           </button>

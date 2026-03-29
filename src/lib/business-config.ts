@@ -5,6 +5,7 @@
  */
 
 import type { BookingModel, VenueTerminology } from '@/types/booking-models';
+import { DEFAULT_TERMINOLOGY } from '@/types/booking-models';
 
 export interface DefaultService {
   name: string;
@@ -122,7 +123,124 @@ export const BUSINESS_TYPE_CONFIG: Record<string, BusinessConfig> = {
     terms: { client: 'Client', booking: 'Booking', staff: 'Staff' },
     defaultServices: [],
   },
+
+  /**
+   * Signup-only keys when the user chooses a booking model directly (not in the business directory).
+   * Persisted as `venues.business_type`; excluded from `getBusinessTypesByCategory()`.
+   */
+  model_table_reservation: {
+    model: 'table_reservation',
+    category: 'other',
+    terms: { ...DEFAULT_TERMINOLOGY.table_reservation },
+  },
+  model_practitioner_appointment: {
+    model: 'practitioner_appointment',
+    category: 'other',
+    terms: { ...DEFAULT_TERMINOLOGY.practitioner_appointment },
+  },
+  model_event_ticket: {
+    model: 'event_ticket',
+    category: 'other',
+    terms: { ...DEFAULT_TERMINOLOGY.event_ticket },
+  },
+  model_class_session: {
+    model: 'class_session',
+    category: 'other',
+    terms: { ...DEFAULT_TERMINOLOGY.class_session },
+  },
+  model_resource_booking: {
+    model: 'resource_booking',
+    category: 'other',
+    terms: { ...DEFAULT_TERMINOLOGY.resource_booking },
+  },
 };
+
+/** Short label for chips when browsing business types by category. */
+export const BOOKING_MODEL_CHIP_LABEL: Record<BookingModel, string> = {
+  table_reservation: 'Table booking',
+  practitioner_appointment: 'Appointments',
+  event_ticket: 'Event tickets',
+  class_session: 'Group classes',
+  resource_booking: 'Spaces & resources',
+};
+
+export interface BookingModelSignupCard {
+  model: BookingModel;
+  /** Key in `BUSINESS_TYPE_CONFIG` used when this model is chosen directly. */
+  businessTypeKey: string;
+  title: string;
+  summary: string;
+  /** Shown on the direct-selection card */
+  detail: string;
+  examples: string;
+}
+
+/** Order shown on the “choose by booking type” signup path. */
+export const BOOKING_MODEL_SIGNUP_CARDS: BookingModelSignupCard[] = [
+  {
+    model: 'table_reservation',
+    businessTypeKey: 'model_table_reservation',
+    title: 'Table & cover booking',
+    summary: 'Guests book a time for a party size; you manage capacity per slot.',
+    detail:
+      'Best for restaurants, cafés, pubs, and anywhere people reserve tables or covers for a sitting.',
+    examples: 'Restaurant, café, hotel dining, afternoon tea',
+  },
+  {
+    model: 'practitioner_appointment',
+    businessTypeKey: 'model_practitioner_appointment',
+    title: 'Appointments with a person',
+    summary: 'Clients book a service with a specific team member for a set duration.',
+    detail:
+      'Each practitioner has their own calendar, services, and working hours. One client per staff member at a time.',
+    examples: 'Barber, salon, physio, tutor, consultant',
+  },
+  {
+    model: 'event_ticket',
+    businessTypeKey: 'model_event_ticket',
+    title: 'Events & experiences',
+    summary: 'Guests buy tickets for dated experiences with fixed start times and capacity.',
+    detail:
+      'You define events (or sessions), ticket types, and how many people can attend each run.',
+    examples: 'Escape room, tour, tasting, workshop, show night',
+  },
+  {
+    model: 'class_session',
+    businessTypeKey: 'model_class_session',
+    title: 'Recurring group classes',
+    summary: 'Members book a spot in scheduled sessions that repeat on a timetable.',
+    detail:
+      'Define class types and weekly slots; clients pick which instance they want to join.',
+    examples: 'Yoga studio, gym class, swim school, language class',
+  },
+  {
+    model: 'resource_booking',
+    businessTypeKey: 'model_resource_booking',
+    title: 'Rooms, pitches & equipment',
+    summary: 'Bookers reserve a space or item for a length of time—no specific staff required.',
+    detail:
+      'Resources have their own availability and pricing; bookings are tied to the asset, not a named practitioner.',
+    examples: 'Meeting room, court, studio hire, lane, pitch',
+  },
+];
+
+/** `business_type` value stored when user picks a model directly (matches card `businessTypeKey`). */
+export function directModelBusinessTypeKey(model: BookingModel): string {
+  return `model_${model}`;
+}
+
+export function isDirectModelBusinessType(businessType: string): boolean {
+  return businessType.startsWith('model_');
+}
+
+/** Human-readable label for plan summary / payment (handles `model_*` keys). */
+export function formatSignupBusinessTypeLabel(businessType: string): string {
+  if (isDirectModelBusinessType(businessType)) {
+    const card = BOOKING_MODEL_SIGNUP_CARDS.find((c) => c.businessTypeKey === businessType);
+    if (card) return card.title;
+  }
+  return businessType.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+}
 
 export function getBusinessConfig(businessType: string): BusinessConfig {
   return BUSINESS_TYPE_CONFIG[businessType] ?? BUSINESS_TYPE_CONFIG.other!;
@@ -132,7 +250,7 @@ export function getBusinessConfig(businessType: string): BusinessConfig {
 export function getBusinessTypesByCategory(): Record<string, Array<{ key: string; label: string; model: BookingModel }>> {
   const result: Record<string, Array<{ key: string; label: string; model: BookingModel }>> = {};
   for (const [key, config] of Object.entries(BUSINESS_TYPE_CONFIG)) {
-    if (key === 'other') continue;
+    if (key === 'other' || key.startsWith('model_')) continue;
     if (!result[config.category]) result[config.category] = [];
     result[config.category]!.push({
       key,

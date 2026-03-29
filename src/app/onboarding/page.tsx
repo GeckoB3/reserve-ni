@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import type { BookingModel } from '@/types/booking-models';
 import { getBusinessConfig } from '@/lib/business-config';
@@ -181,7 +182,10 @@ export default function OnboardingPage() {
     loadVenue();
   }, [router]);
 
-  const terms = venue?.terminology ?? { client: 'Client', booking: 'Booking', staff: 'Staff' };
+  const terms = useMemo(
+    () => venue?.terminology ?? { client: 'Client', booking: 'Booking', staff: 'Staff' },
+    [venue?.terminology],
+  );
 
   const modelSteps = useMemo(() => {
     if (!venue) return [];
@@ -625,7 +629,12 @@ export default function OnboardingPage() {
               Add your {terms.staff.toLowerCase()}s
             </h2>
             <p className="mb-6 text-sm text-slate-500">
-              Each {terms.staff.toLowerCase()} gets their own bookable calendar.
+              Each {terms.staff.toLowerCase()} gets their own bookable calendar. After onboarding, set{' '}
+              <strong>working hours, breaks, and days off</strong> under{' '}
+              <Link href="/dashboard/availability" className="font-medium text-brand-600 underline hover:text-brand-700">
+                Availability
+              </Link>{' '}
+              in the dashboard.
             </p>
             <div className="space-y-3">
               {practitioners.map((p, i) => (
@@ -679,7 +688,11 @@ export default function OnboardingPage() {
           <div>
             <h2 className="mb-1 text-lg font-bold text-slate-900">Your services</h2>
             <p className="mb-6 text-sm text-slate-500">
-              Define what {terms.client.toLowerCase()}s can book.
+              Define what {terms.client.toLowerCase()}s can book. To choose <strong>which {terms.staff.toLowerCase()} offers which service</strong>, deposits, and colours, use{' '}
+              <Link href="/dashboard/appointment-services" className="font-medium text-brand-600 underline hover:text-brand-700">
+                Services
+              </Link>{' '}
+              after you finish here.
             </p>
             <div className="space-y-3">
               {services.map((s, i) => (
@@ -1086,6 +1099,36 @@ export default function OnboardingPage() {
               Your booking page is ready. Share the link below with your{' '}
               {terms.client.toLowerCase()}s.
             </p>
+            {venue.booking_model === 'practitioner_appointment' && (
+              <div className="mb-6 rounded-xl border border-amber-100 bg-amber-50/80 p-4 text-left">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-amber-900/80">
+                  Before you go live
+                </p>
+                <p className="mb-3 text-sm text-slate-700">
+                  Finish calendar and payment setup in the dashboard so slots and charges work as you expect:
+                </p>
+                <ul className="list-inside list-disc space-y-1.5 text-sm text-slate-600">
+                  <li>
+                    <Link href="/dashboard/availability" className="font-medium text-brand-600 underline hover:text-brand-700">
+                      Availability
+                    </Link>{' '}
+                    — working hours, breaks, and days off per {terms.staff.toLowerCase()}
+                  </li>
+                  <li>
+                    <Link href="/dashboard/appointment-services" className="font-medium text-brand-600 underline hover:text-brand-700">
+                      Services
+                    </Link>{' '}
+                    — link services to {terms.staff.toLowerCase()}s, deposits, and pricing details
+                  </li>
+                  <li>
+                    <Link href="/dashboard/settings" className="font-medium text-brand-600 underline hover:text-brand-700">
+                      Settings
+                    </Link>{' '}
+                    — Stripe Connect and venue payment options
+                  </li>
+                </ul>
+              </div>
+            )}
             {venue.slug && (
               <div className="mb-6 rounded-xl border border-slate-200 bg-slate-50 p-4">
                 <p className="text-xs font-medium text-slate-400 mb-1">Your booking page</p>

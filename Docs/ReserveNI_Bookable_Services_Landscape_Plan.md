@@ -1,7 +1,9 @@
 # ReserveNI — Bookable Services Landscape & Unified Architecture Plan
 
-**From Restaurant Bookings to Every Bookable Service in Northern Ireland**
-**March 2026**
+**From Restaurant Bookings to Every Bookable Service in Northern Ireland**  
+**March 2026** · **Last reviewed:** March 2026
+
+This document is the **master reference** for ReserveNI’s five booking models: what each pattern means, what is implemented in the repo today, and how to extend Models C–E using the same patterns as Model B.
 
 ---
 
@@ -11,28 +13,28 @@ Every bookable business in Northern Ireland falls into one of five fundamental b
 
 ### 1.1 The Five Booking Models
 
-**Model A: Table/Cover Reservation (Already Built)**
+**Model A: Table/Cover Reservation (MVP complete)**  
 The guest books a time slot for a party at a venue. Capacity is measured in covers or tables. Duration is estimated by the venue. Multiple parties share the same time slot up to capacity.
 
 Businesses: Restaurants, cafes, pubs, bars, gastropubs, hotel restaurants, afternoon tea venues, supper clubs.
 
-**Model B: Practitioner Appointment**
-The client books a specific service with a specific practitioner for a defined duration. One client per practitioner at a time. The calendar is the practitioner's day divided into bookable slots based on service durations.
+**Model B: Practitioner Appointment (MVP shipped)**  
+The client books a specific service with a specific practitioner for a defined duration. One client per practitioner at a time. The calendar is the practitioner’s day divided into bookable slots based on service durations, working hours, breaks, days off, and optional **staff calendar blocks** (blocked time on a given date).
 
 Businesses: Barbers, hairdressers, beauty therapists, nail technicians, makeup artists, lash technicians, brow specialists, massage therapists, physiotherapists, osteopaths, chiropractors, podiatrists, occupational therapists, speech therapists, counsellors, psychotherapists, nutritionists, dietitians, acupuncturists, reflexologists, personal trainers, dog groomers, mobile mechanics, tutors, music teachers, driving instructors, photographers (session bookings), tattoo artists, piercing studios, opticians, dentists (private), private GPs, veterinary clinics, solicitors (consultations), accountants (consultations), financial advisers, mobile hairdressers, mobile beauticians, home cleaning services (scheduled), pet sitters.
 
-**Model C: Event/Experience Ticket**
+**Model C: Event/Experience Ticket**  
 The guest books a ticket to a specific event on a specific date and time. Capacity is a fixed number of tickets. Everyone starts at the same time. May have multiple ticket types (adult, child, VIP).
 
 Businesses: Cooking classes, escape rooms, boat tours, whiskey tastings, wine tastings, pottery classes, art workshops, axe throwing, archery experiences, clay pigeon shooting, brewery tours, distillery tours, farm tours, ghost tours, walking tours, segway tours, outdoor adventures (kayaking, climbing, coasteering), theatre performances, comedy nights, live music venues, cinema screenings, kids party venues, team building events, food tours, foraging experiences, craft workshops, dance classes (drop-in), yoga retreats, wellness workshops.
 
-**Model D: Class/Group Session**
+**Model D: Class/Group Session**  
 A recurring scheduled session with a fixed capacity. Clients book a spot in a specific instance of a recurring class. The same class repeats on a schedule (e.g. every Monday at 7pm).
 
 Businesses: Yoga studios, pilates studios, spin/cycling studios, CrossFit boxes, martial arts schools, dance schools, swimming lessons, fitness bootcamps, gym classes, language classes, music schools (group lessons), kids activity clubs, baby/toddler classes (e.g. baby sensory, messy play), adult education workshops, sewing classes, cooking schools (recurring), book clubs, sports coaching groups.
 
-**Model E: Resource/Facility Booking**
-The client books a physical space or resource for a defined time period. No specific staff member is required — it's the resource that's being reserved.
+**Model E: Resource/Facility Booking**  
+The client books a physical space or resource for a defined time period. No specific staff member is required — it’s the resource that’s being reserved.
 
 Businesses: Meeting rooms, co-working desks, sports pitches (5-a-side, tennis courts, padel courts), golf tee times, bowling lanes, hot tub hire, sauna rooms, photography studios, rehearsal rooms, recording studios, party rooms, function rooms, event spaces, caravan/glamping sites, holiday cottage changeover slots, equipment hire (bikes, paddleboards, kayaks), car wash bays, self-service dog wash, launderette machines.
 
@@ -42,41 +44,76 @@ You might look at this list and see 100+ business types. But every single one ma
 
 This is the key architectural decision: **build five booking engines, not fifty dashboards.**
 
+### 1.3 Implementation status (living)
+
+#### Model A (`table_reservation`)
+
+**Status: MVP complete.** Service-based availability engine (with legacy path only where venues are not yet on service config), deposits, communications, day sheet, table management (floor plan / table grid), waitlist, reporting.
+
+#### Model B (`practitioner_appointment`)
+
+**Status: MVP shipped.** Primary implementation surfaces:
+
+| Area | What exists (code pointers) |
+|------|------------------------------|
+| Team | `practitioners` via venue API; working hours, breaks, days off in dashboard — [`src/app/dashboard/availability/AppointmentAvailabilitySettings.tsx`](../src/app/dashboard/availability/AppointmentAvailabilitySettings.tsx) |
+| Services | `appointment_services` + `practitioner_services`; `/dashboard/appointment-services` |
+| Calendar | Practitioner calendar — [`src/app/dashboard/practitioner-calendar/PractitionerCalendarView.tsx`](../src/app/dashboard/practitioner-calendar/PractitionerCalendarView.tsx); registry-style view `/dashboard/calendar`; detail sheet (edit time, drag reschedule); [`src/app/api/venue/practitioner-calendar-blocks/`](../src/app/api/venue/practitioner-calendar-blocks/); calendar entitlement — [`src/app/api/venue/calendar-entitlement/route.ts`](../src/app/api/venue/calendar-entitlement/route.ts) |
+| Availability | [`src/lib/availability/appointment-engine.ts`](../src/lib/availability/appointment-engine.ts) + `fetchAppointmentInput`; working-hours keys align with JS `getDay()` / [`getDayOfWeek`](../src/lib/availability/engine.ts) (0 = Sunday … 6 = Saturday) |
+| Staff edits | [`PATCH` venue booking](../src/app/api/venue/bookings/[id]/route.ts): exclude current booking from overlap; `skipPastSlotFilter` for same-day time moves; existing bookings use per-link **custom duration** where set |
+| Bookings | Appointments-oriented bookings UI; walk-in API for appointment venues; group booking support where enabled; `client_arrived_at` (arrived/waiting before “Seated”) |
+| Payments / comms | Stripe Connect; templated email/SMS; deposit-request and comm log types — see migration [`supabase/migrations/20260402000000_deposit_request_email_and_comm_logs_types.sql`](../supabase/migrations/20260402000000_deposit_request_email_and_comm_logs_types.sql) |
+
+**Tooling note:** Linting uses **Next.js ESLint** ([`eslint.config.mjs`](../eslint.config.mjs) — `eslint-config-next` core-web-vitals + TypeScript). **`eslint-plugin-react-compiler` is not enabled** in this repo; adopt it deliberately (e.g. warn-only on a directory first) if you want compiler-oriented rules in CI.
+
+**Honest gaps (iterate as needed):** Consumer discovery / marketing site is out of app scope unless specified. Model B onboarding vs §6.2 is documented in **§6.3** (wizard today + dashboard source of truth).
+
+#### Models C, D, E (`event_ticket`, `class_session`, `resource_booking`)
+
+**Status: foundation in place; product incomplete vs B.**
+
+- **Database:** Core tables and `bookings` FKs created in [`supabase/migrations/20260327000001_multi_model_foundation.sql`](../supabase/migrations/20260327000001_multi_model_foundation.sql) (see §5).
+- **Availability:** Dedicated engines (e.g. [`src/lib/availability/event-ticket-engine.ts`](../src/lib/availability/event-ticket-engine.ts) and siblings) + `POST /api/booking/create` validation branches in [`src/app/api/booking/create/route.ts`](../src/app/api/booking/create/route.ts).
+- **Dashboard:** Sidebar entries for event manager, class timetable, resource timeline — [`src/app/dashboard/DashboardSidebar.tsx`](../src/app/dashboard/DashboardSidebar.tsx); depth varies by screen.
+
+**Remaining build-out (phrasing for all three):** Guest-facing booking UX to parity with Model B; staff CRUD and polish; communications and reporting parity; venue `PATCH` reschedule rules per model (mirror Model B: exclude self from capacity, model-specific “invalid slot” edge cases).
+
 ---
 
 ## 2. What Each Model Needs — Feature Matrix
 
 | Feature | A: Table | B: Appointment | C: Event | D: Class | E: Resource |
 |---|---|---|---|---|---|
-| Calendar type | Slot/sitting grid | Practitioner day calendar | Event listing by date | Recurring timetable | Resource timeline |
+| Calendar type | Slot/sitting grid | Practitioner day calendar + registry calendar | Event listing by date | Recurring timetable | Resource timeline |
 | Capacity unit | Covers/tables | 1 client per practitioner | Tickets per event | Spots per class | Time slots per resource |
-| Duration set by | Venue (turn time) | Service duration | Event duration (fixed) | Class duration (fixed) | Client (booking length) |
+| Duration set by | Venue (turn time) | Service duration (+ buffer) | Event duration (fixed) | Class duration (fixed) | Client (booking length) |
 | Multiple staff | N/A (table-based) | Yes — each has own calendar | Optional (instructor) | Yes (instructor per class) | N/A (resource-based) |
-| Service menu | N/A | Yes — services with durations/prices | Ticket types/tiers | Class types | Resource types |
-| Recurring schedule | Opening hours | Practitioner working hours | One-off or repeating | Weekly timetable | Opening hours |
-| Deposit/payment | Deposit per cover | Full payment or deposit | Full payment upfront | Per-class or package | Full or hourly rate |
-| Client record | Guest record | Client profile with history | Attendee list | Member/participant | Booker details |
+| Service menu | N/A | Yes — `appointment_services` + links | Ticket types/tiers | Class types | Resource types |
+| Recurring schedule | Opening hours | Practitioner working hours | One-off or repeating | Weekly timetable | `availability_hours` on resource |
+| Deposit/payment | Deposit per cover | Full or deposit per service (Stripe) | Full payment upfront | Per-class or package | Full or slot-based |
+| Client record | Guest record | Guest/client with history | Attendee list | Member/participant | Booker details |
 | No-show handling | Deposit forfeit | Cancellation fee or forfeit | Usually non-refundable | Spot released | Slot released |
-| Walk-ins | Yes (walk-in queue) | Yes (squeeze in if free) | No (ticketed) | Yes (if spots remain) | No (must book) |
-| Check-in | Day sheet / table status | Mark as arrived | Attendee check-in | Class roster check-in | N/A |
-| Key dashboard view | Day sheet + table grid | Practitioner calendar | Event management | Timetable + class roster | Resource timeline |
-| Reminders | SMS 24h before | SMS/email day before | Email with ticket/details | Email day before | Email day before |
+| Walk-ins | Yes (walk-in queue) | Yes — venue walk-in API for appointment venues | No (ticketed) | Yes (if spots remain) | No (must book) |
+| Check-in | Day sheet / table status | `client_arrived_at` + status (e.g. Seated) | Attendee check-in | Class roster check-in | N/A |
+| Staff unavailability | Table / floor blocks | Per-practitioner **calendar blocks** (not table blocks) | — | — | — |
+| Key dashboard view | Day sheet + table grid | Practitioner calendar, calendar registry, services, availability | Event management (partial) | Timetable (partial) | Resource timeline (partial) |
+| Reminders | SMS 24h before | SMS/email per settings | Email with ticket/details | Email day before | Email day before |
 | Online payment | Deposit via Stripe | Full or deposit via Stripe | Full via Stripe | Per-class or membership | Full via Stripe |
 
 ### 2.1 Shared Infrastructure Across All Models
 
-These features are identical regardless of booking model and are already built or easily shared:
+These features are identical regardless of booking model and are already built or shared:
 
 - Authentication and user management (Supabase Auth)
 - Stripe Connect for payments (direct charges to venue)
-- Communication engine (SendGrid email + Twilio SMS)
+- Communication engine (SendGrid email + Twilio SMS) — [`src/lib/communications/`](../src/lib/communications/)
 - Confirm-or-cancel flow
 - Guest/client record with identity matching
-- Events table (audit log)
-- Booking page and iFrame widget (template varies by model)
+- Events / audit logging
+- Booking page and embed/widget (layout varies by `booking_model`)
 - QR codes
 - Reporting framework
-- Onboarding wizard framework
+- Onboarding wizard framework (shared shell; steps vary)
 
 ---
 
@@ -86,512 +123,288 @@ These features are identical regardless of booking model and are already built o
 
 Instead of building separate applications for each business type, build a **template system** where the business type selection at onboarding configures:
 
-1. **Which booking model** drives the availability engine
+1. **Which booking model** drives the availability engine (`venues.booking_model`)
 2. **Which dashboard views** are shown in the sidebar
-3. **Which terminology** is used throughout the UI
+3. **Which terminology** is used throughout the UI (`venues.terminology` merged with defaults)
 4. **Which default services/settings** are pre-populated
 5. **Which booking page layout** guests see
 
 Everything else — auth, payments, communications, reporting — is shared.
 
-### 3.2 Business Type → Model Mapping
+### 3.2 Cross-model implementation pattern (follow Model B)
 
-When a business selects their type during onboarding, the system maps it to a booking model:
+Use this checklist when extending C, D, or E so they stay consistent with what Model B proved out.
+
+```mermaid
+flowchart LR
+  subgraph venue [Venue]
+    bm[booking_model]
+    term[terminology jsonb]
+  end
+  subgraph runtime [Runtime]
+    rvm[resolveVenueMode]
+    eng[fetchInput + computeAvailability]
+  end
+  subgraph surfaces [Surfaces]
+    apiPub["/api/booking/*"]
+    apiVenue["/api/venue/*"]
+    dash[DashboardSidebar + views]
+  end
+  bm --> rvm
+  term --> rvm
+  rvm --> eng
+  rvm --> dash
+  eng --> apiPub
+  eng --> apiVenue
+```
+
+| Layer | Rule |
+|--------|------|
+| **Venue** | `venues.booking_model` (enum), optional `business_type` / `business_category`, `terminology` JSONB. Resolved in [`src/lib/venue-mode.ts`](../src/lib/venue-mode.ts). |
+| **Booking row** | Single `bookings` row per reservation; populate **one** model FK: Model A uses service/table semantics; Model B `practitioner_id` + `appointment_service_id`; Model C `experience_event_id`; Model D `class_instance_id`; Model E `resource_id` (+ `booking_end_time` where required). |
+| **Availability** | Pair `fetch*Input(supabase, venueId, date, …)` with `compute*Availability(input)` under [`src/lib/availability/`](../src/lib/availability/). Mirror appointment-engine: pure compute + explicit fetcher. |
+| **Public API** | Guest actions under [`src/app/api/booking/`](../src/app/api/booking/) (`create`, `availability`, etc.). |
+| **Staff API** | CRUD and staff actions under [`src/app/api/venue/`](../src/app/api/venue/) namespaced by entity (`experience-events`, `classes`, `resources`, …). |
+| **Staff reschedule** | When venue `PATCH` changes date/time, validate with the same engine, **excluding** the current booking id from capacity; add model-specific flags if “past slot” or equivalent matters (see Model B `skipPastSlotFilter`). |
+| **Dashboard** | Add nav via `MODEL_NAV_ITEMS` and conditional labels in [`DashboardSidebar.tsx`](../src/app/dashboard/DashboardSidebar.tsx) — do not fork apps. |
+
+### 3.3 Business type → model mapping
+
+At onboarding, the business picks a type; the system sets `booking_model`, `business_type`, and default `terminology`. **The runtime source of truth is the database** (`venues` columns) plus code in `resolveVenueMode` and [`src/types/booking-models.ts`](../src/types/booking-models.ts).
+
+The long pseudo-config below is **illustrative only** — not a copy-paste of production code:
 
 ```typescript
-const BUSINESS_TYPE_CONFIG: Record<string, BusinessConfig> = {
-
-  // MODEL A: Table Reservation
-  restaurant:        { model: 'table_reservation', category: 'hospitality', 
-                       terms: { client: 'Guest', booking: 'Reservation', staff: 'Staff' },
-                       pricing: 'venue_flat', defaultPrice: 7900 },
-  cafe:              { model: 'table_reservation', category: 'hospitality', ... },
-  pub:               { model: 'table_reservation', category: 'hospitality', ... },
-  hotel_restaurant:  { model: 'table_reservation', category: 'hospitality', ... },
-
-  // MODEL B: Practitioner Appointment
-  barber:            { model: 'practitioner_appointment', category: 'beauty_grooming',
-                       terms: { client: 'Client', booking: 'Appointment', staff: 'Barber' },
-                       pricing: 'per_user', defaultPrice: 1000,
-                       defaultServices: [
-                         { name: "Men's Cut", duration: 30, price: 1500 },
-                         { name: 'Beard Trim', duration: 15, price: 1000 },
-                         { name: 'Cut & Beard', duration: 45, price: 2200 },
-                         { name: "Kid's Cut", duration: 20, price: 1000 },
-                       ]},
-  hairdresser:       { model: 'practitioner_appointment', category: 'beauty_grooming',
-                       terms: { client: 'Client', booking: 'Appointment', staff: 'Stylist' },
-                       defaultServices: [
-                         { name: 'Cut & Blow Dry', duration: 60, price: 4000 },
-                         { name: 'Colour', duration: 90, price: 6500 },
-                         { name: 'Highlights', duration: 120, price: 8500 },
-                         { name: 'Blow Dry', duration: 30, price: 2500 },
-                       ]},
-  beauty_therapist:  { model: 'practitioner_appointment', category: 'beauty_grooming',
-                       terms: { client: 'Client', booking: 'Appointment', staff: 'Therapist' },
-                       defaultServices: [
-                         { name: 'Facial', duration: 60, price: 5000 },
-                         { name: 'Manicure', duration: 45, price: 2500 },
-                         { name: 'Pedicure', duration: 45, price: 3000 },
-                         { name: 'Waxing', duration: 30, price: 2000 },
-                       ]},
-  nail_technician:   { model: 'practitioner_appointment', category: 'beauty_grooming', ... },
-  massage_therapist: { model: 'practitioner_appointment', category: 'health_wellness', ... },
-  physiotherapist:   { model: 'practitioner_appointment', category: 'health_wellness',
-                       terms: { client: 'Patient', booking: 'Appointment', staff: 'Physio' },
-                       defaultServices: [
-                         { name: 'Initial Assessment', duration: 60, price: 5500 },
-                         { name: 'Follow-up Treatment', duration: 30, price: 4000 },
-                         { name: 'Sports Massage', duration: 45, price: 4500 },
-                       ]},
-  osteopath:         { model: 'practitioner_appointment', category: 'health_wellness', ... },
-  chiropractor:      { model: 'practitioner_appointment', category: 'health_wellness', ... },
-  podiatrist:        { model: 'practitioner_appointment', category: 'health_wellness', ... },
-  occupational_therapist: { model: 'practitioner_appointment', category: 'health_wellness', ... },
-  counsellor:        { model: 'practitioner_appointment', category: 'health_wellness',
-                       terms: { client: 'Client', booking: 'Session', staff: 'Counsellor' }, ... },
-  dentist:           { model: 'practitioner_appointment', category: 'health_wellness', ... },
-  optician:          { model: 'practitioner_appointment', category: 'health_wellness', ... },
-  veterinary:        { model: 'practitioner_appointment', category: 'health_wellness',
-                       terms: { client: 'Pet Owner', booking: 'Appointment', staff: 'Vet' }, ... },
-  dog_groomer:       { model: 'practitioner_appointment', category: 'pets', ... },
-  tattoo_artist:     { model: 'practitioner_appointment', category: 'beauty_grooming', ... },
-  personal_trainer:  { model: 'practitioner_appointment', category: 'fitness', ... },
-  tutor:             { model: 'practitioner_appointment', category: 'education', ... },
-  driving_instructor:{ model: 'practitioner_appointment', category: 'education', ... },
-  photographer:      { model: 'practitioner_appointment', category: 'creative', ... },
-  solicitor:         { model: 'practitioner_appointment', category: 'professional', ... },
-  accountant:        { model: 'practitioner_appointment', category: 'professional', ... },
-
-  // MODEL C: Event/Experience
-  escape_room:       { model: 'event_ticket', category: 'experiences',
-                       terms: { client: 'Guest', booking: 'Booking', staff: 'Host' },
-                       pricing: 'venue_flat', defaultPrice: 7900 },
-  cooking_class:     { model: 'event_ticket', category: 'experiences', ... },
-  boat_tour:         { model: 'event_ticket', category: 'experiences', ... },
-  distillery_tour:   { model: 'event_ticket', category: 'experiences', ... },
-  adventure_activity:{ model: 'event_ticket', category: 'experiences', ... },
-  workshop:          { model: 'event_ticket', category: 'experiences', ... },
-  theatre:           { model: 'event_ticket', category: 'entertainment', ... },
-  comedy_night:      { model: 'event_ticket', category: 'entertainment', ... },
-  live_music_venue:  { model: 'event_ticket', category: 'entertainment', ... },
-  kids_party_venue:  { model: 'event_ticket', category: 'experiences', ... },
-
-  // MODEL D: Class/Group
-  yoga_studio:       { model: 'class_session', category: 'fitness',
-                       terms: { client: 'Member', booking: 'Booking', staff: 'Instructor' },
-                       pricing: 'venue_flat', defaultPrice: 7900 },
-  pilates_studio:    { model: 'class_session', category: 'fitness', ... },
-  gym:               { model: 'class_session', category: 'fitness', ... },
-  dance_school:      { model: 'class_session', category: 'education', ... },
-  martial_arts:      { model: 'class_session', category: 'fitness', ... },
-  swimming_lessons:  { model: 'class_session', category: 'fitness', ... },
-  baby_classes:      { model: 'class_session', category: 'family', ... },
-  language_school:   { model: 'class_session', category: 'education', ... },
-
-  // MODEL E: Resource/Facility
-  meeting_room:      { model: 'resource_booking', category: 'business',
-                       terms: { client: 'Booker', booking: 'Booking', staff: 'Manager' },
-                       pricing: 'venue_flat', defaultPrice: 7900 },
-  sports_pitch:      { model: 'resource_booking', category: 'sports', ... },
-  tennis_court:      { model: 'resource_booking', category: 'sports', ... },
-  golf_tee_time:     { model: 'resource_booking', category: 'sports', ... },
-  studio_hire:       { model: 'resource_booking', category: 'creative', ... },
-  equipment_hire:    { model: 'resource_booking', category: 'leisure', ... },
-  glamping_site:     { model: 'resource_booking', category: 'accommodation', ... },
-
-  // CATCH-ALL
-  other:             { model: 'practitioner_appointment', category: 'other',
-                       terms: { client: 'Client', booking: 'Booking', staff: 'Staff' },
-                       pricing: 'per_user', defaultPrice: 1000,
-                       defaultServices: [] },
+// Illustrative — real defaults may live in signup/onboarding + DB
+const EXAMPLES: Record<string, { model: BookingModel; terms: VenueTerminology }> = {
+  restaurant: { model: 'table_reservation', terms: { client: 'Guest', booking: 'Reservation', staff: 'Staff' } },
+  barber: {
+    model: 'practitioner_appointment',
+    terms: { client: 'Client', booking: 'Appointment', staff: 'Barber' },
+  },
+  escape_room: { model: 'event_ticket', terms: { client: 'Guest', booking: 'Booking', staff: 'Host' } },
+  yoga_studio: { model: 'class_session', terms: { client: 'Member', booking: 'Booking', staff: 'Instructor' } },
+  meeting_room: { model: 'resource_booking', terms: { client: 'Booker', booking: 'Booking', staff: 'Manager' } },
+  other: { model: 'practitioner_appointment', terms: { client: 'Client', booking: 'Booking', staff: 'Staff' } },
 };
 ```
 
-### 3.3 Dashboard Views Per Model
+Extend mappings when adding business types: prefer **config + DB** over hard-coding in random components.
 
-Each booking model shows a different set of dashboard pages:
+### 3.4 Dashboard views per model
 
-| Dashboard Page | A: Table | B: Appointment | C: Event | D: Class | E: Resource |
+Each booking model shows a different set of dashboard pages. **Model B** reflects current nav; **C/D/E** include routes that exist but may be **partial** (shell or incomplete product).
+
+| Dashboard page | A: Table | B: Appointment | C: Event | D: Class | E: Resource |
 |---|---|---|---|---|---|
-| Bookings list | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Day sheet | ✅ | — | — | — | — |
-| Table grid / Floor plan | ✅ (if enabled) | — | — | — | — |
+| Bookings / appointments list | ✅ | ✅ | ✅ | ✅ | ✅ |
+| New booking / appointment | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Day sheet | ✅ | ✅ (appointment-oriented day view) | — | — | — |
+| Table grid / floor plan | ✅ (if enabled) | — | — | — | — |
 | Practitioner calendar | — | ✅ | — | — | — |
-| Event manager | — | — | ✅ | — | — |
-| Class timetable | — | — | — | ✅ | — |
-| Resource timeline | — | — | — | — | ✅ |
-| Client / guest records | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Services / menu | — | ✅ | — | — | — |
-| Reporting | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Settings | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Calendar (registry) | — | ✅ `/dashboard/calendar` | — | — | — |
+| Appointment services + team hours | — | ✅ Services + Availability | — | — | — |
+| Event manager | — | — | ⚠️ Partial | — | — |
+| Class timetable | — | — | — | ⚠️ Partial | — |
+| Resource timeline | — | — | — | — | ⚠️ Partial |
+| Waitlist | ✅ | — | — | — | — |
+| Reports / settings | ✅ (admin) | ✅ (admin) | ✅ (admin) | ✅ (admin) | ✅ (admin) |
 
-### 3.4 Terminology System
+Legend: ✅ shipped for MVP · ⚠️ route/feature present; product depth TBD · — not applicable
 
-A simple translation layer that replaces labels throughout the UI based on the business type's terms configuration:
+### 3.5 Terminology system
 
-```typescript
-// lib/terminology.ts
-export function t(key: string, businessType: string): string {
-  const config = BUSINESS_TYPE_CONFIG[businessType];
-  const terms = config?.terms || { client: 'Client', booking: 'Booking', staff: 'Staff' };
-  
-  const translations: Record<string, string> = {
-    'client': terms.client,           // Guest / Client / Patient / Member
-    'clients': pluralise(terms.client),
-    'booking': terms.booking,          // Reservation / Appointment / Booking / Session
-    'bookings': pluralise(terms.booking),
-    'staff_member': terms.staff,       // Staff / Barber / Stylist / Physio / Instructor
-    'staff_members': pluralise(terms.staff),
-    'no_show': terms.client === 'Patient' ? 'DNA' : 'No-show',  // Health uses 'DNA' (Did Not Attend)
-    'covers': terms.client === 'Guest' ? 'Covers' : 'Clients',
-  };
-  
-  return translations[key] || key;
-}
-```
+Labels are **not** driven by a giant static `BUSINESS_TYPE_CONFIG` at runtime. Production behaviour:
 
-This means a physiotherapist sees "Patients", "Appointments", "DNAs" in their dashboard while a barber sees "Clients", "Appointments", "No-shows" — with zero additional code.
+- Defaults per model: [`DEFAULT_TERMINOLOGY` in `src/types/booking-models.ts`](../src/types/booking-models.ts)
+- Per-venue overrides: `venues.terminology` JSONB merged in [`resolveVenueMode`](../src/lib/venue-mode.ts)
+- UI helpers: [`src/lib/terminology.ts`](../src/lib/terminology.ts) where used
+
+A physiotherapist can see Patient / Appointment / Physio; a barber sees Client / Appointment / Barber — via stored terminology, without forking components.
 
 ---
 
-## 4. Build Priority & Sequence
+## 4. Build priority and sequence
 
-### 4.1 What's Already Built (Model A — complete)
+### 4.1 Delivered
 
-Your restaurant platform covers Model A fully: table reservations with availability engine, deposits, communications, day sheet, table management, reporting.
+- **Model A** — MVP complete (restaurant / table reservation).
+- **Model B** — MVP shipped (practitioner appointments as in §1.3).
 
-### 4.2 Build Order for Remaining Models
+### 4.2 Remaining work (product completion, not greenfield schema)
 
-**Phase 1: Model B — Practitioner Appointments (build next)**
+Phases below assume **migrations already applied** (see §5). Effort is guest UX, staff tooling, comms/reporting parity, and hardening — not inventing new tables from scratch.
 
-This is the highest priority because it covers the most business types by far (barbers, hairdressers, beauty, all health professions, trainers, tutors, groomers, etc.). It's also the model most requested by NI small businesses.
+**Phase 2 — Model C (`event_ticket`)**  
+Complete guest event listing + ticket purchase flow; staff event CRUD parity with Model B admin patterns; attendee management; reminders; reporting. Reuse `experience_events` + `event_ticket_types` + `event-ticket-engine`.
 
-Core features needed:
-- Practitioner management (add practitioners with working hours, breaks, days off)
-- Service menu (services with names, durations, prices, which practitioners offer them)
-- Practitioner calendar view (day/week, showing appointments per practitioner in columns)
-- Appointment booking engine (check practitioner availability based on their working hours, existing appointments, and service duration + buffer time)
-- Guest-facing booking page (select service → select practitioner → select date → select available time → pay/book)
-- Client records (visit history per client, notes, preferences)
-- Appointment reminders and confirmations (reuse communication engine)
-- Deposit or full payment via Stripe Connect
-- Basic reporting (appointments per practitioner, revenue, no-show rate)
+**Phase 3 — Model D (`class_session`)**  
+Timetable UX, instance generation/management, spot booking UI, roster/check-in. Shares “dated occurrence + capacity” mental model with C; reuses `class_types`, `class_timetable`, `class_instances` and class availability engine.
 
-Estimated effort: 3–4 weeks with AI-assisted development.
+**Phase 4 — Model E (`resource_booking`)**  
+Resource timeline UX, duration-based booking UI, pricing rules. Close to Model B’s “grid of bookable intervals” but keyed by `resource_id` and `venue_resources.availability_hours`.
 
-**Phase 2: Model C — Event/Experience Tickets**
+### 4.3 Phased estimate (from current codebase)
 
-Second priority because NI has a growing experience economy (escape rooms, tours, outdoor activities) and these businesses currently have limited local booking options.
-
-Core features needed:
-- Event creation (name, date/time, duration, capacity, description, images, ticket types with pricing)
-- Recurring event support (e.g. "every Saturday at 2pm")
-- Ticket booking engine (check remaining capacity, handle multiple ticket types)
-- Guest-facing event listing and booking page
-- Attendee management (check-in list, contact details)
-- Event reminders
-- Full payment collection at booking
-- Basic reporting (tickets sold, revenue, attendance rate)
-
-Estimated effort: 2–3 weeks (simpler than appointments because there's no per-practitioner calendar complexity).
-
-**Phase 3: Model D — Class/Group Sessions**
-
-Third priority. Overlaps significantly with Model C (a class is essentially a recurring event with a timetable view).
-
-Core features needed:
-- Class type definition (name, duration, capacity, instructor, price)
-- Recurring timetable builder (drag-and-drop weekly schedule)
-- Class instance management (individual sessions from the timetable)
-- Spot booking engine (check capacity per class instance)
-- Guest-facing timetable view and booking
-- Class roster with check-in
-- Drop-in vs. membership/package support (future enhancement)
-- Reminders and reporting
-
-Estimated effort: 2–3 weeks (heavily leverages Model C infrastructure).
-
-**Phase 4: Model E — Resource/Facility Booking**
-
-Lowest priority — fewer businesses in NI, and many already use bespoke systems. But architecturally simple.
-
-Core features needed:
-- Resource definition (name, type, hourly/per-slot rate, availability hours)
-- Resource timeline view (similar to table management grid but for resources)
-- Time-slot booking engine (check resource availability, prevent double-booking)
-- Guest-facing booking page (select resource → select date → select time block → pay)
-- Duration-based pricing (e.g. 1 hour, 2 hours)
-- Reminders and reporting
-
-Estimated effort: 2 weeks (the simplest model, and borrows heavily from existing timeline grid work).
-
-### 4.3 Total Phased Build Estimate
-
-| Phase | Model | Covers | Effort |
+| Phase | Model | Status | Remaining focus |
 |---|---|---|---|
-| Done | A: Table Reservation | Restaurants, cafes, pubs | Complete |
-| Phase 1 | B: Practitioner Appointment | ~35+ business types | 3–4 weeks |
-| Phase 2 | C: Event/Experience Ticket | ~20+ business types | 2–3 weeks |
-| Phase 3 | D: Class/Group Session | ~15+ business types | 2–3 weeks |
-| Phase 4 | E: Resource/Facility Booking | ~15+ business types | 2 weeks |
-| **Total** | **All models** | **85+ business types** | **9–12 weeks** |
+| — | A: Table | Complete | Maintenance + founding venues |
+| — | B: Appointment | MVP shipped | Polish, lint/CI, onboarding parity |
+| 2 | C: Event | Foundation | Guest + staff product completion |
+| 3 | D: Class | Foundation | Timetable + roster product completion |
+| 4 | E: Resource | Foundation | Timeline + booking UX |
 
 ---
 
-## 5. Database Schema Strategy
+## 5. Database schema strategy
 
-### 5.1 Shared Tables (existing, extended)
+**Canonical DDL lives in Supabase migrations** — do not treat this section as SQL to run manually. Key files:
 
-These tables serve ALL booking models with minor additions:
+| Migration | Contents |
+|-----------|----------|
+| [`20260327000001_multi_model_foundation.sql`](../supabase/migrations/20260327000001_multi_model_foundation.sql) | `booking_model` enum on `venues`; Model B–E core tables; nullable FKs on `bookings` |
+| [`20260401000000_practitioner_calendar_blocks.sql`](../supabase/migrations/20260401000000_practitioner_calendar_blocks.sql) | `practitioner_calendar_blocks` |
+| [`20260331000001_booking_client_arrived.sql`](../supabase/migrations/20260331000001_booking_client_arrived.sql) | `bookings.client_arrived_at` |
+| [`20260330000001_group_booking_columns.sql`](../supabase/migrations/20260330000001_group_booking_columns.sql) | Group booking columns on `bookings` |
+| [`20260402000000_deposit_request_email_and_comm_logs_types.sql`](../supabase/migrations/20260402000000_deposit_request_email_and_comm_logs_types.sql) | Comms / deposit-request related |
 
-- **`venues`** — Add `booking_model` (text: 'table_reservation', 'practitioner_appointment', 'event_ticket', 'class_session', 'resource_booking'), `business_type` (text), `business_category` (text), `terminology` (JSONB: the terms map for this business)
-- **`bookings`** — Already flexible. Add nullable FKs: `practitioner_id`, `event_id`, `class_instance_id`, `resource_id`. Only one is populated per booking depending on the model.
-- **`guests`** — Works as-is for all models. The identity matching logic is universal.
-- **`events_log`** (audit) — Works as-is.
-- **`communication_logs`** — Works as-is.
+### 5.1 Shared tables
 
-### 5.2 Model B: New Tables
+- **`venues`** — `booking_model`, `business_type`, `business_category`, `terminology` (and existing venue fields).
+- **`bookings`** — Nullable FKs: `practitioner_id`, `appointment_service_id`, `experience_event_id`, `class_instance_id`, `resource_id` (only relevant columns populated per model). Additional columns: e.g. `booking_end_time`, `estimated_end_time`, `client_arrived_at`, group fields per migrations.
+- **`guests`** — Universal client/guest identity.
+- **Audit / comms** — e.g. `events` (booking audit trail), `communications`, `communication_logs` (see migrations for exact columns).
 
-```sql
--- Practitioners (staff who take appointments)
-CREATE TABLE practitioners (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  venue_id UUID NOT NULL REFERENCES venues(id) ON DELETE CASCADE,
-  staff_id UUID REFERENCES staff(id),  -- linked to auth user if they log in
-  name TEXT NOT NULL,
-  email TEXT,
-  phone TEXT,
-  working_hours JSONB NOT NULL DEFAULT '{}',  -- { "mon": [{"start":"09:00","end":"17:00"}], ... }
-  break_times JSONB DEFAULT '[]',             -- [{"start":"13:00","end":"14:00"}]
-  days_off JSONB DEFAULT '[]',                -- recurring: ["sun"] or specific: ["2026-04-15"]
-  is_active BOOLEAN DEFAULT true,
-  sort_order INT DEFAULT 0,
-  created_at TIMESTAMPTZ DEFAULT now()
-);
+### 5.2 Model B — core tables (names as implemented)
 
--- Services offered
-CREATE TABLE offered_services (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  venue_id UUID NOT NULL REFERENCES venues(id) ON DELETE CASCADE,
-  name TEXT NOT NULL,
-  description TEXT,
-  duration_minutes INT NOT NULL,
-  buffer_minutes INT DEFAULT 0,        -- cleanup/prep time after appointment
-  price_pence INT,                     -- nullable = price on consultation
-  deposit_pence INT,                   -- nullable = no deposit required
-  colour TEXT DEFAULT '#3B82F6',       -- calendar colour coding
-  is_active BOOLEAN DEFAULT true,
-  sort_order INT DEFAULT 0,
-  created_at TIMESTAMPTZ DEFAULT now()
-);
+- **`practitioners`** — `working_hours` JSONB (keys `"0"`–`"6"` for Sun–Sat, aligned with dashboard + `getDayOfWeek`), `break_times`, `days_off`, etc.
+- **`appointment_services`** — venue service menu (duration, buffer, price, deposit, colour).
+- **`practitioner_services`** — links practitioner ↔ service; optional `custom_duration_minutes`, `custom_price_pence`.
+- **`practitioner_calendar_blocks`** — date-scoped blocked intervals per practitioner (see migration above).
 
--- Which practitioners offer which services
-CREATE TABLE practitioner_services (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  practitioner_id UUID NOT NULL REFERENCES practitioners(id) ON DELETE CASCADE,
-  service_id UUID NOT NULL REFERENCES offered_services(id) ON DELETE CASCADE,
-  custom_duration_minutes INT,         -- override if this practitioner is slower/faster
-  custom_price_pence INT,              -- override if this practitioner charges differently
-  UNIQUE(practitioner_id, service_id)
-);
-```
+### 5.3 Model C — core tables
 
-### 5.3 Model C: New Tables
+- **`experience_events`** — not `venue_events`; stores dated experiences, capacity, recurrence fields, `parent_event_id`.
+- **`event_ticket_types`** — `event_id` references **`experience_events.id`**.
 
-```sql
--- Events / experiences
-CREATE TABLE venue_events (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  venue_id UUID NOT NULL REFERENCES venues(id) ON DELETE CASCADE,
-  name TEXT NOT NULL,
-  description TEXT,
-  event_date DATE NOT NULL,
-  start_time TIME NOT NULL,
-  end_time TIME NOT NULL,
-  capacity INT NOT NULL,
-  image_url TEXT,
-  is_recurring BOOLEAN DEFAULT false,
-  recurrence_rule TEXT,                -- iCal RRULE format for recurring events
-  parent_event_id UUID REFERENCES venue_events(id),  -- if this is an instance of a recurring event
-  is_active BOOLEAN DEFAULT true,
-  created_at TIMESTAMPTZ DEFAULT now()
-);
+Implementation status: tables + engine + `booking/create` branch — see §1.3.
 
--- Ticket types per event
-CREATE TABLE event_ticket_types (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  event_id UUID NOT NULL REFERENCES venue_events(id) ON DELETE CASCADE,
-  name TEXT NOT NULL,                  -- e.g. 'Adult', 'Child', 'VIP'
-  price_pence INT NOT NULL,
-  capacity INT,                        -- null = limited only by event capacity
-  sort_order INT DEFAULT 0
-);
-```
+### 5.4 Model D — core tables
 
-### 5.4 Model D: New Tables
+- **`class_types`**, **`class_timetable`**, **`class_instances`** — as created in multi-model migration; `instructor_id` may reference `practitioners`.
 
-```sql
--- Class types
-CREATE TABLE class_types (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  venue_id UUID NOT NULL REFERENCES venues(id) ON DELETE CASCADE,
-  name TEXT NOT NULL,                  -- e.g. 'Vinyasa Yoga', 'Spin Class'
-  description TEXT,
-  duration_minutes INT NOT NULL,
-  capacity INT NOT NULL,
-  instructor_id UUID REFERENCES practitioners(id),
-  price_pence INT,
-  colour TEXT DEFAULT '#22C55E',
-  is_active BOOLEAN DEFAULT true,
-  created_at TIMESTAMPTZ DEFAULT now()
-);
+Implementation status: see §1.3.
 
--- Timetable entries (recurring schedule)
-CREATE TABLE class_timetable (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  class_type_id UUID NOT NULL REFERENCES class_types(id) ON DELETE CASCADE,
-  day_of_week INT NOT NULL,            -- 0=Sun, 6=Sat
-  start_time TIME NOT NULL,
-  is_active BOOLEAN DEFAULT true
-);
+### 5.5 Model E — core tables
 
--- Individual class instances (generated from timetable)
-CREATE TABLE class_instances (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  class_type_id UUID NOT NULL REFERENCES class_types(id),
-  timetable_entry_id UUID REFERENCES class_timetable(id),
-  instance_date DATE NOT NULL,
-  start_time TIME NOT NULL,
-  capacity_override INT,               -- null = use class_type default
-  is_cancelled BOOLEAN DEFAULT false,
-  cancel_reason TEXT,
-  created_at TIMESTAMPTZ DEFAULT now()
-);
-```
+- **`venue_resources`** — availability JSONB, slot length, min/max booking, pricing.
 
-### 5.5 Model E: New Tables
-
-```sql
--- Bookable resources
-CREATE TABLE venue_resources (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  venue_id UUID NOT NULL REFERENCES venues(id) ON DELETE CASCADE,
-  name TEXT NOT NULL,                  -- e.g. 'Court 1', 'Studio A', 'Pitch 2'
-  resource_type TEXT,                  -- e.g. 'tennis_court', 'meeting_room'
-  min_booking_minutes INT DEFAULT 60,
-  max_booking_minutes INT DEFAULT 120,
-  slot_interval_minutes INT DEFAULT 30,
-  price_per_slot_pence INT,
-  availability_hours JSONB NOT NULL,   -- same format as practitioner working_hours
-  is_active BOOLEAN DEFAULT true,
-  sort_order INT DEFAULT 0,
-  created_at TIMESTAMPTZ DEFAULT now()
-);
-```
+Implementation status: see §1.3.
 
 ---
 
-## 6. The Onboarding Experience Per Model
+## 6. The onboarding experience per model
 
-When a business selects their type during signup, the onboarding wizard adapts:
+### 6.1 Shared steps (all models)
 
-### 6.1 Shared Steps (all models)
+- Early steps: business identity (name, address, phone, photo — as implemented in signup/onboarding).
+- Final steps: preview, go-live, Stripe Connect, QR/widget — as implemented.
 
-- Step 1: Your Business (name, address, phone, photo — identical for all)
-- Final Step: Preview & Go Live (booking page preview, QR code — identical for all)
+### 6.2 Target model-specific steps (product vision)
 
-### 6.2 Model-Specific Steps
+**Model A (restaurants):** Opening hours → slot model and capacity → deposits → preview. **Largely as built.**
 
-**Model A (restaurants):** Opening Hours → Slot Model & Capacity → Deposits → Preview. Already built.
+**Model B (appointments):** Your team (practitioners + working hours) → services (menu + who offers what) → deposits/payments → preview.
 
-**Model B (appointments):** Your Team (add practitioners + working hours) → Your Services (service menu with durations and prices) → Deposits/Payments → Preview.
+**Model C (events):** First event (date, time, capacity, ticket types) → payments → preview.
 
-**Model C (events):** Your First Event (create an event with date, time, capacity, ticket types) → Payment Settings → Preview.
+**Model D (classes):** Class types → weekly timetable → payments → preview.
 
-**Model D (classes):** Your Classes (define class types) → Your Timetable (set up weekly schedule) → Payment Settings → Preview.
+**Model E (resources):** Resources + availability → pricing → preview.
 
-**Model E (resources):** Your Resources (define bookable resources with availability) → Pricing → Preview.
+### 6.3 Current vs target (Model B)
 
-### 6.3 Smart Defaults
+Today, appointment venues typically configure **team, services, and hours** through **Settings → Availability** (appointment team/hours), **Appointment services**, and related venue APIs — not necessarily a single linear wizard that matches every bullet in §6.2. When onboarding copy and dashboard settings diverge, treat **§6.2 as the target UX** and the dashboard routes as **source of truth for what works today**.
 
-When the user selects their business type, the wizard pre-populates everything it can:
+#### Model B wizard today (`practitioner_appointment`)
 
-- Barber → Services pre-filled (Men's Cut 30min £15, etc.), working hours pre-set (Tue-Sat 9-6)
-- Physiotherapist → Services pre-filled (Initial Assessment 60min £55, Follow-up 30min £40), terminology switched to Patient/Appointment/Physio
-- Escape Room → One event template pre-created, capacity suggested at 6
-- Yoga Studio → Class types pre-filled (Vinyasa 60min, Yin 75min), timetable template ready
+The linear flow in [`src/app/onboarding/page.tsx`](../src/app/onboarding/page.tsx) is **profile → team (practitioner names/emails) → services (basic menu: name, duration, price) → preview**. It does **not** yet cover every §6.2 bullet. Use this matrix to see what is in-wizard vs dashboard:
 
-The user adjusts from sensible defaults rather than building from scratch. This is the single biggest time-saver in the onboarding experience.
+| §6.2 target | In onboarding wizard today | Configure after onboarding (dashboard) |
+|-------------|---------------------------|----------------------------------------|
+| Practitioners + **working hours** | Names (and optional emails) only; no `working_hours` payload | **Availability** — [`src/app/dashboard/availability/AppointmentAvailabilitySettings.tsx`](../src/app/dashboard/availability/AppointmentAvailabilitySettings.tsx) (`/dashboard/availability`) |
+| Services + **who offers what** | Creates `appointment_services` only; no `practitioner_services` links | **Services** — [`src/app/dashboard/appointment-services/AppointmentServicesView.tsx`](../src/app/dashboard/appointment-services/AppointmentServicesView.tsx) (`/dashboard/appointment-services`) |
+| **Deposits / payments** | No dedicated step | Stripe Connect and payment/deposit settings via **Settings** (`/dashboard/settings`) and service-level deposits on Appointment services |
+| Preview / go-live | Yes | — |
+
+The onboarding **preview** step surfaces short reminders and links to these routes so venues are not left assuming §6.2 is fully completed inside the wizard.
+
+### 6.4 Smart defaults
+
+When the user selects a business type, pre-populate sensible defaults (services, hours, terminology) from DB seeds or TS config so users edit rather than invent structure. Same principle applies to C/D/E once those flows are prioritised.
 
 ---
 
-## 7. Maintaining Simplicity — Guidelines
+## 7. Maintaining simplicity — guidelines
 
-Your concern about providing too many bespoke options is well-founded. Here are the rules to keep the system manageable:
-
-### 7.1 Rules for What's Configurable vs. Fixed
+### 7.1 Rules for what's configurable vs fixed
 
 **Configurable by the business (through settings):**
+
 - Business name, address, logo, description
-- Services/events/classes/resources (names, durations, prices)
+- Services / events / classes / resources (names, durations, prices)
 - Working hours and availability
 - Practitioner profiles
 - Deposit amounts and cancellation policy
 - Communication template wording
 
-**Configurable by business TYPE (through the template system, not by the user):**
+**Configurable by business type (template / DB, not ad hoc code):**
+
 - Which dashboard views are shown
 - Terminology (Guest vs Client vs Patient)
 - Default services and settings
 - Booking page layout
 - Which booking model drives availability
 
-**NOT configurable (hard-coded decisions):**
-- The booking models themselves (five models, no hybrids)
-- The core database schema
-- The payment flow (always Stripe Connect)
-- The communication channels (always email + SMS)
-- The cancellation policy structure (configurable windows, but the framework is fixed)
-- The reporting metrics (standardised across all models)
+**NOT configurable (fixed product rules):**
 
-### 7.2 The "Other" Escape Hatch
+- The five booking models (no arbitrary hybrids in MVP)
+- Core schema (change via migrations)
+- Payment rail (Stripe Connect direct charges)
+- Communication channels (email + SMS through abstraction layer)
+- Cancellation framework shape (windows configurable inside the framework)
 
-For any business that doesn't fit neatly into a predefined type, the "Other" option defaults to Model B (practitioner appointment) with blank service templates. This is the safest default because appointment booking is the most common pattern for service businesses, and it's flexible enough to work for almost anything. The user just fills in their own service names and durations.
+### 7.2 The "Other" escape hatch
 
-### 7.3 One Codebase, One Dashboard Shell
+**Other** should default to **`practitioner_appointment`** with blank or minimal service templates — flexible for unknown service businesses.
 
-The dashboard should be a single application with conditional rendering, not five separate apps. The sidebar navigation, header, settings structure, and reporting framework are shared. Only the main content area changes based on the booking model. This means:
+### 7.3 One codebase, one dashboard shell
 
-- One set of components to maintain
-- One deployment pipeline
-- Shared bug fixes and improvements benefit all business types
-- New business types can be added by creating a config entry and (if needed) custom default services — no new code required unless a new booking MODEL is needed
+Single Next.js app: shared shell, conditional nav and pages by `booking_model`. New **business types** should be config/DB where possible; new **models** are rare and require engines + migrations.
 
 ---
 
-## 8. Pricing Model Summary
+## 8. Pricing model summary
 
 | Model | Pricing | Rationale |
 |---|---|---|
-| A: Table Reservation | £79/month flat | Restaurant pricing is venue-based, not staff-based |
-| B: Practitioner Appointment | £10/user/month | Value scales with team size |
-| C: Event/Experience | £79/month flat | Venue-based, one account manages all events |
-| D: Class/Group | £79/month flat | Studio-based, one account manages the timetable |
-| E: Resource/Facility | £79/month flat | Facility-based, one account manages all resources |
+| A: Table Reservation | £79/month flat | Venue-based |
+| B: Practitioner Appointment | £10/user/month (calendar/practitioner limits per plan) | Scales with team |
+| C: Event/Experience | £79/month flat | Venue-based |
+| D: Class/Group | £79/month flat | Studio-based |
+| E: Resource/Facility | £79/month flat | Facility-based |
 
-Solo practitioners (barbers, physios, tutors working alone) get the cheapest entry at £10/month. Multi-practitioner businesses (salons, clinics) scale naturally. Venue-based businesses (restaurants, studios, escape rooms) pay a flat fee regardless of staff count.
+Solo practitioners get low entry; multi-practitioner businesses scale; venue-based models pay flat regardless of headcount (subject to actual billing implementation in Stripe/products).
 
 ---
 
-## 9. Summary — What to Build and In What Order
+## 9. Summary — what to do next
 
-1. **Now:** Finish polishing the restaurant product. Get founding venues live.
-2. **Next (Phase 1):** Build Model B (practitioner appointments). This single model covers the largest number of NI businesses and is the fastest path to revenue diversification.
-3. **Then (Phase 2):** Build Model C (events/experiences). NI's experience economy is growing.
-4. **Then (Phase 3):** Build Model D (classes). Heavily reuses Model C.
-5. **Finally (Phase 4):** Build Model E (resources). Simplest model, smallest market.
-6. **After all models:** Build the multi-vertical landing page and onboarding flow that routes users to the right experience.
-7. **Future:** Consumer-facing app for discovery and booking across all verticals.
+1. **Now:** Operate and harden Model A and Model B for founding venues (reliability, comms, payments, support).
+2. **Next:** Complete **Model C** guest + staff product on top of existing `experience_events` / engines (Phase 2).
+3. **Then:** **Model D** timetable and roster UX (Phase 3), reusing patterns from C where instances and capacity overlap.
+4. **Then:** **Model E** resource timeline and booking length UX (Phase 4).
+5. **Ongoing:** Multi-vertical marketing/onboarding that routes businesses to the correct `booking_model` without forking the app.
+6. **Future:** Consumer discovery across verticals (out of scope unless prioritised).
 
-At each phase, the existing models continue working unchanged. New business types can be added to the config file without new code — they just need a mapping to one of the five models and a set of default services.
+New business types should map to one of the five models and extend **terminology + defaults**; new engines are only needed for a new **model**, not for each industry name.

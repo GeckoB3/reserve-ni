@@ -151,22 +151,25 @@ export function AppointmentBookingForm({
 
   const activePractitioners = useMemo(() => practitioners.filter((p) => p.is_active), [practitioners]);
 
-  function getServicesForPractitioner(pracId: string) {
-    if (!pracId) return services.filter((s) => s.is_active);
-    const pracLinks = links.filter((l) => l.practitioner_id === pracId);
-    if (pracLinks.length === 0) return services.filter((s) => s.is_active);
-    const linkedIds = new Set(pracLinks.map((l) => l.service_id));
-    return services.filter((s) => s.is_active && linkedIds.has(s.id));
-  }
+  const getServicesForPractitioner = useCallback(
+    (pracId: string) => {
+      if (!pracId) return services.filter((s) => s.is_active);
+      const pracLinks = links.filter((l) => l.practitioner_id === pracId);
+      if (pracLinks.length === 0) return services.filter((s) => s.is_active);
+      const linkedIds = new Set(pracLinks.map((l) => l.service_id));
+      return services.filter((s) => s.is_active && linkedIds.has(s.id));
+    },
+    [services, links],
+  );
 
   const servicesForPractitioner = useMemo(
     () => getServicesForPractitioner(selectedPractitioner),
-    [selectedPractitioner, services, links],
+    [selectedPractitioner, getServicesForPractitioner],
   );
 
   const groupServicesForPrac = useMemo(
     () => getServicesForPractitioner(groupPracId),
-    [groupPracId, services, links],
+    [groupPracId, getServicesForPractitioner],
   );
 
   // ── Single: fetch slots ──
