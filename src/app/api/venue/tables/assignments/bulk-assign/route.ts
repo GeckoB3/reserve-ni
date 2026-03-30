@@ -5,6 +5,7 @@ import { getVenueStaff } from '@/lib/venue-auth';
 import { BOOKING_ACTIVE_STATUSES } from '@/lib/table-management/constants';
 import { autoAssignTable } from '@/lib/table-availability';
 import { syncTableStatusesForBooking } from '@/lib/table-management/lifecycle';
+import { resolveTableAssignmentDurationBuffer } from '@/lib/table-management/booking-table-duration';
 
 const bodySchema = z.object({
   dry_run: z.boolean().optional(),
@@ -32,6 +33,7 @@ type BookingRow = {
   estimated_end_time: string | null;
   party_size: number;
   status: string;
+  service_id: string | null;
   guest: { name: string } | { name: string }[] | null;
 };
 
@@ -114,8 +116,18 @@ export async function POST(request: NextRequest) {
   for (const booking of unassignedBookings) {
     const bookingTime = booking.booking_time.slice(0, 5);
     const guestName = Array.isArray(booking.guest) ? booking.guest[0]?.name ?? 'Guest' : booking.guest?.name ?? 'Guest';
-    const durationMinutes = getDurationMinutes(bookingTime, booking.estimated_end_time);
-    const bufferMinutes = 15;
+    const { durationMinutes, bufferMinutes } = booking.service_id
+      ? await resolveTableAssignmentDurationBuffer(
+          staff.db,
+          staff.venue_id,
+          booking.booking_date,
+          booking.party_size,
+          booking.service_id,
+        )
+      : {
+          durationMinutes: getDurationMinutes(bookingTime, booking.estimated_end_time),
+          bufferMinutes: 15,
+        };
 
     try {
       const result = await autoAssignTable(

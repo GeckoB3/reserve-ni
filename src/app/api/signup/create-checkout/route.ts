@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { stripe } from '@/lib/stripe';
 import { getBusinessConfig } from '@/lib/business-config';
+import { FOUNDING_PARTNER_CAP } from '@/lib/pricing-constants';
 
 export async function POST(request: Request) {
   try {
@@ -28,6 +29,13 @@ export async function POST(request: Request) {
 
     const config = getBusinessConfig(business_type);
 
+    if (config.model === 'table_reservation' && plan === 'standard') {
+      return NextResponse.json(
+        { error: 'Restaurant businesses must subscribe to the Business plan.' },
+        { status: 400 },
+      );
+    }
+
     // Founding Partner: skip Stripe, create venue directly
     if (plan === 'founding') {
       if (config.model !== 'table_reservation') {
@@ -37,6 +45,19 @@ export async function POST(request: Request) {
         );
       }
       const admin = getSupabaseAdminClient();
+
+      const { count: foundingCount, error: foundingCountErr } = await admin
+        .from('venues')
+        .select('id', { count: 'exact', head: true })
+        .eq('pricing_tier', 'founding');
+      if (!foundingCountErr) {
+        if ((foundingCount ?? 0) >= FOUNDING_PARTNER_CAP) {
+          return NextResponse.json(
+            { error: 'Founding Partner places are full. Please choose the Business plan.' },
+            { status: 400 },
+          );
+        }
+      }
 
       // Idempotency: check if this user already has a venue
       const { data: existingStaff } = await admin
@@ -140,8 +161,10 @@ export async function POST(request: Request) {
       ],
       metadata: {
         supabase_user_id: user.id,
+        user_id: user.id,
         business_type,
         plan,
+        pricing_tier: plan,
         calendar_count: String(quantity),
         booking_model: config.model,
         business_category: config.category,

@@ -21,13 +21,22 @@ function intervalsOverlap(startA: number, endA: number, startB: number, endB: nu
   return startA < endB && startB < endA;
 }
 
-function computeEndMinutes(booking: Pick<BookingCore, 'booking_time' | 'estimated_end_time'>, fallbackMinutes = 90): number {
+/** End minute-of-day for overlap checks; may exceed 1440 when the booking crosses midnight (wall time). */
+export function computeEndMinutes(
+  booking: Pick<BookingCore, 'booking_time' | 'estimated_end_time'>,
+  fallbackMinutes = 90,
+): number {
   const startMin = timeToMinutes(booking.booking_time);
   if (!booking.estimated_end_time) return startMin + fallbackMinutes;
   const raw = booking.estimated_end_time.includes('T')
     ? booking.estimated_end_time.split('T')[1] ?? ''
     : booking.estimated_end_time;
-  return raw ? timeToMinutes(raw) : startMin + fallbackMinutes;
+  if (!raw) return startMin + fallbackMinutes;
+  let endMin = timeToMinutes(raw);
+  if (endMin <= startMin) {
+    endMin += 24 * 60;
+  }
+  return endMin;
 }
 
 export async function getBookingById(
@@ -291,6 +300,8 @@ export async function applyBookingLifecycleStatusEffects(
   const assignedTableIds = await getAssignedTableIds(db, bookingId);
   if (nextStatus === 'Cancelled' || nextStatus === 'No-Show' || nextStatus === 'Completed') {
     await clearTableStatusesForBooking(db, bookingId, actorId);
+    // Remove assignment rows so dashboards and exports do not show stale table links.
+    await replaceBookingAssignments(db, bookingId, [], actorId);
   } else if (nextStatus === 'Seated' || nextStatus === 'Confirmed' || nextStatus === 'Pending') {
     await syncTableStatusesForBooking(db, bookingId, assignedTableIds, nextStatus, actorId);
   }

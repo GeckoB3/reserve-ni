@@ -1,17 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { stripe } from '@/lib/stripe';
+import { requireCronAuthorisation } from '@/lib/cron-auth';
 
 /**
- * POST /api/cron/reconciliation
- * Daily job: compare bookings with deposit Paid/Refunded (created/updated in last 48h) to Stripe PaymentIntent.
- * Log discrepancies to reconciliation_alerts. Secured with CRON_SECRET.
+ * GET/POST /api/cron/reconciliation
+ * Vercel Cron uses GET; POST kept for manual triggers.
+ * Compares recent Paid/Refunded bookings to Stripe PaymentIntents; logs reconciliation_alerts.
  */
+export async function GET(request: NextRequest) {
+  return POST(request);
+}
+
 export async function POST(request: NextRequest) {
-  const secret = process.env.CRON_SECRET;
-  if (secret && request.headers.get('authorization') !== `Bearer ${secret}`) {
-    return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
-  }
+  const denied = requireCronAuthorisation(request);
+  if (denied) return denied;
 
   try {
     const supabase = getSupabaseAdminClient();

@@ -36,7 +36,7 @@ export async function GET(request: NextRequest) {
     const { data: booking, error: bookErr } = await supabase
       .from('bookings')
       .select(
-        'id, venue_id, guest_id, booking_date, booking_time, party_size, status, deposit_status, deposit_amount_pence, confirm_token_hash, confirm_token_used_at, practitioner_id, appointment_service_id',
+        'id, venue_id, guest_id, booking_date, booking_time, party_size, status, deposit_status, deposit_amount_pence, confirm_token_hash, confirm_token_used_at, practitioner_id, appointment_service_id, updated_at',
       )
       .eq('id', bookingId)
       .single();
@@ -149,7 +149,7 @@ export async function POST(request: NextRequest) {
     const { data: booking, error: bookErr } = await supabase
       .from('bookings')
       .select(
-        'id, venue_id, guest_id, booking_date, booking_time, party_size, status, deposit_status, deposit_amount_pence, stripe_payment_intent_id, cancellation_deadline, confirm_token_hash, confirm_token_used_at, service_id, practitioner_id, appointment_service_id',
+        'id, venue_id, guest_id, booking_date, booking_time, party_size, status, deposit_status, deposit_amount_pence, stripe_payment_intent_id, cancellation_deadline, confirm_token_hash, confirm_token_used_at, service_id, practitioner_id, appointment_service_id, updated_at',
       )
       .eq('id', bookingId)
       .single();
@@ -382,7 +382,8 @@ export async function POST(request: NextRequest) {
         };
 
         const nowIso = new Date().toISOString();
-        await supabase
+        const prevUpdatedAt = booking.updated_at as string;
+        const { data: apptUpdated, error: apptUpdErr } = await supabase
           .from('bookings')
           .update({
             booking_date: newDate,
@@ -395,7 +396,21 @@ export async function POST(request: NextRequest) {
             cancellation_policy_snapshot,
             updated_at: nowIso,
           })
-          .eq('id', bookingId);
+          .eq('id', bookingId)
+          .eq('updated_at', prevUpdatedAt)
+          .select('id')
+          .maybeSingle();
+
+        if (apptUpdErr) {
+          console.error('confirm modify (appointment) update failed:', apptUpdErr);
+          return NextResponse.json({ error: 'Failed to update booking.' }, { status: 500 });
+        }
+        if (!apptUpdated) {
+          return NextResponse.json(
+            { error: 'This booking was updated elsewhere. Refresh the page and try again.' },
+            { status: 412 },
+          );
+        }
 
         return NextResponse.json({
           success: true,
@@ -455,7 +470,8 @@ export async function POST(request: NextRequest) {
       }
 
       const now = new Date().toISOString();
-      await supabase
+      const prevUpdatedAt = booking.updated_at as string;
+      const { data: tableUpdated, error: tableUpdErr } = await supabase
         .from('bookings')
         .update({
           booking_date: newDate,
@@ -463,7 +479,21 @@ export async function POST(request: NextRequest) {
           party_size: newPartySize,
           updated_at: now,
         })
-        .eq('id', bookingId);
+        .eq('id', bookingId)
+        .eq('updated_at', prevUpdatedAt)
+        .select('id')
+        .maybeSingle();
+
+      if (tableUpdErr) {
+        console.error('confirm modify (table) update failed:', tableUpdErr);
+        return NextResponse.json({ error: 'Failed to update booking.' }, { status: 500 });
+      }
+      if (!tableUpdated) {
+        return NextResponse.json(
+          { error: 'This booking was updated elsewhere. Refresh the page and try again.' },
+          { status: 412 },
+        );
+      }
 
       return NextResponse.json({
         success: true,

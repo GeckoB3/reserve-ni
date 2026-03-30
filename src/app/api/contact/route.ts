@@ -1,16 +1,17 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import sgMail from '@sendgrid/mail';
+import { z } from 'zod';
 import { normalizeToE164 } from '@/lib/phone/e164';
+import { checkRateLimit, getClientIp } from '@/lib/rate-limit';
 
 const apiKey = process.env.SENDGRID_API_KEY;
 if (apiKey) {
   sgMail.setApiKey(apiKey);
 }
 
-const CONTACT_TO = 'hello@reserveni.com';
+const CONTACT_TO = process.env.CONTACT_TO?.trim() || 'hello@reserveni.com';
 const FROM = { email: 'hello@reserveni.com', name: 'Reserve NI' };
 
-const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MAX_MESSAGE_LENGTH = 2000;
 
 /** Validated payload: name and email are set. */
@@ -39,7 +40,7 @@ function validate(body: unknown): { ok: true; data: ContactPayload } | { ok: fal
   if (!email) {
     return { ok: false, error: 'Please enter your email address.' };
   }
-  if (!EMAIL_REGEX.test(email)) {
+  if (!z.string().email().safeParse(email).success) {
     return { ok: false, error: 'Please enter a valid email address.' };
   }
   if (phone !== undefined && phone !== '') {
@@ -98,8 +99,17 @@ function escapeHtml(s: string): string {
     .replace(/"/g, '&quot;');
 }
 
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
   try {
+    const ip = getClientIp(request);
+    const rl = checkRateLimit(ip, 'contact', 3, 60_000);
+    if (!rl.ok) {
+      return NextResponse.json(
+        { success: false, error: 'Too many requests. Try again shortly.' },
+        { status: 429, headers: { 'Retry-After': String(rl.retryAfterSec) } },
+      );
+    }
+
     const body = (await request.json()) as Record<string, unknown>;
     const companyWebsite = typeof body.company_website === 'string' ? body.company_website.trim() : '';
     if (companyWebsite) {

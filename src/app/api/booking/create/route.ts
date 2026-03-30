@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse, after } from 'next/server';
+import { checkRateLimit, getClientIp } from '@/lib/rate-limit';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { stripe } from '@/lib/stripe';
 import { findOrCreateGuest } from '@/lib/guests';
 import { sendBookingConfirmationEmail } from '@/lib/communications/send-templated';
 import { computeAvailability, fetchEngineInput } from '@/lib/availability';
 import { AVAILABILITY_SETUP_REQUIRED_MESSAGE } from '@/lib/availability/availability-errors';
-import { resolveDuration, getDayOfWeek } from '@/lib/availability/engine';
 import { generateConfirmToken, hashConfirmToken } from '@/lib/confirm-token';
 import { z } from 'zod';
 import { normalizeToE164 } from '@/lib/phone/e164';
@@ -13,6 +13,9 @@ import { normalizeToE164 } from '@/lib/phone/e164';
 import { autoAssignTable } from '@/lib/table-availability';
 import { resolveVenueMode } from '@/lib/venue-mode';
 import { syncTableStatusesForBooking } from '@/lib/table-management/lifecycle';
+import { resolveDurationAndBufferForTableAssignment } from '@/lib/table-management/booking-table-duration';
+import { isStrictTableAssignOnOnlineCreate } from '@/lib/table-management/auto-assign-policy';
+import { resolvePartySizeBoundsForVenueServices } from '@/lib/booking/party-size-bounds';
 import {
   attachVenueClockToAppointmentInput,
   fetchAppointmentInput,
@@ -67,6 +70,15 @@ function cancellationDeadline(bookingDate: string, bookingTime: string): string 
  */
 export async function POST(request: NextRequest) {
   try {
+    const ip = getClientIp(request);
+    const rl = checkRateLimit(ip, 'booking-create', 8, 60_000);
+    if (!rl.ok) {
+      return NextResponse.json(
+        { error: 'Too many requests. Try again shortly.' },
+        { status: 429, headers: { 'Retry-After': String(rl.retryAfterSec) } },
+      );
+    }
+
     const body = await request.json();
     const parsed = createBookingSchema.safeParse(body);
     if (!parsed.success) {
@@ -118,29 +130,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: AVAILABILITY_SETUP_REQUIRED_MESSAGE }, { status: 503 });
     }
 
-    const { data: activeServices } = await supabase
-      .from('venue_services')
-      .select('id')
-      .eq('venue_id', venue_id)
-      .eq('is_active', true);
-    const serviceIds = (activeServices ?? []).map((s) => s.id);
-
-    let minParty = 1;
-    let maxParty = 50;
-    if (serviceIds.length > 0) {
-      const { data: restrRows } = await supabase
-        .from('booking_restrictions')
-        .select('min_party_size_online, max_party_size_online')
-        .in('service_id', serviceIds);
-      for (const row of restrRows ?? []) {
-        minParty = Math.max(minParty, row.min_party_size_online ?? 1);
-        maxParty = Math.min(maxParty, row.max_party_size_online ?? 50);
-      }
-    } else {
-      const rules = (venue.booking_rules as { min_party_size?: number; max_party_size?: number }) ?? {};
-      minParty = rules.min_party_size ?? 1;
-      maxParty = rules.max_party_size ?? 50;
-    }
+    const { min: minParty, max: maxParty } = await resolvePartySizeBoundsForVenueServices(supabase, venue_id);
     if (party_size < minParty || party_size > maxParty) {
       return NextResponse.json(
         { error: `Party size must be between ${minParty} and ${maxParty}` },
@@ -182,12 +172,17 @@ export async function POST(request: NextRequest) {
     }
 
     resolvedServiceId = slot.service_id;
-    const engineDow = getDayOfWeek(booking_date);
-    const duration = resolveDuration(engineInput.durations, slot.service_id, party_size, engineDow);
+    const { durationMinutes, bufferMinutes } = await resolveDurationAndBufferForTableAssignment(
+      supabase,
+      engineInput,
+      booking_date,
+      party_size,
+      resolvedServiceId,
+    );
     const [y, mo, d] = booking_date.split('-').map(Number);
     const [hh, mm] = timeStr.split(':').map(Number);
     const endDate = new Date(Date.UTC(y!, mo! - 1, d!, hh!, mm!, 0));
-    endDate.setMinutes(endDate.getMinutes() + duration);
+    endDate.setMinutes(endDate.getMinutes() + durationMinutes);
     estimatedEndTime = endDate.toISOString();
 
     const isOnlineSource = source === 'online' || source === 'widget' || source === 'booking_page';
@@ -251,28 +246,16 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to create booking' }, { status: 500 });
     }
 
+    let tableAssignmentUnassigned = false;
     if (venueMode.tableManagementEnabled && estimatedEndTime) {
-      const durationMs = new Date(estimatedEndTime).getTime() - new Date(`${booking_date}T${timeForDb}`).getTime();
-      const durationMins = Math.round(durationMs / 60000);
-      const defaultRule = await supabase
-        .from('service_capacity_rules')
-        .select('buffer_minutes')
-        .eq('service_id', resolvedServiceId!)
-        .is('day_of_week', null)
-        .is('time_range_start', null)
-        .limit(1)
-        .maybeSingle();
-
-      const bufferMins = defaultRule?.data?.buffer_minutes ?? 15;
-
       const assigned = await autoAssignTable(
         supabase,
         venue_id,
         booking.id,
         booking_date,
         timeStr,
-        durationMins,
-        bufferMins,
+        durationMinutes,
+        bufferMinutes,
         party_size,
       );
       if (assigned) {
@@ -283,6 +266,18 @@ export async function POST(request: NextRequest) {
           booking.status,
           null
         );
+      } else {
+        tableAssignmentUnassigned = true;
+        if (isStrictTableAssignOnOnlineCreate() && isOnlineSource) {
+          await supabase.from('bookings').delete().eq('id', booking.id);
+          return NextResponse.json(
+            {
+              error:
+                'No table could be assigned for this time. Please choose another slot or contact the venue.',
+            },
+            { status: 503 },
+          );
+        }
       }
     }
 
@@ -356,6 +351,7 @@ export async function POST(request: NextRequest) {
         client_secret: client_secret ?? undefined,
         stripe_account_id: requiresDeposit ? venue.stripe_connected_account_id : undefined,
         status: booking.status,
+        ...(tableAssignmentUnassigned ? { table_assignment_unassigned: true as const } : {}),
       },
       { status: 201 }
     );

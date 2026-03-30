@@ -5,20 +5,12 @@ import { getVenueStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { stripe } from '@/lib/stripe';
 import { sendDepositRequestNotifications } from '@/lib/communications/send-templated';
-import { createHmac } from 'crypto';
+import { createPaymentLinkToken } from '@/lib/payment-token';
 
 const schema = z.object({
   action: z.enum(['send_payment_link', 'waive', 'record_cash', 'refund']),
   amount_pence: z.number().int().min(0).max(500000).optional(),
 });
-
-function createPaymentToken(bookingId: string): string {
-  const secret = process.env.PAYMENT_TOKEN_SECRET || process.env.STRIPE_SECRET_KEY || 'dev-secret';
-  const exp = Date.now() + 24 * 60 * 60 * 1000;
-  const payload = `${bookingId}:${exp}`;
-  const sig = createHmac('sha256', secret).update(payload).digest('base64url');
-  return Buffer.from(payload).toString('base64url') + '.' + sig;
-}
 
 export async function POST(
   request: NextRequest,
@@ -88,7 +80,7 @@ export async function POST(
   }
 
   const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || request.nextUrl.origin;
-  const paymentToken = createPaymentToken(id);
+  const paymentToken = createPaymentLinkToken(id);
   const paymentLink = `${baseUrl}/pay?t=${paymentToken}`;
 
   await admin.from('communication_logs').delete().eq('booking_id', id).eq('message_type', 'deposit_request_sms');

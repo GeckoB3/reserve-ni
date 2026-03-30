@@ -139,6 +139,12 @@ export async function POST(request: Request) {
       }
 
       case 'downgrade': {
+        if ((venue.booking_model as string) === 'table_reservation') {
+          return NextResponse.json(
+            { error: 'Restaurant venues must stay on the Business plan. Contact support if you need help.' },
+            { status: 400 },
+          );
+        }
         const custErr = requireStripeCustomer();
         if (custErr) return custErr;
         const standardPriceId = process.env.STRIPE_STANDARD_PRICE_ID;

@@ -40,6 +40,8 @@ interface Props {
   venueName?: string;
   venueSlug?: string;
   tableManagementEnabled?: boolean;
+  /** Business or Founding — with table_reservation and tableManagementEnabled, shows table grid / floor plan. */
+  pricingTier?: string;
   bookingModel?: BookingModel;
   /** Reports and Availability nav items are admin-only. */
   isAdmin?: boolean;
@@ -52,12 +54,18 @@ export function DashboardSidebar({
   staffName,
   venueSlug,
   tableManagementEnabled,
+  pricingTier = 'standard',
   bookingModel = 'table_reservation',
   isAdmin = false,
 }: Props) {
   const pathname = usePathname();
   const router = useRouter();
   const [mobileOpen, setMobileOpen] = useState(false);
+
+  const showTableManagementNav =
+    Boolean(tableManagementEnabled) &&
+    bookingModel === 'table_reservation' &&
+    (pricingTier === 'business' || pricingTier === 'founding');
 
   const navItems = useMemo(() => {
     const isTableReservation = bookingModel === 'table_reservation';
@@ -167,7 +175,7 @@ export function DashboardSidebar({
         {/* Nav links */}
         <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-1">
           {navItems.map((item) => {
-            if (item.href === '/dashboard/bookings' && !tableManagementEnabled) {
+            if (item.href === '/dashboard/bookings' && !showTableManagementNav) {
               const scheduleActive = bookingModel === 'practitioner_appointment'
                 ? pathname.startsWith('/dashboard/calendar') || pathname.startsWith('/dashboard/practitioner-calendar')
                 : pathname.startsWith('/dashboard/day-sheet');
@@ -208,24 +216,10 @@ export function DashboardSidebar({
               );
             }
 
-            if (item.href === '/dashboard/bookings' && tableManagementEnabled) {
+            if (item.href === '/dashboard/bookings' && showTableManagementNav) {
               const reservationsActive = isActive(item.href);
-              const isApptTm = bookingModel === 'practitioner_appointment';
-              const calActive = pathname.startsWith('/dashboard/calendar') || pathname.startsWith('/dashboard/practitioner-calendar');
               return (
                 <div key="reservations-with-table-views" className="space-y-1">
-                  {isApptTm && (
-                    <Link
-                      href="/dashboard/calendar"
-                      onClick={() => setMobileOpen(false)}
-                      className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
-                        calActive ? 'bg-brand-50 text-brand-700' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
-                      }`}
-                    >
-                      <CalendarIcon className={`h-5 w-5 flex-shrink-0 ${calActive ? 'text-brand-600' : 'text-slate-400'}`} />
-                      Calendar
-                    </Link>
-                  )}
                   <Link
                     href={item.href}
                     onClick={() => setMobileOpen(false)}

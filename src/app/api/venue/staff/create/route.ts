@@ -106,7 +106,7 @@ export async function POST(request: NextRequest) {
       if (updateErr) {
         console.error('Auth user update failed:', updateErr);
         return NextResponse.json(
-          { error: 'Failed to set password for existing account: ' + updateErr.message },
+          { error: 'Failed to set password for this account. Try again or contact support.' },
           { status: 500 },
         );
       }
@@ -120,7 +120,10 @@ export async function POST(request: NextRequest) {
 
       if (createErr) {
         console.error('Auth user creation failed:', createErr);
-        return NextResponse.json({ error: 'Failed to create user account: ' + createErr.message }, { status: 500 });
+        return NextResponse.json(
+          { error: 'Failed to create user account. Try again or contact support.' },
+          { status: 500 },
+        );
       }
       authUserId = newUser.user.id;
     }
@@ -154,7 +157,10 @@ export async function POST(request: NextRequest) {
       if (!linkResult.ok) {
         console.error('[staff/create] calendar link failed:', linkResult.error);
         return NextResponse.json(
-          { error: `User was created but linking to the calendar failed: ${linkResult.error}. You can assign the calendar from Settings → Staff.` },
+          {
+            error:
+              'User was created but linking to the calendar failed. You can assign the calendar from Settings → Staff.',
+          },
           { status: 500 },
         );
       }

@@ -2,18 +2,20 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { sendCommunication } from '@/lib/communications';
 import { applyBookingLifecycleStatusEffects, validateBookingStatusTransition } from '@/lib/table-management/lifecycle';
+import { requireCronAuthorisation } from '@/lib/cron-auth';
 
 /**
- * POST /api/cron/auto-cancel-bookings
- * Call from a cron job (e.g. every 15 min). Cancels phone bookings that are still
- * Pending with deposit Pending and created more than 24 hours ago.
- * Secure with CRON_SECRET header.
+ * GET/POST /api/cron/auto-cancel-bookings
+ * Vercel Cron uses GET; POST kept for manual triggers.
+ * Cancels phone bookings still Pending with deposit Pending after 24h.
  */
+export async function GET(request: NextRequest) {
+  return POST(request);
+}
+
 export async function POST(request: NextRequest) {
-  const secret = process.env.CRON_SECRET;
-  if (secret && request.headers.get('authorization') !== `Bearer ${secret}`) {
-    return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
-  }
+  const denied = requireCronAuthorisation(request);
+  if (denied) return denied;
 
   try {
     const supabase = getSupabaseAdminClient();
@@ -79,6 +81,8 @@ export async function POST(request: NextRequest) {
       const { data: venue } = await supabase.from('venues').select('name').eq('id', b.venue_id).single();
       await sendCommunication({
         type: 'auto_cancel_notification',
+        venue_id: b.venue_id,
+        booking_id: b.id,
         recipient: { email: guest?.email ?? undefined, phone: guest?.phone ?? undefined },
         payload: {
           guest_name: guest?.name,

@@ -21,6 +21,8 @@ interface BookingDetails {
   practitioner_name?: string | null;
   appointment_service_name?: string | null;
   refund_notice_hours?: number;
+  /** ISO timestamp for optimistic concurrency on guest modify */
+  updated_at?: string;
 }
 
 interface Slot {
@@ -442,7 +444,11 @@ function ModifyAppointmentSection({
       });
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
-        setError((j as { error?: string }).error ?? 'Failed to update appointment.');
+        const msg =
+          res.status === 412
+            ? 'This booking was updated elsewhere. Refresh the page and try again.'
+            : ((j as { error?: string }).error ?? 'Failed to update appointment.');
+        setError(msg);
         return;
       }
       onSaved();
@@ -727,7 +733,11 @@ function ModifyTableBookingSection({
 
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
-        setError((j as { error?: string }).error ?? 'Failed to update booking.');
+        const msg =
+          res.status === 412
+            ? 'This booking was updated elsewhere. Refresh the page and try again.'
+            : ((j as { error?: string }).error ?? 'Failed to update booking.');
+        setError(msg);
         return;
       }
 

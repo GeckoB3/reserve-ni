@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { replaceBookingAssignments, syncTableStatusesForBooking } from '@/lib/table-management/lifecycle';
+import { resolvePartySizeBoundsForVenueServices } from '@/lib/booking/party-size-bounds';
 import { resolveVenueMode } from '@/lib/venue-mode';
 import { z } from 'zod';
 import { normalizeToE164 } from '@/lib/phone/e164';
@@ -210,6 +211,17 @@ export async function POST(request: NextRequest) {
     }
 
     // --- Model A: Table walk-in ---
+    const { min: minPartyWalkIn, max: maxPartyWalkIn } = await resolvePartySizeBoundsForVenueServices(
+      admin,
+      staff.venue_id,
+    );
+    if (party_size < minPartyWalkIn || party_size > maxPartyWalkIn) {
+      return NextResponse.json(
+        { error: `Party size must be between ${minPartyWalkIn} and ${maxPartyWalkIn}` },
+        { status: 400 },
+      );
+    }
+
     const { data: venueSettings } = await admin
       .from('venues')
       .select('timezone, table_management_enabled')

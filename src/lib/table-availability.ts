@@ -442,7 +442,20 @@ export async function autoAssignTable(
     partySize,
   );
 
-  if (candidates.length === 0) return null;
+  if (candidates.length === 0) {
+    const { logTableAutoAssignMiss } = await import('@/lib/table-management/auto-assign-policy');
+    logTableAutoAssignMiss({
+      venueId,
+      bookingId,
+      date,
+      startTime,
+      partySize,
+      durationMinutes,
+      bufferMinutes,
+      reason: 'no_candidate',
+    });
+    return null;
+  }
 
   const best = candidates[0]!;
 
@@ -457,6 +470,17 @@ export async function autoAssignTable(
 
   if (error) {
     console.error('Auto-assign table failed:', error);
+    const { logTableAutoAssignMiss } = await import('@/lib/table-management/auto-assign-policy');
+    logTableAutoAssignMiss({
+      venueId,
+      bookingId,
+      date,
+      startTime,
+      partySize,
+      durationMinutes,
+      bufferMinutes,
+      reason: 'insert_failed',
+    });
     return null;
   }
 

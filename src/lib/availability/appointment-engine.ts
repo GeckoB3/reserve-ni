@@ -208,6 +208,28 @@ function effectiveWorkingRangesForAppointments(
 
 const CAPACITY_CONSUMING_STATUSES = ['Confirmed', 'Pending', 'Seated'];
 
+/**
+ * Services a practitioner offers for appointment booking (venue defaults merged with practitioner_services).
+ * Used by the availability engine and by the guest-facing catalog (service/staff pickers) without a date.
+ */
+export function getOfferedAppointmentServicesForPractitioner(
+  practitioner: Practitioner,
+  services: AppointmentService[],
+  practitionerServices: PractitionerService[],
+): AppointmentService[] {
+  const serviceMap = new Map(services.map((s) => [s.id, s]));
+  const allLinksForPractitioner = practitionerServices.filter((ps) => ps.practitioner_id === practitioner.id);
+  const linkedServices = allLinksForPractitioner
+    .map((ps) => {
+      const svc = serviceMap.get(ps.service_id);
+      if (!svc || !svc.is_active) return null;
+      return mergeAppointmentServiceWithPractitionerLink(svc, ps);
+    })
+    .filter(Boolean) as AppointmentService[];
+
+  return allLinksForPractitioner.length > 0 ? linkedServices : services.filter((s) => s.is_active);
+}
+
 // ---------------------------------------------------------------------------
 // Core engine
 // ---------------------------------------------------------------------------
@@ -224,10 +246,8 @@ export function computeAppointmentAvailability(input: AppointmentEngineInput, no
     skipPastSlotFilter = false,
     venueTimezone,
     minNoticeHours = 0,
-    allowSameDayBooking = true,
     venueOpeningHours,
   } = input;
-  const serviceMap = new Map(services.map((s) => [s.id, s]));
 
   // “Today” and clock are venue-local when timezone is set (production); otherwise server-local (tests).
   let todayStr: string;
@@ -243,13 +263,11 @@ export function computeAppointmentAvailability(input: AppointmentEngineInput, no
   }
   const isToday = date === todayStr;
   const minNoticeMinutes = Math.max(0, minNoticeHours * 60);
-  const blockSameDayForGuests = isToday && allowSameDayBooking === false && !skipPastSlotFilter;
 
   const result: AppointmentAvailabilityResult = { practitioners: [] };
 
   for (const practitioner of practitioners) {
     if (!practitioner.is_active) continue;
-    if (blockSameDayForGuests) continue;
 
     const workingRanges = getWorkingRanges(practitioner, date);
     if (workingRanges.length === 0) continue;
@@ -269,18 +287,7 @@ export function computeAppointmentAvailability(input: AppointmentEngineInput, no
 
     const dayBlocks = practitionerBlockedRanges.filter((b) => b.practitioner_id === practitioner.id);
 
-    const allLinksForPractitioner = practitionerServices.filter((ps) => ps.practitioner_id === practitioner.id);
-    const linkedServices = allLinksForPractitioner
-      .map((ps) => {
-        const svc = serviceMap.get(ps.service_id);
-        if (!svc || !svc.is_active) return null;
-        return mergeAppointmentServiceWithPractitionerLink(svc, ps);
-      })
-      .filter(Boolean) as AppointmentService[];
-
-    // Only fall back to all services when practitioner has zero configured links (unconfigured venue).
-    // If they have links but none match the queried services, they genuinely don't offer them.
-    const offeredServices = allLinksForPractitioner.length > 0 ? linkedServices : services.filter((s) => s.is_active);
+    const offeredServices = getOfferedAppointmentServicesForPractitioner(practitioner, services, practitionerServices);
 
     const allSlots: PractitionerSlot[] = [];
     const practitionerServiceList: Array<{

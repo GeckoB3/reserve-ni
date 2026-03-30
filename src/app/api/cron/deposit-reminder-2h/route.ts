@@ -1,25 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { sendCommunication } from '@/lib/communications';
-import { createHmac } from 'crypto';
-
-function createPaymentToken(bookingId: string): string {
-  const secret = process.env.PAYMENT_TOKEN_SECRET || process.env.STRIPE_SECRET_KEY || 'dev-secret';
-  const exp = Date.now() + 24 * 60 * 60 * 1000;
-  const payload = `${bookingId}:${exp}`;
-  const sig = createHmac('sha256', secret).update(payload).digest('base64url');
-  return Buffer.from(payload).toString('base64url') + '.' + sig;
-}
+import { createPaymentLinkToken, tryGetPaymentTokenSecret } from '@/lib/payment-token';
+import { requireCronAuthorisation } from '@/lib/cron-auth';
 
 /**
- * POST /api/cron/deposit-reminder-2h
- * Sends a follow-up SMS if a phone booking deposit hasn't been paid 2 hours after creation.
- * Run every 15 minutes.
+ * GET/POST /api/cron/deposit-reminder-2h
+ * Vercel Cron invokes scheduled paths with HTTP GET; POST kept for manual triggers.
+ * Sends a follow-up if a phone booking deposit hasn't been paid 2 hours after creation.
  */
+export async function GET(request: NextRequest) {
+  return POST(request);
+}
+
 export async function POST(request: NextRequest) {
-  const secret = process.env.CRON_SECRET;
-  if (secret && request.headers.get('authorization') !== `Bearer ${secret}`) {
-    return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
+  const denied = requireCronAuthorisation(request);
+  if (denied) return denied;
+
+  if (!tryGetPaymentTokenSecret()) {
+    console.error('deposit-reminder-2h: PAYMENT_TOKEN_SECRET is not set');
+    return NextResponse.json({ error: 'Service misconfigured' }, { status: 503 });
   }
 
   try {
@@ -42,17 +42,19 @@ export async function POST(request: NextRequest) {
 
     for (const b of bookings ?? []) {
       const { data: venue } = await supabase.from('venues').select('name').eq('id', b.venue_id).single();
-      const { data: guest } = await supabase.from('guests').select('name, phone').eq('id', b.guest_id).single();
-      if (!guest?.phone) continue;
+      const { data: guest } = await supabase.from('guests').select('name, phone, email').eq('id', b.guest_id).single();
+      if (!guest?.phone && !guest?.email) continue;
 
       const timeStr = typeof b.booking_time === 'string' ? b.booking_time.slice(0, 5) : '00:00';
       const depositAmount = b.deposit_amount_pence ? (b.deposit_amount_pence / 100).toFixed(2) : '5.00';
-      const paymentToken = createPaymentToken(b.id);
+      const paymentToken = createPaymentLinkToken(b.id);
       const paymentLink = `${origin}/pay?t=${paymentToken}`;
 
       await sendCommunication({
         type: 'deposit_payment_reminder',
-        recipient: { phone: guest.phone },
+        venue_id: b.venue_id,
+        booking_id: b.id,
+        recipient: { phone: guest.phone ?? undefined, email: guest.email ?? undefined },
         payload: {
           guest_name: guest.name ?? 'Guest',
           venue_name: venue?.name ?? 'Venue',

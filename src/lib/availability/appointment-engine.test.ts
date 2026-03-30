@@ -87,7 +87,7 @@ describe('computeAppointmentAvailability', () => {
     expect(r.practitioners[0]?.slots.find((s) => s.start_time === '12:00')).toBeDefined();
   });
 
-  it('returns no slots for venue-local today when allowSameDayBooking is false', () => {
+  it('does not drop the practitioner on today when allowSameDayBooking is false (slots follow min-notice and clock)', () => {
     const date = todayYmd();
     const dk = workingHoursDayKey(date);
     const input: AppointmentEngineInput = {
@@ -116,7 +116,8 @@ describe('computeAppointmentAvailability', () => {
       allowSameDayBooking: false,
     };
     const r = computeAppointmentAvailability(input, 9 * 60);
-    expect(r.practitioners[0]?.slots.length ?? 0).toBe(0);
+    expect(r.practitioners.length).toBeGreaterThan(0);
+    expect(r.practitioners[0]?.slots.length ?? 0).toBeGreaterThan(0);
   });
 
   it('hides today slots before current time for guest flow (default)', () => {

@@ -3,11 +3,15 @@ import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { stripe } from '@/lib/stripe';
+import { hasServiceConfig } from '@/lib/availability';
+import { computeGuestBookingReady } from '@/lib/setup-guest-booking-ready';
 import type { BookingModel } from '@/types/booking-models';
 
 export interface SetupStatus {
   profile_complete: boolean;
   availability_set: boolean;
+  /** True when guests can complete a booking on the public page (Model A: active services; Model B: catalog non-empty). */
+  guest_booking_ready: boolean;
   stripe_connected: boolean;
   first_booking_made: boolean;
   is_admin: boolean;
@@ -49,11 +53,7 @@ async function checkAvailabilitySet(
       return (count ?? 0) > 0;
     }
     default: {
-      const { count } = await admin
-        .from('venue_services')
-        .select('id', { count: 'exact', head: true })
-        .eq('venue_id', venueId);
-      return (count ?? 0) > 0;
+      return hasServiceConfig(admin, venueId);
     }
   }
 }
@@ -78,6 +78,13 @@ export async function GET() {
     const admin = getSupabaseAdminClient();
     const availabilitySet = await checkAvailabilitySet(admin, staff.venue_id, bookingModel);
 
+    const guestBookingReady = await computeGuestBookingReady(
+      admin,
+      staff.venue_id,
+      bookingModel,
+      availabilitySet,
+    );
+
     let stripeConnected = false;
     if (venue.stripe_connected_account_id) {
       try {
@@ -98,6 +105,7 @@ export async function GET() {
     const status: SetupStatus = {
       profile_complete: profileComplete,
       availability_set: availabilitySet,
+      guest_booking_ready: guestBookingReady,
       stripe_connected: stripeConnected,
       first_booking_made: firstBookingMade,
       is_admin: staff.role === 'admin',

@@ -11,6 +11,7 @@ import { isSmsAllowed } from '@/lib/tier-enforcement';
 import { createBookingHmac } from '@/lib/short-manage-link';
 import { enrichBookingEmailForAppointment } from '@/lib/emails/booking-email-enrichment';
 import type { BookingEmailData, VenueEmailData } from '@/lib/emails/types';
+import { requireCronAuthorisation } from '@/lib/cron-auth';
 
 /**
  * Unified cron handler for scheduled guest communications.
@@ -22,13 +23,8 @@ import type { BookingEmailData, VenueEmailData } from '@/lib/emails/types';
  * Uses communication_logs UNIQUE(booking_id, message_type) for dedup.
  */
 export async function GET(request: NextRequest) {
-  const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret) {
-    const authHeader = request.headers.get('authorization');
-    if (authHeader !== `Bearer ${cronSecret}`) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-  }
+  const denied = requireCronAuthorisation(request);
+  if (denied) return denied;
 
   const results = { reminders_56h: 0, day_of_reminders: 0, post_visit: 0, errors: 0 };
 

@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createHmac } from 'crypto';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { stripe } from '@/lib/stripe';
+import { verifyPaymentLinkToken } from '@/lib/payment-token';
+import { checkRateLimit, getClientIp } from '@/lib/rate-limit';
 
 /**
  * GET /api/booking/pay?t=token
@@ -10,25 +11,30 @@ import { stripe } from '@/lib/stripe';
  */
 export async function GET(request: NextRequest) {
   try {
+    const ip = getClientIp(request);
+    const rl = checkRateLimit(ip, 'booking-pay', 60, 60_000);
+    if (!rl.ok) {
+      return NextResponse.json(
+        { error: 'Too many requests. Try again shortly.' },
+        { status: 429, headers: { 'Retry-After': String(rl.retryAfterSec) } },
+      );
+    }
+
     const token = request.nextUrl.searchParams.get('t');
     if (!token?.trim()) {
       return NextResponse.json({ error: 'Missing token' }, { status: 400 });
     }
 
-    const parts = token.trim().split('.');
-    if (parts.length !== 2) {
+    const verified = verifyPaymentLinkToken(token);
+    if (!verified.ok && verified.reason === 'misconfigured') {
+      console.error('GET /api/booking/pay: PAYMENT_TOKEN_SECRET not set');
+      return NextResponse.json({ error: 'Service temporarily unavailable' }, { status: 503 });
+    }
+    if (!verified.ok) {
       return NextResponse.json({ error: 'Invalid token' }, { status: 400 });
     }
 
-    const secret = process.env.PAYMENT_TOKEN_SECRET || process.env.STRIPE_SECRET_KEY || 'dev-secret';
-    const payload = Buffer.from(parts[0]!, 'base64url').toString('utf8');
-    const sig = createHmac('sha256', secret).update(payload).digest('base64url');
-    if (sig !== parts[1]) {
-      return NextResponse.json({ error: 'Invalid token' }, { status: 400 });
-    }
-
-    const [bookingId, expStr] = payload.split(':');
-    const exp = parseInt(expStr ?? '0', 10);
+    const { bookingId, exp } = verified;
     if (Date.now() > exp || !bookingId) {
       return NextResponse.json({ error: 'Link expired' }, { status: 400 });
     }

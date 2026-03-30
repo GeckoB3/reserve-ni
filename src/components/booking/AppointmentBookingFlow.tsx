@@ -12,7 +12,8 @@ import {
 } from '@/lib/booking/cancellation-deadline';
 import { defaultPhoneCountryForVenueCurrency } from '@/lib/phone/default-country';
 
-interface Practitioner {
+/** Services + staff from catalog (no date / slots). */
+interface CatalogPractitioner {
   id: string;
   name: string;
   services: Array<{
@@ -22,6 +23,10 @@ interface Practitioner {
     price_pence: number | null;
     deposit_pence?: number | null;
   }>;
+}
+
+/** Per-date availability from /api/booking/availability. */
+interface SlotPractitioner extends CatalogPractitioner {
   slots: Array<{ start_time: string; service_id: string; duration_minutes: number; price_pence: number | null }>;
 }
 
@@ -93,7 +98,9 @@ export function AppointmentBookingFlow({ venue, cancellationPolicy, onHeightChan
   // Shared state
   const [step, setStep] = useState<Step>('mode_choice');
   const [date, setDate] = useState(todayStr);
-  const [practitioners, setPractitioners] = useState<Practitioner[]>([]);
+  const [catalogStaff, setCatalogStaff] = useState<CatalogPractitioner[]>([]);
+  const [catalogLoading, setCatalogLoading] = useState(false);
+  const [slotPractitioners, setSlotPractitioners] = useState<SlotPractitioner[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -140,7 +147,7 @@ export function AppointmentBookingFlow({ venue, cancellationPolicy, onHeightChan
     function onReset() {
       setStep('mode_choice');
       setDate(todayStr());
-      setPractitioners([]);
+      setSlotPractitioners([]);
       setLoading(false);
       setError(null);
       setSelectedServiceId(null);
@@ -170,40 +177,66 @@ export function AppointmentBookingFlow({ venue, cancellationPolicy, onHeightChan
       }));
   }, [groupPeople, date]);
 
-  const fetchAvailability = useCallback(async (opts?: { serviceId?: string | null; practitionerId?: string | null }) => {
-    setLoading(true);
+  const fetchCatalog = useCallback(async () => {
+    setCatalogLoading(true);
     try {
-      const params = new URLSearchParams({ venue_id: venue.id, date });
-      const svc = opts?.serviceId !== undefined ? opts.serviceId : selectedServiceId;
-      const prac = opts?.practitionerId !== undefined ? opts.practitionerId : selectedPractitionerId;
-      if (svc) params.set('service_id', svc);
-      if (prac) params.set('practitioner_id', prac);
-      if (phantomBookings.length > 0) {
-        params.set('phantoms', JSON.stringify(phantomBookings));
-      }
-      const res = await fetch(`/api/booking/availability?${params}`);
+      const res = await fetch(`/api/booking/appointment-catalog?venue_id=${encodeURIComponent(venue.id)}`);
       const data = await res.json();
-      setPractitioners(data.practitioners ?? []);
+      if (!res.ok) throw new Error(data.error ?? 'Failed to load catalog');
+      setCatalogStaff(data.practitioners ?? []);
     } catch {
-      setError('Failed to load availability');
+      setError('Failed to load services');
+      setCatalogStaff([]);
     } finally {
-      setLoading(false);
+      setCatalogLoading(false);
     }
-  }, [venue.id, date, selectedServiceId, selectedPractitionerId, phantomBookings]);
+  }, [venue.id]);
 
   useEffect(() => {
-    const singleSteps: Step[] = ['service', 'practitioner', 'slot'];
-    const groupSteps: Step[] = ['group_service', 'group_practitioner', 'group_slot'];
-    if (singleSteps.includes(step) || groupSteps.includes(step)) {
-      const isGroup = step.startsWith('group_');
-      fetchAvailability({
-        serviceId: isGroup ? groupServiceId : selectedServiceId,
-        practitionerId: isGroup ? groupPractitionerId : selectedPractitionerId,
-      });
-    }
-  }, [fetchAvailability, step, groupServiceId, groupPractitionerId, selectedServiceId, selectedPractitionerId]);
+    fetchCatalog();
+  }, [fetchCatalog]);
 
-  const allServices = practitioners.flatMap((p) => p.services);
+  const fetchAvailability = useCallback(
+    async (opts: { serviceId: string; practitionerId: string }) => {
+      setLoading(true);
+      try {
+        const params = new URLSearchParams({ venue_id: venue.id, date });
+        params.set('service_id', opts.serviceId);
+        params.set('practitioner_id', opts.practitionerId);
+        if (phantomBookings.length > 0) {
+          params.set('phantoms', JSON.stringify(phantomBookings));
+        }
+        const res = await fetch(`/api/booking/availability?${params}`);
+        const data = await res.json();
+        setSlotPractitioners(data.practitioners ?? []);
+      } catch {
+        setError('Failed to load availability');
+      } finally {
+        setLoading(false);
+      }
+    },
+    [venue.id, date, phantomBookings],
+  );
+
+  useEffect(() => {
+    if (step !== 'slot' && step !== 'group_slot') return;
+    const isGroup = step === 'group_slot';
+    const svc = isGroup ? groupServiceId : selectedServiceId;
+    const prac = isGroup ? groupPractitionerId : selectedPractitionerId;
+    if (!svc || !prac) return;
+    fetchAvailability({ serviceId: svc, practitionerId: prac });
+  }, [
+    step,
+    date,
+    selectedServiceId,
+    selectedPractitionerId,
+    groupServiceId,
+    groupPractitionerId,
+    phantomBookings,
+    fetchAvailability,
+  ]);
+
+  const allServices = catalogStaff.flatMap((p) => p.services);
   const uniqueServices = Array.from(new Map(allServices.map((s) => [s.id, s])).values());
 
   const servicesWithFromPrice = useMemo(() => {
@@ -211,7 +244,7 @@ export function AppointmentBookingFlow({ venue, cancellationPolicy, onHeightChan
       string,
       { id: string; name: string; duration_minutes: number; minPricePence: number | null }
     >();
-    for (const p of practitioners) {
+    for (const p of catalogStaff) {
       for (const s of p.services) {
         const price = s.price_pence;
         const existing = map.get(s.id);
@@ -228,7 +261,17 @@ export function AppointmentBookingFlow({ venue, cancellationPolicy, onHeightChan
       }
     }
     return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
-  }, [practitioners]);
+  }, [catalogStaff]);
+
+  const practitionersForSelectedService = useMemo(() => {
+    if (!selectedServiceId) return [];
+    return catalogStaff.filter((p) => p.services.some((s) => s.id === selectedServiceId));
+  }, [catalogStaff, selectedServiceId]);
+
+  const practitionersForGroupService = useMemo(() => {
+    if (!groupServiceId) return [];
+    return catalogStaff.filter((p) => p.services.some((s) => s.id === groupServiceId));
+  }, [catalogStaff, groupServiceId]);
 
   const sym = venue.currency === 'EUR' ? '€' : '£';
   function formatPrice(pence: number | null): string {
@@ -244,17 +287,19 @@ export function AppointmentBookingFlow({ venue, cancellationPolicy, onHeightChan
   const refundNoticeHours = venue.booking_rules?.cancellation_notice_hours ?? 48;
   const phoneDefaultCountry = defaultPhoneCountryForVenueCurrency(venue.currency);
 
-  // Single flow helpers
-  const selectedPrac = practitioners.find((p) => p.id === selectedPractitionerId);
-  const availableSlots = selectedPrac?.slots.filter((s) => !selectedServiceId || s.service_id === selectedServiceId) ?? [];
+  // Single flow helpers (names/prices from catalog; slots from availability API)
+  const selectedPrac = catalogStaff.find((p) => p.id === selectedPractitionerId);
+  const slotPrac = slotPractitioners.find((p) => p.id === selectedPractitionerId);
+  const availableSlots = slotPrac?.slots.filter((s) => !selectedServiceId || s.service_id === selectedServiceId) ?? [];
   const selectedService = uniqueServices.find((s) => s.id === selectedServiceId);
   const selectedServiceForPractitioner =
     selectedPrac?.services.find((s) => s.id === selectedServiceId) ?? selectedService;
   const groupedSlots = groupSlotsByPeriod(availableSlots);
 
   // Group flow helpers
-  const groupSelectedPrac = practitioners.find((p) => p.id === groupPractitionerId);
-  const groupAvailableSlots = groupSelectedPrac?.slots.filter((s) => !groupServiceId || s.service_id === groupServiceId) ?? [];
+  const groupSelectedPrac = catalogStaff.find((p) => p.id === groupPractitionerId);
+  const groupSlotPrac = slotPractitioners.find((p) => p.id === groupPractitionerId);
+  const groupAvailableSlots = groupSlotPrac?.slots.filter((s) => !groupServiceId || s.service_id === groupServiceId) ?? [];
   const groupSelectedService = uniqueServices.find((s) => s.id === groupServiceId);
   const groupGroupedSlots = groupSlotsByPeriod(groupAvailableSlots);
 
@@ -318,7 +363,7 @@ export function AppointmentBookingFlow({ venue, cancellationPolicy, onHeightChan
 
   function addPersonToGroup(time: string) {
     const svc = uniqueServices.find((s) => s.id === groupServiceId);
-    const prac = practitioners.find((p) => p.id === groupPractitionerId);
+    const prac = catalogStaff.find((p) => p.id === groupPractitionerId);
     if (!svc || !prac) return;
 
     const svcOffer = prac.services.find((s) => s.id === groupServiceId);
@@ -581,7 +626,7 @@ export function AppointmentBookingFlow({ venue, cancellationPolicy, onHeightChan
           </button>
           <h2 className="mb-1 text-lg font-semibold text-slate-900">Select a service</h2>
           <p className="mb-4 text-sm text-slate-500">Choose the service you want. You will pick a date and time in a later step.</p>
-          {loading ? (
+          {catalogLoading ? (
             <div className="space-y-3">{[1, 2, 3].map((i) => <div key={i} className="h-[72px] animate-pulse rounded-xl bg-slate-100" />)}</div>
           ) : servicesWithFromPrice.length === 0 ? (
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-8 text-center">
@@ -623,15 +668,16 @@ export function AppointmentBookingFlow({ venue, cancellationPolicy, onHeightChan
           )}
           <h2 className="mb-1 text-lg font-semibold text-slate-900">Who would you like to see?</h2>
           <p className="mb-4 text-sm text-slate-500">Choose your preferred {terms.staff.toLowerCase()}. Prices shown are what they charge for this service.</p>
-          {loading ? (
+          {catalogLoading ? (
             <div className="space-y-3">{[1, 2].map((i) => <div key={i} className="h-16 animate-pulse rounded-xl bg-slate-100" />)}</div>
-          ) : practitioners.length === 0 ? (
+          ) : practitionersForSelectedService.length === 0 ? (
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-8 text-center">
-              <p className="text-sm font-medium text-slate-600">No {terms.staff.toLowerCase()} available on {formatDateHuman(date)}</p>
+              <p className="text-sm font-medium text-slate-600">No {terms.staff.toLowerCase()} offer this service</p>
+              <p className="mt-1 text-xs text-slate-400">Contact the venue if you need help.</p>
             </div>
           ) : (
             <div className="space-y-2">
-              {practitioners.map((prac) => {
+              {practitionersForSelectedService.map((prac) => {
                 const offer = prac.services.find((s) => s.id === selectedServiceId);
                 return (
                   <button key={prac.id} onClick={() => { setSelectedPractitionerId(prac.id); setStep('slot'); }} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3.5 text-left shadow-sm transition-all hover:border-brand-300 hover:shadow-md active:scale-[0.99]">
@@ -910,7 +956,7 @@ export function AppointmentBookingFlow({ venue, cancellationPolicy, onHeightChan
           </div>
           <h2 className="mb-1 text-lg font-semibold text-slate-900">Select a service</h2>
           <p className="mb-4 text-sm text-slate-500">What would {currentPersonLabel} like?</p>
-          {loading ? (
+          {catalogLoading ? (
             <div className="space-y-3">{[1, 2, 3].map((i) => <div key={i} className="h-[72px] animate-pulse rounded-xl bg-slate-100" />)}</div>
           ) : servicesWithFromPrice.length === 0 ? (
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-8 text-center">
@@ -950,15 +996,16 @@ export function AppointmentBookingFlow({ venue, cancellationPolicy, onHeightChan
           </div>
           <h2 className="mb-1 text-lg font-semibold text-slate-900">Choose {terms.staff.toLowerCase()}</h2>
           <p className="mb-4 text-sm text-slate-500">Who should see {currentPersonLabel}?</p>
-          {loading ? (
+          {catalogLoading ? (
             <div className="space-y-3">{[1, 2].map((i) => <div key={i} className="h-16 animate-pulse rounded-xl bg-slate-100" />)}</div>
-          ) : practitioners.length === 0 ? (
+          ) : practitionersForGroupService.length === 0 ? (
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-8 text-center">
-              <p className="text-sm font-medium text-slate-600">No {terms.staff.toLowerCase()} available on {formatDateHuman(date)}</p>
+              <p className="text-sm font-medium text-slate-600">No {terms.staff.toLowerCase()} offer this service</p>
+              <p className="mt-1 text-xs text-slate-400">Contact the venue if you need help.</p>
             </div>
           ) : (
             <div className="space-y-2">
-              {practitioners.map((prac) => {
+              {practitionersForGroupService.map((prac) => {
                 const offer = prac.services.find((s) => s.id === groupServiceId);
                 return (
                   <button key={prac.id} onClick={() => { setGroupPractitionerId(prac.id); setStep('group_slot'); }} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3.5 text-left shadow-sm transition-all hover:border-brand-300 hover:shadow-md active:scale-[0.99]">

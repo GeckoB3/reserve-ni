@@ -17,6 +17,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   let venueSlug: string | undefined;
   let staffName: string | undefined;
   let tableManagementEnabled = false;
+  let pricingTier = 'standard';
   let bookingModel: BookingModel = 'table_reservation';
   let venueId: string | undefined;
   let isAdmin = false;
@@ -41,12 +42,13 @@ export default async function DashboardLayout({ children }: { children: React.Re
     if (venueId) {
       const { data: venue } = await admin
         .from('venues')
-        .select('name, slug, table_management_enabled, booking_model, plan_status, onboarding_completed')
+        .select('name, slug, table_management_enabled, booking_model, plan_status, onboarding_completed, pricing_tier')
         .eq('id', venueId)
         .single();
       venueName = venue?.name ?? undefined;
       venueSlug = venue?.slug ?? undefined;
       tableManagementEnabled = venue?.table_management_enabled ?? false;
+      pricingTier = (venue?.pricing_tier as string) ?? 'standard';
       bookingModel = (venue?.booking_model as BookingModel) ?? 'table_reservation';
       planStatus = (venue?.plan_status as string) ?? 'active';
       onboardingCompleted = (venue?.onboarding_completed as boolean) ?? true;
@@ -67,6 +69,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
         venueName={venueName}
         venueSlug={venueSlug}
         tableManagementEnabled={tableManagementEnabled}
+        pricingTier={pricingTier}
         bookingModel={bookingModel}
         isAdmin={isAdmin}
       />

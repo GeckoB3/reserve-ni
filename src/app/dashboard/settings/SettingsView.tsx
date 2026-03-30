@@ -160,6 +160,11 @@ function PlanSection({
 
   const calendarDirty = tier === 'standard' && calendarDraft !== (venue.calendar_count ?? 1);
   const isAppointmentVenue = venue.booking_model === 'practitioner_appointment';
+  const isRestaurantVenue = venue.booking_model === 'table_reservation';
+  const standardSeatsPaid = calendarCount ?? 1;
+  const standardMonthlyPence = standardSeatsPaid * 10;
+  const showSevenPlusBusinessNudge =
+    tier === 'standard' && isAppointmentVenue && calendarCount != null && calendarCount >= 7;
 
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm space-y-4">
@@ -334,32 +339,63 @@ function PlanSection({
             Upgrade to Business
           </button>
         )}
-        {tier === 'business' && !isCancelling && (
-          <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-end">
-            <div>
-              <label htmlFor="downgrade-calendars" className="mb-1 block text-xs font-medium text-slate-600">
-                Team members on Standard after switch
-              </label>
-              <input
-                id="downgrade-calendars"
-                type="number"
-                min={minCalendars}
-                max={MAX_STANDARD_CALENDARS}
-                value={downgradeQty}
-                onChange={(e) =>
-                  setDowngradeQty(Math.max(minCalendars, Math.min(MAX_STANDARD_CALENDARS, parseInt(e.target.value, 10) || minCalendars)))
-                }
-                className="w-24 rounded-lg border border-slate-300 px-3 py-2 text-sm"
-              />
+        {tier === 'business' && !isCancelling && !isRestaurantVenue && (
+          <div className="w-full space-y-3 rounded-lg border border-amber-100 bg-amber-50/50 p-4">
+            {isAppointmentVenue && (
+              <div className="text-xs text-amber-950">
+                <p className="font-medium text-amber-900">Before switching to Standard</p>
+                <p className="mt-1 text-amber-900/90">
+                  On Standard you would pay &pound;{downgradeQty * 10}/month for {downgradeQty} active calendar
+                  {downgradeQty === 1 ? '' : 's'}. SMS reminders would be replaced with email reminders.
+                </p>
+                {downgradeQty >= 8 && (
+                  <p className="mt-2 font-medium text-amber-900">
+                    At this size, Standard would cost more than your current &pound;79/month Business plan.
+                  </p>
+                )}
+              </div>
+            )}
+            <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-end">
+              <div>
+                <label htmlFor="downgrade-calendars" className="mb-1 block text-xs font-medium text-slate-600">
+                  {isAppointmentVenue ? 'Calendars on Standard after switch' : 'Team members on Standard after switch'}
+                </label>
+                <input
+                  id="downgrade-calendars"
+                  type="number"
+                  min={minCalendars}
+                  max={MAX_STANDARD_CALENDARS}
+                  value={downgradeQty}
+                  onChange={(e) =>
+                    setDowngradeQty(Math.max(minCalendars, Math.min(MAX_STANDARD_CALENDARS, parseInt(e.target.value, 10) || minCalendars)))
+                  }
+                  className="w-24 rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                />
+              </div>
+              <button
+                type="button"
+                disabled={loading}
+                onClick={() => {
+                  let msg: string;
+                  if (isAppointmentVenue) {
+                    const lines = [
+                      `Switch to Standard at £${downgradeQty * 10}/month for ${downgradeQty} calendar(s)?`,
+                      'SMS guest reminders will move to email only.',
+                    ];
+                    if (downgradeQty >= 8) lines.push('Standard would cost more than Business at this size.');
+                    msg = lines.join('\n\n');
+                  } else {
+                    msg =
+                      'Switch to Standard? Review pricing in your next invoice; SMS guest messaging may be more limited than on Business.';
+                  }
+                  if (!window.confirm(msg)) return;
+                  void handleAction('downgrade', { calendar_count: downgradeQty });
+                }}
+                className="rounded-lg border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+              >
+                Switch to Standard
+              </button>
             </div>
-            <button
-              type="button"
-              disabled={loading}
-              onClick={() => void handleAction('downgrade', { calendar_count: downgradeQty })}
-              className="rounded-lg border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
-            >
-              Switch to Standard
-            </button>
           </div>
         )}
         {billingActive && tier !== 'founding' && !isCancelling && (
@@ -373,13 +409,29 @@ function PlanSection({
           </button>
         )}
       </div>
+      {showSevenPlusBusinessNudge && calendarCount != null && (
+        <div className="rounded-lg border border-brand-200 bg-brand-50/80 p-4 text-sm text-brand-900">
+          <p className="font-medium">You&apos;re paying &pound;{standardMonthlyPence}/month</p>
+          <p className="mt-1 text-xs leading-relaxed">
+            Business is &pound;79/month for unlimited team members and SMS reminders.
+            {standardMonthlyPence > 79 ? (
+              <>
+                {' '}
+                You&apos;d save &pound;{standardMonthlyPence - 79}/month and get SMS reminders.
+              </>
+            ) : (
+              <> Compare totals and upgrade if SMS and unlimited calendars suit you better.</>
+            )}
+          </p>
+        </div>
+      )}
       {tier === 'standard' && (
         <div className="mt-4 rounded-lg border border-brand-100 bg-brand-50 p-4">
           <p className="text-sm font-medium text-brand-800">Upgrade to unlock more</p>
           <ul className="mt-2 space-y-1 text-xs text-brand-700">
             <li>&bull; SMS communications</li>
             <li>&bull; Unlimited team members</li>
-            <li>&bull; Table management (restaurants)</li>
+            {!isAppointmentVenue && !isRestaurantVenue && <li>&bull; Table management (restaurants)</li>}
             <li>&bull; Priority support</li>
           </ul>
         </div>

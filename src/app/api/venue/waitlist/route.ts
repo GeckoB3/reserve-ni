@@ -6,6 +6,7 @@ import { findOrCreateGuest } from '@/lib/guests';
 import { autoAssignTable } from '@/lib/table-availability';
 import { resolveVenueMode } from '@/lib/venue-mode';
 import { syncTableStatusesForBooking } from '@/lib/table-management/lifecycle';
+import { resolveTableAssignmentDurationBuffer } from '@/lib/table-management/booking-table-duration';
 
 /** GET /api/venue/waitlist — list waitlist entries for the venue */
 export async function GET() {
@@ -116,15 +117,22 @@ export async function PATCH(request: NextRequest) {
       }
 
       if (venueMode.tableManagementEnabled && venueMode.availabilityEngine === 'service') {
+        const { durationMinutes, bufferMinutes } = await resolveTableAssignmentDurationBuffer(
+          admin,
+          staff.venue_id,
+          bookingDate,
+          partySize,
+          existingEntry.service_id ?? null,
+        );
         const assigned = await autoAssignTable(
           admin,
           staff.venue_id,
           booking.id,
           bookingDate,
           bookingTime,
-          90,
-          15,
-          partySize
+          durationMinutes,
+          bufferMinutes,
+          partySize,
         );
         if (assigned) {
           await syncTableStatusesForBooking(admin, booking.id, assigned.table_ids, booking.status, staff.id);

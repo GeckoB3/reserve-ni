@@ -10,9 +10,9 @@ import { sendBookingConfirmationEmail, sendDepositRequestNotifications } from '@
 import { autoAssignTable } from '@/lib/table-availability';
 import { computeAvailability, fetchEngineInput } from '@/lib/availability';
 import { AVAILABILITY_SETUP_REQUIRED_MESSAGE } from '@/lib/availability/availability-errors';
-import { getDayOfWeek, resolveDuration } from '@/lib/availability/engine';
 import { resolveVenueMode } from '@/lib/venue-mode';
 import { syncTableStatusesForBooking } from '@/lib/table-management/lifecycle';
+import { resolveDurationAndBufferForTableAssignment } from '@/lib/table-management/booking-table-duration';
 import {
   attachVenueClockToAppointmentInput,
   fetchAppointmentInput,
@@ -20,7 +20,7 @@ import {
 } from '@/lib/availability/appointment-engine';
 import { z } from 'zod';
 import { normalizeToE164 } from '@/lib/phone/e164';
-import { createHmac } from 'crypto';
+import { createPaymentLinkToken } from '@/lib/payment-token';
 
 const phoneBookingSchema = z.object({
   booking_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
@@ -44,15 +44,6 @@ function cancellationDeadline(bookingDate: string, bookingTime: string): string 
   const dt = new Date(Date.UTC(y!, m! - 1, d!, hh, mm, 0));
   dt.setHours(dt.getHours() - 48);
   return dt.toISOString();
-}
-
-/** Create a signed payment URL token (booking_id + 24h expiry). */
-function createPaymentToken(bookingId: string): string {
-  const secret = process.env.PAYMENT_TOKEN_SECRET || process.env.STRIPE_SECRET_KEY || 'dev-secret';
-  const exp = Date.now() + 24 * 60 * 60 * 1000;
-  const payload = `${bookingId}:${exp}`;
-  const sig = createHmac('sha256', secret).update(payload).digest('base64url');
-  return Buffer.from(payload).toString('base64url') + '.' + sig;
 }
 
 /**
@@ -246,7 +237,7 @@ export async function POST(request: NextRequest) {
             .update({ stripe_payment_intent_id: paymentIntent.id, updated_at: new Date().toISOString() })
             .eq('id', apptBooking.id);
 
-          const token = createPaymentToken(apptBooking.id);
+          const token = createPaymentLinkToken(apptBooking.id);
           const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : request.nextUrl.origin);
           payment_url = `${baseUrl}/pay?t=${token}`;
         } catch (stripeErr) {
@@ -345,12 +336,17 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Selected time is not available' }, { status: 409 });
     }
 
-    const engineDow = getDayOfWeek(booking_date);
-    const durationMins = resolveDuration(engineInput.durations, slot.service_id, party_size, engineDow);
+    const { durationMinutes, bufferMinutes } = await resolveDurationAndBufferForTableAssignment(
+      admin,
+      engineInput,
+      booking_date,
+      party_size,
+      slot.service_id,
+    );
     const [y, mo, d] = booking_date.split('-').map(Number);
     const [hh, mm] = timeStr.split(':').map(Number);
     const endDate = new Date(Date.UTC(y!, mo! - 1, d!, hh!, mm!, 0));
-    endDate.setMinutes(endDate.getMinutes() + durationMins);
+    endDate.setMinutes(endDate.getMinutes() + durationMinutes);
     const estimatedEndTime = endDate.toISOString();
 
     const channelRequiresPhone = depositConfig.phone_requires_deposit ?? false;
@@ -398,25 +394,16 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to create booking' }, { status: 500 });
     }
 
+    let tableAssignmentUnassigned = false;
     if (venueMode.tableManagementEnabled) {
-      const { data: defaultRule } = await admin
-        .from('service_capacity_rules')
-        .select('buffer_minutes')
-        .eq('service_id', slot.service_id)
-        .is('day_of_week', null)
-        .is('time_range_start', null)
-        .limit(1)
-        .maybeSingle();
-      const bufferMins = defaultRule?.buffer_minutes ?? 15;
-
       const assigned = await autoAssignTable(
         admin,
         venueId,
         booking.id,
         booking_date,
         booking_time.slice(0, 5),
-        durationMins,
-        bufferMins,
+        durationMinutes,
+        bufferMinutes,
         party_size,
       );
       if (assigned) {
@@ -427,6 +414,8 @@ export async function POST(request: NextRequest) {
           bookingInsert.status,
           staff.id
         );
+      } else {
+        tableAssignmentUnassigned = true;
       }
     }
 
@@ -452,7 +441,7 @@ export async function POST(request: NextRequest) {
           })
           .eq('id', booking.id);
 
-        const token = createPaymentToken(booking.id);
+        const token = createPaymentLinkToken(booking.id);
         const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : request.nextUrl.origin);
         payment_url = `${baseUrl}/pay?t=${token}`;
       } catch (stripeErr) {
@@ -531,6 +520,7 @@ export async function POST(request: NextRequest) {
         booking_id: booking.id,
         payment_url: payment_url ?? undefined,
         message: payment_url ? 'Booking created. Deposit link sent to guest (stub: check logs).' : 'Booking created.',
+        ...(tableAssignmentUnassigned ? { table_assignment_unassigned: true as const } : {}),
       },
       { status: 201 }
     );

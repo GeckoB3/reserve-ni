@@ -59,11 +59,40 @@ function getAvailabilityStep(model: BookingModel): Step {
 }
 
 function isSetupComplete(s: SetupStatus) {
-  return s.profile_complete && s.availability_set && s.stripe_connected && s.first_booking_made;
+  return (
+    s.profile_complete &&
+    s.availability_set &&
+    s.guest_booking_ready &&
+    s.stripe_connected &&
+    s.first_booking_made
+  );
+}
+
+function getGuestBookingStep(model: BookingModel): Step {
+  switch (model) {
+    case 'practitioner_appointment':
+      return {
+        key: 'guest_booking_ready',
+        label: 'Public booking page',
+        description:
+          'Guests need at least one team member with an active service. Link services under Appointment Services.',
+        href: '/dashboard/appointment-services',
+        actionLabel: 'Fix services',
+      };
+    default:
+      return {
+        key: 'guest_booking_ready',
+        label: 'Public booking page',
+        description:
+          'Add at least one active service and complete availability so online guests can see times and book.',
+        href: '/dashboard/onboarding',
+        actionLabel: 'Finish setup',
+      };
+  }
 }
 
 function getSteps(model: BookingModel): Step[] {
-  return [
+  const base: Step[] = [
     {
       key: 'profile_complete',
       label: 'Business profile',
@@ -72,6 +101,11 @@ function getSteps(model: BookingModel): Step[] {
       actionLabel: 'Complete profile',
     },
     getAvailabilityStep(model),
+  ];
+  if (model === 'table_reservation' || model === 'practitioner_appointment') {
+    base.push(getGuestBookingStep(model));
+  }
+  base.push(
     {
       key: 'stripe_connected',
       label: 'Stripe payments',
@@ -86,7 +120,8 @@ function getSteps(model: BookingModel): Step[] {
       href: '/dashboard/bookings/new',
       actionLabel: 'Create booking',
     },
-  ];
+  );
+  return base;
 }
 
 export function SetupChecklist() {

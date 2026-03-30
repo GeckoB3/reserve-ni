@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff } from '@/lib/venue-auth';
+import { BOOKING_ACTIVE_STATUSES } from '@/lib/table-management/constants';
 
 /**
  * GET /api/venue/bookings/list?date=YYYY-MM-DD&status=Confirmed|Pending|...
@@ -22,6 +23,7 @@ export async function GET(request: NextRequest) {
     const ids = request.nextUrl.searchParams.get('ids');
     const statusFilter = request.nextUrl.searchParams.get('status');
     const groupBookingId = request.nextUrl.searchParams.get('group_booking_id');
+    const unassignedTables = request.nextUrl.searchParams.get('unassigned_tables') === '1';
     const isoRe = /^\d{4}-\d{2}-\d{2}$/;
 
     let query = staff.db
@@ -123,10 +125,30 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    const enriched = bookings.map((b: Record<string, unknown>) => ({
+    let enriched = bookings.map((b: Record<string, unknown>) => ({
       ...b,
       table_assignments: assignmentsMap.get(b.id as string) ?? [],
     }));
+
+    if (unassignedTables) {
+      const { data: venueRow } = await staff.db
+        .from('venues')
+        .select('table_management_enabled')
+        .eq('id', staff.venue_id)
+        .maybeSingle();
+      if (venueRow?.table_management_enabled) {
+        const active = new Set<string>(BOOKING_ACTIVE_STATUSES);
+        enriched = enriched.filter((b: Record<string, unknown>) => {
+          const assigns = (b.table_assignments as Array<unknown>) ?? [];
+          return (
+            !b.practitioner_id &&
+            typeof b.status === 'string' &&
+            active.has(b.status as string) &&
+            assigns.length === 0
+          );
+        });
+      }
+    }
 
     return NextResponse.json({ bookings: enriched });
   } catch (err) {

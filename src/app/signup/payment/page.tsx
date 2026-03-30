@@ -22,6 +22,12 @@ export default function PaymentPage() {
         router.push('/signup/business-type');
         return;
       }
+      const cfg = getBusinessConfig(bt);
+      if (cfg.model === 'table_reservation' && p === 'standard') {
+        sessionStorage.removeItem('signup_plan');
+        router.replace('/signup/plan');
+        return;
+      }
       setBusinessType(bt);
       setPlan(p);
       const parsed = cc ? parseInt(cc, 10) : 1;
@@ -85,6 +91,7 @@ export default function PaymentPage() {
   }
 
   const planLabel = plan === 'founding' ? 'Founding Partner' : plan === 'business' ? 'Business' : 'Standard';
+  const isRestaurant = config.model === 'table_reservation';
 
   return (
     <div className="w-full max-w-md">
@@ -115,12 +122,43 @@ export default function PaymentPage() {
             <span className="text-slate-500">Plan</span>
             <span className="font-medium text-slate-900">{planLabel}</span>
           </div>
+          {plan === 'business' && isRestaurant && (
+            <div className="rounded-lg border border-slate-100 bg-slate-50/80 px-3 py-2 text-xs text-slate-600">
+              <p className="font-medium text-slate-800">Reserve NI Business — &pound;{BUSINESS_PRICE}/month</p>
+              <p className="mt-1">
+                Unlimited team members. SMS reminders. Priority support. Table management with timeline grid and floor
+                plan.
+              </p>
+            </div>
+          )}
+          {plan === 'business' && !isRestaurant && (
+            <div className="rounded-lg border border-slate-100 bg-slate-50/80 px-3 py-2 text-xs text-slate-600">
+              <p className="font-medium text-slate-800">Reserve NI Business — &pound;{BUSINESS_PRICE}/month</p>
+              <p className="mt-1">Unlimited team members. SMS reminders. Priority support.</p>
+            </div>
+          )}
           {plan === 'standard' && (
-            <div className="flex justify-between text-sm">
-              <span className="text-slate-500">
-                {calendarCount === 1 ? config.terms.staff : `${config.terms.staff}s`}
-              </span>
-              <span className="font-medium text-slate-900">{calendarCount}</span>
+            <>
+              <div className="rounded-lg border border-slate-100 bg-slate-50/80 px-3 py-2 text-xs text-slate-600">
+                <p className="font-medium text-slate-800">
+                  Reserve NI Standard — {calendarCount} &times; &pound;{STANDARD_PRICE_PER_CALENDAR}/month = &pound;
+                  {calendarCount * STANDARD_PRICE_PER_CALENDAR}/month
+                </p>
+                <p className="mt-1">
+                  {calendarCount} bookable calendar{calendarCount === 1 ? '' : 's'}. Email reminders.
+                </p>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-slate-500">
+                  {calendarCount === 1 ? config.terms.staff : `${config.terms.staff}s`}
+                </span>
+                <span className="font-medium text-slate-900">{calendarCount}</span>
+              </div>
+            </>
+          )}
+          {plan === 'founding' && isRestaurant && (
+            <div className="rounded-lg border border-emerald-100 bg-emerald-50/60 px-3 py-2 text-xs text-emerald-900">
+              <p className="font-medium">Founding Partner — Business plan free for 6 months, then &pound;{BUSINESS_PRICE}/month.</p>
             </div>
           )}
           <div className="border-t border-slate-100 pt-4">
@@ -158,8 +196,9 @@ export default function PaymentPage() {
               : 'Proceed to payment'}
         </button>
 
+        <p className="mt-3 text-center text-xs text-slate-500">Cancel anytime with 30 days notice.</p>
         {plan !== 'founding' && (
-          <p className="mt-3 text-center text-xs text-slate-400">
+          <p className="mt-1 text-center text-xs text-slate-400">
             You&apos;ll be redirected to Stripe for secure payment.
           </p>
         )}

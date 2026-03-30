@@ -1,18 +1,26 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { createHmac, timingSafeEqual } from 'crypto';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { createBookingHmac } from '@/lib/short-manage-link';
-import { createHmac } from 'crypto';
-
-const SECRET = () => process.env.PAYMENT_TOKEN_SECRET || process.env.STRIPE_SECRET_KEY || 'dev-secret';
+import { tryGetPaymentTokenSecret } from '@/lib/payment-token';
 
 function parseShortCode(code: string): string | null {
+  const secret = tryGetPaymentTokenSecret();
+  if (!secret) return null;
+
   const dotIdx = code.lastIndexOf('.');
   if (dotIdx < 1) return null;
   const payload = code.slice(0, dotIdx);
   const sig = code.slice(dotIdx + 1);
 
-  const expected = createHmac('sha256', SECRET()).update(payload).digest('base64url').slice(0, 12);
-  if (sig !== expected) return null;
+  const expectedFull = createHmac('sha256', secret).update(payload).digest('base64url');
+  const expected = expectedFull.slice(0, 12);
+  if (expected.length !== sig.length) return null;
+  try {
+    if (!timingSafeEqual(Buffer.from(expected), Buffer.from(sig))) return null;
+  } catch {
+    return null;
+  }
 
   try {
     const bytes = Buffer.from(payload, 'base64url');

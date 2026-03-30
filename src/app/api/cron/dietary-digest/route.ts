@@ -1,18 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { sendCommunication } from '@/lib/communications';
+import { requireCronAuthorisation } from '@/lib/cron-auth';
 
 /**
- * POST /api/cron/dietary-digest
+ * GET/POST /api/cron/dietary-digest
+ * Vercel Cron uses GET; POST kept for manual triggers.
  * Sends a morning dietary digest email to the venue's kitchen_email.
- * Groups dietary notes by booking time for today's reservations.
- * Run once daily at ~7am.
  */
+export async function GET(request: NextRequest) {
+  return POST(request);
+}
+
 export async function POST(request: NextRequest) {
-  const secret = process.env.CRON_SECRET;
-  if (secret && request.headers.get('authorization') !== `Bearer ${secret}`) {
-    return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
-  }
+  const denied = requireCronAuthorisation(request);
+  if (denied) return denied;
 
   try {
     const supabase = getSupabaseAdminClient();
@@ -51,6 +53,7 @@ export async function POST(request: NextRequest) {
 
       await sendCommunication({
         type: 'dietary_digest',
+        venue_id: venue.id,
         recipient: { email: venue.kitchen_email },
         payload: {
           venue_name: venue.name,

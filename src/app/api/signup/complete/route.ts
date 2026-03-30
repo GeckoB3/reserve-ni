@@ -87,10 +87,7 @@ export async function POST(request: Request) {
 
     if (venueError || !venue) {
       console.error('[signup/complete] Venue creation failed:', venueError);
-      return NextResponse.json(
-        { error: 'Failed to create venue: ' + (venueError?.message ?? 'unknown') },
-        { status: 500 }
-      );
+      return NextResponse.json({ error: 'Failed to complete signup. Please contact support.' }, { status: 500 });
     }
 
     const { error: staffError } = await admin.from('staff').insert({
@@ -102,10 +99,7 @@ export async function POST(request: Request) {
 
     if (staffError) {
       console.error('[signup/complete] Staff creation failed:', staffError);
-      return NextResponse.json(
-        { error: 'Failed to create staff record: ' + staffError.message },
-        { status: 500 }
-      );
+      return NextResponse.json({ error: 'Failed to complete signup. Please contact support.' }, { status: 500 });
     }
 
     return NextResponse.json({ redirect_url: '/onboarding' });

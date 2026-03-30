@@ -23,6 +23,7 @@ import {
   validateNoShowGracePeriod,
   validateTablesBelongToVenue,
 } from '@/lib/table-management/lifecycle';
+import { resolveTableAssignmentDurationBuffer } from '@/lib/table-management/booking-table-duration';
 import { resolveVenueMode } from '@/lib/venue-mode';
 import { z } from 'zod';
 import { normalizeToE164 } from '@/lib/phone/e164';
@@ -521,10 +522,25 @@ export async function PATCH(
         }
       }
 
-      await staff.db
+      const prevUpdatedAt = booking.updated_at as string;
+      const { data: updatedAfterModify, error: modifyUpdErr } = await staff.db
         .from('bookings')
         .update(bookingUpdate)
-        .eq('id', id);
+        .eq('id', id)
+        .eq('updated_at', prevUpdatedAt)
+        .select('*')
+        .maybeSingle();
+
+      if (modifyUpdErr) {
+        console.error('Booking modify update failed:', modifyUpdErr);
+        return NextResponse.json({ error: 'Failed to update booking' }, { status: 500 });
+      }
+      if (!updatedAfterModify) {
+        return NextResponse.json(
+          { error: 'Booking was modified elsewhere. Refresh and try again.', code: 'stale_booking' },
+          { status: 412 },
+        );
+      }
 
       await admin.from('events').insert({
         venue_id: staff.venue_id,
@@ -537,6 +553,7 @@ export async function PATCH(
       const timeChanged = timeStr !== before.booking_time;
       const partySizeChanged = newPartySize !== booking.party_size;
 
+      let tableAssignmentUnassigned = false;
       if (dateChanged || timeChanged || partySizeChanged) {
         const { data: venueForTables } = await admin
           .from('venues')
@@ -548,9 +565,28 @@ export async function PATCH(
           await replaceBookingAssignments(admin, id, [], staff.id);
           await clearTableStatusesForBooking(admin, id, staff.id);
 
-          await autoAssignTable(admin, staff.venue_id, id, newDate, timeStr, 90, 15, newPartySize);
+          const { durationMinutes, bufferMinutes } = await resolveTableAssignmentDurationBuffer(
+            admin,
+            staff.venue_id,
+            newDate,
+            newPartySize,
+            booking.service_id,
+          );
+          const assigned = await autoAssignTable(
+            admin,
+            staff.venue_id,
+            id,
+            newDate,
+            timeStr,
+            durationMinutes,
+            bufferMinutes,
+            newPartySize,
+          );
+          if (!assigned) {
+            tableAssignmentUnassigned = true;
+          }
           const nextAssigned = await getAssignedTableIds(admin, id);
-          await syncTableStatusesForBooking(admin, id, nextAssigned, booking.status, staff.id);
+          await syncTableStatusesForBooking(admin, id, nextAssigned, updatedAfterModify.status as string, staff.id);
         }
       }
 
@@ -568,8 +604,8 @@ export async function PATCH(
           booking_date: newDate,
           booking_time: timeStr,
           party_size: newPartySize,
-          deposit_amount_pence: booking.deposit_amount_pence ?? null,
-          deposit_status: booking.deposit_status ?? null,
+          deposit_amount_pence: updatedAfterModify.deposit_amount_pence ?? null,
+          deposit_status: updatedAfterModify.deposit_status ?? null,
           manage_booking_link: manageLink,
         };
         const venueEmail: import('@/lib/emails/types').VenueEmailData = {
@@ -599,8 +635,10 @@ export async function PATCH(
         console.error('Communication log reset failed after modification:', logResetErr);
       }
 
-      const updated = await staff.db.from('bookings').select('*').eq('id', id).single();
-      return NextResponse.json(updated.data);
+      return NextResponse.json({
+        ...updatedAfterModify,
+        ...(tableAssignmentUnassigned ? { table_assignment_unassigned: true as const } : {}),
+      });
     }
 
     return NextResponse.json({ error: 'Provide status or booking_date/booking_time/party_size' }, { status: 400 });

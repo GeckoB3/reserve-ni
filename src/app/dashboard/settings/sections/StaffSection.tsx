@@ -47,6 +47,11 @@ export function StaffSection({ venueId: _venueId, isAdmin, bookingModel }: Staff
   const [newCalendarName, setNewCalendarName] = useState('');
   const [addCalendarSaving, setAddCalendarSaving] = useState(false);
   const [addCalendarError, setAddCalendarError] = useState<string | null>(null);
+  const [calendarBillingModal, setCalendarBillingModal] = useState<{
+    limit: number;
+    current: number;
+    pendingName: string;
+  } | null>(null);
   const [deleteCalendarTarget, setDeleteCalendarTarget] = useState<PractitionerOption | null>(null);
   const [deletingCalendar, setDeletingCalendar] = useState(false);
   const [deleteCalendarError, setDeleteCalendarError] = useState<string | null>(null);
@@ -196,13 +201,18 @@ export function StaffSection({ venueId: _venueId, isAdmin, bookingModel }: Staff
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ name }),
         });
-        const j = (await res.json().catch(() => ({}))) as { error?: string; upgrade_required?: boolean };
+        const j = (await res.json().catch(() => ({}))) as {
+          error?: string;
+          upgrade_required?: boolean;
+          current?: number;
+          limit?: number;
+        };
         if (!res.ok) {
-          throw new Error(
-            typeof j.error === 'string'
-              ? j.error
-              : 'Could not add calendar',
-          );
+          if (res.status === 403 && j.upgrade_required && typeof j.limit === 'number' && typeof j.current === 'number') {
+            setCalendarBillingModal({ limit: j.limit, current: j.current, pendingName: name });
+            return;
+          }
+          throw new Error(typeof j.error === 'string' ? j.error : 'Could not add calendar');
         }
         setNewCalendarName('');
         setShowAddCalendarForm(false);
@@ -218,6 +228,45 @@ export function StaffSection({ venueId: _venueId, isAdmin, bookingModel }: Staff
     },
     [newCalendarName, loadPractitioners, loadCalendarEntitlement],
   );
+
+  const confirmCalendarBillingIncrease = useCallback(async () => {
+    if (!calendarBillingModal) return;
+    const { limit, pendingName } = calendarBillingModal;
+    const newCount = limit + 1;
+    setAddCalendarSaving(true);
+    setAddCalendarError(null);
+    try {
+      const up = await fetch('/api/venue/update-subscription', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ calendar_count: newCount }),
+      });
+      const upJson = (await up.json().catch(() => ({}))) as { error?: string };
+      if (!up.ok) {
+        throw new Error(typeof upJson.error === 'string' ? upJson.error : 'Could not update your subscription.');
+      }
+      const res = await fetch('/api/venue/practitioners', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: pendingName }),
+      });
+      const j = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) {
+        throw new Error(typeof j.error === 'string' ? j.error : 'Could not add calendar after billing update.');
+      }
+      setCalendarBillingModal(null);
+      setNewCalendarName('');
+      setShowAddCalendarForm(false);
+      await loadPractitioners();
+      await loadCalendarEntitlement();
+      setCalendarRenameSuccess('Plan updated and calendar added.');
+      setTimeout(() => setCalendarRenameSuccess(null), 4000);
+    } catch (err) {
+      setAddCalendarError(err instanceof Error ? err.message : 'Something went wrong.');
+    } finally {
+      setAddCalendarSaving(false);
+    }
+  }, [calendarBillingModal, loadPractitioners, loadCalendarEntitlement]);
 
   const onDeleteCalendar = useCallback(async () => {
     if (!deleteCalendarTarget) return;
@@ -560,7 +609,7 @@ export function StaffSection({ venueId: _venueId, isAdmin, bookingModel }: Staff
                 Founding plans have no limit). Rename without changing staff logins.
               </p>
             </div>
-            {calendarEntitlement?.can_add_practitioner && (
+            {calendarEntitlement && (
               <button
                 type="button"
                 onClick={() => {
@@ -597,7 +646,7 @@ export function StaffSection({ venueId: _venueId, isAdmin, bookingModel }: Staff
                 {calendarRenameError}
               </div>
             )}
-            {showAddCalendarForm && calendarEntitlement?.can_add_practitioner && (
+            {showAddCalendarForm && calendarEntitlement && (
               <form onSubmit={onAddCalendar} className="rounded-lg border border-slate-200 bg-slate-50/50 p-4 space-y-3">
                 <h3 className="text-sm font-semibold text-slate-800">New calendar</h3>
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
@@ -638,6 +687,51 @@ export function StaffSection({ venueId: _venueId, isAdmin, bookingModel }: Staff
                 </div>
                 {addCalendarError && <p className="text-sm text-red-600">{addCalendarError}</p>}
               </form>
+            )}
+            {calendarBillingModal && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" role="dialog" aria-modal="true" aria-labelledby="calendar-billing-title">
+                <div className="max-w-md rounded-xl border border-slate-200 bg-white p-6 shadow-lg">
+                  <h3 id="calendar-billing-title" className="text-base font-semibold text-slate-900">
+                    Increase your plan?
+                  </h3>
+                  <p className="mt-2 text-sm text-slate-600">
+                    You currently pay for {calendarBillingModal.limit} calendar
+                    {calendarBillingModal.limit === 1 ? '' : 's'}. Adding another team member will increase your plan to
+                    &pound;{(calendarBillingModal.limit + 1) * 10}/month.
+                  </p>
+                  {calendarBillingModal.limit + 1 >= 8 && (
+                    <p className="mt-3 rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 text-xs text-brand-900">
+                      Or upgrade to Business at &pound;79/month for unlimited calendars, SMS reminders, and priority
+                      support — see the{' '}
+                      <a href="/dashboard/settings?tab=plan" className="font-semibold underline">
+                        Plan
+                      </a>{' '}
+                      tab.
+                    </p>
+                  )}
+                  <div className="mt-5 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      disabled={addCalendarSaving}
+                      onClick={() => void confirmCalendarBillingIncrease()}
+                      className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
+                    >
+                      {addCalendarSaving ? 'Updating…' : 'Confirm — update my plan'}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={addCalendarSaving}
+                      onClick={() => {
+                        setCalendarBillingModal(null);
+                        setAddCalendarError(null);
+                      }}
+                      className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              </div>
             )}
             {practitioners.length === 0 ? (
               <p className="text-sm text-slate-600">

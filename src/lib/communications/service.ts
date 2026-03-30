@@ -4,6 +4,7 @@ import { EmailChannel } from './channels/email';
 import { SMSChannel } from './channels/sms';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { isSmsAllowed } from '@/lib/tier-enforcement';
+import { getChannelsForMessage } from '@/lib/communications/tier-message-channels';
 import type { CommMessageType } from '@/lib/emails/types';
 
 interface LogContext {
@@ -208,7 +209,7 @@ export async function updateCommLogStatus(opts: {
 const MESSAGE_CHANNELS: Record<MessageType, Array<'email' | 'sms'>> = {
   booking_confirmation: [],
   deposit_payment_request: [],
-  deposit_payment_reminder: ['sms'],
+  deposit_payment_reminder: [],
   pre_visit_reminder: [],
   confirm_or_cancel_prompt: [],
   dietary_digest: ['email'],
@@ -321,17 +322,14 @@ export class CommunicationService {
   }
 
   async send(type: MessageType, recipient: Recipient, payload: TemplateVariables, ctx: LogContext = {}): Promise<void> {
-    const channels = MESSAGE_CHANNELS[type];
+    const tierChannels = await getChannelsForMessage(type, ctx.venue_id);
+    const channels = tierChannels ?? MESSAGE_CHANNELS[type];
     if (!channels?.length) {
       console.warn('[CommunicationService] No channels for type', type);
       return;
     }
 
-    // Standard tier: filter out SMS channels (email only)
-    let smsAllowed = true;
-    if (ctx.venue_id) {
-      smsAllowed = await isSmsAllowed(ctx.venue_id);
-    }
+    const smsAllowed = ctx.venue_id ? await isSmsAllowed(ctx.venue_id) : false;
 
     const vars = normalisePayload(payload);
 

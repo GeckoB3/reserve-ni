@@ -17,7 +17,9 @@ import {
   defaultDurationForDashboardDay,
 } from '@/lib/dashboard/resolve-venue-concurrent-cap';
 import { resolveVenueMode } from '@/lib/venue-mode';
+import { computeGuestBookingReady } from '@/lib/setup-guest-booking-ready';
 import type { AvailabilityConfig, EngineInput, OpeningHours } from '@/types/availability';
+import type { BookingModel } from '@/types/booking-models';
 
 const WEEKDAYS_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
@@ -199,9 +201,30 @@ export async function GET() {
     const coversInHouseNow = coversOverlappingNow(todayLoadBookings, nowMinutes, todayDefaultDur);
     const arrivingWithin30 = coversArrivingWithin(todayLoadBookings, nowMinutes, 30, todayDefaultDur);
 
-    const venueBookingModel = (venueRow as Record<string, unknown>).booking_model as string ?? 'table_reservation';
+    const venueBookingModel = ((venueRow as Record<string, unknown>).booking_model as string) ?? 'table_reservation';
     const isAppt = venueBookingModel === 'practitioner_appointment';
     const alerts: Array<{ type: string; message: string }> = [];
+
+    if (
+      staff.role === 'admin' &&
+      (venueBookingModel === 'table_reservation' || venueBookingModel === 'practitioner_appointment')
+    ) {
+      const guestReady = await computeGuestBookingReady(
+        admin,
+        staff.venue_id,
+        venueBookingModel as BookingModel,
+        true,
+      );
+      if (!guestReady) {
+        alerts.push({
+          type: 'warning',
+          message:
+            venueBookingModel === 'practitioner_appointment'
+              ? 'Public bookings are off until at least one team member has an active linked service. Open Appointment Services to finish setup.'
+              : 'Public table booking is off until you have at least one active service and availability configured. Use the setup wizard or Availability.',
+        });
+      }
+    }
     if (!isAppt && todayHeat.fill_percent != null && todayHeat.fill_percent >= 80) {
       alerts.push({
         type: 'warning',
