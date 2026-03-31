@@ -13,6 +13,7 @@ export interface AppointmentCatalogPractitioner {
     id: string;
     name: string;
     duration_minutes: number;
+    buffer_minutes: number;
     price_pence: number | null;
     deposit_pence: number | null;
   }>;
@@ -21,6 +22,7 @@ export interface AppointmentCatalogPractitioner {
 export async function fetchAppointmentCatalog(
   supabase: SupabaseClient,
   venueId: string,
+  options?: { practitionerSlug?: string },
 ): Promise<{ practitioners: AppointmentCatalogPractitioner[] }> {
   const [practitionersRes, allServicesRes, psRes] = await Promise.all([
     supabase
@@ -38,9 +40,16 @@ export async function fetchAppointmentCatalog(
     supabase.from('practitioner_services').select('*, practitioners!inner(venue_id)').eq('practitioners.venue_id', venueId),
   ]);
 
-  const practitioners = (practitionersRes.data ?? []) as Practitioner[];
+  let practitioners = (practitionersRes.data ?? []) as Practitioner[];
   const services = (allServicesRes.data ?? []) as AppointmentService[];
   const practitionerServices = (psRes.data ?? []) as PractitionerService[];
+
+  if (options?.practitionerSlug) {
+    const slug = options.practitionerSlug.trim().toLowerCase();
+    practitioners = practitioners.filter(
+      (p) => p.is_active && (p.slug ?? '').toLowerCase() === slug,
+    );
+  }
 
   const result: AppointmentCatalogPractitioner[] = [];
 
@@ -56,6 +65,7 @@ export async function fetchAppointmentCatalog(
         id: svc.id,
         name: svc.name,
         duration_minutes: svc.duration_minutes,
+        buffer_minutes: svc.buffer_minutes ?? 0,
         price_pence: svc.price_pence,
         deposit_pence: svc.deposit_pence,
       })),

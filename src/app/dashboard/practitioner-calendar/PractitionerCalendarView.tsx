@@ -68,6 +68,7 @@ interface Booking {
   client_arrived_at: string | null;
   deposit_amount_pence: number | null;
   deposit_status: string;
+  group_booking_id?: string | null;
 }
 
 interface CalendarBlock {
@@ -191,6 +192,41 @@ function weekDatesFrom(start: string): string[] {
 
 function overlapsRange(a0: number, a1: number, b0: number, b1: number): boolean {
   return a0 < b1 && b0 < a1;
+}
+
+type BookingCluster = { kind: 'single'; booking: Booking } | { kind: 'group'; items: Booking[] };
+
+/** Merge consecutive multi-service rows (same group_booking_id) into one visual stack. */
+function clusterMultiServiceBookings(bookings: Booking[]): BookingCluster[] {
+  const sorted = [...bookings].sort((a, b) => timeToMinutes(a.booking_time) - timeToMinutes(b.booking_time));
+  const byGroup = new Map<string, Booking[]>();
+  for (const b of bookings) {
+    if (b.group_booking_id) {
+      const g = byGroup.get(b.group_booking_id) ?? [];
+      g.push(b);
+      byGroup.set(b.group_booking_id, g);
+    }
+  }
+  for (const [, arr] of byGroup) {
+    arr.sort((a, b) => timeToMinutes(a.booking_time) - timeToMinutes(b.booking_time));
+  }
+  const seen = new Set<string>();
+  const out: BookingCluster[] = [];
+  for (const b of sorted) {
+    if (!b.group_booking_id) {
+      out.push({ kind: 'single', booking: b });
+      continue;
+    }
+    if (seen.has(b.group_booking_id)) continue;
+    seen.add(b.group_booking_id);
+    const items = byGroup.get(b.group_booking_id) ?? [b];
+    if (items.length <= 1) {
+      out.push({ kind: 'single', booking: items[0]! });
+    } else {
+      out.push({ kind: 'group', items });
+    }
+  }
+  return out;
 }
 
 function todayLocalISO(): string {
@@ -502,6 +538,7 @@ export function PractitionerCalendarView({
     y: number;
   } | null>(null);
   const [blockModal, setBlockModal] = useState<{
+    blockId?: string;
     pracId: string;
     dateStr: string;
     startTime: string;
@@ -740,6 +777,19 @@ export function PractitionerCalendarView({
     setSlotMenu(null);
   }
 
+  function openEditBlockModal(bl: CalendarBlock) {
+    const st = bl.start_time.length >= 5 ? bl.start_time.slice(0, 5) : bl.start_time;
+    const en = bl.end_time.length >= 5 ? bl.end_time.slice(0, 5) : bl.end_time;
+    setBlockModal({
+      blockId: bl.id,
+      pracId: bl.practitioner_id,
+      dateStr: bl.block_date,
+      startTime: st,
+      endTime: en,
+      reason: bl.reason ?? '',
+    });
+  }
+
   async function saveBlock() {
     if (!blockModal) return;
     if (timeToMinutes(blockModal.endTime) <= timeToMinutes(blockModal.startTime)) {
@@ -748,36 +798,61 @@ export function PractitionerCalendarView({
     }
     setBlockSaving(true);
     try {
-      const res = await fetch('/api/venue/practitioner-calendar-blocks', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          practitioner_id: blockModal.pracId,
-          block_date: blockModal.dateStr,
-          start_time: blockModal.startTime,
-          end_time: blockModal.endTime,
-          reason: blockModal.reason.trim() || undefined,
-        }),
-      });
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        addToast((j as { error?: string }).error ?? 'Could not create block', 'error');
-        return;
+      if (blockModal.blockId) {
+        const res = await fetch(`/api/venue/practitioner-calendar-blocks/${blockModal.blockId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            end_time: blockModal.endTime,
+            reason: blockModal.reason.trim() || null,
+          }),
+        });
+        if (!res.ok) {
+          const j = await res.json().catch(() => ({}));
+          addToast((j as { error?: string }).error ?? 'Could not update block', 'error');
+          return;
+        }
+      } else {
+        const res = await fetch('/api/venue/practitioner-calendar-blocks', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            practitioner_id: blockModal.pracId,
+            block_date: blockModal.dateStr,
+            start_time: blockModal.startTime,
+            end_time: blockModal.endTime,
+            reason: blockModal.reason.trim() || undefined,
+          }),
+        });
+        if (!res.ok) {
+          const j = await res.json().catch(() => ({}));
+          addToast((j as { error?: string }).error ?? 'Could not create block', 'error');
+          return;
+        }
       }
       setBlockModal(null);
       void fetchData({ silent: true });
     } catch {
-      addToast('Could not create block', 'error');
+      addToast(blockModal.blockId ? 'Could not update block' : 'Could not create block', 'error');
     } finally {
       setBlockSaving(false);
     }
   }
 
-  async function deleteBlock(blockId: string) {
+  async function deleteBlockFromModal() {
+    if (!blockModal?.blockId) return;
     if (!window.confirm('Remove this blocked time?')) return;
-    const res = await fetch(`/api/venue/practitioner-calendar-blocks/${blockId}`, { method: 'DELETE' });
-    if (!res.ok) addToast('Could not remove block', 'error');
-    else void fetchData({ silent: true });
+    setBlockSaving(true);
+    try {
+      const res = await fetch(`/api/venue/practitioner-calendar-blocks/${blockModal.blockId}`, { method: 'DELETE' });
+      if (!res.ok) addToast('Could not remove block', 'error');
+      else {
+        setBlockModal(null);
+        void fetchData({ silent: true });
+      }
+    } finally {
+      setBlockSaving(false);
+    }
   }
 
   async function patchBookingMove(booking: Booking, newDate: string, newTime: string, newPracId: string) {
@@ -1247,79 +1322,164 @@ export function PractitionerCalendarView({
                           <button
                             key={bl.id}
                             type="button"
-                            onClick={() => void deleteBlock(bl.id)}
+                            onClick={() => openEditBlockModal(bl)}
                             className="absolute left-1 right-1 z-[15] cursor-pointer overflow-hidden rounded-md border border-slate-300 bg-slate-200/90 px-1 py-0.5 text-left text-[10px] font-medium text-slate-700 hover:bg-slate-300/90"
                             style={{ top, height: h }}
-                            title="Click to remove block"
+                            title="Click to edit block"
                           >
                             Blocked{bl.reason ? `: ${bl.reason}` : ''}
                           </button>
                         );
                       })}
 
-                      {pracBookings.map((b) => {
-                        const duration = getBookingDuration(b);
-                        const colour = isArrivedWaitingDisplay(b) ? ARRIVED_WAITING_ACCENT_HEX : getBookingColour(b);
-                        const statusStyle = bookingCalendarBlockStyle(b);
-                        const svc = b.appointment_service_id ? serviceMap.get(b.appointment_service_id) : null;
-                        const top = slotTop(b.booking_time);
-                        const height = slotHeightFromDuration(duration);
-                        const canDrag = ['Pending', 'Confirmed', 'Seated'].includes(b.status);
-                        const flash = flashIds.has(b.id);
-                        const qBusy = quickActionId === b.id;
-                        const arrived = Boolean(b.client_arrived_at);
+                      {clusterMultiServiceBookings(pracBookings).map((cluster) => {
+                        if (cluster.kind === 'single') {
+                          const b = cluster.booking;
+                          const duration = getBookingDuration(b);
+                          const colour = isArrivedWaitingDisplay(b) ? ARRIVED_WAITING_ACCENT_HEX : getBookingColour(b);
+                          const statusStyle = bookingCalendarBlockStyle(b);
+                          const svc = b.appointment_service_id ? serviceMap.get(b.appointment_service_id) : null;
+                          const top = slotTop(b.booking_time);
+                          const height = slotHeightFromDuration(duration);
+                          const canDrag = ['Pending', 'Confirmed', 'Seated'].includes(b.status);
+                          const flash = flashIds.has(b.id);
+                          const qBusy = quickActionId === b.id;
+                          const arrived = Boolean(b.client_arrived_at);
+                          return (
+                            <DraggableBookingShell key={b.id} booking={b} top={top} height={height} canDrag={canDrag}>
+                              {(handle) => (
+                                <div
+                                  className={`flex h-full min-h-0 flex-row items-stretch overflow-hidden rounded-lg border shadow-sm transition-shadow hover:shadow-md ${statusStyle.bg} ${statusStyle.border} ${
+                                    flash ? 'motion-safe:animate-pulse ring-2 ring-brand-400/60' : ''
+                                  }`}
+                                  style={{ borderLeftWidth: 3, borderLeftColor: colour }}
+                                >
+                                  {canDrag && handle.listeners && handle.attributes ? (
+                                    <button
+                                      type="button"
+                                      className="w-5 shrink-0 cursor-grab touch-none border-r border-black/5 bg-black/[0.03] px-0.5 text-[10px] text-slate-400 hover:bg-black/[0.06] active:cursor-grabbing"
+                                      aria-label="Drag to reschedule"
+                                      {...handle.listeners}
+                                      {...handle.attributes}
+                                    >
+                                      ⋮⋮
+                                    </button>
+                                  ) : null}
+                                  <div className="flex min-h-0 min-w-0 flex-1 flex-row items-start gap-0">
+                                    <button
+                                      type="button"
+                                      onClick={() => setDetailBookingId(b.id)}
+                                      className="min-h-0 min-w-0 flex-1 px-1.5 py-1 text-left"
+                                    >
+                                      <div className="flex flex-wrap items-center gap-1">
+                                        <span className={`truncate text-xs font-semibold ${statusStyle.text}`}>
+                                          {b.guest_name}
+                                        </span>
+                                        {arrived && b.status !== 'Seated' && ['Pending', 'Confirmed'].includes(b.status) && (
+                                          <span className="inline-flex h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-amber-500" aria-hidden title="Waiting" />
+                                        )}
+                                      </div>
+                                      {svc && height > 36 && (
+                                        <div className="truncate text-[10px] text-slate-500">{svc.name}</div>
+                                      )}
+                                      {height > 48 && (
+                                        <div className="text-[10px] text-slate-400">
+                                          {b.booking_time.slice(0, 5)} –{' '}
+                                          {minutesToTime(timeToMinutes(b.booking_time) + duration)}
+                                        </div>
+                                      )}
+                                    </button>
+                                    <CalendarBookingQuickActions
+                                      b={b}
+                                      busy={qBusy}
+                                      graceMinutes={noShowGraceMinutes}
+                                      onStatus={(id, s) => void quickPatchBooking(id, { status: s })}
+                                      onArrived={(id, v) => void quickPatchBooking(id, { client_arrived: v })}
+                                    />
+                                  </div>
+                                </div>
+                              )}
+                            </DraggableBookingShell>
+                          );
+                        }
+
+                        const items = cluster.items;
+                        const first = items[0]!;
+                        const last = items[items.length - 1]!;
+                        const spanMins =
+                          timeToMinutes(last.booking_time) +
+                          getBookingDuration(last) -
+                          timeToMinutes(first.booking_time);
+                        const top = slotTop(first.booking_time);
+                        const height = slotHeightFromDuration(spanMins);
+                        const colour = isArrivedWaitingDisplay(first) ? ARRIVED_WAITING_ACCENT_HEX : getBookingColour(first);
+                        const statusStyle = bookingCalendarBlockStyle(first);
+                        const flash = items.some((x) => flashIds.has(x.id));
+                        const qBusy = items.some((x) => quickActionId === x.id);
+                        const arrived = Boolean(first.client_arrived_at);
+                        const serviceTitle = items
+                          .map((x) => (x.appointment_service_id ? serviceMap.get(x.appointment_service_id)?.name : null))
+                          .filter(Boolean)
+                          .join(' → ');
                         return (
-                          <DraggableBookingShell key={b.id} booking={b} top={top} height={height} canDrag={canDrag}>
-                            {(handle) => (
+                          <DraggableBookingShell key={first.id} booking={first} top={top} height={height} canDrag={false}>
+                            {() => (
                               <div
                                 className={`flex h-full min-h-0 flex-row items-stretch overflow-hidden rounded-lg border shadow-sm transition-shadow hover:shadow-md ${statusStyle.bg} ${statusStyle.border} ${
                                   flash ? 'motion-safe:animate-pulse ring-2 ring-brand-400/60' : ''
                                 }`}
                                 style={{ borderLeftWidth: 3, borderLeftColor: colour }}
+                                title={serviceTitle || undefined}
                               >
-                                {canDrag && handle.listeners && handle.attributes ? (
-                                  <button
-                                    type="button"
-                                    className="w-5 shrink-0 cursor-grab touch-none border-r border-black/5 bg-black/[0.03] px-0.5 text-[10px] text-slate-400 hover:bg-black/[0.06] active:cursor-grabbing"
-                                    aria-label="Drag to reschedule"
-                                    {...handle.listeners}
-                                    {...handle.attributes}
-                                  >
-                                    ⋮⋮
-                                  </button>
-                                ) : null}
-                                <div className="flex min-h-0 min-w-0 flex-1 flex-row items-start gap-0">
-                                  <button
-                                    type="button"
-                                    onClick={() => setDetailBookingId(b.id)}
-                                    className="min-h-0 min-w-0 flex-1 px-1.5 py-1 text-left"
-                                  >
-                                    <div className="flex flex-wrap items-center gap-1">
-                                      <span className={`truncate text-xs font-semibold ${statusStyle.text}`}>
-                                        {b.guest_name}
-                                      </span>
-                                      {arrived && b.status !== 'Seated' && ['Pending', 'Confirmed'].includes(b.status) && (
-                                        <span className="inline-flex h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-amber-500" aria-hidden title="Waiting" />
-                                      )}
-                                    </div>
-                                    {svc && height > 36 && (
-                                      <div className="truncate text-[10px] text-slate-500">{svc.name}</div>
-                                    )}
-                                    {height > 48 && (
-                                      <div className="text-[10px] text-slate-400">
-                                        {b.booking_time.slice(0, 5)} –{' '}
-                                        {minutesToTime(timeToMinutes(b.booking_time) + duration)}
+                                <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+                                  {items.map((b, segIdx) => {
+                                    const dur = getBookingDuration(b);
+                                    const svc = b.appointment_service_id ? serviceMap.get(b.appointment_service_id) : null;
+                                    return (
+                                      <div
+                                        key={b.id}
+                                        className={`flex min-h-0 flex-col border-t border-slate-500/25 first:border-t-0 ${statusStyle.bg}`}
+                                        style={{ flex: dur }}
+                                      >
+                                        <button
+                                          type="button"
+                                          onClick={() => setDetailBookingId(b.id)}
+                                          className="flex min-h-0 min-w-0 flex-1 flex-col px-1.5 py-0.5 text-left"
+                                        >
+                                          <div className="flex flex-wrap items-center gap-1">
+                                            <span className={`truncate text-xs font-semibold ${statusStyle.text}`}>
+                                              {segIdx === 0 ? b.guest_name : '\u00a0'}
+                                            </span>
+                                            {segIdx === 0 &&
+                                              arrived &&
+                                              first.status !== 'Seated' &&
+                                              ['Pending', 'Confirmed'].includes(first.status) && (
+                                                <span
+                                                  className="inline-flex h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-amber-500"
+                                                  aria-hidden
+                                                  title="Waiting"
+                                                />
+                                              )}
+                                          </div>
+                                          {svc && (
+                                            <div className="truncate text-[10px] text-slate-500">{svc.name}</div>
+                                          )}
+                                          <div className="text-[10px] text-slate-400">
+                                            {b.booking_time.slice(0, 5)} –{' '}
+                                            {minutesToTime(timeToMinutes(b.booking_time) + dur)}
+                                          </div>
+                                        </button>
                                       </div>
-                                    )}
-                                  </button>
-                                  <CalendarBookingQuickActions
-                                    b={b}
-                                    busy={qBusy}
-                                    graceMinutes={noShowGraceMinutes}
-                                    onStatus={(id, s) => void quickPatchBooking(id, { status: s })}
-                                    onArrived={(id, v) => void quickPatchBooking(id, { client_arrived: v })}
-                                  />
+                                    );
+                                  })}
                                 </div>
+                                <CalendarBookingQuickActions
+                                  b={first}
+                                  busy={qBusy}
+                                  graceMinutes={noShowGraceMinutes}
+                                  onStatus={(id, s) => void quickPatchBooking(id, { status: s })}
+                                  onArrived={(id, v) => void quickPatchBooking(id, { client_arrived: v })}
+                                />
                               </div>
                             )}
                           </DraggableBookingShell>
@@ -1382,10 +1542,11 @@ export function PractitionerCalendarView({
             onClick={(e) => e.stopPropagation()}
           >
             <h3 id="block-modal-title" className="text-base font-semibold text-slate-900">
-              Block time
+              {blockModal.blockId ? 'Edit block' : 'Block time'}
             </h3>
             <p className="mt-1 text-xs text-slate-500">
               {blockModal.dateStr} · {blockModal.startTime} – {blockModal.endTime}
+              {blockModal.blockId ? ' (start time is fixed; adjust end time below)' : ''}
             </p>
             <div className="mt-4 space-y-3">
               <div>
@@ -1408,22 +1569,36 @@ export function PractitionerCalendarView({
                 />
               </div>
             </div>
-            <div className="mt-5 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setBlockModal(null)}
-                className="rounded-lg px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                disabled={blockSaving}
-                onClick={() => void saveBlock()}
-                className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"
-              >
-                {blockSaving ? 'Saving…' : 'Save'}
-              </button>
+            <div className="mt-5 flex flex-wrap items-center justify-between gap-2">
+              {blockModal.blockId ? (
+                <button
+                  type="button"
+                  disabled={blockSaving}
+                  onClick={() => void deleteBlockFromModal()}
+                  className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-100 disabled:opacity-50"
+                >
+                  Delete
+                </button>
+              ) : (
+                <span />
+              )}
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setBlockModal(null)}
+                  className="rounded-lg px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={blockSaving}
+                  onClick={() => void saveBlock()}
+                  className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"
+                >
+                  {blockSaving ? 'Saving…' : 'Save'}
+                </button>
+              </div>
             </div>
           </div>
         </div>

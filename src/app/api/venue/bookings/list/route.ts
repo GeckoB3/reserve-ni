@@ -6,6 +6,7 @@ import { BOOKING_ACTIVE_STATUSES } from '@/lib/table-management/constants';
 /**
  * GET /api/venue/bookings/list?date=YYYY-MM-DD&status=Confirmed|Pending|...
  * or  /api/venue/bookings/list?from=YYYY-MM-DD&to=YYYY-MM-DD&status=...
+ * Optional: guest=<uuid> filters to that guest_id (with date/from-to or ids).
  * Returns bookings for the authenticated venue, with guest name.
  * Sorted by date then time.
  */
@@ -24,7 +25,10 @@ export async function GET(request: NextRequest) {
     const statusFilter = request.nextUrl.searchParams.get('status');
     const groupBookingId = request.nextUrl.searchParams.get('group_booking_id');
     const unassignedTables = request.nextUrl.searchParams.get('unassigned_tables') === '1';
+    const guestIdParam = request.nextUrl.searchParams.get('guest');
     const isoRe = /^\d{4}-\d{2}-\d{2}$/;
+    const guestUuidRe =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
     let query = staff.db
       .from('bookings')
@@ -34,6 +38,10 @@ export async function GET(request: NextRequest) {
       .eq('venue_id', staff.venue_id)
       .order('booking_date', { ascending: true })
       .order('booking_time', { ascending: true });
+
+    if (guestIdParam && guestUuidRe.test(guestIdParam)) {
+      query = query.eq('guest_id', guestIdParam);
+    }
 
     if (groupBookingId) {
       query = query.eq('group_booking_id', groupBookingId);
@@ -60,11 +68,18 @@ export async function GET(request: NextRequest) {
 
     const guestIds = [...new Set((rows ?? []).map((r: { guest_id: string }) => r.guest_id))];
     const { data: guestsRows } = guestIds.length
-      ? await staff.db.from('guests').select('id, name, email, phone, visit_count').in('id', guestIds)
+      ? await staff.db.from('guests').select('id, name, email, phone, visit_count, tags').in('id', guestIds)
       : { data: [] };
     const guestsMap = new Map(
       (guestsRows ?? []).map(
-        (g: { id: string; name: string | null; email: string | null; phone: string | null; visit_count?: number | null }) => [
+        (g: {
+          id: string;
+          name: string | null;
+          email: string | null;
+          phone: string | null;
+          visit_count?: number | null;
+          tags?: string[] | null;
+        }) => [
           g.id,
           g,
         ],
@@ -90,10 +105,12 @@ export async function GET(request: NextRequest) {
         estimated_end_time: r.estimated_end_time,
         booking_end_time: r.booking_end_time,
         created_at: r.created_at,
+        guest_id: r.guest_id,
         guest_name: guest?.name ?? '—',
         guest_email: guest?.email ?? null,
         guest_phone: guest?.phone ?? null,
         guest_visit_count: guest?.visit_count ?? null,
+        guest_tags: Array.isArray(guest?.tags) ? guest.tags : [],
         practitioner_id: r.practitioner_id ?? null,
         appointment_service_id: r.appointment_service_id ?? null,
         experience_event_id: r.experience_event_id ?? null,

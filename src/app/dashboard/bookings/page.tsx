@@ -1,3 +1,4 @@
+import { Suspense } from 'react';
 import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
 import { BookingsDashboard } from './BookingsDashboard';
@@ -43,16 +44,18 @@ export default async function BookingsPage() {
       <div className="mx-auto max-w-6xl min-w-0">
         <h1 className="mb-4 text-xl font-semibold tracking-tight text-slate-900 sm:mb-6 sm:text-2xl">{title}</h1>
         <ToastProvider>
-          {isAppointment ? (
-            <AppointmentBookingsDashboard
-              venueId={venueId}
-              currency={currency}
-              defaultPractitionerFilter={defaultAppointmentPractitionerFilter}
-              linkedPractitionerId={linkedPractitionerId}
-            />
-          ) : (
-            <BookingsDashboard venueId={venueId} currency={currency} />
-          )}
+          <Suspense fallback={<div className="rounded-lg border border-slate-200 bg-white p-8 text-center text-sm text-slate-500">Loading bookings…</div>}>
+            {isAppointment ? (
+              <AppointmentBookingsDashboard
+                venueId={venueId}
+                currency={currency}
+                defaultPractitionerFilter={defaultAppointmentPractitionerFilter}
+                linkedPractitionerId={linkedPractitionerId}
+              />
+            ) : (
+              <BookingsDashboard venueId={venueId} currency={currency} />
+            )}
+          </Suspense>
         </ToastProvider>
       </div>
     </div>

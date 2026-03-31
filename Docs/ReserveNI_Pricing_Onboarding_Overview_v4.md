@@ -294,7 +294,7 @@ User lands on their model-appropriate dashboard with:
 - Copy the Price ID → set as STRIPE_BUSINESS_PRICE_ID
 
 **Webhook endpoint:**
-- URL: `{your-domain}/api/webhooks/stripe-onboarding`
+- URL: `{your-domain}/api/webhooks/stripe-subscription`
 - Events: checkout.session.completed, customer.subscription.updated, invoice.payment_succeeded, invoice.payment_failed, customer.subscription.deleted
 - Copy signing secret → set as STRIPE_ONBOARDING_WEBHOOK_SECRET
 

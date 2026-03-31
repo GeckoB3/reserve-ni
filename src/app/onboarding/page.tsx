@@ -485,6 +485,7 @@ export default function OnboardingPage() {
             body: JSON.stringify({
               name: s.name.trim(),
               duration_minutes: s.duration,
+              buffer_minutes: 0,
               price_pence: poundsToMinor(s.price),
             }),
           });

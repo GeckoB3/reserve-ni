@@ -1,0 +1,90 @@
+'use client';
+
+export interface MultiServiceLine {
+  serviceName: string;
+  practitionerName: string;
+  startTime: string;
+  durationMinutes: number;
+  pricePence: number | null;
+  depositPence: number;
+}
+
+interface MultiServiceSummaryCardProps {
+  lines: MultiServiceLine[];
+  formatDateHuman: (dateStr: string) => string;
+  bookingDate: string;
+  currencySymbol: string;
+  formatPrice: (pence: number | null) => string;
+  onRemove?: (index: number) => void;
+}
+
+export function MultiServiceSummaryCard({
+  lines,
+  formatDateHuman,
+  bookingDate,
+  currencySymbol,
+  formatPrice,
+  onRemove,
+}: MultiServiceSummaryCardProps) {
+  const totalDuration = lines.reduce((sum, l) => sum + l.durationMinutes, 0);
+  const totalPrice = lines.reduce((sum, l) => sum + (l.pricePence ?? 0), 0);
+  const totalDeposit = lines.reduce((sum, l) => sum + (l.depositPence ?? 0), 0);
+  const hasPrice = lines.some((l) => l.pricePence != null);
+
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+      <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-400">Your appointment</h3>
+      <p className="mb-3 text-sm text-slate-600">
+        {formatDateHuman(bookingDate)}
+      </p>
+      <ul className="space-y-0 divide-y divide-slate-100 border border-slate-100 rounded-lg overflow-hidden">
+        {lines.map((line, idx) => (
+          <li key={`${line.serviceName}-${idx}-${line.startTime}`} className="flex items-start justify-between gap-3 bg-slate-50/50 px-3 py-2.5">
+            <div className="min-w-0 flex-1">
+              <div className="font-medium text-slate-900">{line.serviceName}</div>
+              <div className="mt-0.5 text-xs text-slate-500">
+                {line.startTime} · {line.durationMinutes} min · {line.practitionerName}
+              </div>
+              {line.pricePence != null && (
+                <div className="mt-0.5 text-xs font-medium text-brand-600">{formatPrice(line.pricePence)}</div>
+              )}
+            </div>
+            {onRemove ? (
+              <button
+                type="button"
+                onClick={() => onRemove(idx)}
+                className="shrink-0 rounded-lg px-2 py-1 text-xs font-medium text-slate-500 hover:bg-red-50 hover:text-red-600"
+              >
+                Remove
+              </button>
+            ) : null}
+          </li>
+        ))}
+      </ul>
+      <div className="mt-4 space-y-1.5 border-t border-slate-100 pt-3 text-sm">
+        <div className="flex justify-between text-slate-600">
+          <span>Total duration</span>
+          <span className="font-medium text-slate-900">{totalDuration} min</span>
+        </div>
+        {hasPrice && (
+          <div className="flex justify-between text-slate-600">
+            <span>Combined price</span>
+            <span className="font-semibold text-brand-600">
+              {currencySymbol}
+              {(totalPrice / 100).toFixed(2)}
+            </span>
+          </div>
+        )}
+        {totalDeposit > 0 && (
+          <div className="flex justify-between text-amber-900/90">
+            <span className="font-medium">Deposit due</span>
+            <span className="font-semibold">
+              {currencySymbol}
+              {(totalDeposit / 100).toFixed(2)}
+            </span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

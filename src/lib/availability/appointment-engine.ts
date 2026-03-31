@@ -369,6 +369,117 @@ export function computeAppointmentAvailability(input: AppointmentEngineInput, no
   return result;
 }
 
+/**
+ * Validates that an appointment can start at an exact time (not limited to 15-minute grid).
+ * Used for consecutive multi-service bookings where follow-on start times are derived from
+ * previous service end + buffer.
+ */
+export function validateExactAppointmentStart(
+  input: AppointmentEngineInput,
+  practitionerId: string,
+  serviceId: string,
+  startTimeHHmm: string,
+): { ok: boolean; reason?: string } {
+  const {
+    date,
+    practitioners,
+    services,
+    practitionerServices,
+    existingBookings,
+    phantomBookings = [],
+    practitionerBlockedRanges = [],
+    skipPastSlotFilter = false,
+    venueTimezone,
+    minNoticeHours = 0,
+    venueOpeningHours,
+  } = input;
+
+  let todayStr: string;
+  let currentMinute: number;
+  if (venueTimezone) {
+    const local = getVenueLocalDateAndMinutes(venueTimezone, new Date());
+    todayStr = local.dateYmd;
+    currentMinute = local.minutesSinceMidnight;
+  } else {
+    const now = new Date();
+    todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    currentMinute = now.getHours() * 60 + now.getMinutes();
+  }
+  const isToday = date === todayStr;
+  const minNoticeMinutes = Math.max(0, minNoticeHours * 60);
+
+  const practitioner = practitioners.find((p) => p.id === practitionerId && p.is_active);
+  if (!practitioner) {
+    return { ok: false, reason: 'Staff not available' };
+  }
+
+  const offeredServices = getOfferedAppointmentServicesForPractitioner(practitioner, services, practitionerServices);
+  const svc = offeredServices.find((s) => s.id === serviceId);
+  if (!svc) {
+    return { ok: false, reason: 'Service not available with this staff member' };
+  }
+
+  const totalDuration = svc.duration_minutes + svc.buffer_minutes;
+  const t = timeToMinutes(startTimeHHmm.slice(0, 5));
+  const slotEnd = t + totalDuration;
+
+  const workingRanges = getWorkingRanges(practitioner, date);
+  if (workingRanges.length === 0) {
+    return { ok: false, reason: 'Staff not working this day' };
+  }
+
+  const effectiveWorkingRanges = effectiveWorkingRangesForAppointments(workingRanges, venueOpeningHours, date);
+  if (effectiveWorkingRanges.length === 0) {
+    return { ok: false, reason: 'Outside opening hours' };
+  }
+
+  const fitsInRange = effectiveWorkingRanges.some((r) => t >= r.start && slotEnd <= r.end);
+  if (!fitsInRange) {
+    return { ok: false, reason: 'Outside working hours' };
+  }
+
+  if (isToday && !skipPastSlotFilter && t < currentMinute + minNoticeMinutes) {
+    return { ok: false, reason: 'Past minimum notice window' };
+  }
+
+  const breakRanges = getBreakRanges(practitioner, date);
+  if (breakRanges.some((b) => overlaps(t, slotEnd, b.start, b.end))) {
+    return { ok: false, reason: 'Conflicts with a break' };
+  }
+
+  const dayBlocks = practitionerBlockedRanges.filter((b) => b.practitioner_id === practitioner.id);
+  if (dayBlocks.some((b) => overlaps(t, slotEnd, b.start, b.end))) {
+    return { ok: false, reason: 'Blocked time' };
+  }
+
+  const practitionerBookings = existingBookings.filter(
+    (b) => b.practitioner_id === practitioner.id && CAPACITY_CONSUMING_STATUSES.includes(b.status),
+  );
+
+  if (
+    practitionerBookings.some((b) => {
+      const bStart = timeToMinutes(b.booking_time);
+      const bEnd = bStart + b.duration_minutes + b.buffer_minutes;
+      return overlaps(t, slotEnd, bStart, bEnd);
+    })
+  ) {
+    return { ok: false, reason: 'Conflicts with another booking' };
+  }
+
+  const practitionerPhantoms = phantomBookings.filter((p) => p.practitioner_id === practitioner.id);
+  if (
+    practitionerPhantoms.some((p) => {
+      const pStart = timeToMinutes(p.start_time);
+      const pEnd = pStart + p.duration_minutes + p.buffer_minutes;
+      return overlaps(t, slotEnd, pStart, pEnd);
+    })
+  ) {
+    return { ok: false, reason: 'Overlaps with another service in this booking' };
+  }
+
+  return { ok: true };
+}
+
 // ---------------------------------------------------------------------------
 // Fetcher
 // ---------------------------------------------------------------------------

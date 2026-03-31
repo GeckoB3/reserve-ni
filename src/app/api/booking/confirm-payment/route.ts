@@ -79,8 +79,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: transitionCheck.error }, { status: 400 });
     }
 
-    // Payment verified — atomically confirm the booking (only if not already
-    // confirmed by the webhook). This prevents duplicate processing.
+    // Payment verified — confirm every booking row that shares this PaymentIntent
+    // (group / multi-service deposits store the same PI on each segment).
     const { data: statusRows } = await supabase
       .from('bookings')
       .update({
@@ -88,8 +88,9 @@ export async function POST(request: NextRequest) {
         deposit_status: 'Paid',
         updated_at: new Date().toISOString(),
       })
-      .eq('id', bookingId)
-      .neq('status', 'Confirmed')
+      .eq('stripe_payment_intent_id', booking.stripe_payment_intent_id)
+      .eq('venue_id', booking.venue_id)
+      .eq('status', 'Pending')
       .select('id');
 
     if (!statusRows?.length) {

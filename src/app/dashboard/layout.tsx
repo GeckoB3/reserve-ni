@@ -42,7 +42,9 @@ export default async function DashboardLayout({ children }: { children: React.Re
     if (venueId) {
       const { data: venue } = await admin
         .from('venues')
-        .select('name, slug, table_management_enabled, booking_model, plan_status, onboarding_completed, pricing_tier')
+        .select(
+          'name, slug, table_management_enabled, booking_model, plan_status, onboarding_completed, pricing_tier, terminology',
+        )
         .eq('id', venueId)
         .single();
       venueName = venue?.name ?? undefined;

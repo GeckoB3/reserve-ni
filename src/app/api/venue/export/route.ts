@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { getVenueStaff } from '@/lib/venue-auth';
+import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 
 function escapeCsvCell(value: string | number | boolean | null | undefined): string {
   const str = value == null ? '' : String(value);
@@ -111,6 +111,9 @@ export async function GET(request: NextRequest) {
     }
 
     if (type === 'guests') {
+      if (!requireAdmin(staff)) {
+        return NextResponse.json({ error: 'Forbidden: admin only' }, { status: 403 });
+      }
       const { data: guests, error } = await staff.db
         .from('guests')
         .select(`
@@ -119,8 +122,10 @@ export async function GET(request: NextRequest) {
           email,
           phone,
           visit_count,
+          no_show_count,
           last_visit_date,
-          created_at
+          created_at,
+          tags
         `)
         .eq('venue_id', staff.venue_id)
         .order('name');
@@ -146,21 +151,30 @@ export async function GET(request: NextRequest) {
         'Name',
         'Email',
         'Phone',
+        'Tags',
         'Visit count (seated)',
+        'No-show count',
         'Last visit',
         'Total bookings',
         'First seen',
       ];
-      const rows = (guests ?? []).map((g) => [
-        g.id,
-        g.name ?? '',
-        g.email ?? '',
-        g.phone ?? '',
-        (g as { visit_count?: number }).visit_count ?? 0,
-        (g as { last_visit_date?: string | null }).last_visit_date ?? '',
-        countMap[g.id] ?? 0,
-        g.created_at,
-      ]);
+      const rows = (guests ?? []).map((g) => {
+        const tags = Array.isArray((g as { tags?: string[] }).tags)
+          ? (g as { tags: string[] }).tags.join('; ')
+          : '';
+        return [
+          g.id,
+          g.name ?? '',
+          g.email ?? '',
+          g.phone ?? '',
+          tags,
+          (g as { visit_count?: number }).visit_count ?? 0,
+          (g as { no_show_count?: number }).no_show_count ?? 0,
+          (g as { last_visit_date?: string | null }).last_visit_date ?? '',
+          countMap[g.id] ?? 0,
+          g.created_at,
+        ];
+      });
 
       const csv = buildCsv(headers, rows);
       const today = new Date().toISOString().slice(0, 10);

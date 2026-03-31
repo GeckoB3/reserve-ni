@@ -7,12 +7,21 @@ import { EventBookingFlow } from './EventBookingFlow';
 import { ClassBookingFlow } from './ClassBookingFlow';
 import { ResourceBookingFlow } from './ResourceBookingFlow';
 
+export interface LockedPractitionerBooking {
+  id: string;
+  name: string;
+  /** URL segment; passed as practitioner_slug to appointment catalog */
+  bookingSlug: string;
+}
+
 interface Props {
   venue: VenuePublic;
   embed?: boolean;
   onHeightChange?: (height: number) => void;
   cancellationPolicy?: string;
   accentColour?: string;
+  /** Model B: pre-selected practitioner from /book/{venue}/{practitioner-slug} */
+  lockedPractitioner?: LockedPractitionerBooking | null;
 }
 
 /**
@@ -20,10 +29,26 @@ interface Props {
  * Model A (table_reservation) uses the existing BookingFlow.
  * Models B–E use their dedicated flows.
  */
-export function BookingFlowRouter({ venue, embed, onHeightChange, cancellationPolicy, accentColour }: Props) {
+export function BookingFlowRouter({
+  venue,
+  embed,
+  onHeightChange,
+  cancellationPolicy,
+  accentColour,
+  lockedPractitioner,
+}: Props) {
   switch (venue.booking_model) {
     case 'practitioner_appointment':
-      return <AppointmentBookingFlow venue={venue} cancellationPolicy={cancellationPolicy} embed={embed} onHeightChange={onHeightChange} accentColour={accentColour} />;
+      return (
+        <AppointmentBookingFlow
+          venue={venue}
+          cancellationPolicy={cancellationPolicy}
+          embed={embed}
+          onHeightChange={onHeightChange}
+          accentColour={accentColour}
+          lockedPractitioner={lockedPractitioner ?? undefined}
+        />
+      );
     case 'event_ticket':
       return <EventBookingFlow venue={venue} cancellationPolicy={cancellationPolicy} />;
     case 'class_session':

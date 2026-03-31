@@ -51,6 +51,7 @@ export interface DaySheetBooking {
   no_show_count: number;
   last_visit_date: string | null;
   created_at: string;
+  guest_tags: string[];
 }
 
 export interface DaySheetPeriod {
@@ -134,7 +135,7 @@ export async function GET(request: NextRequest) {
     const { data: guestRows } = guestIds.length
       ? await staff.db
           .from('guests')
-          .select('id, name, email, phone, visit_count, no_show_count, last_visit_date')
+          .select('id, name, email, phone, visit_count, no_show_count, last_visit_date, tags')
           .in('id', guestIds)
       : { data: [] };
     const guestMap = new Map(
@@ -146,6 +147,7 @@ export async function GET(request: NextRequest) {
         visit_count: number | null;
         no_show_count: number | null;
         last_visit_date: string | null;
+        tags?: string[] | null;
       }) => [g.id, g]),
     );
 
@@ -172,6 +174,7 @@ export async function GET(request: NextRequest) {
         no_show_count: guest?.no_show_count ?? 0,
         last_visit_date: guest?.last_visit_date ?? null,
         created_at: row.created_at,
+        guest_tags: Array.isArray(guest?.tags) ? guest.tags : [],
       };
     }
 

@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { TableSelector } from '@/components/table-tracking/TableSelector';
 import type { OccupancyMap, TableForSelector } from '@/components/table-tracking/TableSelector';
 import { createClient } from '@/lib/supabase/browser';
@@ -39,6 +40,7 @@ interface BookingRow {
   guest_name: string;
   guest_email: string | null;
   guest_phone: string | null;
+  guest_id?: string;
   table_assignments?: Array<{ id: string; name: string }>;
   practitioner_id?: string | null;
   appointment_service_id?: string | null;
@@ -64,6 +66,8 @@ interface BookingDetailLite {
 
 type ViewMode = 'day' | 'week' | 'month' | 'custom';
 const STATUS_OPTIONS = ['All', 'Confirmed', 'Pending', 'Seated', 'Completed', 'Cancelled', 'No-Show'];
+const GUEST_UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 interface FetchBookingsOptions {
   silent?: boolean;
@@ -154,6 +158,8 @@ export function BookingsDashboard({ venueId, currency }: { venueId: string; curr
   const [loading, setLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const searchParams = useSearchParams();
+  const router = useRouter();
   const [walkInOpen, setWalkInOpen] = useState(false);
   const [newBookingOpen, setNewBookingOpen] = useState(false);
   const [realtimeConnected, setRealtimeConnected] = useState<boolean | null>(null);
@@ -183,6 +189,29 @@ export function BookingsDashboard({ venueId, currency }: { venueId: string; curr
     return { from: customFrom, to: customTo };
   }, [viewMode, anchorDate, customFrom, customTo]);
   const invalidCustomRange = viewMode === 'custom' && customFrom > customTo;
+
+  const filterGuestId = useMemo(() => {
+    const g = searchParams.get('guest');
+    return g && GUEST_UUID_RE.test(g) ? g : null;
+  }, [searchParams]);
+
+  const clearGuestFilter = useCallback(() => {
+    const next = new URLSearchParams(searchParams.toString());
+    next.delete('guest');
+    const qs = next.toString();
+    router.replace(qs ? `/dashboard/bookings?${qs}` : '/dashboard/bookings', { scroll: false });
+  }, [router, searchParams]);
+
+  useEffect(() => {
+    const ob = searchParams.get('openBooking');
+    if (ob && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(ob)) {
+      setSelectedId(ob);
+      const next = new URLSearchParams(searchParams.toString());
+      next.delete('openBooking');
+      const qs = next.toString();
+      router.replace(qs ? `/dashboard/bookings?${qs}` : '/dashboard/bookings', { scroll: false });
+    }
+  }, [searchParams, router]);
 
   const fetchModeData = useCallback(async () => {
     try {
@@ -271,6 +300,7 @@ export function BookingsDashboard({ venueId, currency }: { venueId: string; curr
         ? new URLSearchParams({ ids: ids.join(',') })
         : (viewMode === 'day' ? new URLSearchParams({ date: from }) : new URLSearchParams({ from, to }));
       if (!ids && statusFilter !== 'All') params.set('status', statusFilter);
+      if (!ids && filterGuestId) params.set('guest', filterGuestId);
       const res = await fetch(`/api/venue/bookings/list?${params}`);
       if (!res.ok) {
         const json = await res.json().catch(() => ({}));
@@ -294,7 +324,7 @@ export function BookingsDashboard({ venueId, currency }: { venueId: string; curr
       if (silent) setIsRefreshing(false);
       else setLoading(false);
     }
-  }, [from, invalidCustomRange, statusFilter, to, viewMode]);
+  }, [filterGuestId, from, invalidCustomRange, statusFilter, to, viewMode]);
 
   const changeTableSaveLock = useRef(false);
 
@@ -657,6 +687,18 @@ export function BookingsDashboard({ venueId, currency }: { venueId: string; curr
       {error && (
         <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           {error}
+        </div>
+      )}
+      {filterGuestId && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+          <span>Showing bookings for one guest in the selected date range.</span>
+          <button
+            type="button"
+            onClick={clearGuestFilter}
+            className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 font-medium text-slate-700 hover:bg-slate-100"
+          >
+            Clear guest filter
+          </button>
         </div>
       )}
 

@@ -12,6 +12,29 @@ interface StaffSectionProps {
 interface PractitionerOption {
   id: string;
   name: string;
+  slug?: string | null;
+}
+
+const PUBLIC_BOOK_ORIGIN =
+  (typeof process.env.NEXT_PUBLIC_BASE_URL === 'string' && process.env.NEXT_PUBLIC_BASE_URL.replace(/\/$/, '')) ||
+  'https://www.reserveni.com';
+
+const PUBLIC_BOOK_HOST = (() => {
+  try {
+    return new URL(PUBLIC_BOOK_ORIGIN).host;
+  } catch {
+    return 'localhost';
+  }
+})();
+
+function bookingSlugDraftError(raw: string): string | null {
+  const t = raw.trim().toLowerCase();
+  if (t === '') return null;
+  if (t.length > 64) return 'Booking link must be 64 characters or fewer.';
+  if (!/^[a-z0-9-]+$/.test(t)) {
+    return 'Use lowercase letters, numbers, and hyphens only.';
+  }
+  return null;
 }
 
 interface CalendarEntitlementState {
@@ -43,6 +66,11 @@ export function StaffSection({ venueId: _venueId, isAdmin, bookingModel }: Staff
   const [calendarSavingId, setCalendarSavingId] = useState<string | null>(null);
   const [calendarError, setCalendarError] = useState<string | null>(null);
   const [calendarEntitlement, setCalendarEntitlement] = useState<CalendarEntitlementState | null>(null);
+  const [venueSlug, setVenueSlug] = useState<string | null>(null);
+  const [calendarSlugDrafts, setCalendarSlugDrafts] = useState<Record<string, string>>({});
+  const [calendarSlugFieldError, setCalendarSlugFieldError] = useState<Record<string, string | null>>({});
+  const [savingSlugId, setSavingSlugId] = useState<string | null>(null);
+  const [slugCopySuccessId, setSlugCopySuccessId] = useState<string | null>(null);
   const [showAddCalendarForm, setShowAddCalendarForm] = useState(false);
   const [newCalendarName, setNewCalendarName] = useState('');
   const [addCalendarSaving, setAddCalendarSaving] = useState(false);
@@ -111,9 +139,17 @@ export function StaffSection({ venueId: _venueId, isAdmin, bookingModel }: Staff
     try {
       const res = await fetch('/api/venue/practitioners');
       if (!res.ok) return;
-      const data = (await res.json()) as { practitioners?: Array<{ id: string; name: string }> };
+      const data = (await res.json()) as {
+        practitioners?: Array<{ id: string; name: string; slug?: string | null }>;
+      };
       const list = data.practitioners ?? [];
-      setPractitioners(list.map((p) => ({ id: p.id, name: p.name })));
+      setPractitioners(
+        list.map((p) => ({
+          id: p.id,
+          name: p.name,
+          slug: p.slug ?? null,
+        })),
+      );
     } catch {
       /* ignore */
     }
@@ -141,15 +177,35 @@ export function StaffSection({ venueId: _venueId, isAdmin, bookingModel }: Staff
     }
   }, [isAppointmentVenue, isAdmin]);
 
+  const loadVenueSlug = useCallback(async () => {
+    if (!isAppointmentVenue || !isAdmin) return;
+    try {
+      const res = await fetch('/api/venue');
+      if (!res.ok) return;
+      const data = (await res.json()) as { slug?: string | null };
+      setVenueSlug(typeof data.slug === 'string' && data.slug ? data.slug : null);
+    } catch {
+      /* ignore */
+    }
+  }, [isAppointmentVenue, isAdmin]);
+
   useEffect(() => {
     setLoading(true);
-    Promise.all([load(), loadSessionSettings(), loadPractitioners(), loadCalendarEntitlement()]).finally(() =>
-      setLoading(false),
-    );
-  }, [load, loadSessionSettings, loadPractitioners, loadCalendarEntitlement]);
+    Promise.all([
+      load(),
+      loadSessionSettings(),
+      loadPractitioners(),
+      loadCalendarEntitlement(),
+      loadVenueSlug(),
+    ]).finally(() => setLoading(false));
+  }, [load, loadSessionSettings, loadPractitioners, loadCalendarEntitlement, loadVenueSlug]);
 
   useEffect(() => {
     setCalendarNameDrafts(Object.fromEntries(practitioners.map((p) => [p.id, p.name])));
+  }, [practitioners]);
+
+  useEffect(() => {
+    setCalendarSlugDrafts(Object.fromEntries(practitioners.map((p) => [p.id, (p.slug ?? '').trim()])));
   }, [practitioners]);
 
   const onSaveCalendarName = useCallback(
@@ -183,6 +239,67 @@ export function StaffSection({ venueId: _venueId, isAdmin, bookingModel }: Staff
       }
     },
     [calendarNameDrafts, load, loadPractitioners],
+  );
+
+  const onSaveBookingSlug = useCallback(
+    async (practitionerId: string) => {
+      const raw = calendarSlugDrafts[practitionerId] ?? '';
+      const fieldErr = bookingSlugDraftError(raw);
+      setCalendarSlugFieldError((prev) => ({ ...prev, [practitionerId]: fieldErr }));
+      if (fieldErr) return;
+      const normalized = raw.trim().toLowerCase();
+      setSavingSlugId(practitionerId);
+      try {
+        const res = await fetch('/api/venue/practitioners', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            id: practitionerId,
+            slug: normalized === '' ? null : normalized,
+          }),
+        });
+        if (!res.ok) {
+          const j = await res.json().catch(() => ({}));
+          throw new Error(typeof j.error === 'string' ? j.error : 'Could not update booking link');
+        }
+        await loadPractitioners();
+        setCalendarSlugFieldError((prev) => ({ ...prev, [practitionerId]: null }));
+        setCalendarRenameSuccess('Booking link saved.');
+        setTimeout(() => setCalendarRenameSuccess(null), 4000);
+      } catch (e) {
+        setCalendarSlugFieldError((prev) => ({
+          ...prev,
+          [practitionerId]: e instanceof Error ? e.message : 'Save failed',
+        }));
+      } finally {
+        setSavingSlugId(null);
+      }
+    },
+    [calendarSlugDrafts, loadPractitioners],
+  );
+
+  const copyPractitionerBookUrl = useCallback(
+    async (practitionerId: string) => {
+      if (!venueSlug) return;
+      const raw = calendarSlugDrafts[practitionerId] ?? '';
+      if (bookingSlugDraftError(raw)) return;
+      const seg = raw.trim().toLowerCase();
+      if (!seg) return;
+      const url = `${PUBLIC_BOOK_ORIGIN}/book/${encodeURIComponent(venueSlug)}/${encodeURIComponent(seg)}`;
+      try {
+        await navigator.clipboard.writeText(url);
+        setSlugCopySuccessId(practitionerId);
+        setTimeout(() => {
+          setSlugCopySuccessId((id) => (id === practitionerId ? null : id));
+        }, 2500);
+      } catch {
+        setCalendarSlugFieldError((prev) => ({
+          ...prev,
+          [practitionerId]: 'Could not copy to clipboard.',
+        }));
+      }
+    },
+    [venueSlug, calendarSlugDrafts],
   );
 
   const onAddCalendar = useCallback(
@@ -754,54 +871,146 @@ export function StaffSection({ venueId: _venueId, isAdmin, bookingModel }: Staff
               </p>
             ) : (
               <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
-                {practitioners.map((p) => (
-                  <li key={p.id} className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-                    <label htmlFor={`calendar-name-${p.id}`} className="sr-only">
-                      Calendar name for {p.name}
-                    </label>
-                    <input
-                      id={`calendar-name-${p.id}`}
-                      type="text"
-                      value={calendarNameDrafts[p.id] ?? ''}
-                      onChange={(e) =>
-                        setCalendarNameDrafts((prev) => ({
-                          ...prev,
-                          [p.id]: e.target.value,
-                        }))
-                      }
-                      maxLength={200}
-                      className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
-                      placeholder="Calendar display name"
-                    />
-                    <div className="flex shrink-0 items-center gap-2 self-end sm:self-center">
-                      <button
-                        type="button"
-                        disabled={
-                          savingPractitionerNameId === p.id ||
-                          !(calendarNameDrafts[p.id]?.trim()) ||
-                          (calendarNameDrafts[p.id]?.trim() ?? '') === p.name
-                        }
-                        onClick={() => void onSaveCalendarName(p.id)}
-                        className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
-                      >
-                        {savingPractitionerNameId === p.id ? 'Saving…' : 'Save'}
-                      </button>
-                      {practitioners.length > 1 && (
-                        <button
-                          type="button"
-                          title="Remove calendar"
-                          onClick={() => {
-                            setDeleteCalendarTarget(p);
-                            setDeleteCalendarError(null);
-                          }}
-                          className="rounded-lg border border-slate-200 p-2 text-slate-400 hover:bg-red-50 hover:text-red-600"
-                        >
-                          <TrashIcon className="h-4 w-4" />
-                        </button>
+                {practitioners.map((p) => {
+                  const slugDraft = calendarSlugDrafts[p.id] ?? '';
+                  const slugFieldErr = calendarSlugFieldError[p.id] ?? null;
+                  const savedSlug = (p.slug ?? '').trim().toLowerCase();
+                  const draftNorm = slugDraft.trim().toLowerCase();
+                  const slugDirty = draftNorm !== savedSlug;
+                  const slugLiveErr = bookingSlugDraftError(slugDraft);
+                  const canCopyBookUrl =
+                    Boolean(venueSlug && savedSlug && draftNorm === savedSlug && !slugLiveErr);
+                  const previewUrl =
+                    venueSlug && draftNorm && !slugLiveErr
+                      ? `${PUBLIC_BOOK_ORIGIN}/book/${encodeURIComponent(venueSlug)}/${encodeURIComponent(draftNorm)}`
+                      : null;
+                  return (
+                    <li key={p.id} className="flex flex-col gap-4 px-4 py-3">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <label htmlFor={`calendar-name-${p.id}`} className="sr-only">
+                          Calendar name for {p.name}
+                        </label>
+                        <input
+                          id={`calendar-name-${p.id}`}
+                          type="text"
+                          value={calendarNameDrafts[p.id] ?? ''}
+                          onChange={(e) =>
+                            setCalendarNameDrafts((prev) => ({
+                              ...prev,
+                              [p.id]: e.target.value,
+                            }))
+                          }
+                          maxLength={200}
+                          className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+                          placeholder="Calendar display name"
+                        />
+                        <div className="flex shrink-0 items-center gap-2 self-end sm:self-center">
+                          <button
+                            type="button"
+                            disabled={
+                              savingPractitionerNameId === p.id ||
+                              !(calendarNameDrafts[p.id]?.trim()) ||
+                              (calendarNameDrafts[p.id]?.trim() ?? '') === p.name
+                            }
+                            onClick={() => void onSaveCalendarName(p.id)}
+                            className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
+                          >
+                            {savingPractitionerNameId === p.id ? 'Saving…' : 'Save'}
+                          </button>
+                          {practitioners.length > 1 && (
+                            <button
+                              type="button"
+                              title="Remove calendar"
+                              onClick={() => {
+                                setDeleteCalendarTarget(p);
+                                setDeleteCalendarError(null);
+                              }}
+                              className="rounded-lg border border-slate-200 p-2 text-slate-400 hover:bg-red-50 hover:text-red-600"
+                            >
+                              <TrashIcon className="h-4 w-4" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {venueSlug ? (
+                        <div className="rounded-lg border border-slate-100 bg-slate-50/80 p-3 space-y-2">
+                          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Booking link</p>
+                          {!savedSlug ? (
+                            <p className="text-xs text-slate-600">
+                              Add a link segment to give {p.name} their own booking page.
+                            </p>
+                          ) : (
+                            <p className="text-xs text-slate-600">
+                              Guests can use this link to book only with {p.name}.
+                            </p>
+                          )}
+                          <div className="flex min-w-0 flex-wrap items-center gap-x-0.5 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm text-slate-700">
+                            <span className="shrink-0 text-slate-500">
+                              {PUBLIC_BOOK_HOST}/book/{venueSlug}/
+                            </span>
+                            <input
+                              id={`calendar-slug-${p.id}`}
+                              type="text"
+                              value={slugDraft}
+                              onChange={(e) => {
+                                const v = e.target.value;
+                                setCalendarSlugDrafts((prev) => ({ ...prev, [p.id]: v }));
+                                setCalendarSlugFieldError((prev) => ({
+                                  ...prev,
+                                  [p.id]: bookingSlugDraftError(v),
+                                }));
+                              }}
+                              maxLength={64}
+                              autoComplete="off"
+                              spellCheck={false}
+                              className="min-w-[6rem] flex-1 border-0 bg-transparent p-0.5 text-slate-900 outline-none focus:ring-0"
+                              placeholder="e.g. sarah"
+                              aria-invalid={Boolean(slugLiveErr || slugFieldErr)}
+                            />
+                          </div>
+                          {(slugLiveErr || slugFieldErr) && (
+                            <p className="text-xs text-red-600">{slugLiveErr ?? slugFieldErr}</p>
+                          )}
+                          {previewUrl && (
+                            <p className="text-xs">
+                              <a
+                                href={previewUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="font-medium text-brand-600 hover:text-brand-700 break-all"
+                              >
+                                {previewUrl}
+                              </a>
+                            </p>
+                          )}
+                          <div className="flex flex-wrap items-center gap-2 pt-1">
+                            <button
+                              type="button"
+                              disabled={!slugDirty || Boolean(slugLiveErr) || savingSlugId === p.id}
+                              onClick={() => void onSaveBookingSlug(p.id)}
+                              className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                            >
+                              {savingSlugId === p.id ? 'Saving…' : 'Save link'}
+                            </button>
+                            <button
+                              type="button"
+                              disabled={!canCopyBookUrl}
+                              onClick={() => void copyPractitionerBookUrl(p.id)}
+                              className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                            >
+                              {slugCopySuccessId === p.id ? 'Copied!' : 'Copy link'}
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <p className="text-xs text-amber-700">
+                          Set your venue booking slug under Venue details to preview personal booking links.
+                        </p>
                       )}
-                    </div>
-                  </li>
-                ))}
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </div>

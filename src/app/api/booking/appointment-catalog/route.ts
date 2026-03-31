@@ -14,13 +14,20 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Missing required query param: venue_id' }, { status: 400 });
     }
 
+    const practitionerSlug = new URL(request.url).searchParams.get('practitioner_slug')?.trim();
+
     const supabase = getSupabaseAdminClient();
     const venueMode = await resolveVenueMode(supabase, venueId);
     if (venueMode.bookingModel !== 'practitioner_appointment') {
       return NextResponse.json({ error: 'Not an appointment venue' }, { status: 404 });
     }
 
-    const catalog = await fetchAppointmentCatalog(supabase, venueId);
+    const catalog = await fetchAppointmentCatalog(supabase, venueId, {
+      practitionerSlug: practitionerSlug || undefined,
+    });
+    if (practitionerSlug && catalog.practitioners.length === 0) {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    }
     return NextResponse.json(catalog);
   } catch (error) {
     console.error('[appointment-catalog] Failed:', error);

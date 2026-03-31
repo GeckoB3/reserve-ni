@@ -11,6 +11,8 @@ import {
   isDepositRefundAvailableAt,
 } from '@/lib/booking/cancellation-deadline';
 import { defaultPhoneCountryForVenueCurrency } from '@/lib/phone/default-country';
+import { minutesToTime, timeToMinutes } from '@/lib/availability';
+import { MultiServiceSummaryCard } from './MultiServiceSummaryCard';
 
 /** Services + staff from catalog (no date / slots). */
 interface CatalogPractitioner {
@@ -20,6 +22,7 @@ interface CatalogPractitioner {
     id: string;
     name: string;
     duration_minutes: number;
+    buffer_minutes?: number;
     price_pence: number | null;
     deposit_pence?: number | null;
   }>;
@@ -44,15 +47,38 @@ interface PersonSelection {
   depositPence: number;
 }
 
+/** Consecutive services for one practitioner (multi-service booking). */
+export interface MultiServiceSegment {
+  serviceId: string;
+  serviceName: string;
+  practitionerId: string;
+  practitionerName: string;
+  startTime: string;
+  durationMinutes: number;
+  bufferMinutes: number;
+  pricePence: number | null;
+  depositPence: number;
+}
+
+function recomputeMultiServiceChain(segments: MultiServiceSegment[], firstStart: string): MultiServiceSegment[] {
+  let m = timeToMinutes(firstStart);
+  return segments.map((seg) => {
+    const row = { ...seg, startTime: minutesToTime(m) };
+    m += seg.durationMinutes + seg.bufferMinutes;
+    return row;
+  });
+}
+
 type Step =
   | 'mode_choice'
-  | 'service' | 'practitioner' | 'slot' | 'details' | 'payment' | 'confirmation'
+  | 'service' | 'practitioner' | 'slot' | 'multi_service' | 'details' | 'payment' | 'confirmation'
   | 'group_person_label' | 'group_service' | 'group_practitioner' | 'group_slot'
   | 'group_review' | 'group_details' | 'group_payment' | 'group_confirmation';
 
-const SINGLE_STEPS: Step[] = ['service', 'practitioner', 'slot', 'details'];
+const SINGLE_STEPS: Step[] = ['service', 'practitioner', 'slot', 'multi_service', 'details'];
+const SINGLE_STEPS_LOCKED: Step[] = ['service', 'slot', 'multi_service', 'details'];
 const STEP_LABELS: Record<string, string> = {
-  service: 'Service', practitioner: 'Staff', slot: 'Time', details: 'Details',
+  service: 'Service', practitioner: 'Staff', slot: 'Time', multi_service: 'Services', details: 'Details',
 };
 
 interface AppointmentBookingFlowProps {
@@ -61,6 +87,8 @@ interface AppointmentBookingFlowProps {
   embed?: boolean;
   onHeightChange?: (height: number) => void;
   accentColour?: string;
+  /** From /book/{venue}/{practitioner-slug}: skip staff step; catalog filtered */
+  lockedPractitioner?: { id: string; name: string; bookingSlug: string };
 }
 
 function formatDateHuman(dateStr: string): string {
@@ -92,11 +120,24 @@ function groupSlotsByPeriod(slots: Array<{ start_time: string }>) {
   return { morning, afternoon, evening };
 }
 
-export function AppointmentBookingFlow({ venue, cancellationPolicy, onHeightChange, accentColour }: AppointmentBookingFlowProps) {
+export function AppointmentBookingFlow({
+  venue,
+  cancellationPolicy,
+  onHeightChange,
+  accentColour,
+  lockedPractitioner,
+}: AppointmentBookingFlowProps) {
   const terms = venue.terminology ?? { client: 'Client', booking: 'Appointment', staff: 'Staff' };
 
+  const isLockedPractitionerFlow = Boolean(
+    lockedPractitioner?.id && lockedPractitioner?.bookingSlug,
+  );
+  const singleFlowSteps: Step[] = isLockedPractitionerFlow ? SINGLE_STEPS_LOCKED : SINGLE_STEPS;
+
   // Shared state
-  const [step, setStep] = useState<Step>('mode_choice');
+  const [step, setStep] = useState<Step>(() =>
+    isLockedPractitionerFlow ? 'service' : 'mode_choice',
+  );
   const [date, setDate] = useState(todayStr);
   const [catalogStaff, setCatalogStaff] = useState<CatalogPractitioner[]>([]);
   const [catalogLoading, setCatalogLoading] = useState(false);
@@ -106,17 +147,23 @@ export function AppointmentBookingFlow({ venue, cancellationPolicy, onHeightChan
 
   // Single booking state
   const [selectedServiceId, setSelectedServiceId] = useState<string | null>(null);
-  const [selectedPractitionerId, setSelectedPractitionerId] = useState<string | null>(null);
+  const [selectedPractitionerId, setSelectedPractitionerId] = useState<string | null>(() =>
+    lockedPractitioner?.id && lockedPractitioner?.bookingSlug ? lockedPractitioner.id : null,
+  );
   const [selectedTime, setSelectedTime] = useState<string | null>(null);
   const [guestDetails, setGuestDetails] = useState<GuestDetails | null>(null);
   const [createResult, setCreateResult] = useState<{
     booking_id: string;
+    booking_ids?: string[];
     client_secret?: string;
     stripe_account_id?: string;
     requires_deposit: boolean;
     deposit_amount_pence: number;
     cancellation_notice_hours: number;
   } | null>(null);
+
+  const [multiServiceSegments, setMultiServiceSegments] = useState<MultiServiceSegment[] | null>(null);
+  const [addingExtraService, setAddingExtraService] = useState(false);
 
   // Group booking state
   const [groupPeople, setGroupPeople] = useState<PersonSelection[]>([]);
@@ -145,25 +192,32 @@ export function AppointmentBookingFlow({ venue, cancellationPolicy, onHeightChan
 
   useEffect(() => {
     function onReset() {
-      setStep('mode_choice');
       setDate(todayStr());
       setSlotPractitioners([]);
       setLoading(false);
       setError(null);
       setSelectedServiceId(null);
-      setSelectedPractitionerId(null);
       setSelectedTime(null);
       setGuestDetails(null);
       setCreateResult(null);
+      setMultiServiceSegments(null);
+      setAddingExtraService(false);
       setGroupPeople([]);
       setCurrentPersonLabel('');
       setGroupServiceId(null);
       setGroupPractitionerId(null);
       setGroupCreateResult(null);
+      if (lockedPractitioner?.id && lockedPractitioner?.bookingSlug) {
+        setStep('service');
+        setSelectedPractitionerId(lockedPractitioner.id);
+      } else {
+        setStep('mode_choice');
+        setSelectedPractitionerId(null);
+      }
     }
     window.addEventListener(APPOINTMENT_BOOKING_RESET_EVENT, onReset);
     return () => window.removeEventListener(APPOINTMENT_BOOKING_RESET_EVENT, onReset);
-  }, []);
+  }, [lockedPractitioner?.id, lockedPractitioner?.bookingSlug]);
 
   // Build phantom bookings from already-selected group people
   const phantomBookings = useMemo(() => {
@@ -180,7 +234,11 @@ export function AppointmentBookingFlow({ venue, cancellationPolicy, onHeightChan
   const fetchCatalog = useCallback(async () => {
     setCatalogLoading(true);
     try {
-      const res = await fetch(`/api/booking/appointment-catalog?venue_id=${encodeURIComponent(venue.id)}`);
+      const qs = new URLSearchParams({ venue_id: venue.id });
+      if (lockedPractitioner?.bookingSlug) {
+        qs.set('practitioner_slug', lockedPractitioner.bookingSlug);
+      }
+      const res = await fetch(`/api/booking/appointment-catalog?${qs}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? 'Failed to load catalog');
       setCatalogStaff(data.practitioners ?? []);
@@ -190,7 +248,7 @@ export function AppointmentBookingFlow({ venue, cancellationPolicy, onHeightChan
     } finally {
       setCatalogLoading(false);
     }
-  }, [venue.id]);
+  }, [venue.id, lockedPractitioner?.bookingSlug]);
 
   useEffect(() => {
     fetchCatalog();
@@ -303,48 +361,198 @@ export function AppointmentBookingFlow({ venue, cancellationPolicy, onHeightChan
   const groupSelectedService = uniqueServices.find((s) => s.id === groupServiceId);
   const groupGroupedSlots = groupSlotsByPeriod(groupAvailableSlots);
 
-  const currentStepIdx = SINGLE_STEPS.indexOf(step);
-  const showSingleProgress = ['service', 'practitioner', 'slot', 'details'].includes(step);
+  const currentStepIdx = singleFlowSteps.indexOf(step);
+  const showSingleProgress = singleFlowSteps.includes(step);
 
   // ── Single booking handlers ──
 
-  const handleDetailsSubmit = useCallback(async (details: GuestDetails) => {
-    setGuestDetails(details);
-    setError(null);
-    try {
-      const res = await fetch('/api/booking/create', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          venue_id: venue.id,
-          booking_date: date,
-          booking_time: selectedTime,
-          party_size: 1,
-          name: details.name,
-          email: details.email || undefined,
-          phone: details.phone,
-          source: 'booking_page',
-          practitioner_id: selectedPractitionerId,
-          appointment_service_id: selectedServiceId,
-          dietary_notes: details.dietary_notes,
-          occasion: details.occasion,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? 'Booking failed');
-      setCreateResult({
-        booking_id: data.booking_id,
-        client_secret: data.client_secret,
-        stripe_account_id: data.stripe_account_id,
-        requires_deposit: data.requires_deposit ?? false,
-        deposit_amount_pence: typeof data.deposit_amount_pence === 'number' ? data.deposit_amount_pence : 0,
-        cancellation_notice_hours: typeof data.cancellation_notice_hours === 'number' ? data.cancellation_notice_hours : refundNoticeHours,
-      });
-      setStep(data.requires_deposit && data.client_secret ? 'payment' : 'confirmation');
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Booking failed');
-    }
-  }, [venue.id, date, selectedTime, selectedPractitionerId, selectedServiceId, refundNoticeHours]);
+  const validateMultiServiceChain = useCallback(
+    async (chain: MultiServiceSegment[]): Promise<string | null> => {
+      const phantoms: Array<{
+        practitioner_id: string;
+        start_time: string;
+        duration_minutes: number;
+        buffer_minutes: number;
+      }> = [];
+      for (const seg of chain) {
+        const res = await fetch('/api/booking/validate-appointment-slot', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            venue_id: venue.id,
+            booking_date: date,
+            practitioner_id: seg.practitionerId,
+            service_id: seg.serviceId,
+            start_time: seg.startTime,
+            phantoms,
+          }),
+        });
+        const data = (await res.json()) as { ok?: boolean; error?: string };
+        if (!data.ok) {
+          return data.error ?? 'One or more times are no longer available';
+        }
+        phantoms.push({
+          practitioner_id: seg.practitionerId,
+          start_time: seg.startTime,
+          duration_minutes: seg.durationMinutes,
+          buffer_minutes: seg.bufferMinutes,
+        });
+      }
+      return null;
+    },
+    [venue.id, date],
+  );
+
+  const handlePickAdditionalService = useCallback(
+    async (serviceId: string) => {
+      if (!selectedPrac || !multiServiceSegments?.length) return;
+      const offer = selectedPrac.services.find((s) => s.id === serviceId);
+      if (!offer) return;
+      if (multiServiceSegments.length >= 4) {
+        setError('You can book up to four services in one visit.');
+        return;
+      }
+      const firstStart = multiServiceSegments[0]!.startTime;
+      const nextSeg: MultiServiceSegment = {
+        serviceId: offer.id,
+        serviceName: offer.name,
+        practitionerId: selectedPrac.id,
+        practitionerName: selectedPrac.name,
+        startTime: '00:00',
+        durationMinutes: offer.duration_minutes,
+        bufferMinutes: offer.buffer_minutes ?? 0,
+        pricePence: offer.price_pence,
+        depositPence: offer.deposit_pence ?? 0,
+      };
+      const chain = recomputeMultiServiceChain([...multiServiceSegments, nextSeg], firstStart);
+      const err = await validateMultiServiceChain(chain);
+      if (err) {
+        setError(err);
+        return;
+      }
+      setMultiServiceSegments(chain);
+      setError(null);
+      setAddingExtraService(false);
+    },
+    [selectedPrac, multiServiceSegments, validateMultiServiceChain],
+  );
+
+  const handleRemoveMultiSegment = useCallback(
+    async (index: number) => {
+      if (!multiServiceSegments || multiServiceSegments.length <= 1) return;
+      const firstStart = multiServiceSegments[0]!.startTime;
+      const next = multiServiceSegments.filter((_, i) => i !== index);
+      const chain = recomputeMultiServiceChain(next, firstStart);
+      const err = await validateMultiServiceChain(chain);
+      if (err) {
+        setError(err);
+        return;
+      }
+      setMultiServiceSegments(chain);
+      setError(null);
+    },
+    [multiServiceSegments, validateMultiServiceChain],
+  );
+
+  const handleDetailsSubmit = useCallback(
+    async (details: GuestDetails) => {
+      setGuestDetails(details);
+      setError(null);
+      const chain = multiServiceSegments;
+      if (chain && chain.length > 1) {
+        const v = await validateMultiServiceChain(chain);
+        if (v) {
+          setError(v);
+          return;
+        }
+        try {
+          const res = await fetch('/api/booking/create-multi-service', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              venue_id: venue.id,
+              booking_date: date,
+              name: details.name,
+              email: details.email || undefined,
+              phone: details.phone,
+              source: 'booking_page',
+              dietary_notes: details.dietary_notes,
+              occasion: details.occasion,
+              services: chain.map((s) => ({
+                service_id: s.serviceId,
+                practitioner_id: s.practitionerId,
+                start_time: s.startTime,
+              })),
+            }),
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error ?? 'Booking failed');
+          const ids = data.booking_ids as string[] | undefined;
+          const primary = (data.primary_booking_id as string | undefined) ?? ids?.[0];
+          if (!primary) throw new Error('Booking failed');
+          setCreateResult({
+            booking_id: primary,
+            booking_ids: ids,
+            client_secret: data.client_secret,
+            stripe_account_id: data.stripe_account_id,
+            requires_deposit: data.requires_deposit ?? false,
+            deposit_amount_pence: typeof data.total_deposit_pence === 'number' ? data.total_deposit_pence : 0,
+            cancellation_notice_hours:
+              typeof data.cancellation_notice_hours === 'number' ? data.cancellation_notice_hours : refundNoticeHours,
+          });
+          setStep(data.requires_deposit && data.client_secret ? 'payment' : 'confirmation');
+        } catch (e) {
+          setError(e instanceof Error ? e.message : 'Booking failed');
+        }
+        return;
+      }
+
+      try {
+        const res = await fetch('/api/booking/create', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            venue_id: venue.id,
+            booking_date: date,
+            booking_time: selectedTime,
+            party_size: 1,
+            name: details.name,
+            email: details.email || undefined,
+            phone: details.phone,
+            source: 'booking_page',
+            practitioner_id: selectedPractitionerId,
+            appointment_service_id: selectedServiceId,
+            dietary_notes: details.dietary_notes,
+            occasion: details.occasion,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error ?? 'Booking failed');
+        setCreateResult({
+          booking_id: data.booking_id,
+          client_secret: data.client_secret,
+          stripe_account_id: data.stripe_account_id,
+          requires_deposit: data.requires_deposit ?? false,
+          deposit_amount_pence: typeof data.deposit_amount_pence === 'number' ? data.deposit_amount_pence : 0,
+          cancellation_notice_hours:
+            typeof data.cancellation_notice_hours === 'number' ? data.cancellation_notice_hours : refundNoticeHours,
+        });
+        setStep(data.requires_deposit && data.client_secret ? 'payment' : 'confirmation');
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Booking failed');
+      }
+    },
+    [
+      venue.id,
+      date,
+      selectedTime,
+      selectedPractitionerId,
+      selectedServiceId,
+      refundNoticeHours,
+      multiServiceSegments,
+      validateMultiServiceChain,
+    ],
+  );
 
   const handlePaymentComplete = useCallback(async () => {
     if (createResult?.booking_id) {
@@ -538,7 +746,7 @@ export function AppointmentBookingFlow({ venue, cancellationPolicy, onHeightChan
       {/* Single flow progress indicator */}
       {showSingleProgress && (
         <div className="mb-6 flex items-center justify-between">
-          {SINGLE_STEPS.map((s, i) => {
+          {singleFlowSteps.map((s, i) => {
             const isActive = i === currentStepIdx;
             const isComplete = i < currentStepIdx;
             return (
@@ -559,12 +767,24 @@ export function AppointmentBookingFlow({ venue, cancellationPolicy, onHeightChan
                     {s === 'practitioner' ? terms.staff : STEP_LABELS[s]}
                   </span>
                 </div>
-                {i < SINGLE_STEPS.length - 1 && (
+                {i < singleFlowSteps.length - 1 && (
                   <div className={`mx-2 h-0.5 flex-1 rounded ${isComplete ? 'bg-brand-200' : 'bg-slate-100'}`} />
                 )}
               </div>
             );
           })}
+        </div>
+      )}
+
+      {isLockedPractitionerFlow && lockedPractitioner && showSingleProgress && (
+        <div className="mb-4 flex items-center gap-3 rounded-xl border border-brand-100 bg-brand-50/80 px-4 py-3 text-sm text-brand-900">
+          <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-brand-100 text-sm font-bold text-brand-800">
+            {lockedPractitioner.name.charAt(0).toUpperCase()}
+          </div>
+          <div>
+            <div className="font-medium">Booking with {lockedPractitioner.name}</div>
+            <div className="text-xs text-brand-700/80">You will only see services and times for this {terms.staff.toLowerCase()}.</div>
+          </div>
         </div>
       )}
 
@@ -575,7 +795,7 @@ export function AppointmentBookingFlow({ venue, cancellationPolicy, onHeightChan
       {/* ════════════════════════════════════════════════
           MODE CHOICE: Book for myself vs Group
           ════════════════════════════════════════════════ */}
-      {step === 'mode_choice' && (
+      {step === 'mode_choice' && !isLockedPractitionerFlow && (
         <div>
           <h2 className="mb-2 text-lg font-semibold text-slate-900">How would you like to book?</h2>
           <p className="mb-5 text-sm text-slate-500">Choose a single appointment or a group booking for several people.</p>
@@ -620,10 +840,12 @@ export function AppointmentBookingFlow({ venue, cancellationPolicy, onHeightChan
 
       {step === 'service' && (
         <div>
-          <button onClick={() => { setStep('mode_choice'); }} className="mb-3 inline-flex items-center gap-1 text-sm text-brand-600 hover:text-brand-700">
-            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" /></svg>
-            Back
-          </button>
+          {!isLockedPractitionerFlow && (
+            <button type="button" onClick={() => { setStep('mode_choice'); }} className="mb-3 inline-flex items-center gap-1 text-sm text-brand-600 hover:text-brand-700">
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" /></svg>
+              Back
+            </button>
+          )}
           <h2 className="mb-1 text-lg font-semibold text-slate-900">Select a service</h2>
           <p className="mb-4 text-sm text-slate-500">Choose the service you want. You will pick a date and time in a later step.</p>
           {catalogLoading ? (
@@ -636,7 +858,7 @@ export function AppointmentBookingFlow({ venue, cancellationPolicy, onHeightChan
           ) : (
             <div className="space-y-2">
               {servicesWithFromPrice.map((svc) => (
-                <button key={svc.id} onClick={() => { setSelectedServiceId(svc.id); setStep('practitioner'); }} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3.5 text-left shadow-sm transition-all hover:border-brand-300 hover:shadow-md active:scale-[0.99]">
+                <button key={svc.id} type="button" onClick={() => { setSelectedServiceId(svc.id); setStep(isLockedPractitionerFlow ? 'slot' : 'practitioner'); }} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3.5 text-left shadow-sm transition-all hover:border-brand-300 hover:shadow-md active:scale-[0.99]">
                   <div className="flex items-center justify-between gap-3">
                     <div className="min-w-0">
                       <div className="font-medium text-slate-900">{svc.name}</div>
@@ -701,7 +923,21 @@ export function AppointmentBookingFlow({ venue, cancellationPolicy, onHeightChan
 
       {step === 'slot' && (
         <div>
-          <button onClick={() => { setSelectedPractitionerId(null); setSelectedTime(null); setStep('practitioner'); }} className="mb-3 inline-flex items-center gap-1 text-sm text-brand-600 hover:text-brand-700">
+          <button
+            type="button"
+            onClick={() => {
+              setSelectedTime(null);
+              setMultiServiceSegments(null);
+              if (isLockedPractitionerFlow) {
+                setSelectedServiceId(null);
+                setStep('service');
+              } else {
+                setSelectedPractitionerId(null);
+                setStep('practitioner');
+              }
+            }}
+            className="mb-3 inline-flex items-center gap-1 text-sm text-brand-600 hover:text-brand-700"
+          >
             <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" /></svg>
             Back
           </button>
@@ -726,52 +962,178 @@ export function AppointmentBookingFlow({ venue, cancellationPolicy, onHeightChan
               <p className="mt-1 text-xs text-slate-400">Try a different date above.</p>
             </div>
           ) : (
-            renderTimeSlots(groupedSlots, (time) => { setSelectedTime(time); setStep('details'); })
+            renderTimeSlots(groupedSlots, (time) => {
+              const offer = selectedPrac?.services.find((s) => s.id === selectedServiceId);
+              setSelectedTime(time);
+              setMultiServiceSegments([
+                {
+                  serviceId: selectedServiceId!,
+                  serviceName: offer?.name ?? '',
+                  practitionerId: selectedPractitionerId!,
+                  practitionerName: selectedPrac?.name ?? '',
+                  startTime: time,
+                  durationMinutes: offer?.duration_minutes ?? 30,
+                  bufferMinutes: offer?.buffer_minutes ?? 0,
+                  pricePence: offer?.price_pence ?? null,
+                  depositPence: offer?.deposit_pence ?? 0,
+                },
+              ]);
+              setAddingExtraService(false);
+              setStep('multi_service');
+            })
           )}
+        </div>
+      )}
+
+      {step === 'multi_service' && multiServiceSegments && multiServiceSegments.length > 0 && selectedPrac && (
+        <div>
+          <button
+            type="button"
+            onClick={() => {
+              setSelectedTime(null);
+              setMultiServiceSegments(null);
+              setAddingExtraService(false);
+              setStep('slot');
+            }}
+            className="mb-3 inline-flex items-center gap-1 text-sm text-brand-600 hover:text-brand-700"
+          >
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" /></svg>
+            Back
+          </button>
+          <h2 className="mb-1 text-lg font-semibold text-slate-900">Review your services</h2>
+          <p className="mb-4 text-sm text-slate-500">
+            Add more treatments with {selectedPrac.name} (same visit, back-to-back), or continue to your details.
+          </p>
+          <MultiServiceSummaryCard
+            lines={multiServiceSegments.map((s) => ({
+              serviceName: s.serviceName,
+              practitionerName: s.practitionerName,
+              startTime: s.startTime,
+              durationMinutes: s.durationMinutes,
+              pricePence: s.pricePence,
+              depositPence: s.depositPence,
+            }))}
+            formatDateHuman={formatDateHuman}
+            bookingDate={date}
+            currencySymbol={sym}
+            formatPrice={formatPrice}
+            onRemove={multiServiceSegments.length > 1 ? (idx) => void handleRemoveMultiSegment(idx) : undefined}
+          />
+          <div className="mt-4 space-y-3">
+            {multiServiceSegments.length < 4 && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAddingExtraService((v) => !v);
+                    setError(null);
+                  }}
+                  className="w-full rounded-xl border border-dashed border-slate-300 bg-white px-4 py-3 text-sm font-medium text-slate-700 transition-all hover:border-brand-300 hover:text-brand-700"
+                >
+                  {addingExtraService ? 'Hide service list' : 'Add another service'}
+                </button>
+                {addingExtraService && (
+                  <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3">
+                    <p className="mb-2 text-xs font-medium text-slate-500">Choose a service — next start time is calculated automatically.</p>
+                    <div className="flex flex-wrap gap-2">
+                      {selectedPrac.services.map((svc) => (
+                        <button
+                          key={svc.id}
+                          type="button"
+                          onClick={() => void handlePickAdditionalService(svc.id)}
+                          className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-left text-sm hover:border-brand-300"
+                        >
+                          <span className="font-medium text-slate-900">{svc.name}</span>
+                          <span className="ml-2 text-xs text-slate-500">{svc.duration_minutes} min</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+            <button
+              type="button"
+              onClick={() => setStep('details')}
+              className="w-full rounded-xl bg-brand-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-700"
+            >
+              Continue to details
+            </button>
+          </div>
         </div>
       )}
 
       {step === 'details' && selectedTime && (
         <div>
-          <button onClick={() => { setSelectedTime(null); setStep('slot'); }} className="mb-3 inline-flex items-center gap-1 text-sm text-brand-600 hover:text-brand-700">
+          <button
+            onClick={() => {
+              setStep('multi_service');
+            }}
+            className="mb-3 inline-flex items-center gap-1 text-sm text-brand-600 hover:text-brand-700"
+          >
             <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" /></svg>
             Back
           </button>
-          <div className="mb-5 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">Your {terms.booking.toLowerCase()}</h3>
-            <div className="space-y-1.5 text-sm">
-              <div className="flex justify-between"><span className="text-slate-500">Service</span><span className="font-medium text-slate-900">{selectedService?.name}</span></div>
-              <div className="flex justify-between"><span className="text-slate-500">{terms.staff}</span><span className="font-medium text-slate-900">{selectedPrac?.name}</span></div>
-              <div className="flex justify-between"><span className="text-slate-500">Date</span><span className="font-medium text-slate-900">{formatDateHuman(date)}</span></div>
-              <div className="flex justify-between"><span className="text-slate-500">Time</span><span className="font-medium text-slate-900">{selectedTime}</span></div>
-              {selectedServiceForPractitioner?.duration_minutes != null && (
-                <div className="flex justify-between">
-                  <span className="text-slate-500">Duration</span>
-                  <span className="font-medium text-slate-900">{selectedServiceForPractitioner.duration_minutes} min</span>
-                </div>
-              )}
-              {selectedServiceForPractitioner?.price_pence != null && (
-                <div className="mt-1.5 flex justify-between border-t border-slate-100 pt-1.5">
-                  <span className="font-medium text-slate-700">Price</span>
-                  <span className="font-semibold text-brand-600">{formatPrice(selectedServiceForPractitioner.price_pence)}</span>
-                </div>
-              )}
-              {(selectedServiceForPractitioner?.deposit_pence ?? 0) > 0 && (
-                <div className="mt-1.5 flex justify-between border-t border-slate-100 pt-1.5">
-                  <span className="font-medium text-slate-700">Deposit</span>
-                  <span className="font-semibold text-amber-700">{formatPrice(selectedServiceForPractitioner?.deposit_pence ?? null)}</span>
-                </div>
-              )}
+          {multiServiceSegments && multiServiceSegments.length > 1 ? (
+            <div className="mb-5">
+              <MultiServiceSummaryCard
+                lines={multiServiceSegments.map((s) => ({
+                  serviceName: s.serviceName,
+                  practitionerName: s.practitionerName,
+                  startTime: s.startTime,
+                  durationMinutes: s.durationMinutes,
+                  pricePence: s.pricePence,
+                  depositPence: s.depositPence,
+                }))}
+                formatDateHuman={formatDateHuman}
+                bookingDate={date}
+                currencySymbol={sym}
+                formatPrice={formatPrice}
+              />
             </div>
-          </div>
+          ) : (
+            <div className="mb-5 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+              <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">Your {terms.booking.toLowerCase()}</h3>
+              <div className="space-y-1.5 text-sm">
+                <div className="flex justify-between"><span className="text-slate-500">Service</span><span className="font-medium text-slate-900">{selectedService?.name}</span></div>
+                <div className="flex justify-between"><span className="text-slate-500">{terms.staff}</span><span className="font-medium text-slate-900">{selectedPrac?.name}</span></div>
+                <div className="flex justify-between"><span className="text-slate-500">Date</span><span className="font-medium text-slate-900">{formatDateHuman(date)}</span></div>
+                <div className="flex justify-between"><span className="text-slate-500">Time</span><span className="font-medium text-slate-900">{selectedTime}</span></div>
+                {selectedServiceForPractitioner?.duration_minutes != null && (
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Duration</span>
+                    <span className="font-medium text-slate-900">{selectedServiceForPractitioner.duration_minutes} min</span>
+                  </div>
+                )}
+                {selectedServiceForPractitioner?.price_pence != null && (
+                  <div className="mt-1.5 flex justify-between border-t border-slate-100 pt-1.5">
+                    <span className="font-medium text-slate-700">Price</span>
+                    <span className="font-semibold text-brand-600">{formatPrice(selectedServiceForPractitioner.price_pence)}</span>
+                  </div>
+                )}
+                {(selectedServiceForPractitioner?.deposit_pence ?? 0) > 0 && (
+                  <div className="mt-1.5 flex justify-between border-t border-slate-100 pt-1.5">
+                    <span className="font-medium text-slate-700">Deposit</span>
+                    <span className="font-semibold text-amber-700">{formatPrice(selectedServiceForPractitioner?.deposit_pence ?? null)}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
           <DetailsStep
             slot={{ key: selectedTime, label: selectedTime, start_time: selectedTime, end_time: '', available_covers: 1 }}
             date={date}
             partySize={1}
             onSubmit={handleDetailsSubmit}
-            onBack={() => { setSelectedTime(null); setStep('slot'); }}
+            onBack={() => {
+              setStep('multi_service');
+            }}
             variant="appointment"
-            appointmentDepositPence={selectedServiceForPractitioner?.deposit_pence ?? 0}
+            appointmentDepositPence={
+              multiServiceSegments && multiServiceSegments.length > 1
+                ? multiServiceSegments.reduce((sum, s) => sum + (s.depositPence ?? 0), 0)
+                : selectedServiceForPractitioner?.deposit_pence ?? 0
+            }
             currencySymbol={sym}
             refundNoticeHours={refundNoticeHours}
             phoneDefaultCountry={phoneDefaultCountry}
@@ -796,8 +1158,24 @@ export function AppointmentBookingFlow({ venue, cancellationPolicy, onHeightChan
         <div className="rounded-2xl border border-green-200 bg-green-50 p-8 text-center">
           <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-green-100"><svg className="h-8 w-8 text-green-600" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" /></svg></div>
           <h2 className="text-xl font-bold text-green-900">{terms.booking} Confirmed</h2>
-          <p className="mt-2 text-sm text-green-700">{selectedService?.name} with {selectedPrac?.name}</p>
-          <p className="mt-1 text-sm text-green-600">{formatDateHuman(date)} at {selectedTime}</p>
+          {multiServiceSegments && multiServiceSegments.length > 1 ? (
+            <div className="mt-3 space-y-2 text-left text-sm text-green-800">
+              <p className="text-center text-green-700">{formatDateHuman(date)} with {selectedPrac?.name}</p>
+              <ul className="mx-auto max-w-sm list-none space-y-1.5 rounded-lg border border-green-200/80 bg-white/60 px-3 py-2">
+                {multiServiceSegments.map((s) => (
+                  <li key={`${s.serviceId}-${s.startTime}`} className="flex justify-between gap-2 text-xs">
+                    <span className="font-medium text-green-900">{s.serviceName}</span>
+                    <span className="text-green-700">{s.startTime}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : (
+            <>
+              <p className="mt-2 text-sm text-green-700">{selectedService?.name} with {selectedPrac?.name}</p>
+              <p className="mt-1 text-sm text-green-600">{formatDateHuman(date)} at {selectedTime}</p>
+            </>
+          )}
           {guestDetails?.name && <p className="mt-3 text-xs text-green-600">A confirmation will be sent to {guestDetails.email || guestDetails.phone}.</p>}
           {(createResult?.deposit_amount_pence ?? 0) > 0 ? (
             <p className="mt-4 max-w-sm mx-auto text-left text-xs text-green-800/90">

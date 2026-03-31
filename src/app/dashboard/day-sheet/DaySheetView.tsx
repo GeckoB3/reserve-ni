@@ -53,6 +53,7 @@ interface DaySheetBooking {
   no_show_count: number;
   last_visit_date: string | null;
   created_at: string;
+  guest_tags?: string[];
   table_assignments?: Array<{ id: string; name: string }>;
 }
 
@@ -1495,6 +1496,9 @@ export function DaySheetView({ venueId, currency }: { venueId: string; currency?
                 <ul className="divide-y divide-slate-50">
                   {period.bookings.map((b) => {
                     const tags = parseDietaryNotes(b.dietary_notes, b.occasion, b.special_requests);
+                    const crmTags = Array.isArray(b.guest_tags) ? b.guest_tags : [];
+                    const crmVisible = crmTags.slice(0, 3);
+                    const crmMore = crmTags.length > 3 ? crmTags.length - 3 : 0;
                     const hasAllergy = tags.some((t) => t.isAllergy) || hasAllergyKeywords([b.dietary_notes, b.special_requests].filter(Boolean).join(' '));
                     const isExpanded = expandedId === b.id;
                     const isTerminalStatus = isTerminal(b.status);
@@ -1613,13 +1617,28 @@ export function DaySheetView({ venueId, currency }: { venueId: string; currency?
                         </div>
 
                         {/* Dietary/special requests line */}
-                        {(tags.length > 0 || b.special_requests) && (
+                        {(tags.length > 0 || b.special_requests || crmTags.length > 0) && (
                           <div className={`px-4 pb-2 space-y-1 ${isTerminalStatus ? 'opacity-60' : ''}`}>
+                            {crmTags.length > 0 && (
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                {crmVisible.map((tag, ti) => (
+                                  <span
+                                    key={`crm-${tag}-${ti}`}
+                                    className="inline-flex items-center rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-semibold text-violet-800 ring-1 ring-violet-200"
+                                  >
+                                    {tag}
+                                  </span>
+                                ))}
+                                {crmMore > 0 && (
+                                  <span className="text-[10px] font-semibold text-violet-700">+{crmMore}</span>
+                                )}
+                              </div>
+                            )}
                             {tags.length > 0 && (
                               <div className="flex flex-wrap items-center gap-1.5">
                                 {tags.map((t) => (
                                   <span key={t.label} className={`inline-flex items-center gap-0.5 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                                    t.isAllergy ? 'bg-red-100 text-red-800 ring-1 ring-red-200' : 'bg-amber-50 text-amber-700'
+                                    t.isAllergy ? 'bg-red-100 text-red-800 ring-1 ring-red-200' : 'bg-emerald-50 text-emerald-800 ring-1 ring-emerald-200'
                                   }`}>
                                     {t.isAllergy && <span className="text-red-500">⚠</span>}
                                     {t.icon} {t.label}

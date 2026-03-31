@@ -65,7 +65,7 @@ export async function GET(
 
     const { data: guest } = await staff.db
       .from('guests')
-      .select('id, name, email, phone, visit_count')
+      .select('id, name, email, phone, visit_count, tags')
       .eq('id', booking.guest_id)
       .single();
 
@@ -160,17 +160,53 @@ export async function PATCH(
       }
 
       if (newStatus === 'Cancelled' && (booking.status === 'Confirmed' || booking.status === 'Pending' || booking.status === 'Seated')) {
+        const groupBookingId = booking.group_booking_id as string | null | undefined;
+        let idsToCancel: string[] = [id];
+        let paymentIntentForRefund: string | null =
+          typeof booking.stripe_payment_intent_id === 'string' ? booking.stripe_payment_intent_id : null;
+        let depositPenceForMessage: number | null =
+          typeof booking.deposit_amount_pence === 'number' ? booking.deposit_amount_pence : null;
+        let hadPaidDeposit = booking.deposit_status === 'Paid';
+
+        if (groupBookingId) {
+          const { data: groupRows } = await staff.db
+            .from('bookings')
+            .select('id, stripe_payment_intent_id, deposit_status, deposit_amount_pence')
+            .eq('venue_id', staff.venue_id)
+            .eq('group_booking_id', groupBookingId)
+            .in('status', ['Pending', 'Confirmed', 'Seated']);
+
+          idsToCancel = (groupRows ?? []).map((r: { id: string }) => r.id);
+          if (idsToCancel.length === 0) {
+            idsToCancel = [id];
+          }
+          const withPi = (groupRows ?? []).find(
+            (r: { stripe_payment_intent_id?: string | null }) => r.stripe_payment_intent_id,
+          );
+          paymentIntentForRefund =
+            typeof withPi?.stripe_payment_intent_id === 'string' ? withPi.stripe_payment_intent_id : paymentIntentForRefund;
+          const totalPence = (groupRows ?? []).reduce(
+            (sum: number, r: { deposit_amount_pence?: number | null }) => sum + (r.deposit_amount_pence ?? 0),
+            0,
+          );
+          if (totalPence > 0) {
+            depositPenceForMessage = totalPence;
+          }
+          hadPaidDeposit = (groupRows ?? []).some((r: { deposit_status?: string | null }) => r.deposit_status === 'Paid');
+        }
+
         const deadline = booking.cancellation_deadline ? new Date(booking.cancellation_deadline) : null;
-        const canRefund = deadline && new Date() <= deadline && booking.deposit_status === 'Paid' && booking.stripe_payment_intent_id;
+        const canRefund =
+          Boolean(deadline && new Date() <= deadline && hadPaidDeposit && paymentIntentForRefund);
 
         let refundSucceeded = false;
-        if (canRefund) {
+        if (canRefund && paymentIntentForRefund) {
           const { data: venue } = await admin.from('venues').select('stripe_connected_account_id').eq('id', staff.venue_id).single();
           if (venue?.stripe_connected_account_id) {
             try {
               await stripe.refunds.create(
-                { payment_intent: booking.stripe_payment_intent_id },
-                { stripeAccount: venue.stripe_connected_account_id }
+                { payment_intent: paymentIntentForRefund },
+                { stripeAccount: venue.stripe_connected_account_id },
               );
               refundSucceeded = true;
             } catch (refundErr) {
@@ -179,27 +215,37 @@ export async function PATCH(
           }
         }
 
-        await staff.db
-          .from('bookings')
-          .update({
-            status: 'Cancelled',
-            deposit_status: refundSucceeded ? 'Refunded' : booking.deposit_status,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', id);
+        if (refundSucceeded) {
+          await staff.db
+            .from('bookings')
+            .update({
+              status: 'Cancelled',
+              deposit_status: 'Refunded',
+              updated_at: new Date().toISOString(),
+            })
+            .in('id', idsToCancel);
+        } else {
+          await staff.db
+            .from('bookings')
+            .update({
+              status: 'Cancelled',
+              updated_at: new Date().toISOString(),
+            })
+            .in('id', idsToCancel);
+        }
 
         const { data: guestRow } = await staff.db.from('guests').select('name, email, phone').eq('id', booking.guest_id).single();
         const { data: venueRow } = await staff.db.from('venues').select('name, address, phone').eq('id', staff.venue_id).single();
         if (guestRow && venueRow?.name) {
-          const depositAmountStr = booking.deposit_amount_pence
-            ? `£${(booking.deposit_amount_pence / 100).toFixed(2)}`
+          const depositAmountStr = depositPenceForMessage
+            ? `£${(depositPenceForMessage / 100).toFixed(2)}`
             : null;
           let refund_message: string | undefined;
           if (refundSucceeded) {
             refund_message = `Your deposit of ${depositAmountStr} will be refunded to your original payment method within 5\u201310 business days.`;
-          } else if (booking.deposit_status === 'Paid' && !canRefund) {
+          } else if (hadPaidDeposit && !canRefund) {
             refund_message = `Your deposit of ${depositAmountStr} is non-refundable as the cancellation was made less than 48 hours before the reservation.`;
-          } else if (booking.deposit_status === 'Paid' && canRefund && !refundSucceeded) {
+          } else if (hadPaidDeposit && canRefund && !refundSucceeded) {
             refund_message = `We were unable to process your refund automatically. Please contact the venue directly to arrange your refund of ${depositAmountStr}.`;
           }
           const bookingTime = typeof booking.booking_time === 'string' ? booking.booking_time.slice(0, 5) : '';
@@ -212,7 +258,7 @@ export async function PATCH(
             booking_date: booking.booking_date,
             booking_time: bookingTime,
             party_size: booking.party_size,
-            deposit_amount_pence: booking.deposit_amount_pence ?? null,
+            deposit_amount_pence: depositPenceForMessage ?? booking.deposit_amount_pence ?? null,
             deposit_status: booking.deposit_status ?? null,
           };
           const cancelVenueEmail: import('@/lib/emails/types').VenueEmailData = {

@@ -4,7 +4,6 @@ import { stripe } from '@/lib/stripe';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { sendCommunication } from '@/lib/communications';
 import { generateConfirmToken, hashConfirmToken } from '@/lib/confirm-token';
-import { validateBookingStatusTransition } from '@/lib/table-management/lifecycle';
 import { sendBookingConfirmationEmail, sendDepositConfirmationEmail } from '@/lib/communications/send-templated';
 import { enrichBookingEmailForAppointment } from '@/lib/emails/booking-email-enrichment';
 import { isSelfServeBookingSource } from '@/lib/booking-source';
@@ -76,15 +75,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ received: true });
       }
 
-      const transitionCheck = validateBookingStatusTransition(booking.status as string, 'Confirmed');
-      if (!transitionCheck.ok) {
-        console.log(`[Stripe webhook] Booking ${bookingId} transition invalid (${booking.status} -> Confirmed) \u2014 skipping`);
-        await recordProcessed(supabase, event.id, event.type);
-        return NextResponse.json({ received: true });
-      }
-
-      // Atomically update only if not yet confirmed, so the confirm-payment
-      // route and webhook don't both process the same booking.
+      // Confirm every segment that shares this PaymentIntent (group / multi-service).
       const { data: updatedRows } = await supabase
         .from('bookings')
         .update({
@@ -92,12 +83,13 @@ export async function POST(request: NextRequest) {
           deposit_status: 'Paid',
           updated_at: new Date().toISOString(),
         })
-        .eq('id', bookingId)
-        .neq('status', 'Confirmed')
+        .eq('stripe_payment_intent_id', pi.id)
+        .eq('venue_id', booking.venue_id)
+        .eq('status', 'Pending')
         .select('id');
 
       if (!updatedRows?.length) {
-        console.log(`[Stripe webhook] Booking ${bookingId} already confirmed — skipping`);
+        console.log(`[Stripe webhook] No pending bookings to confirm for PI ${pi.id} — may already be processed`);
         await recordProcessed(supabase, event.id, event.type);
         return NextResponse.json({ received: true });
       }

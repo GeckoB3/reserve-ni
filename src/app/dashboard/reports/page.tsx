@@ -68,7 +68,7 @@ export default async function ReportsPage() {
             </p>
           )}
         </div>
-        <ReportsView bookingModel={bookingModel} terminology={terminology} />
+        <ReportsView bookingModel={bookingModel} terminology={terminology} venueId={venueId} />
       </div>
     </div>
   );

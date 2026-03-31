@@ -66,6 +66,8 @@ export interface Practitioner {
   is_active: boolean;
   sort_order: number;
   created_at: string;
+  /** Public booking URL segment under /book/{venue-slug}/{slug} */
+  slug?: string | null;
 }
 
 /** Dated time off (annual / sick) — stored in `practitioner_leave_periods`. */

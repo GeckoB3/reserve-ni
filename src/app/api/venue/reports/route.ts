@@ -146,30 +146,41 @@ export async function GET(request: NextRequest) {
       { data: noShowSeries, error: e2 },
       { data: cancellation, error: e3 },
       { data: deposit, error: e4 },
-      { data: frequentVisitors, error: e5 },
       { data: venueFlags },
+      { data: clientSummaryRaw, error: eClient },
     ] = await Promise.all([
       supabase.rpc('report_booking_summary', { p_venue_id: staff.venue_id, p_start: pStart, p_end: pEnd }),
       supabase.rpc('report_no_show_series', { p_venue_id: staff.venue_id, p_start: pStart, p_end: pEnd, p_granularity: 'day' }),
       supabase.rpc('report_cancellation', { p_venue_id: staff.venue_id, p_start: pStart, p_end: pEnd }),
       supabase.rpc('report_deposit_summary', { p_venue_id: staff.venue_id, p_start: pStart, p_end: pEnd }),
-      supabase.rpc('report_frequent_visitors', {
-        p_venue_id: staff.venue_id,
-        p_start: from,
-        p_end: to,
-        p_limit: 100,
-      }),
       staff.db
         .from('venues')
         .select('table_management_enabled, booking_model')
         .eq('id', staff.venue_id)
         .single(),
+      staff.db.rpc('report_client_summary', {
+        p_venue_id: staff.venue_id,
+        p_from: from,
+        p_to: to,
+      }),
     ]);
 
-    if (e1 || e2 || e3 || e4 || e5) {
-      console.error('reports rpc errors:', e1, e2, e3, e4, e5);
+    if (e1 || e2 || e3 || e4) {
+      console.error('reports rpc errors:', e1, e2, e3, e4);
       return NextResponse.json({ error: 'Failed to load reports' }, { status: 500 });
     }
+
+    if (eClient) {
+      console.error('report_client_summary failed:', eClient);
+    }
+
+    const clientSummaryParsed = clientSummaryRaw as Record<string, unknown> | null;
+    const client_summary = {
+      identified_clients_total: Number(clientSummaryParsed?.identified_clients_total ?? 0),
+      new_clients_in_period: Number(clientSummaryParsed?.new_clients_in_period ?? 0),
+      returning_clients_in_period: Number(clientSummaryParsed?.returning_clients_in_period ?? 0),
+      anonymous_visits_in_period: Number(clientSummaryParsed?.anonymous_visits_in_period ?? 0),
+    };
 
     const bookingModel = (venueFlags?.booking_model as BookingModel | undefined) ?? 'table_reservation';
 
@@ -237,8 +248,8 @@ export async function GET(request: NextRequest) {
       report3_cancellation: cancellationObj ?? null,
       report4_deposit: depositObj ?? null,
       report5_table_utilisation: tableUtilisation,
-      report6_frequent_visitors: frequentVisitors ?? [],
       report7_appointment_insights: report7_appointment_insights,
+      client_summary,
     });
   } catch (err) {
     console.error('GET /api/venue/reports failed:', err);

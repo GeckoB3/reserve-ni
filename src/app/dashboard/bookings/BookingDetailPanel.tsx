@@ -9,6 +9,7 @@ import { defaultPhoneCountryForVenueCurrency } from '@/lib/phone/default-country
 import type { CountryCode } from 'libphonenumber-js';
 import { ModifyBookingInline } from '@/components/booking/ModifyBookingInline';
 import { BookingNotesEditablePanel } from '@/components/booking/BookingNotesEditablePanel';
+import { GuestTagEditor } from '@/components/dashboard/GuestTagEditor';
 
 interface Guest {
   id: string;
@@ -16,6 +17,7 @@ interface Guest {
   email: string | null;
   phone: string | null;
   visit_count: number;
+  tags?: string[];
 }
 
 interface EventRow {
@@ -152,7 +154,7 @@ function buildPlaceholderDetail(
     special_requests: snap.specialRequests ?? null,
     internal_notes: null,
     cancellation_deadline: null,
-    guest: { id: '', name: snap.guestName, email: null, phone: null, visit_count: 0 },
+    guest: { id: '', name: snap.guestName, email: null, phone: null, visit_count: 0, tags: [] },
     events: [],
     communications: [],
     table_assignments: [],
@@ -644,6 +646,27 @@ export function BookingDetailPanel({
                 ) : (
                   <p className="text-xs italic text-slate-400">No phone on file</p>
                 )}
+                {d.guest?.id ? (
+                  <div className="mt-2">
+                    <GuestTagEditor
+                      tags={Array.isArray(d.guest.tags) ? d.guest.tags : []}
+                      venueId={d.venue_id}
+                      onTagsChange={async (nextTags) => {
+                        const res = await fetch(`/api/venue/guests/${d.guest!.id}`, {
+                          method: 'PATCH',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ tags: nextTags }),
+                        });
+                        if (!res.ok) {
+                          const j = (await res.json().catch(() => ({}))) as { error?: string };
+                          throw new Error(typeof j.error === 'string' ? j.error : 'Could not save tags');
+                        }
+                        await load();
+                        onUpdated();
+                      }}
+                    />
+                  </div>
+                ) : null}
               </div>
             </div>
 

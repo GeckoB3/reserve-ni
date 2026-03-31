@@ -1,11 +1,13 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, Legend, LineChart, Line, CartesianGrid,
 } from 'recharts';
 import { DataExportSection } from './DataExportSection';
+import { ClientsSection, type ClientSummary } from './ClientsSection';
 import type { BookingModel, VenueTerminology } from '@/types/booking-models';
 
 interface Report1 {
@@ -77,8 +79,8 @@ interface ReportsData {
     occupied_hours: number;
     available_hours: number;
   }>;
-  report6_frequent_visitors?: Report6Row[];
   report7_appointment_insights?: AppointmentInsightsPayload | null;
+  client_summary?: ClientSummary | null;
 }
 
 const COLORS = ['#4E6B78', '#059669', '#f59e0b', '#ef4444', '#8b5cf6', '#6b7280'];
@@ -128,14 +130,38 @@ function aggregateBookingSourcesByLabel(bySource: Record<string, number>): Array
 export interface ReportsViewProps {
   bookingModel: BookingModel;
   terminology: VenueTerminology;
+  venueId: string;
 }
 
-export function ReportsView({ bookingModel, terminology }: ReportsViewProps) {
+export function ReportsView({ bookingModel, terminology, venueId }: ReportsViewProps) {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
   const [range, setRange] = useState(last7Days);
   const [data, setData] = useState<ReportsData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [exportFlash, setExportFlash] = useState<ExportFlash | null>(null);
+  const [activeTab, setActiveTabState] = useState<'overview' | 'clients'>(() =>
+    searchParams.get('tab') === 'clients' ? 'clients' : 'overview',
+  );
+
+  useEffect(() => {
+    const t = searchParams.get('tab');
+    setActiveTabState(t === 'clients' ? 'clients' : 'overview');
+  }, [searchParams]);
+
+  const setActiveTab = useCallback(
+    (tab: 'overview' | 'clients') => {
+      setActiveTabState(tab);
+      const p = new URLSearchParams(searchParams.toString());
+      if (tab === 'clients') p.set('tab', 'clients');
+      else p.delete('tab');
+      const qs = p.toString();
+      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+    },
+    [pathname, router, searchParams],
+  );
 
   const dismissExportFlashSoon = useCallback(() => {
     window.setTimeout(() => setExportFlash(null), 4500);
@@ -254,31 +280,6 @@ export function ReportsView({ bookingModel, terminology }: ReportsViewProps) {
     ]);
   }, [data]);
 
-  const exportReport6 = useCallback(() => {
-    if (!data) return;
-    const rows = data.report6_frequent_visitors ?? [];
-    const model = (data.booking_model as BookingModel | undefined) ?? bookingModel;
-    const appt = model === 'practitioner_appointment';
-    downloadCsv(`report6-frequent-visitors-${data.from}-${data.to}.csv`, [
-      [
-        'Name',
-        'Email',
-        'Phone',
-        appt ? 'Lifetime appointments attended' : 'Lifetime visits',
-        appt ? 'Last appointment' : 'Last visit',
-        appt ? `${terminology.booking}s in period` : 'Bookings in period',
-      ],
-      ...rows.map((row) => [
-        row.name ?? '',
-        row.email ?? '',
-        row.phone ?? '',
-        String(row.visit_count),
-        row.last_visit_date ?? '',
-        String(row.bookings_in_period),
-      ]),
-    ]);
-  }, [data, bookingModel, terminology]);
-
   const exportReport7 = useCallback(() => {
     if (!data?.report7_appointment_insights) return;
     const r = data.report7_appointment_insights;
@@ -323,7 +324,6 @@ export function ReportsView({ bookingModel, terminology }: ReportsViewProps) {
   const r3 = data?.report3_cancellation;
   const r4 = data?.report4_deposit;
   const r5 = data?.report5_table_utilisation ?? [];
-  const r6 = data?.report6_frequent_visitors ?? [];
   const r7 = data?.report7_appointment_insights;
 
   const resolvedBookingModel =
@@ -382,6 +382,33 @@ export function ReportsView({ bookingModel, terminology }: ReportsViewProps) {
         </div>
       )}
 
+      <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex w-full max-w-md rounded-xl border border-slate-200 bg-white p-1 shadow-sm sm:w-max">
+          <button
+            type="button"
+            onClick={() => setActiveTab('overview')}
+            className={`flex-1 rounded-lg px-4 py-2 text-sm font-medium transition-colors sm:flex-none ${
+              activeTab === 'overview'
+                ? 'bg-brand-600 text-white shadow-sm'
+                : 'text-slate-600 hover:bg-slate-50'
+            }`}
+          >
+            Overview
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('clients')}
+            className={`flex-1 rounded-lg px-4 py-2 text-sm font-medium transition-colors sm:flex-none ${
+              activeTab === 'clients'
+                ? 'bg-brand-600 text-white shadow-sm'
+                : 'text-slate-600 hover:bg-slate-50'
+            }`}
+          >
+            {terminology.client}s
+          </button>
+        </div>
+      </div>
+
       {/* Date range controls */}
       <div className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
         <label className="flex items-center gap-2 text-sm">
@@ -412,6 +439,19 @@ export function ReportsView({ bookingModel, terminology }: ReportsViewProps) {
         </button>
       </div>
 
+      {activeTab === 'clients' && data ? (
+        <ClientsSection
+          venueId={venueId}
+          terminology={terminology}
+          bookingModel={resolvedBookingModel}
+          clientSummary={data.client_summary ?? null}
+          rangeLabel={`${data.from} → ${data.to}`}
+          onReportsRefresh={fetchReports}
+        />
+      ) : null}
+
+      {activeTab === 'overview' && (
+        <>
       {/* Report 1 */}
       <ReportSection
         title={isAppointment ? 'Appointment activity' : 'Booking summary'}
@@ -700,79 +740,6 @@ export function ReportsView({ bookingModel, terminology }: ReportsViewProps) {
         )}
       </ReportSection>
 
-      <ReportSection
-        title={isAppointment ? `Returning ${clientLower}s` : 'Identifiable frequent guests'}
-        onExport={exportReport6}
-        exportBlocked={!data}
-        exportBlockedMessage="Reports are still loading or unavailable."
-        onExportSuccess={() =>
-          notifyExport(
-            'success',
-            r6.length > 0
-              ? `${isAppointment ? `Returning ${clientLower}s` : 'Frequent guests'} CSV download started — check your downloads folder.`
-              : 'CSV with headers only was downloaded (no rows matched this period).',
-          )
-        }
-        onExportBlocked={(msg) => notifyExport('notice', msg)}
-      >
-        <p className="mb-4 text-sm text-slate-500">
-          {isAppointment ? (
-            <>
-              {client}s with email or phone who have completed or been seated at least once. Walk-ins without
-              contact details are excluded. Ranked by how many times they have attended. Only {clientLower}s with at
-              least one non-cancelled {bookingWord.toLowerCase()} in the selected range are listed — useful for
-              retention and follow-up.
-            </>
-          ) : (
-            <>
-              Guests with an email or phone on file who have been seated at least once before. Walk-ins without
-              contact details are not listed. Ranked by lifetime visits (each time a booking is marked seated).
-              Only guests with at least one non-cancelled booking in the selected date range appear here.
-            </>
-          )}
-        </p>
-        {r6.length > 0 ? (
-          <div className="overflow-x-auto rounded-lg border border-slate-100">
-            <table className="w-full min-w-[640px] text-sm">
-              <thead className="border-b border-slate-100 bg-slate-50">
-                <tr>
-                  <th className="px-3 py-2 text-left text-xs font-medium text-slate-500">Name</th>
-                  <th className="px-3 py-2 text-left text-xs font-medium text-slate-500">Email</th>
-                  <th className="px-3 py-2 text-left text-xs font-medium text-slate-500">Phone</th>
-                  <th className="px-3 py-2 text-right text-xs font-medium text-slate-500">
-                    {isAppointment ? 'Lifetime appointments' : 'Lifetime visits'}
-                  </th>
-                  <th className="px-3 py-2 text-left text-xs font-medium text-slate-500">
-                    {isAppointment ? 'Last appointment' : 'Last visit'}
-                  </th>
-                  <th className="px-3 py-2 text-right text-xs font-medium text-slate-500">
-                    {isAppointment ? `${bookingWord}s (period)` : 'Bookings (period)'}
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {r6.map((row) => (
-                  <tr key={row.guest_id} className="hover:bg-slate-50/60">
-                    <td className="px-3 py-2.5 font-medium text-slate-800">{row.name ?? '—'}</td>
-                    <td className="max-w-[180px] truncate px-3 py-2.5 text-slate-600" title={row.email ?? undefined}>{row.email ?? '—'}</td>
-                    <td className="whitespace-nowrap px-3 py-2.5 text-slate-600">{row.phone ?? '—'}</td>
-                    <td className="px-3 py-2.5 text-right tabular-nums text-slate-800">{row.visit_count}</td>
-                    <td className="whitespace-nowrap px-3 py-2.5 text-slate-600">{row.last_visit_date ?? '—'}</td>
-                    <td className="px-3 py-2.5 text-right tabular-nums text-slate-800">{row.bookings_in_period}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <p className="text-sm text-slate-400">
-            {isAppointment
-              ? `No identifiable ${clientLower}s match this period. Try a wider date range or capture email/phone on ${bookingWord.toLowerCase()}s.`
-              : 'No identifiable guests match this period. Try a wider date range or add email/phone to guest profiles.'}
-          </p>
-        )}
-      </ReportSection>
-
       {!isAppointment && data?.table_management_enabled && (
         <ReportSection
           title="Table utilisation"
@@ -820,6 +787,8 @@ export function ReportsView({ bookingModel, terminology }: ReportsViewProps) {
         clientLabel={client}
         bookingWord={bookingWord}
       />
+        </>
+      )}
     </div>
   );
 }

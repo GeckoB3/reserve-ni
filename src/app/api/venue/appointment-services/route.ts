@@ -84,11 +84,13 @@ export async function POST(request: NextRequest) {
     }
 
     const admin = getSupabaseAdminClient();
-    const { data, error } = await admin
-      .from('appointment_services')
-      .insert({ venue_id: staff.venue_id, ...parsed.data })
-      .select()
-      .single();
+    /** Model B: new services default to no turnaround gap; staff add buffer only when they want prep time between clients. */
+    const insertRow = {
+      venue_id: staff.venue_id,
+      ...parsed.data,
+      buffer_minutes: parsed.data.buffer_minutes ?? 0,
+    };
+    const { data, error } = await admin.from('appointment_services').insert(insertRow).select().single();
 
     if (error) {
       console.error('POST /api/venue/appointment-services failed:', error);
