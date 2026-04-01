@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { stripe } from '@/lib/stripe';
+import { buildCheckoutLineItems } from '@/lib/stripe/subscription-line-items';
 import { getBusinessConfig } from '@/lib/business-config';
 import { FOUNDING_PARTNER_CAP } from '@/lib/pricing-constants';
 
@@ -153,12 +154,7 @@ export async function POST(request: Request) {
     const session = await stripe.checkout.sessions.create({
       customer: customer.id,
       mode: 'subscription',
-      line_items: [
-        {
-          price: priceId,
-          quantity,
-        },
-      ],
+      line_items: buildCheckoutLineItems(priceId, quantity),
       metadata: {
         supabase_user_id: user.id,
         user_id: user.id,

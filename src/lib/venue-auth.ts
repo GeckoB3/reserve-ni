@@ -94,12 +94,30 @@ export function requireAdmin(staff: VenueStaff | null): staff is VenueStaff {
   return staff !== null && staff.role === 'admin';
 }
 
-/** Practitioner row linked to this staff member for Model B (one calendar per staff). */
+/** Bookable calendar id linked to this staff (legacy `practitioners` or USE `unified_calendars`). */
 export async function getLinkedPractitionerId(
   admin: SupabaseClient,
   venueId: string,
   staffId: string,
 ): Promise<string | null> {
+  const { data: venue } = await admin.from('venues').select('booking_model').eq('id', venueId).maybeSingle();
+  const bookingModel = (venue as { booking_model?: string } | null)?.booking_model;
+
+  if (bookingModel === 'unified_scheduling') {
+    const { data, error } = await admin
+      .from('unified_calendars')
+      .select('id')
+      .eq('venue_id', venueId)
+      .eq('staff_id', staffId)
+      .maybeSingle();
+
+    if (error) {
+      console.error('[getLinkedPractitionerId] unified_calendars lookup failed:', error.message, { venueId, staffId });
+      return null;
+    }
+    return data?.id ?? null;
+  }
+
   const { data, error } = await admin
     .from('practitioners')
     .select('id')
@@ -108,7 +126,7 @@ export async function getLinkedPractitionerId(
     .maybeSingle();
 
   if (error) {
-    console.error('[getLinkedPractitionerId] lookup failed:', error.message, { venueId, staffId });
+    console.error('[getLinkedPractitionerId] practitioners lookup failed:', error.message, { venueId, staffId });
     return null;
   }
 

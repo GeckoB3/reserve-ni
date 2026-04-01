@@ -7,6 +7,7 @@ import { getDashboardStaff, getLinkedPractitionerId } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { ToastProvider } from '@/components/ui/Toast';
 import type { BookingModel } from '@/types/booking-models';
+import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 
 export default async function BookingsPage() {
   const supabase = await createClient();
@@ -30,7 +31,7 @@ export default async function BookingsPage() {
   const { data: venue } = await admin.from('venues').select('booking_model, currency').eq('id', venueId).single();
   const bookingModel = (venue?.booking_model as BookingModel) ?? 'table_reservation';
   const currency = (venue?.currency as string) ?? 'GBP';
-  const isAppointment = bookingModel === 'practitioner_appointment';
+  const isAppointment = isUnifiedSchedulingVenue(bookingModel);
   const title = isAppointment ? 'Appointments' : 'Reservations';
 
   const linkedPractitionerId =

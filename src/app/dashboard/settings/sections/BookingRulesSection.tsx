@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { useCallback } from 'react';
 import type { VenueSettings, BookingRulesSettings } from '../types';
 import { useNumericField } from '@/hooks/useNumericField';
+import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 
 const restaurantSchema = z.object({
   min_party_size: z.number().int().min(1).max(20),
@@ -41,7 +42,7 @@ interface BookingRulesSectionProps {
 }
 
 export function BookingRulesSection({ venue, onUpdate, isAdmin, bookingModel = 'table_reservation' }: BookingRulesSectionProps) {
-  const isAppointment = bookingModel === 'practitioner_appointment';
+  const isAppointment = isUnifiedSchedulingVenue(bookingModel);
   const rules = venue.booking_rules ?? defaultRules;
   const { integerProps } = useNumericField();
   const int = integerProps();

@@ -26,8 +26,14 @@ interface Props {
 
 /**
  * Renders the correct booking flow component based on the venue's booking model.
- * Model A (table_reservation) uses the existing BookingFlow.
- * Models B–E use their dedicated flows.
+ *
+ * Architecture (Unified Scheduling Engine plan):
+ * - **table_reservation** — restaurant `BookingFlow`.
+ * - **unified_scheduling** — practitioner-style flow backed by `unified_calendars` +
+ *   `service_items` + `calendar_service_assignments`.
+ * - **event_ticket / class_session / resource_booking** — legacy dedicated flows for venues
+ *   still on those enum values. Engine/API support for event/class/resource under USE exists
+ *   (`getUnifiedAvailableSlots`, `event_sessions`); full UI consolidation is a future cutover.
  */
 export function BookingFlowRouter({
   venue,
@@ -39,6 +45,7 @@ export function BookingFlowRouter({
 }: Props) {
   switch (venue.booking_model) {
     case 'practitioner_appointment':
+    case 'unified_scheduling':
       return (
         <AppointmentBookingFlow
           venue={venue}

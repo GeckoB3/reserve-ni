@@ -1,0 +1,56 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { getSupabaseAdminClient } from '@/lib/supabase';
+import { resolveVenueMode } from '@/lib/venue-mode';
+import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
+import { getUnifiedAvailableSlots } from '@/lib/unified-availability';
+import { z } from 'zod';
+
+const querySchema = z.object({
+  calendar_id: z.string().uuid(),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  service_item_id: z.string().uuid(),
+  venue_id: z.string().uuid(),
+  /** Resource calendars: fix duration (minutes) instead of expanding min–max grid. */
+  duration_minutes: z.coerce.number().int().min(5).max(1440).optional(),
+});
+
+/**
+ * GET /api/booking/unified-availability?venue_id=&calendar_id=&date=&service_item_id=
+ * Public: guest booking page slot list for unified scheduling venues.
+ */
+export async function GET(request: NextRequest) {
+  try {
+    const sp = request.nextUrl.searchParams;
+    const parsed = querySchema.safeParse({
+      calendar_id: sp.get('calendar_id'),
+      date: sp.get('date'),
+      service_item_id: sp.get('service_item_id'),
+      venue_id: sp.get('venue_id'),
+      duration_minutes: sp.get('duration_minutes') ?? undefined,
+    });
+    if (!parsed.success) {
+      return NextResponse.json({ error: 'Invalid query parameters' }, { status: 400 });
+    }
+
+    const { venue_id, calendar_id, date, service_item_id, duration_minutes } = parsed.data;
+    const supabase = getSupabaseAdminClient();
+    const venueMode = await resolveVenueMode(supabase, venue_id);
+    if (!isUnifiedSchedulingVenue(venueMode.bookingModel)) {
+      return NextResponse.json({ error: 'Venue does not use unified scheduling' }, { status: 400 });
+    }
+
+    const slots = await getUnifiedAvailableSlots({
+      supabase,
+      venueId: venue_id,
+      calendarId: calendar_id,
+      date,
+      serviceItemId: service_item_id,
+      durationMinutesOverride: duration_minutes,
+    });
+
+    return NextResponse.json({ slots });
+  } catch (err) {
+    console.error('[unified-availability] GET failed:', err);
+    return NextResponse.json({ error: 'Server error' }, { status: 500 });
+  }
+}

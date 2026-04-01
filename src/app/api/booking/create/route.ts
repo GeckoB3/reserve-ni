@@ -26,6 +26,7 @@ import { fetchEventInput, computeEventAvailability } from '@/lib/availability/ev
 import { fetchClassInput, computeClassAvailability } from '@/lib/availability/class-session-engine';
 import { fetchResourceInput, computeResourceAvailability } from '@/lib/availability/resource-booking-engine';
 import { cancellationDeadlineHoursBefore } from '@/lib/booking/cancellation-deadline';
+import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 import type { BookingEmailData } from '@/lib/emails/types';
 
 const createBookingSchema = z.object({
@@ -56,6 +57,9 @@ const createBookingSchema = z.object({
   // Model E: resource fields
   resource_id: z.string().uuid().optional(),
   booking_end_time: z.string().regex(/^([01]?[0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9])?$/).optional(),
+  /** USE: book a materialised event/class session (capacity enforced server-side). */
+  event_session_id: z.string().uuid().optional(),
+  capacity_used: z.number().int().min(1).max(50).optional(),
 });
 
 /** Table reservations: fixed 48h refund window (legacy). */
@@ -380,6 +384,8 @@ async function handleNonTableBooking(
     experience_event_id, ticket_lines,
     class_instance_id,
     resource_id, booking_end_time,
+    event_session_id,
+    capacity_used,
   } = data;
 
   const timeForDb = booking_time.length === 5 ? booking_time + ':00' : booking_time;
@@ -390,8 +396,115 @@ async function handleNonTableBooking(
   let depositAmountPence: number | null = null;
   let requiresDeposit = false;
   let appointmentEmailExtras: Partial<BookingEmailData> = {};
+  let unifiedSessionAnchor: { calendar_id: string; service_item_id: string | null } | null = null;
 
-  if (venueMode.bookingModel === 'practitioner_appointment') {
+  const SESSION_CAPACITY_STATUSES = ['Pending', 'Confirmed', 'Seated'];
+
+  if (event_session_id && venueMode.bookingModel !== 'unified_scheduling') {
+    return NextResponse.json(
+      { error: 'event_session_id is only supported for unified_scheduling venues' },
+      { status: 400 },
+    );
+  }
+
+  if (venueMode.bookingModel === 'unified_scheduling' && event_session_id) {
+    const needSeats = capacity_used ?? party_size;
+    const { data: session, error: sesErr } = await supabase
+      .from('event_sessions')
+      .select(
+        'id, venue_id, calendar_id, session_date, start_time, end_time, capacity_override, is_cancelled, service_item_id',
+      )
+      .eq('id', event_session_id)
+      .maybeSingle();
+
+    if (sesErr || !session) {
+      return NextResponse.json({ error: 'Session not found' }, { status: 404 });
+    }
+    const sess = session as {
+      venue_id: string;
+      calendar_id: string;
+      session_date: string;
+      start_time: string;
+      end_time: string;
+      capacity_override: number | null;
+      is_cancelled: boolean;
+      service_item_id: string | null;
+    };
+    if (sess.is_cancelled) {
+      return NextResponse.json({ error: 'This session is not available' }, { status: 409 });
+    }
+    if (sess.venue_id !== venue_id) {
+      return NextResponse.json({ error: 'Session does not belong to this venue' }, { status: 400 });
+    }
+    if (sess.session_date !== booking_date) {
+      return NextResponse.json({ error: 'Session date does not match booking date' }, { status: 400 });
+    }
+    const sessionStart = String(sess.start_time).slice(0, 5);
+    if (sessionStart !== timeStr) {
+      return NextResponse.json({ error: 'Booking time does not match session start' }, { status: 400 });
+    }
+
+    const { data: calRow } = await supabase
+      .from('unified_calendars')
+      .select('capacity, name')
+      .eq('id', sess.calendar_id)
+      .eq('venue_id', venue_id)
+      .maybeSingle();
+    const cap = sess.capacity_override ?? (calRow as { capacity?: number } | null)?.capacity ?? 0;
+    if (cap < 1) {
+      return NextResponse.json({ error: 'Session has no capacity' }, { status: 409 });
+    }
+
+    const { data: bookedRows } = await supabase
+      .from('bookings')
+      .select('capacity_used')
+      .eq('venue_id', venue_id)
+      .eq('event_session_id', event_session_id)
+      .in('status', SESSION_CAPACITY_STATUSES);
+
+    let used = 0;
+    for (const r of bookedRows ?? []) {
+      used += (r as { capacity_used?: number }).capacity_used ?? 1;
+    }
+    if (used + needSeats > cap) {
+      return NextResponse.json({ error: 'This session is fully booked' }, { status: 409 });
+    }
+
+    const [y, mo, d] = booking_date.split('-').map(Number);
+    const endHm = String(sess.end_time).slice(0, 5);
+    const [eh, em] = endHm.split(':').map(Number);
+    estimatedEndTime = new Date(Date.UTC(y!, mo! - 1, d!, eh!, em!, 0)).toISOString();
+
+    let svcName: string | null = null;
+    let priceDisplay: string | null = null;
+    let depositPence: number | null = null;
+    if (sess.service_item_id) {
+      const { data: si } = await supabase
+        .from('service_items')
+        .select('name, price_pence, deposit_pence')
+        .eq('id', sess.service_item_id)
+        .eq('venue_id', venue_id)
+        .maybeSingle();
+      svcName = (si as { name?: string } | null)?.name ?? null;
+      const pp = (si as { price_pence?: number | null } | null)?.price_pence;
+      priceDisplay = pp != null ? `£${(pp / 100).toFixed(2)}` : null;
+      depositPence = (si as { deposit_pence?: number | null } | null)?.deposit_pence ?? null;
+    }
+
+    appointmentEmailExtras = {
+      email_variant: 'appointment',
+      practitioner_name: (calRow as { name?: string } | null)?.name ?? null,
+      appointment_service_name: svcName,
+      appointment_price_display: priceDisplay,
+    };
+
+    if (depositPence != null && depositPence > 0) {
+      requiresDeposit = true;
+      depositAmountPence = depositPence * needSeats;
+    }
+
+    unifiedSessionAnchor = { calendar_id: sess.calendar_id, service_item_id: sess.service_item_id };
+  } else if (isUnifiedSchedulingVenue(venueMode.bookingModel)) {
     if (!practitioner_id || !appointment_service_id) {
       return NextResponse.json({ error: 'practitioner_id and appointment_service_id are required' }, { status: 400 });
     }
@@ -495,7 +608,7 @@ async function handleNonTableBooking(
 
   const bookingRulesJson = (venue.booking_rules as { cancellation_notice_hours?: number } | null) ?? {};
   const refundWindowHours =
-    venueMode.bookingModel === 'practitioner_appointment' && typeof bookingRulesJson.cancellation_notice_hours === 'number'
+    isUnifiedSchedulingVenue(venueMode.bookingModel) && typeof bookingRulesJson.cancellation_notice_hours === 'number'
       ? bookingRulesJson.cancellation_notice_hours
       : 48;
 
@@ -528,7 +641,24 @@ async function handleNonTableBooking(
     class_instance_id: class_instance_id ?? null,
     resource_id: resource_id ?? null,
     booking_end_time: booking_end_time ? (booking_end_time.length === 5 ? booking_end_time + ':00' : booking_end_time) : null,
+    event_session_id: event_session_id ?? null,
+    capacity_used: capacity_used ?? null,
   };
+
+  if (venueMode.bookingModel === 'unified_scheduling') {
+    if (event_session_id && unifiedSessionAnchor) {
+      bookingInsert.calendar_id = unifiedSessionAnchor.calendar_id;
+      bookingInsert.service_item_id = unifiedSessionAnchor.service_item_id;
+      bookingInsert.practitioner_id = null;
+      bookingInsert.appointment_service_id = null;
+      bookingInsert.capacity_used = capacity_used ?? party_size;
+    } else {
+      bookingInsert.calendar_id = practitioner_id ?? null;
+      bookingInsert.service_item_id = appointment_service_id ?? null;
+      bookingInsert.practitioner_id = null;
+      bookingInsert.appointment_service_id = null;
+    }
+  }
 
   const { data: booking, error: bookErr } = await supabase
     .from('bookings')

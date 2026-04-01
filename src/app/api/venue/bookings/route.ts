@@ -21,6 +21,7 @@ import {
 import { z } from 'zod';
 import { normalizeToE164 } from '@/lib/phone/e164';
 import { createPaymentLinkToken } from '@/lib/payment-token';
+import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 
 const phoneBookingSchema = z.object({
   booking_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
@@ -96,7 +97,7 @@ export async function POST(request: NextRequest) {
 
     const phoneRaw = (phone ?? '').trim();
     let phoneE164: string | null = null;
-    if (venueMode.bookingModel === 'practitioner_appointment') {
+    if (isUnifiedSchedulingVenue(venueMode.bookingModel)) {
       if (phoneRaw) {
         const n = normalizeToE164(phoneRaw, 'GB');
         if (!n) {
@@ -132,7 +133,7 @@ export async function POST(request: NextRequest) {
     const timeStr = timeForDb.slice(0, 5);
 
     // --- Model B: Practitioner appointment ---
-    if (venueMode.bookingModel === 'practitioner_appointment') {
+    if (isUnifiedSchedulingVenue(venueMode.bookingModel)) {
       const { practitioner_id, appointment_service_id } = parsed.data;
       if (!practitioner_id || !appointment_service_id) {
         return NextResponse.json(

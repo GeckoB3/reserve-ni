@@ -1,5 +1,13 @@
 'use client';
 
+/**
+ * Dashboard settings shell. For `unified_scheduling` venues, sections map broadly to plan §9.1:
+ * business profile → ProfileSection / VenueProfileSection; bookable calendars & staff → StaffSection;
+ * services → `/dashboard/appointment-services` (linked from staff flow); communications →
+ * CommunicationTemplatesSection + venue notification APIs; plan & billing → StripeConnectSection;
+ * booking page URL/widgets → dashboard home / embed docs elsewhere.
+ */
+
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -14,6 +22,12 @@ import { TableManagementSection } from './sections/TableManagementSection';
 import { AvailabilityConfigSection } from './sections/AvailabilityConfigSection';
 import { BookingRulesSection } from './sections/BookingRulesSection';
 import { StaffPersonalSettingsSection } from './sections/StaffPersonalSettingsSection';
+import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
+import {
+  SMS_INCLUDED_BUSINESS_TIER,
+  SMS_INCLUDED_PER_CALENDAR_STANDARD,
+  computeSmsMonthlyAllowance,
+} from '@/lib/billing/sms-allowance';
 
 interface SettingsViewProps {
   initialVenue: VenueSettings | null;
@@ -159,10 +173,11 @@ function PlanSection({
   }
 
   const calendarDirty = tier === 'standard' && calendarDraft !== (venue.calendar_count ?? 1);
-  const isAppointmentVenue = venue.booking_model === 'practitioner_appointment';
+  const isAppointmentVenue = isUnifiedSchedulingVenue(venue.booking_model);
   const isRestaurantVenue = venue.booking_model === 'table_reservation';
   const standardSeatsPaid = calendarCount ?? 1;
   const standardMonthlyPence = standardSeatsPaid * 10;
+  const smsIncludedMonthly = computeSmsMonthlyAllowance(tier, calendarCount ?? null);
   const showSevenPlusBusinessNudge =
     tier === 'standard' && isAppointmentVenue && calendarCount != null && calendarCount >= 7;
 
@@ -207,6 +222,24 @@ function PlanSection({
       </div>
       {periodEndLabel && tier !== 'founding' && billingActive && !isCancelling && (
         <p className="text-xs text-slate-500">Current billing period ends on {periodEndLabel}.</p>
+      )}
+      {isAppointmentVenue && (
+        <p className="text-sm text-slate-600">
+          SMS this billing month:{' '}
+          <span className="font-semibold text-slate-900">{venue.sms_messages_sent_this_month ?? 0}</span>
+          {' / '}
+          {smsIncludedMonthly} included
+          {tier === 'standard' && calendarCount != null ? (
+            <span className="text-slate-500">
+              {' '}
+              ({SMS_INCLUDED_PER_CALENDAR_STANDARD} × {calendarCount} paid calendar{calendarCount === 1 ? '' : 's'})
+            </span>
+          ) : null}
+          {tier === 'business' || tier === 'founding' ? (
+            <span className="text-slate-500"> ({SMS_INCLUDED_BUSINESS_TIER}/month included)</span>
+          ) : null}
+          . Overage is billed via Stripe metered SMS.
+        </p>
       )}
       {actionError && (
         <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
@@ -346,7 +379,8 @@ function PlanSection({
                 <p className="font-medium text-amber-900">Before switching to Standard</p>
                 <p className="mt-1 text-amber-900/90">
                   On Standard you would pay &pound;{downgradeQty * 10}/month for {downgradeQty} active calendar
-                  {downgradeQty === 1 ? '' : 's'}. SMS reminders would be replaced with email reminders.
+                  {downgradeQty === 1 ? '' : 's'}. Included SMS drops to{' '}
+                  {SMS_INCLUDED_PER_CALENDAR_STANDARD * downgradeQty}/month (Business includes {SMS_INCLUDED_BUSINESS_TIER}).
                 </p>
                 {downgradeQty >= 8 && (
                   <p className="mt-2 font-medium text-amber-900">
@@ -380,7 +414,7 @@ function PlanSection({
                   if (isAppointmentVenue) {
                     const lines = [
                       `Switch to Standard at £${downgradeQty * 10}/month for ${downgradeQty} calendar(s)?`,
-                      'SMS guest reminders will move to email only.',
+                      `Included SMS will be ${SMS_INCLUDED_PER_CALENDAR_STANDARD * downgradeQty}/month (${SMS_INCLUDED_PER_CALENDAR_STANDARD} per calendar) vs ${SMS_INCLUDED_BUSINESS_TIER} on Business.`,
                     ];
                     if (downgradeQty >= 8) lines.push('Standard would cost more than Business at this size.');
                     msg = lines.join('\n\n');
@@ -450,7 +484,7 @@ export function SettingsView({
   activePractitionerCount = 0,
 }: SettingsViewProps) {
   const router = useRouter();
-  const isAppointment = bookingModel === 'practitioner_appointment';
+  const isAppointment = isUnifiedSchedulingVenue(bookingModel);
   const [venue, setVenue] = useState<VenueSettings | null>(initialVenue);
   const visibleTabs = useMemo(() => [...TABS], []);
   const [activeTab, setActiveTab] = useState<TabKey>(() => resolveInitialTab(initialTab));
@@ -599,6 +633,7 @@ export function SettingsView({
             venue={venue}
             isAdmin={isAdmin}
             pricingTier={venue.pricing_tier ?? 'standard'}
+            bookingModel={bookingModel}
           />
         )}
         {activeTab === 'staff' && isAdmin && (

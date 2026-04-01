@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 import type { StaffMember } from '../types';
 
 interface StaffSectionProps {
@@ -45,7 +46,7 @@ interface CalendarEntitlementState {
 }
 
 export function StaffSection({ venueId: _venueId, isAdmin, bookingModel }: StaffSectionProps) {
-  const isAppointmentVenue = bookingModel === 'practitioner_appointment';
+  const isAppointmentVenue = isUnifiedSchedulingVenue(bookingModel);
 
   const [staff, setStaff] = useState<StaffMember[]>([]);
   const [loading, setLoading] = useState(true);

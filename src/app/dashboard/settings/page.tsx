@@ -4,6 +4,8 @@ import { SettingsView } from './SettingsView';
 import { StaffPersonalSettingsSection } from './sections/StaffPersonalSettingsSection';
 import { getDashboardStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
+import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
+import { computeSmsMonthlyAllowance, updateVenueSmsMonthlyAllowance } from '@/lib/billing/sms-allowance';
 
 export default async function SettingsPage({
   searchParams,
@@ -44,7 +46,7 @@ export default async function SettingsPage({
 
   /** Model B: staff users only get personal account settings (not venue-wide configuration). */
   if (staff.role === 'staff') {
-    if (bookingModelForAccess !== 'practitioner_appointment') {
+    if (!isUnifiedSchedulingVenue(bookingModelForAccess)) {
       redirect('/dashboard');
     }
     return (
@@ -68,12 +70,20 @@ export default async function SettingsPage({
   let hasServiceConfig = false;
   const { data: fullVenue, error: fullErr } = await staff.db
     .from('venues')
-    .select('id, name, slug, address, phone, email, website_url, cover_photo_url, cuisine_type, price_band, no_show_grace_minutes, kitchen_email, communication_templates, opening_hours, booking_rules, deposit_config, availability_config, stripe_connected_account_id, timezone, table_management_enabled, combination_threshold, pricing_tier, plan_status, subscription_current_period_end, calendar_count, booking_model')
+    .select('id, name, slug, address, phone, email, website_url, cover_photo_url, cuisine_type, price_band, no_show_grace_minutes, kitchen_email, communication_templates, opening_hours, booking_rules, deposit_config, availability_config, stripe_connected_account_id, timezone, table_management_enabled, combination_threshold, pricing_tier, plan_status, subscription_current_period_end, calendar_count, booking_model, sms_monthly_allowance')
     .eq('id', venueId)
     .single();
 
   if (fullVenue) {
     venue = fullVenue;
+    const pt = ((fullVenue as { pricing_tier?: string | null }).pricing_tier ?? 'standard') as string;
+    const cc = (fullVenue as { calendar_count?: number | null }).calendar_count ?? null;
+    const expectedAllowance = computeSmsMonthlyAllowance(pt, cc);
+    const stored = (fullVenue as { sms_monthly_allowance?: number | null }).sms_monthly_allowance;
+    if (stored !== expectedAllowance && venueId) {
+      await updateVenueSmsMonthlyAllowance(venueId);
+      venue = { ...fullVenue, sms_monthly_allowance: expectedAllowance };
+    }
   } else {
     console.error('Settings page full venue query failed, trying basic columns:', fullErr?.message);
     const { data: basicVenue } = await staff.db
@@ -98,7 +108,7 @@ export default async function SettingsPage({
 
   const bookingModel = ((venue as Record<string, unknown>)?.booking_model as string) ?? 'table_reservation';
   if (venueId) {
-    if (bookingModel === 'practitioner_appointment') {
+    if (isUnifiedSchedulingVenue(bookingModel)) {
       const { count } = await staff.db
         .from('appointment_services')
         .select('id', { count: 'exact', head: true })
@@ -117,14 +127,33 @@ export default async function SettingsPage({
 
   const isAdmin = staff.role === 'admin';
   let activePractitionerCount = 0;
-  if (venueId && bookingModel === 'practitioner_appointment') {
+  let smsMessagesSentThisMonth: number | null = null;
+  if (venueId && isUnifiedSchedulingVenue(bookingModel)) {
     const adminClient = getSupabaseAdminClient();
-    const { count } = await adminClient
-      .from('practitioners')
-      .select('id', { count: 'exact', head: true })
+    if (bookingModel === 'unified_scheduling') {
+      const { count } = await adminClient
+        .from('unified_calendars')
+        .select('id', { count: 'exact', head: true })
+        .eq('venue_id', venueId)
+        .eq('is_active', true);
+      activePractitionerCount = count ?? 0;
+    } else {
+      const { count } = await adminClient
+        .from('practitioners')
+        .select('id', { count: 'exact', head: true })
+        .eq('venue_id', venueId)
+        .eq('is_active', true);
+      activePractitionerCount = count ?? 0;
+    }
+    const now = new Date();
+    const bm = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}-01`;
+    const { data: smsRow } = await staff.db
+      .from('sms_usage')
+      .select('messages_sent')
       .eq('venue_id', venueId)
-      .eq('is_active', true);
-    activePractitionerCount = count ?? 0;
+      .eq('billing_month', bm)
+      .maybeSingle();
+    smsMessagesSentThisMonth = (smsRow as { messages_sent?: number } | null)?.messages_sent ?? 0;
   }
 
   const sp = await searchParams;
@@ -139,7 +168,11 @@ export default async function SettingsPage({
       <div className="mx-auto max-w-3xl">
         <h1 className="mb-6 text-2xl font-semibold text-slate-900">Settings</h1>
         <SettingsView
-          initialVenue={venue ?? null}
+          initialVenue={
+            venue
+              ? { ...venue, sms_messages_sent_this_month: smsMessagesSentThisMonth }
+              : null
+          }
           isAdmin={isAdmin}
           initialTab={tab}
           planCheckoutReturn={planCheckoutReturn}

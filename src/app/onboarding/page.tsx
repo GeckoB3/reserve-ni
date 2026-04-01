@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import type { BookingModel } from '@/types/booking-models';
 import { getBusinessConfig } from '@/lib/business-config';
+import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 import { buildAddress, parseAddress } from '@/lib/venue/address-format';
 
 type Currency = 'GBP' | 'EUR';
@@ -79,6 +80,22 @@ interface ResourceDraft {
 }
 
 const DAY_LABELS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+/** Plan §8.2: unified onboarding step labels adapt to business category (calendars/events vs team-centric). */
+function unifiedTeamStepLabel(businessType: string | null, terms: { staff: string }): string {
+  const cfg = getBusinessConfig(businessType ?? 'other');
+  if (cfg.category === 'experiences' || cfg.category === 'entertainment') {
+    return 'Your calendars & events';
+  }
+  if (cfg.category === 'fitness') {
+    return 'Your instructors & calendars';
+  }
+  const s = terms.staff.trim();
+  if (/^staff$/i.test(s)) {
+    return 'Calendars & team';
+  }
+  return `Your ${s}s`;
+}
 
 export default function OnboardingPage() {
   const router = useRouter();
@@ -171,7 +188,7 @@ export default function OnboardingPage() {
         // Model B: merge existing practitioners (retry / refresh after partial save).
         // Business / Founding: unlimited calendars — start from one row, add as many as needed.
         // Standard: one row per paid calendar slot (fixed count).
-        if (v.booking_model === 'practitioner_appointment') {
+        if (isUnifiedSchedulingVenue(v.booking_model)) {
           const unlimitedCalendars =
             v.pricing_tier === 'business' || v.pricing_tier === 'founding';
           const slots = Math.max(1, v.calendar_count ?? 1);
@@ -252,6 +269,10 @@ export default function OnboardingPage() {
         break;
       case 'practitioner_appointment':
         steps.push({ key: 'team', label: `Your ${terms.staff}s` });
+        steps.push({ key: 'services', label: 'Services' });
+        break;
+      case 'unified_scheduling':
+        steps.push({ key: 'team', label: unifiedTeamStepLabel(venue.business_type, terms) });
         steps.push({ key: 'services', label: 'Services' });
         break;
       case 'event_ticket':
@@ -1393,7 +1414,7 @@ export default function OnboardingPage() {
               Your booking page is ready. Share the link below with your{' '}
               {terms.client.toLowerCase()}s.
             </p>
-            {venue.booking_model === 'practitioner_appointment' && (
+            {isUnifiedSchedulingVenue(venue.booking_model) && (
               <div className="mb-6 rounded-xl border border-amber-100 bg-amber-50/80 p-4 text-left">
                 <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-amber-900/80">
                   Before you go live

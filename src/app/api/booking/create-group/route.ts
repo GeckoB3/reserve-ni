@@ -14,9 +14,10 @@ import {
 } from '@/lib/availability/appointment-engine';
 import { mergeAppointmentServiceWithPractitionerLink } from '@/lib/appointments/merge-service-with-overrides';
 import { z } from 'zod';
-import { randomUUID } from 'crypto';
 import { cancellationDeadlineHoursBefore } from '@/lib/booking/cancellation-deadline';
+import { generateGroupBookingId } from '@/lib/booking/group-booking';
 import type { GroupAppointmentLine } from '@/lib/emails/types';
+import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 
 const personEntrySchema = z.object({
   person_label: z.string().min(1).max(100),
@@ -77,7 +78,7 @@ export async function POST(request: NextRequest) {
     }
 
     const venueMode = await resolveVenueMode(supabase, venue_id);
-    if (venueMode.bookingModel !== 'practitioner_appointment') {
+    if (!isUnifiedSchedulingVenue(venueMode.bookingModel)) {
       return NextResponse.json({ error: 'Group bookings are only available for appointment businesses' }, { status: 400 });
     }
 
@@ -171,8 +172,11 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const { data: prRows } = await supabase.from('practitioners').select('id, name').eq('venue_id', venue_id);
-    const prMap = new Map((prRows ?? []).map((p: { id: string; name: string }) => [p.id, p.name]));
+    const { data: nameRows } =
+      venueMode.bookingModel === 'unified_scheduling'
+        ? await supabase.from('unified_calendars').select('id, name').eq('venue_id', venue_id)
+        : await supabase.from('practitioners').select('id, name').eq('venue_id', venue_id);
+    const prMap = new Map((nameRows ?? []).map((p: { id: string; name: string }) => [p.id, p.name]));
     const groupAppointmentLines: GroupAppointmentLine[] = validatedPeople.map((p) => {
       return {
         person_label: p.person_label,
@@ -202,7 +206,7 @@ export async function POST(request: NextRequest) {
       phone: phoneE164,
     });
 
-    const groupBookingId = randomUUID();
+    const groupBookingId = generateGroupBookingId();
     const bookingIds: string[] = [];
 
     const bookingRulesJson = (venue.booking_rules as { cancellation_notice_hours?: number } | null) ?? {};
@@ -234,10 +238,18 @@ export async function POST(request: NextRequest) {
         cancellation_deadline: deadline,
         cancellation_policy_snapshot: policySnapshot,
         estimated_end_time: person.estimated_end_time,
-        practitioner_id: person.practitioner_id,
-        appointment_service_id: person.appointment_service_id,
+        practitioner_id:
+          venueMode.bookingModel === 'unified_scheduling' ? null : person.practitioner_id,
+        appointment_service_id:
+          venueMode.bookingModel === 'unified_scheduling' ? null : person.appointment_service_id,
         group_booking_id: groupBookingId,
         person_label: person.person_label,
+        ...(venueMode.bookingModel === 'unified_scheduling'
+          ? {
+              calendar_id: person.practitioner_id,
+              service_item_id: person.appointment_service_id,
+            }
+          : {}),
       };
 
       const { data: booking, error: bookErr } = await supabase

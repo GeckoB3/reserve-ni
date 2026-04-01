@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff } from '@/lib/venue-auth';
 import type { BookingModel } from '@/types/booking-models';
+import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 
 export interface AppointmentInsightsRow {
   practitioner_id: string;
@@ -189,7 +190,7 @@ export async function GET(request: NextRequest) {
     const depositObj = Array.isArray(deposit) ? deposit[0] : deposit;
     let tableUtilisation: Array<{ table_id: string; table_name: string; utilisation_pct: number; occupied_hours: number; available_hours: number }> = [];
 
-    if (venueFlags?.table_management_enabled && bookingModel !== 'practitioner_appointment') {
+    if (venueFlags?.table_management_enabled && !isUnifiedSchedulingVenue(bookingModel)) {
       const [{ data: tables }, { data: assignments }] = await Promise.all([
         supabase.from('venue_tables').select('id, name').eq('venue_id', staff.venue_id).eq('is_active', true),
         supabase
@@ -234,7 +235,7 @@ export async function GET(request: NextRequest) {
     }
 
     let report7_appointment_insights: Awaited<ReturnType<typeof buildAppointmentInsights>> | null = null;
-    if (bookingModel === 'practitioner_appointment') {
+    if (isUnifiedSchedulingVenue(bookingModel)) {
       report7_appointment_insights = await buildAppointmentInsights(supabase, staff.venue_id, from, to);
     }
 

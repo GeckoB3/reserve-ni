@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import type { SetupStatus } from '@/app/api/venue/setup-status/route';
 import type { BookingModel } from '@/types/booking-models';
+import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 
 interface Step {
   key: keyof Omit<SetupStatus, 'is_admin' | 'booking_model'>;
@@ -16,6 +17,7 @@ interface Step {
 function getAvailabilityStep(model: BookingModel): Step {
   switch (model) {
     case 'practitioner_appointment':
+    case 'unified_scheduling':
       return {
         key: 'availability_set',
         label: 'Team & services',
@@ -71,6 +73,7 @@ function isSetupComplete(s: SetupStatus) {
 function getGuestBookingStep(model: BookingModel): Step {
   switch (model) {
     case 'practitioner_appointment':
+    case 'unified_scheduling':
       return {
         key: 'guest_booking_ready',
         label: 'Public booking page',
@@ -102,7 +105,7 @@ function getSteps(model: BookingModel): Step[] {
     },
     getAvailabilityStep(model),
   ];
-  if (model === 'table_reservation' || model === 'practitioner_appointment') {
+  if (model === 'table_reservation' || isUnifiedSchedulingVenue(model)) {
     base.push(getGuestBookingStep(model));
   }
   base.push(

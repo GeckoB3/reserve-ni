@@ -1,7 +1,8 @@
 /**
  * Business type → booking model mapping.
  * When a business selects their type during onboarding, the system
- * maps it to one of five booking models and applies template defaults.
+ * maps it to a booking model and applies template defaults.
+ * Practitioner-style trades use `unified_scheduling` (Unified Scheduling Engine); legacy rows may still show `practitioner_appointment`.
  */
 
 import type { BookingModel, VenueTerminology } from '@/types/booking-models';
@@ -27,9 +28,9 @@ export const BUSINESS_TYPE_CONFIG: Record<string, BusinessConfig> = {
   pub:              { model: 'table_reservation', category: 'hospitality', terms: { client: 'Guest', booking: 'Reservation', staff: 'Staff' } },
   hotel_restaurant: { model: 'table_reservation', category: 'hospitality', terms: { client: 'Guest', booking: 'Reservation', staff: 'Staff' } },
 
-  // MODEL B: Practitioner Appointment
+  // MODEL B: Unified scheduling (appointments / calendars — USE)
   barber: {
-    model: 'practitioner_appointment', category: 'beauty_grooming',
+    model: 'unified_scheduling', category: 'beauty_grooming',
     terms: { client: 'Client', booking: 'Appointment', staff: 'Barber' },
     defaultServices: [
       { name: "Men's Cut", duration: 30, price: 1500 },
@@ -39,7 +40,7 @@ export const BUSINESS_TYPE_CONFIG: Record<string, BusinessConfig> = {
     ],
   },
   hairdresser: {
-    model: 'practitioner_appointment', category: 'beauty_grooming',
+    model: 'unified_scheduling', category: 'beauty_grooming',
     terms: { client: 'Client', booking: 'Appointment', staff: 'Stylist' },
     defaultServices: [
       { name: 'Cut & Blow Dry', duration: 60, price: 4000 },
@@ -49,7 +50,7 @@ export const BUSINESS_TYPE_CONFIG: Record<string, BusinessConfig> = {
     ],
   },
   beauty_therapist: {
-    model: 'practitioner_appointment', category: 'beauty_grooming',
+    model: 'unified_scheduling', category: 'beauty_grooming',
     terms: { client: 'Client', booking: 'Appointment', staff: 'Therapist' },
     defaultServices: [
       { name: 'Facial', duration: 60, price: 5000 },
@@ -58,10 +59,10 @@ export const BUSINESS_TYPE_CONFIG: Record<string, BusinessConfig> = {
       { name: 'Waxing', duration: 30, price: 2000 },
     ],
   },
-  nail_technician:   { model: 'practitioner_appointment', category: 'beauty_grooming', terms: { client: 'Client', booking: 'Appointment', staff: 'Nail Tech' } },
-  massage_therapist: { model: 'practitioner_appointment', category: 'health_wellness', terms: { client: 'Client', booking: 'Appointment', staff: 'Therapist' } },
+  nail_technician:   { model: 'unified_scheduling', category: 'beauty_grooming', terms: { client: 'Client', booking: 'Appointment', staff: 'Nail Tech' } },
+  massage_therapist: { model: 'unified_scheduling', category: 'health_wellness', terms: { client: 'Client', booking: 'Appointment', staff: 'Therapist' } },
   physiotherapist: {
-    model: 'practitioner_appointment', category: 'health_wellness',
+    model: 'unified_scheduling', category: 'health_wellness',
     terms: { client: 'Patient', booking: 'Appointment', staff: 'Physio' },
     defaultServices: [
       { name: 'Initial Assessment', duration: 60, price: 5500 },
@@ -69,22 +70,22 @@ export const BUSINESS_TYPE_CONFIG: Record<string, BusinessConfig> = {
       { name: 'Sports Massage', duration: 45, price: 4500 },
     ],
   },
-  osteopath:               { model: 'practitioner_appointment', category: 'health_wellness', terms: { client: 'Patient', booking: 'Appointment', staff: 'Osteopath' } },
-  chiropractor:            { model: 'practitioner_appointment', category: 'health_wellness', terms: { client: 'Patient', booking: 'Appointment', staff: 'Chiropractor' } },
-  podiatrist:              { model: 'practitioner_appointment', category: 'health_wellness', terms: { client: 'Patient', booking: 'Appointment', staff: 'Podiatrist' } },
-  occupational_therapist:  { model: 'practitioner_appointment', category: 'health_wellness', terms: { client: 'Patient', booking: 'Session', staff: 'OT' } },
-  counsellor:              { model: 'practitioner_appointment', category: 'health_wellness', terms: { client: 'Client', booking: 'Session', staff: 'Counsellor' } },
-  dentist:                 { model: 'practitioner_appointment', category: 'health_wellness', terms: { client: 'Patient', booking: 'Appointment', staff: 'Dentist' } },
-  optician:                { model: 'practitioner_appointment', category: 'health_wellness', terms: { client: 'Patient', booking: 'Appointment', staff: 'Optician' } },
-  veterinary:              { model: 'practitioner_appointment', category: 'health_wellness', terms: { client: 'Pet Owner', booking: 'Appointment', staff: 'Vet' } },
-  dog_groomer:             { model: 'practitioner_appointment', category: 'pets', terms: { client: 'Client', booking: 'Appointment', staff: 'Groomer' } },
-  tattoo_artist:           { model: 'practitioner_appointment', category: 'beauty_grooming', terms: { client: 'Client', booking: 'Session', staff: 'Artist' } },
-  personal_trainer:        { model: 'practitioner_appointment', category: 'fitness', terms: { client: 'Client', booking: 'Session', staff: 'Trainer' } },
-  tutor:                   { model: 'practitioner_appointment', category: 'education', terms: { client: 'Student', booking: 'Lesson', staff: 'Tutor' } },
-  driving_instructor:      { model: 'practitioner_appointment', category: 'education', terms: { client: 'Learner', booking: 'Lesson', staff: 'Instructor' } },
-  photographer:            { model: 'practitioner_appointment', category: 'creative', terms: { client: 'Client', booking: 'Session', staff: 'Photographer' } },
-  solicitor:               { model: 'practitioner_appointment', category: 'professional', terms: { client: 'Client', booking: 'Consultation', staff: 'Solicitor' } },
-  accountant:              { model: 'practitioner_appointment', category: 'professional', terms: { client: 'Client', booking: 'Consultation', staff: 'Accountant' } },
+  osteopath:               { model: 'unified_scheduling', category: 'health_wellness', terms: { client: 'Patient', booking: 'Appointment', staff: 'Osteopath' } },
+  chiropractor:            { model: 'unified_scheduling', category: 'health_wellness', terms: { client: 'Patient', booking: 'Appointment', staff: 'Chiropractor' } },
+  podiatrist:              { model: 'unified_scheduling', category: 'health_wellness', terms: { client: 'Patient', booking: 'Appointment', staff: 'Podiatrist' } },
+  occupational_therapist:  { model: 'unified_scheduling', category: 'health_wellness', terms: { client: 'Patient', booking: 'Session', staff: 'OT' } },
+  counsellor:              { model: 'unified_scheduling', category: 'health_wellness', terms: { client: 'Client', booking: 'Session', staff: 'Counsellor' } },
+  dentist:                 { model: 'unified_scheduling', category: 'health_wellness', terms: { client: 'Patient', booking: 'Appointment', staff: 'Dentist' } },
+  optician:                { model: 'unified_scheduling', category: 'health_wellness', terms: { client: 'Patient', booking: 'Appointment', staff: 'Optician' } },
+  veterinary:              { model: 'unified_scheduling', category: 'health_wellness', terms: { client: 'Pet Owner', booking: 'Appointment', staff: 'Vet' } },
+  dog_groomer:             { model: 'unified_scheduling', category: 'pets', terms: { client: 'Client', booking: 'Appointment', staff: 'Groomer' } },
+  tattoo_artist:           { model: 'unified_scheduling', category: 'beauty_grooming', terms: { client: 'Client', booking: 'Session', staff: 'Artist' } },
+  personal_trainer:        { model: 'unified_scheduling', category: 'fitness', terms: { client: 'Client', booking: 'Session', staff: 'Trainer' } },
+  tutor:                   { model: 'unified_scheduling', category: 'education', terms: { client: 'Student', booking: 'Lesson', staff: 'Tutor' } },
+  driving_instructor:      { model: 'unified_scheduling', category: 'education', terms: { client: 'Learner', booking: 'Lesson', staff: 'Instructor' } },
+  photographer:            { model: 'unified_scheduling', category: 'creative', terms: { client: 'Client', booking: 'Session', staff: 'Photographer' } },
+  solicitor:               { model: 'unified_scheduling', category: 'professional', terms: { client: 'Client', booking: 'Consultation', staff: 'Solicitor' } },
+  accountant:              { model: 'unified_scheduling', category: 'professional', terms: { client: 'Client', booking: 'Consultation', staff: 'Accountant' } },
 
   // MODEL C: Event/Experience
   escape_room:       { model: 'event_ticket', category: 'experiences', terms: { client: 'Guest', booking: 'Booking', staff: 'Host' } },
@@ -119,7 +120,7 @@ export const BUSINESS_TYPE_CONFIG: Record<string, BusinessConfig> = {
 
   // CATCH-ALL
   other: {
-    model: 'practitioner_appointment', category: 'other',
+    model: 'unified_scheduling', category: 'other',
     terms: { client: 'Client', booking: 'Booking', staff: 'Staff' },
     defaultServices: [],
   },
@@ -133,10 +134,17 @@ export const BUSINESS_TYPE_CONFIG: Record<string, BusinessConfig> = {
     category: 'other',
     terms: { ...DEFAULT_TERMINOLOGY.table_reservation },
   },
-  model_practitioner_appointment: {
-    model: 'practitioner_appointment',
+  /** Direct signup: “Appointments with a person” — stored as `venues.business_type`. */
+  model_unified_scheduling: {
+    model: 'unified_scheduling',
     category: 'other',
-    terms: { ...DEFAULT_TERMINOLOGY.practitioner_appointment },
+    terms: { ...DEFAULT_TERMINOLOGY.unified_scheduling },
+  },
+  /** @deprecated Alias for `model_unified_scheduling` (older signup sessions / data). */
+  model_practitioner_appointment: {
+    model: 'unified_scheduling',
+    category: 'other',
+    terms: { ...DEFAULT_TERMINOLOGY.unified_scheduling },
   },
   model_event_ticket: {
     model: 'event_ticket',
@@ -159,6 +167,7 @@ export const BUSINESS_TYPE_CONFIG: Record<string, BusinessConfig> = {
 export const BOOKING_MODEL_CHIP_LABEL: Record<BookingModel, string> = {
   table_reservation: 'Table booking',
   practitioner_appointment: 'Appointments',
+  unified_scheduling: 'Appointments',
   event_ticket: 'Event tickets',
   class_session: 'Group classes',
   resource_booking: 'Spaces & resources',
@@ -187,8 +196,8 @@ export const BOOKING_MODEL_SIGNUP_CARDS: BookingModelSignupCard[] = [
     examples: 'Restaurant, café, hotel dining, afternoon tea',
   },
   {
-    model: 'practitioner_appointment',
-    businessTypeKey: 'model_practitioner_appointment',
+    model: 'unified_scheduling',
+    businessTypeKey: 'model_unified_scheduling',
     title: 'Appointments with a person',
     summary: 'Clients book a service with a specific team member for a set duration.',
     detail:

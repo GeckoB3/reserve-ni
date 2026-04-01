@@ -36,9 +36,11 @@ export default function PlanPage() {
     if (!isRestaurant) return;
     const wantFounding = searchParams.get('plan') === 'founding';
     if (!wantFounding) {
-      setPlan('business');
-      setFoundingRemaining(null);
-      return;
+      const id = requestAnimationFrame(() => {
+        setPlan('business');
+        setFoundingRemaining(null);
+      });
+      return () => cancelAnimationFrame(id);
     }
     let cancelled = false;
     (async () => {
@@ -66,6 +68,7 @@ export default function PlanPage() {
     if (!config) return 'calendar';
     switch (config.model) {
       case 'practitioner_appointment':
+      case 'unified_scheduling':
         return config.terms.staff.toLowerCase();
       case 'resource_booking':
         return 'resource';

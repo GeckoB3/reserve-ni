@@ -1,16 +1,60 @@
+import { randomUUID } from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
+import { getVenueStaff, requireAdmin, getLinkedPractitionerId } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { checkCalendarLimit } from '@/lib/tier-enforcement';
 import { z } from 'zod';
 
+/** Map unified_calendars rows to the practitioner shape expected by dashboard + booking UI. */
+function unifiedCalendarToPractitionerRow(
+  row: Record<string, unknown>,
+): Record<string, unknown> {
+  return {
+    id: row.id,
+    venue_id: row.venue_id,
+    staff_id: row.staff_id ?? null,
+    name: row.name,
+    email: null,
+    phone: null,
+    slug: row.slug ?? null,
+    working_hours: row.working_hours ?? {},
+    break_times: row.break_times ?? [],
+    break_times_by_day: row.break_times_by_day ?? null,
+    days_off: row.days_off ?? [],
+    is_active: row.is_active,
+    sort_order: row.sort_order ?? 0,
+    created_at: row.created_at,
+    photo_url: row.photo_url ?? null,
+    colour: row.colour ?? null,
+    calendar_type: row.calendar_type,
+  };
+}
+
+async function getVenueBookingModel(
+  admin: ReturnType<typeof getSupabaseAdminClient>,
+  venueId: string,
+): Promise<string> {
+  const { data } = await admin.from('venues').select('booking_model').eq('id', venueId).maybeSingle();
+  return ((data as { booking_model?: string } | null)?.booking_model as string) ?? '';
+}
+
+/** Booking link slug uniqueness: `unified_calendars` for USE venues, else legacy `practitioners`. */
 async function isPractitionerSlugTaken(
   admin: ReturnType<typeof getSupabaseAdminClient>,
   venueId: string,
   slug: string,
   excludePractitionerId?: string,
+  bookingModel?: string,
 ): Promise<boolean> {
+  if (bookingModel === 'unified_scheduling') {
+    let q = admin.from('unified_calendars').select('id').eq('venue_id', venueId).eq('slug', slug).limit(1);
+    if (excludePractitionerId) {
+      q = q.neq('id', excludePractitionerId);
+    }
+    const { data } = await q.maybeSingle();
+    return Boolean(data);
+  }
   let q = admin.from('practitioners').select('id').eq('venue_id', venueId).eq('slug', slug).limit(1);
   if (excludePractitionerId) {
     q = q.neq('id', excludePractitionerId);
@@ -71,6 +115,33 @@ export async function GET(request: NextRequest) {
     const roster = request.nextUrl.searchParams.get('roster') === '1';
 
     const admin = getSupabaseAdminClient();
+    const { data: venueMeta } = await admin
+      .from('venues')
+      .select('booking_model')
+      .eq('id', staff.venue_id)
+      .maybeSingle();
+    const bookingModel = (venueMeta as { booking_model?: string } | null)?.booking_model ?? '';
+
+    if (bookingModel === 'unified_scheduling') {
+      const { data, error } = await admin
+        .from('unified_calendars')
+        .select('*')
+        .eq('venue_id', staff.venue_id)
+        .order('sort_order', { ascending: true });
+
+      if (error) {
+        console.error('GET /api/venue/practitioners (unified_calendars) failed:', error);
+        return NextResponse.json({ error: 'Failed to fetch practitioners' }, { status: 500 });
+      }
+
+      let list = (data ?? []).map((r) => unifiedCalendarToPractitionerRow(r as Record<string, unknown>));
+      if (staff.role !== 'admin' && !roster) {
+        const linkedId = await getLinkedPractitionerId(admin, staff.venue_id, staff.id);
+        list = linkedId ? list.filter((p) => (p as { id: string }).id === linkedId) : [];
+      }
+      return NextResponse.json({ practitioners: list });
+    }
+
     const { data, error } = await admin
       .from('practitioners')
       .select('*')
@@ -122,13 +193,20 @@ export async function POST(request: NextRequest) {
     }
 
     const admin = getSupabaseAdminClient();
+    const bookingModel = await getVenueBookingModel(admin, staff.venue_id);
     const { slug: rawSlug, ...createRest } = parsed.data;
     const slugNorm = normalisePractitionerSlugInput(rawSlug);
     if (!slugNorm.ok) {
       return NextResponse.json({ error: slugNorm.error }, { status: 400 });
     }
     if (slugNorm.value) {
-      const taken = await isPractitionerSlugTaken(admin, staff.venue_id, slugNorm.value);
+      const taken = await isPractitionerSlugTaken(
+        admin,
+        staff.venue_id,
+        slugNorm.value,
+        undefined,
+        bookingModel,
+      );
       if (taken) {
         return NextResponse.json(
           { error: 'That booking link is already used for another calendar at your venue.' },
@@ -148,6 +226,41 @@ export async function POST(request: NextRequest) {
     };
     if (slugNorm.value !== undefined) {
       insertRow.slug = slugNorm.value;
+    }
+
+    if (bookingModel === 'unified_scheduling') {
+      const calendarId = randomUUID();
+      const { data: ucRow, error: ucErr } = await admin
+        .from('unified_calendars')
+        .insert({
+          id: calendarId,
+          venue_id: staff.venue_id,
+          name: parsed.data.name,
+          staff_id: parsed.data.staff_id ?? null,
+          slug: slugNorm.value ?? null,
+          working_hours: parsed.data.working_hours ?? {},
+          break_times: parsed.data.break_times ?? [],
+          break_times_by_day: parsed.data.break_times_by_day ?? null,
+          days_off: parsed.data.days_off ?? [],
+          sort_order: parsed.data.sort_order ?? 0,
+          is_active: parsed.data.is_active ?? true,
+          colour: '#3B82F6',
+          calendar_type: 'practitioner',
+        })
+        .select()
+        .single();
+      if (ucErr) {
+        console.error('POST /api/venue/practitioners unified_calendars failed:', ucErr);
+        if (ucErr.code === '23505') {
+          return NextResponse.json(
+            { error: 'That booking link is already used for another calendar at your venue.' },
+            { status: 409 },
+          );
+        }
+        return NextResponse.json({ error: 'Failed to create calendar' }, { status: 500 });
+      }
+
+      return NextResponse.json(unifiedCalendarToPractitionerRow(ucRow as Record<string, unknown>), { status: 201 });
     }
 
     const { data, error } = await admin.from('practitioners').insert(insertRow).select().single();
@@ -208,6 +321,42 @@ export async function PATCH(request: NextRequest) {
         return NextResponse.json({ error: 'Invalid request', details: parsed.error.flatten() }, { status: 400 });
       }
 
+      const bookingModelStaff = await getVenueBookingModel(admin, staff.venue_id);
+
+      if (bookingModelStaff === 'unified_scheduling') {
+        const { data: cal, error: calErr } = await admin
+          .from('unified_calendars')
+          .select('id, staff_id')
+          .eq('id', id)
+          .eq('venue_id', staff.venue_id)
+          .maybeSingle();
+
+        if (calErr || !cal) {
+          return NextResponse.json({ error: 'Team member not found' }, { status: 404 });
+        }
+        if (cal.staff_id !== staff.id) {
+          return NextResponse.json(
+            { error: 'You can only edit the calendar linked to your account.' },
+            { status: 403 },
+          );
+        }
+
+        const { data, error } = await admin
+          .from('unified_calendars')
+          .update(parsed.data)
+          .eq('id', id)
+          .eq('venue_id', staff.venue_id)
+          .select()
+          .single();
+
+        if (error) {
+          console.error('PATCH /api/venue/practitioners (staff schedule, unified) failed:', error);
+          return NextResponse.json({ error: 'Failed to update schedule' }, { status: 500 });
+        }
+
+        return NextResponse.json(unifiedCalendarToPractitionerRow(data as Record<string, unknown>));
+      }
+
       const { data: prac, error: pracErr } = await admin
         .from('practitioners')
         .select('id, staff_id')
@@ -246,6 +395,8 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid request', details: parsed.error.flatten() }, { status: 400 });
     }
 
+    const bookingModel = await getVenueBookingModel(admin, staff.venue_id);
+
     const updatePayload: Record<string, unknown> = { ...parsed.data };
     if (Object.prototype.hasOwnProperty.call(parsed.data, 'slug')) {
       const slugNorm = normalisePractitionerSlugInput(parsed.data.slug);
@@ -253,7 +404,13 @@ export async function PATCH(request: NextRequest) {
         return NextResponse.json({ error: slugNorm.error }, { status: 400 });
       }
       if (slugNorm.value) {
-        const taken = await isPractitionerSlugTaken(admin, staff.venue_id, slugNorm.value, id);
+        const taken = await isPractitionerSlugTaken(
+          admin,
+          staff.venue_id,
+          slugNorm.value,
+          id,
+          bookingModel,
+        );
         if (taken) {
           return NextResponse.json(
             { error: 'That booking link is already used for another calendar at your venue.' },
@@ -262,6 +419,46 @@ export async function PATCH(request: NextRequest) {
         }
       }
       updatePayload.slug = slugNorm.value === undefined ? undefined : slugNorm.value;
+    }
+
+    if (bookingModel === 'unified_scheduling') {
+      const ucPayload: Record<string, unknown> = {};
+      const ucKeys = [
+        'name',
+        'slug',
+        'working_hours',
+        'break_times',
+        'break_times_by_day',
+        'days_off',
+        'sort_order',
+        'is_active',
+        'staff_id',
+      ] as const;
+      for (const k of ucKeys) {
+        if (Object.prototype.hasOwnProperty.call(updatePayload, k)) {
+          ucPayload[k] = updatePayload[k];
+        }
+      }
+      const { data: ucData, error: ucErr } = await admin
+        .from('unified_calendars')
+        .update(ucPayload)
+        .eq('id', id)
+        .eq('venue_id', staff.venue_id)
+        .select()
+        .single();
+
+      if (ucErr) {
+        console.error('PATCH /api/venue/practitioners (admin unified) failed:', ucErr);
+        if (ucErr.code === '23505') {
+          return NextResponse.json(
+            { error: 'That booking link is already used for another calendar at your venue.' },
+            { status: 409 },
+          );
+        }
+        return NextResponse.json({ error: 'Failed to update calendar' }, { status: 500 });
+      }
+
+      return NextResponse.json(unifiedCalendarToPractitionerRow(ucData as Record<string, unknown>));
     }
 
     const { data, error } = await admin
@@ -302,9 +499,11 @@ export async function DELETE(request: NextRequest) {
     if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 });
 
     const admin = getSupabaseAdminClient();
+    const bookingModel = await getVenueBookingModel(admin, staff.venue_id);
 
-    const { count: practitionerCount, error: countErr } = await admin
-      .from('practitioners')
+    const countTable = bookingModel === 'unified_scheduling' ? 'unified_calendars' : 'practitioners';
+    const { count: calendarCount, error: countErr } = await admin
+      .from(countTable)
       .select('id', { count: 'exact', head: true })
       .eq('venue_id', staff.venue_id);
 
@@ -312,11 +511,24 @@ export async function DELETE(request: NextRequest) {
       console.error('DELETE /api/venue/practitioners count failed:', countErr);
       return NextResponse.json({ error: 'Failed to verify calendars' }, { status: 500 });
     }
-    if ((practitionerCount ?? 0) <= 1) {
+    if ((calendarCount ?? 0) <= 1) {
       return NextResponse.json(
         { error: 'You must keep at least one bookable calendar for appointment bookings.' },
         { status: 400 },
       );
+    }
+
+    if (bookingModel === 'unified_scheduling') {
+      const { error: delUc } = await admin
+        .from('unified_calendars')
+        .delete()
+        .eq('id', id)
+        .eq('venue_id', staff.venue_id);
+      if (delUc) {
+        console.error('DELETE /api/venue/practitioners unified_calendars failed:', delUc);
+        return NextResponse.json({ error: 'Failed to delete calendar' }, { status: 500 });
+      }
+      return NextResponse.json({ success: true });
     }
 
     const { error } = await admin

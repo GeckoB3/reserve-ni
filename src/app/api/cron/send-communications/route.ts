@@ -12,30 +12,59 @@ import { createBookingHmac } from '@/lib/short-manage-link';
 import { enrichBookingEmailForAppointment } from '@/lib/emails/booking-email-enrichment';
 import type { BookingEmailData, VenueEmailData } from '@/lib/emails/types';
 import { requireCronAuthorisation } from '@/lib/cron-auth';
+import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
+import { runUnifiedSchedulingComms } from '@/lib/cron/unified-scheduling-comms';
 
 /**
- * Unified cron handler for scheduled guest communications.
- * Runs every 15 minutes. Handles:
- * 1. 56-hour reminder emails
- * 2. Day-of reminders (SMS + email)
- * 3. Post-visit thank-you emails
+ * Unified cron handler for scheduled guest communications (every ~15 minutes).
  *
- * Uses communication_logs UNIQUE(booking_id, message_type) for dedup.
+ * **Legacy restaurant paths** (table_reservation, etc.): 56h reminder, day-of SMS/email, post-visit.
+ * These loops **skip** `unified_scheduling` venues (`isUnifiedSchedulingVenue`) so they are not double-sent.
+ *
+ * **Unified scheduling** (`runUnifiedSchedulingComms`): reminder_1, reminder_2, post_visit driven by
+ * `venues.notification_settings`. See §4.2 map in `src/lib/cron/unified-scheduling-comms.ts`.
+ *
+ * Confirmation, deposit, reschedule, cancellation, and no-show notifications use transactional / other
+ * code paths (`send-templated`, webhooks, `CommunicationService`), not this cron.
+ *
+ * Uses `communication_logs` UNIQUE(booking_id, message_type) for dedup where applicable.
  */
 export async function GET(request: NextRequest) {
   const denied = requireCronAuthorisation(request);
   if (denied) return denied;
 
-  const results = { reminders_56h: 0, day_of_reminders: 0, post_visit: 0, errors: 0 };
+  const results = {
+    reminders_56h: 0,
+    day_of_reminders: 0,
+    post_visit: 0,
+    unified_reminder_1: 0,
+    unified_reminder_2: 0,
+    unified_post_visit: 0,
+    errors: 0,
+  };
+
+  const supabase = getSupabaseAdminClient();
 
   try {
-    const [r1, r2, r3] = await Promise.allSettled([
+    const unifiedResults = {
+      unified_reminder_1: 0,
+      unified_reminder_2: 0,
+      unified_post_visit: 0,
+      errors: 0,
+    };
+    const [r1, r2, r3, u1] = await Promise.allSettled([
       send56hReminders(results),
       sendDayOfReminders(results),
       sendPostVisitEmails(results),
+      runUnifiedSchedulingComms(supabase, unifiedResults),
     ]);
 
-    for (const r of [r1, r2, r3]) {
+    results.unified_reminder_1 = unifiedResults.unified_reminder_1;
+    results.unified_reminder_2 = unifiedResults.unified_reminder_2;
+    results.unified_post_visit = unifiedResults.unified_post_visit;
+    results.errors += unifiedResults.errors;
+
+    for (const r of [r1, r2, r3, u1]) {
       if (r.status === 'rejected') {
         console.error('[send-communications] sub-task failed:', r.reason);
         results.errors++;
@@ -141,12 +170,14 @@ async function send56hReminders(results: { reminders_56h: number; errors: number
 
   const { data: venues } = await supabase
     .from('venues')
-    .select('id, name, address, timezone');
+    .select('id, name, address, timezone, booking_model');
 
   if (!venues?.length) return;
 
   for (const venue of venues) {
     try {
+      if (isUnifiedSchedulingVenue((venue as { booking_model?: string }).booking_model)) continue;
+
       const tz = venue.timezone ?? 'Europe/London';
       const settings = await getCommSettings(venue.id);
       if (!settings.reminder_email_enabled) continue;
@@ -230,12 +261,14 @@ async function sendDayOfReminders(results: { day_of_reminders: number; errors: n
 
   const { data: venues } = await supabase
     .from('venues')
-    .select('id, name, address, timezone');
+    .select('id, name, address, timezone, booking_model');
 
   if (!venues?.length) return;
 
   for (const venue of venues) {
     try {
+      if (isUnifiedSchedulingVenue((venue as { booking_model?: string }).booking_model)) continue;
+
       const tz = venue.timezone ?? 'Europe/London';
       const nowLocal = toVenueLocal(now, tz);
       const nowTimeStr = localTimeStr(nowLocal);
@@ -333,12 +366,14 @@ async function sendPostVisitEmails(results: { post_visit: number; errors: number
 
   const { data: venues } = await supabase
     .from('venues')
-    .select('id, name, address, timezone');
+    .select('id, name, address, timezone, booking_model');
 
   if (!venues?.length) return;
 
   for (const venue of venues) {
     try {
+      if (isUnifiedSchedulingVenue((venue as { booking_model?: string }).booking_model)) continue;
+
       const tz = venue.timezone ?? 'Europe/London';
       const nowLocal = toVenueLocal(now, tz);
       const nowTimeStr = localTimeStr(nowLocal);

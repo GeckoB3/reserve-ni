@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { GuestTagEditor } from '@/components/dashboard/GuestTagEditor';
 import { buildCsvFromRows, downloadCsvString } from '@/lib/appointments-csv';
 import type { BookingModel, VenueTerminology } from '@/types/booking-models';
+import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 
 export interface ClientSummary {
   identified_clients_total: number;
@@ -92,7 +93,7 @@ export function ClientsSection({
   rangeLabel,
   onReportsRefresh,
 }: ClientsSectionProps) {
-  const isAppointment = bookingModel === 'practitioner_appointment';
+  const isAppointment = isUnifiedSchedulingVenue(bookingModel);
   const clientWord = terminology.client;
   const clientLower = clientWord.toLowerCase();
   const bookingWord = terminology.booking;

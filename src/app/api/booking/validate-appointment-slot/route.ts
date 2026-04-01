@@ -8,6 +8,7 @@ import {
   type PhantomBooking,
 } from '@/lib/availability/appointment-engine';
 import { z } from 'zod';
+import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 
 const phantomSchema = z.object({
   practitioner_id: z.string().uuid(),
@@ -40,7 +41,7 @@ export async function POST(request: NextRequest) {
     const supabase = getSupabaseAdminClient();
 
     const venueMode = await resolveVenueMode(supabase, venue_id);
-    if (venueMode.bookingModel !== 'practitioner_appointment') {
+    if (!isUnifiedSchedulingVenue(venueMode.bookingModel)) {
       return NextResponse.json({ ok: false, error: 'Not an appointment venue' }, { status: 400 });
     }
 

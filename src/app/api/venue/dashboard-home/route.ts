@@ -20,6 +20,8 @@ import { resolveVenueMode } from '@/lib/venue-mode';
 import { computeGuestBookingReady } from '@/lib/setup-guest-booking-ready';
 import type { AvailabilityConfig, EngineInput, OpeningHours } from '@/types/availability';
 import type { BookingModel } from '@/types/booking-models';
+import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
+import { getSmsUsageDisplayForVenue } from '@/lib/billing/sms-usage-display';
 
 const WEEKDAYS_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
@@ -202,12 +204,12 @@ export async function GET() {
     const arrivingWithin30 = coversArrivingWithin(todayLoadBookings, nowMinutes, 30, todayDefaultDur);
 
     const venueBookingModel = ((venueRow as Record<string, unknown>).booking_model as string) ?? 'table_reservation';
-    const isAppt = venueBookingModel === 'practitioner_appointment';
+    const isAppt = isUnifiedSchedulingVenue(venueBookingModel as BookingModel);
     const alerts: Array<{ type: string; message: string }> = [];
 
     if (
       staff.role === 'admin' &&
-      (venueBookingModel === 'table_reservation' || venueBookingModel === 'practitioner_appointment')
+      (venueBookingModel === 'table_reservation' || isUnifiedSchedulingVenue(venueBookingModel as BookingModel))
     ) {
       const guestReady = await computeGuestBookingReady(
         admin,
@@ -219,7 +221,7 @@ export async function GET() {
         alerts.push({
           type: 'warning',
           message:
-            venueBookingModel === 'practitioner_appointment'
+            isUnifiedSchedulingVenue(venueBookingModel as BookingModel)
               ? 'Public bookings are off until at least one team member has an active linked service. Open Appointment Services to finish setup.'
               : 'Public table booking is off until you have at least one active service and availability configured. Use the setup wizard or Availability.',
         });
@@ -253,8 +255,11 @@ export async function GET() {
       String(a.booking_time).localeCompare(String(b.booking_time)),
     );
 
+    const smsUsage = await getSmsUsageDisplayForVenue(admin, staff.venue_id);
+
     return NextResponse.json({
       booking_model: (venueRow as Record<string, unknown>).booking_model ?? 'table_reservation',
+      sms_usage: smsUsage,
       today: {
         covers: todayCovers ?? 0,
         bookings: todayBookingCount ?? 0,

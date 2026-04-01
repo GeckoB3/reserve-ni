@@ -19,6 +19,14 @@
     {
       "path": "/api/cron/reconciliation",
       "schedule": "0 6 * * *"
+    },
+    {
+      "path": "/api/cron/materialize-event-sessions",
+      "schedule": "0 3 * * *"
+    },
+    {
+      "path": "/api/cron/sms-overage-billing",
+      "schedule": "0 2 1 * *"
     }
   ]
 }

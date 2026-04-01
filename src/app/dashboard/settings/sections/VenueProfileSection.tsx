@@ -10,6 +10,7 @@ import { PhoneWithCountryField } from '@/components/phone/PhoneWithCountryField'
 import { normalizeToE164 } from '@/lib/phone/e164';
 import { isValidWebsiteUrlInput } from '@/lib/urls/website-url';
 import { buildAddress, parseAddress } from '@/lib/venue/address-format';
+import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 
 const profileSchema = z.object({
   name: z.string().min(1, 'Name is required').max(200),
@@ -59,7 +60,7 @@ function slugFromName(name: string): string {
 }
 
 export function VenueProfileSection({ venue, onUpdate, isAdmin, bookingModel = 'table_reservation' }: VenueProfileSectionProps) {
-  const isAppointment = bookingModel === 'practitioner_appointment';
+  const isAppointment = isUnifiedSchedulingVenue(bookingModel);
   const [coverSaving, setCoverSaving] = useState(false);
   const [coverError, setCoverError] = useState<string | null>(null);
   const { integerProps } = useNumericField();

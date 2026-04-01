@@ -4,6 +4,8 @@ import { createClient } from '@/lib/supabase/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { stripe } from '@/lib/stripe';
 import { subscriptionPeriodEndIso } from '@/lib/stripe/subscription-fields';
+import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
+import { updateVenueSmsMonthlyAllowance } from '@/lib/billing/sms-allowance';
 
 /**
  * POST /api/venue/update-subscription
@@ -58,21 +60,22 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Invalid calendar_count' }, { status: 400 });
     }
 
-    if ((venue.booking_model as string) === 'practitioner_appointment') {
-      const { count: pracCount, error: pracErr } = await admin
-        .from('practitioners')
+    if (isUnifiedSchedulingVenue(venue.booking_model)) {
+      const table = venue.booking_model === 'unified_scheduling' ? 'unified_calendars' : 'practitioners';
+      const { count: activeCalCount, error: countErr } = await admin
+        .from(table)
         .select('id', { count: 'exact', head: true })
         .eq('venue_id', staffRow.venue_id)
         .eq('is_active', true);
-      if (pracErr) {
-        console.error('[update-subscription] practitioner count failed:', pracErr);
+      if (countErr) {
+        console.error('[update-subscription] active calendar count failed:', countErr);
         return NextResponse.json({ error: 'Failed to validate team size' }, { status: 500 });
       }
-      const minCalendars = Math.max(1, pracCount ?? 0);
+      const minCalendars = Math.max(1, activeCalCount ?? 0);
       if (newCount < minCalendars) {
         return NextResponse.json(
           {
-            error: `You have ${pracCount} active team member(s). Set calendars to at least ${minCalendars}, or remove or deactivate team members first.`,
+            error: `You have ${activeCalCount} active calendar(s). Set calendars to at least ${minCalendars}, or remove or deactivate calendars first.`,
           },
           { status: 400 },
         );
@@ -103,6 +106,8 @@ export async function POST(request: Request) {
         ...(periodEndIso ? { subscription_current_period_end: periodEndIso } : {}),
       })
       .eq('id', staffRow.venue_id);
+
+    await updateVenueSmsMonthlyAllowance(staffRow.venue_id);
 
     return NextResponse.json({ ok: true, calendar_count: newCount });
   } catch (err) {

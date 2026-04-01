@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { ToastProvider } from '@/components/ui/Toast';
 import { UnifiedBookingForm } from '@/components/booking/UnifiedBookingForm';
 import { AppointmentBookingForm } from '@/components/booking/AppointmentBookingForm';
+import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 
 export function NewBookingPageClient({
   venueId,
@@ -17,7 +18,7 @@ export function NewBookingPageClient({
   currency?: string;
 }) {
   const router = useRouter();
-  const isAppointment = bookingModel === 'practitioner_appointment';
+  const isAppointment = isUnifiedSchedulingVenue(bookingModel);
 
   if (isAppointment) {
     return (

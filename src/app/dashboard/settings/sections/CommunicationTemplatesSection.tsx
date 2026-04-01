@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CommunicationSettings } from '@/lib/communications/service';
 import type { CommMessageType } from '@/lib/emails/types';
+import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 
 interface CommCardConfig {
   messageType: CommMessageType;
@@ -22,22 +23,26 @@ interface CommCardConfig {
   requireOneSubToggle?: boolean;
 }
 
-function buildCommunicationCards(isStandardTier: boolean): CommCardConfig[] {
-  const daySub: CommCardConfig['subToggles'] = isStandardTier
+/**
+ * When true, Standard-tier restaurant (Model A) limits several templates to email-only.
+ * Unified scheduling Standard tier includes SMS per product plan §1.1 — pass false when `unified_scheduling`.
+ */
+function buildCommunicationCards(restrictSmsForStandard: boolean): CommCardConfig[] {
+  const daySub: CommCardConfig['subToggles'] = restrictSmsForStandard
     ? [{ key: 'day_of_reminder_email_enabled', label: 'Email' }]
     : [
         { key: 'day_of_reminder_email_enabled', label: 'Email' },
         { key: 'day_of_reminder_sms_enabled', label: 'SMS' },
       ];
 
-  const modSub: CommCardConfig['subToggles'] = isStandardTier
+  const modSub: CommCardConfig['subToggles'] = restrictSmsForStandard
     ? [{ key: 'modification_email_enabled', label: 'Email' }]
     : [
         { key: 'modification_email_enabled', label: 'Email' },
         { key: 'modification_sms_enabled', label: 'SMS' },
       ];
 
-  const cancelSub: CommCardConfig['subToggles'] = isStandardTier
+  const cancelSub: CommCardConfig['subToggles'] = restrictSmsForStandard
     ? [{ key: 'cancellation_email_enabled', label: 'Email' }]
     : [
         { key: 'cancellation_email_enabled', label: 'Email' },
@@ -67,12 +72,12 @@ function buildCommunicationCards(isStandardTier: boolean): CommCardConfig[] {
     },
   ];
 
-  if (!isStandardTier) {
+  if (!restrictSmsForStandard) {
     cards.push({
       messageType: 'deposit_request_sms',
       label: 'Deposit request (SMS)',
       description:
-        'SMS with a payment link for staff pay-by-link deposits. Standard plan uses email only for deposit requests.',
+        'SMS with a payment link for staff pay-by-link deposits. (Restaurant Standard tier uses email-only deposit requests.)',
       channel: 'sms',
       enabledKey: 'deposit_sms_enabled',
       customMessageKey: 'deposit_sms_custom_message',
@@ -104,10 +109,10 @@ function buildCommunicationCards(isStandardTier: boolean): CommCardConfig[] {
     {
       messageType: 'day_of_reminder_email',
       label: 'Day-of Reminder',
-      description: isStandardTier
-        ? 'Reminder on the day of the booking. Standard plan: email only (SMS on Business).'
+      description: restrictSmsForStandard
+        ? 'Reminder on the day of the booking. Restaurant Standard: email only (SMS on Business).'
         : 'Reminder sent on the day of the booking. Choose email and/or SMS.',
-      channel: isStandardTier ? 'email' : 'both',
+      channel: restrictSmsForStandard ? 'email' : 'both',
       enabledKey: 'day_of_reminder_enabled',
       customMessageKey: 'day_of_reminder_custom_message',
       timeKey: 'day_of_reminder_time',
@@ -127,10 +132,10 @@ function buildCommunicationCards(isStandardTier: boolean): CommCardConfig[] {
     {
       messageType: 'booking_modification_email',
       label: 'Booking Modification',
-      description: isStandardTier
-        ? 'Sent when a booking is changed. Standard plan: email only (SMS on Business).'
+      description: restrictSmsForStandard
+        ? 'Sent when a booking is changed. Restaurant Standard: email only (SMS on Business).'
         : 'Sent when a booking\'s date, time, or party size is changed. Choose email and/or SMS.',
-      channel: isStandardTier ? 'email' : 'both',
+      channel: restrictSmsForStandard ? 'email' : 'both',
       enabledKey: 'modification_email_enabled',
       customMessageKey: 'modification_custom_message',
       locked: true,
@@ -141,10 +146,10 @@ function buildCommunicationCards(isStandardTier: boolean): CommCardConfig[] {
     {
       messageType: 'cancellation_email',
       label: 'Booking Cancellation',
-      description: isStandardTier
-        ? 'Sent when a booking is cancelled. Standard plan: email only (SMS on Business).'
+      description: restrictSmsForStandard
+        ? 'Sent when a booking is cancelled. Restaurant Standard: email only (SMS on Business).'
         : 'Sent when a booking is cancelled. Choose email and/or SMS.',
-      channel: isStandardTier ? 'email' : 'both',
+      channel: restrictSmsForStandard ? 'email' : 'both',
       enabledKey: 'cancellation_email_enabled',
       customMessageKey: 'cancellation_custom_message',
       locked: true,
@@ -166,8 +171,9 @@ const CHANNEL_BADGE: Record<string, { label: string; className: string }> = {
 interface CommunicationTemplatesSectionProps {
   venue: { id: string };
   isAdmin: boolean;
-  /** Standard tier: email-only deposit request; SMS comms hidden for several message types. */
+  /** Standard tier on restaurants only: email-only deposit request; SMS comms hidden for several message types. */
   pricingTier?: string;
+  bookingModel?: string;
   onUpdate?: (patch: Record<string, unknown>) => void;
 }
 
@@ -175,9 +181,11 @@ export function CommunicationTemplatesSection({
   venue: _venue,
   isAdmin,
   pricingTier = 'standard',
+  bookingModel,
 }: CommunicationTemplatesSectionProps) {
-  const isStandardTier = pricingTier === 'standard';
-  const cards = useMemo(() => buildCommunicationCards(isStandardTier), [isStandardTier]);
+  const restrictSmsForStandard =
+    pricingTier === 'standard' && !isUnifiedSchedulingVenue(bookingModel);
+  const cards = useMemo(() => buildCommunicationCards(restrictSmsForStandard), [restrictSmsForStandard]);
   const [settings, setSettings] = useState<CommunicationSettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
@@ -280,9 +288,9 @@ export function CommunicationTemplatesSection({
           <p className="mt-0.5 text-sm text-slate-500">
             Control what messages your guests receive and when they are sent.
           </p>
-          {isStandardTier && (
+          {restrictSmsForStandard && (
             <p className="mt-2 text-xs text-slate-500">
-              Standard plan: automated SMS to guests is off. Upgrade to Business for SMS on deposit requests, day-of reminders, and booking change/cancel notices.
+              Restaurant Standard plan: several guest SMS options are off here; upgrade to Business for full SMS on deposit requests, day-of reminders, and change/cancel notices. Unified scheduling venues on Standard include SMS with a monthly allowance (see Plan).
             </p>
           )}
         </div>

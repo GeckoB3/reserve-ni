@@ -3,6 +3,73 @@
  * Used for same-day booking cutoffs so server UTC does not leak into guest UX.
  */
 
+export function formatYmdInTimezone(utcMs: number, timeZone: string): string {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date(utcMs));
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? '00';
+  return `${get('year')}-${get('month')}-${get('day')}`;
+}
+
+export function addDaysToYmd(ymd: string, delta: number): string {
+  const [y, m, d] = ymd.split('-').map(Number);
+  const t = new Date(Date.UTC(y, m - 1, d + delta));
+  return t.toISOString().slice(0, 10);
+}
+
+/**
+ * Convert a venue-local wall time (date + HH:mm) to UTC epoch milliseconds.
+ * Uses 15-minute stepping search so DST transitions are handled without extra deps.
+ */
+export function venueLocalDateTimeToUtcMs(dateYmd: string, timeHHmm: string, timeZone: string): number {
+  const [y, mo, d] = dateYmd.split('-').map(Number);
+  const [h, min] = timeHHmm.slice(0, 5).split(':').map(Number);
+  const targetHm = h * 60 + min;
+  const formatter = new Intl.DateTimeFormat('en-GB', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
+  const partsAt = (utcMs: number) => {
+    const parts = formatter.formatToParts(new Date(utcMs));
+    const get = (type: string) => parts.find((p) => p.type === type)?.value ?? '00';
+    const yy = get('year');
+    const mm = get('month');
+    const dd = get('day');
+    const hh = get('hour');
+    const mi = get('minute');
+    const ymd = `${yy}-${mm}-${dd}`;
+    const mins = Number(hh) * 60 + Number(mi);
+    return { ymd, mins };
+  };
+  const anchor = Date.UTC(y, mo - 1, d, 12, 0, 0);
+  for (let step = 0; step < 192; step++) {
+    const utcMs = anchor + (step - 96) * 15 * 60 * 1000;
+    const { ymd, mins } = partsAt(utcMs);
+    if (ymd === dateYmd && mins === targetHm) return utcMs;
+  }
+  return anchor;
+}
+
+/**
+ * Weekday (0=Sunday … 6=Saturday) for a calendar date in the venue timezone.
+ * Used for recurring rules keyed by JS getDay() conventions.
+ */
+export function getDayOfWeekForYmdInTimezone(ymd: string, timeZone: string): number {
+  const [y, mo, d] = ymd.split('-').map(Number);
+  const utcMs = Date.UTC(y, mo - 1, d, 12, 0, 0);
+  const w = new Intl.DateTimeFormat('en-US', { timeZone, weekday: 'short' }).format(new Date(utcMs));
+  const map: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+  return map[w] ?? 0;
+}
+
 export function getVenueLocalDateAndMinutes(timezone: string, at: Date = new Date()): {
   dateYmd: string;
   minutesSinceMidnight: number;

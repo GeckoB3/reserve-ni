@@ -7,6 +7,11 @@ import {
   subscriptionCancelAtPeriodEnd,
   subscriptionPeriodEndIso,
 } from '@/lib/stripe/subscription-fields';
+import {
+  findMainPlanSubscriptionItem,
+  getPersistedSubscriptionItemIds,
+} from '@/lib/stripe/subscription-line-items';
+import { updateVenueSmsMonthlyAllowance } from '@/lib/billing/sms-allowance';
 
 /**
  * Configure in Stripe Dashboard: endpoint URL /api/webhooks/stripe-subscription,
@@ -139,14 +144,16 @@ async function handleCheckoutCompleted(
     const subscriptionId =
       typeof session.subscription === 'string' ? session.subscription : null;
 
-    let subscriptionItemId: string | null = null;
+    let mainSubscriptionItemId: string | null = null;
+    let smsSubscriptionItemId: string | null = null;
     let periodEndIso: string | null = null;
     let cancelAtPeriodEnd = false;
     if (subscriptionId) {
       try {
         const sub = await stripe.subscriptions.retrieve(subscriptionId);
-        const items = (sub as { items?: { data?: Array<{ id?: string }> } }).items;
-        subscriptionItemId = items?.data?.[0]?.id ?? null;
+        const ids = getPersistedSubscriptionItemIds(sub);
+        mainSubscriptionItemId = ids.mainSubscriptionItemId;
+        smsSubscriptionItemId = ids.smsSubscriptionItemId;
         periodEndIso = subscriptionPeriodEndIso(sub);
         cancelAtPeriodEnd = subscriptionCancelAtPeriodEnd(sub);
       } catch {
@@ -156,7 +163,8 @@ async function handleCheckoutCompleted(
 
     const changePlanUpdates: Record<string, unknown> = {
       stripe_subscription_id: subscriptionId,
-      stripe_subscription_item_id: subscriptionItemId,
+      stripe_subscription_item_id: mainSubscriptionItemId,
+      stripe_sms_subscription_item_id: smsSubscriptionItemId,
       subscription_current_period_end: periodEndIso,
       plan_status: cancelAtPeriodEnd ? 'cancelling' : 'active',
     };
@@ -174,6 +182,8 @@ async function handleCheckoutCompleted(
       .from('venues')
       .update(changePlanUpdates)
       .eq('id', venueIdMeta);
+
+    await updateVenueSmsMonthlyAllowance(venueIdMeta);
 
     console.log(`[Subscription webhook] Processed change-plan (${actionMeta}) for venue ${venueIdMeta}`);
     return;
@@ -222,14 +232,16 @@ async function handleCheckoutCompleted(
   const subscriptionId =
     typeof session.subscription === 'string' ? session.subscription : null;
 
-  let subscriptionItemId: string | null = null;
+  let mainSubscriptionItemId: string | null = null;
+  let smsSubscriptionItemId: string | null = null;
   let periodEndIso: string | null = null;
   let cancelAtPeriodEnd = false;
   if (subscriptionId) {
     try {
       const sub = await stripe.subscriptions.retrieve(subscriptionId);
-      const items = (sub as { items?: { data?: Array<{ id?: string }> } }).items;
-      subscriptionItemId = items?.data?.[0]?.id ?? null;
+      const ids = getPersistedSubscriptionItemIds(sub);
+      mainSubscriptionItemId = ids.mainSubscriptionItemId;
+      smsSubscriptionItemId = ids.smsSubscriptionItemId;
       periodEndIso = subscriptionPeriodEndIso(sub);
       cancelAtPeriodEnd = subscriptionCancelAtPeriodEnd(sub);
     } catch {
@@ -252,7 +264,8 @@ async function handleCheckoutCompleted(
       plan_status: cancelAtPeriodEnd ? 'cancelling' : 'active',
       stripe_customer_id: customerId,
       stripe_subscription_id: subscriptionId,
-      stripe_subscription_item_id: subscriptionItemId,
+      stripe_subscription_item_id: mainSubscriptionItemId,
+      stripe_sms_subscription_item_id: smsSubscriptionItemId,
       subscription_current_period_end: periodEndIso,
       calendar_count: plan === 'standard' ? calendarCount : null,
       onboarding_step: 0,
@@ -279,37 +292,42 @@ async function handleCheckoutCompleted(
       throw new Error('Staff creation failed: ' + staffError.message);
     }
   }
+
+  await updateVenueSmsMonthlyAllowance(venue.id);
 }
 
 async function handleSubscriptionUpdated(
   supabase: ReturnType<typeof getSupabaseAdminClient>,
   subscriptionRaw: unknown
 ) {
-  const subscription = subscriptionRaw as {
-    id?: string;
-    customer?: string | { id: string };
-    items?: { data?: Array<{ id?: string; price?: { id?: string }; quantity?: number }> };
-    status?: string;
-    cancel_at_period_end?: boolean;
-  };
+  const subscription = subscriptionRaw as Stripe.Subscription;
   const customerId =
     typeof subscription.customer === 'string'
       ? subscription.customer
       : subscription.customer?.id;
   if (!customerId || !subscription.id) return;
 
-  const firstItem = subscription.items?.data?.[0];
+  const ids = getPersistedSubscriptionItemIds(subscription);
+  const mainItem = findMainPlanSubscriptionItem(subscription);
+
   const updates: Record<string, unknown> = {
     stripe_subscription_id: subscription.id,
-    stripe_subscription_item_id: firstItem?.id ?? null,
+    stripe_subscription_item_id: ids.mainSubscriptionItemId,
+    stripe_sms_subscription_item_id: ids.smsSubscriptionItemId,
     subscription_current_period_end: subscriptionPeriodEndIso(subscriptionRaw),
   };
 
-  const priceId = firstItem?.price?.id;
-  if (priceId === process.env.STRIPE_STANDARD_PRICE_ID) {
+  const priceId = mainItem?.price && typeof mainItem.price === 'object'
+    ? mainItem.price.id
+    : typeof mainItem?.price === 'string'
+      ? mainItem.price
+      : undefined;
+  const std = process.env.STRIPE_STANDARD_PRICE_ID?.trim();
+  const bus = process.env.STRIPE_BUSINESS_PRICE_ID?.trim();
+  if (priceId && std && priceId === std) {
     updates.pricing_tier = 'standard';
-    updates.calendar_count = firstItem?.quantity ?? 1;
-  } else if (priceId === process.env.STRIPE_BUSINESS_PRICE_ID) {
+    updates.calendar_count = mainItem?.quantity ?? 1;
+  } else if (priceId && bus && priceId === bus) {
     updates.pricing_tier = 'business';
     updates.calendar_count = null;
   }
@@ -329,7 +347,12 @@ async function handleSubscriptionUpdated(
     updates.plan_status = 'active';
   }
 
+  const { data: venueRows } = await supabase.from('venues').select('id').eq('stripe_customer_id', customerId);
   await supabase.from('venues').update(updates).eq('stripe_customer_id', customerId);
+  for (const row of venueRows ?? []) {
+    const vid = (row as { id: string }).id;
+    if (vid) await updateVenueSmsMonthlyAllowance(vid);
+  }
 }
 
 async function handleSubscriptionDeleted(
@@ -347,6 +370,7 @@ async function handleSubscriptionDeleted(
       plan_status: 'cancelled',
       stripe_subscription_id: null,
       stripe_subscription_item_id: null,
+      stripe_sms_subscription_item_id: null,
       subscription_current_period_end: null,
     })
     .eq('stripe_customer_id', customerId);

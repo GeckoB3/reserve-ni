@@ -28,6 +28,10 @@ export interface VenueSettings {
   subscription_current_period_end?: string | null;
   calendar_count?: number | null;
   booking_model?: string;
+  /** Included SMS per billing month (unified scheduling / tier). */
+  sms_monthly_allowance?: number | null;
+  /** Sent this calendar month (from sms_usage), when loaded. */
+  sms_messages_sent_this_month?: number | null;
 }
 
 export type OpeningHoursDaySettings =

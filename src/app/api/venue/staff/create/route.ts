@@ -6,6 +6,7 @@ import { sendEmail } from '@/lib/emails/send-email';
 import { renderStaffWelcomeEmail } from '@/lib/emails/templates/staff-welcome-email';
 import { z } from 'zod';
 import { setStaffPractitionerLink } from '@/lib/staff-practitioner-link';
+import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 
 const createSchema = z
   .object({
@@ -52,7 +53,7 @@ export async function POST(request: NextRequest) {
     const venueName = venueRow?.name?.trim() || 'Your venue';
     const bookingModel = (venueRow?.booking_model as string) ?? 'table_reservation';
 
-    if (practitionerIdOpt && bookingModel !== 'practitioner_appointment') {
+    if (practitionerIdOpt && !isUnifiedSchedulingVenue(bookingModel)) {
       return NextResponse.json(
         { error: 'Calendar linking is only available for appointment businesses' },
         { status: 400 },
@@ -147,7 +148,7 @@ export async function POST(request: NextRequest) {
 
     let linkedPractitionerId: string | null = null;
     let linkedPractitionerName: string | null = null;
-    if (practitionerIdOpt && bookingModel === 'practitioner_appointment') {
+    if (practitionerIdOpt && isUnifiedSchedulingVenue(bookingModel)) {
       const linkResult = await setStaffPractitionerLink(
         admin,
         staff.venue_id,

@@ -5,6 +5,7 @@ import { getSupabaseAdminClient } from '@/lib/supabase';
 import { replaceBookingAssignments, syncTableStatusesForBooking } from '@/lib/table-management/lifecycle';
 import { resolvePartySizeBoundsForVenueServices } from '@/lib/booking/party-size-bounds';
 import { resolveVenueMode } from '@/lib/venue-mode';
+import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 import { z } from 'zod';
 import { normalizeToE164 } from '@/lib/phone/e164';
 
@@ -112,7 +113,7 @@ export async function POST(request: NextRequest) {
     const venueMode = await resolveVenueMode(admin, staff.venue_id);
 
     // --- Model B: Appointment walk-in ---
-    if (venueMode.bookingModel === 'practitioner_appointment') {
+    if (isUnifiedSchedulingVenue(venueMode.bookingModel)) {
       const { practitioner_id, appointment_service_id } = parsed.data;
       if (!practitioner_id || !appointment_service_id) {
         return NextResponse.json(

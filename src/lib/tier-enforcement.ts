@@ -11,6 +11,9 @@ interface VenueTier {
  * Check whether a venue on the Standard tier has reached its calendar limit.
  * Returns { allowed: true } or { allowed: false, current, limit }.
  * Business/Founding tiers always pass (unlimited).
+ *
+ * For `unified_scheduling` venues, bookable calendars live in `unified_calendars` (plan §2.2);
+ * counting `practitioners` alone would diverge from subscription limits.
  */
 export async function checkCalendarLimit(
   venueId: string,
@@ -20,13 +23,13 @@ export async function checkCalendarLimit(
 
   const { data: venue } = await admin
     .from('venues')
-    .select('pricing_tier, calendar_count')
+    .select('pricing_tier, calendar_count, booking_model')
     .eq('id', venueId)
     .single();
 
   if (!venue) return { allowed: false };
 
-  const tier = venue as VenueTier;
+  const tier = venue as VenueTier & { booking_model?: string };
 
   if (tier.pricing_tier !== 'standard') {
     return { allowed: true };
@@ -34,14 +37,19 @@ export async function checkCalendarLimit(
 
   const limit = tier.calendar_count ?? 1;
 
+  const effectiveTable =
+    tier.booking_model === 'unified_scheduling' && countTable === 'practitioners'
+      ? 'unified_calendars'
+      : countTable;
+
   const { count, error } = await admin
-    .from(countTable)
+    .from(effectiveTable)
     .select('id', { count: 'exact', head: true })
     .eq('venue_id', venueId)
     .eq('is_active', true);
 
   if (error) {
-    console.error(`[checkCalendarLimit] Failed to count ${countTable}:`, error);
+    console.error(`[checkCalendarLimit] Failed to count ${effectiveTable}:`, error);
     return { allowed: false };
   }
 
@@ -54,8 +62,7 @@ export async function checkCalendarLimit(
 
 /**
  * Check if a venue's tier allows SMS communications.
- * Standard tier: SMS is disabled regardless of settings.
- * Business/Founding: SMS follows venue's communication_settings.
+ * Unified Scheduling plan §1.1: Standard, Business, and Founding all include SMS (allowances differ).
  */
 export async function isSmsAllowed(venueId: string): Promise<boolean> {
   const admin = getSupabaseAdminClient();
@@ -66,7 +73,8 @@ export async function isSmsAllowed(venueId: string): Promise<boolean> {
     .single();
 
   if (!venue) return false;
-  return (venue.pricing_tier as string) !== 'standard';
+  const tier = ((venue.pricing_tier as string) ?? 'standard').toLowerCase();
+  return tier === 'standard' || tier === 'business' || tier === 'founding';
 }
 
 /**

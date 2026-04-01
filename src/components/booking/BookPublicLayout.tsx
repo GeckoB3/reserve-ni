@@ -1,4 +1,5 @@
 import { BookingFlowRouter, type LockedPractitionerBooking } from '@/components/booking/BookingFlowRouter';
+import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 import { BookVenueTitle } from '@/components/booking/BookVenueTitle';
 import type { VenuePublic, OpeningHours } from '@/components/booking/types';
 
@@ -86,7 +87,7 @@ interface BookPublicLayoutProps {
 }
 
 export function BookPublicLayout({ venue, lockedPractitioner }: BookPublicLayoutProps) {
-  const isAppointment = venue.booking_model === 'practitioner_appointment';
+  const isAppointment = isUnifiedSchedulingVenue(venue.booking_model);
 
   return (
     <main className="min-h-screen bg-slate-50">

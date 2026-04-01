@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { setStaffPractitionerLink } from '@/lib/staff-practitioner-link';
+import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 import { z } from 'zod';
 
 const bodySchema = z.object({
@@ -38,7 +39,7 @@ export async function PATCH(
       .eq('id', staff.venue_id)
       .single();
 
-    if ((venue?.booking_model as string) !== 'practitioner_appointment') {
+    if (!isUnifiedSchedulingVenue(venue?.booking_model)) {
       return NextResponse.json(
         { error: 'Calendar linking is only available for appointment businesses' },
         { status: 400 },

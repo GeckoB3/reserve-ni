@@ -11,6 +11,7 @@ import type { OpeningHours } from '@/types/availability';
 import { getOpeningPeriodsForDay, timeToMinutes, minutesToTime } from '@/lib/availability';
 import { getDayOfWeek } from '@/lib/availability/engine';
 import { getVenueLocalDateAndMinutes } from '@/lib/venue/venue-local-clock';
+import { unifiedCalendarRowToPractitioner } from '@/lib/availability/unified-calendar-mapper';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -21,6 +22,7 @@ export interface PhantomBooking {
   start_time: string;         // "HH:mm"
   duration_minutes: number;
   buffer_minutes: number;
+  processing_time_minutes?: number;
 }
 
 /** Staff blocks on the practitioner calendar (breaks / blocked time). Minutes from midnight. */
@@ -83,6 +85,7 @@ export interface AppointmentBooking {
   booking_time: string;       // "HH:mm"
   duration_minutes: number;
   buffer_minutes: number;
+  processing_time_minutes?: number;
   status: string;
 }
 
@@ -162,6 +165,44 @@ function getBreakRanges(practitioner: Practitioner, dateStr: string): Array<{ st
 
 function overlaps(startA: number, endA: number, startB: number, endB: number): boolean {
   return startA < endB && startB < endA;
+}
+
+function appointmentBookingBusyEnd(b: AppointmentBooking): number {
+  const bStart = timeToMinutes(b.booking_time);
+  const bProc = b.processing_time_minutes ?? 0;
+  return bStart + b.duration_minutes + b.buffer_minutes + bProc;
+}
+
+function phantomBusyEnd(p: PhantomBooking): number {
+  const pStart = timeToMinutes(p.start_time);
+  const pProc = p.processing_time_minutes ?? 0;
+  return pStart + p.duration_minutes + p.buffer_minutes + pProc;
+}
+
+function countOverlappingBookings(bookings: AppointmentBooking[], t: number, slotEnd: number): number {
+  let n = 0;
+  for (const b of bookings) {
+    const bStart = timeToMinutes(b.booking_time);
+    const bEnd = appointmentBookingBusyEnd(b);
+    if (overlaps(t, slotEnd, bStart, bEnd)) n++;
+  }
+  return n;
+}
+
+function countOverlappingPhantoms(phantoms: PhantomBooking[], t: number, slotEnd: number): number {
+  let n = 0;
+  for (const p of phantoms) {
+    const pStart = timeToMinutes(p.start_time);
+    const pEnd = phantomBusyEnd(p);
+    if (overlaps(t, slotEnd, pStart, pEnd)) n++;
+  }
+  return n;
+}
+
+function parallelCapacityFor(practitioner: Practitioner): number {
+  const p = practitioner.parallel_clients;
+  if (typeof p === 'number' && p >= 1) return Math.min(50, Math.floor(p));
+  return 1;
 }
 
 /** True when the venue has saved opening hours (non-empty object). */
@@ -286,6 +327,7 @@ export function computeAppointmentAvailability(input: AppointmentEngineInput, no
     );
 
     const dayBlocks = practitionerBlockedRanges.filter((b) => b.practitioner_id === practitioner.id);
+    const parallelCap = parallelCapacityFor(practitioner);
 
     const offeredServices = getOfferedAppointmentServicesForPractitioner(practitioner, services, practitionerServices);
 
@@ -299,7 +341,8 @@ export function computeAppointmentAvailability(input: AppointmentEngineInput, no
     }> = [];
 
     for (const svc of offeredServices) {
-      const totalDuration = svc.duration_minutes + svc.buffer_minutes;
+      const processing = svc.processing_time_minutes ?? 0;
+      const totalDuration = svc.duration_minutes + svc.buffer_minutes + processing;
       const serviceSlots: PractitionerSlot[] = [];
 
       practitionerServiceList.push({
@@ -325,21 +368,11 @@ export function computeAppointmentAvailability(input: AppointmentEngineInput, no
           const hitsCalendarBlock = dayBlocks.some((b) => overlaps(t, slotEnd, b.start, b.end));
           if (hitsCalendarBlock) continue;
 
-          // Check existing bookings
-          const hitsBooking = practitionerBookings.some((b) => {
-            const bStart = timeToMinutes(b.booking_time);
-            const bEnd = bStart + b.duration_minutes + b.buffer_minutes;
-            return overlaps(t, slotEnd, bStart, bEnd);
-          });
-          if (hitsBooking) continue;
-
-          // Check phantom bookings (already-selected slots in a group booking)
-          const hitsPhantom = practitionerPhantoms.some((p) => {
-            const pStart = timeToMinutes(p.start_time);
-            const pEnd = pStart + p.duration_minutes + p.buffer_minutes;
-            return overlaps(t, slotEnd, pStart, pEnd);
-          });
-          if (hitsPhantom) continue;
+          // Existing + phantom bookings vs parallel_clients (USE / unified_calendars)
+          const overlapping =
+            countOverlappingBookings(practitionerBookings, t, slotEnd) +
+            countOverlappingPhantoms(practitionerPhantoms, t, slotEnd);
+          if (overlapping >= parallelCap) continue;
 
           serviceSlots.push({
             practitioner_id: practitioner.id,
@@ -419,7 +452,8 @@ export function validateExactAppointmentStart(
     return { ok: false, reason: 'Service not available with this staff member' };
   }
 
-  const totalDuration = svc.duration_minutes + svc.buffer_minutes;
+  const processing = svc.processing_time_minutes ?? 0;
+  const totalDuration = svc.duration_minutes + svc.buffer_minutes + processing;
   const t = timeToMinutes(startTimeHHmm.slice(0, 5));
   const slotEnd = t + totalDuration;
 
@@ -456,25 +490,13 @@ export function validateExactAppointmentStart(
     (b) => b.practitioner_id === practitioner.id && CAPACITY_CONSUMING_STATUSES.includes(b.status),
   );
 
-  if (
-    practitionerBookings.some((b) => {
-      const bStart = timeToMinutes(b.booking_time);
-      const bEnd = bStart + b.duration_minutes + b.buffer_minutes;
-      return overlaps(t, slotEnd, bStart, bEnd);
-    })
-  ) {
-    return { ok: false, reason: 'Conflicts with another booking' };
-  }
-
   const practitionerPhantoms = phantomBookings.filter((p) => p.practitioner_id === practitioner.id);
-  if (
-    practitionerPhantoms.some((p) => {
-      const pStart = timeToMinutes(p.start_time);
-      const pEnd = pStart + p.duration_minutes + p.buffer_minutes;
-      return overlaps(t, slotEnd, pStart, pEnd);
-    })
-  ) {
-    return { ok: false, reason: 'Overlaps with another service in this booking' };
+  const parallelCap = parallelCapacityFor(practitioner);
+  const overlapping =
+    countOverlappingBookings(practitionerBookings, t, slotEnd) +
+    countOverlappingPhantoms(practitionerPhantoms, t, slotEnd);
+  if (overlapping >= parallelCap) {
+    return { ok: false, reason: 'Conflicts with another booking' };
   }
 
   return { ok: true };
@@ -503,6 +525,20 @@ export async function fetchAppointmentInput(params: {
     practitionerQuery = practitionerQuery.eq('id', practitionerId);
   }
 
+  let bookingsQuery = supabase
+    .from('bookings')
+    .select('id, practitioner_id, calendar_id, booking_time, appointment_service_id, service_item_id, status')
+    .eq('venue_id', venueId)
+    .eq('booking_date', date)
+    .in('status', CAPACITY_CONSUMING_STATUSES);
+  if (practitionerId) {
+    bookingsQuery = bookingsQuery.or(
+      `practitioner_id.eq.${practitionerId},calendar_id.eq.${practitionerId}`,
+    );
+  } else {
+    bookingsQuery = bookingsQuery.not('practitioner_id', 'is', null);
+  }
+
   const [practitionersRes, allServicesRes, psRes, bookingsRes, blocksRes, leaveRes, venueRes] = await Promise.all([
     practitionerQuery,
     supabase
@@ -512,13 +548,7 @@ export async function fetchAppointmentInput(params: {
       .eq('is_active', true)
       .order('sort_order'),
     supabase.from('practitioner_services').select('*, practitioners!inner(venue_id)').eq('practitioners.venue_id', venueId),
-    supabase
-      .from('bookings')
-      .select('id, practitioner_id, booking_time, appointment_service_id, status')
-      .eq('venue_id', venueId)
-      .eq('booking_date', date)
-      .not('practitioner_id', 'is', null)
-      .in('status', CAPACITY_CONSUMING_STATUSES),
+    bookingsQuery,
     supabase
       .from('practitioner_calendar_blocks')
       .select('practitioner_id, start_time, end_time')
@@ -548,24 +578,52 @@ export async function fetchAppointmentInput(params: {
   } else if (leaveRes.error) {
     console.warn('[fetchAppointmentInput] practitioner_leave_periods:', leaveRes.error.message);
   }
-  const allServices = (allServicesRes.data ?? []) as AppointmentService[];
+  let allServices = (allServicesRes.data ?? []) as AppointmentService[];
+  if (allServices.length > 0) {
+    const { data: procRows } = await supabase
+      .from('service_items')
+      .select('id, processing_time_minutes')
+      .eq('venue_id', venueId)
+      .in(
+        'id',
+        allServices.map((s) => s.id),
+      );
+    const procMap = new Map(
+      (procRows ?? []).map((r) => [
+        (r as { id: string }).id,
+        (r as { processing_time_minutes?: number }).processing_time_minutes ?? 0,
+      ]),
+    );
+    allServices = allServices.map((s) => ({
+      ...s,
+      processing_time_minutes: procMap.get(s.id) ?? 0,
+    }));
+  }
   const services = serviceId ? allServices.filter((s) => s.id === serviceId) : allServices;
   const practitionerServices = (psRes.data ?? []) as PractitionerService[];
   const serviceMapForBookings = new Map(allServices.map((s) => [s.id, s]));
 
   const existingBookings: AppointmentBooking[] = (bookingsRes.data ?? []).map((b) => {
-    const sid = b.appointment_service_id as string | null;
+    const row = b as {
+      practitioner_id: string | null;
+      calendar_id?: string | null;
+      appointment_service_id: string | null;
+      service_item_id: string | null;
+    };
+    const sid = (row.service_item_id ?? row.appointment_service_id) as string | null;
     const svc = sid ? serviceMapForBookings.get(sid) : null;
-    const ps = sid
-      ? practitionerServices.find((row) => row.practitioner_id === b.practitioner_id && row.service_id === sid)
+    const practId = row.practitioner_id ?? row.calendar_id;
+    const ps = sid && practId
+      ? practitionerServices.find((pRow) => pRow.practitioner_id === practId && pRow.service_id === sid)
       : undefined;
     const merged = svc ? mergeAppointmentServiceWithPractitionerLink(svc, ps) : null;
     return {
       id: b.id,
-      practitioner_id: b.practitioner_id!,
+      practitioner_id: practId!,
       booking_time: (b.booking_time as string).slice(0, 5),
       duration_minutes: merged?.duration_minutes ?? 30,
       buffer_minutes: merged?.buffer_minutes ?? 0,
+      processing_time_minutes: merged?.processing_time_minutes ?? 0,
       status: b.status,
     };
   });
@@ -595,6 +653,206 @@ export async function fetchAppointmentInput(params: {
   return {
     date,
     practitioners,
+    services,
+    practitionerServices,
+    existingBookings,
+    practitionerBlockedRanges,
+    venueOpeningHours,
+  };
+}
+
+/**
+ * Availability input for a unified calendar row (resource, or practitioner without legacy row).
+ * Uses service_items + calendar_service_assignments; calendar UUID is both calendar and practitioner id.
+ */
+export async function fetchCalendarAppointmentInput(params: {
+  supabase: SupabaseClient;
+  venueId: string;
+  date: string;
+  calendarId: string;
+  serviceId?: string;
+}): Promise<AppointmentEngineInput> {
+  const { supabase, venueId, date, calendarId, serviceId } = params;
+
+  const empty = (): AppointmentEngineInput => ({
+    date,
+    practitioners: [],
+    services: [],
+    practitionerServices: [],
+    existingBookings: [],
+    practitionerBlockedRanges: [],
+    venueOpeningHours: null,
+  });
+
+  const { data: ucRow, error: ucErr } = await supabase
+    .from('unified_calendars')
+    .select('*')
+    .eq('id', calendarId)
+    .eq('venue_id', venueId)
+    .maybeSingle();
+  if (ucErr || !ucRow) {
+    console.warn('[fetchCalendarAppointmentInput] unified_calendars:', ucErr?.message);
+    return empty();
+  }
+
+  let practitioner: Practitioner = unifiedCalendarRowToPractitioner(ucRow as Record<string, unknown>);
+
+  const { data: assignments } = await supabase
+    .from('calendar_service_assignments')
+    .select('id, service_item_id, custom_duration_minutes, custom_price_pence')
+    .eq('calendar_id', calendarId);
+
+  const assignList = assignments ?? [];
+  const serviceIds = assignList.map((a) => (a as { service_item_id: string }).service_item_id);
+  if (serviceIds.length === 0) {
+    return {
+      date,
+      practitioners: [practitioner],
+      services: [],
+      practitionerServices: [],
+      existingBookings: [],
+      practitionerBlockedRanges: [],
+      venueOpeningHours: null,
+    };
+  }
+
+  const { data: svcRows } = await supabase
+    .from('service_items')
+    .select('*')
+    .eq('venue_id', venueId)
+    .eq('is_active', true)
+    .in('id', serviceIds);
+
+  const assignMap = new Map(
+    assignList.map((a) => [(a as { service_item_id: string }).service_item_id, a]),
+  );
+
+  let services: AppointmentService[] = (svcRows ?? []).map((raw) => {
+    const s = raw as Record<string, unknown>;
+    const a = assignMap.get(s.id as string) as
+      | { custom_duration_minutes?: number | null; custom_price_pence?: number | null }
+      | undefined;
+    const customDur = a?.custom_duration_minutes;
+    const customPrice = a?.custom_price_pence;
+    return {
+      id: s.id as string,
+      venue_id: venueId,
+      name: s.name as string,
+      description: (s.description as string) ?? null,
+      duration_minutes: (customDur ?? s.duration_minutes) as number,
+      buffer_minutes: (s.buffer_minutes as number) ?? 0,
+      processing_time_minutes: (s.processing_time_minutes as number) ?? 0,
+      price_pence: (customPrice ?? s.price_pence) as number | null,
+      deposit_pence: (s.deposit_pence as number | null) ?? null,
+      colour: (s.colour as string) ?? '#3B82F6',
+      is_active: true,
+      sort_order: (s.sort_order as number) ?? 0,
+      created_at: (s.created_at as string) ?? new Date().toISOString(),
+    };
+  });
+  if (serviceId) {
+    services = services.filter((s) => s.id === serviceId);
+  }
+
+  const practitionerServices: PractitionerService[] = assignList.map((a) => {
+    const row = a as {
+      id: string;
+      service_item_id: string;
+      custom_duration_minutes: number | null;
+      custom_price_pence: number | null;
+    };
+    return {
+      id: row.id,
+      practitioner_id: calendarId,
+      service_id: row.service_item_id,
+      custom_duration_minutes: row.custom_duration_minutes,
+      custom_price_pence: row.custom_price_pence,
+    };
+  });
+
+  const { data: leaveRows, error: leaveErr } = await supabase
+    .from('practitioner_leave_periods')
+    .select('practitioner_id')
+    .eq('venue_id', venueId)
+    .lte('start_date', date)
+    .gte('end_date', date);
+
+  if (!leaveErr && leaveRows?.length) {
+    const onLeaveIds = new Set(
+      (leaveRows as Array<{ practitioner_id: string }>).map((r) => r.practitioner_id),
+    );
+    if (onLeaveIds.has(calendarId)) {
+      const existing = Array.isArray(practitioner.days_off) ? [...practitioner.days_off] : [];
+      if (!existing.includes(date)) existing.push(date);
+      practitioner = { ...practitioner, days_off: existing };
+    }
+  }
+
+  const [bookingsRes, blocksRes, venueRes] = await Promise.all([
+    supabase
+      .from('bookings')
+      .select('id, practitioner_id, calendar_id, booking_time, appointment_service_id, service_item_id, status')
+      .eq('venue_id', venueId)
+      .eq('booking_date', date)
+      .or(`practitioner_id.eq.${calendarId},calendar_id.eq.${calendarId}`)
+      .in('status', CAPACITY_CONSUMING_STATUSES),
+    supabase
+      .from('practitioner_calendar_blocks')
+      .select('practitioner_id, start_time, end_time')
+      .eq('venue_id', venueId)
+      .eq('block_date', date)
+      .eq('practitioner_id', calendarId),
+    supabase.from('venues').select('opening_hours').eq('id', venueId).single(),
+  ]);
+
+  const serviceMapForBookings = new Map(services.map((s) => [s.id, s]));
+
+  const existingBookings: AppointmentBooking[] = (bookingsRes.data ?? []).map((b) => {
+    const row = b as {
+      practitioner_id: string | null;
+      calendar_id?: string | null;
+      appointment_service_id: string | null;
+      service_item_id: string | null;
+    };
+    const sid = (row.service_item_id ?? row.appointment_service_id) as string | null;
+    const svc = sid ? serviceMapForBookings.get(sid) : null;
+    const practKey = row.practitioner_id ?? row.calendar_id ?? calendarId;
+    const ps = sid
+      ? practitionerServices.find((pRow) => pRow.practitioner_id === calendarId && pRow.service_id === sid)
+      : undefined;
+    const merged = svc ? mergeAppointmentServiceWithPractitionerLink(svc, ps) : null;
+    return {
+      id: b.id,
+      practitioner_id: practKey,
+      booking_time: (b.booking_time as string).slice(0, 5),
+      duration_minutes: merged?.duration_minutes ?? 30,
+      buffer_minutes: merged?.buffer_minutes ?? 0,
+      processing_time_minutes: merged?.processing_time_minutes ?? 0,
+      status: b.status,
+    };
+  });
+
+  const practitionerBlockedRanges: PractitionerCalendarBlockedRange[] = blocksRes.error
+    ? []
+    : (blocksRes.data ?? [])
+        .map((row: { practitioner_id: string; start_time: string; end_time: string }) => ({
+          practitioner_id: row.practitioner_id,
+          start: timeToMinutes(String(row.start_time).slice(0, 5)),
+          end: timeToMinutes(String(row.end_time).slice(0, 5)),
+        }))
+        .filter((b) => b.end > b.start);
+
+  if (blocksRes.error) {
+    console.warn('[fetchCalendarAppointmentInput] practitioner_calendar_blocks:', blocksRes.error.message);
+  }
+
+  const venueOpeningHours = venueRes.error
+    ? null
+    : ((venueRes.data?.opening_hours as OpeningHours | null) ?? null);
+
+  return {
+    date,
+    practitioners: [practitioner],
     services,
     practitionerServices,
     existingBookings,

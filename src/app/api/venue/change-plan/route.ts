@@ -7,6 +7,28 @@ import {
   subscriptionPeriodEndIso,
   subscriptionStatus,
 } from '@/lib/stripe/subscription-fields';
+import {
+  buildCheckoutLineItems,
+  buildSubscriptionItemsForPlanChange,
+  findMainPlanSubscriptionItem,
+  getPersistedSubscriptionItemIds,
+} from '@/lib/stripe/subscription-line-items';
+import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
+import { updateVenueSmsMonthlyAllowance } from '@/lib/billing/sms-allowance';
+
+async function countActiveCalendars(
+  admin: ReturnType<typeof getSupabaseAdminClient>,
+  venueId: string,
+  bookingModel: string | null | undefined,
+): Promise<number> {
+  const table = bookingModel === 'unified_scheduling' ? 'unified_calendars' : 'practitioners';
+  const { count } = await admin
+    .from(table)
+    .select('id', { count: 'exact', head: true })
+    .eq('venue_id', venueId)
+    .eq('is_active', true);
+  return count ?? 0;
+}
 
 /**
  * POST /api/venue/change-plan
@@ -79,27 +101,34 @@ export async function POST(request: Request) {
           try {
             const existing = await stripe.subscriptions.retrieve(subId);
             if (existing.status === 'active' || existing.status === 'trialing') {
-              const itemId = existing.items.data[0]?.id;
-              if (!itemId) {
+              const mainItem = findMainPlanSubscriptionItem(existing);
+              if (!mainItem?.id) {
                 throw new Error('No subscription line item');
               }
               const updated = await stripe.subscriptions.update(subId, {
-                items: [{ id: itemId, price: businessPriceId, quantity: 1 }],
+                items: buildSubscriptionItemsForPlanChange(existing, {
+                  id: mainItem.id,
+                  price: businessPriceId,
+                  quantity: 1,
+                }),
                 proration_behavior: 'create_prorations',
                 cancel_at_period_end: false,
               });
               const periodEndIso = subscriptionPeriodEndIso(updated);
               const cancelling = subscriptionCancelAtPeriodEnd(updated);
+              const itemIds = getPersistedSubscriptionItemIds(updated);
               await admin
                 .from('venues')
                 .update({
                   pricing_tier: 'business',
                   calendar_count: null,
-                  stripe_subscription_item_id: updated.items.data[0]?.id ?? null,
+                  stripe_subscription_item_id: itemIds.mainSubscriptionItemId,
+                  stripe_sms_subscription_item_id: itemIds.smsSubscriptionItemId,
                   subscription_current_period_end: periodEndIso,
                   plan_status: cancelling ? 'cancelling' : 'active',
                 })
                 .eq('id', venue.id);
+              await updateVenueSmsMonthlyAllowance(venue.id);
               return NextResponse.json({
                 ok: true,
                 message:
@@ -124,7 +153,7 @@ export async function POST(request: Request) {
         const session = await stripe.checkout.sessions.create({
           customer: venue.stripe_customer_id as string,
           mode: 'subscription',
-          line_items: [{ price: businessPriceId, quantity: 1 }],
+          line_items: buildCheckoutLineItems(businessPriceId, 1),
           metadata: {
             venue_id: venue.id,
             plan: 'business',
@@ -153,13 +182,9 @@ export async function POST(request: Request) {
         }
 
         let minQty = 1;
-        if ((venue.booking_model as string) === 'practitioner_appointment') {
-          const { count: pracCount } = await admin
-            .from('practitioners')
-            .select('id', { count: 'exact', head: true })
-            .eq('venue_id', staffRow.venue_id)
-            .eq('is_active', true);
-          minQty = Math.max(1, pracCount ?? 0);
+        if (isUnifiedSchedulingVenue(venue.booking_model)) {
+          const n = await countActiveCalendars(admin, staffRow.venue_id, venue.booking_model as string);
+          minQty = Math.max(1, n);
         }
         const qty = Math.max(minQty, calendar_count ?? minQty);
 
@@ -170,27 +195,34 @@ export async function POST(request: Request) {
           try {
             const existing = await stripe.subscriptions.retrieve(subId);
             if (existing.status === 'active' || existing.status === 'trialing') {
-              const itemId = existing.items.data[0]?.id;
-              if (!itemId) {
+              const mainItem = findMainPlanSubscriptionItem(existing);
+              if (!mainItem?.id) {
                 throw new Error('No subscription line item');
               }
               const updated = await stripe.subscriptions.update(subId, {
-                items: [{ id: itemId, price: standardPriceId, quantity: qty }],
+                items: buildSubscriptionItemsForPlanChange(existing, {
+                  id: mainItem.id,
+                  price: standardPriceId,
+                  quantity: qty,
+                }),
                 proration_behavior: 'create_prorations',
                 cancel_at_period_end: false,
               });
               const periodEndIso = subscriptionPeriodEndIso(updated);
               const cancelling = subscriptionCancelAtPeriodEnd(updated);
+              const itemIds = getPersistedSubscriptionItemIds(updated);
               await admin
                 .from('venues')
                 .update({
                   pricing_tier: 'standard',
                   calendar_count: qty,
-                  stripe_subscription_item_id: updated.items.data[0]?.id ?? null,
+                  stripe_subscription_item_id: itemIds.mainSubscriptionItemId,
+                  stripe_sms_subscription_item_id: itemIds.smsSubscriptionItemId,
                   subscription_current_period_end: periodEndIso,
                   plan_status: cancelling ? 'cancelling' : 'active',
                 })
                 .eq('id', venue.id);
+              await updateVenueSmsMonthlyAllowance(venue.id);
               return NextResponse.json({
                 ok: true,
                 message:
@@ -214,7 +246,7 @@ export async function POST(request: Request) {
         const session = await stripe.checkout.sessions.create({
           customer: venue.stripe_customer_id as string,
           mode: 'subscription',
-          line_items: [{ price: standardPriceId, quantity: qty }],
+          line_items: buildCheckoutLineItems(standardPriceId, qty),
           metadata: {
             venue_id: venue.id,
             plan: 'standard',
@@ -280,20 +312,16 @@ export async function POST(request: Request) {
         let resubQty = 1;
         if (isStandard) {
           resubQty = Math.max(1, (venue.calendar_count as number | null) ?? 1);
-          if ((venue.booking_model as string) === 'practitioner_appointment') {
-            const { count: pracCount } = await admin
-              .from('practitioners')
-              .select('id', { count: 'exact', head: true })
-              .eq('venue_id', staffRow.venue_id)
-              .eq('is_active', true);
-            resubQty = Math.max(resubQty, pracCount ?? 0, 1);
+          if (isUnifiedSchedulingVenue(venue.booking_model)) {
+            const n = await countActiveCalendars(admin, staffRow.venue_id, venue.booking_model as string);
+            resubQty = Math.max(resubQty, n, 1);
           }
         }
 
         const session = await stripe.checkout.sessions.create({
           customer: venue.stripe_customer_id as string,
           mode: 'subscription',
-          line_items: [{ price: priceId, quantity: resubQty }],
+          line_items: buildCheckoutLineItems(priceId, resubQty),
           metadata: {
             venue_id: venue.id,
             plan: venue.pricing_tier as string,

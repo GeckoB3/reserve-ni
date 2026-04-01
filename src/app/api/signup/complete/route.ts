@@ -2,7 +2,9 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { stripe } from '@/lib/stripe';
+import { getPersistedSubscriptionItemIds } from '@/lib/stripe/subscription-line-items';
 import { getBusinessConfig } from '@/lib/business-config';
+import { updateVenueSmsMonthlyAllowance } from '@/lib/billing/sms-allowance';
 
 export async function POST(request: Request) {
   try {
@@ -54,10 +56,25 @@ export async function POST(request: Request) {
     const calendarCount = parseInt(metadata.calendar_count ?? '1', 10);
     const config = getBusinessConfig(businessType);
 
-    const subscription =
-      typeof session.subscription === 'object' ? session.subscription : null;
+    const subscriptionId =
+      typeof session.subscription === 'string'
+        ? session.subscription
+        : session.subscription && typeof session.subscription === 'object'
+          ? session.subscription.id
+          : null;
 
-    const subscriptionItemId = subscription?.items?.data?.[0]?.id ?? null;
+    let mainSubscriptionItemId: string | null = null;
+    let smsSubscriptionItemId: string | null = null;
+    if (subscriptionId) {
+      try {
+        const subFull = await stripe.subscriptions.retrieve(subscriptionId);
+        const ids = getPersistedSubscriptionItemIds(subFull);
+        mainSubscriptionItemId = ids.mainSubscriptionItemId;
+        smsSubscriptionItemId = ids.smsSubscriptionItemId;
+      } catch (e) {
+        console.warn('[signup/complete] Could not load subscription items:', e);
+      }
+    }
 
     const slug = `venue-${Date.now()}`;
 
@@ -73,11 +90,9 @@ export async function POST(request: Request) {
         pricing_tier: plan,
         plan_status: 'active',
         stripe_customer_id: session.customer as string,
-        stripe_subscription_id:
-          typeof session.subscription === 'string'
-            ? session.subscription
-            : subscription?.id ?? null,
-        stripe_subscription_item_id: subscriptionItemId,
+        stripe_subscription_id: subscriptionId,
+        stripe_subscription_item_id: mainSubscriptionItemId,
+        stripe_sms_subscription_item_id: smsSubscriptionItemId,
         calendar_count: plan === 'standard' ? calendarCount : null,
         onboarding_step: 0,
         onboarding_completed: false,
@@ -101,6 +116,8 @@ export async function POST(request: Request) {
       console.error('[signup/complete] Staff creation failed:', staffError);
       return NextResponse.json({ error: 'Failed to complete signup. Please contact support.' }, { status: 500 });
     }
+
+    await updateVenueSmsMonthlyAllowance(venue.id);
 
     return NextResponse.json({ redirect_url: '/onboarding' });
   } catch (err) {

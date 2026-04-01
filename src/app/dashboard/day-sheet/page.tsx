@@ -6,6 +6,7 @@ import { getDashboardStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { ToastProvider } from '@/components/ui/Toast';
 import type { BookingModel } from '@/types/booking-models';
+import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 
 export default async function DaySheetPage() {
   const supabase = await createClient();
@@ -38,7 +39,7 @@ export default async function DaySheetPage() {
 
   const bookingModel = (venue?.booking_model as BookingModel) ?? 'table_reservation';
 
-  if (bookingModel === 'practitioner_appointment') {
+  if (isUnifiedSchedulingVenue(bookingModel)) {
     redirect('/dashboard/calendar');
   }
 

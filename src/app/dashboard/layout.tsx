@@ -23,6 +23,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   let isAdmin = false;
   let planStatus: string = 'active';
   let onboardingCompleted = true;
+  let venueTerminology: Record<string, unknown> | null = null;
   try {
     const admin = getSupabaseAdminClient();
     const { data: staffRows } = await admin
@@ -54,6 +55,11 @@ export default async function DashboardLayout({ children }: { children: React.Re
       bookingModel = (venue?.booking_model as BookingModel) ?? 'table_reservation';
       planStatus = (venue?.plan_status as string) ?? 'active';
       onboardingCompleted = (venue?.onboarding_completed as boolean) ?? true;
+      const rawTerms = (venue as { terminology?: unknown } | null)?.terminology;
+      venueTerminology =
+        rawTerms && typeof rawTerms === 'object' && rawTerms !== null && !Array.isArray(rawTerms)
+          ? (rawTerms as Record<string, unknown>)
+          : null;
 
       if (!onboardingCompleted) {
         redirect('/onboarding');
@@ -74,6 +80,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
         pricingTier={pricingTier}
         bookingModel={bookingModel}
         isAdmin={isAdmin}
+        venueTerminology={venueTerminology}
       />
       <main className="flex-1 overflow-y-auto pt-14 lg:pt-0">
         {planStatus === 'cancelling' && (

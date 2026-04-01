@@ -10,6 +10,7 @@
 export type BookingModel =
   | 'table_reservation'
   | 'practitioner_appointment'
+  | 'unified_scheduling'
   | 'event_ticket'
   | 'class_session'
   | 'resource_booking';
@@ -27,6 +28,7 @@ export interface VenueTerminology {
 export const DEFAULT_TERMINOLOGY: Record<BookingModel, VenueTerminology> = {
   table_reservation:        { client: 'Guest',  booking: 'Reservation',  staff: 'Staff' },
   practitioner_appointment: { client: 'Client', booking: 'Appointment',  staff: 'Staff' },
+  unified_scheduling:       { client: 'Client', booking: 'Appointment',  staff: 'Staff' },
   event_ticket:             { client: 'Guest',  booking: 'Booking',      staff: 'Host' },
   class_session:            { client: 'Member', booking: 'Booking',      staff: 'Instructor' },
   resource_booking:         { client: 'Booker', booking: 'Booking',      staff: 'Manager' },
@@ -68,6 +70,11 @@ export interface Practitioner {
   created_at: string;
   /** Public booking URL segment under /book/{venue-slug}/{slug} */
   slug?: string | null;
+  /**
+   * Concurrent overlapping appointments allowed (`unified_calendars.parallel_clients`).
+   * Omitted or 1 = one busy occupancy interval at a time (default).
+   */
+  parallel_clients?: number;
 }
 
 /** Dated time off (annual / sick) — stored in `practitioner_leave_periods`. */
@@ -91,6 +98,8 @@ export interface AppointmentService {
   description: string | null;
   duration_minutes: number;
   buffer_minutes: number;
+  /** Turnover after service (resource / unified); included in slot occupancy in appointment engine. */
+  processing_time_minutes?: number;
   price_pence: number | null;
   deposit_pence: number | null;
   colour: string;

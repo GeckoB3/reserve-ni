@@ -6,6 +6,7 @@ import { useMemo, useState } from 'react';
 import { createClient } from '@/lib/supabase/browser';
 
 import type { BookingModel } from '@/types/booking-models';
+import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 
 type NavItem = { href: string; label: string; icon: React.ComponentType<{ className?: string }> };
 
@@ -21,6 +22,7 @@ const BASE_NAV_ITEMS: NavItem[] = [
 
 const MODEL_NAV_ITEMS: Partial<Record<BookingModel, NavItem[]>> = {
   practitioner_appointment: [{ href: '/dashboard/appointment-services', label: 'Services', icon: ClockIcon }],
+  unified_scheduling: [{ href: '/dashboard/appointment-services', label: 'Services', icon: ClockIcon }],
   event_ticket: [
     { href: '/dashboard/event-manager', label: 'Events', icon: CalendarIcon },
   ],
@@ -45,6 +47,8 @@ interface Props {
   bookingModel?: BookingModel;
   /** Reports and Availability nav items are admin-only. */
   isAdmin?: boolean;
+  /** Venue `terminology` JSONB — drives booking list / new-booking labels (plan §6.4). */
+  venueTerminology?: Record<string, unknown> | null;
 }
 
 const ADMIN_ONLY_HREFS = new Set(['/dashboard/reports', '/dashboard/settings']);
@@ -57,6 +61,7 @@ export function DashboardSidebar({
   pricingTier = 'standard',
   bookingModel = 'table_reservation',
   isAdmin = false,
+  venueTerminology: _venueTerminology = null,
 }: Props) {
   const pathname = usePathname();
   const router = useRouter();
@@ -69,7 +74,7 @@ export function DashboardSidebar({
 
   const navItems = useMemo(() => {
     const isTableReservation = bookingModel === 'table_reservation';
-    const isAppointment = bookingModel === 'practitioner_appointment';
+    const isAppointment = isUnifiedSchedulingVenue(bookingModel);
 
     let items = BASE_NAV_ITEMS.filter((item) => {
       if (!isTableReservation && TABLE_RESERVATION_ONLY.has(item.href)) return false;
@@ -176,10 +181,10 @@ export function DashboardSidebar({
         <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-1">
           {navItems.map((item) => {
             if (item.href === '/dashboard/bookings' && !showTableManagementNav) {
-              const scheduleActive = bookingModel === 'practitioner_appointment'
+              const scheduleActive = isUnifiedSchedulingVenue(bookingModel)
                 ? pathname.startsWith('/dashboard/calendar') || pathname.startsWith('/dashboard/practitioner-calendar')
                 : pathname.startsWith('/dashboard/day-sheet');
-              const isAppt = bookingModel === 'practitioner_appointment';
+              const isAppt = isUnifiedSchedulingVenue(bookingModel);
               return (
                 <div key="reservations-with-day-sheet" className="space-y-1">
                   <Link

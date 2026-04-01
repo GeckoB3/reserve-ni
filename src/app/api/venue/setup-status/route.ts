@@ -24,7 +24,8 @@ async function checkAvailabilitySet(
   model: BookingModel,
 ): Promise<boolean> {
   switch (model) {
-    case 'practitioner_appointment': {
+    case 'practitioner_appointment':
+    case 'unified_scheduling': {
       const { count } = await admin
         .from('practitioners')
         .select('id', { count: 'exact', head: true })

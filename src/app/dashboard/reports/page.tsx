@@ -4,6 +4,7 @@ import { ReportsView } from './ReportsView';
 import { getDashboardStaff } from '@/lib/venue-auth';
 import type { BookingModel, VenueTerminology } from '@/types/booking-models';
 import { DEFAULT_TERMINOLOGY } from '@/types/booking-models';
+import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 
 function mergeVenueTerminology(model: BookingModel, raw: unknown): VenueTerminology {
   const base = DEFAULT_TERMINOLOGY[model];
@@ -56,7 +57,7 @@ export default async function ReportsPage() {
       <div className="mx-auto max-w-5xl">
         <div className="mb-6">
           <h1 className="text-2xl font-semibold text-slate-900">Reports</h1>
-          {bookingModel === 'practitioner_appointment' ? (
+          {isUnifiedSchedulingVenue(bookingModel) ? (
             <p className="mt-1 text-sm text-slate-500">
               Appointment analytics for your team, services, and channels. Figures use the selected date range
               unless noted.

@@ -9,6 +9,7 @@ import {
 import { DataExportSection } from './DataExportSection';
 import { ClientsSection, type ClientSummary } from './ClientsSection';
 import type { BookingModel, VenueTerminology } from '@/types/booking-models';
+import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 
 interface Report1 {
   total_bookings_created: number;
@@ -195,7 +196,7 @@ export function ReportsView({ bookingModel, terminology, venueId }: ReportsViewP
     if (!data?.report1_booking_summary) return;
     const r = data.report1_booking_summary;
     const model = (data.booking_model as BookingModel | undefined) ?? bookingModel;
-    const appt = model === 'practitioner_appointment';
+    const appt = isUnifiedSchedulingVenue(model);
     downloadCsv(`report1-booking-summary-${data.from}-${data.to}.csv`, [
       ['Metric', 'Value'],
       [
@@ -224,7 +225,7 @@ export function ReportsView({ bookingModel, terminology, venueId }: ReportsViewP
   const exportReport2 = useCallback(() => {
     if (!data?.report2_no_show_series?.length) return;
     const model = (data.booking_model as BookingModel | undefined) ?? bookingModel;
-    const appt = model === 'practitioner_appointment';
+    const appt = isUnifiedSchedulingVenue(model);
     const headerRow = appt
       ? ['Date', 'No-shows', 'Attended or no-show (count)', 'Rate %']
       : ['Date', 'No-shows', 'Denominator', 'Rate %'];
@@ -238,7 +239,7 @@ export function ReportsView({ bookingModel, terminology, venueId }: ReportsViewP
     if (!data?.report3_cancellation) return;
     const r = data.report3_cancellation;
     const model = (data.booking_model as BookingModel | undefined) ?? bookingModel;
-    const appt = model === 'practitioner_appointment';
+    const appt = isUnifiedSchedulingVenue(model);
     downloadCsv(`report3-cancellation-${data.from}-${data.to}.csv`, [
       ['Metric', 'Value'],
       [
@@ -328,7 +329,7 @@ export function ReportsView({ bookingModel, terminology, venueId }: ReportsViewP
 
   const resolvedBookingModel =
     (data?.booking_model as BookingModel | undefined) ?? bookingModel;
-  const isAppointment = resolvedBookingModel === 'practitioner_appointment';
+  const isAppointment = isUnifiedSchedulingVenue(resolvedBookingModel);
   const client = terminology.client;
   const clientLower = client.toLowerCase();
   const bookingWord = terminology.booking;

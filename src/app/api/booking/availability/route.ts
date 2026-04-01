@@ -22,6 +22,7 @@ import {
 import { computeEventAvailability, fetchEventInput } from '@/lib/availability/event-ticket-engine';
 import { computeClassAvailability, fetchClassInput } from '@/lib/availability/class-session-engine';
 import { computeResourceAvailability, fetchResourceInput } from '@/lib/availability/resource-booking-engine';
+import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 
 function toMinutes(value: string): number {
   const [h, m] = value.slice(0, 5).split(':').map(Number);
@@ -170,7 +171,7 @@ export async function GET(request: NextRequest) {
     const venueMode = await resolveVenueMode(supabase, venueId);
 
     // Dispatch to model-specific availability engines
-    if (venueMode.bookingModel === 'practitioner_appointment') {
+    if (isUnifiedSchedulingVenue(venueMode.bookingModel)) {
       return handleAppointmentAvailability(supabase, venueId, dateStr, searchParams);
     }
     if (venueMode.bookingModel === 'event_ticket') {

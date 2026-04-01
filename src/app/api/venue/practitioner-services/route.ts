@@ -12,7 +12,8 @@ const syncSchema = z.object({
 
 /**
  * PUT /api/venue/practitioner-services
- * Replaces all service links for a practitioner with the provided set.
+ * Replaces all service links for a practitioner calendar with the provided set.
+ * For `unified_scheduling`, `practitioner_id` is a `unified_calendars.id`.
  */
 export async function PUT(request: NextRequest) {
   try {
@@ -28,6 +29,66 @@ export async function PUT(request: NextRequest) {
 
     const { practitioner_id, service_ids } = parsed.data;
     const admin = getSupabaseAdminClient();
+
+    const { data: venue } = await admin.from('venues').select('booking_model').eq('id', staff.venue_id).maybeSingle();
+    const bookingModel = (venue as { booking_model?: string } | null)?.booking_model ?? '';
+
+    if (bookingModel === 'unified_scheduling') {
+      const { data: cal, error: calErr } = await admin
+        .from('unified_calendars')
+        .select('id, staff_id')
+        .eq('id', practitioner_id)
+        .eq('venue_id', staff.venue_id)
+        .single();
+
+      if (calErr || !cal) {
+        return NextResponse.json({ error: 'Calendar not found' }, { status: 404 });
+      }
+
+      if (staff.role !== 'admin') {
+        if (cal.staff_id !== staff.id) {
+          return NextResponse.json(
+            { error: 'You can only update service links for your own calendar.' },
+            { status: 403 },
+          );
+        }
+      }
+
+      const { data: existingRows } = await admin
+        .from('calendar_service_assignments')
+        .select('*')
+        .eq('calendar_id', practitioner_id);
+
+      const preserve = new Map(
+        (existingRows ?? []).map((r) => {
+          const row = r as { service_item_id: string; custom_price_pence: number | null; custom_duration_minutes: number | null };
+          return [row.service_item_id, row] as const;
+        }),
+      );
+
+      await admin.from('calendar_service_assignments').delete().eq('calendar_id', practitioner_id);
+
+      if (service_ids.length > 0) {
+        const links = service_ids.map((sid) => {
+          const prev = preserve.get(sid) as
+            | { custom_price_pence: number | null; custom_duration_minutes: number | null }
+            | undefined;
+          return {
+            calendar_id: practitioner_id,
+            service_item_id: sid,
+            custom_price_pence: prev?.custom_price_pence ?? null,
+            custom_duration_minutes: prev?.custom_duration_minutes ?? null,
+          };
+        });
+        const { error } = await admin.from('calendar_service_assignments').insert(links);
+        if (error) {
+          console.error('PUT /api/venue/practitioner-services (USE) insert failed:', error);
+          return NextResponse.json({ error: 'Failed to save service links' }, { status: 500 });
+        }
+      }
+
+      return NextResponse.json({ success: true });
+    }
 
     const { data: prac } = await admin
       .from('practitioners')

@@ -6,6 +6,7 @@ import { getSupabaseAdminClient } from '@/lib/supabase';
 import { isSmsAllowed } from '@/lib/tier-enforcement';
 import { getChannelsForMessage } from '@/lib/communications/tier-message-channels';
 import type { CommMessageType } from '@/lib/emails/types';
+import { recordOutboundSms, estimateSmsSegments } from '@/lib/sms-usage';
 
 interface LogContext {
   venue_id?: string;
@@ -352,6 +353,15 @@ export class CommunicationService {
           if (body && recipient.phone) {
             await getChannel('sms').send(recipient, { body }, payload);
             await this.logCommunication(type, 'sms', recipient, 'sent', ctx);
+            if (ctx.venue_id) {
+              await recordOutboundSms({
+                venueId: ctx.venue_id,
+                bookingId: ctx.booking_id,
+                messageType: type,
+                recipientPhone: recipient.phone,
+                segmentCount: estimateSmsSegments(body),
+              });
+            }
           }
         }
       } catch (err) {

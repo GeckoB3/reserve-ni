@@ -17,6 +17,7 @@ import {
 } from '@/lib/availability/appointment-engine';
 import { mergeAppointmentServiceWithPractitionerLink } from '@/lib/appointments/merge-service-with-overrides';
 import { cancellationDeadlineHoursBefore } from '@/lib/booking/cancellation-deadline';
+import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 
 /**
  * GET /api/confirm?booking_id=uuid&token=xxx  (token-based)
@@ -80,7 +81,7 @@ export async function GET(request: NextRequest) {
 
     const rules = (venue?.booking_rules as { cancellation_notice_hours?: number } | null) ?? null;
     const refundNoticeHours =
-      (venue?.booking_model as string) === 'practitioner_appointment' &&
+      isUnifiedSchedulingVenue(venue?.booking_model) &&
       typeof rules?.cancellation_notice_hours === 'number'
         ? rules.cancellation_notice_hours
         : 48;
@@ -310,7 +311,7 @@ export async function POST(request: NextRequest) {
 
       const venueMode = await resolveVenueMode(supabase, booking.venue_id);
 
-      if (venueMode.bookingModel === 'practitioner_appointment') {
+      if (isUnifiedSchedulingVenue(venueMode.bookingModel)) {
         if (!booking_date || !booking_time || !bodyPractitionerId || !bodyAppointmentServiceId) {
           return NextResponse.json(
             {
