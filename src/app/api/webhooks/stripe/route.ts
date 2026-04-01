@@ -4,7 +4,7 @@ import { stripe } from '@/lib/stripe';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { sendCommunication } from '@/lib/communications';
 import { generateConfirmToken, hashConfirmToken } from '@/lib/confirm-token';
-import { sendBookingConfirmationEmail, sendDepositConfirmationEmail } from '@/lib/communications/send-templated';
+import { sendBookingConfirmationNotifications, sendDepositConfirmationEmail } from '@/lib/communications/send-templated';
 import { enrichBookingEmailForAppointment } from '@/lib/emails/booking-email-enrichment';
 import { isSelfServeBookingSource } from '@/lib/booking-source';
 
@@ -118,6 +118,7 @@ export async function POST(request: NextRequest) {
         id: bookingId,
         guest_name: guest?.name ?? 'Guest',
         guest_email: recipientEmail ?? null,
+        guest_phone: guest?.phone ?? null,
         booking_date: b?.booking_date ?? '',
         booking_time: typeof b?.booking_time === 'string' ? b.booking_time.slice(0, 5) : b?.booking_time ?? '',
         party_size: b?.party_size ?? 2,
@@ -133,10 +134,17 @@ export async function POST(request: NextRequest) {
       after(async () => {
         try {
           const enriched = await enrichBookingEmailForAppointment(getSupabaseAdminClient(), bookingId, bookingData);
-          const confResult = await sendBookingConfirmationEmail(enriched, venueData, venueIdForAfter);
-          if (!confResult.sent) console.warn('[after] webhook confirmation email not sent:', confResult.reason);
+          const { email: confEmail, sms: confSms } = await sendBookingConfirmationNotifications(
+            enriched,
+            venueData,
+            venueIdForAfter,
+          );
+          if (!confEmail.sent) console.warn('[after] webhook confirmation email not sent:', confEmail.reason);
+          if (!confSms.sent && confSms.reason !== 'skipped' && confSms.reason !== 'no_phone') {
+            console.warn('[after] webhook confirmation SMS not sent:', confSms.reason);
+          }
         } catch (err) {
-          console.error('[after] webhook confirmation email failed:', err);
+          console.error('[after] webhook confirmation notifications failed:', err);
         }
 
         if (hasDeposit && !skipDepositReceipt) {

@@ -82,7 +82,8 @@ export default function PlanPage() {
   }, [config]);
 
   const standardTotal = calendarCount * STANDARD_PRICE_PER_CALENDAR;
-  const showCrossoverNudge = calendarCount >= 8;
+  const showCrossoverNudge =
+    calendarCount * STANDARD_PRICE_PER_CALENDAR > BUSINESS_PRICE;
   function handleContinue() {
     sessionStorage.setItem('signup_plan', plan);
     sessionStorage.setItem('signup_calendar_count', String(isRestaurant ? 1 : calendarCount));
@@ -236,7 +237,7 @@ export default function PlanPage() {
                   }}
                   className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
                 >
-                  Just me (&pound;10)
+                  Just me (&pound;{STANDARD_PRICE_PER_CALENDAR})
                 </button>
                 <button
                   type="button"
@@ -246,7 +247,7 @@ export default function PlanPage() {
                   }}
                   className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
                 >
-                  2 (&pound;20)
+                  2 (&pound;{STANDARD_PRICE_PER_CALENDAR * 2})
                 </button>
                 <button
                   type="button"
@@ -256,7 +257,7 @@ export default function PlanPage() {
                   }}
                   className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
                 >
-                  3 (&pound;30)
+                  3 (&pound;{STANDARD_PRICE_PER_CALENDAR * 3})
                 </button>
               </div>
               <div className="mt-3 flex items-center gap-3">

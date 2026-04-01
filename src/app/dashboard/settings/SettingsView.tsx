@@ -28,6 +28,7 @@ import {
   SMS_INCLUDED_PER_CALENDAR_STANDARD,
   computeSmsMonthlyAllowance,
 } from '@/lib/billing/sms-allowance';
+import { BUSINESS_PRICE, STANDARD_PRICE_PER_CALENDAR } from '@/lib/pricing-constants';
 
 interface SettingsViewProps {
   initialVenue: VenueSettings | null;
@@ -175,11 +176,17 @@ function PlanSection({
   const calendarDirty = tier === 'standard' && calendarDraft !== (venue.calendar_count ?? 1);
   const isAppointmentVenue = isUnifiedSchedulingVenue(venue.booking_model);
   const isRestaurantVenue = venue.booking_model === 'table_reservation';
+  /** Restaurants must subscribe to Business; Standard should not appear in normal signup flows. */
+  const restaurantOnInvalidStandard = isRestaurantVenue && tier === 'standard';
   const standardSeatsPaid = calendarCount ?? 1;
-  const standardMonthlyPence = standardSeatsPaid * 10;
+  const standardMonthlyPence = standardSeatsPaid * STANDARD_PRICE_PER_CALENDAR;
   const smsIncludedMonthly = computeSmsMonthlyAllowance(tier, calendarCount ?? null);
-  const showSevenPlusBusinessNudge =
-    tier === 'standard' && isAppointmentVenue && calendarCount != null && calendarCount >= 7;
+  const showFourPlusBusinessNudge =
+    tier === 'standard' &&
+    isAppointmentVenue &&
+    !isRestaurantVenue &&
+    calendarCount != null &&
+    calendarCount >= 4;
 
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm space-y-4">
@@ -223,23 +230,30 @@ function PlanSection({
       {periodEndLabel && tier !== 'founding' && billingActive && !isCancelling && (
         <p className="text-xs text-slate-500">Current billing period ends on {periodEndLabel}.</p>
       )}
-      {isAppointmentVenue && (
-        <p className="text-sm text-slate-600">
-          SMS this billing month:{' '}
-          <span className="font-semibold text-slate-900">{venue.sms_messages_sent_this_month ?? 0}</span>
-          {' / '}
-          {smsIncludedMonthly} included
-          {tier === 'standard' && calendarCount != null ? (
-            <span className="text-slate-500">
-              {' '}
-              ({SMS_INCLUDED_PER_CALENDAR_STANDARD} × {calendarCount} paid calendar{calendarCount === 1 ? '' : 's'})
-            </span>
-          ) : null}
-          {tier === 'business' || tier === 'founding' ? (
-            <span className="text-slate-500"> ({SMS_INCLUDED_BUSINESS_TIER}/month included)</span>
-          ) : null}
-          . Overage is billed via Stripe metered SMS.
-        </p>
+      <p className="text-sm text-slate-600">
+        SMS this billing month:{' '}
+        <span className="font-semibold text-slate-900">{venue.sms_messages_sent_this_month ?? 0}</span>
+        {' / '}
+        {smsIncludedMonthly} included
+        {tier === 'standard' && calendarCount != null ? (
+          <span className="text-slate-500">
+            {' '}
+            ({SMS_INCLUDED_PER_CALENDAR_STANDARD} × {calendarCount} paid calendar{calendarCount === 1 ? '' : 's'})
+          </span>
+        ) : null}
+        {tier === 'business' || tier === 'founding' ? (
+          <span className="text-slate-500"> ({SMS_INCLUDED_BUSINESS_TIER}/month included)</span>
+        ) : null}
+        . Overage is billed via Stripe metered SMS.
+      </p>
+      {restaurantOnInvalidStandard && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+          <p className="font-medium">Restaurants must be on the Business plan</p>
+          <p className="mt-1 text-xs leading-relaxed text-amber-900">
+            Table management and floor plan require Business (£{BUSINESS_PRICE}/month). Upgrade below or contact support
+            if this looks wrong.
+          </p>
+        </div>
       )}
       {actionError && (
         <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
@@ -264,13 +278,13 @@ function PlanSection({
           </button>
         </div>
       )}
-      {tier === 'standard' && calendarCount != null && (
+      {tier === 'standard' && calendarCount != null && !restaurantOnInvalidStandard && (
         <p className="text-sm text-slate-600">
           {isAppointmentVenue ? (
             <>
               Your plan covers up to{' '}
-              <span className="font-semibold text-slate-900">{calendarCount}</span> team member
-              {calendarCount === 1 ? '' : 's'} (&pound;{calendarCount * 10}/month total).{' '}
+              <span className="font-semibold text-slate-900">{calendarCount}</span> bookable calendar
+              {calendarCount === 1 ? '' : 's'} (&pound;{calendarCount * STANDARD_PRICE_PER_CALENDAR}/month total).{' '}
               {billingActive && (
                 <>
                   You have{' '}
@@ -280,31 +294,31 @@ function PlanSection({
             </>
           ) : (
             <>
-              {calendarCount} slot{calendarCount === 1 ? '' : 's'} on Standard — &pound;{calendarCount * 10}/month
+              {calendarCount} slot{calendarCount === 1 ? '' : 's'} on Standard — &pound;{calendarCount * STANDARD_PRICE_PER_CALENDAR}/month
               total.
             </>
           )}
         </p>
       )}
-      {tier === 'standard' && billingActive && !isCancelling && (
+      {tier === 'standard' && billingActive && !isCancelling && !restaurantOnInvalidStandard && (
         <div className="rounded-lg border border-slate-200 bg-slate-50/80 p-4 space-y-3">
           <p className="text-sm font-medium text-slate-800">
-            {isAppointmentVenue ? 'How many team members?' : 'Slots on your Standard plan'}
+            {isAppointmentVenue ? 'How many bookable calendars?' : 'Slots on your Standard plan'}
           </p>
           <p className="text-xs text-slate-600">
             {isAppointmentVenue ? (
               <>
-                One team member uses one slot. Each slot is &pound;10/month. Raise the number to add more people; lower it after removing team
-                members.
+                Each paid slot covers one bookable calendar (e.g. one team member). Each slot is &pound;{STANDARD_PRICE_PER_CALENDAR}/month.
+                Increase the number to add capacity; lower it after removing calendars you no longer bill for.
               </>
             ) : (
-              <>Each slot is &pound;10/month. Change the number if your plan includes more than one.</>
+              <>Each slot is &pound;{STANDARD_PRICE_PER_CALENDAR}/month. Change the number if your plan includes more than one.</>
             )}
           </p>
           <div className="flex flex-wrap items-end gap-3">
             <div>
               <label htmlFor="plan-calendar-count" className="mb-1 block text-xs font-medium text-slate-600">
-                {isAppointmentVenue ? 'Team members included' : 'Slots included'}
+                {isAppointmentVenue ? 'Bookable calendars included' : 'Slots included'}
               </label>
               <input
                 id="plan-calendar-count"
@@ -350,26 +364,47 @@ function PlanSection({
       )}
       {tier === 'business' && (
         <p className="text-sm text-slate-500">
-          {isAppointmentVenue ? (
-            <>Unlimited team members and SMS. Configure SMS under Communications. &pound;79/month</>
+          {isRestaurantVenue ? (
+            <>
+              Business plan: &pound;{BUSINESS_PRICE}/month flat. Includes guest SMS, table timeline and floor plan, day
+              sheet, and priority support — the plan required for restaurants.
+            </>
+          ) : isAppointmentVenue ? (
+            <>
+              Business plan: &pound;{BUSINESS_PRICE}/month flat. Unlimited bookable calendars, {SMS_INCLUDED_BUSINESS_TIER}{' '}
+              SMS/month included, priority support. Configure message templates under Communications.
+            </>
           ) : (
-            <>Unlimited team members, SMS, and table management. &pound;79/month</>
+            <>
+              Business plan: &pound;{BUSINESS_PRICE}/month flat. Unlimited capacity on your subscription tier, SMS, and
+              venue features included for your booking model.
+            </>
           )}
         </p>
       )}
       {tier === 'founding' && (
         <p className="text-sm text-slate-500">
-          {isAppointmentVenue ? (
-            <>Founding Partner: unlimited team, SMS, and appointments features, free during the founding period.</>
+          {isRestaurantVenue ? (
+            <>
+              Founding Partner: full restaurant Business features (guest SMS, table management, floor plan) — free during
+              your founding period; subscription pricing applies when the founding period ends.
+            </>
+          ) : isAppointmentVenue ? (
+            <>
+              Founding Partner: unlimited bookable calendars and the same SMS allowance as Business — free during your
+              founding period; subscription pricing applies when the founding period ends.
+            </>
           ) : (
-            <>Full Business-tier access (including table management), free during founding period.</>
+            <>
+              Founding Partner: Business-tier access for your booking model for free during the founding period.
+            </>
           )}
         </p>
       )}
       <div className="flex flex-wrap gap-2 pt-2">
         {tier === 'standard' && !isCancelling && (
           <button type="button" disabled={loading} onClick={() => void handleAction('upgrade')} className="rounded-lg bg-brand-600 px-4 py-2 text-xs font-semibold text-white hover:bg-brand-700 disabled:opacity-50">
-            Upgrade to Business
+            {isRestaurantVenue ? 'Switch to Business plan' : 'Upgrade to Business'}
           </button>
         )}
         {tier === 'business' && !isCancelling && !isRestaurantVenue && (
@@ -378,13 +413,13 @@ function PlanSection({
               <div className="text-xs text-amber-950">
                 <p className="font-medium text-amber-900">Before switching to Standard</p>
                 <p className="mt-1 text-amber-900/90">
-                  On Standard you would pay &pound;{downgradeQty * 10}/month for {downgradeQty} active calendar
+                  On Standard you would pay &pound;{downgradeQty * STANDARD_PRICE_PER_CALENDAR}/month for {downgradeQty} active calendar
                   {downgradeQty === 1 ? '' : 's'}. Included SMS drops to{' '}
                   {SMS_INCLUDED_PER_CALENDAR_STANDARD * downgradeQty}/month (Business includes {SMS_INCLUDED_BUSINESS_TIER}).
                 </p>
-                {downgradeQty >= 8 && (
+                {downgradeQty * STANDARD_PRICE_PER_CALENDAR > BUSINESS_PRICE && (
                   <p className="mt-2 font-medium text-amber-900">
-                    At this size, Standard would cost more than your current &pound;79/month Business plan.
+                    At this size, Standard would cost more than your current &pound;{BUSINESS_PRICE}/month Business plan.
                   </p>
                 )}
               </div>
@@ -413,10 +448,12 @@ function PlanSection({
                   let msg: string;
                   if (isAppointmentVenue) {
                     const lines = [
-                      `Switch to Standard at £${downgradeQty * 10}/month for ${downgradeQty} calendar(s)?`,
+                      `Switch to Standard at £${downgradeQty * STANDARD_PRICE_PER_CALENDAR}/month for ${downgradeQty} calendar(s)?`,
                       `Included SMS will be ${SMS_INCLUDED_PER_CALENDAR_STANDARD * downgradeQty}/month (${SMS_INCLUDED_PER_CALENDAR_STANDARD} per calendar) vs ${SMS_INCLUDED_BUSINESS_TIER} on Business.`,
                     ];
-                    if (downgradeQty >= 8) lines.push('Standard would cost more than Business at this size.');
+                    if (downgradeQty * STANDARD_PRICE_PER_CALENDAR > BUSINESS_PRICE) {
+                      lines.push('Standard would cost more than Business at this size.');
+                    }
                     msg = lines.join('\n\n');
                   } else {
                     msg =
@@ -443,30 +480,47 @@ function PlanSection({
           </button>
         )}
       </div>
-      {showSevenPlusBusinessNudge && calendarCount != null && (
+      {showFourPlusBusinessNudge && calendarCount != null && (
         <div className="rounded-lg border border-brand-200 bg-brand-50/80 p-4 text-sm text-brand-900">
           <p className="font-medium">You&apos;re paying &pound;{standardMonthlyPence}/month</p>
           <p className="mt-1 text-xs leading-relaxed">
-            Business is &pound;79/month for unlimited team members and SMS reminders.
-            {standardMonthlyPence > 79 ? (
+            Business is &pound;{BUSINESS_PRICE}/month for unlimited bookable calendars, 800 SMS/month, and priority support.
+            {standardMonthlyPence > BUSINESS_PRICE ? (
               <>
                 {' '}
-                You&apos;d save &pound;{standardMonthlyPence - 79}/month and get SMS reminders.
+                You&apos;d save &pound;{standardMonthlyPence - BUSINESS_PRICE}/month at Business pricing.
               </>
             ) : (
-              <> Compare totals and upgrade if SMS and unlimited calendars suit you better.</>
+              <> Compare totals and upgrade if the flat allowance and unlimited calendars suit you better.</>
             )}
           </p>
         </div>
       )}
       {tier === 'standard' && (
         <div className="mt-4 rounded-lg border border-brand-100 bg-brand-50 p-4">
-          <p className="text-sm font-medium text-brand-800">Upgrade to unlock more</p>
+          <p className="text-sm font-medium text-brand-800">
+            {isRestaurantVenue ? 'Business is required for restaurants' : 'Upgrade to unlock more'}
+          </p>
           <ul className="mt-2 space-y-1 text-xs text-brand-700">
-            <li>&bull; SMS communications</li>
-            <li>&bull; Unlimited team members</li>
-            {!isAppointmentVenue && !isRestaurantVenue && <li>&bull; Table management (restaurants)</li>}
-            <li>&bull; Priority support</li>
+            {isRestaurantVenue ? (
+              <>
+                <li>&bull; Table service timeline and floor plan (not available on Standard)</li>
+                <li>&bull; Guest SMS at {SMS_INCLUDED_BUSINESS_TIER}/month included on Business</li>
+                <li>&bull; Priority support</li>
+              </>
+            ) : isAppointmentVenue ? (
+              <>
+                <li>&bull; Higher SMS allowance ({SMS_INCLUDED_BUSINESS_TIER}/month flat)</li>
+                <li>&bull; Unlimited bookable calendars</li>
+                <li>&bull; Priority support</li>
+              </>
+            ) : (
+              <>
+                <li>&bull; Higher SMS allowance ({SMS_INCLUDED_BUSINESS_TIER}/month flat)</li>
+                <li>&bull; Unlimited capacity on your plan type where applicable</li>
+                <li>&bull; Priority support</li>
+              </>
+            )}
           </ul>
         </div>
       )}
@@ -634,6 +688,7 @@ export function SettingsView({
             isAdmin={isAdmin}
             pricingTier={venue.pricing_tier ?? 'standard'}
             bookingModel={bookingModel}
+            depositConfig={venue.deposit_config}
           />
         )}
         {activeTab === 'staff' && isAdmin && (

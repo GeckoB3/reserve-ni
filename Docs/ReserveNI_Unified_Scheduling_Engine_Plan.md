@@ -829,6 +829,8 @@ The existing communication engine at `lib/communications/` has a channel abstrac
 
 Every non-restaurant booking goes through this lifecycle. Each message has a specific trigger, timing, channel rules, and content.
 
+**Implementation note:** Variable names and placeholder lists in dashboard template editors and preview samples may not match every production HTML template one-to-one; treat the product UI and `send-templated` / cron renderers as the source of truth for what is actually substituted at send time.
+
 #### Message 1: Booking Confirmation
 
 **Trigger:** Booking created (online, phone, or staff-created). For bookings with deposits, sent after Stripe payment_intent.succeeded webhook. For bookings without deposits, sent immediately on creation.
@@ -1017,6 +1019,19 @@ For each booking:
 ```
 
 ### 4.3 Channel Routing Logic
+
+#### 4.3.1 Implementation (production)
+
+Routing is applied where messages are sent, rather than a single global `getChannelsForMessage` helper:
+
+- **Transactional unified appointment messages** (confirmation, deposit request/confirm, reschedule, cancellation): [`src/lib/communications/send-templated.ts`](src/lib/communications/send-templated.ts) loads [`getVenueNotificationSettings`](src/lib/notifications/notification-settings.ts) for `unified_scheduling` / `practitioner_appointment` venues and gates sends (e.g. `confirmation_enabled`, `confirmation_channels`, `reschedule_notification_enabled`, `cancellation_notification_enabled`). Cancellation SMS is not sent for these booking models. Deposit channels still follow [`getCommSettings`](src/lib/communications/service.ts) and tier checks ([`isSmsAllowed`](src/lib/tier-enforcement.ts)).
+- **Scheduled reminders and post-visit** (messages 4, 5, 8): [`src/lib/cron/unified-scheduling-comms.ts`](src/lib/cron/unified-scheduling-comms.ts) reads the same `notification_settings` JSON for toggles, hours, and channels; legacy restaurant cron skips unified venues.
+- **No-show email**: [`CommunicationService`](src/lib/communications/service.ts) with `no_show_notification` and email-only `MESSAGE_CHANNELS`, gated by `no_show_notification_enabled` before send in the venue booking API.
+- **Legacy / tier overrides**: [`src/lib/communications/tier-message-channels.ts`](src/lib/communications/tier-message-channels.ts) only overrides `deposit_payment_reminder` today; it does not replace the unified paths above.
+
+The pseudocode below remains the **canonical channel matrix** for product and docs; new code should stay aligned with these rules even if the function is not literally centralized.
+
+#### 4.3.2 Central router (reference pseudocode)
 
 Update `lib/communications/service.ts` with this routing:
 

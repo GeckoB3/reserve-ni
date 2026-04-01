@@ -3,6 +3,7 @@ import { createHmac, timingSafeEqual } from 'crypto';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { createBookingHmac } from '@/lib/short-manage-link';
 import { tryGetPaymentTokenSecret } from '@/lib/payment-token';
+import { resolvePublicSiteOriginFromRequest } from '@/lib/public-base-url';
 
 function parseShortCode(code: string): string | null {
   const secret = tryGetPaymentTokenSecret();
@@ -42,7 +43,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id: code } = await params;
-  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'https://www.reserveni.com';
+  const baseUrl = resolvePublicSiteOriginFromRequest(_request);
 
   const bookingId = parseShortCode(code);
   if (!bookingId) {

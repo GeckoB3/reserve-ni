@@ -3,7 +3,7 @@ import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { generateConfirmToken, hashConfirmToken } from '@/lib/confirm-token';
-import { sendBookingConfirmationEmail } from '@/lib/communications/send-templated';
+import { sendBookingConfirmationNotifications } from '@/lib/communications/send-templated';
 import { enrichBookingEmailForAppointment } from '@/lib/emails/booking-email-enrichment';
 
 export async function POST(
@@ -57,6 +57,7 @@ export async function POST(
     id: booking.id,
     guest_name: guest.name ?? 'Guest',
     guest_email: guest.email,
+    guest_phone: guest.phone ?? null,
     booking_date: booking.booking_date,
     booking_time: booking.booking_time?.slice(0, 5) ?? '00:00',
     party_size: booking.party_size,
@@ -67,7 +68,11 @@ export async function POST(
     manage_booking_link: manageBookingLink,
   };
   const enriched = await enrichBookingEmailForAppointment(admin, booking.id, basePayload);
-  await sendBookingConfirmationEmail(enriched, { name: venue.name, address: venue.address ?? undefined }, staff.venue_id);
+  await sendBookingConfirmationNotifications(
+    enriched,
+    { name: venue.name, address: venue.address ?? undefined },
+    staff.venue_id,
+  );
 
   return NextResponse.json({ success: true });
 }

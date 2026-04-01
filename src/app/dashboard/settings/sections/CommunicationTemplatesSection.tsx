@@ -4,6 +4,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CommunicationSettings } from '@/lib/communications/service';
 import type { CommMessageType } from '@/lib/emails/types';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
+import type { DepositConfigLike } from '@/lib/venue/deposit-workflow';
+import { venueUsesDepositWorkflow } from '@/lib/venue/deposit-workflow';
+import { UnifiedAppointmentNotificationSection } from './UnifiedAppointmentNotificationSection';
 
 interface CommCardConfig {
   messageType: CommMessageType;
@@ -13,6 +16,8 @@ interface CommCardConfig {
   enabledKey: keyof CommunicationSettings;
   customMessageKey: keyof CommunicationSettings;
   locked?: boolean;
+  /** When `locked`, replaces the default "Always on" badge (e.g. unified venues). */
+  lockedBadgeLabel?: string;
   timeKey?: keyof CommunicationSettings;
   hoursBeforeKey?: keyof CommunicationSettings;
   maxChars: number;
@@ -27,7 +32,7 @@ interface CommCardConfig {
  * When true, Standard-tier restaurant (Model A) limits several templates to email-only.
  * Unified scheduling Standard tier includes SMS per product plan §1.1 — pass false when `unified_scheduling`.
  */
-function buildCommunicationCards(restrictSmsForStandard: boolean): CommCardConfig[] {
+function buildCommunicationCards(restrictSmsForStandard: boolean, unifiedVenue: boolean): CommCardConfig[] {
   const daySub: CommCardConfig['subToggles'] = restrictSmsForStandard
     ? [{ key: 'day_of_reminder_email_enabled', label: 'Email' }]
     : [
@@ -42,22 +47,27 @@ function buildCommunicationCards(restrictSmsForStandard: boolean): CommCardConfi
         { key: 'modification_sms_enabled', label: 'SMS' },
       ];
 
-  const cancelSub: CommCardConfig['subToggles'] = restrictSmsForStandard
+  const cancelSub: CommCardConfig['subToggles'] = unifiedVenue
     ? [{ key: 'cancellation_email_enabled', label: 'Email' }]
-    : [
-        { key: 'cancellation_email_enabled', label: 'Email' },
-        { key: 'cancellation_sms_enabled', label: 'SMS' },
-      ];
+    : restrictSmsForStandard
+      ? [{ key: 'cancellation_email_enabled', label: 'Email' }]
+      : [
+          { key: 'cancellation_email_enabled', label: 'Email' },
+          { key: 'cancellation_sms_enabled', label: 'SMS' },
+        ];
 
   const cards: CommCardConfig[] = [
     {
       messageType: 'booking_confirmation_email',
       label: 'Booking Confirmation',
-      description: 'Sent immediately when a booking is confirmed. Includes booking details and a manage-booking link.',
+      description: unifiedVenue
+        ? 'Sent when a booking is confirmed. Channels are controlled under Automated messages above.'
+        : 'Sent immediately when a booking is confirmed. Includes booking details and a manage-booking link.',
       channel: 'email',
       enabledKey: 'confirmation_email_enabled',
       customMessageKey: 'confirmation_email_custom_message',
       locked: true,
+      ...(unifiedVenue ? { lockedBadgeLabel: 'Channels above' } : {}),
       maxChars: 500,
     },
     {
@@ -76,8 +86,9 @@ function buildCommunicationCards(restrictSmsForStandard: boolean): CommCardConfi
     cards.push({
       messageType: 'deposit_request_sms',
       label: 'Deposit request (SMS)',
-      description:
-        'SMS with a payment link for staff pay-by-link deposits. (Restaurant Standard tier uses email-only deposit requests.)',
+      description: unifiedVenue
+        ? 'Text message with a payment link when staff create a booking that needs a separate deposit payment.'
+        : 'SMS with a payment link for staff pay-by-link deposits. (Restaurant Standard tier uses email-only deposit requests.)',
       channel: 'sms',
       enabledKey: 'deposit_sms_enabled',
       customMessageKey: 'deposit_sms_custom_message',
@@ -132,9 +143,11 @@ function buildCommunicationCards(restrictSmsForStandard: boolean): CommCardConfi
     {
       messageType: 'booking_modification_email',
       label: 'Booking Modification',
-      description: restrictSmsForStandard
-        ? 'Sent when a booking is changed. Restaurant Standard: email only (SMS on Business).'
-        : 'Sent when a booking\'s date, time, or party size is changed. Choose email and/or SMS.',
+      description: unifiedVenue
+        ? 'Sent when an appointment is rescheduled or details change. Choose email and, where your plan allows, text.'
+        : restrictSmsForStandard
+          ? 'Sent when a booking is changed. Restaurant Standard: email only (SMS on Business).'
+          : 'Sent when a booking\'s date, time, or party size is changed. Choose email and/or SMS.',
       channel: restrictSmsForStandard ? 'email' : 'both',
       enabledKey: 'modification_email_enabled',
       customMessageKey: 'modification_custom_message',
@@ -146,10 +159,12 @@ function buildCommunicationCards(restrictSmsForStandard: boolean): CommCardConfi
     {
       messageType: 'cancellation_email',
       label: 'Booking Cancellation',
-      description: restrictSmsForStandard
-        ? 'Sent when a booking is cancelled. Restaurant Standard: email only (SMS on Business).'
-        : 'Sent when a booking is cancelled. Choose email and/or SMS.',
-      channel: restrictSmsForStandard ? 'email' : 'both',
+      description: unifiedVenue
+        ? 'Sent when a booking is cancelled. For appointments this is always by email.'
+        : restrictSmsForStandard
+          ? 'Sent when a booking is cancelled. Restaurant Standard: email only (SMS on Business).'
+          : 'Sent when a booking is cancelled. Choose email and/or SMS.',
+      channel: unifiedVenue || restrictSmsForStandard ? 'email' : 'both',
       enabledKey: 'cancellation_email_enabled',
       customMessageKey: 'cancellation_custom_message',
       locked: true,
@@ -174,24 +189,90 @@ interface CommunicationTemplatesSectionProps {
   /** Standard tier on restaurants only: email-only deposit request; SMS comms hidden for several message types. */
   pricingTier?: string;
   bookingModel?: string;
+  /** When unset, deposit-related template cards are shown for unified venues (conservative default). */
+  depositConfig?: DepositConfigLike | null;
   onUpdate?: (patch: Record<string, unknown>) => void;
 }
+
+const UNIFIED_HIDDEN_TYPES = new Set<CommMessageType>(['reminder_56h_email', 'day_of_reminder_email', 'post_visit_email']);
+const DEPOSIT_MESSAGE_TYPES = new Set<CommMessageType>([
+  'deposit_request_email',
+  'deposit_request_sms',
+  'deposit_confirmation_email',
+]);
+
+type UnifiedTemplateGroup = 'booking' | 'deposits' | 'changes';
+
+function unifiedTemplateGroup(messageType: CommMessageType): UnifiedTemplateGroup {
+  if (DEPOSIT_MESSAGE_TYPES.has(messageType)) return 'deposits';
+  if (messageType === 'booking_modification_email' || messageType === 'cancellation_email') return 'changes';
+  return 'booking';
+}
+
+const UNIFIED_TEMPLATE_GROUP_LABEL: Record<UnifiedTemplateGroup, string> = {
+  booking: 'Confirmations',
+  deposits: 'Deposits (pay-by-link)',
+  changes: 'Reschedules and cancellations',
+};
 
 export function CommunicationTemplatesSection({
   venue: _venue,
   isAdmin,
   pricingTier = 'standard',
   bookingModel,
+  depositConfig,
 }: CommunicationTemplatesSectionProps) {
-  const restrictSmsForStandard =
-    pricingTier === 'standard' && !isUnifiedSchedulingVenue(bookingModel);
-  const cards = useMemo(() => buildCommunicationCards(restrictSmsForStandard), [restrictSmsForStandard]);
+  const unifiedVenue = isUnifiedSchedulingVenue(bookingModel);
+  const restrictSmsForStandard = pricingTier === 'standard' && !unifiedVenue;
+  const cards = useMemo(
+    () => buildCommunicationCards(restrictSmsForStandard, unifiedVenue),
+    [restrictSmsForStandard, unifiedVenue],
+  );
+  /** When deposit JSON is missing, keep deposit cards visible for unified venues (cannot infer intent). */
+  const showDepositTemplates =
+    !unifiedVenue || depositConfig == null || venueUsesDepositWorkflow(depositConfig);
+  const visibleCards = useMemo(() => {
+    let list = unifiedVenue ? cards.filter((c) => !UNIFIED_HIDDEN_TYPES.has(c.messageType)) : cards;
+    if (unifiedVenue && !showDepositTemplates) {
+      list = list.filter((c) => !DEPOSIT_MESSAGE_TYPES.has(c.messageType));
+    }
+    return list;
+  }, [cards, unifiedVenue, showDepositTemplates]);
+
+  const unifiedTimelineSteps = useMemo(() => {
+    if (!unifiedVenue) return null;
+    if (showDepositTemplates) {
+      return [
+        { label: 'Booking made', icon: '1' },
+        { label: 'Deposit', icon: '2' },
+        { label: 'First reminder', icon: '3' },
+        { label: 'Second reminder', icon: '4' },
+        { label: 'Thank you', icon: '5' },
+      ];
+    }
+    return [
+      { label: 'Booking made', icon: '1' },
+      { label: 'First reminder', icon: '2' },
+      { label: 'Second reminder', icon: '3' },
+      { label: 'Thank you', icon: '4' },
+    ];
+  }, [unifiedVenue, showDepositTemplates]);
+
   const [settings, setSettings] = useState<CommunicationSettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [notifSaveStatus, setNotifSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const mergedSaveStatus = useMemo(() => {
+    if (saveStatus === 'saving' || notifSaveStatus === 'saving') return 'saving';
+    if (saveStatus === 'error' || notifSaveStatus === 'error') return 'error';
+    if (saveStatus === 'saved' || notifSaveStatus === 'saved') return 'saved';
+    return 'idle';
+  }, [saveStatus, notifSaveStatus]);
+
   const [previewHtml, setPreviewHtml] = useState<string | null>(null);
   const [previewText, setPreviewText] = useState<string | null>(null);
   const [previewType, setPreviewType] = useState<CommMessageType | null>(null);
+  const [previewCardLabel, setPreviewCardLabel] = useState<string | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -241,25 +322,29 @@ export function CommunicationTemplatesSection({
     [isAdmin],
   );
 
-  const openPreview = useCallback(async (messageType: CommMessageType, customMessage?: string | null) => {
-    setPreviewLoading(true);
-    setPreviewType(messageType);
-    try {
-      const res = await fetch('/api/venue/communication-preview', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messageType, customMessage }),
-      });
-      const data = await res.json();
-      setPreviewHtml(data.html ?? null);
-      setPreviewText(data.text ?? null);
-    } catch {
-      setPreviewHtml(null);
-      setPreviewText('Preview failed to load');
-    } finally {
-      setPreviewLoading(false);
-    }
-  }, []);
+  const openPreview = useCallback(
+    async (messageType: CommMessageType, customMessage?: string | null, displayLabel?: string) => {
+      setPreviewLoading(true);
+      setPreviewType(messageType);
+      setPreviewCardLabel(displayLabel ?? null);
+      try {
+        const res = await fetch('/api/venue/communication-preview', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ messageType, customMessage }),
+        });
+        const data = await res.json();
+        setPreviewHtml(data.html ?? null);
+        setPreviewText(data.text ?? null);
+      } catch {
+        setPreviewHtml(null);
+        setPreviewText('Preview failed to load');
+      } finally {
+        setPreviewLoading(false);
+      }
+    },
+    [],
+  );
 
   if (loading) {
     return (
@@ -280,67 +365,174 @@ export function CommunicationTemplatesSection({
     );
   }
 
+  const timelineSteps =
+    unifiedVenue && unifiedTimelineSteps
+      ? unifiedTimelineSteps
+      : [
+          { label: 'Booking made', icon: '1' },
+          { label: 'Deposit paid', icon: '2' },
+          { label: 'Confirm/Cancel', icon: '3' },
+          { label: 'Day of visit', icon: '4' },
+          { label: 'After visit', icon: '5' },
+        ];
+
   return (
-    <section className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-lg font-semibold text-slate-900">Guest Communications</h2>
-          <p className="mt-0.5 text-sm text-slate-500">
-            Control what messages your guests receive and when they are sent.
+    <section className="space-y-10" aria-labelledby="guest-comms-main-heading">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <h2 id="guest-comms-main-heading" className="text-lg font-semibold text-slate-900">
+            Guest communications
+          </h2>
+          <p className="mt-1 text-sm text-slate-600">
+            {unifiedVenue
+              ? 'Set when messages go out and how guests are reached, then adjust the wording for each message.'
+              : 'Control what messages your guests receive and when they are sent.'}
           </p>
+          {unifiedVenue && !showDepositTemplates && (
+            <p className="mt-2 text-sm text-slate-500">
+              Deposit wording is hidden while deposits are off in your booking and payment settings.
+            </p>
+          )}
           {restrictSmsForStandard && (
             <p className="mt-2 text-xs text-slate-500">
-              Restaurant Standard plan: several guest SMS options are off here; upgrade to Business for full SMS on deposit requests, day-of reminders, and change/cancel notices. Unified scheduling venues on Standard include SMS with a monthly allowance (see Plan).
+              Restaurant Standard plan: several guest SMS options are off here; upgrade to Business for full SMS on deposit
+              requests, day-of reminders, and change/cancel notices. Unified scheduling venues on Standard include SMS with a
+              monthly allowance (see Plan).
             </p>
           )}
         </div>
-        <SaveIndicator status={saveStatus} />
+        <SaveIndicator status={mergedSaveStatus} />
       </div>
 
-      {/* Timeline visual */}
-      <div className="rounded-xl border border-slate-200 bg-gradient-to-r from-slate-50 to-white p-4">
-        <div className="flex items-center gap-1 overflow-x-auto text-xs">
-          {[
-            { label: 'Booking made', icon: '1' },
-            { label: 'Deposit paid', icon: '2' },
-            { label: 'Confirm/Cancel', icon: '3' },
-            { label: 'Day of visit', icon: '4' },
-            { label: 'After visit', icon: '5' },
-          ].map((step, i) => (
-            <div key={step.label} className="flex items-center gap-1">
-              {i > 0 && <div className="h-px w-6 bg-slate-300 sm:w-10" />}
-              <div className="flex flex-shrink-0 items-center gap-1.5">
-                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-brand-600 text-[10px] font-bold text-white">{step.icon}</span>
-                <span className="whitespace-nowrap text-slate-600">{step.label}</span>
-              </div>
+      {unifiedVenue && (
+        <div className="space-y-4">
+          <div
+            className="rounded-xl border border-slate-200 bg-slate-50/80 px-4 py-3"
+            role="region"
+            aria-label="Typical message order for your clients"
+          >
+            <p className="text-xs font-medium text-slate-700">Typical order for your clients</p>
+            <ol className="mt-2 flex flex-wrap items-center gap-x-1 gap-y-2 text-xs text-slate-600">
+              {timelineSteps.map((step, i) => (
+                <li key={`${step.label}-${step.icon}`} className="flex items-center gap-1">
+                  {i > 0 && <span className="mx-1 text-slate-300" aria-hidden="true">→</span>}
+                  <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-white text-[11px] font-semibold text-brand-700 shadow-sm ring-1 ring-slate-200/80">
+                    {step.icon}
+                  </span>
+                  <span className="whitespace-nowrap pl-0.5">{step.label}</span>
+                </li>
+              ))}
+            </ol>
+          </div>
+
+          <section className="space-y-4" aria-labelledby="unified-automation-heading">
+            <div>
+              <h3 id="unified-automation-heading" className="text-base font-semibold text-slate-900">
+                Automated messages
+              </h3>
+              <p className="mt-1 max-w-2xl text-sm text-slate-500">
+                Choose channels and timing here. Optional lines for reminders and thank-you sit in the same box so
+                everything for automation stays in one place.
+              </p>
             </div>
-          ))}
+            <UnifiedAppointmentNotificationSection
+              isAdmin={isAdmin}
+              commSettings={settings}
+              onUpdateComm={updateSetting}
+              onNotificationSaveStatus={setNotifSaveStatus}
+              onPreview={(type, custom) => {
+                const labels: Partial<Record<CommMessageType, string>> = {
+                  reminder_1_email: 'First reminder (email)',
+                  reminder_1_sms: 'Reminder text (sample)',
+                  reminder_2_sms: 'Reminder text (sample)',
+                  unified_post_visit_email: 'Thank-you after visit (email)',
+                  booking_confirmation_sms: 'Confirmation text',
+                };
+                void openPreview(type, custom ?? null, labels[type]);
+              }}
+            />
+          </section>
         </div>
-      </div>
+      )}
 
-      {/* Message cards */}
-      <div className="space-y-4">
-        {cards.map((card) => (
-          <CommCard
-            key={card.messageType}
-            card={card}
-            settings={settings}
-            onUpdate={updateSetting}
-            onPreview={openPreview}
-            isAdmin={isAdmin}
-          />
-        ))}
-      </div>
+      <section className="space-y-5" aria-labelledby="message-templates-section-heading">
+        <div className="border-t border-slate-200 pt-8">
+          <h3 id="message-templates-section-heading" className="text-base font-semibold text-slate-900">
+            {unifiedVenue ? 'Wording for each message' : 'Message templates'}
+          </h3>
+          <p className="mt-1 text-sm text-slate-500">
+            {unifiedVenue
+              ? 'Edit how each email or text reads. Preview shows sample appointment details.'
+              : 'Edit the wording guests see in each email or text.'}
+          </p>
+        </div>
 
-      {/* Preview modal */}
+        {!unifiedVenue && (
+          <div className="rounded-xl border border-slate-200 bg-slate-50/80 px-4 py-3" role="region" aria-label="Typical journey">
+            <p className="text-xs font-medium text-slate-700">Typical journey</p>
+            <div className="mt-2 flex flex-wrap items-center gap-x-1 gap-y-2 text-xs text-slate-600">
+              {timelineSteps.map((step, i) => (
+                <div key={`${step.label}-${step.icon}`} className="flex items-center gap-1">
+                  {i > 0 && <span className="mx-1 text-slate-300" aria-hidden="true">→</span>}
+                  <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-white text-[11px] font-semibold text-brand-700 shadow-sm ring-1 ring-slate-200/80">
+                    {step.icon}
+                  </span>
+                  <span className="whitespace-nowrap pl-0.5">{step.label}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="space-y-8">
+          {unifiedVenue
+            ? (['booking', 'deposits', 'changes'] as const).map((g) => {
+                const groupCards = visibleCards.filter((c) => unifiedTemplateGroup(c.messageType) === g);
+                if (groupCards.length === 0) return null;
+                return (
+                  <div key={g} className="space-y-3">
+                    <h4 className="text-sm font-semibold text-slate-800">{UNIFIED_TEMPLATE_GROUP_LABEL[g]}</h4>
+                    <div className="space-y-4">
+                      {groupCards.map((card) => (
+                        <CommCard
+                          key={card.messageType}
+                          card={card}
+                          settings={settings}
+                          onUpdate={updateSetting}
+                          onPreview={(type, msg) => void openPreview(type, msg)}
+                          isAdmin={isAdmin}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                );
+              })
+            : visibleCards.map((card) => (
+                <CommCard
+                  key={card.messageType}
+                  card={card}
+                  settings={settings}
+                  onUpdate={updateSetting}
+                  onPreview={(type, msg) => void openPreview(type, msg)}
+                  isAdmin={isAdmin}
+                />
+              ))}
+        </div>
+      </section>
+
       {previewType && (
         <PreviewModal
           messageType={previewType}
-          cardLabel={cards.find((c) => c.messageType === previewType)?.label}
+          cardLabel={previewCardLabel ?? visibleCards.find((c) => c.messageType === previewType)?.label}
           html={previewHtml}
           text={previewText}
           loading={previewLoading}
-          onClose={() => { setPreviewType(null); setPreviewHtml(null); setPreviewText(null); }}
+          onClose={() => {
+            setPreviewType(null);
+            setPreviewHtml(null);
+            setPreviewText(null);
+            setPreviewCardLabel(null);
+          }}
         />
       )}
     </section>
@@ -401,7 +593,9 @@ function CommCard({
             </button>
           )}
           {card.locked && (
-            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-500 uppercase">Always on</span>
+            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-500 uppercase">
+              {card.lockedBadgeLabel ?? 'Always on'}
+            </span>
           )}
         </div>
       </div>

@@ -3,9 +3,10 @@ import { getSupabaseAdminClient } from '@/lib/supabase';
 import { stripe } from '@/lib/stripe';
 import { generateConfirmToken, hashConfirmToken } from '@/lib/confirm-token';
 import { validateBookingStatusTransition } from '@/lib/table-management/lifecycle';
-import { sendBookingConfirmationEmail, sendDepositConfirmationEmail } from '@/lib/communications/send-templated';
+import { sendBookingConfirmationNotifications, sendDepositConfirmationEmail } from '@/lib/communications/send-templated';
 import { isSelfServeBookingSource } from '@/lib/booking-source';
 import { enrichBookingEmailForAppointment } from '@/lib/emails/booking-email-enrichment';
+import { resolvePublicSiteOriginFromRequest } from '@/lib/public-base-url';
 
 /**
  * POST /api/booking/confirm-payment
@@ -132,8 +133,7 @@ export async function POST(request: NextRequest) {
       .eq('id', booking.guest_id)
       .single();
 
-    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL
-      || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : request.nextUrl.origin);
+    const baseUrl = resolvePublicSiteOriginFromRequest(request);
     const manageBookingLink = manageToken
       ? `${baseUrl}/manage/${bookingId}/${encodeURIComponent(manageToken)}`
       : undefined;
@@ -147,6 +147,7 @@ export async function POST(request: NextRequest) {
       id: booking.id,
       guest_name: guest?.name ?? guestEmail ?? 'Guest',
       guest_email: recipientEmail ?? null,
+      guest_phone: guest?.phone ?? null,
       booking_date: booking.booking_date,
       booking_time: bookingTime,
       party_size: booking.party_size,
@@ -159,10 +160,17 @@ export async function POST(request: NextRequest) {
     after(async () => {
       try {
         const enriched = await enrichBookingEmailForAppointment(supabase, bookingId, bookingData);
-        const confResult = await sendBookingConfirmationEmail(enriched, venueData, booking.venue_id);
-        if (!confResult.sent) console.warn('[after] confirm-payment confirmation email not sent:', confResult.reason);
+        const { email: confEmail, sms: confSms } = await sendBookingConfirmationNotifications(
+          enriched,
+          venueData,
+          booking.venue_id,
+        );
+        if (!confEmail.sent) console.warn('[after] confirm-payment confirmation email not sent:', confEmail.reason);
+        if (!confSms.sent && confSms.reason !== 'skipped' && confSms.reason !== 'no_phone') {
+          console.warn('[after] confirm-payment confirmation SMS not sent:', confSms.reason);
+        }
       } catch (err) {
-        console.error('[after] confirm-payment confirmation email failed:', err);
+        console.error('[after] confirm-payment confirmation notifications failed:', err);
       }
 
       const skipDepositReceipt = isSelfServeBookingSource(booking.source as string | null);

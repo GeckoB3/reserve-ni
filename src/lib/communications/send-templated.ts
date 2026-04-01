@@ -14,10 +14,22 @@ import { sendSms } from '@/lib/emails/send-sms';
 import { getCommSettings, logToCommLogs, updateCommLogStatus } from './service';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { isSmsAllowed } from '@/lib/tier-enforcement';
+import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
+import { getVenueNotificationSettings } from '@/lib/notifications/notification-settings';
+import { renderBookingConfirmationSms } from '@/lib/emails/templates/booking-confirmation-sms';
 
 interface SendResult {
   sent: boolean;
   reason?: string;
+}
+
+async function fetchVenueBookingModel(venueId: string): Promise<string | null> {
+  const { data } = await getSupabaseAdminClient()
+    .from('venues')
+    .select('booking_model')
+    .eq('id', venueId)
+    .maybeSingle();
+  return (data as { booking_model?: string | null } | null)?.booking_model ?? null;
 }
 
 async function trySendWithDedup(opts: {
@@ -74,6 +86,14 @@ export async function sendBookingConfirmationEmail(
     const settings = await getCommSettings(venueId);
     if (!settings.confirmation_email_enabled) return { sent: false, reason: 'disabled' };
 
+    const bookingModel = await fetchVenueBookingModel(venueId);
+    if (isUnifiedSchedulingVenue(bookingModel)) {
+      const ns = await getVenueNotificationSettings(venueId);
+      if (!ns.confirmation_enabled || !ns.confirmation_channels.includes('email')) {
+        return { sent: false, reason: 'disabled' };
+      }
+    }
+
     const rendered = renderBookingConfirmation(booking, venue, settings.confirmation_email_custom_message);
 
     return trySendWithDedup({
@@ -88,6 +108,55 @@ export async function sendBookingConfirmationEmail(
     console.error('[send-templated] booking confirmation email error:', err);
     return { sent: false, reason: 'error' };
   }
+}
+
+/**
+ * Unified scheduling / practitioner appointments: confirmation SMS (Message 1) per `notification_settings`.
+ */
+export async function sendBookingConfirmationSms(
+  booking: BookingEmailData,
+  venue: VenueEmailData,
+  venueId: string,
+  guestPhone?: string | null,
+): Promise<SendResult> {
+  const phone = guestPhone ?? booking.guest_phone;
+  if (!phone) return { sent: false, reason: 'no_phone' };
+
+  try {
+    const bookingModel = await fetchVenueBookingModel(venueId);
+    if (!isUnifiedSchedulingVenue(bookingModel)) return { sent: false, reason: 'skipped' };
+
+    const ns = await getVenueNotificationSettings(venueId);
+    if (!ns.confirmation_enabled || !ns.confirmation_channels.includes('sms')) {
+      return { sent: false, reason: 'disabled' };
+    }
+
+    if (!(await isSmsAllowed(venueId))) return { sent: false, reason: 'tier' };
+
+    const rendered = renderBookingConfirmationSms(booking, venue, ns.confirmation_sms_custom_message);
+
+    return trySendWithDedup({
+      venueId,
+      bookingId: booking.id,
+      messageType: 'booking_confirmation_sms',
+      channel: 'sms',
+      recipient: phone,
+      sendFn: () => sendSms(phone, rendered.body),
+    });
+  } catch (err) {
+    console.error('[send-templated] booking confirmation SMS error:', err);
+    return { sent: false, reason: 'error' };
+  }
+}
+
+export async function sendBookingConfirmationNotifications(
+  booking: BookingEmailData,
+  venue: VenueEmailData,
+  venueId: string,
+): Promise<{ email: SendResult; sms: SendResult }> {
+  const email = await sendBookingConfirmationEmail(booking, venue, venueId);
+  const sms = await sendBookingConfirmationSms(booking, venue, venueId);
+  return { email, sms };
 }
 
 export async function sendDepositRequestEmail(
@@ -251,6 +320,17 @@ export async function sendBookingModificationNotification(
   try {
     const settings = await getCommSettings(venueId);
 
+    const bookingModel = await fetchVenueBookingModel(venueId);
+    if (isUnifiedSchedulingVenue(bookingModel)) {
+      const ns = await getVenueNotificationSettings(venueId);
+      if (!ns.reschedule_notification_enabled) {
+        return {
+          email: { sent: false, reason: 'disabled' },
+          sms: { sent: false, reason: 'disabled' },
+        };
+      }
+    }
+
     if (settings.modification_email_enabled && booking.guest_email) {
       try {
         const rendered = renderBookingModification(booking, venue, settings.modification_custom_message);
@@ -342,6 +422,15 @@ export async function sendCancellationNotification(
 
   try {
     const settings = await getCommSettings(venueId);
+    const bookingModel = await fetchVenueBookingModel(venueId);
+    const unified = isUnifiedSchedulingVenue(bookingModel);
+    const ns = unified ? await getVenueNotificationSettings(venueId) : null;
+    if (unified && ns && !ns.cancellation_notification_enabled) {
+      return {
+        email: { sent: false, reason: 'disabled' },
+        sms: { sent: false, reason: 'disabled' },
+      };
+    }
 
     if (settings.cancellation_email_enabled && booking.guest_email) {
       try {
@@ -377,7 +466,12 @@ export async function sendCancellationNotification(
       results.email = { sent: false, reason: 'disabled' };
     }
 
-    if (settings.cancellation_sms_enabled && booking.guest_phone && (await isSmsAllowed(venueId))) {
+    if (
+      !unified &&
+      settings.cancellation_sms_enabled &&
+      booking.guest_phone &&
+      (await isSmsAllowed(venueId))
+    ) {
       try {
         const rendered = renderBookingCancellationSms(booking, venue, refundMessage);
         await sendSms(booking.guest_phone, rendered.body);
@@ -406,6 +500,8 @@ export async function sendCancellationNotification(
       }
     } else if (!booking.guest_phone) {
       results.sms = { sent: false, reason: 'no_phone' };
+    } else if (unified) {
+      results.sms = { sent: false, reason: 'skipped' };
     } else if (!settings.cancellation_sms_enabled) {
       results.sms = { sent: false, reason: 'disabled' };
     } else {

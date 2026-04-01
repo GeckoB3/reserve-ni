@@ -1,4 +1,5 @@
 import { createHmac, timingSafeEqual } from 'crypto';
+import { normalizePublicBaseUrl } from '@/lib/public-base-url';
 import { getPaymentTokenSecret, tryGetPaymentTokenSecret } from '@/lib/payment-token';
 
 /**
@@ -13,7 +14,7 @@ export function createShortManageLink(bookingId: string): string {
     .update(payload)
     .digest('base64url')
     .slice(0, 12);
-  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'https://www.reserveni.com';
+  const baseUrl = normalizePublicBaseUrl(process.env.NEXT_PUBLIC_BASE_URL);
   return `${baseUrl}/m/${payload}.${sig}`;
 }
 

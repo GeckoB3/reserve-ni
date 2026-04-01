@@ -6,7 +6,7 @@ import { stripe } from '@/lib/stripe';
 import { findOrCreateGuest } from '@/lib/guests';
 import { generateConfirmToken, hashConfirmToken } from '@/lib/confirm-token';
 
-import { sendBookingConfirmationEmail, sendDepositRequestNotifications } from '@/lib/communications/send-templated';
+import { sendBookingConfirmationNotifications, sendDepositRequestNotifications } from '@/lib/communications/send-templated';
 import { autoAssignTable } from '@/lib/table-availability';
 import { computeAvailability, fetchEngineInput } from '@/lib/availability';
 import { AVAILABILITY_SETUP_REQUIRED_MESSAGE } from '@/lib/availability/availability-errors';
@@ -287,13 +287,18 @@ export async function POST(request: NextRequest) {
         const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : request.nextUrl.origin);
         const manageBookingLink = `${baseUrl}/manage/${apptBooking.id}/${encodeURIComponent(manageToken)}`;
 
-        if (guest.email) {
+        if (guest.email || guest.phone) {
           after(async () => {
             try {
-              const result = await sendBookingConfirmationEmail(
+              const { email, sms } = await sendBookingConfirmationNotifications(
                 {
-                  id: apptBooking.id, guest_name: name, guest_email: guest.email!,
-                  booking_date, booking_time, party_size: 1,
+                  id: apptBooking.id,
+                  guest_name: name,
+                  guest_email: guest.email ?? null,
+                  guest_phone: guest.phone ?? null,
+                  booking_date,
+                  booking_time,
+                  party_size: 1,
                   special_requests: special_requests ?? null,
                   dietary_notes: dietary_notes ?? null,
                   manage_booking_link: manageBookingLink,
@@ -302,9 +307,12 @@ export async function POST(request: NextRequest) {
                 { name: venue.name, address: venue.address ?? undefined },
                 venueId,
               );
-              if (!result.sent) console.warn('[after] appointment confirmation email not sent:', result.reason);
+              if (!email.sent) console.warn('[after] appointment confirmation email not sent:', email.reason);
+              if (!sms.sent && sms.reason !== 'skipped' && sms.reason !== 'no_phone') {
+                console.warn('[after] appointment confirmation SMS not sent:', sms.reason);
+              }
             } catch (err) {
-              console.error('[after] appointment confirmation email failed:', err);
+              console.error('[after] appointment confirmation notifications failed:', err);
             }
           });
         }
@@ -494,13 +502,18 @@ export async function POST(request: NextRequest) {
       const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : request.nextUrl.origin);
       const manageBookingLink = `${baseUrl}/manage/${booking.id}/${encodeURIComponent(manageToken)}`;
 
-      if (guest.email) {
+      if (guest.email || guest.phone) {
         after(async () => {
           try {
-            const result = await sendBookingConfirmationEmail(
+            const { email, sms } = await sendBookingConfirmationNotifications(
               {
-                id: booking.id, guest_name: name, guest_email: guest.email!,
-                booking_date, booking_time, party_size,
+                id: booking.id,
+                guest_name: name,
+                guest_email: guest.email ?? null,
+                guest_phone: guest.phone ?? null,
+                booking_date,
+                booking_time,
+                party_size,
                 special_requests: special_requests ?? null,
                 dietary_notes: dietary_notes ?? null,
                 manage_booking_link: manageBookingLink,
@@ -508,9 +521,12 @@ export async function POST(request: NextRequest) {
               { name: venue.name, address: venue.address ?? undefined },
               venueId,
             );
-            if (!result.sent) console.warn('[after] confirmation email not sent:', result.reason);
+            if (!email.sent) console.warn('[after] confirmation email not sent:', email.reason);
+            if (!sms.sent && sms.reason !== 'skipped' && sms.reason !== 'no_phone') {
+              console.warn('[after] confirmation SMS not sent:', sms.reason);
+            }
           } catch (err) {
-            console.error('[after] confirmation email failed:', err);
+            console.error('[after] confirmation notifications failed:', err);
           }
         });
       }

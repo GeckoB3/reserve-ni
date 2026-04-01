@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server';
+import { normalizePublicBaseUrl } from '@/lib/public-base-url';
 import { redirect } from 'next/navigation';
 import { WidgetSection } from './WidgetSection';
 import { getDashboardStaff } from '@/lib/venue-auth';
@@ -41,7 +42,7 @@ export default async function WidgetPage() {
     );
   }
 
-  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'https://www.reserveni.com';
+  const baseUrl = normalizePublicBaseUrl(process.env.NEXT_PUBLIC_BASE_URL);
 
   return (
     <div className="p-4 md:p-6 lg:p-8">

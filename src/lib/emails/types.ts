@@ -60,6 +60,7 @@ export interface RenderedSms {
 
 export type CommMessageType =
   | 'booking_confirmation_email'
+  | 'booking_confirmation_sms'
   | 'deposit_request_sms'
   | 'deposit_request_email'
   | 'deposit_confirmation_email'

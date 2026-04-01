@@ -16,6 +16,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { getVenueNotificationSettings } from '@/lib/notifications/notification-settings';
+import { getCommSettings } from '@/lib/communications/service';
 import { venueLocalDateTimeToUtcMs, formatYmdInTimezone, addDaysToYmd } from '@/lib/venue/venue-local-clock';
 import { logToCommLogs } from '@/lib/communications/service';
 import { sendEmail } from '@/lib/emails/send-email';
@@ -28,6 +29,7 @@ import { renderReminder56h } from '@/lib/emails/templates/reminder-56h';
 import { renderDayOfReminderSms } from '@/lib/emails/templates/day-of-reminder-sms';
 import { renderPostVisitEmail } from '@/lib/emails/templates/post-visit';
 import { recordOutboundSms } from '@/lib/sms-usage';
+import { normalizePublicBaseUrl } from '@/lib/public-base-url';
 
 const TOLERANCE_MS = 15 * 60 * 1000;
 
@@ -128,7 +130,7 @@ export async function runUnifiedSchedulingComms(
   supabase: SupabaseClient,
   results: UnifiedCommsResults,
 ): Promise<void> {
-  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'https://www.reserveni.com';
+  const baseUrl = normalizePublicBaseUrl(process.env.NEXT_PUBLIC_BASE_URL);
   const nowMs = Date.now();
 
   const { data: venues } = await supabase
@@ -140,10 +142,38 @@ export async function runUnifiedSchedulingComms(
     const tz = (venue as { timezone?: string }).timezone ?? 'Europe/London';
     const vid = (venue as { id: string }).id;
     const ns = await getVenueNotificationSettings(vid);
+    const comm = await getCommSettings(vid);
 
-    await sendUnifiedReminder1(supabase, venue as { id: string; name: string; address: string | null }, tz, ns, baseUrl, nowMs, results);
-    await sendUnifiedReminder2(supabase, venue as { id: string; name: string; address: string | null }, tz, ns, baseUrl, nowMs, results);
-    await sendUnifiedPostVisit(supabase, venue as { id: string; name: string; address: string | null }, tz, ns, baseUrl, nowMs, results);
+    await sendUnifiedReminder1(
+      supabase,
+      venue as { id: string; name: string; address: string | null },
+      tz,
+      ns,
+      comm,
+      baseUrl,
+      nowMs,
+      results,
+    );
+    await sendUnifiedReminder2(
+      supabase,
+      venue as { id: string; name: string; address: string | null },
+      tz,
+      ns,
+      comm,
+      baseUrl,
+      nowMs,
+      results,
+    );
+    await sendUnifiedPostVisit(
+      supabase,
+      venue as { id: string; name: string; address: string | null },
+      tz,
+      ns,
+      comm,
+      baseUrl,
+      nowMs,
+      results,
+    );
   }
 }
 
@@ -152,6 +182,7 @@ async function sendUnifiedReminder1(
   venue: { id: string; name: string; address: string | null },
   tz: string,
   ns: Awaited<ReturnType<typeof getVenueNotificationSettings>>,
+  comm: Awaited<ReturnType<typeof getCommSettings>>,
   baseUrl: string,
   nowMs: number,
   results: UnifiedCommsResults,
@@ -214,7 +245,7 @@ async function sendUnifiedReminder1(
           status: 'sent',
         });
         if (canSend) {
-          const sms = renderDayOfReminderSms(bookingData, venueData, null);
+          const sms = renderDayOfReminderSms(bookingData, venueData, comm.day_of_reminder_custom_message);
           const { sid, segmentCount } = await sendSmsWithSegments(phone, sms.body);
           await recordOutboundSms({
             venueId: venue.id,
@@ -244,11 +275,13 @@ async function sendUnifiedReminder2(
   venue: { id: string; name: string; address: string | null },
   tz: string,
   ns: Awaited<ReturnType<typeof getVenueNotificationSettings>>,
+  comm: Awaited<ReturnType<typeof getCommSettings>>,
   baseUrl: string,
   nowMs: number,
   results: UnifiedCommsResults,
 ) {
   if (!ns.reminder_2_enabled) return;
+  if (!ns.reminder_2_channels.includes('sms')) return;
   const hours = ns.reminder_2_hours_before;
   const targetMs = hours * 60 * 60 * 1000;
   const smsOk = await isSmsAllowed(venue.id);
@@ -313,6 +346,7 @@ async function sendUnifiedPostVisit(
   venue: { id: string; name: string; address: string | null },
   tz: string,
   ns: Awaited<ReturnType<typeof getVenueNotificationSettings>>,
+  comm: Awaited<ReturnType<typeof getCommSettings>>,
   _baseUrl: string,
   nowMs: number,
   results: UnifiedCommsResults,
@@ -361,7 +395,7 @@ async function sendUnifiedPostVisit(
 
       let bookingData = buildBookingData(b);
       bookingData = await enrichBookingEmailForAppointment(supabase, b.id, bookingData);
-      const rendered = renderPostVisitEmail(bookingData, venueData, null);
+      const rendered = renderPostVisitEmail(bookingData, venueData, comm.post_visit_email_custom_message);
 
       const canSend = await logToCommLogs({
         venue_id: venue.id,

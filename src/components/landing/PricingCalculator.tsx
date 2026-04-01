@@ -1,10 +1,11 @@
 'use client';
 
 import { useState } from 'react';
+import { STANDARD_PRICE_PER_CALENDAR, BUSINESS_PRICE } from '@/lib/pricing-constants';
 
 export function PricingCalculator() {
   const [count, setCount] = useState(1);
-  const total = count * 10;
+  const total = count * STANDARD_PRICE_PER_CALENDAR;
 
   return (
     <div className="mt-4">
@@ -31,9 +32,10 @@ export function PricingCalculator() {
           = &pound;{total}/mo
         </span>
       </div>
-      {count >= 8 && (
+      {count >= 4 && count * STANDARD_PRICE_PER_CALENDAR > BUSINESS_PRICE && (
         <p className="mt-2 rounded-md bg-amber-50 border border-amber-200 px-2.5 py-1.5 text-[11px] text-amber-700">
-          At {count} calendars, Business (&pound;79/mo) gives you unlimited calendars plus SMS and priority support.
+          At {count} bookable calendars, Standard totals &pound;{count * STANDARD_PRICE_PER_CALENDAR}/mo. Business is
+          &pound;{BUSINESS_PRICE}/mo with unlimited calendars, 800 SMS/month, and priority support.
         </p>
       )}
     </div>

@@ -218,7 +218,7 @@ const MESSAGE_CHANNELS: Record<MessageType, Array<'email' | 'sms'>> = {
   auto_cancel_notification: ['email', 'sms'],
   booking_modification: [],
   cancellation_confirmation: [],
-  no_show_notification: [],
+  no_show_notification: ['email'],
   custom_message: ['email', 'sms'],
 };
 

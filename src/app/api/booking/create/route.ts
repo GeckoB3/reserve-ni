@@ -3,7 +3,7 @@ import { checkRateLimit, getClientIp } from '@/lib/rate-limit';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { stripe } from '@/lib/stripe';
 import { findOrCreateGuest } from '@/lib/guests';
-import { sendBookingConfirmationEmail } from '@/lib/communications/send-templated';
+import { sendBookingConfirmationNotifications } from '@/lib/communications/send-templated';
 import { computeAvailability, fetchEngineInput } from '@/lib/availability';
 import { AVAILABILITY_SETUP_REQUIRED_MESSAGE } from '@/lib/availability/availability-errors';
 import { generateConfirmToken, hashConfirmToken } from '@/lib/confirm-token';
@@ -27,6 +27,7 @@ import { fetchClassInput, computeClassAvailability } from '@/lib/availability/cl
 import { fetchResourceInput, computeResourceAvailability } from '@/lib/availability/resource-booking-engine';
 import { cancellationDeadlineHoursBefore } from '@/lib/booking/cancellation-deadline';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
+import { resolvePublicSiteOriginFromRequest } from '@/lib/public-base-url';
 import type { BookingEmailData } from '@/lib/emails/types';
 
 const createBookingSchema = z.object({
@@ -323,15 +324,20 @@ export async function POST(request: NextRequest) {
           updated_at: new Date().toISOString(),
         })
         .eq('id', booking.id);
-      const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : request.nextUrl.origin);
+      const baseUrl = resolvePublicSiteOriginFromRequest(request);
       const manageBookingLink = `${baseUrl}/manage/${booking.id}/${encodeURIComponent(manageToken)}`;
-      if (guest.email) {
+      if (guest.email || guest.phone) {
         after(async () => {
           try {
-            const result = await sendBookingConfirmationEmail(
+            const { email, sms } = await sendBookingConfirmationNotifications(
               {
-                id: booking.id, guest_name: name, guest_email: guest.email!,
-                booking_date, booking_time, party_size,
+                id: booking.id,
+                guest_name: name,
+                guest_email: guest.email ?? null,
+                guest_phone: guest.phone ?? null,
+                booking_date,
+                booking_time,
+                party_size,
                 dietary_notes: dietary_notes ?? null,
                 deposit_amount_pence: depositAmountPence ?? null,
                 deposit_status: requiresDeposit ? 'Pending' : 'Not Required',
@@ -340,9 +346,12 @@ export async function POST(request: NextRequest) {
               { name: venue.name, address: venue.address ?? undefined },
               venue.id,
             );
-            if (!result.sent) console.warn('[after] confirmation email not sent:', result.reason);
+            if (!email.sent) console.warn('[after] confirmation email not sent:', email.reason);
+            if (!sms.sent && sms.reason !== 'skipped' && sms.reason !== 'no_phone') {
+              console.warn('[after] confirmation SMS not sent:', sms.reason);
+            }
           } catch (err) {
-            console.error('[after] confirmation email failed:', err);
+            console.error('[after] confirmation notifications failed:', err);
           }
         });
       }
@@ -718,16 +727,21 @@ async function handleNonTableBooking(
       .update({ confirm_token_hash: hashConfirmToken(manageToken), updated_at: new Date().toISOString() })
       .eq('id', booking.id);
 
-    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : request.nextUrl.origin);
+    const baseUrl = resolvePublicSiteOriginFromRequest(request);
     const manageBookingLink = `${baseUrl}/manage/${booking.id}/${encodeURIComponent(manageToken)}`;
 
-    if (guest.email) {
+    if (guest.email || guest.phone) {
       after(async () => {
         try {
-          await sendBookingConfirmationEmail(
+          const { email, sms } = await sendBookingConfirmationNotifications(
             {
-              id: booking.id, guest_name: name, guest_email: guest.email!,
-              booking_date, booking_time, party_size,
+              id: booking.id,
+              guest_name: name,
+              guest_email: guest.email ?? null,
+              guest_phone: guest.phone ?? phoneE164,
+              booking_date,
+              booking_time,
+              party_size,
               dietary_notes: dietary_notes ?? null,
               deposit_amount_pence: depositAmountPence ?? null,
               deposit_status: requiresDeposit ? 'Pending' : 'Not Required',
@@ -737,8 +751,12 @@ async function handleNonTableBooking(
             { name: venue.name as string, address: (venue.address as string) ?? undefined },
             venue_id,
           );
+          if (!email.sent) console.warn('[after] confirmation email not sent:', email.reason);
+          if (!sms.sent && sms.reason !== 'skipped' && sms.reason !== 'no_phone') {
+            console.warn('[after] confirmation SMS not sent:', sms.reason);
+          }
         } catch (err) {
-          console.error('[after] confirmation email failed:', err);
+          console.error('[after] confirmation notifications failed:', err);
         }
       });
     }

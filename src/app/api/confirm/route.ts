@@ -37,7 +37,7 @@ export async function GET(request: NextRequest) {
     const { data: booking, error: bookErr } = await supabase
       .from('bookings')
       .select(
-        'id, venue_id, guest_id, booking_date, booking_time, party_size, status, deposit_status, deposit_amount_pence, confirm_token_hash, confirm_token_used_at, practitioner_id, appointment_service_id, updated_at',
+        'id, venue_id, guest_id, booking_date, booking_time, party_size, status, deposit_status, deposit_amount_pence, confirm_token_hash, confirm_token_used_at, practitioner_id, appointment_service_id, calendar_id, service_item_id, updated_at',
       )
       .eq('id', bookingId)
       .single();
@@ -69,15 +69,36 @@ export async function GET(request: NextRequest) {
 
     let practitioner_name: string | null = null;
     let appointment_service_name: string | null = null;
-    const isAppointment = Boolean(booking.practitioner_id && booking.appointment_service_id);
-    if (isAppointment) {
+
+    const bookingRow = booking as {
+      practitioner_id?: string | null;
+      appointment_service_id?: string | null;
+      calendar_id?: string | null;
+      service_item_id?: string | null;
+    };
+    const unifiedVenue = isUnifiedSchedulingVenue(venue?.booking_model);
+    const legacyAppt = Boolean(bookingRow.practitioner_id && bookingRow.appointment_service_id);
+    const unifiedAppt = Boolean(unifiedVenue && bookingRow.calendar_id && bookingRow.service_item_id);
+    const isAppointment = legacyAppt || unifiedAppt;
+
+    if (unifiedAppt) {
+      const [{ data: uc }, { data: si }] = await Promise.all([
+        supabase.from('unified_calendars').select('name').eq('id', bookingRow.calendar_id as string).maybeSingle(),
+        supabase.from('service_items').select('name').eq('id', bookingRow.service_item_id as string).maybeSingle(),
+      ]);
+      practitioner_name = (uc as { name?: string } | null)?.name ?? null;
+      appointment_service_name = (si as { name?: string } | null)?.name ?? null;
+    } else if (legacyAppt) {
       const [{ data: pr }, { data: svc }] = await Promise.all([
-        supabase.from('practitioners').select('name').eq('id', booking.practitioner_id as string).maybeSingle(),
-        supabase.from('appointment_services').select('name').eq('id', booking.appointment_service_id as string).maybeSingle(),
+        supabase.from('practitioners').select('name').eq('id', bookingRow.practitioner_id as string).maybeSingle(),
+        supabase.from('appointment_services').select('name').eq('id', bookingRow.appointment_service_id as string).maybeSingle(),
       ]);
       practitioner_name = pr?.name ?? null;
       appointment_service_name = svc?.name ?? null;
     }
+
+    const practitionerIdForUi = (bookingRow.practitioner_id ?? bookingRow.calendar_id) as string | null | undefined;
+    const serviceIdForUi = (bookingRow.appointment_service_id ?? bookingRow.service_item_id) as string | null | undefined;
 
     const rules = (venue?.booking_rules as { cancellation_notice_hours?: number } | null) ?? null;
     const refundNoticeHours =
@@ -99,8 +120,8 @@ export async function GET(request: NextRequest) {
       deposit_amount_pence: booking.deposit_amount_pence,
       status: booking.status,
       is_appointment: isAppointment,
-      practitioner_id: isAppointment ? (booking.practitioner_id as string) : null,
-      appointment_service_id: isAppointment ? (booking.appointment_service_id as string) : null,
+      practitioner_id: isAppointment && practitionerIdForUi ? practitionerIdForUi : null,
+      appointment_service_id: isAppointment && serviceIdForUi ? serviceIdForUi : null,
       practitioner_name,
       appointment_service_name,
       refund_notice_hours: refundNoticeHours,
@@ -150,7 +171,7 @@ export async function POST(request: NextRequest) {
     const { data: booking, error: bookErr } = await supabase
       .from('bookings')
       .select(
-        'id, venue_id, guest_id, booking_date, booking_time, party_size, status, deposit_status, deposit_amount_pence, stripe_payment_intent_id, cancellation_deadline, confirm_token_hash, confirm_token_used_at, service_id, practitioner_id, appointment_service_id, updated_at',
+        'id, venue_id, guest_id, booking_date, booking_time, party_size, status, deposit_status, deposit_amount_pence, stripe_payment_intent_id, cancellation_deadline, confirm_token_hash, confirm_token_used_at, service_id, practitioner_id, appointment_service_id, calendar_id, service_item_id, updated_at',
       )
       .eq('id', bookingId)
       .single();
@@ -390,8 +411,11 @@ export async function POST(request: NextRequest) {
             booking_date: newDate,
             booking_time: newTime,
             party_size: newPartySize,
-            practitioner_id: bodyPractitionerId,
-            appointment_service_id: bodyAppointmentServiceId,
+            // Unified scheduling stores staff/service on calendar_id + service_item_id; legacy Model B uses practitioner_id + appointment_service_id.
+            calendar_id: bodyPractitionerId,
+            service_item_id: bodyAppointmentServiceId,
+            practitioner_id: null,
+            appointment_service_id: null,
             estimated_end_time: estimatedEndTime,
             cancellation_deadline,
             cancellation_policy_snapshot,

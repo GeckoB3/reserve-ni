@@ -13,6 +13,7 @@ import { renderDayOfReminderSms } from '@/lib/emails/templates/day-of-reminder-s
 import { renderPostVisitEmail } from '@/lib/emails/templates/post-visit';
 import { renderBookingModification } from '@/lib/emails/templates/booking-modification';
 import { renderBookingCancellation } from '@/lib/emails/templates/booking-cancellation';
+import { renderBookingConfirmationSms } from '@/lib/emails/templates/booking-confirmation-sms';
 
 const SAMPLE_BOOKING: BookingEmailData = {
   id: '00000000-0000-0000-0000-000000000000',
@@ -29,6 +30,19 @@ const SAMPLE_BOOKING: BookingEmailData = {
   refund_cutoff: '2026-03-18T19:00:00Z',
   manage_booking_link: 'https://www.reserveni.com/manage/preview',
   confirm_cancel_link: 'https://www.reserveni.com/confirm/preview?hmac=sample',
+};
+
+/** Appointment-style sample for unified scheduling previews (reminders, post-visit, confirmation SMS). */
+const SAMPLE_APPOINTMENT_BOOKING: BookingEmailData = {
+  ...SAMPLE_BOOKING,
+  party_size: 1,
+  email_variant: 'appointment',
+  guest_name: 'Alex Morgan',
+  appointment_service_name: 'Initial consultation',
+  practitioner_name: 'Dr. Jordan Smith',
+  appointment_price_display: '£45',
+  dietary_notes: null,
+  special_requests: null,
 };
 
 /**
@@ -78,6 +92,19 @@ export async function POST(request: NextRequest) {
         break;
       case 'reminder_56h_email':
         preview = renderReminder56h(SAMPLE_BOOKING, venueData, customMessage);
+        break;
+      case 'reminder_1_email':
+        preview = renderReminder56h(SAMPLE_APPOINTMENT_BOOKING, venueData, customMessage);
+        break;
+      case 'reminder_1_sms':
+      case 'reminder_2_sms':
+        preview = renderDayOfReminderSms(SAMPLE_APPOINTMENT_BOOKING, venueData, customMessage);
+        break;
+      case 'unified_post_visit_email':
+        preview = renderPostVisitEmail(SAMPLE_APPOINTMENT_BOOKING, venueData, customMessage);
+        break;
+      case 'booking_confirmation_sms':
+        preview = renderBookingConfirmationSms(SAMPLE_APPOINTMENT_BOOKING, venueData, customMessage);
         break;
       case 'day_of_reminder_email':
         preview = renderDayOfReminderEmail(SAMPLE_BOOKING, venueData, customMessage);

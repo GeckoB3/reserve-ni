@@ -1,21 +1,26 @@
 import Link from "next/link";
 import ContactForm from "@/components/ContactForm";
 import { PricingCalculator } from "@/components/landing/PricingCalculator";
+import { BUSINESS_PRICE, FOUNDING_PARTNER_CAP, STANDARD_PRICE_PER_CALENDAR } from "@/lib/pricing-constants";
 
+/** Feature blurbs aligned with ReserveNI Unified Scheduling Engine Plan (v1.1): deposits, comms lifecycle, dashboard. */
 const features = [
   {
     title: "Deposit Collection",
-    description: "Reduce no-shows by 60%+ with per-head deposits via Stripe. Funds go directly to your account. Reserve NI never holds your money.",
+    description:
+      "Per-head deposits via Stripe Connect so funds settle to your connected account. Reserve NI never holds customer money.",
     icon: CreditCardIcon,
   },
   {
     title: "Smart Communications",
-    description: "Automated confirmation emails, SMS reminders 24 hours before, and follow-ups, all handled for you.",
+    description:
+      "Automated confirmations, deposit requests, reminders, and post-visit messages across email and SMS — channels and allowances follow your tier and notification settings.",
     icon: ChatIcon,
   },
   {
     title: "Real-time Dashboard",
-    description: "Live booking management with day sheet view, walk-in logging, phone bookings, and allergy flag tracking.",
+    description:
+      "Bookings, calendars, guest records, and reporting. Restaurants on Business also get visual timeline and live floor plan for seating.",
     icon: DashboardIcon,
   },
   {
@@ -42,7 +47,12 @@ const businessTypes = [
 ];
 
 const steps = [
-  { number: "1", title: "Sign up and choose your plan", description: "Create your account, pick your business type, and select Standard or Business." },
+  {
+    number: "1",
+    title: "Sign up and choose your plan",
+    description:
+      "Create your account, pick your business type, and choose Standard, Business, or Founding Partner where offered.",
+  },
   { number: "2", title: "Set up in minutes", description: "Our model-aware wizard walks you through the setup for your specific business type." },
   { number: "3", title: "Start taking bookings", description: "Share your booking page link, embed the widget, or print a QR code so your clients can book instantly." },
 ];
@@ -148,20 +158,19 @@ export default function Home() {
             <div className="flex flex-col rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
               <h3 className="text-lg font-bold text-slate-900">Standard</h3>
               <div className="mt-3 flex items-baseline gap-1">
-                <span className="text-4xl font-extrabold text-slate-900">&pound;10</span>
-                <span className="text-sm text-slate-500">/month per calendar</span>
+                <span className="text-4xl font-extrabold text-slate-900">&pound;{STANDARD_PRICE_PER_CALENDAR}</span>
+                <span className="text-sm text-slate-500">/month per bookable calendar</span>
               </div>
               <p className="mt-2 text-sm font-medium leading-snug text-slate-700">
-                Everything you need to fill your diary and stop no-shows
+                Best for solo practitioners and small teams
               </p>
               <PricingCalculator />
               <ul className="mt-6 flex-1 space-y-3 text-sm text-slate-600">
-                <PricingFeature text="Open for bookings 24/7, even when you are not" />
-                <PricingFeature text="Automated reminders so clients show up, not just book" />
-                <PricingFeature text="Take deposits upfront. Late cancellations cost you less" />
-                <PricingFeature text="One-tap confirm or cancel. Clients manage themselves" />
-                <PricingFeature text="Your schedule, client notes, and history on any device" />
-                <PricingFeature text="A professional booking page ready to share in minutes" />
+                <PricingFeature text="All features included: bookings, deposits, reminders, client records, reporting" />
+                <PricingFeature text="Email and SMS communications" />
+                <PricingFeature text="200 SMS messages included per bookable calendar per month" />
+                <PricingFeature text="Additional SMS at 5p each, billed at month end if you exceed the allowance" />
+                <PricingFeature text="Email support" />
               </ul>
               <Link href="/signup" className="mt-8 inline-flex h-11 w-full items-center justify-center rounded-xl bg-brand-600 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700">
                 Get started
@@ -172,22 +181,24 @@ export default function Home() {
             <div className="flex flex-col rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
               <h3 className="text-lg font-bold text-slate-900">Business</h3>
               <div className="mt-3 flex items-baseline gap-1">
-                <span className="text-4xl font-extrabold text-slate-900">&pound;79</span>
-                <span className="text-sm text-slate-500">/month</span>
+                <span className="text-4xl font-extrabold text-slate-900">&pound;{BUSINESS_PRICE}</span>
+                <span className="text-sm text-slate-500">/month flat</span>
               </div>
               <p className="mt-2 text-sm font-medium leading-snug text-slate-700">
-                Run a smoother operation and never lose a booking again
+                Best for restaurants and larger teams
+              </p>
+              <p className="mt-2 text-xs text-slate-600">
+                Restaurants must choose Business. Other business types may choose Standard or Business.
               </p>
               <p className="mt-4 text-xs font-semibold uppercase tracking-wide text-slate-500">
                 Everything in Standard, plus
               </p>
               <ul className="mt-3 flex-1 space-y-3 text-sm text-slate-600">
-                <PricingFeature text="Unlimited calendars included" />
-                <PricingFeature text="SMS reminders. 98% open rate vs 20% for email" />
-                <PricingFeature text="Confirm or cancel by text. Reduce no-shows by 60%+" />
-                <PricingFeature text="Visual timeline and table management. Your whole day at a glance" />
-                <PricingFeature text="Live floor plan so you can seat walk-ins on the spot" />
-                <PricingFeature text="Priority phone support whenever you need it" />
+                <PricingFeature text="Unlimited bookable calendars" />
+                <PricingFeature text="800 SMS messages included per month" />
+                <PricingFeature text="Additional SMS at 5p each, billed at month end if you exceed the allowance" />
+                <PricingFeature text="Table management with timeline grid and floor plan (restaurants)" />
+                <PricingFeature text="Priority support" />
               </ul>
               <Link href="/signup" className="mt-8 inline-flex h-11 w-full items-center justify-center rounded-xl bg-brand-600 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700">
                 Get started
@@ -207,7 +218,7 @@ export default function Home() {
               <p className="mt-2 text-sm font-medium leading-snug text-emerald-800">
                 Be one of the first. Get everything free while you help us build it
               </p>
-              <p className="mt-1 text-xs text-emerald-600">Only 20 spots available.</p>
+              <p className="mt-1 text-xs text-emerald-600">Only {FOUNDING_PARTNER_CAP} spots available.</p>
               <ul className="mt-6 flex-1 space-y-3 text-sm text-slate-600">
                 <PricingFeature text="Full Business plan. Every feature, nothing held back" />
                 <PricingFeature text="Six months completely free. No card needed to start" />

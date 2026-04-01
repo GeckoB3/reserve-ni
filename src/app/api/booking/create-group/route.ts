@@ -2,7 +2,7 @@ import { NextRequest, NextResponse, after } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { stripe } from '@/lib/stripe';
 import { findOrCreateGuest } from '@/lib/guests';
-import { sendBookingConfirmationEmail } from '@/lib/communications/send-templated';
+import { sendBookingConfirmationNotifications } from '@/lib/communications/send-templated';
 import { generateConfirmToken, hashConfirmToken } from '@/lib/confirm-token';
 import { normalizeToE164 } from '@/lib/phone/e164';
 import { resolveVenueMode } from '@/lib/venue-mode';
@@ -18,6 +18,7 @@ import { cancellationDeadlineHoursBefore } from '@/lib/booking/cancellation-dead
 import { generateGroupBookingId } from '@/lib/booking/group-booking';
 import type { GroupAppointmentLine } from '@/lib/emails/types';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
+import { resolvePublicSiteOriginFromRequest } from '@/lib/public-base-url';
 
 const personEntrySchema = z.object({
   person_label: z.string().min(1).max(100),
@@ -304,7 +305,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    if (!requiresDeposit && guest.email) {
+    if (!requiresDeposit && (guest.email || guest.phone)) {
       const manageToken = generateConfirmToken();
       const primaryBookingId = bookingIds[0]!;
       await supabase
@@ -315,18 +316,18 @@ export async function POST(request: NextRequest) {
         })
         .eq('id', primaryBookingId);
 
-      const baseUrl = process.env.NEXT_PUBLIC_BASE_URL ||
-        (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : request.nextUrl.origin);
+      const baseUrl = resolvePublicSiteOriginFromRequest(request);
       const manageBookingLink = `${baseUrl}/manage/${primaryBookingId}/${encodeURIComponent(manageToken)}`;
 
       const firstPerson = validatedPeople[0]!;
       after(async () => {
         try {
-          await sendBookingConfirmationEmail(
+          await sendBookingConfirmationNotifications(
             {
               id: primaryBookingId,
               guest_name: name,
-              guest_email: guest.email!,
+              guest_email: guest.email ?? null,
+              guest_phone: guest.phone ?? null,
               booking_date: firstPerson.booking_date,
               booking_time: firstPerson.booking_time,
               party_size: validatedPeople.length,

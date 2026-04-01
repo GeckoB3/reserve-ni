@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
+import { normalizePublicBaseUrl, publicBaseUrlHost } from '@/lib/public-base-url';
+import { BUSINESS_PRICE, STANDARD_PRICE_PER_CALENDAR } from '@/lib/pricing-constants';
 import type { StaffMember } from '../types';
 
 interface StaffSectionProps {
@@ -16,17 +18,8 @@ interface PractitionerOption {
   slug?: string | null;
 }
 
-const PUBLIC_BOOK_ORIGIN =
-  (typeof process.env.NEXT_PUBLIC_BASE_URL === 'string' && process.env.NEXT_PUBLIC_BASE_URL.replace(/\/$/, '')) ||
-  'https://www.reserveni.com';
-
-const PUBLIC_BOOK_HOST = (() => {
-  try {
-    return new URL(PUBLIC_BOOK_ORIGIN).host;
-  } catch {
-    return 'localhost';
-  }
-})();
+const PUBLIC_BOOK_ORIGIN = normalizePublicBaseUrl(process.env.NEXT_PUBLIC_BASE_URL);
+const PUBLIC_BOOK_HOST = publicBaseUrlHost(PUBLIC_BOOK_ORIGIN);
 
 function bookingSlugDraftError(raw: string): string | null {
   const t = raw.trim().toLowerCase();
@@ -815,11 +808,11 @@ export function StaffSection({ venueId: _venueId, isAdmin, bookingModel }: Staff
                   <p className="mt-2 text-sm text-slate-600">
                     You currently pay for {calendarBillingModal.limit} calendar
                     {calendarBillingModal.limit === 1 ? '' : 's'}. Adding another team member will increase your plan to
-                    &pound;{(calendarBillingModal.limit + 1) * 10}/month.
+                    &pound;{(calendarBillingModal.limit + 1) * STANDARD_PRICE_PER_CALENDAR}/month.
                   </p>
-                  {calendarBillingModal.limit + 1 >= 8 && (
+                  {(calendarBillingModal.limit + 1) * STANDARD_PRICE_PER_CALENDAR > BUSINESS_PRICE && (
                     <p className="mt-3 rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 text-xs text-brand-900">
-                      Or upgrade to Business at &pound;79/month for unlimited calendars, SMS reminders, and priority
+                      Or upgrade to Business at &pound;{BUSINESS_PRICE}/month for unlimited calendars, SMS reminders, and priority
                       support — see the{' '}
                       <a href="/dashboard/settings?tab=plan" className="font-semibold underline">
                         Plan

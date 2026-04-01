@@ -27,6 +27,8 @@ import { resolveTableAssignmentDurationBuffer } from '@/lib/table-management/boo
 import { resolveVenueMode } from '@/lib/venue-mode';
 import { z } from 'zod';
 import { normalizeToE164 } from '@/lib/phone/e164';
+import { getVenueNotificationSettings } from '@/lib/notifications/notification-settings';
+import { communicationService } from '@/lib/communications';
 
 const statusSchema = z.enum(BOOKING_MUTABLE_STATUSES);
 
@@ -278,11 +280,51 @@ export async function PATCH(
           });
         }
       } else if (newStatus === 'No-Show') {
-        const depositStatus = booking.deposit_status === 'Paid' ? 'Forfeited' : booking.deposit_status;
+        const hadPaidDeposit = booking.deposit_status === 'Paid';
+        const depositStatus = hadPaidDeposit ? 'Forfeited' : booking.deposit_status;
         await staff.db
           .from('bookings')
           .update({ status: 'No-Show', deposit_status: depositStatus, updated_at: new Date().toISOString() })
           .eq('id', id);
+
+        const { data: guestNoShow } = await staff.db
+          .from('guests')
+          .select('name, email')
+          .eq('id', booking.guest_id)
+          .maybeSingle();
+        const { data: venueNoShow } = await admin.from('venues').select('name').eq('id', staff.venue_id).maybeSingle();
+        const nsNoShow = await getVenueNotificationSettings(staff.venue_id);
+        if (guestNoShow?.email && venueNoShow?.name && nsNoShow.no_show_notification_enabled) {
+          const bookingTimeNs = typeof booking.booking_time === 'string' ? booking.booking_time.slice(0, 5) : '';
+          const venueIdNs = staff.venue_id;
+          const bookingIdNs = id;
+          const guestIdNs = booking.guest_id;
+          after(async () => {
+            try {
+              await communicationService.send(
+                'no_show_notification',
+                { email: guestNoShow.email! },
+                {
+                  guest_name: guestNoShow.name ?? 'Guest',
+                  venue_name: venueNoShow.name!,
+                  booking_date: booking.booking_date,
+                  booking_time: bookingTimeNs,
+                  party_size: booking.party_size,
+                  ...(hadPaidDeposit && typeof booking.deposit_amount_pence === 'number'
+                    ? { deposit_amount_pence: booking.deposit_amount_pence }
+                    : {}),
+                },
+                {
+                  venue_id: venueIdNs,
+                  booking_id: bookingIdNs,
+                  guest_id: guestIdNs,
+                },
+              );
+            } catch (noShowCommsErr) {
+              console.error('No-show guest notification failed:', noShowCommsErr);
+            }
+          });
+        }
       } else {
         const statusPayload: Record<string, unknown> = {
           status: newStatus,
@@ -296,7 +338,7 @@ export async function PATCH(
         await staff.db.from('bookings').update(statusPayload).eq('id', id);
 
         if (booking.status === 'Pending' && newStatus === 'Confirmed') {
-          const { sendBookingConfirmationEmail } = await import('@/lib/communications/send-templated');
+          const { sendBookingConfirmationNotifications } = await import('@/lib/communications/send-templated');
           const { data: guestRow } = await staff.db.from('guests').select('name, email, phone').eq('id', booking.guest_id).single();
           const { data: venueRow } = await staff.db.from('venues').select('name, address').eq('id', staff.venue_id).single();
           if (guestRow?.email && venueRow?.name) {
@@ -305,6 +347,7 @@ export async function PATCH(
               id,
               guest_name: guestRow.name ?? 'Guest',
               guest_email: guestRow.email,
+              guest_phone: guestRow.phone ?? null,
               booking_date: booking.booking_date,
               booking_time: bookingTime,
               party_size: booking.party_size,
@@ -313,10 +356,13 @@ export async function PATCH(
             const vid = staff.venue_id;
             after(async () => {
               try {
-                const result = await sendBookingConfirmationEmail(emailData, venueEmailData, vid);
-                if (!result.sent) console.warn('[after] status-confirm email not sent:', result.reason);
+                const { email, sms } = await sendBookingConfirmationNotifications(emailData, venueEmailData, vid);
+                if (!email.sent) console.warn('[after] status-confirm email not sent:', email.reason);
+                if (!sms.sent && sms.reason !== 'skipped' && sms.reason !== 'no_phone') {
+                  console.warn('[after] status-confirm SMS not sent:', sms.reason);
+                }
               } catch (err) {
-                console.error('[after] status-confirm email failed:', err);
+                console.error('[after] status-confirm notifications failed:', err);
               }
             });
           }
@@ -676,7 +722,16 @@ export async function PATCH(
           .from('communication_logs')
           .delete()
           .eq('booking_id', id)
-          .in('message_type', ['reminder_56h_email', 'day_of_reminder_sms', 'day_of_reminder_email', 'post_visit_email']);
+          .in('message_type', [
+            'reminder_56h_email',
+            'day_of_reminder_sms',
+            'day_of_reminder_email',
+            'post_visit_email',
+            'reminder_1_email',
+            'reminder_1_sms',
+            'reminder_2_sms',
+            'unified_post_visit_email',
+          ]);
       } catch (logResetErr) {
         console.error('Communication log reset failed after modification:', logResetErr);
       }
