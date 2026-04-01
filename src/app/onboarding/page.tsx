@@ -81,18 +81,11 @@ interface ResourceDraft {
 
 const DAY_LABELS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
-/** Plan §8.2: unified onboarding step labels adapt to business category (calendars/events vs team-centric). */
-function unifiedTeamStepLabel(businessType: string | null, terms: { staff: string }): string {
-  const cfg = getBusinessConfig(businessType ?? 'other');
-  if (cfg.category === 'experiences' || cfg.category === 'entertainment') {
-    return 'Your calendars & events';
-  }
-  if (cfg.category === 'fitness') {
-    return 'Your instructors & calendars';
-  }
+/** Plan §8.2 Step 2: heading adapts to terminology (team / calendars). */
+function unifiedTeamStepLabel(terms: { staff: string }): string {
   const s = terms.staff.trim();
   if (/^staff$/i.test(s)) {
-    return 'Calendars & team';
+    return 'Your team & calendars';
   }
   return `Your ${s}s`;
 }
@@ -272,7 +265,7 @@ export default function OnboardingPage() {
         steps.push({ key: 'services', label: 'Services' });
         break;
       case 'unified_scheduling':
-        steps.push({ key: 'team', label: unifiedTeamStepLabel(venue.business_type, terms) });
+        steps.push({ key: 'team', label: unifiedTeamStepLabel(terms) });
         steps.push({ key: 'services', label: 'Services' });
         break;
       case 'event_ticket':

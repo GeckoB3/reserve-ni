@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { getBusinessConfig, formatSignupBusinessTypeLabel } from '@/lib/business-config';
+import { getBusinessConfig, formatSignupBusinessTypeLabel, isSignupSupportedBookingModel } from '@/lib/business-config';
 import { STANDARD_PRICE_PER_CALENDAR, BUSINESS_PRICE, FOUNDING_PARTNER_CAP } from '@/lib/pricing-constants';
 
 export default function PlanPage() {
@@ -29,6 +29,14 @@ export default function PlanPage() {
     () => (businessType ? getBusinessConfig(businessType) : null),
     [businessType],
   );
+
+  useEffect(() => {
+    if (!config) return;
+    if (!isSignupSupportedBookingModel(config.model)) {
+      sessionStorage.removeItem('signup_business_type');
+      router.replace('/signup/business-type');
+    }
+  }, [config, router]);
 
   const isRestaurant = config?.model === 'table_reservation';
 
@@ -66,19 +74,10 @@ export default function PlanPage() {
 
   const calendarLabel = useMemo(() => {
     if (!config) return 'calendar';
-    switch (config.model) {
-      case 'practitioner_appointment':
-      case 'unified_scheduling':
-        return config.terms.staff.toLowerCase();
-      case 'resource_booking':
-        return 'resource';
-      case 'class_session':
-        return 'class type';
-      case 'event_ticket':
-        return 'event';
-      default:
-        return 'calendar';
+    if (config.model === 'unified_scheduling' || config.model === 'practitioner_appointment') {
+      return config.terms.staff.toLowerCase();
     }
+    return 'calendar';
   }, [config]);
 
   const standardTotal = calendarCount * STANDARD_PRICE_PER_CALENDAR;

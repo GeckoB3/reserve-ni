@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { getBusinessConfig, formatSignupBusinessTypeLabel, isDirectModelBusinessType } from '@/lib/business-config';
+import { getBusinessConfig, formatSignupBusinessTypeLabel, isDirectModelBusinessType, isSignupSupportedBookingModel } from '@/lib/business-config';
 import { STANDARD_PRICE_PER_CALENDAR, BUSINESS_PRICE } from '@/lib/pricing-constants';
 
 export default function PaymentPage() {
@@ -40,6 +40,16 @@ export default function PaymentPage() {
     () => (businessType ? getBusinessConfig(businessType) : null),
     [businessType]
   );
+
+  useEffect(() => {
+    if (!config) return;
+    if (!isSignupSupportedBookingModel(config.model)) {
+      sessionStorage.removeItem('signup_business_type');
+      sessionStorage.removeItem('signup_plan');
+      sessionStorage.removeItem('signup_calendar_count');
+      router.replace('/signup/business-type');
+    }
+  }, [config, router]);
 
   const totalPrice = useMemo(() => {
     if (plan === 'standard') return calendarCount * STANDARD_PRICE_PER_CALENDAR;

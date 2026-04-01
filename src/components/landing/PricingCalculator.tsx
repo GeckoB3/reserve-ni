@@ -10,7 +10,7 @@ export function PricingCalculator() {
   return (
     <div className="mt-4">
       <label className="text-xs font-medium text-slate-500">
-        How many calendars?
+        How many team members (calendars)?
       </label>
       <div className="mt-1.5 flex items-center gap-3">
         <button

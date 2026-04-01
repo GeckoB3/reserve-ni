@@ -153,23 +153,23 @@ export default function Home() {
           <h2 className="text-center text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">Simple, transparent pricing</h2>
           <p className="mx-auto mt-4 max-w-xl text-center text-slate-500">No commission, no hidden fees. Pick the plan that fits your business.</p>
 
-          <div className="mt-14 grid items-stretch gap-8 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="mx-auto mt-14 grid max-w-4xl items-stretch gap-8 lg:grid-cols-2">
             {/* Standard */}
             <div className="flex flex-col rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
               <h3 className="text-lg font-bold text-slate-900">Standard</h3>
               <div className="mt-3 flex items-baseline gap-1">
                 <span className="text-4xl font-extrabold text-slate-900">&pound;{STANDARD_PRICE_PER_CALENDAR}</span>
-                <span className="text-sm text-slate-500">/month per bookable calendar</span>
+                <span className="text-sm text-slate-500">/month per team member</span>
               </div>
               <p className="mt-2 text-sm font-medium leading-snug text-slate-700">
-                Best for solo practitioners and small teams
+                All features. Best for solo practitioners and small teams.
               </p>
+              <p className="mt-1 text-xs text-slate-500">200 SMS per bookable calendar per month.</p>
               <PricingCalculator />
               <ul className="mt-6 flex-1 space-y-3 text-sm text-slate-600">
-                <PricingFeature text="All features included: bookings, deposits, reminders, client records, reporting" />
+                <PricingFeature text="Bookings, deposits, reminders, client records, reporting" />
                 <PricingFeature text="Email and SMS communications" />
-                <PricingFeature text="200 SMS messages included per bookable calendar per month" />
-                <PricingFeature text="Additional SMS at 5p each, billed at month end if you exceed the allowance" />
+                <PricingFeature text="Additional SMS at 5p each if you exceed the allowance" />
                 <PricingFeature text="Email support" />
               </ul>
               <Link href="/signup" className="mt-8 inline-flex h-11 w-full items-center justify-center rounded-xl bg-brand-600 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700">
@@ -185,10 +185,13 @@ export default function Home() {
                 <span className="text-sm text-slate-500">/month flat</span>
               </div>
               <p className="mt-2 text-sm font-medium leading-snug text-slate-700">
-                Best for restaurants and larger teams
+                Unlimited calendars. 800 SMS. Table management. Priority support.
+              </p>
+              <p className="mt-2 text-sm font-medium leading-snug text-slate-700">
+                Best for restaurants and large teams.
               </p>
               <p className="mt-2 text-xs text-slate-600">
-                Restaurants must choose Business. Other business types may choose Standard or Business.
+                Restaurants use Business. Appointment-based businesses can choose Standard or Business.
               </p>
               <p className="mt-4 text-xs font-semibold uppercase tracking-wide text-slate-500">
                 Everything in Standard, plus
@@ -196,7 +199,6 @@ export default function Home() {
               <ul className="mt-3 flex-1 space-y-3 text-sm text-slate-600">
                 <PricingFeature text="Unlimited bookable calendars" />
                 <PricingFeature text="800 SMS messages included per month" />
-                <PricingFeature text="Additional SMS at 5p each, billed at month end if you exceed the allowance" />
                 <PricingFeature text="Table management with timeline grid and floor plan (restaurants)" />
                 <PricingFeature text="Priority support" />
               </ul>
@@ -204,28 +206,30 @@ export default function Home() {
                 Get started
               </Link>
             </div>
+          </div>
 
-            {/* Founding Partner */}
-            <div className="flex flex-col rounded-2xl border border-emerald-200 bg-gradient-to-br from-emerald-50 to-white p-8 shadow-sm">
-              <div className="flex items-center gap-2">
-                <h3 className="text-lg font-bold text-slate-900">Founding Partner</h3>
-                <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-700">Limited</span>
+          {/* Founding Partner — restaurants & hospitality */}
+          <div className="mx-auto mt-10 max-w-4xl overflow-hidden rounded-2xl border border-emerald-200 bg-gradient-to-br from-emerald-50 to-white shadow-sm">
+            <div className="flex flex-col gap-4 p-6 sm:flex-row sm:items-center sm:justify-between sm:gap-8">
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="text-lg font-bold text-slate-900">Founding Partner</h3>
+                  <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-700">
+                    Limited
+                  </span>
+                  <span className="rounded-full bg-white/80 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-800 ring-1 ring-emerald-200">
+                    Restaurants
+                  </span>
+                </div>
+                <p className="mt-2 text-sm font-medium text-emerald-900">
+                  Free for six months — full Business plan, no card to start. We onboard you personally.
+                </p>
+                <p className="mt-1 text-xs text-emerald-700">Only {FOUNDING_PARTNER_CAP} spots available.</p>
               </div>
-              <div className="mt-3 flex items-baseline gap-1">
-                <span className="text-4xl font-extrabold text-slate-900">Free</span>
-                <span className="text-sm text-slate-500">for 6 months</span>
-              </div>
-              <p className="mt-2 text-sm font-medium leading-snug text-emerald-800">
-                Be one of the first. Get everything free while you help us build it
-              </p>
-              <p className="mt-1 text-xs text-emerald-600">Only {FOUNDING_PARTNER_CAP} spots available.</p>
-              <ul className="mt-6 flex-1 space-y-3 text-sm text-slate-600">
-                <PricingFeature text="Full Business plan. Every feature, nothing held back" />
-                <PricingFeature text="Six months completely free. No card needed to start" />
-                <PricingFeature text="We set everything up with you, one-on-one" />
-                <PricingFeature text="Your feedback directly shapes what we build next" />
-              </ul>
-              <a href="#contact" className="mt-8 inline-flex h-11 w-full items-center justify-center rounded-xl bg-emerald-600 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-emerald-700">
+              <a
+                href="#contact"
+                className="inline-flex h-11 flex-shrink-0 items-center justify-center rounded-xl bg-emerald-600 px-6 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-emerald-700 sm:min-w-[10rem]"
+              >
                 Apply now
               </a>
             </div>

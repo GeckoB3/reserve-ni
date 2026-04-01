@@ -184,7 +184,17 @@ export interface BookingModelSignupCard {
   examples: string;
 }
 
-/** Order shown on the “choose by booking type” signup path. */
+/**
+ * New signups only support restaurants (table booking) and unified appointments.
+ * Legacy venues may still have other `booking_model` values in the database.
+ */
+export const SIGNUP_SUPPORTED_BOOKING_MODELS: BookingModel[] = ['table_reservation', 'unified_scheduling'];
+
+export function isSignupSupportedBookingModel(model: BookingModel | string | null | undefined): boolean {
+  return model === 'table_reservation' || model === 'unified_scheduling' || model === 'practitioner_appointment';
+}
+
+/** Order shown when explaining the two booking patterns (e.g. onboarding help text). */
 export const BOOKING_MODEL_SIGNUP_CARDS: BookingModelSignupCard[] = [
   {
     model: 'table_reservation',
@@ -198,38 +208,11 @@ export const BOOKING_MODEL_SIGNUP_CARDS: BookingModelSignupCard[] = [
   {
     model: 'unified_scheduling',
     businessTypeKey: 'model_unified_scheduling',
-    title: 'Appointments with a person',
-    summary: 'Clients book a service with a specific team member for a set duration.',
+    title: 'Appointments & services',
+    summary: 'Clients book a service with a specific team member or calendar for a set duration.',
     detail:
-      'Each practitioner has their own calendar, services, and working hours. One client per staff member at a time.',
+      'Each calendar has services, working hours, and online booking. Ideal for salons, clinics, studios, and trades.',
     examples: 'Barber, salon, physio, tutor, consultant',
-  },
-  {
-    model: 'event_ticket',
-    businessTypeKey: 'model_event_ticket',
-    title: 'Events & experiences',
-    summary: 'Guests buy tickets for dated experiences with fixed start times and capacity.',
-    detail:
-      'You define events (or sessions), ticket types, and how many people can attend each run.',
-    examples: 'Escape room, tour, tasting, workshop, show night',
-  },
-  {
-    model: 'class_session',
-    businessTypeKey: 'model_class_session',
-    title: 'Recurring group classes',
-    summary: 'Members book a spot in scheduled sessions that repeat on a timetable.',
-    detail:
-      'Define class types and weekly slots; clients pick which instance they want to join.',
-    examples: 'Yoga studio, gym class, swim school, language class',
-  },
-  {
-    model: 'resource_booking',
-    businessTypeKey: 'model_resource_booking',
-    title: 'Rooms, pitches & equipment',
-    summary: 'Bookers reserve a space or item for a length of time—no specific staff required.',
-    detail:
-      'Resources have their own availability and pricing; bookings are tied to the asset, not a named practitioner.',
-    examples: 'Meeting room, court, studio hire, lane, pitch',
   },
 ];
 
@@ -255,11 +238,12 @@ export function getBusinessConfig(businessType: string): BusinessConfig {
   return BUSINESS_TYPE_CONFIG[businessType] ?? BUSINESS_TYPE_CONFIG.other!;
 }
 
-/** All business types grouped by category. */
+/** All business types grouped by category (signup: restaurants + unified appointments only). */
 export function getBusinessTypesByCategory(): Record<string, Array<{ key: string; label: string; model: BookingModel }>> {
   const result: Record<string, Array<{ key: string; label: string; model: BookingModel }>> = {};
   for (const [key, config] of Object.entries(BUSINESS_TYPE_CONFIG)) {
     if (key === 'other' || key.startsWith('model_')) continue;
+    if (config.model !== 'table_reservation' && config.model !== 'unified_scheduling') continue;
     if (!result[config.category]) result[config.category] = [];
     result[config.category]!.push({
       key,
