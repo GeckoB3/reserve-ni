@@ -22,7 +22,7 @@ import { logToCommLogs } from '@/lib/communications/service';
 import { sendEmail } from '@/lib/emails/send-email';
 import { sendSmsWithSegments } from '@/lib/emails/send-sms';
 import { isSmsAllowed } from '@/lib/tier-enforcement';
-import { createBookingHmac } from '@/lib/short-manage-link';
+import { createShortConfirmLink, createShortManageLink } from '@/lib/short-manage-link';
 import { enrichBookingEmailForAppointment } from '@/lib/emails/booking-email-enrichment';
 import type { BookingEmailData, VenueEmailData } from '@/lib/emails/types';
 import { renderReminder56h } from '@/lib/emails/templates/reminder-56h';
@@ -183,7 +183,7 @@ async function sendUnifiedReminder1(
   tz: string,
   ns: Awaited<ReturnType<typeof getVenueNotificationSettings>>,
   comm: Awaited<ReturnType<typeof getCommSettings>>,
-  baseUrl: string,
+  _baseUrl: string,
   nowMs: number,
   results: UnifiedCommsResults,
 ) {
@@ -207,9 +207,8 @@ async function sendUnifiedReminder1(
       const delta = startMs - nowMs;
       if (delta < targetMs - TOLERANCE_MS || delta > targetMs + TOLERANCE_MS) continue;
 
-      const hmac = createBookingHmac(b.id);
-      const confirmCancelLink = `${baseUrl}/confirm/${b.id}?hmac=${encodeURIComponent(hmac)}`;
-      const manageLink = `${baseUrl}/manage/${b.id}?hmac=${encodeURIComponent(hmac)}`;
+      const confirmCancelLink = createShortConfirmLink(b.id);
+      const manageLink = createShortManageLink(b.id);
       let bookingData = buildBookingData(b);
       bookingData.confirm_cancel_link = confirmCancelLink;
       bookingData.manage_booking_link = manageLink;
@@ -276,7 +275,7 @@ async function sendUnifiedReminder2(
   tz: string,
   ns: Awaited<ReturnType<typeof getVenueNotificationSettings>>,
   comm: Awaited<ReturnType<typeof getCommSettings>>,
-  baseUrl: string,
+  _baseUrl: string,
   nowMs: number,
   results: UnifiedCommsResults,
 ) {
@@ -306,8 +305,7 @@ async function sendUnifiedReminder2(
       const phone = getGuestPhone(b);
       if (!phone) continue;
 
-      const hmac = createBookingHmac(b.id);
-      const manageLink = `${baseUrl}/manage/${b.id}?hmac=${encodeURIComponent(hmac)}`;
+      const manageLink = createShortManageLink(b.id);
       let bookingData = buildBookingData(b);
       bookingData.manage_booking_link = manageLink;
       bookingData = await enrichBookingEmailForAppointment(supabase, b.id, bookingData);

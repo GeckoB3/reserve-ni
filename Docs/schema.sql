@@ -44,6 +44,7 @@
 --   business_type (text), business_category (text), terminology (jsonb)
 
 -- bookings additions:
+--   guest_attendance_confirmed_at (timestamptz, nullable) — guest tapped "I'll be there" on reminder link
 --   practitioner_id (FK → practitioners), appointment_service_id (FK → appointment_services)
 --   experience_event_id (FK → experience_events), class_instance_id (FK → class_instances)
 --   resource_id (FK → venue_resources), booking_end_time (time)

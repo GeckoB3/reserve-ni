@@ -8,7 +8,7 @@ import { renderPostVisitEmail } from '@/lib/emails/templates/post-visit';
 import { sendEmail } from '@/lib/emails/send-email';
 import { sendSms } from '@/lib/emails/send-sms';
 import { isSmsAllowed } from '@/lib/tier-enforcement';
-import { createBookingHmac } from '@/lib/short-manage-link';
+import { createShortConfirmLink, createShortManageLink } from '@/lib/short-manage-link';
 import { enrichBookingEmailForAppointment } from '@/lib/emails/booking-email-enrichment';
 import type { BookingEmailData, VenueEmailData } from '@/lib/emails/types';
 import { requireCronAuthorisation } from '@/lib/cron-auth';
@@ -166,7 +166,6 @@ function getGuestPhone(b: BookingRow): string | null {
 async function send56hReminders(results: { reminders_56h: number; errors: number }) {
   const supabase = getSupabaseAdminClient();
   const now = new Date();
-  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'https://www.reserveni.com';
 
   const { data: venues } = await supabase
     .from('venues')
@@ -219,9 +218,8 @@ async function send56hReminders(results: { reminders_56h: number; errors: number
           if (diffMs < targetMs - tolerance || diffMs > targetMs + tolerance) continue;
 
           const email = getGuestEmail(b)!;
-          const hmac = createBookingHmac(b.id);
-          const confirmCancelLink = `${baseUrl}/confirm/${b.id}?hmac=${encodeURIComponent(hmac)}`;
-          const manageLink = `${baseUrl}/manage/${b.id}?hmac=${encodeURIComponent(hmac)}`;
+          const confirmCancelLink = createShortConfirmLink(b.id);
+          const manageLink = createShortManageLink(b.id);
 
           const bookingData = buildBookingData(b);
           bookingData.confirm_cancel_link = confirmCancelLink;
@@ -298,13 +296,10 @@ async function sendDayOfReminders(results: { day_of_reminders: number; errors: n
 
       const venueData = buildVenueData(venue);
 
-      const baseUrlDay = process.env.NEXT_PUBLIC_BASE_URL || 'https://www.reserveni.com';
-
       for (const b of normalizeBookings(bookings)) {
         try {
-          const hmacDay = createBookingHmac(b.id);
-          const manageLinkDay = `${baseUrlDay}/manage/${b.id}?hmac=${encodeURIComponent(hmacDay)}`;
-          const confirmLinkDay = `${baseUrlDay}/confirm/${b.id}?hmac=${encodeURIComponent(hmacDay)}`;
+          const manageLinkDay = createShortManageLink(b.id);
+          const confirmLinkDay = createShortConfirmLink(b.id);
           let bookingData = buildBookingData(b);
           bookingData.manage_booking_link = manageLinkDay;
           bookingData.confirm_cancel_link = confirmLinkDay;

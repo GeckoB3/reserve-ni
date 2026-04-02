@@ -36,6 +36,7 @@ export interface AppointmentDetailPrefetch {
   special_requests: string | null;
   internal_notes: string | null;
   client_arrived_at: string | null;
+  guest_attendance_confirmed_at?: string | null;
   deposit_amount_pence: number | null;
   deposit_status: string | null;
   party_size: number;
@@ -64,6 +65,7 @@ export interface BookingDetailRecord {
   special_requests: string | null;
   internal_notes: string | null;
   client_arrived_at: string | null;
+  guest_attendance_confirmed_at?: string | null;
   deposit_amount_pence: number | null;
   deposit_status: string | null;
   party_size: number;
@@ -85,6 +87,7 @@ function prefetchToDetailRecord(p: AppointmentDetailPrefetch): BookingDetailReco
     special_requests: p.special_requests,
     internal_notes: p.internal_notes,
     client_arrived_at: p.client_arrived_at,
+    guest_attendance_confirmed_at: p.guest_attendance_confirmed_at ?? null,
     deposit_amount_pence: p.deposit_amount_pence,
     deposit_status: p.deposit_status,
     party_size: p.party_size,
@@ -399,6 +402,11 @@ export function AppointmentDetailSheet({
                     <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-950 ring-1 ring-amber-300/70">
                       <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-500" aria-hidden />
                       Waiting
+                    </span>
+                  )}
+                  {detail.guest_attendance_confirmed_at && ['Pending', 'Confirmed'].includes(detail.status) && (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-teal-100 px-2 py-0.5 text-xs font-semibold text-teal-900 ring-1 ring-teal-200/80">
+                      Guest confirmed
                     </span>
                   )}
                 </div>

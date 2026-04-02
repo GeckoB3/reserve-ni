@@ -28,8 +28,8 @@ const SAMPLE_BOOKING: BookingEmailData = {
   deposit_amount_pence: 2000,
   deposit_status: 'Paid',
   refund_cutoff: '2026-03-18T19:00:00Z',
-  manage_booking_link: 'https://www.reserveni.com/manage/preview',
-  confirm_cancel_link: 'https://www.reserveni.com/confirm/preview?hmac=sample',
+  manage_booking_link: 'https://www.reserveni.com/m/AAAAAAAAAAAAAAAAAAAAAA.aaaaaaaaaaaa',
+  confirm_cancel_link: 'https://www.reserveni.com/c/AAAAAAAAAAAAAAAAAAAAAA.bbbbbbbbbbbb',
 };
 
 /** Appointment-style sample for unified scheduling previews (reminders, post-visit, confirmation SMS). */

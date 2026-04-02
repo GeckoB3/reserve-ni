@@ -66,6 +66,7 @@ interface Booking {
   special_requests: string | null;
   internal_notes: string | null;
   client_arrived_at: string | null;
+  guest_attendance_confirmed_at?: string | null;
   deposit_amount_pence: number | null;
   deposit_status: string;
   group_booking_id?: string | null;
@@ -246,6 +247,7 @@ function bookingToPrefetch(b: Booking): AppointmentDetailPrefetch {
     special_requests: b.special_requests,
     internal_notes: b.internal_notes,
     client_arrived_at: b.client_arrived_at,
+    guest_attendance_confirmed_at: b.guest_attendance_confirmed_at ?? null,
     deposit_amount_pence: b.deposit_amount_pence,
     deposit_status: b.deposit_status,
     party_size: b.party_size,
@@ -1378,6 +1380,14 @@ export function PractitionerCalendarView({
                                         {arrived && b.status !== 'Seated' && ['Pending', 'Confirmed'].includes(b.status) && (
                                           <span className="inline-flex h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-amber-500" aria-hidden title="Waiting" />
                                         )}
+                                        {b.guest_attendance_confirmed_at &&
+                                          ['Pending', 'Confirmed'].includes(b.status) && (
+                                            <span
+                                              className="inline-flex h-1.5 w-1.5 shrink-0 rounded-full bg-teal-500"
+                                              aria-hidden
+                                              title="Guest confirmed via reminder email"
+                                            />
+                                          )}
                                       </div>
                                       {svc && height > 36 && (
                                         <div className="truncate text-[10px] text-slate-500">{svc.name}</div>
@@ -1458,6 +1468,15 @@ export function PractitionerCalendarView({
                                                   className="inline-flex h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-amber-500"
                                                   aria-hidden
                                                   title="Waiting"
+                                                />
+                                              )}
+                                            {segIdx === 0 &&
+                                              first.guest_attendance_confirmed_at &&
+                                              ['Pending', 'Confirmed'].includes(first.status) && (
+                                                <span
+                                                  className="inline-flex h-1.5 w-1.5 shrink-0 rounded-full bg-teal-500"
+                                                  aria-hidden
+                                                  title="Guest confirmed via reminder email"
                                                 />
                                               )}
                                           </div>

@@ -5,7 +5,7 @@ import { getPaymentTokenSecret, tryGetPaymentTokenSecret } from '@/lib/payment-t
 /**
  * Create a compact signed manage link for a booking.
  * Format: /m/[base64url(uuid_bytes)].[hmac_12chars]
- * Total URL length: ~55 characters.
+ * Path segment after /m/ is ~35 chars (stateless; shorter than /manage/{uuid}/… or ?hmac=…).
  */
 export function createShortManageLink(bookingId: string): string {
   const hex = bookingId.replace(/-/g, '');
@@ -16,6 +16,20 @@ export function createShortManageLink(bookingId: string): string {
     .slice(0, 12);
   const baseUrl = normalizePublicBaseUrl(process.env.NEXT_PUBLIC_BASE_URL);
   return `${baseUrl}/m/${payload}.${sig}`;
+}
+
+/**
+ * Compact signed link to the confirm/cancel guest page (same shape as manage, distinct HMAC domain).
+ */
+export function createShortConfirmLink(bookingId: string): string {
+  const hex = bookingId.replace(/-/g, '');
+  const payload = Buffer.from(hex, 'hex').toString('base64url');
+  const sig = createHmac('sha256', getPaymentTokenSecret())
+    .update(`confirm:${payload}`)
+    .digest('base64url')
+    .slice(0, 12);
+  const baseUrl = normalizePublicBaseUrl(process.env.NEXT_PUBLIC_BASE_URL);
+  return `${baseUrl}/c/${payload}.${sig}`;
 }
 
 /**

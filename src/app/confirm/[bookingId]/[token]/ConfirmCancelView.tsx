@@ -16,6 +16,7 @@ interface BookingDetails {
   is_appointment?: boolean;
   practitioner_name?: string | null;
   appointment_service_name?: string | null;
+  guest_attendance_confirmed_at?: string | null;
 }
 
 type View = 'main' | 'cancel_confirm' | 'done';
@@ -39,7 +40,12 @@ export function ConfirmCancelView({ bookingId, token, hmac }: { bookingId: strin
         if (!r.ok) return r.json().then((j) => Promise.reject(new Error(j.error ?? 'Failed')));
         return r.json();
       })
-      .then(setDetails)
+      .then((data) => {
+        setDetails(data);
+        if (typeof window !== 'undefined' && window.location.hash === '#cancel') {
+          setView('cancel_confirm');
+        }
+      })
       .catch((e) => setError(e instanceof Error ? e.message : 'Invalid link'))
       .finally(() => setLoading(false));
   }, [bookingId, authParam]);

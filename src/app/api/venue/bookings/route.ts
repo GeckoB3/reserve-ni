@@ -20,7 +20,8 @@ import {
 } from '@/lib/availability/appointment-engine';
 import { z } from 'zod';
 import { normalizeToE164 } from '@/lib/phone/e164';
-import { createPaymentLinkToken } from '@/lib/payment-token';
+import { createPaymentPageUrl } from '@/lib/payment-token';
+import { createShortManageLink } from '@/lib/short-manage-link';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 
 const phoneBookingSchema = z.object({
@@ -238,9 +239,8 @@ export async function POST(request: NextRequest) {
             .update({ stripe_payment_intent_id: paymentIntent.id, updated_at: new Date().toISOString() })
             .eq('id', apptBooking.id);
 
-          const token = createPaymentLinkToken(apptBooking.id);
           const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : request.nextUrl.origin);
-          payment_url = `${baseUrl}/pay?t=${token}`;
+          payment_url = createPaymentPageUrl(apptBooking.id, baseUrl);
         } catch (stripeErr) {
           console.error('PaymentIntent create failed for appointment:', stripeErr);
           await admin.from('bookings').delete().eq('id', apptBooking.id);
@@ -284,8 +284,7 @@ export async function POST(request: NextRequest) {
           .update({ confirm_token_hash: hashConfirmToken(manageToken), updated_at: new Date().toISOString() })
           .eq('id', apptBooking.id);
 
-        const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : request.nextUrl.origin);
-        const manageBookingLink = `${baseUrl}/manage/${apptBooking.id}/${encodeURIComponent(manageToken)}`;
+        const manageBookingLink = createShortManageLink(apptBooking.id);
 
         if (guest.email || guest.phone) {
           after(async () => {
@@ -450,9 +449,8 @@ export async function POST(request: NextRequest) {
           })
           .eq('id', booking.id);
 
-        const token = createPaymentLinkToken(booking.id);
         const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : request.nextUrl.origin);
-        payment_url = `${baseUrl}/pay?t=${token}`;
+        payment_url = createPaymentPageUrl(booking.id, baseUrl);
       } catch (stripeErr) {
         console.error('PaymentIntent create failed for phone booking:', stripeErr);
         await admin.from('bookings').delete().eq('id', booking.id);
@@ -499,8 +497,7 @@ export async function POST(request: NextRequest) {
         })
         .eq('id', booking.id);
 
-      const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : request.nextUrl.origin);
-      const manageBookingLink = `${baseUrl}/manage/${booking.id}/${encodeURIComponent(manageToken)}`;
+      const manageBookingLink = createShortManageLink(booking.id);
 
       if (guest.email || guest.phone) {
         after(async () => {

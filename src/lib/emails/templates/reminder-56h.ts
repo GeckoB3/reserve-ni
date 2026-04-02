@@ -41,7 +41,7 @@ function buildActionButtons(confirmCancelLink: string, manageLink: string | null
     '</td></tr></table>',
     '<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin-bottom:12px">',
     `<tr><td align="center" style="background-color:#ffffff;border:2px solid ${RED};border-radius:8px;text-align:center">`,
-    `<a href="${confirmCancelLink}" target="_blank" style="display:block;padding:14px 32px;color:${RED};font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:14px;font-weight:600;text-decoration:none">${cancelLabel}</a>`,
+    `<a href="${confirmCancelLink}#cancel" target="_blank" style="display:block;padding:14px 32px;color:${RED};font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:14px;font-weight:600;text-decoration:none">${cancelLabel}</a>`,
     '</td></tr></table>',
   ];
 

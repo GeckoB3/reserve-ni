@@ -20,6 +20,8 @@ export interface RegistryAppointment {
   special_requests: string | null;
   internal_notes: string | null;
   client_arrived_at: string | null;
+  /** Guest tapped "I'll be there" on the reminder link */
+  guest_attendance_confirmed_at?: string | null;
 }
 
 const STATUS_BADGE: Record<string, string> = {
@@ -92,6 +94,7 @@ export function AppointmentRegistryCard({
   sym,
 }: Props) {
   const arrived = Boolean(booking.client_arrived_at);
+  const guestConfirmedAttendance = Boolean(booking.guest_attendance_confirmed_at);
   const shortRef = booking.id.slice(0, 8).toUpperCase();
   const statusLabel = STATUS_LABEL[booking.status] ?? booking.status;
   const panelId = `appointment-registry-panel-${booking.id}`;
@@ -132,6 +135,14 @@ export function AppointmentRegistryCard({
                 Arrived
               </span>
             )}
+            {guestConfirmedAttendance && (booking.status === 'Confirmed' || booking.status === 'Pending') && (
+              <span
+                className="inline-flex rounded-full bg-teal-100 px-2 py-0.5 text-xs font-medium text-teal-900 ring-1 ring-teal-200/80"
+                title="Guest confirmed via reminder email"
+              >
+                Guest confirmed
+              </span>
+            )}
           </div>
           <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-sm text-slate-600">
             <span className="font-medium tabular-nums text-slate-800">
@@ -166,6 +177,17 @@ export function AppointmentRegistryCard({
                 <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">Status</dt>
                 <dd className="mt-0.5 text-slate-800">{statusLabel}</dd>
               </div>
+              {guestConfirmedAttendance && booking.guest_attendance_confirmed_at && (
+                <div className="sm:col-span-2">
+                  <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">Guest confirmed attendance</dt>
+                  <dd className="mt-0.5 text-slate-800">
+                    {new Date(booking.guest_attendance_confirmed_at).toLocaleString('en-GB', {
+                      dateStyle: 'medium',
+                      timeStyle: 'short',
+                    })}
+                  </dd>
+                </div>
+              )}
               <div>
                 <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">Email</dt>
                 <dd className="mt-0.5 break-all text-slate-700">{booking.guest_email ?? '—'}</dd>

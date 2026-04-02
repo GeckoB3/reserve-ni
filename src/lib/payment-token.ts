@@ -1,4 +1,5 @@
 import { createHmac, timingSafeEqual } from 'crypto';
+import { normalizePublicBaseUrl } from '@/lib/public-base-url';
 
 /**
  * Secret for HMAC signing of payment links and manage-link tokens.
@@ -17,13 +18,35 @@ export function tryGetPaymentTokenSecret(): string | null {
   return secret && secret.length > 0 ? secret : null;
 }
 
-/** Signed token: base64url(bookingId:exp).hmac — 24h expiry. */
+/**
+ * Compact signed payment token (24h expiry).
+ * Format: base64url(16-byte uuid + 4-byte unix expiry seconds).12-char HMAC
+ * — much shorter than legacy `uuid:ms` string encoding for SMS.
+ */
 export function createPaymentLinkToken(bookingId: string): string {
   const secret = getPaymentTokenSecret();
-  const exp = Date.now() + 24 * 60 * 60 * 1000;
-  const payload = `${bookingId}:${exp}`;
-  const sig = createHmac('sha256', secret).update(payload).digest('base64url');
-  return Buffer.from(payload).toString('base64url') + '.' + sig;
+  const hex = bookingId.replace(/-/g, '');
+  const idBytes = Buffer.from(hex, 'hex');
+  if (idBytes.length !== 16) {
+    throw new Error('Invalid booking id for payment token');
+  }
+  const expSec = Math.floor(Date.now() / 1000) + 24 * 60 * 60;
+  const expBuf = Buffer.alloc(4);
+  expBuf.writeUInt32BE(expSec, 0);
+  const body = Buffer.concat([idBytes, expBuf]);
+  const sig = createHmac('sha256', secret).update(body).digest('base64url').slice(0, 12);
+  return `${body.toString('base64url')}.${sig}`;
+}
+
+/**
+ * Guest-facing pay URL with a short path (`/p/...`) so SMS stays in one GSM segment where possible.
+ */
+export function createPaymentPageUrl(bookingId: string, publicOrigin?: string): string {
+  const baseUrl = publicOrigin
+    ? normalizePublicBaseUrl(publicOrigin)
+    : normalizePublicBaseUrl(process.env.NEXT_PUBLIC_BASE_URL);
+  const token = createPaymentLinkToken(bookingId);
+  return `${baseUrl}/p/${token}`;
 }
 
 export type VerifyPaymentLinkTokenResult =
@@ -41,22 +64,51 @@ export function verifyPaymentLinkToken(token: string): VerifyPaymentLinkTokenRes
     return { ok: false, reason: 'invalid' };
   }
 
+  let payloadBuf: Buffer;
+  try {
+    payloadBuf = Buffer.from(parts[0]!, 'base64url');
+  } catch {
+    return { ok: false, reason: 'invalid' };
+  }
+
+  const receivedSig = parts[1]!;
+
+  if (payloadBuf.length === 20) {
+    const idBytes = payloadBuf.subarray(0, 16);
+    const expSec = payloadBuf.readUInt32BE(16);
+    const expectedSig = createHmac('sha256', secret).update(payloadBuf).digest('base64url').slice(0, 12);
+    if (expectedSig.length !== receivedSig.length) {
+      return { ok: false, reason: 'invalid' };
+    }
+    try {
+      if (!timingSafeEqual(Buffer.from(expectedSig), Buffer.from(receivedSig))) {
+        return { ok: false, reason: 'invalid' };
+      }
+    } catch {
+      return { ok: false, reason: 'invalid' };
+    }
+    const hex = idBytes.toString('hex');
+    const bookingId = `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+    const expMs = expSec * 1000;
+    if (!Number.isFinite(expMs)) {
+      return { ok: false, reason: 'invalid' };
+    }
+    return { ok: true, bookingId, exp: expMs };
+  }
+
   let payload: string;
   try {
-    payload = Buffer.from(parts[0]!, 'base64url').toString('utf8');
+    payload = payloadBuf.toString('utf8');
   } catch {
     return { ok: false, reason: 'invalid' };
   }
 
   const expectedSig = createHmac('sha256', secret).update(payload).digest('base64url');
-  const received = parts[1]!;
-
-  if (expectedSig.length !== received.length) {
+  if (expectedSig.length !== receivedSig.length) {
     return { ok: false, reason: 'invalid' };
   }
-
   try {
-    if (!timingSafeEqual(Buffer.from(expectedSig), Buffer.from(received))) {
+    if (!timingSafeEqual(Buffer.from(expectedSig), Buffer.from(receivedSig))) {
       return { ok: false, reason: 'invalid' };
     }
   } catch {

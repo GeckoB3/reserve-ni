@@ -5,7 +5,7 @@ import { getVenueStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { stripe } from '@/lib/stripe';
 import { sendDepositRequestNotifications } from '@/lib/communications/send-templated';
-import { createPaymentLinkToken } from '@/lib/payment-token';
+import { createPaymentPageUrl } from '@/lib/payment-token';
 
 const schema = z.object({
   action: z.enum(['send_payment_link', 'waive', 'record_cash', 'refund']),
@@ -80,8 +80,7 @@ export async function POST(
   }
 
   const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || request.nextUrl.origin;
-  const paymentToken = createPaymentLinkToken(id);
-  const paymentLink = `${baseUrl}/pay?t=${paymentToken}`;
+  const paymentLink = createPaymentPageUrl(id, baseUrl);
 
   await admin.from('communication_logs').delete().eq('booking_id', id).eq('message_type', 'deposit_request_sms');
   await admin.from('communication_logs').delete().eq('booking_id', id).eq('message_type', 'deposit_request_email');

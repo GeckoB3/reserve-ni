@@ -6,7 +6,7 @@ import { validateBookingStatusTransition } from '@/lib/table-management/lifecycl
 import { sendBookingConfirmationNotifications, sendDepositConfirmationEmail } from '@/lib/communications/send-templated';
 import { isSelfServeBookingSource } from '@/lib/booking-source';
 import { enrichBookingEmailForAppointment } from '@/lib/emails/booking-email-enrichment';
-import { resolvePublicSiteOriginFromRequest } from '@/lib/public-base-url';
+import { createShortManageLink } from '@/lib/short-manage-link';
 
 /**
  * POST /api/booking/confirm-payment
@@ -109,7 +109,6 @@ export async function POST(request: NextRequest) {
 
     // Generate a manage-booking token. Use an atomic WHERE clause so that if
     // the webhook fires simultaneously, only the first writer wins.
-    let manageToken: string | undefined;
     const candidateToken = generateConfirmToken();
     const { data: tokenRows } = await supabase
       .from('bookings')
@@ -121,10 +120,8 @@ export async function POST(request: NextRequest) {
       .is('confirm_token_hash', null)
       .select('id');
 
-    if (tokenRows && tokenRows.length > 0) {
-      manageToken = candidateToken;
-    } else {
-      console.log('confirm-payment: token already set by another process, skipping manage link');
+    if (!tokenRows?.length) {
+      console.log('confirm-payment: token already set by another process, skipping token write');
     }
 
     const { data: guest } = await supabase
@@ -133,10 +130,7 @@ export async function POST(request: NextRequest) {
       .eq('id', booking.guest_id)
       .single();
 
-    const baseUrl = resolvePublicSiteOriginFromRequest(request);
-    const manageBookingLink = manageToken
-      ? `${baseUrl}/manage/${bookingId}/${encodeURIComponent(manageToken)}`
-      : undefined;
+    const manageBookingLink = createShortManageLink(bookingId);
     const bookingTime = typeof booking.booking_time === 'string'
       ? booking.booking_time.slice(0, 5)
       : booking.booking_time;
@@ -154,7 +148,7 @@ export async function POST(request: NextRequest) {
       deposit_amount_pence: booking.deposit_amount_pence ?? null,
       deposit_status: 'Paid' as const,
       refund_cutoff: booking.cancellation_deadline ?? null,
-      manage_booking_link: manageBookingLink ?? null,
+      manage_booking_link: manageBookingLink,
     };
 
     after(async () => {

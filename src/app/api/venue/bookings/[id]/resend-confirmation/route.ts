@@ -5,6 +5,7 @@ import { getSupabaseAdminClient } from '@/lib/supabase';
 import { generateConfirmToken, hashConfirmToken } from '@/lib/confirm-token';
 import { sendBookingConfirmationNotifications } from '@/lib/communications/send-templated';
 import { enrichBookingEmailForAppointment } from '@/lib/emails/booking-email-enrichment';
+import { createShortManageLink } from '@/lib/short-manage-link';
 
 export async function POST(
   request: NextRequest,
@@ -43,8 +44,7 @@ export async function POST(
     })
     .eq('id', booking.id);
 
-  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : request.nextUrl.origin);
-  const manageBookingLink = `${baseUrl}/manage/${booking.id}/${encodeURIComponent(manageToken)}`;
+  const manageBookingLink = createShortManageLink(booking.id);
 
   // Clear any existing dedup entry so the resend actually fires
   await admin

@@ -19,7 +19,7 @@ import { generateGroupBookingId } from '@/lib/booking/group-booking';
 import type { GroupAppointmentLine } from '@/lib/emails/types';
 import { timeToMinutes, minutesToTime } from '@/lib/availability';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
-import { resolvePublicSiteOriginFromRequest } from '@/lib/public-base-url';
+import { createShortManageLink } from '@/lib/short-manage-link';
 
 const serviceEntrySchema = z.object({
   service_id: z.string().uuid(),
@@ -334,8 +334,7 @@ export async function POST(request: NextRequest) {
         })
         .eq('id', primaryBookingId);
 
-      const baseUrl = resolvePublicSiteOriginFromRequest(request);
-      const manageBookingLink = `${baseUrl}/manage/${primaryBookingId}/${encodeURIComponent(manageToken)}`;
+      const manageBookingLink = createShortManageLink(primaryBookingId);
 
       after(async () => {
         try {

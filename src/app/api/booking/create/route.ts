@@ -28,6 +28,7 @@ import { fetchResourceInput, computeResourceAvailability } from '@/lib/availabil
 import { cancellationDeadlineHoursBefore } from '@/lib/booking/cancellation-deadline';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 import { resolvePublicSiteOriginFromRequest } from '@/lib/public-base-url';
+import { createShortManageLink } from '@/lib/short-manage-link';
 import type { BookingEmailData } from '@/lib/emails/types';
 
 const createBookingSchema = z.object({
@@ -324,8 +325,7 @@ export async function POST(request: NextRequest) {
           updated_at: new Date().toISOString(),
         })
         .eq('id', booking.id);
-      const baseUrl = resolvePublicSiteOriginFromRequest(request);
-      const manageBookingLink = `${baseUrl}/manage/${booking.id}/${encodeURIComponent(manageToken)}`;
+      const manageBookingLink = createShortManageLink(booking.id);
       if (guest.email || guest.phone) {
         after(async () => {
           try {
@@ -651,7 +651,7 @@ async function handleNonTableBooking(
     resource_id: resource_id ?? null,
     booking_end_time: booking_end_time ? (booking_end_time.length === 5 ? booking_end_time + ':00' : booking_end_time) : null,
     event_session_id: event_session_id ?? null,
-    capacity_used: capacity_used ?? null,
+    capacity_used: capacity_used ?? party_size,
   };
 
   if (venueMode.bookingModel === 'unified_scheduling') {
@@ -727,8 +727,7 @@ async function handleNonTableBooking(
       .update({ confirm_token_hash: hashConfirmToken(manageToken), updated_at: new Date().toISOString() })
       .eq('id', booking.id);
 
-    const baseUrl = resolvePublicSiteOriginFromRequest(request);
-    const manageBookingLink = `${baseUrl}/manage/${booking.id}/${encodeURIComponent(manageToken)}`;
+    const manageBookingLink = createShortManageLink(booking.id);
 
     if (guest.email || guest.phone) {
       after(async () => {

@@ -37,7 +37,7 @@ export async function GET(request: NextRequest) {
     const { data: booking, error: bookErr } = await supabase
       .from('bookings')
       .select(
-        'id, venue_id, guest_id, booking_date, booking_time, party_size, status, deposit_status, deposit_amount_pence, confirm_token_hash, confirm_token_used_at, practitioner_id, appointment_service_id, calendar_id, service_item_id, updated_at',
+        'id, venue_id, guest_id, booking_date, booking_time, party_size, status, deposit_status, deposit_amount_pence, confirm_token_hash, confirm_token_used_at, practitioner_id, appointment_service_id, calendar_id, service_item_id, updated_at, guest_attendance_confirmed_at',
       )
       .eq('id', bookingId)
       .single();
@@ -125,6 +125,8 @@ export async function GET(request: NextRequest) {
       practitioner_name,
       appointment_service_name,
       refund_notice_hours: refundNoticeHours,
+      guest_attendance_confirmed_at:
+        (booking as { guest_attendance_confirmed_at?: string | null }).guest_attendance_confirmed_at ?? null,
     });
   } catch (err) {
     console.error('GET /api/confirm failed:', err);
@@ -171,7 +173,7 @@ export async function POST(request: NextRequest) {
     const { data: booking, error: bookErr } = await supabase
       .from('bookings')
       .select(
-        'id, venue_id, guest_id, booking_date, booking_time, party_size, status, deposit_status, deposit_amount_pence, stripe_payment_intent_id, cancellation_deadline, confirm_token_hash, confirm_token_used_at, service_id, practitioner_id, appointment_service_id, calendar_id, service_item_id, updated_at',
+        'id, venue_id, guest_id, booking_date, booking_time, party_size, status, deposit_status, deposit_amount_pence, stripe_payment_intent_id, cancellation_deadline, confirm_token_hash, confirm_token_used_at, service_id, practitioner_id, appointment_service_id, calendar_id, service_item_id, updated_at, guest_attendance_confirmed_at',
       )
       .eq('id', bookingId)
       .single();
@@ -197,17 +199,47 @@ export async function POST(request: NextRequest) {
     const usedAt = now;
 
     if (action === 'confirm') {
-      const confirmCheck = validateBookingStatusTransition(booking.status as string, 'Confirmed');
+      const currentStatus = booking.status as string;
+      const attendanceAlready = (booking as { guest_attendance_confirmed_at?: string | null })
+        .guest_attendance_confirmed_at;
+
+      // Pre-visit reminder: booking is often already Confirmed — record guest attendance instead of
+      // attempting Confirmed → Confirmed (invalid transition).
+      if (currentStatus === 'Confirmed') {
+        if (attendanceAlready) {
+          return NextResponse.json({
+            success: true,
+            message: 'Thanks — we already have your confirmation on file.',
+            guest_attendance_confirmed_at: attendanceAlready,
+          });
+        }
+        await supabase
+          .from('bookings')
+          .update({
+            guest_attendance_confirmed_at: now,
+            updated_at: now,
+          })
+          .eq('id', bookingId);
+
+        return NextResponse.json({
+          success: true,
+          message: "Thanks — we've noted that you're coming. We look forward to seeing you.",
+          guest_attendance_confirmed_at: now,
+        });
+      }
+
+      const confirmCheck = validateBookingStatusTransition(currentStatus, 'Confirmed');
       if (!confirmCheck.ok) {
         return NextResponse.json({ error: confirmCheck.error }, { status: 400 });
       }
 
-      const previousStatus = booking.status as string;
+      const previousStatus = currentStatus;
       await supabase
         .from('bookings')
         .update({
           status: 'Confirmed',
           confirm_token_used_at: usedAt,
+          guest_attendance_confirmed_at: now,
           updated_at: now,
         })
         .eq('id', bookingId);

@@ -18,7 +18,7 @@ import { cancellationDeadlineHoursBefore } from '@/lib/booking/cancellation-dead
 import { generateGroupBookingId } from '@/lib/booking/group-booking';
 import type { GroupAppointmentLine } from '@/lib/emails/types';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
-import { resolvePublicSiteOriginFromRequest } from '@/lib/public-base-url';
+import { createShortManageLink } from '@/lib/short-manage-link';
 
 const personEntrySchema = z.object({
   person_label: z.string().min(1).max(100),
@@ -316,8 +316,7 @@ export async function POST(request: NextRequest) {
         })
         .eq('id', primaryBookingId);
 
-      const baseUrl = resolvePublicSiteOriginFromRequest(request);
-      const manageBookingLink = `${baseUrl}/manage/${primaryBookingId}/${encodeURIComponent(manageToken)}`;
+      const manageBookingLink = createShortManageLink(primaryBookingId);
 
       const firstPerson = validatedPeople[0]!;
       after(async () => {
