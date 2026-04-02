@@ -132,19 +132,13 @@ export default function PaymentPage() {
             <span className="text-slate-500">Plan</span>
             <span className="font-medium text-slate-900">{planLabel}</span>
           </div>
-          {plan === 'business' && isRestaurant && (
+          {plan === 'business' && (
             <div className="rounded-lg border border-slate-100 bg-slate-50/80 px-3 py-2 text-xs text-slate-600">
               <p className="font-medium text-slate-800">Reserve NI Business: &pound;{BUSINESS_PRICE}/month</p>
-              <p className="mt-1">
-                Unlimited team members. SMS reminders. Priority support. Table management with timeline grid and floor
-                plan.
+              <p className="mt-1 leading-relaxed">
+                Everything you need to run your business. Unlimited staff calendars, 800 SMS included, table management
+                for restaurants, and priority support. One flat price, no per-head costs.
               </p>
-            </div>
-          )}
-          {plan === 'business' && !isRestaurant && (
-            <div className="rounded-lg border border-slate-100 bg-slate-50/80 px-3 py-2 text-xs text-slate-600">
-              <p className="font-medium text-slate-800">Reserve NI Business: &pound;{BUSINESS_PRICE}/month</p>
-              <p className="mt-1">Unlimited team members. SMS reminders. Priority support.</p>
             </div>
           )}
           {plan === 'standard' && (
