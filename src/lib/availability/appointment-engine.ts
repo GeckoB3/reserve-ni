@@ -515,6 +515,19 @@ export async function fetchAppointmentInput(params: {
 }): Promise<AppointmentEngineInput> {
   const { supabase, venueId, date, practitionerId, serviceId } = params;
 
+  /** Unified scheduling exposes staff as `unified_calendars` rows; the same UUID is sent as `practitioner_id`. */
+  if (practitionerId) {
+    const { data: ucRow } = await supabase
+      .from('unified_calendars')
+      .select('id')
+      .eq('venue_id', venueId)
+      .eq('id', practitionerId)
+      .maybeSingle();
+    if (ucRow) {
+      return fetchCalendarAppointmentInput({ supabase, venueId, date, calendarId: practitionerId, serviceId });
+    }
+  }
+
   let practitionerQuery = supabase
     .from('practitioners')
     .select('*')
@@ -788,7 +801,7 @@ export async function fetchCalendarAppointmentInput(params: {
     }
   }
 
-  const [bookingsRes, blocksRes, venueRes] = await Promise.all([
+  const [bookingsRes, blocksRes, calBlocksRes, venueRes] = await Promise.all([
     supabase
       .from('bookings')
       .select('id, practitioner_id, calendar_id, booking_time, appointment_service_id, service_item_id, status')
@@ -802,6 +815,12 @@ export async function fetchCalendarAppointmentInput(params: {
       .eq('venue_id', venueId)
       .eq('block_date', date)
       .eq('practitioner_id', calendarId),
+    supabase
+      .from('calendar_blocks')
+      .select('start_time, end_time')
+      .eq('venue_id', venueId)
+      .eq('calendar_id', calendarId)
+      .eq('block_date', date),
     supabase.from('venues').select('opening_hours').eq('id', venueId).single(),
   ]);
 
@@ -832,7 +851,7 @@ export async function fetchCalendarAppointmentInput(params: {
     };
   });
 
-  const practitionerBlockedRanges: PractitionerCalendarBlockedRange[] = blocksRes.error
+  const legacyBlockRanges: PractitionerCalendarBlockedRange[] = blocksRes.error
     ? []
     : (blocksRes.data ?? [])
         .map((row: { practitioner_id: string; start_time: string; end_time: string }) => ({
@@ -842,8 +861,25 @@ export async function fetchCalendarAppointmentInput(params: {
         }))
         .filter((b) => b.end > b.start);
 
+  const unifiedCalBlockRanges: PractitionerCalendarBlockedRange[] = calBlocksRes.error
+    ? []
+    : (calBlocksRes.data ?? []).map((row: { start_time: string; end_time: string }) => ({
+        practitioner_id: calendarId,
+        start: timeToMinutes(String(row.start_time).slice(0, 5)),
+        end: timeToMinutes(String(row.end_time).slice(0, 5)),
+      }))
+      .filter((b) => b.end > b.start);
+
+  const practitionerBlockedRanges: PractitionerCalendarBlockedRange[] = [
+    ...legacyBlockRanges,
+    ...unifiedCalBlockRanges,
+  ];
+
   if (blocksRes.error) {
     console.warn('[fetchCalendarAppointmentInput] practitioner_calendar_blocks:', blocksRes.error.message);
+  }
+  if (calBlocksRes.error) {
+    console.warn('[fetchCalendarAppointmentInput] calendar_blocks:', calBlocksRes.error.message);
   }
 
   const venueOpeningHours = venueRes.error
