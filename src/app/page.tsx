@@ -154,23 +154,22 @@ export default function Home() {
           <p className="mx-auto mt-4 max-w-xl text-center text-slate-500">No commission, no hidden fees. Pick the plan that fits your business.</p>
 
           <div className="mx-auto mt-14 grid max-w-4xl items-stretch gap-8 lg:grid-cols-2">
-            {/* Standard */}
+            {/* Standard — aligned with signup plan step & reserveni.com marketing */}
             <div className="flex flex-col rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
               <h3 className="text-lg font-bold text-slate-900">Standard</h3>
               <div className="mt-3 flex items-baseline gap-1">
                 <span className="text-4xl font-extrabold text-slate-900">&pound;{STANDARD_PRICE_PER_CALENDAR}</span>
-                <span className="text-sm text-slate-500">/month per team member</span>
+                <span className="text-sm text-slate-500">/month per staff</span>
               </div>
-              <p className="mt-2 text-sm font-medium leading-snug text-slate-700">
-                All features. Best for solo practitioners and small teams.
-              </p>
-              <p className="mt-1 text-xs text-slate-500">200 SMS per bookable calendar per month.</p>
               <PricingCalculator />
               <ul className="mt-6 flex-1 space-y-3 text-sm text-slate-600">
-                <PricingFeature text="Bookings, deposits, reminders, client records, reporting" />
-                <PricingFeature text="Email and SMS communications" />
-                <PricingFeature text="Additional SMS at 5p each if you exceed the allowance" />
-                <PricingFeature text="Email support" />
+                <PricingFeature text="Clients book online 24/7" />
+                <PricingFeature text="Automated email reminders" />
+                <PricingFeature text="One-tap confirm or cancel via email" />
+                <PricingFeature text="Collect deposits at booking" />
+                <PricingFeature text="Full schedule at a glance" />
+                <PricingFeature text="Client records with visit history" />
+                <PricingFeature text="Your own branded booking page" />
               </ul>
               <Link href="/signup" className="mt-8 inline-flex h-11 w-full items-center justify-center rounded-xl bg-brand-600 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700">
                 Get started
@@ -179,29 +178,24 @@ export default function Home() {
 
             {/* Business */}
             <div className="flex flex-col rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
-              <h3 className="text-lg font-bold text-slate-900">Business</h3>
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="text-lg font-bold text-slate-900">Business</h3>
+                <span className="rounded-full bg-brand-100 px-2.5 py-0.5 text-xs font-semibold text-brand-700">
+                  Popular
+                </span>
+              </div>
               <div className="mt-3 flex items-baseline gap-1">
                 <span className="text-4xl font-extrabold text-slate-900">&pound;{BUSINESS_PRICE}</span>
-                <span className="text-sm text-slate-500">/month flat</span>
+                <span className="text-sm text-slate-500">/month</span>
               </div>
-              <p className="mt-2 text-sm font-medium leading-snug text-slate-700">
-                Unlimited calendars. 800 SMS. Table management. Priority support.
-              </p>
-              <p className="mt-2 text-sm font-medium leading-snug text-slate-700">
-                Best for restaurants and large teams.
-              </p>
-              <p className="mt-2 text-xs text-slate-600">
-                Restaurants use Business. Appointment-based businesses can choose Standard or Business.
-              </p>
-              <p className="mt-4 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                Everything in Standard, plus
-              </p>
-              <ul className="mt-3 flex-1 space-y-3 text-sm text-slate-600">
-                <PricingFeature text="Unlimited bookable calendars" />
-                <PricingFeature text="800 SMS messages included per month" />
-                <PricingFeature text="Table management with timeline grid and floor plan (restaurants)" />
+              <ul className="mt-4 flex-1 space-y-3 text-sm text-slate-600">
+                <PricingFeature text="Everything in Standard" />
+                <PricingFeature text="SMS reminders that actually get read" />
+                <PricingFeature text="Confirm-or-cancel via text" />
+                <PricingFeature text="Unlimited team members at one flat price" />
                 <PricingFeature text="Priority support" />
               </ul>
+              <p className="mt-4 text-xs font-medium text-slate-500">Best value for teams of 8+</p>
               <Link href="/signup" className="mt-8 inline-flex h-11 w-full items-center justify-center rounded-xl bg-brand-600 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700">
                 Get started
               </Link>
