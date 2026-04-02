@@ -134,7 +134,7 @@ export default function PaymentPage() {
           </div>
           {plan === 'business' && isRestaurant && (
             <div className="rounded-lg border border-slate-100 bg-slate-50/80 px-3 py-2 text-xs text-slate-600">
-              <p className="font-medium text-slate-800">Reserve NI Business — &pound;{BUSINESS_PRICE}/month</p>
+              <p className="font-medium text-slate-800">Reserve NI Business: &pound;{BUSINESS_PRICE}/month</p>
               <p className="mt-1">
                 Unlimited team members. SMS reminders. Priority support. Table management with timeline grid and floor
                 plan.
@@ -143,7 +143,7 @@ export default function PaymentPage() {
           )}
           {plan === 'business' && !isRestaurant && (
             <div className="rounded-lg border border-slate-100 bg-slate-50/80 px-3 py-2 text-xs text-slate-600">
-              <p className="font-medium text-slate-800">Reserve NI Business — &pound;{BUSINESS_PRICE}/month</p>
+              <p className="font-medium text-slate-800">Reserve NI Business: &pound;{BUSINESS_PRICE}/month</p>
               <p className="mt-1">Unlimited team members. SMS reminders. Priority support.</p>
             </div>
           )}
@@ -151,7 +151,7 @@ export default function PaymentPage() {
             <>
               <div className="rounded-lg border border-slate-100 bg-slate-50/80 px-3 py-2 text-xs text-slate-600">
                 <p className="font-medium text-slate-800">
-                  Reserve NI Standard — {calendarCount} &times; &pound;{STANDARD_PRICE_PER_CALENDAR}/month = &pound;
+                  Reserve NI Standard: {calendarCount} &times; &pound;{STANDARD_PRICE_PER_CALENDAR}/month = &pound;
                   {calendarCount * STANDARD_PRICE_PER_CALENDAR}/month
                 </p>
                 <p className="mt-1">
@@ -168,7 +168,7 @@ export default function PaymentPage() {
           )}
           {plan === 'founding' && isRestaurant && (
             <div className="rounded-lg border border-emerald-100 bg-emerald-50/60 px-3 py-2 text-xs text-emerald-900">
-              <p className="font-medium">Founding Partner — Business plan free for 6 months, then &pound;{BUSINESS_PRICE}/month.</p>
+              <p className="font-medium">Founding Partner: Business plan free for 6 months, then &pound;{BUSINESS_PRICE}/month.</p>
             </div>
           )}
           <div className="border-t border-slate-100 pt-4">

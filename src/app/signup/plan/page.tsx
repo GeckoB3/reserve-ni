@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { getBusinessConfig, formatSignupBusinessTypeLabel, isSignupSupportedBookingModel } from '@/lib/business-config';
 import { STANDARD_PRICE_PER_CALENDAR, BUSINESS_PRICE, FOUNDING_PARTNER_CAP } from '@/lib/pricing-constants';
+import { PricingCalculator } from '@/components/landing/PricingCalculator';
 
 export default function PlanPage() {
   const router = useRouter();
@@ -72,17 +73,6 @@ export default function PlanPage() {
     };
   }, [isRestaurant, searchParams]);
 
-  const calendarLabel = useMemo(() => {
-    if (!config) return 'calendar';
-    if (config.model === 'unified_scheduling' || config.model === 'practitioner_appointment') {
-      return config.terms.staff.toLowerCase();
-    }
-    return 'calendar';
-  }, [config]);
-
-  const standardTotal = calendarCount * STANDARD_PRICE_PER_CALENDAR;
-  const showCrossoverNudge =
-    calendarCount * STANDARD_PRICE_PER_CALENDAR > BUSINESS_PRICE;
   function handleContinue() {
     sessionStorage.setItem('signup_plan', plan);
     sessionStorage.setItem('signup_calendar_count', String(isRestaurant ? 1 : calendarCount));
@@ -159,18 +149,27 @@ export default function PlanPage() {
           </p>
         </div>
         <div className="rounded-2xl border border-brand-200 bg-brand-50/30 p-6 shadow-sm">
-          <h2 className="text-lg font-bold text-slate-900">Reserve NI Business — &pound;{BUSINESS_PRICE}/month</h2>
-          <ul className="mt-4 space-y-2 text-sm text-slate-600">
-            <FeatureItem text="Unlimited calendars" />
-            <FeatureItem text="SMS reminders" />
-            <FeatureItem text="Confirm-or-cancel via SMS" />
-            <FeatureItem text="Table management with timeline grid and floor plan" />
+          <h2 className="text-lg font-bold text-slate-900">Business</h2>
+          <div className="mt-2 flex items-baseline gap-1">
+            <span className="text-2xl font-extrabold text-slate-900">&pound;{BUSINESS_PRICE}</span>
+            <span className="text-sm text-slate-500">/month flat</span>
+          </div>
+          <p className="mt-2 text-sm font-medium leading-snug text-slate-700">
+            Unlimited calendars. 800 SMS. Table management. Priority support.
+          </p>
+          <p className="mt-2 text-sm font-medium leading-snug text-slate-700">Best for restaurants and large teams.</p>
+          <p className="mt-2 text-xs text-slate-600">
+            Restaurants use Business. Appointment-based businesses can choose Standard or Business.
+          </p>
+          <p className="mt-4 text-xs font-semibold uppercase tracking-wide text-slate-500">
+            Everything in Standard, plus
+          </p>
+          <ul className="mt-3 space-y-2 text-sm text-slate-600">
+            <FeatureItem text="Unlimited bookable calendars" />
+            <FeatureItem text="800 SMS messages included per month" />
+            <FeatureItem text="Table management with timeline grid and floor plan (restaurants)" />
             <FeatureItem text="Priority support" />
           </ul>
-          <p className="mt-4 text-sm text-slate-600">
-            The Business plan includes everything you need to manage your restaurant, including SMS reminders, deposit
-            collection, and table management.
-          </p>
         </div>
         <div className="mt-8 flex justify-center">
           <button
@@ -219,105 +218,28 @@ export default function PlanPage() {
             <span className="text-3xl font-extrabold text-slate-900">
               &pound;{STANDARD_PRICE_PER_CALENDAR}
             </span>
-            <span className="text-sm text-slate-500">/month per {calendarLabel}</span>
+            <span className="text-sm text-slate-500">/month per team member</span>
+          </div>
+          <p className="mt-2 text-sm font-medium leading-snug text-slate-700">
+            All features. Best for solo practitioners and small teams.
+          </p>
+          <p className="mt-1 text-xs text-slate-500">200 SMS per bookable calendar per month.</p>
+
+          <div
+            className="mt-2"
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => e.stopPropagation()}
+            role="presentation"
+          >
+            <PricingCalculator count={calendarCount} onCountChange={setCalendarCount} />
           </div>
 
-          {plan === 'standard' && (
-            <div className="mt-4">
-              <label className="text-sm font-medium text-slate-700">
-                How many {calendarLabel}s will use Reserve NI?
-              </label>
-              <div className="mt-2 flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setCalendarCount(1);
-                  }}
-                  className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
-                >
-                  Just me (&pound;{STANDARD_PRICE_PER_CALENDAR})
-                </button>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setCalendarCount(2);
-                  }}
-                  className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
-                >
-                  2 (&pound;{STANDARD_PRICE_PER_CALENDAR * 2})
-                </button>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setCalendarCount(3);
-                  }}
-                  className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
-                >
-                  3 (&pound;{STANDARD_PRICE_PER_CALENDAR * 3})
-                </button>
-              </div>
-              <div className="mt-3 flex items-center gap-3">
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setCalendarCount(Math.max(1, calendarCount - 1));
-                  }}
-                  className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
-                >
-                  -
-                </button>
-                <span className="w-8 text-center text-lg font-semibold">{calendarCount}</span>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setCalendarCount(Math.min(30, calendarCount + 1));
-                  }}
-                  className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
-                >
-                  +
-                </button>
-              </div>
-              <p className="mt-2 text-sm font-semibold text-brand-600">
-                {calendarCount} &times; &pound;{STANDARD_PRICE_PER_CALENDAR}/month = &pound;{standardTotal}/month
-              </p>
-              {showCrossoverNudge && (
-                <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-                  <p>
-                    At {calendarCount} team members, that&apos;s &pound;{standardTotal}/month. The Business plan is
-                    &pound;{BUSINESS_PRICE}/month for unlimited team members plus SMS reminders and priority support.
-                  </p>
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setPlan('business');
-                    }}
-                    className="mt-2 font-semibold text-amber-950 underline hover:no-underline"
-                  >
-                    Switch to Business
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
-
           <ul className="mt-4 space-y-2 text-sm text-slate-600">
-            <FeatureItem text="Clients book online 24/7" />
-            <FeatureItem text="Automated email reminders" />
-            <FeatureItem text="One-tap confirm or cancel via email" />
-            <FeatureItem text="Collect deposits at booking" />
-            <FeatureItem text="Full schedule at a glance" />
-            <FeatureItem text="Client records with visit history" />
-            <FeatureItem text="Your own branded booking page" />
+            <FeatureItem text="Bookings, deposits, reminders, client records, reporting" />
+            <FeatureItem text="Email and SMS communications" />
+            <FeatureItem text="Additional SMS at 5p each if you exceed the allowance" />
+            <FeatureItem text="Email support" />
           </ul>
-          {plan === 'standard' && (
-            <p className="mt-4 text-center text-xs font-semibold text-slate-500">Continue with Standard (next step)</p>
-          )}
         </div>
 
         <div
@@ -336,27 +258,27 @@ export default function PlanPage() {
               : 'border-slate-200 bg-white hover:border-slate-300'
           }`}
         >
-          <div className="flex items-center justify-between">
-            <h2 className="text-lg font-bold text-slate-900">Business</h2>
-            <span className="rounded-full bg-brand-100 px-2.5 py-0.5 text-xs font-semibold text-brand-700">
-              Popular
-            </span>
-          </div>
+          <h2 className="text-lg font-bold text-slate-900">Business</h2>
           <div className="mt-2 flex items-baseline gap-1">
             <span className="text-3xl font-extrabold text-slate-900">&pound;{BUSINESS_PRICE}</span>
-            <span className="text-sm text-slate-500">/month</span>
+            <span className="text-sm text-slate-500">/month flat</span>
           </div>
-          <ul className="mt-4 space-y-2 text-sm text-slate-600">
-            <FeatureItem text="Everything in Standard" />
-            <FeatureItem text="SMS reminders that actually get read" />
-            <FeatureItem text="Confirm-or-cancel via text" />
-            <FeatureItem text="Unlimited team members at one flat price" />
+          <p className="mt-2 text-sm font-medium leading-snug text-slate-700">
+            Unlimited calendars. 800 SMS. Table management. Priority support.
+          </p>
+          <p className="mt-2 text-sm font-medium leading-snug text-slate-700">Best for restaurants and large teams.</p>
+          <p className="mt-2 text-xs text-slate-600">
+            Restaurants use Business. Appointment-based businesses can choose Standard or Business.
+          </p>
+          <p className="mt-4 text-xs font-semibold uppercase tracking-wide text-slate-500">
+            Everything in Standard, plus
+          </p>
+          <ul className="mt-3 space-y-2 text-sm text-slate-600">
+            <FeatureItem text="Unlimited bookable calendars" />
+            <FeatureItem text="800 SMS messages included per month" />
+            <FeatureItem text="Table management with timeline grid and floor plan (restaurants)" />
             <FeatureItem text="Priority support" />
           </ul>
-          <p className="mt-4 text-xs font-medium text-slate-500">Best value for teams of 8+</p>
-          {plan === 'business' && (
-            <p className="mt-2 text-center text-xs font-semibold text-brand-600">Continue with Business (next step)</p>
-          )}
         </div>
       </div>
 

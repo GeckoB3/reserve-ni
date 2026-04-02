@@ -54,7 +54,7 @@ export default function BusinessTypePage() {
         <p className="mt-2 text-sm text-slate-500">
           Reserve NI supports <span className="font-medium text-slate-700">table &amp; cover booking</span> for hospitality,
           and <span className="font-medium text-slate-700">appointments &amp; services</span> for everyone else. Pick the
-          trade that fits you best—we&apos;ll tailor wording and defaults.
+          trade that fits you best. We&apos;ll tailor wording and defaults.
         </p>
       </div>
 
@@ -155,7 +155,7 @@ export default function BusinessTypePage() {
             selected === 'other' ? 'text-brand-600' : 'text-slate-500 hover:text-slate-700'
           }`}
         >
-          My trade isn&apos;t listed — use flexible appointments
+          My trade isn&apos;t listed: use flexible appointments
         </button>
       </div>
 

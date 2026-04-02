@@ -201,7 +201,7 @@ export default function OnboardingPage() {
         }
 
         // Model B: merge existing practitioners (retry / refresh after partial save).
-        // Business / Founding: unlimited calendars — start from one row, add as many as needed.
+        // Business / Founding: unlimited calendars; start from one row, add as many as needed.
         // Standard: one row per paid calendar slot (fixed count).
         if (isUnifiedSchedulingVenue(v.booking_model)) {
           const unlimitedCalendars =
@@ -476,7 +476,7 @@ export default function OnboardingPage() {
         setError(
           unlimitedCalendars
             ? `Enter a name for each ${terms.staff.toLowerCase()}.`
-            : `Enter a name for each ${terms.staff.toLowerCase()} — your plan includes ${slots} calendar slot${slots === 1 ? '' : 's'}.`,
+            : `Enter a name for each ${terms.staff.toLowerCase()}. Your plan includes ${slots} calendar slot${slots === 1 ? '' : 's'}.`,
         );
         return;
       }
@@ -534,7 +534,7 @@ export default function OnboardingPage() {
               };
               if (errBody.upgrade_required) {
                 throw new Error(
-                  `Your plan includes ${errBody.limit ?? slots} calendar slot${(errBody.limit ?? slots) === 1 ? '' : 's'}. You already have that many team members saved — edit the rows above, or change your plan under Settings → Plan.`,
+                  `Your plan includes ${errBody.limit ?? slots} calendar slot${(errBody.limit ?? slots) === 1 ? '' : 's'}. You already have that many team members saved. Edit the rows above, or change your plan under Settings → Plan.`,
                 );
               }
               throw new Error(
@@ -874,7 +874,7 @@ export default function OnboardingPage() {
       <div className="mb-8">
         <div className="mb-2 flex justify-between text-xs font-medium text-slate-400">
           <span>
-            Step {step + 1} of {totalSteps} — {modelSteps[step]?.label}
+            Step {step + 1} of {totalSteps} · {modelSteps[step]?.label}
           </span>
           <span>{Math.round(((step + 1) / totalSteps) * 100)}%</span>
         </div>
@@ -1014,7 +1014,7 @@ export default function OnboardingPage() {
                 </h2>
                 <p className="mb-4 text-sm text-slate-500">
                   Your Business plan includes <strong>unlimited bookable calendars</strong> and{' '}
-                  <strong>unlimited team members</strong> — add everyone you need. Each person below gets their own
+                  <strong>unlimited team members</strong>: add everyone you need. Each person below gets their own
                   calendar and staff settings. Set{' '}
                   <strong>working hours, breaks, and days off</strong> under{' '}
                   <Link
@@ -1104,7 +1104,7 @@ export default function OnboardingPage() {
                   {Math.max(1, venue.calendar_count ?? 1) === 1 ? '' : 's'})
                 </h2>
                 <p className="mb-6 text-sm text-slate-500">
-                  Each person below gets their own bookable calendar — this matches the number of slots on your
+                  Each person below gets their own bookable calendar. This matches the number of slots on your
                   current plan. After onboarding, change calendar count under{' '}
                   <Link
                     href="/dashboard/settings?tab=plan"
@@ -1171,7 +1171,7 @@ export default function OnboardingPage() {
               <p className="mb-6 text-sm text-slate-500">
                 {isUnifiedSchedulingVenue(venue.booking_model) ? (
                   <>
-                    Add each service with the same detail as in the dashboard — duration, buffer, price, deposits,
+                    Add each service with the same detail as in the dashboard: duration, buffer, price, deposits,
                     which {terms.staff.toLowerCase()} offers it, and optional staff customisation rules.
                   </>
                 ) : (
@@ -1217,7 +1217,7 @@ export default function OnboardingPage() {
               {rosterList.map((cal) => (
                 <div key={cal.id}>
                   <h3 className="mb-3 text-sm font-semibold text-slate-800">
-                    {cal.name} — working hours
+                    {cal.name}: working hours
                   </h3>
                   <WorkingHoursControl
                     value={calendarWorkingDraft[cal.id] ?? defaultPractitionerWorkingHours()}
@@ -1572,14 +1572,14 @@ export default function OnboardingPage() {
                   <li>
                     <Link href="/dashboard/settings" className="font-medium text-brand-600 underline hover:text-brand-700">
                       Settings
-                    </Link>{' '}
-                    — Stripe Connect and venue payment options
+                    </Link>
+                    : Stripe Connect and venue payment options
                   </li>
                   <li>
                     <Link href="/dashboard/availability" className="font-medium text-brand-600 underline hover:text-brand-700">
                       Availability
-                    </Link>{' '}
-                    — breaks, time off, and fine-tune schedules anytime
+                    </Link>
+                    : breaks, time off, and fine-tune schedules anytime
                   </li>
                 </ul>
               </div>
