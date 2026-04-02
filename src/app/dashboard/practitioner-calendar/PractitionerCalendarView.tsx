@@ -57,7 +57,10 @@ interface Booking {
   party_size: number;
   status: string;
   practitioner_id: string | null;
+  /** Unified scheduling: column is `unified_calendars.id`; `practitioner_id` may be null. */
+  calendar_id: string | null;
   appointment_service_id: string | null;
+  service_item_id: string | null;
   guest_name: string;
   guest_email: string | null;
   guest_phone: string | null;
@@ -79,6 +82,15 @@ interface CalendarBlock {
   start_time: string;
   end_time: string;
   reason: string | null;
+}
+
+/** Staff column: legacy practitioner row or unified calendar row (same id used in roster). */
+function columnIdForBooking(b: Booking): string | null {
+  return b.practitioner_id ?? b.calendar_id ?? null;
+}
+
+function serviceIdForBooking(b: Booking): string | null {
+  return b.appointment_service_id ?? b.service_item_id ?? null;
 }
 
 type ViewMode = 'day' | 'week' | 'month';
@@ -243,7 +255,7 @@ function bookingToPrefetch(b: Booking): AppointmentDetailPrefetch {
     booking_end_time: b.booking_end_time,
     status: b.status,
     practitioner_id: b.practitioner_id,
-    appointment_service_id: b.appointment_service_id,
+    appointment_service_id: serviceIdForBooking(b),
     special_requests: b.special_requests,
     internal_notes: b.internal_notes,
     client_arrived_at: b.client_arrived_at,
@@ -383,13 +395,14 @@ function slotOccupied(
   serviceMap: Map<string, AppointmentService>,
 ): boolean {
   for (const b of bookings) {
-    if (b.practitioner_id !== pracId || b.booking_date !== dateStr) continue;
+    if (columnIdForBooking(b) !== pracId || b.booking_date !== dateStr) continue;
     if (['Cancelled', 'No-Show'].includes(b.status)) continue; // Completed still occupies the slot for scheduling
+    const sid = serviceIdForBooking(b);
     const dur =
       b.booking_end_time != null
         ? Math.max(SLOT_MINUTES, timeToMinutes(b.booking_end_time) - timeToMinutes(b.booking_time))
-        : b.appointment_service_id
-          ? serviceMap.get(b.appointment_service_id)?.duration_minutes ?? 30
+        : sid
+          ? serviceMap.get(sid)?.duration_minutes ?? 30
           : 30;
     const b0 = timeToMinutes(b.booking_time);
     const b1 = b0 + Math.max(dur, SLOT_MINUTES);
@@ -602,7 +615,7 @@ export function PractitionerCalendarView({
           svcRes.json(),
         ]);
         setPractitioners(pracData.practitioners ?? []);
-        setBookings((bookData.bookings ?? []).filter((b: Booking) => b.practitioner_id));
+        setBookings((bookData.bookings ?? []).filter((b: Booking) => Boolean(columnIdForBooking(b))));
         setServices(svcData.services ?? []);
         if (blockRes.ok) {
           const bjson = await blockRes.json();
@@ -707,7 +720,7 @@ export function PractitionerCalendarView({
   function bookingsForPractitioner(pracId: string, dayDate: string): Booking[] {
     return bookings.filter((b) => {
       if (b.booking_date !== dayDate) return false;
-      if (b.practitioner_id !== pracId) return false;
+      if (columnIdForBooking(b) !== pracId) return false;
       if (filterStatus !== 'all' && b.status !== filterStatus) return false;
       return true;
     });
@@ -717,16 +730,18 @@ export function PractitionerCalendarView({
     if (b.booking_end_time) {
       return Math.max(SLOT_MINUTES, timeToMinutes(b.booking_end_time) - timeToMinutes(b.booking_time));
     }
-    if (b.appointment_service_id) {
-      const svc = serviceMap.get(b.appointment_service_id);
+    const sid = serviceIdForBooking(b);
+    if (sid) {
+      const svc = serviceMap.get(sid);
       if (svc) return svc.duration_minutes;
     }
     return 30;
   }
 
   function getBookingColour(b: Booking): string {
-    if (b.appointment_service_id) {
-      const svc = serviceMap.get(b.appointment_service_id);
+    const sid = serviceIdForBooking(b);
+    if (sid) {
+      const svc = serviceMap.get(sid);
       if (svc?.colour) return svc.colour;
     }
     return '#3B82F6';
@@ -868,7 +883,7 @@ export function PractitionerCalendarView({
               ...b,
               booking_date: newDate,
               booking_time: newTime.length === 5 ? `${newTime}:00` : newTime,
-              practitioner_id: newPracId,
+              ...(b.calendar_id != null ? { calendar_id: newPracId } : { practitioner_id: newPracId }),
             }
           : b,
       ),
@@ -935,7 +950,7 @@ export function PractitionerCalendarView({
     const newTime = minutesToTime(slotStartMins);
     if (
       b.booking_date === dateStr &&
-      b.practitioner_id === pracId &&
+      columnIdForBooking(b) === pracId &&
       b.booking_time.slice(0, 5) === newTime
     ) {
       return;
@@ -951,7 +966,7 @@ export function PractitionerCalendarView({
 
   const bookingsMatchingFilters = useMemo(() => {
     return bookings.filter((b) => {
-      if (filterPractitioner !== 'all' && b.practitioner_id !== filterPractitioner) return false;
+      if (filterPractitioner !== 'all' && columnIdForBooking(b) !== filterPractitioner) return false;
       if (filterStatus !== 'all' && b.status !== filterStatus) return false;
       return true;
     });
@@ -1361,7 +1376,8 @@ export function PractitionerCalendarView({
                           const duration = getBookingDuration(b);
                           const colour = isArrivedWaitingDisplay(b) ? ARRIVED_WAITING_ACCENT_HEX : getBookingColour(b);
                           const statusStyle = bookingCalendarBlockStyle(b);
-                          const svc = b.appointment_service_id ? serviceMap.get(b.appointment_service_id) : null;
+                          const sid = serviceIdForBooking(b);
+                          const svc = sid ? serviceMap.get(sid) : null;
                           const top = slotTop(b.booking_time);
                           const height = slotHeightFromDuration(duration);
                           const canDrag = ['Pending', 'Confirmed', 'Seated'].includes(b.status);
@@ -1449,7 +1465,10 @@ export function PractitionerCalendarView({
                         const qBusy = items.some((x) => quickActionId === x.id);
                         const arrived = Boolean(first.client_arrived_at);
                         const serviceTitle = items
-                          .map((x) => (x.appointment_service_id ? serviceMap.get(x.appointment_service_id)?.name : null))
+                          .map((x) => {
+                            const sid = serviceIdForBooking(x);
+                            return sid ? serviceMap.get(sid)?.name : null;
+                          })
                           .filter(Boolean)
                           .join(' → ');
                         return (
@@ -1465,7 +1484,8 @@ export function PractitionerCalendarView({
                                 <div className="flex min-h-0 min-w-0 flex-1 flex-col">
                                   {items.map((b, segIdx) => {
                                     const dur = getBookingDuration(b);
-                                    const svc = b.appointment_service_id ? serviceMap.get(b.appointment_service_id) : null;
+                                    const sid = serviceIdForBooking(b);
+                                    const svc = sid ? serviceMap.get(sid) : null;
                                     return (
                                       <div
                                         key={b.id}

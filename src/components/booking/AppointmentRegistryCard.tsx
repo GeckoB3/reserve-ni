@@ -16,7 +16,9 @@ export interface RegistryAppointment {
   guest_visit_count: number | null;
   guest_id?: string;
   practitioner_id: string | null;
+  calendar_id?: string | null;
   appointment_service_id: string | null;
+  service_item_id?: string | null;
   special_requests: string | null;
   internal_notes: string | null;
   client_arrived_at: string | null;

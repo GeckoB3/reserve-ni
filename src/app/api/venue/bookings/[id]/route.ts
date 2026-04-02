@@ -332,7 +332,7 @@ export async function PATCH(
         };
         // Table bookings: clear "arrived" when seated. Appointment (practitioner) bookings keep client_arrived_at
         // so staff can undo start and return to Confirmed with waiting state restored.
-        if (newStatus === 'Seated' && !booking.practitioner_id) {
+        if (newStatus === 'Seated' && !booking.practitioner_id && !booking.calendar_id) {
           statusPayload.client_arrived_at = null;
         }
         await staff.db.from('bookings').update(statusPayload).eq('id', id);
@@ -393,7 +393,7 @@ export async function PATCH(
 
     /** Appointment bookings: staff marks client as arrived / waiting (optional; cleared when status → Seated). */
     if (body.client_arrived !== undefined) {
-      if (!booking.practitioner_id) {
+      if (!booking.practitioner_id && !booking.calendar_id) {
         return NextResponse.json({ error: 'Arrived is only available for appointment bookings' }, { status: 400 });
       }
       const st = booking.status as string;
@@ -494,13 +494,17 @@ export async function PATCH(
       }
 
       const timeStr = newTime.slice(0, 5);
-      const isAppointment = Boolean(booking.practitioner_id);
+      const isAppointment = Boolean(booking.practitioner_id || booking.calendar_id);
       const idLc = id.toLowerCase();
 
       // --- Validate slot availability ---
       if (isAppointment) {
-        const practId = (body.practitioner_id as string) ?? booking.practitioner_id;
-        const svcId = booking.appointment_service_id;
+        const practId =
+          (body.practitioner_id as string | undefined) ??
+          (booking.practitioner_id as string | null) ??
+          (booking.calendar_id as string | null);
+        const svcId =
+          (booking.appointment_service_id as string | null) ?? (booking.service_item_id as string | null);
         const apptInput = await fetchAppointmentInput({
           supabase: admin,
           venueId: staff.venue_id,
@@ -565,16 +569,32 @@ export async function PATCH(
       };
 
       if (body.practitioner_id && isAppointment) {
-        bookingUpdate.practitioner_id = body.practitioner_id;
+        if (booking.calendar_id) {
+          bookingUpdate.calendar_id = body.practitioner_id;
+        } else {
+          bookingUpdate.practitioner_id = body.practitioner_id;
+        }
       }
 
-      if (isAppointment && booking.appointment_service_id) {
-        const { data: svcRow } = await admin
-          .from('appointment_services')
-          .select('duration_minutes')
-          .eq('id', booking.appointment_service_id)
-          .single();
-        const svcDuration = svcRow?.duration_minutes ?? 30;
+      const appointmentSvcId = booking.appointment_service_id as string | null | undefined;
+      const serviceItemId = booking.service_item_id as string | null | undefined;
+      if (isAppointment && (appointmentSvcId || serviceItemId)) {
+        let svcDuration = 30;
+        if (appointmentSvcId) {
+          const { data: svcRow } = await admin
+            .from('appointment_services')
+            .select('duration_minutes')
+            .eq('id', appointmentSvcId)
+            .single();
+          svcDuration = svcRow?.duration_minutes ?? 30;
+        } else if (serviceItemId) {
+          const { data: siRow } = await admin
+            .from('service_items')
+            .select('duration_minutes')
+            .eq('id', serviceItemId)
+            .single();
+          svcDuration = (siRow as { duration_minutes?: number } | null)?.duration_minutes ?? 30;
+        }
         const [ry, rmo, rd] = newDate.split('-').map(Number);
         const [rhh, rmm] = timeStr.split(':').map(Number);
         const rEnd = new Date(Date.UTC(ry!, rmo! - 1, rd!, rhh!, rmm!, 0));

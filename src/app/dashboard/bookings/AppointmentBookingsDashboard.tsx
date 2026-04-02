@@ -118,6 +118,14 @@ function sourceLabelForCsv(source: string): string {
   return source;
 }
 
+function columnIdForRegistry(b: RegistryAppointment): string | null {
+  return b.practitioner_id ?? b.calendar_id ?? null;
+}
+
+function serviceIdForRegistry(b: RegistryAppointment): string | null {
+  return b.appointment_service_id ?? b.service_item_id ?? null;
+}
+
 function filterRegistryAppointments(
   list: RegistryAppointment[],
   practitionerFilter: 'all' | string,
@@ -126,10 +134,10 @@ function filterRegistryAppointments(
 ): RegistryAppointment[] {
   let result = list;
   if (practitionerFilter !== 'all') {
-    result = result.filter((b) => b.practitioner_id === practitionerFilter);
+    result = result.filter((b) => columnIdForRegistry(b) === practitionerFilter);
   }
   if (serviceFilter !== 'all') {
-    result = result.filter((b) => b.appointment_service_id === serviceFilter);
+    result = result.filter((b) => serviceIdForRegistry(b) === serviceFilter);
   }
   const q = searchQuery.trim().toLowerCase();
   if (!q) return result;
@@ -151,7 +159,7 @@ function registryToPrefetch(b: RegistryAppointment): AppointmentDetailPrefetch {
     booking_end_time: b.booking_end_time,
     status: b.status,
     practitioner_id: b.practitioner_id,
-    appointment_service_id: b.appointment_service_id,
+    appointment_service_id: serviceIdForRegistry(b),
     special_requests: b.special_requests,
     internal_notes: b.internal_notes,
     client_arrived_at: b.client_arrived_at,
@@ -266,11 +274,11 @@ export function AppointmentBookingsDashboard({
 
   const effectivePricePence = useCallback(
     (b: RegistryAppointment): number | null => {
-      if (!b.appointment_service_id) return null;
-      const link = b.practitioner_id
-        ? linkPriceKey.get(`${b.practitioner_id}:${b.appointment_service_id}`)
-        : undefined;
-      const svc = serviceMap.get(b.appointment_service_id);
+      const sid = serviceIdForRegistry(b);
+      if (!sid) return null;
+      const cid = columnIdForRegistry(b);
+      const link = cid ? linkPriceKey.get(`${cid}:${sid}`) : undefined;
+      const svc = serviceMap.get(sid);
       if (link?.custom_price_pence != null) return link.custom_price_pence;
       return svc?.price_pence ?? null;
     },
@@ -302,7 +310,7 @@ export function AppointmentBookingsDashboard({
         }
         const data = await res.json();
         const raw = (data.bookings ?? []) as RegistryAppointment[];
-        const apptOnly = raw.filter((b) => b.practitioner_id);
+        const apptOnly = raw.filter((b) => columnIdForRegistry(b));
         setBookings(apptOnly);
       } catch {
         setError('Network error loading appointments');
@@ -327,7 +335,7 @@ export function AppointmentBookingsDashboard({
       if (!res.ok) return;
       const data = await res.json();
       const raw = (data.bookings ?? []) as RegistryAppointment[];
-      setAllStatusBookings(raw.filter((b) => b.practitioner_id));
+      setAllStatusBookings(raw.filter((b) => columnIdForRegistry(b)));
     } catch {
       setAllStatusBookings([]);
     }
@@ -426,14 +434,26 @@ export function AppointmentBookingsDashboard({
           cmp = a.guest_name.localeCompare(b.guest_name, undefined, { sensitivity: 'base' });
           break;
         case 'service': {
-          const sa = a.appointment_service_id ? serviceMap.get(a.appointment_service_id)?.name ?? '' : '';
-          const sb = b.appointment_service_id ? serviceMap.get(b.appointment_service_id)?.name ?? '' : '';
+          const sa = (() => {
+            const id = serviceIdForRegistry(a);
+            return id ? serviceMap.get(id)?.name ?? '' : '';
+          })();
+          const sb = (() => {
+            const id = serviceIdForRegistry(b);
+            return id ? serviceMap.get(id)?.name ?? '' : '';
+          })();
           cmp = sa.localeCompare(sb, undefined, { sensitivity: 'base' });
           break;
         }
         case 'practitioner': {
-          const pa = a.practitioner_id ? practitionerMap.get(a.practitioner_id)?.name ?? '' : '';
-          const pb = b.practitioner_id ? practitionerMap.get(b.practitioner_id)?.name ?? '' : '';
+          const pa = (() => {
+            const id = columnIdForRegistry(a);
+            return id ? practitionerMap.get(id)?.name ?? '' : '';
+          })();
+          const pb = (() => {
+            const id = columnIdForRegistry(b);
+            return id ? practitionerMap.get(id)?.name ?? '' : '';
+          })();
           cmp = pa.localeCompare(pb, undefined, { sensitivity: 'base' });
           break;
         }
@@ -547,7 +567,7 @@ export function AppointmentBookingsDashboard({
         return;
       }
       const data = await res.json();
-      const rows = ((data.bookings ?? []) as RegistryAppointment[]).filter((b) => b.practitioner_id);
+      const rows = ((data.bookings ?? []) as RegistryAppointment[]).filter((b) => columnIdForRegistry(b));
 
       const header = [
         'Date',
@@ -568,8 +588,10 @@ export function AppointmentBookingsDashboard({
       ];
 
       const csvRows = rows.map((b) => {
-        const prac = b.practitioner_id ? practitionerMap.get(b.practitioner_id)?.name ?? '' : '';
-        const svc = b.appointment_service_id ? serviceMap.get(b.appointment_service_id)?.name ?? '' : '';
+        const cid = columnIdForRegistry(b);
+        const sid = serviceIdForRegistry(b);
+        const prac = cid ? practitionerMap.get(cid)?.name ?? '' : '';
+        const svc = sid ? serviceMap.get(sid)?.name ?? '' : '';
         const price = effectivePricePence(b);
         return [
           b.booking_date,
@@ -622,8 +644,10 @@ export function AppointmentBookingsDashboard({
 
   function renderTableRows(list: RegistryAppointment[]) {
     return list.map((b) => {
-      const pracName = b.practitioner_id ? practitionerMap.get(b.practitioner_id)?.name ?? '—' : '—';
-      const svcName = b.appointment_service_id ? serviceMap.get(b.appointment_service_id)?.name ?? '—' : '—';
+      const cid = columnIdForRegistry(b);
+      const sid = serviceIdForRegistry(b);
+      const pracName = cid ? practitionerMap.get(cid)?.name ?? '—' : '—';
+      const svcName = sid ? serviceMap.get(sid)?.name ?? '—' : '—';
       const dep =
         b.deposit_amount_pence != null
           ? `${formatMoneyPence(b.deposit_amount_pence, sym)} (${b.deposit_status})`
@@ -670,8 +694,10 @@ export function AppointmentBookingsDashboard({
     return (
       <div className="space-y-3 md:hidden">
         {list.map((b) => {
-          const pracName = b.practitioner_id ? practitionerMap.get(b.practitioner_id)?.name ?? '—' : '—';
-          const svcName = b.appointment_service_id ? serviceMap.get(b.appointment_service_id)?.name ?? '—' : '—';
+          const cid = columnIdForRegistry(b);
+          const sid = serviceIdForRegistry(b);
+          const pracName = cid ? practitionerMap.get(cid)?.name ?? '—' : '—';
+          const svcName = sid ? serviceMap.get(sid)?.name ?? '—' : '—';
           const dep =
             b.deposit_amount_pence != null
               ? `${formatMoneyPence(b.deposit_amount_pence, sym)} (${b.deposit_status})`
