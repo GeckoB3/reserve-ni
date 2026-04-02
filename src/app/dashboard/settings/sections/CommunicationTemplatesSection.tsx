@@ -30,7 +30,7 @@ interface CommCardConfig {
 
 /**
  * When true, Standard-tier restaurant (Model A) limits several templates to email-only.
- * Unified scheduling Standard tier includes SMS per product plan §1.1 — pass false when `unified_scheduling`.
+ * Unified scheduling Standard tier includes SMS per product plan §1.1; pass false when `unified_scheduling`.
  */
 function buildCommunicationCards(restrictSmsForStandard: boolean, unifiedVenue: boolean): CommCardConfig[] {
   const daySub: CommCardConfig['subToggles'] = restrictSmsForStandard
@@ -195,6 +195,8 @@ interface CommunicationTemplatesSectionProps {
 }
 
 const UNIFIED_HIDDEN_TYPES = new Set<CommMessageType>(['reminder_56h_email', 'day_of_reminder_email', 'post_visit_email']);
+/** Wording + preview for these live in Unified appointment automation (not in the template list below). */
+const UNIFIED_MERGED_IN_AUTOMATION_SECTION = new Set<CommMessageType>(['booking_confirmation_email']);
 const DEPOSIT_MESSAGE_TYPES = new Set<CommMessageType>([
   'deposit_request_email',
   'deposit_request_sms',
@@ -233,6 +235,9 @@ export function CommunicationTemplatesSection({
     !unifiedVenue || depositConfig == null || venueUsesDepositWorkflow(depositConfig);
   const visibleCards = useMemo(() => {
     let list = unifiedVenue ? cards.filter((c) => !UNIFIED_HIDDEN_TYPES.has(c.messageType)) : cards;
+    if (unifiedVenue) {
+      list = list.filter((c) => !UNIFIED_MERGED_IN_AUTOMATION_SECTION.has(c.messageType));
+    }
     if (unifiedVenue && !showDepositTemplates) {
       list = list.filter((c) => !DEPOSIT_MESSAGE_TYPES.has(c.messageType));
     }
@@ -241,22 +246,13 @@ export function CommunicationTemplatesSection({
 
   const unifiedTimelineSteps = useMemo(() => {
     if (!unifiedVenue) return null;
-    if (showDepositTemplates) {
-      return [
-        { label: 'Booking made', icon: '1' },
-        { label: 'Deposit', icon: '2' },
-        { label: 'First reminder', icon: '3' },
-        { label: 'Second reminder', icon: '4' },
-        { label: 'Thank you', icon: '5' },
-      ];
-    }
     return [
       { label: 'Booking made', icon: '1' },
       { label: 'First reminder', icon: '2' },
       { label: 'Second reminder', icon: '3' },
       { label: 'Thank you', icon: '4' },
     ];
-  }, [unifiedVenue, showDepositTemplates]);
+  }, [unifiedVenue]);
 
   const [settings, setSettings] = useState<CommunicationSettings | null>(null);
   const [loading, setLoading] = useState(true);
@@ -385,7 +381,7 @@ export function CommunicationTemplatesSection({
           </h2>
           <p className="mt-1 text-sm text-slate-600">
             {unifiedVenue
-              ? 'Set when messages go out and how guests are reached, then adjust the wording for each message.'
+              ? 'For each message: choose channels and timing, then add optional wording and preview. Deposit and change notices are grouped below.'
               : 'Control what messages your guests receive and when they are sent.'}
           </p>
           {unifiedVenue && !showDepositTemplates && (
@@ -425,14 +421,13 @@ export function CommunicationTemplatesSection({
             </ol>
           </div>
 
-          <section className="space-y-4" aria-labelledby="unified-automation-heading">
+          <section className="space-y-3" aria-labelledby="unified-automation-heading">
             <div>
               <h3 id="unified-automation-heading" className="text-base font-semibold text-slate-900">
                 Automated messages
               </h3>
               <p className="mt-1 max-w-2xl text-sm text-slate-500">
-                Choose channels and timing here. Optional lines for reminders and thank-you sit in the same box so
-                everything for automation stays in one place.
+                Channels, timing, optional wording, and previews for each step, together in one place.
               </p>
             </div>
             <UnifiedAppointmentNotificationSection
@@ -442,6 +437,7 @@ export function CommunicationTemplatesSection({
               onNotificationSaveStatus={setNotifSaveStatus}
               onPreview={(type, custom) => {
                 const labels: Partial<Record<CommMessageType, string>> = {
+                  booking_confirmation_email: 'Booking confirmation (email)',
                   reminder_1_email: 'First reminder (email)',
                   reminder_1_sms: 'Reminder text (sample)',
                   reminder_2_sms: 'Reminder text (sample)',
@@ -456,13 +452,13 @@ export function CommunicationTemplatesSection({
       )}
 
       <section className="space-y-5" aria-labelledby="message-templates-section-heading">
-        <div className="border-t border-slate-200 pt-8">
+        <div className={unifiedVenue ? 'pt-2' : 'border-t border-slate-200 pt-8'}>
           <h3 id="message-templates-section-heading" className="text-base font-semibold text-slate-900">
-            {unifiedVenue ? 'Wording for each message' : 'Message templates'}
+            {unifiedVenue ? 'Deposits and booking changes' : 'Message templates'}
           </h3>
           <p className="mt-1 text-sm text-slate-500">
             {unifiedVenue
-              ? 'Edit how each email or text reads. Preview shows sample appointment details.'
+              ? 'Pay-by-link deposits and notices when an appointment is changed or cancelled. Preview uses sample appointment details.'
               : 'Edit the wording guests see in each email or text.'}
           </p>
         </div>
@@ -748,9 +744,11 @@ function PreviewModal({
               <div className="h-6 w-6 animate-spin rounded-full border-2 border-brand-600 border-t-transparent" />
             </div>
           ) : isSms ? (
-            <div className="mx-auto max-w-sm">
-              <div className="rounded-2xl bg-emerald-50 border border-emerald-200 p-4">
-                <p className="text-sm text-slate-800 whitespace-pre-wrap">{text}</p>
+            <div className="mx-auto w-full min-w-0 max-w-sm">
+              <div className="w-full min-w-0 overflow-hidden rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+                <p className="max-w-full text-sm break-words text-slate-800 whitespace-pre-wrap [overflow-wrap:anywhere]">
+                  {text}
+                </p>
               </div>
               <p className="mt-2 text-center text-[11px] text-slate-400">SMS preview (sample data)</p>
             </div>

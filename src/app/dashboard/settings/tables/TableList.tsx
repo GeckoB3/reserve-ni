@@ -498,7 +498,7 @@ function TableGrid({ tables, isAdmin, onEdit, onDelete, onDuplicate, variant = '
                 <td className="px-4 py-2.5 font-medium text-slate-900">{t.name}</td>
                 {!isCovers && <td className="px-4 py-2.5 capitalize text-slate-600">{t.shape}</td>}
                 <td className="px-4 py-2.5 text-center text-slate-600">{isCovers ? t.max_covers : `${t.min_covers}–${t.max_covers}`}</td>
-                {!isCovers && <td className="px-4 py-2.5 text-slate-600">{t.zone ?? '—'}</td>}
+                {!isCovers && <td className="px-4 py-2.5 text-slate-600">{t.zone ?? '-'}</td>}
                 <td className="px-4 py-2.5 text-center">
                   <span className={`inline-block h-2 w-2 rounded-full ${t.is_active ? 'bg-green-500' : 'bg-slate-300'}`} />
                 </td>

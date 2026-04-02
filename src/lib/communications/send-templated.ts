@@ -10,7 +10,8 @@ import { renderDepositConfirmation } from '@/lib/emails/templates/deposit-confir
 import { renderBookingModification, renderBookingModificationSms } from '@/lib/emails/templates/booking-modification';
 import { renderBookingCancellation, renderBookingCancellationSms } from '@/lib/emails/templates/booking-cancellation';
 import { sendEmail } from '@/lib/emails/send-email';
-import { sendSms } from '@/lib/emails/send-sms';
+import { sendSms, sendSmsWithSegments } from '@/lib/emails/send-sms';
+import { recordOutboundSms, estimateSmsSegments } from '@/lib/sms-usage';
 import { getCommSettings, logToCommLogs, updateCommLogStatus } from './service';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { isSmsAllowed } from '@/lib/tier-enforcement';
@@ -39,6 +40,8 @@ async function trySendWithDedup(opts: {
   channel: 'email' | 'sms';
   recipient: string;
   sendFn: () => Promise<string | null>;
+  /** When channel is SMS: body used for segment estimate and metering after a successful Twilio send (sid non-null). */
+  smsBodyForUsage?: string;
 }): Promise<SendResult> {
   const canSend = await logToCommLogs({
     venue_id: opts.venueId,
@@ -60,6 +63,16 @@ async function trySendWithDedup(opts: {
       status: 'sent',
       external_id: externalId,
     });
+    if (opts.channel === 'sms' && opts.smsBodyForUsage && externalId) {
+      await recordOutboundSms({
+        venueId: opts.venueId,
+        bookingId: opts.bookingId,
+        messageType: opts.messageType,
+        recipientPhone: opts.recipient,
+        twilioSid: externalId,
+        segmentCount: estimateSmsSegments(opts.smsBodyForUsage),
+      });
+    }
     return { sent: true };
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
@@ -142,6 +155,7 @@ export async function sendBookingConfirmationSms(
       channel: 'sms',
       recipient: phone,
       sendFn: () => sendSms(phone, rendered.body),
+      smsBodyForUsage: rendered.body,
     });
   } catch (err) {
     console.error('[send-templated] booking confirmation SMS error:', err);
@@ -234,6 +248,7 @@ export async function sendDepositRequestSms(
       channel: 'sms',
       recipient: guestPhone,
       sendFn: () => sendSms(guestPhone, rendered.body),
+      smsBodyForUsage: rendered.body,
     });
   } catch (err) {
     console.error('[send-templated] deposit request SMS error:', err);
@@ -368,7 +383,7 @@ export async function sendBookingModificationNotification(
     if (settings.modification_sms_enabled && booking.guest_phone && (await isSmsAllowed(venueId))) {
       try {
         const rendered = renderBookingModificationSms(booking, venue);
-        await sendSms(booking.guest_phone, rendered.body);
+        const { sid, segmentCount } = await sendSmsWithSegments(booking.guest_phone, rendered.body);
         await upsertCommLog({
           venue_id: venueId,
           booking_id: booking.id,
@@ -376,7 +391,18 @@ export async function sendBookingModificationNotification(
           channel: 'sms',
           recipient: booking.guest_phone,
           status: 'sent',
+          external_id: sid,
         });
+        if (sid) {
+          await recordOutboundSms({
+            venueId,
+            bookingId: booking.id,
+            messageType: 'booking_modification_sms',
+            recipientPhone: booking.guest_phone,
+            twilioSid: sid,
+            segmentCount,
+          });
+        }
         results.sms = { sent: true };
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err);
@@ -474,7 +500,7 @@ export async function sendCancellationNotification(
     ) {
       try {
         const rendered = renderBookingCancellationSms(booking, venue, refundMessage);
-        await sendSms(booking.guest_phone, rendered.body);
+        const { sid, segmentCount } = await sendSmsWithSegments(booking.guest_phone, rendered.body);
         await upsertCommLog({
           venue_id: venueId,
           booking_id: booking.id,
@@ -482,7 +508,18 @@ export async function sendCancellationNotification(
           channel: 'sms',
           recipient: booking.guest_phone,
           status: 'sent',
+          external_id: sid,
         });
+        if (sid) {
+          await recordOutboundSms({
+            venueId,
+            bookingId: booking.id,
+            messageType: 'cancellation_sms',
+            recipientPhone: booking.guest_phone,
+            twilioSid: sid,
+            segmentCount,
+          });
+        }
         results.sms = { sent: true };
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err);

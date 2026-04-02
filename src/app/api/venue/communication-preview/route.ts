@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
+import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 import type { BookingEmailData, VenueEmailData, CommMessageType } from '@/lib/emails/types';
 import { renderBookingConfirmation } from '@/lib/emails/templates/booking-confirmation';
 import { renderDepositRequestSms } from '@/lib/emails/templates/deposit-request-sms';
@@ -66,60 +67,91 @@ export async function POST(request: NextRequest) {
     const admin = getSupabaseAdminClient();
     const { data: venue } = await admin
       .from('venues')
-      .select('name, address')
+      .select('name, address, booking_model')
       .eq('id', staff.venue_id)
       .single();
 
+    const bookingModel = (venue as { booking_model?: string | null } | null)?.booking_model ?? null;
+    const useAppointmentSample = isUnifiedSchedulingVenue(bookingModel);
+
     const venueData: VenueEmailData = {
-      name: venue?.name ?? 'Your Restaurant',
+      name: venue?.name ?? 'Your venue',
       address: venue?.address ?? '123 Main Street, Belfast BT1 1AA',
     };
+
+    const apptBooking = SAMPLE_APPOINTMENT_BOOKING;
+    const tableBooking = SAMPLE_BOOKING;
+    /** Most previews: match the venue’s booking model so unified/practitioner venues see appointment-style samples. */
+    const primarySample = useAppointmentSample ? apptBooking : tableBooking;
 
     let preview: { subject?: string; html?: string; text?: string; body?: string } = {};
 
     switch (messageType) {
       case 'booking_confirmation_email':
-        preview = renderBookingConfirmation(SAMPLE_BOOKING, venueData, customMessage);
+        preview = renderBookingConfirmation(primarySample, venueData, customMessage);
         break;
       case 'deposit_request_sms':
-        preview = renderDepositRequestSms(SAMPLE_BOOKING, venueData, 'https://www.reserveni.com/pay?t=preview', customMessage);
+        preview = renderDepositRequestSms(
+          primarySample,
+          venueData,
+          'https://www.reserveni.com/pay?t=preview',
+          customMessage,
+        );
         break;
       case 'deposit_request_email':
-        preview = renderDepositRequestEmail(SAMPLE_BOOKING, venueData, 'https://www.reserveni.com/pay?t=preview', customMessage);
+        preview = renderDepositRequestEmail(
+          primarySample,
+          venueData,
+          'https://www.reserveni.com/pay?t=preview',
+          customMessage,
+        );
         break;
       case 'deposit_confirmation_email':
-        preview = renderDepositConfirmation(SAMPLE_BOOKING, venueData, customMessage);
+        preview = renderDepositConfirmation(primarySample, venueData, customMessage);
         break;
       case 'reminder_56h_email':
         preview = renderReminder56h(SAMPLE_BOOKING, venueData, customMessage);
         break;
       case 'reminder_1_email':
-        preview = renderReminder56h(SAMPLE_APPOINTMENT_BOOKING, venueData, customMessage);
+        preview = renderReminder56h(apptBooking, venueData, customMessage);
         break;
       case 'reminder_1_sms':
       case 'reminder_2_sms':
-        preview = renderDayOfReminderSms(SAMPLE_APPOINTMENT_BOOKING, venueData, customMessage);
+        preview = renderDayOfReminderSms(apptBooking, venueData, customMessage);
         break;
       case 'unified_post_visit_email':
-        preview = renderPostVisitEmail(SAMPLE_APPOINTMENT_BOOKING, venueData, customMessage);
+        preview = renderPostVisitEmail(apptBooking, venueData, customMessage);
         break;
       case 'booking_confirmation_sms':
-        preview = renderBookingConfirmationSms(SAMPLE_APPOINTMENT_BOOKING, venueData, customMessage);
+        preview = renderBookingConfirmationSms(apptBooking, venueData, customMessage);
         break;
       case 'day_of_reminder_email':
-        preview = renderDayOfReminderEmail(SAMPLE_BOOKING, venueData, customMessage);
+        preview = renderDayOfReminderEmail(
+          useAppointmentSample ? apptBooking : tableBooking,
+          venueData,
+          customMessage,
+        );
         break;
       case 'day_of_reminder_sms':
-        preview = renderDayOfReminderSms(SAMPLE_BOOKING, venueData, customMessage);
+        preview = renderDayOfReminderSms(
+          useAppointmentSample ? apptBooking : tableBooking,
+          venueData,
+          customMessage,
+        );
         break;
       case 'post_visit_email':
         preview = renderPostVisitEmail(SAMPLE_BOOKING, venueData, customMessage);
         break;
       case 'booking_modification_email':
-        preview = renderBookingModification(SAMPLE_BOOKING, venueData, customMessage);
+        preview = renderBookingModification(primarySample, venueData, customMessage);
         break;
       case 'cancellation_email':
-        preview = renderBookingCancellation(SAMPLE_BOOKING, venueData, 'Your deposit of £20.00 will be refunded to your original payment method within 5–10 business days.', customMessage);
+        preview = renderBookingCancellation(
+          primarySample,
+          venueData,
+          'Your deposit of £20.00 will be refunded to your original payment method within 5–10 business days.',
+          customMessage,
+        );
         break;
       default:
         return NextResponse.json({ error: 'Unknown message type' }, { status: 400 });

@@ -5,6 +5,8 @@ import type { CommunicationSettings } from '@/lib/communications/service';
 import type { VenueNotificationSettings } from '@/lib/notifications/notification-settings';
 import type { CommMessageType } from '@/lib/emails/types';
 
+const CONFIRMATION_EMAIL_MAX = 500;
+
 interface UnifiedAppointmentNotificationSectionProps {
   isAdmin: boolean;
   commSettings: CommunicationSettings;
@@ -76,7 +78,7 @@ export function UnifiedAppointmentNotificationSection({
       setNs((prev) => {
         if (!prev) return prev;
         const merged = { ...prev, ...partial };
-        // Defer: persistNs updates the parent save indicator — must not run inside this setState updater.
+        // Defer: persistNs updates the parent save indicator; must not run inside this setState updater.
         queueMicrotask(() => {
           persistNs(merged);
         });
@@ -130,7 +132,7 @@ export function UnifiedAppointmentNotificationSection({
           SMS needs a mobile number on the booking. Text messages use your plan&apos;s guest SMS allowance.
         </p>
 
-        <div className="grid gap-4 sm:grid-cols-2 lg:gap-5">
+        <div className="space-y-4">
           <FieldBlock title="Booking confirmation">
             <ToggleRow
               label="Send confirmations"
@@ -160,27 +162,48 @@ export function UnifiedAppointmentNotificationSection({
                 <span className="text-slate-700">Text</span>
               </label>
             </div>
-            <p className="mt-3 text-xs text-slate-500">
-              Add an optional short line at the start of confirmation texts. The main confirmation email is edited under{' '}
-              <span className="font-medium text-slate-600">Wording for each message</span> → Booking confirmation.
-            </p>
-            <label className="mt-2 block text-xs font-medium text-slate-700">Optional line on confirmation texts</label>
-            <textarea
-              value={ns.confirmation_sms_custom_message ?? ''}
-              disabled={!isAdmin}
-              rows={2}
-              maxLength={160}
-              onChange={(e) => patchNs({ confirmation_sms_custom_message: e.target.value || null })}
-              className="mt-1.5 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 disabled:bg-slate-50"
-              placeholder="Short greeting or thank-you before the booking details"
-            />
-            {onPreview && (
-              <PreviewButton
+
+            <div className="mt-4 border-t border-slate-100 pt-4">
+              <p className="text-xs font-medium text-slate-700">Confirmation email</p>
+              <p className="mt-1 text-xs text-slate-500">
+                Optional extra paragraph added to the standard confirmation email (preview uses sample appointment details).
+              </p>
+              <CustomMessageBlock
                 isAdmin={isAdmin}
-                label="Preview text"
-                onClick={() => onPreview('booking_confirmation_sms', ns.confirmation_sms_custom_message ?? null)}
+                value={commSettings.confirmation_email_custom_message ?? ''}
+                maxChars={CONFIRMATION_EMAIL_MAX}
+                onChange={(v) => onUpdateComm('confirmation_email_custom_message', v || null)}
+                onPreview={
+                  onPreview
+                    ? () => onPreview('booking_confirmation_email', commSettings.confirmation_email_custom_message ?? null)
+                    : undefined
+                }
+                previewButtonLabel="Preview email"
               />
-            )}
+            </div>
+
+            <div className="mt-4 border-t border-slate-100 pt-4">
+              <label className="block text-xs font-medium text-slate-700">Confirmation text (SMS)</label>
+              <p className="mt-1 text-xs text-slate-500">Optional short line at the start of confirmation texts.</p>
+              <textarea
+                value={ns.confirmation_sms_custom_message ?? ''}
+                disabled={!isAdmin}
+                rows={2}
+                maxLength={160}
+                onChange={(e) => patchNs({ confirmation_sms_custom_message: e.target.value || null })}
+                className="mt-1.5 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 disabled:bg-slate-50"
+                placeholder="Short greeting or thank-you before the booking details"
+              />
+              {onPreview && (
+                <div className="mt-2 flex justify-end">
+                  <OutlinePreviewButton
+                    isAdmin={isAdmin}
+                    label="Preview text"
+                    onClick={() => onPreview('booking_confirmation_sms', ns.confirmation_sms_custom_message ?? null)}
+                  />
+                </div>
+              )}
+            </div>
           </FieldBlock>
 
           <FieldBlock title="First reminder">
@@ -226,7 +249,42 @@ export function UnifiedAppointmentNotificationSection({
                 <span>Text</span>
               </label>
             </div>
-            <p className="mt-2 text-xs text-slate-500">Optional lines for this reminder are in Extra wording below.</p>
+
+            <div className="mt-4 border-t border-slate-100 pt-4">
+              <p className="text-xs font-medium text-slate-700">First reminder (email)</p>
+              <p className="mt-1 text-xs text-slate-500">Optional line added to the standard reminder email.</p>
+              <CustomMessageBlock
+                isAdmin={isAdmin}
+                value={commSettings.reminder_email_custom_message ?? ''}
+                maxChars={500}
+                onChange={(v) => onUpdateComm('reminder_email_custom_message', v || null)}
+                onPreview={
+                  onPreview
+                    ? () => onPreview('reminder_1_email', commSettings.reminder_email_custom_message ?? null)
+                    : undefined
+                }
+                previewButtonLabel="Preview email"
+              />
+            </div>
+
+            <div className="mt-4 border-t border-slate-100 pt-4">
+              <p className="text-xs font-medium text-slate-700">Reminder texts (first and second)</p>
+              <p className="mt-1 text-xs text-slate-500">
+                Optional line added to both reminder texts (first and second). Leave blank for the default wording only.
+              </p>
+              <CustomMessageBlock
+                isAdmin={isAdmin}
+                value={commSettings.day_of_reminder_custom_message ?? ''}
+                maxChars={500}
+                onChange={(v) => onUpdateComm('day_of_reminder_custom_message', v || null)}
+                onPreview={
+                  onPreview
+                    ? () => onPreview('reminder_1_sms', commSettings.day_of_reminder_custom_message ?? null)
+                    : undefined
+                }
+                previewButtonLabel="Preview text"
+              />
+            </div>
           </FieldBlock>
 
           <FieldBlock title="Second reminder">
@@ -251,7 +309,7 @@ export function UnifiedAppointmentNotificationSection({
               />
             </label>
             <p className="mt-2 text-xs text-slate-500">
-              Sent as a text only. Uses the same optional wording as your first reminder (Extra wording → Reminder texts).
+              Sent as a text only. Optional wording is set under First reminder → Reminder texts (first and second).
             </p>
           </FieldBlock>
 
@@ -266,6 +324,23 @@ export function UnifiedAppointmentNotificationSection({
               Usually a few hours after the appointment ends, or the next morning if the appointment finishes later in the
               day.
             </p>
+            <div className="mt-4 border-t border-slate-100 pt-4">
+              <p className="text-xs font-medium text-slate-700">Thank-you email</p>
+              <p className="mt-1 text-xs text-slate-500">Optional line added to the standard thank-you message.</p>
+              <CustomMessageBlock
+                isAdmin={isAdmin}
+                value={commSettings.post_visit_email_custom_message ?? ''}
+                maxChars={500}
+                onChange={(v) => onUpdateComm('post_visit_email_custom_message', v || null)}
+                onPreview={
+                  onPreview
+                    ? () =>
+                        onPreview('unified_post_visit_email', commSettings.post_visit_email_custom_message ?? null)
+                    : undefined
+                }
+                previewButtonLabel="Preview email"
+              />
+            </div>
           </FieldBlock>
         </div>
       </div>
@@ -275,8 +350,8 @@ export function UnifiedAppointmentNotificationSection({
           When a booking changes
         </h4>
         <p className="mt-1 text-xs text-slate-500">
-          Turn off any notice you do not want sent. Cancellations are always by email. You can still edit the exact wording
-          under Wording for each message.
+          Turn off any notice you do not want sent. Cancellations are always by email. Edit reschedule and cancellation
+          wording under <span className="font-medium text-slate-600">Deposits and booking changes</span> below.
         </p>
         <div className="mt-4 space-y-3 rounded-lg border border-slate-100 bg-slate-50/60 p-4">
           <ToggleRow
@@ -299,82 +374,12 @@ export function UnifiedAppointmentNotificationSection({
           />
         </div>
       </section>
-
-      <section className="p-5 sm:p-6" aria-labelledby="custom-reminder-text-heading">
-        <h4 id="custom-reminder-text-heading" className="text-sm font-semibold text-slate-900">
-          Extra wording (optional)
-        </h4>
-        <p className="mt-1 text-xs text-slate-500">
-          Added on top of the standard text. Leave blank to keep the default messages.
-        </p>
-        <div className="mt-4 space-y-4">
-          <div>
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <label className="text-sm font-medium text-slate-700">First reminder — email</label>
-              {onPreview && (
-                <PreviewButton
-                  isAdmin={isAdmin}
-                  label="Preview"
-                  onClick={() => onPreview('reminder_1_email', commSettings.reminder_email_custom_message ?? null)}
-                />
-              )}
-            </div>
-            <textarea
-              value={commSettings.reminder_email_custom_message ?? ''}
-              disabled={!isAdmin}
-              rows={2}
-              maxLength={500}
-              onChange={(e) => onUpdateComm('reminder_email_custom_message', e.target.value || null)}
-              className="mt-1.5 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm disabled:bg-slate-50"
-            />
-          </div>
-          <div>
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <label className="text-sm font-medium text-slate-700">Reminder texts — first and second</label>
-              {onPreview && (
-                <PreviewButton
-                  isAdmin={isAdmin}
-                  label="Preview"
-                  onClick={() => onPreview('reminder_1_sms', commSettings.day_of_reminder_custom_message ?? null)}
-                />
-              )}
-            </div>
-            <textarea
-              value={commSettings.day_of_reminder_custom_message ?? ''}
-              disabled={!isAdmin}
-              rows={2}
-              maxLength={500}
-              onChange={(e) => onUpdateComm('day_of_reminder_custom_message', e.target.value || null)}
-              className="mt-1.5 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm disabled:bg-slate-50"
-            />
-          </div>
-          <div>
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <label className="text-sm font-medium text-slate-700">Thank-you email after the visit</label>
-              {onPreview && (
-                <PreviewButton
-                  isAdmin={isAdmin}
-                  label="Preview"
-                  onClick={() => onPreview('unified_post_visit_email', commSettings.post_visit_email_custom_message ?? null)}
-                />
-              )}
-            </div>
-            <textarea
-              value={commSettings.post_visit_email_custom_message ?? ''}
-              disabled={!isAdmin}
-              rows={2}
-              maxLength={500}
-              onChange={(e) => onUpdateComm('post_visit_email_custom_message', e.target.value || null)}
-              className="mt-1.5 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm disabled:bg-slate-50"
-            />
-          </div>
-        </div>
-      </section>
     </div>
   );
 }
 
-function PreviewButton({
+/** Same outline + eye icon as CommCard / template previews. */
+function OutlinePreviewButton({
   isAdmin,
   label,
   onClick,
@@ -388,10 +393,74 @@ function PreviewButton({
       type="button"
       disabled={!isAdmin}
       onClick={onClick}
-      className="mt-2 text-sm font-medium text-brand-600 hover:text-brand-700 disabled:cursor-not-allowed disabled:opacity-50"
+      className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-600 shadow-sm transition-colors hover:bg-slate-50 hover:text-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
     >
+      <svg className="h-3.5 w-3.5 shrink-0" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" aria-hidden="true">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 0 1 0-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178Z" />
+        <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
+      </svg>
       {label}
     </button>
+  );
+}
+
+/** Collapsible optional message + preview, aligned with CommCard behaviour. */
+function CustomMessageBlock({
+  isAdmin,
+  value,
+  maxChars,
+  onChange,
+  onPreview,
+  previewButtonLabel,
+}: {
+  isAdmin: boolean;
+  value: string;
+  maxChars: number;
+  onChange: (next: string) => void;
+  onPreview?: () => void;
+  previewButtonLabel: string;
+}) {
+  const [expanded, setExpanded] = useState(() => Boolean(value.trim()));
+  const hasText = Boolean(value.trim());
+
+  return (
+    <div className="mt-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          className="flex items-center gap-1.5 text-xs font-medium text-brand-600 transition-colors hover:text-brand-700"
+        >
+          <svg className={`h-3.5 w-3.5 transition-transform ${expanded ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
+          </svg>
+          {hasText ? 'Edit optional message' : 'Add optional message'}
+        </button>
+        {onPreview && (
+          <OutlinePreviewButton isAdmin={isAdmin} label={previewButtonLabel} onClick={onPreview} />
+        )}
+      </div>
+      {expanded && (
+        <div className="mt-2">
+          <textarea
+            value={value}
+            onChange={(e) => {
+              const val = e.target.value.slice(0, maxChars);
+              onChange(val);
+            }}
+            disabled={!isAdmin}
+            rows={3}
+            placeholder="Added after the standard text in the message…"
+            className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-700 placeholder:text-slate-400 transition-colors focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20 disabled:bg-slate-50"
+          />
+          <div className="mt-1 flex items-center justify-between text-[11px] text-slate-400">
+            <span>
+              {value.length}/{maxChars} characters
+            </span>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 

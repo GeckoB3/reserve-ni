@@ -5,6 +5,8 @@ import { stripe } from '@/lib/stripe';
 import { getPersistedSubscriptionItemIds } from '@/lib/stripe/subscription-line-items';
 import { getBusinessConfig } from '@/lib/business-config';
 import { updateVenueSmsMonthlyAllowance } from '@/lib/billing/sms-allowance';
+import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
+import { mergeNotificationSettingsPatch, parseNotificationSettings } from '@/lib/notifications/notification-settings';
 
 export async function POST(request: Request) {
   try {
@@ -118,6 +120,21 @@ export async function POST(request: Request) {
     }
 
     await updateVenueSmsMonthlyAllowance(venue.id);
+
+    /** Unified appointment venues: confirmation email on, confirmation SMS off by default (opt in under Communications). */
+    if (isUnifiedSchedulingVenue(config.model)) {
+      const defaults = parseNotificationSettings(null);
+      const notification_settings = mergeNotificationSettingsPatch(defaults, {
+        confirmation_channels: ['email'],
+      });
+      const { error: notifErr } = await admin
+        .from('venues')
+        .update({ notification_settings: notification_settings as unknown as Record<string, never> })
+        .eq('id', venue.id);
+      if (notifErr) {
+        console.warn('[signup/complete] Could not set default notification_settings for unified venue:', notifErr);
+      }
+    }
 
     return NextResponse.json({ redirect_url: '/onboarding' });
   } catch (err) {

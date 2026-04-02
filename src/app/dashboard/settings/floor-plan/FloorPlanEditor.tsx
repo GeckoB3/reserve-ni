@@ -635,7 +635,7 @@ export function FloorPlanEditor({ className, embedded = false }: Props) {
                 <div>
                   <span className="text-xs font-medium text-slate-500">Position</span>
                   <p className="text-slate-700">
-                    X: {selected.position_x?.toFixed(1) ?? '—'}, Y: {selected.position_y?.toFixed(1) ?? '—'}
+                    X: {selected.position_x?.toFixed(1) ?? '-'}, Y: {selected.position_y?.toFixed(1) ?? '-'}
                   </p>
                 </div>
               </div>

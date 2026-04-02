@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { computeSmsMonthlyAllowance } from '@/lib/billing/sms-allowance';
+import { SMS_OVERAGE_GBP_PER_MESSAGE } from '@/lib/pricing-constants';
 
 function billingMonthFirstDayUtcYmd(): string {
   const d = new Date();
@@ -53,7 +54,7 @@ export async function getSmsUsageDisplayForVenue(
   const sent = u?.messages_sent ?? 0;
   const remaining = Math.max(0, included - sent);
   const overageCount = Math.max(0, sent - included);
-  const overagePence = overageCount * 5;
+  const overagePence = overageCount * Math.round(SMS_OVERAGE_GBP_PER_MESSAGE * 100);
 
   return {
     messages_sent: sent,

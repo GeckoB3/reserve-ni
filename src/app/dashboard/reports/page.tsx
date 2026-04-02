@@ -5,6 +5,8 @@ import { getDashboardStaff } from '@/lib/venue-auth';
 import type { BookingModel, VenueTerminology } from '@/types/booking-models';
 import { DEFAULT_TERMINOLOGY } from '@/types/booking-models';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
+import { getSupabaseAdminClient } from '@/lib/supabase';
+import { getSmsUsageDisplayForVenue } from '@/lib/billing/sms-usage-display';
 
 function mergeVenueTerminology(model: BookingModel, raw: unknown): VenueTerminology {
   const base = DEFAULT_TERMINOLOGY[model];
@@ -52,6 +54,9 @@ export default async function ReportsPage() {
   const bookingModel = (venueRow?.booking_model as BookingModel | null) ?? 'table_reservation';
   const terminology = mergeVenueTerminology(bookingModel, venueRow?.terminology);
 
+  const admin = getSupabaseAdminClient();
+  const smsUsage = await getSmsUsageDisplayForVenue(admin, venueId);
+
   return (
     <div className="p-4 md:p-6 lg:p-8">
       <div className="mx-auto max-w-5xl">
@@ -69,6 +74,38 @@ export default async function ReportsPage() {
             </p>
           )}
         </div>
+        {smsUsage && (
+          <div className="mb-6 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">SMS this month</p>
+            <div className="mt-2 flex flex-wrap items-center gap-3">
+              <div className="h-2 flex-1 min-w-[100px] max-w-sm overflow-hidden rounded-full bg-slate-100">
+                <div
+                  className="h-full rounded-full bg-brand-500"
+                  style={{
+                    width: `${Math.min(
+                      100,
+                      smsUsage.messages_included > 0
+                        ? (smsUsage.messages_sent / smsUsage.messages_included) * 100
+                        : 0,
+                    )}%`,
+                  }}
+                />
+              </div>
+              <p className="text-sm text-slate-700">
+                <span className="font-semibold text-slate-900">{smsUsage.messages_sent}</span>
+                {' / '}
+                {smsUsage.messages_included} included
+                <span className="text-slate-500"> ({smsUsage.remaining} left)</span>
+              </p>
+            </div>
+            {smsUsage.overage_count > 0 && (
+              <p className="mt-2 text-xs text-amber-800">
+                {smsUsage.overage_count} over included allowance — ≈ £{(smsUsage.overage_amount_pence / 100).toFixed(2)}{' '}
+                at 5p each (billed at month end)
+              </p>
+            )}
+          </div>
+        )}
         <ReportsView bookingModel={bookingModel} terminology={terminology} venueId={venueId} />
       </div>
     </div>

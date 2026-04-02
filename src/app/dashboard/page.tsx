@@ -10,13 +10,6 @@ import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 
 interface DashboardData {
   booking_model?: string;
-  sms_usage?: {
-    messages_sent: number;
-    messages_included: number;
-    remaining: number;
-    overage_count: number;
-    overage_amount_pence: number;
-  } | null;
   today: {
     covers: number;
     bookings: number;
@@ -223,40 +216,6 @@ export default function DashboardHomePage() {
       </div>
 
       <SetupChecklist />
-
-      {data.sms_usage && (
-        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-          <h2 className="text-sm font-semibold text-slate-800">SMS this month</h2>
-          <div className="mt-2 flex flex-wrap items-center gap-3">
-            <div className="h-2 flex-1 min-w-[120px] max-w-md overflow-hidden rounded-full bg-slate-100">
-              <div
-                className="h-full rounded-full bg-brand-500 transition-[width]"
-                style={{
-                  width: `${Math.min(
-                    100,
-                    data.sms_usage.messages_included > 0
-                      ? (data.sms_usage.messages_sent / data.sms_usage.messages_included) * 100
-                      : 0,
-                  )}%`,
-                }}
-              />
-            </div>
-            <p className="text-sm text-slate-700">
-              <span className="font-semibold text-slate-900">{data.sms_usage.messages_sent}</span>
-              {' / '}
-              {data.sms_usage.messages_included} used
-              <span className="text-slate-500"> — {data.sms_usage.remaining} remaining</span>
-            </p>
-          </div>
-          {data.sms_usage.overage_count > 0 && (
-            <p className="mt-2 text-xs text-amber-800">
-              {data.sms_usage.overage_count} additional message{data.sms_usage.overage_count === 1 ? '' : 's'} at 5p each
-              {' ≈ '}
-              £{(data.sms_usage.overage_amount_pence / 100).toFixed(2)} overage (billed at end of month)
-            </p>
-          )}
-        </div>
-      )}
 
       {/* Key Metrics */}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">

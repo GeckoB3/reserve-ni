@@ -27,21 +27,17 @@ const serviceSchema = z.object({
   ...staffMaySchema,
 });
 
-const DEFAULT_STAFF_MAY = {
-  staff_may_customize_name: false,
-  staff_may_customize_description: false,
-  staff_may_customize_duration: false,
-  staff_may_customize_buffer: false,
-  staff_may_customize_price: false,
-  staff_may_customize_deposit: false,
-  staff_may_customize_colour: false,
-};
-
 function mapServiceItemRowForDashboard(row: Record<string, unknown>): Record<string, unknown> {
   return {
     ...row,
     colour: row.colour ?? '#3B82F6',
-    ...DEFAULT_STAFF_MAY,
+    staff_may_customize_name: (row.staff_may_customize_name as boolean | undefined) ?? false,
+    staff_may_customize_description: (row.staff_may_customize_description as boolean | undefined) ?? false,
+    staff_may_customize_duration: (row.staff_may_customize_duration as boolean | undefined) ?? false,
+    staff_may_customize_buffer: (row.staff_may_customize_buffer as boolean | undefined) ?? false,
+    staff_may_customize_price: (row.staff_may_customize_price as boolean | undefined) ?? false,
+    staff_may_customize_deposit: (row.staff_may_customize_deposit as boolean | undefined) ?? false,
+    staff_may_customize_colour: (row.staff_may_customize_colour as boolean | undefined) ?? false,
   };
 }
 
@@ -184,6 +180,13 @@ export async function POST(request: NextRequest) {
         colour: parsed.data.colour ?? '#3B82F6',
         is_active: parsed.data.is_active ?? true,
         sort_order: parsed.data.sort_order ?? 0,
+        staff_may_customize_name: parsed.data.staff_may_customize_name ?? false,
+        staff_may_customize_description: parsed.data.staff_may_customize_description ?? false,
+        staff_may_customize_duration: parsed.data.staff_may_customize_duration ?? false,
+        staff_may_customize_buffer: parsed.data.staff_may_customize_buffer ?? false,
+        staff_may_customize_price: parsed.data.staff_may_customize_price ?? false,
+        staff_may_customize_deposit: parsed.data.staff_may_customize_deposit ?? false,
+        staff_may_customize_colour: parsed.data.staff_may_customize_colour ?? false,
       };
       const { data, error } = await admin.from('service_items').insert(insertRow).select().single();
 
@@ -259,13 +262,6 @@ export async function PATCH(request: NextRequest) {
 
     if (bookingModel === 'unified_scheduling') {
       const updatePayload: Record<string, unknown> = { ...parsed.data };
-      delete updatePayload.staff_may_customize_name;
-      delete updatePayload.staff_may_customize_description;
-      delete updatePayload.staff_may_customize_duration;
-      delete updatePayload.staff_may_customize_buffer;
-      delete updatePayload.staff_may_customize_price;
-      delete updatePayload.staff_may_customize_deposit;
-      delete updatePayload.staff_may_customize_colour;
 
       const { data, error } = await admin
         .from('service_items')

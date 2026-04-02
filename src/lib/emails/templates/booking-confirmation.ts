@@ -59,7 +59,7 @@ export function renderBookingConfirmation(
     serviceName: booking.appointment_service_name ?? null,
     priceDisplay: booking.appointment_price_display ?? null,
     groupAppointments: booking.group_appointments,
-    ctaLabel: booking.manage_booking_link ? 'Manage appointment' : undefined,
+    ctaLabel: booking.manage_booking_link ? (appt ? 'Manage appointment' : 'Manage booking') : undefined,
     ctaUrl: booking.manage_booking_link,
   });
 
@@ -102,7 +102,14 @@ export function renderBookingConfirmation(
     }
   }
   if (customMessage) textParts.push('', customMessage);
-  if (booking.manage_booking_link) textParts.push('', `Manage your appointment: ${booking.manage_booking_link}`);
+  if (booking.manage_booking_link) {
+    textParts.push(
+      '',
+      appt
+        ? `Manage your appointment: ${booking.manage_booking_link}`
+        : `Manage your booking: ${booking.manage_booking_link}`,
+    );
+  }
   textParts.push('', appt ? `We look forward to seeing you.` : `We look forward to seeing you!`, venue.name);
 
   return {

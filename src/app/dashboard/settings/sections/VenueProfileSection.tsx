@@ -278,7 +278,7 @@ export function VenueProfileSection({ venue, onUpdate, isAdmin, bookingModel = '
             className="w-full rounded border border-neutral-300 px-3 py-2 disabled:bg-neutral-50"
           />
           <p className="mt-1 text-xs text-neutral-500">
-            Shown on your public booking page when set. You can enter a domain without https:// — we will save a secure link.
+            Shown on your public booking page when set. You can enter a domain without https://; we save a secure link.
           </p>
           {errors.website_url && <p className="mt-1 text-sm text-red-600">{errors.website_url.message}</p>}
         </div>
@@ -292,9 +292,9 @@ export function VenueProfileSection({ venue, onUpdate, isAdmin, bookingModel = '
               <label htmlFor="price_band" className="block text-sm font-medium text-neutral-700 mb-1">Price band</label>
               <select id="price_band" {...register('price_band')} disabled={!isAdmin} className="w-full rounded border border-neutral-300 px-3 py-2 disabled:bg-neutral-50">
                 <option value="">Not set</option>
-                <option value="£">£ — Budget</option>
-                <option value="££">££ — Mid-range</option>
-                <option value="£££">£££ — Fine dining</option>
+                <option value="£">£ (Budget)</option>
+                <option value="££">££ (Mid-range)</option>
+                <option value="£££">£££ (Fine dining)</option>
               </select>
             </div>
           </div>

@@ -7,6 +7,18 @@ import type { BookingModel } from '@/types/booking-models';
 import { getBusinessConfig } from '@/lib/business-config';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 import { buildAddress, parseAddress } from '@/lib/venue/address-format';
+import { defaultPractitionerWorkingHours } from '@/lib/availability/practitioner-defaults';
+import type { WorkingHours } from '@/types/booking-models';
+import type { OpeningHoursSettings } from '@/app/dashboard/settings/types';
+import { OpeningHoursControl, defaultOpeningHoursSettings } from '@/components/scheduling/OpeningHoursControl';
+import { WorkingHoursControl } from '@/components/scheduling/WorkingHoursControl';
+import {
+  OnboardingAppointmentServiceList,
+  appointmentServiceDraftFromBusinessDefault,
+  createEmptyAppointmentServiceDraft,
+  serviceDraftToApiPayload,
+  type AppointmentServiceFormDraft,
+} from '@/components/onboarding/OnboardingAppointmentServiceList';
 
 type Currency = 'GBP' | 'EUR';
 
@@ -48,12 +60,6 @@ interface VenueOnboarding {
 interface PractitionerDraft {
   name: string;
   email: string;
-}
-
-interface ServiceDraft {
-  name: string;
-  duration: number;
-  price: string;
 }
 
 interface EventDraft {
@@ -110,7 +116,11 @@ export default function OnboardingPage() {
 
   // Model B: Practitioners + services
   const [practitioners, setPractitioners] = useState<PractitionerDraft[]>([{ name: '', email: '' }]);
-  const [services, setServices] = useState<ServiceDraft[]>([]);
+  const [services, setServices] = useState<AppointmentServiceFormDraft[]>([]);
+  /** Unified onboarding: calendar roster for service assignment + hours step */
+  const [rosterList, setRosterList] = useState<Array<{ id: string; name: string }>>([]);
+  const [openingHoursDraft, setOpeningHoursDraft] = useState<OpeningHoursSettings>(() => defaultOpeningHoursSettings());
+  const [calendarWorkingDraft, setCalendarWorkingDraft] = useState<Record<string, WorkingHours>>({});
 
   // Model C: First event
   const [eventDraft, setEventDraft] = useState<EventDraft>({
@@ -169,13 +179,25 @@ export default function OnboardingPage() {
           const config = getBusinessConfig(v.business_type);
           if (config.defaultServices?.length) {
             setServices(
-              config.defaultServices.map((ds) => ({
-                name: ds.name,
-                duration: ds.duration,
-                price: minorToPounds(ds.price),
-              }))
+              config.defaultServices.map((ds) =>
+                appointmentServiceDraftFromBusinessDefault({
+                  name: ds.name,
+                  duration: ds.duration,
+                  price: ds.price,
+                }),
+              ),
             );
+          } else if (
+            v.booking_model === 'practitioner_appointment' ||
+            v.booking_model === 'unified_scheduling'
+          ) {
+            setServices([createEmptyAppointmentServiceDraft()]);
           }
+        } else if (
+          v.booking_model === 'practitioner_appointment' ||
+          v.booking_model === 'unified_scheduling'
+        ) {
+          setServices([createEmptyAppointmentServiceDraft()]);
         }
 
         // Model B: merge existing practitioners (retry / refresh after partial save).
@@ -267,6 +289,7 @@ export default function OnboardingPage() {
       case 'unified_scheduling':
         steps.push({ key: 'team', label: unifiedTeamStepLabel(terms) });
         steps.push({ key: 'services', label: 'Services' });
+        steps.push({ key: 'hours', label: 'Opening hours & schedules' });
         break;
       case 'event_ticket':
         steps.push({ key: 'first_event', label: 'First Event' });
@@ -285,6 +308,79 @@ export default function OnboardingPage() {
 
   const currentStepKey = modelSteps[step]?.key ?? 'profile';
   const totalSteps = modelSteps.length;
+
+  const rosterIds = useMemo(() => rosterList.map((r) => r.id), [rosterList]);
+
+  useEffect(() => {
+    if (!venue) return;
+    if (venue.booking_model !== 'practitioner_appointment' && venue.booking_model !== 'unified_scheduling') {
+      return;
+    }
+    if (currentStepKey !== 'services' && currentStepKey !== 'hours') return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const prRes = await fetch('/api/venue/practitioners?roster=1');
+        if (!prRes.ok || cancelled) return;
+        const body = (await prRes.json()) as { practitioners?: Array<{ id: string; name: string }> };
+        const list = (body.practitioners ?? []).map((p) => ({ id: p.id, name: p.name }));
+        if (!cancelled) setRosterList(list);
+      } catch {
+        /* non-blocking */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [venue, currentStepKey]);
+
+  useEffect(() => {
+    if (rosterIds.length === 0) return;
+    setServices((prev) =>
+      prev.map((s) => (s.practitioner_ids.length === 0 ? { ...s, practitioner_ids: [...rosterIds] } : s)),
+    );
+  }, [rosterIds]);
+
+  useEffect(() => {
+    if (!venue || !isUnifiedSchedulingVenue(venue.booking_model)) return;
+    if (currentStepKey !== 'hours') return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const [vRes, pRes] = await Promise.all([fetch('/api/venue'), fetch('/api/venue/practitioners?roster=1')]);
+        if (!vRes.ok || !pRes.ok || cancelled) return;
+        const venueRow = (await vRes.json()) as { opening_hours?: OpeningHoursSettings | null };
+        const prBody = (await pRes.json()) as {
+          practitioners?: Array<{ id: string; working_hours?: WorkingHours }>;
+        };
+        const pracs = prBody.practitioners ?? [];
+        if (venueRow.opening_hours && typeof venueRow.opening_hours === 'object') {
+          const merged = {
+            ...defaultOpeningHoursSettings(),
+            ...venueRow.opening_hours,
+          } as OpeningHoursSettings;
+          if (!cancelled) setOpeningHoursDraft(merged);
+        } else if (!cancelled) {
+          setOpeningHoursDraft(defaultOpeningHoursSettings());
+        }
+        const byId: Record<string, WorkingHours> = {};
+        for (const p of pracs) {
+          const wh = p.working_hours;
+          if (wh && typeof wh === 'object' && Object.keys(wh).length > 0) {
+            byId[p.id] = wh;
+          } else {
+            byId[p.id] = defaultPractitionerWorkingHours();
+          }
+        }
+        if (!cancelled) setCalendarWorkingDraft(byId);
+      } catch {
+        /* non-blocking */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [venue, currentStepKey]);
 
   const saveProgress = useCallback(
     async (nextStep: number) => {
@@ -490,18 +586,31 @@ export default function OnboardingPage() {
         setError('Please add at least one service.');
         return;
       }
+      const needsRoster =
+        venue?.booking_model === 'practitioner_appointment' ||
+        venue?.booking_model === 'unified_scheduling';
+      if (needsRoster && rosterIds.length === 0) {
+        setError('Your team could not be loaded. Go back one step and save your team again.');
+        return;
+      }
+      for (const s of validServices) {
+        if (needsRoster && s.practitioner_ids.length === 0) {
+          setError(`Select at least one ${terms.staff.toLowerCase()} for each service, or re-save your team step.`);
+          return;
+        }
+        if (s.duration_minutes < 5) {
+          setError('Each service must have a duration of at least 5 minutes.');
+          return;
+        }
+      }
       setSaving(true);
       try {
         for (const s of validServices) {
+          const payload = serviceDraftToApiPayload(s);
           const res = await fetch('/api/venue/appointment-services', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              name: s.name.trim(),
-              duration_minutes: s.duration,
-              buffer_minutes: 0,
-              price_pence: poundsToMinor(s.price),
-            }),
+            body: JSON.stringify(payload),
           });
           if (!res.ok) throw new Error('Failed to create service');
         }
@@ -509,6 +618,63 @@ export default function OnboardingPage() {
         setMaxCompletedStep((prev) => Math.max(prev, step + 1));
       } catch {
         setError('Failed to save services. Please try again.');
+        setSaving(false);
+        return;
+      }
+      setSaving(false);
+    }
+
+    if (currentStepKey === 'hours') {
+      if (step < maxCompletedStep) {
+        setStep((s) => s + 1);
+        return;
+      }
+      if (!venue || !isUnifiedSchedulingVenue(venue.booking_model)) {
+        setStep((s) => s + 1);
+        return;
+      }
+      if (rosterList.length === 0) {
+        setError('No calendars found. Go back and save your team first.');
+        return;
+      }
+      const hasVenueOpenDay = Object.values(openingHoursDraft).some((d) => {
+        if (!d) return false;
+        if ('closed' in d && d.closed === true) return false;
+        if ('periods' in d && Array.isArray(d.periods) && d.periods.length > 0) return true;
+        return false;
+      });
+      if (!hasVenueOpenDay) {
+        setError('Choose at least one day when the business is open, or adjust opening hours below.');
+        return;
+      }
+
+      setSaving(true);
+      try {
+        const ohRes = await fetch('/api/venue/opening-hours', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(openingHoursDraft),
+        });
+        if (!ohRes.ok) throw new Error('Failed to save opening hours');
+        for (const cal of rosterList) {
+          const wh = calendarWorkingDraft[cal.id] ?? defaultPractitionerWorkingHours();
+          const hasDay = Object.values(wh).some((ranges) => Array.isArray(ranges) && ranges.length > 0);
+          if (!hasDay) {
+            throw new Error(
+              `Set at least one working day for ${cal.name} (or adjust their weekly schedule below).`,
+            );
+          }
+          const patchRes = await fetch('/api/venue/practitioners', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: cal.id, working_hours: wh }),
+          });
+          if (!patchRes.ok) throw new Error(`Failed to save working hours for ${cal.name}`);
+        }
+        await saveProgress(step + 1);
+        setMaxCompletedStep((prev) => Math.max(prev, step + 1));
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Failed to save hours.');
         setSaving(false);
         return;
       }
@@ -697,8 +863,13 @@ export default function OnboardingPage() {
     );
   }
 
+  const wideOnboardingStep =
+    (venue.booking_model === 'practitioner_appointment' ||
+      isUnifiedSchedulingVenue(venue.booking_model)) &&
+    (currentStepKey === 'services' || currentStepKey === 'hours');
+
   return (
-    <div className="w-full max-w-xl">
+    <div className={`w-full ${wideOnboardingStep ? 'max-w-3xl' : 'max-w-xl'}`}>
       {/* Progress */}
       <div className="mb-8">
         <div className="mb-2 flex justify-between text-xs font-medium text-slate-400">
@@ -992,92 +1163,73 @@ export default function OnboardingPage() {
         )}
 
         {/* Model B: Services */}
-        {currentStepKey === 'services' && (
+        {currentStepKey === 'services' &&
+          (venue.booking_model === 'practitioner_appointment' ||
+            venue.booking_model === 'unified_scheduling') && (
+            <div>
+              <h2 className="mb-1 text-lg font-bold text-slate-900">Your services</h2>
+              <p className="mb-6 text-sm text-slate-500">
+                {isUnifiedSchedulingVenue(venue.booking_model) ? (
+                  <>
+                    Add each service with the same detail as in the dashboard — duration, buffer, price, deposits,
+                    which {terms.staff.toLowerCase()} offers it, and optional staff customisation rules.
+                  </>
+                ) : (
+                  <>
+                    Define what {terms.client.toLowerCase()}s can book. Use the fields below; you can refine services
+                    later under{' '}
+                    <Link
+                      href="/dashboard/appointment-services"
+                      className="font-medium text-brand-600 underline hover:text-brand-700"
+                    >
+                      Services
+                    </Link>
+                    .
+                  </>
+                )}
+              </p>
+              <OnboardingAppointmentServiceList
+                currencySymbol={currencySymbol(currency)}
+                terms={terms}
+                services={services}
+                setServices={setServices}
+                roster={rosterList}
+                rosterIds={rosterIds}
+              />
+            </div>
+          )}
+
+        {currentStepKey === 'hours' && isUnifiedSchedulingVenue(venue.booking_model) && (
           <div>
-            <h2 className="mb-1 text-lg font-bold text-slate-900">Your services</h2>
+            <h2 className="mb-1 text-lg font-bold text-slate-900">Opening hours & schedules</h2>
             <p className="mb-6 text-sm text-slate-500">
-              Define what {terms.client.toLowerCase()}s can book. To choose <strong>which {terms.staff.toLowerCase()} offers which service</strong>, deposits, and colours, use{' '}
-              <Link href="/dashboard/appointment-services" className="font-medium text-brand-600 underline hover:text-brand-700">
-                Services
-              </Link>{' '}
-              after you finish here.
+              Set when the business accepts appointments and when each {terms.staff.toLowerCase()} is available to
+              take bookings. You can adjust breaks and time off later under Availability.
             </p>
-            <div className="space-y-3">
-              {services.map((s, i) => (
-                <div key={i} className="rounded-xl border border-slate-200 p-4 space-y-2">
-                  <input
-                    type="text"
-                    value={s.name}
-                    onChange={(e) => {
-                      const updated = [...services];
-                      updated[i] = { ...s, name: e.target.value };
-                      setServices(updated);
-                    }}
-                    placeholder="Service name"
-                    className="w-full border-0 bg-transparent p-0 text-sm font-medium text-slate-900 focus:ring-0"
+            <div className="mb-8">
+              <h3 className="mb-3 text-sm font-semibold text-slate-800">Business opening hours</h3>
+              <p className="mb-4 text-xs text-slate-500">
+                Guest booking slots are limited to times when you are open and when staff are working.
+              </p>
+              <OpeningHoursControl value={openingHoursDraft} onChange={setOpeningHoursDraft} />
+            </div>
+            <div className="space-y-10">
+              {rosterList.map((cal) => (
+                <div key={cal.id}>
+                  <h3 className="mb-3 text-sm font-semibold text-slate-800">
+                    {cal.name} — working hours
+                  </h3>
+                  <WorkingHoursControl
+                    value={calendarWorkingDraft[cal.id] ?? defaultPractitionerWorkingHours()}
+                    onChange={(wh) =>
+                      setCalendarWorkingDraft((prev) => ({
+                        ...prev,
+                        [cal.id]: wh,
+                      }))
+                    }
                   />
-                  <div className="flex gap-3">
-                    <div className="flex-1">
-                      <label className="block text-[10px] font-medium text-slate-500">
-                        Duration (min)
-                      </label>
-                      <input
-                        type="number"
-                        value={s.duration}
-                        onChange={(e) => {
-                          const updated = [...services];
-                          updated[i] = { ...s, duration: parseInt(e.target.value) || 30 };
-                          setServices(updated);
-                        }}
-                        min={5}
-                        step={5}
-                        className="w-full rounded border border-slate-200 px-2 py-1.5 text-xs"
-                      />
-                    </div>
-                    <div className="flex-1">
-                      <label className="block text-[10px] font-medium text-slate-500">
-                        Price ({currencySymbol(currency)})
-                      </label>
-                      <div className="relative">
-                        <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-slate-400">
-                          {currencySymbol(currency)}
-                        </span>
-                        <input
-                          type="number"
-                          value={s.price}
-                          onChange={(e) => {
-                            const updated = [...services];
-                            updated[i] = { ...s, price: e.target.value };
-                            setServices(updated);
-                          }}
-                          min={0}
-                          step={0.01}
-                          placeholder="0.00"
-                          className="w-full rounded border border-slate-200 py-1.5 pl-5 pr-2 text-xs"
-                        />
-                      </div>
-                    </div>
-                    <div className="flex items-end">
-                      <button
-                        type="button"
-                        onClick={() => setServices(services.filter((_, j) => j !== i))}
-                        className="pb-1.5 text-xs text-slate-400 hover:text-red-500"
-                      >
-                        Remove
-                      </button>
-                    </div>
-                  </div>
                 </div>
               ))}
-              <button
-                type="button"
-                onClick={() =>
-                  setServices([...services, { name: '', duration: 30, price: '0.00' }])
-                }
-                className="w-full rounded-xl border-2 border-dashed border-slate-200 py-3 text-sm text-slate-500 hover:border-brand-300 hover:text-brand-600"
-              >
-                + Add service
-              </button>
             </div>
           </div>
         )}
@@ -1413,26 +1565,21 @@ export default function OnboardingPage() {
                   Before you go live
                 </p>
                 <p className="mb-3 text-sm text-slate-700">
-                  Finish calendar and payment setup in the dashboard so slots and charges work as you expect:
+                  You have already set services, opening hours, and working hours. Complete payment setup in the
+                  dashboard:
                 </p>
                 <ul className="list-inside list-disc space-y-1.5 text-sm text-slate-600">
-                  <li>
-                    <Link href="/dashboard/availability" className="font-medium text-brand-600 underline hover:text-brand-700">
-                      Availability
-                    </Link>{' '}
-                    — working hours, breaks, and days off per {terms.staff.toLowerCase()}
-                  </li>
-                  <li>
-                    <Link href="/dashboard/appointment-services" className="font-medium text-brand-600 underline hover:text-brand-700">
-                      Services
-                    </Link>{' '}
-                    — link services to {terms.staff.toLowerCase()}s, deposits, and pricing details
-                  </li>
                   <li>
                     <Link href="/dashboard/settings" className="font-medium text-brand-600 underline hover:text-brand-700">
                       Settings
                     </Link>{' '}
                     — Stripe Connect and venue payment options
+                  </li>
+                  <li>
+                    <Link href="/dashboard/availability" className="font-medium text-brand-600 underline hover:text-brand-700">
+                      Availability
+                    </Link>{' '}
+                    — breaks, time off, and fine-tune schedules anytime
                   </li>
                 </ul>
               </div>

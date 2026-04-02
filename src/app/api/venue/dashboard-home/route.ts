@@ -21,8 +21,6 @@ import { computeGuestBookingReady } from '@/lib/setup-guest-booking-ready';
 import type { AvailabilityConfig, EngineInput, OpeningHours } from '@/types/availability';
 import type { BookingModel } from '@/types/booking-models';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
-import { getSmsUsageDisplayForVenue } from '@/lib/billing/sms-usage-display';
-
 const WEEKDAYS_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 function addDaysToDateStr(dateStr: string, delta: number): string {
@@ -255,11 +253,8 @@ export async function GET() {
       String(a.booking_time).localeCompare(String(b.booking_time)),
     );
 
-    const smsUsage = await getSmsUsageDisplayForVenue(admin, staff.venue_id);
-
     return NextResponse.json({
       booking_model: (venueRow as Record<string, unknown>).booking_model ?? 'table_reservation',
-      sms_usage: smsUsage,
       today: {
         covers: todayCovers ?? 0,
         bookings: todayBookingCount ?? 0,

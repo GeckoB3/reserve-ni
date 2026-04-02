@@ -455,7 +455,7 @@ export function StaffSection({ venueId: _venueId, isAdmin, bookingModel }: Staff
       setCreateSuccess(
         welcomeSent
           ? `User ${email} created. They have been emailed their login details.`
-          : `User ${email} created. Welcome email could not be sent — check SendGrid configuration and share their login details manually.`,
+          : `User ${email} created. Welcome email could not be sent. Check SendGrid configuration and share their login details manually.`,
       );
       setShowCreateForm(false);
       setTimeout(() => setCreateSuccess(null), 4000);
@@ -709,7 +709,7 @@ export function StaffSection({ venueId: _venueId, isAdmin, bookingModel }: Staff
         </div>
       </section>
 
-      {/* Bookable calendars (Model B — admin): add/remove/rename practitioner rows */}
+      {/* Bookable calendars (Model B, admin): add/remove/rename practitioner rows */}
       {isAppointmentVenue && isAdmin && (
         <section className="rounded-xl border border-slate-200 bg-white shadow-sm">
           <div className="border-b border-slate-100 px-6 py-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -740,7 +740,7 @@ export function StaffSection({ venueId: _venueId, isAdmin, bookingModel }: Staff
               <p className="text-sm text-amber-800 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
                 You have reached your plan&apos;s calendar limit
                 {calendarEntitlement.calendar_limit != null ? ` (${calendarEntitlement.calendar_limit})` : ''}. Increase
-                your calendar count on the Standard plan or upgrade to Business for unlimited calendars — see the{' '}
+                your calendar count on the Standard plan or upgrade to Business for unlimited calendars. See the{' '}
                 <a href="/dashboard/settings?tab=plan" className="font-medium text-brand-700 underline underline-offset-2">
                   Plan
                 </a>{' '}
@@ -771,7 +771,7 @@ export function StaffSection({ venueId: _venueId, isAdmin, bookingModel }: Staff
                       value={newCalendarName}
                       onChange={(e) => setNewCalendarName(e.target.value)}
                       maxLength={200}
-                      placeholder="e.g. Sarah — Senior stylist"
+                      placeholder="e.g. Sarah (Senior stylist)"
                       className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
                     />
                   </div>
@@ -813,7 +813,7 @@ export function StaffSection({ venueId: _venueId, isAdmin, bookingModel }: Staff
                   {(calendarBillingModal.limit + 1) * STANDARD_PRICE_PER_CALENDAR > BUSINESS_PRICE && (
                     <p className="mt-3 rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 text-xs text-brand-900">
                       Or upgrade to Business at &pound;{BUSINESS_PRICE}/month for unlimited calendars, SMS reminders, and priority
-                      support — see the{' '}
+                      support. See the{' '}
                       <a href="/dashboard/settings?tab=plan" className="font-semibold underline">
                         Plan
                       </a>{' '}
@@ -827,7 +827,7 @@ export function StaffSection({ venueId: _venueId, isAdmin, bookingModel }: Staff
                       onClick={() => void confirmCalendarBillingIncrease()}
                       className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
                     >
-                      {addCalendarSaving ? 'Updating…' : 'Confirm — update my plan'}
+                      {addCalendarSaving ? 'Updating…' : 'Confirm and update my plan'}
                     </button>
                     <button
                       type="button"
@@ -1121,7 +1121,7 @@ export function StaffSection({ venueId: _venueId, isAdmin, bookingModel }: Staff
                       onChange={(e) => setCreatePractitionerId(e.target.value)}
                       className="w-full max-w-md rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
                     >
-                      <option value="">No calendar — assign later from this list</option>
+                      <option value="">No calendar (assign later from this list)</option>
                       {practitioners.map((p) => (
                         <option key={p.id} value={p.id}>
                           {p.name}
@@ -1300,7 +1300,7 @@ export function StaffSection({ venueId: _venueId, isAdmin, bookingModel }: Staff
         </div>
       )}
 
-      {/* Remove calendar (Model B — admin) */}
+      {/* Remove calendar (Model B, admin) */}
       {deleteCalendarTarget && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm"

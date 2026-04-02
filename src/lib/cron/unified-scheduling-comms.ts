@@ -6,7 +6,9 @@
  * - **Deposit request / deposit confirmation** — same shared paths as confirmation (not this cron).
  * - **Reschedule** — `booking_modification_*` in `send-templated.ts` (not this cron).
  * - **Cancellation** — `cancellation_*` in `send-templated.ts` (not this cron).
- * - **Reminder 1 / 2** — **this file** (`reminder_1_email` / `reminder_1_sms` / `reminder_2_sms`). Legacy restaurants use
+ * - **Reminder 1 / 2** — **this file** (`reminder_1_email` / `reminder_1_sms` / `reminder_2_sms`). Email uses
+ *   `communication_settings.reminder_email_custom_message`; first SMS uses `day_of_reminder_custom_message`; second SMS uses
+ *   the same optional line. Legacy restaurants use
  *   `send-communications/route.ts` 56h + day-of paths, which **skip** unified venues (`isUnifiedSchedulingVenue`).
  * - **No-show** — staff-driven status + optional `no_show_notification` via `CommunicationService` (not scheduled here).
  * - **Post-visit** — **this file** (email). Legacy post-visit in `send-communications` skips unified venues.
@@ -228,7 +230,11 @@ async function sendUnifiedReminder1(
           status: 'pending',
         });
         if (canSend) {
-          const rendered = renderReminder56h(bookingData, venueData, null);
+          const rendered = renderReminder56h(
+            bookingData,
+            venueData,
+            comm.reminder_email_custom_message ?? null,
+          );
           await sendEmail({ to: email, ...rendered });
           sentAny = true;
         }
@@ -320,7 +326,11 @@ async function sendUnifiedReminder2(
       });
       if (!canSend) continue;
 
-      const sms = renderDayOfReminderSms(bookingData, venueData, null);
+      const sms = renderDayOfReminderSms(
+        bookingData,
+        venueData,
+        comm.day_of_reminder_custom_message ?? null,
+      );
       const { sid, segmentCount } = await sendSmsWithSegments(phone, sms.body);
       await recordOutboundSms({
         venueId: venue.id,

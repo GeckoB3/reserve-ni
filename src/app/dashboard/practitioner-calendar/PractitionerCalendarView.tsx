@@ -554,6 +554,8 @@ export function PractitionerCalendarView({
   const [noShowGraceMinutes, setNoShowGraceMinutes] = useState(15);
   const scrollRef = useRef<HTMLDivElement>(null);
   const touchX = useRef<number | null>(null);
+  /** Snapshot when a touch starts; if scrollLeft/scrollTop move during the gesture, it was scrolling, not a day swipe. */
+  const scrollSnapshotAtTouch = useRef<{ left: number; top: number } | null>(null);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 10 } }));
 
@@ -1243,14 +1245,33 @@ export function PractitionerCalendarView({
               className="min-h-0 flex-1 overflow-x-auto overflow-y-auto rounded-xl border border-slate-200 bg-white motion-safe:scroll-smooth"
             onTouchStart={(e) => {
               touchX.current = e.touches[0].clientX;
+              const el = scrollRef.current;
+              scrollSnapshotAtTouch.current = el
+                ? { left: el.scrollLeft, top: el.scrollTop }
+                : null;
             }}
             onTouchEnd={(e) => {
               if (touchX.current == null) return;
               const dx = e.changedTouches[0].clientX - touchX.current;
               touchX.current = null;
+              const el = scrollRef.current;
+              const snap = scrollSnapshotAtTouch.current;
+              scrollSnapshotAtTouch.current = null;
+              if (el && snap) {
+                const movedH = Math.abs(el.scrollLeft - snap.left);
+                const movedV = Math.abs(el.scrollTop - snap.top);
+                const scrollMoveThreshold = 10;
+                if (movedH > scrollMoveThreshold || movedV > scrollMoveThreshold) {
+                  return;
+                }
+              }
               if (Math.abs(dx) < 72) return;
               if (dx > 0) setDate((d) => addDays(d, -1));
               else setDate((d) => addDays(d, 1));
+            }}
+            onTouchCancel={() => {
+              touchX.current = null;
+              scrollSnapshotAtTouch.current = null;
             }}
           >
             <div className="flex min-w-[600px]">

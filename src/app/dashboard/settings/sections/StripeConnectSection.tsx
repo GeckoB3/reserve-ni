@@ -124,7 +124,7 @@ export function StripeConnectSection({ stripeAccountId, isAdmin }: StripeConnect
       const { url } = await res.json();
       window.location.href = url;
     } catch {
-      setState({ kind: 'error', message: 'Network error — please try again' });
+      setState({ kind: 'error', message: 'Network error. Please try again.' });
       setRedirecting(false);
     }
   }, []);
@@ -228,7 +228,7 @@ export function StripeConnectSection({ stripeAccountId, isAdmin }: StripeConnect
             <svg className="h-5 w-5 text-green-600" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
             </svg>
-            <span className="text-sm font-medium text-green-700">Stripe connected — charges enabled</span>
+            <span className="text-sm font-medium text-green-700">Stripe connected; charges enabled</span>
           </div>
           <p className="mt-2 text-xs text-neutral-400">Account: {state.accountId}</p>
         </div>

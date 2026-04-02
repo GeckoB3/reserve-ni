@@ -28,7 +28,7 @@ import {
   SMS_INCLUDED_PER_CALENDAR_STANDARD,
   computeSmsMonthlyAllowance,
 } from '@/lib/billing/sms-allowance';
-import { BUSINESS_PRICE, STANDARD_PRICE_PER_CALENDAR } from '@/lib/pricing-constants';
+import { BUSINESS_PRICE, SMS_OVERAGE_GBP_PER_MESSAGE, STANDARD_PRICE_PER_CALENDAR } from '@/lib/pricing-constants';
 
 interface SettingsViewProps {
   initialVenue: VenueSettings | null;
@@ -192,7 +192,14 @@ function PlanSection({
     <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm space-y-4">
       <h2 className="text-base font-semibold text-slate-900">Your Plan</h2>
       <p className="text-xs text-slate-600 leading-relaxed">
-        Billing runs through Stripe. Upgrades, downgrades, and seat changes use{' '}
+        Billing runs through Stripe. Upgrades, downgrades, and{' '}
+        {isAppointmentVenue ? (
+          <>
+            other subscription changes (including how many bookable calendars you pay for on Standard) use{' '}
+          </>
+        ) : (
+          <>seat changes use </>
+        )}
         <span className="font-medium text-slate-700">proration</span>: unused time on your current price is credited and
         only the net difference is charged for the rest of this billing period (see your Stripe invoice and customer
         portal). If you cancel, you keep full access until the end of the period shown below; no further charges after
@@ -244,7 +251,8 @@ function PlanSection({
         {tier === 'business' || tier === 'founding' ? (
           <span className="text-slate-500"> ({SMS_INCLUDED_BUSINESS_TIER}/month included)</span>
         ) : null}
-        . Overage is billed via Stripe metered SMS.
+        . Overage beyond your allowance is billed at £{SMS_OVERAGE_GBP_PER_MESSAGE.toFixed(2)} per SMS via Stripe metered
+        billing.
       </p>
       {restaurantOnInvalidStandard && (
         <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-950">
@@ -294,7 +302,7 @@ function PlanSection({
             </>
           ) : (
             <>
-              {calendarCount} slot{calendarCount === 1 ? '' : 's'} on Standard — &pound;{calendarCount * STANDARD_PRICE_PER_CALENDAR}/month
+              {calendarCount} slot{calendarCount === 1 ? '' : 's'} on Standard: &pound;{calendarCount * STANDARD_PRICE_PER_CALENDAR}/month
               total.
             </>
           )}
@@ -367,7 +375,7 @@ function PlanSection({
           {isRestaurantVenue ? (
             <>
               Business plan: &pound;{BUSINESS_PRICE}/month flat. Includes guest SMS, table timeline and floor plan, day
-              sheet, and priority support — the plan required for restaurants.
+              sheet, and priority support: the plan required for restaurants.
             </>
           ) : isAppointmentVenue ? (
             <>
@@ -386,12 +394,12 @@ function PlanSection({
         <p className="text-sm text-slate-500">
           {isRestaurantVenue ? (
             <>
-              Founding Partner: full restaurant Business features (guest SMS, table management, floor plan) — free during
+              Founding Partner: full restaurant Business features (guest SMS, table management, floor plan), free during
               your founding period; subscription pricing applies when the founding period ends.
             </>
           ) : isAppointmentVenue ? (
             <>
-              Founding Partner: unlimited bookable calendars and the same SMS allowance as Business — free during your
+              Founding Partner: unlimited bookable calendars and the same SMS allowance as Business, free during your
               founding period; subscription pricing applies when the founding period ends.
             </>
           ) : (
@@ -625,7 +633,7 @@ export function SettingsView({
             {isAppointment && isAdmin ? (
               <div className="space-y-4">
                 <p className="text-sm text-slate-500">
-                  <span className="font-medium text-slate-700">Your login</span> — display name, sign-in email, phone, and
+                  <span className="font-medium text-slate-700">Your login:</span> display name, sign-in email, phone, and
                   password apply to you. Business details in the sections below apply to your venue and public booking page.
                 </p>
                 <StaffPersonalSettingsSection />

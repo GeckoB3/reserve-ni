@@ -128,6 +128,17 @@ export default async function SettingsPage({
   const isAdmin = staff.role === 'admin';
   let activePractitionerCount = 0;
   let smsMessagesSentThisMonth: number | null = null;
+  if (venueId) {
+    const now = new Date();
+    const bm = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}-01`;
+    const { data: smsRow } = await staff.db
+      .from('sms_usage')
+      .select('messages_sent')
+      .eq('venue_id', venueId)
+      .eq('billing_month', bm)
+      .maybeSingle();
+    smsMessagesSentThisMonth = (smsRow as { messages_sent?: number } | null)?.messages_sent ?? 0;
+  }
   if (venueId && isUnifiedSchedulingVenue(bookingModel)) {
     const adminClient = getSupabaseAdminClient();
     if (bookingModel === 'unified_scheduling') {
@@ -145,15 +156,6 @@ export default async function SettingsPage({
         .eq('is_active', true);
       activePractitionerCount = count ?? 0;
     }
-    const now = new Date();
-    const bm = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}-01`;
-    const { data: smsRow } = await staff.db
-      .from('sms_usage')
-      .select('messages_sent')
-      .eq('venue_id', venueId)
-      .eq('billing_month', bm)
-      .maybeSingle();
-    smsMessagesSentThisMonth = (smsRow as { messages_sent?: number } | null)?.messages_sent ?? 0;
   }
 
   const sp = await searchParams;

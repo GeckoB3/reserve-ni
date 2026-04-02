@@ -254,7 +254,7 @@ export function TableManagementSection({ venue, onUpdate, isAdmin }: Props) {
                 </span>
                 <span>
                   <span className="block text-sm font-semibold text-slate-900">What&apos;s the difference?</span>
-                  <span className="mt-0.5 block text-xs text-slate-500">Simple covers vs advanced — how booking and the dashboard change</span>
+                  <span className="mt-0.5 block text-xs text-slate-500">Simple covers vs advanced: how booking and the dashboard change</span>
                 </span>
               </span>
               <span className="flex shrink-0 items-center gap-1.5 rounded-full bg-slate-100/90 px-2.5 py-1 text-[11px] font-medium text-slate-600 group-open:bg-brand-50 group-open:text-brand-700">
@@ -283,7 +283,7 @@ export function TableManagementSection({ venue, onUpdate, isAdmin }: Props) {
                     </li>
                     <li className="flex gap-2.5">
                       <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-slate-300" aria-hidden />
-                      <span>Optional tables are <strong className="font-semibold text-slate-800">seating tracking only</strong> — they don&apos;t block online availability.</span>
+                      <span>Optional tables are <strong className="font-semibold text-slate-800">seating tracking only</strong>; they don&apos;t block online availability.</span>
                     </li>
                   </ul>
                 </div>

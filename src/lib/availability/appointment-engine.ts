@@ -72,7 +72,7 @@ export function attachVenueClockToAppointmentInput(
     min_notice_hours?: number;
     allow_same_day_booking?: boolean;
   } | null | undefined;
-  input.minNoticeHours = rules?.min_notice_hours ?? 24;
+  input.minNoticeHours = rules?.min_notice_hours ?? 1;
   input.allowSameDayBooking = rules?.allow_same_day_booking ?? true;
   if (venue.opening_hours !== undefined) {
     input.venueOpeningHours = venue.opening_hours as OpeningHours | null;

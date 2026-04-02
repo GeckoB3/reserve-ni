@@ -29,7 +29,7 @@ const defaultRules: BookingRulesSettings = {
   min_party_size: 1,
   max_party_size: 20,
   max_advance_booking_days: 90,
-  min_notice_hours: 24,
+  min_notice_hours: 1,
   cancellation_notice_hours: 48,
   allow_same_day_booking: true,
 };

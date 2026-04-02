@@ -6,7 +6,8 @@ import { renderDayOfReminderEmail } from '@/lib/emails/templates/day-of-reminder
 import { renderDayOfReminderSms } from '@/lib/emails/templates/day-of-reminder-sms';
 import { renderPostVisitEmail } from '@/lib/emails/templates/post-visit';
 import { sendEmail } from '@/lib/emails/send-email';
-import { sendSms } from '@/lib/emails/send-sms';
+import { sendSmsWithSegments } from '@/lib/emails/send-sms';
+import { recordOutboundSms } from '@/lib/sms-usage';
 import { isSmsAllowed } from '@/lib/tier-enforcement';
 import { createShortConfirmLink, createShortManageLink } from '@/lib/short-manage-link';
 import { enrichBookingEmailForAppointment } from '@/lib/emails/booking-email-enrichment';
@@ -320,7 +321,17 @@ async function sendDayOfReminders(results: { day_of_reminders: number; errors: n
               status: 'sent',
             });
             if (canSend) {
-              await sendSms(phone, sms.body);
+              const { sid, segmentCount } = await sendSmsWithSegments(phone, sms.body);
+              if (sid) {
+                await recordOutboundSms({
+                  venueId: venue.id,
+                  bookingId: b.id,
+                  messageType: 'day_of_reminder_sms',
+                  recipientPhone: phone,
+                  twilioSid: sid,
+                  segmentCount,
+                });
+              }
               results.day_of_reminders++;
             }
           }
