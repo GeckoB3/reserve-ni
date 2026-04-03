@@ -29,7 +29,14 @@ export function ScheduleCalendarLegend({
   if (!showMergedFeeds) return null;
 
   return (
-    <div className="flex flex-wrap items-center gap-3">
+    <div className="flex flex-col gap-2">
+      <p className="max-w-3xl text-xs leading-snug text-slate-500">
+        Team appointments appear in the <span className="font-medium text-slate-700">blue practitioner columns</span>.
+        Ticketed events, classes, and resource bookings appear in the{' '}
+        <span className="font-medium text-slate-700">amber / emerald / slate lanes</span> to the right (not in those
+        columns).
+      </p>
+      <div className="flex flex-wrap items-center gap-3">
       <div className="flex flex-wrap items-center gap-4 text-xs text-slate-600">
         <span className="inline-flex items-center gap-1.5 font-medium text-slate-700">
           <span className="h-2.5 w-2.5 rounded-sm bg-blue-500" aria-hidden />
@@ -63,12 +70,15 @@ export function ScheduleCalendarLegend({
           aria-label={`Schedule feed filter (${viewMode} view)`}
         >
           <option value="all">All types</option>
-          <option value="appointments">Appointments only</option>
+          <option value="appointments">
+            Practitioner appointments only (hide events, classes, resources lanes)
+          </option>
           {showEventsColumn ? <option value="event_ticket">Events only</option> : null}
           {showClassesColumn ? <option value="class_session">Classes only</option> : null}
           {showResourcesLane ? <option value="resource_booking">Resources only</option> : null}
         </select>
       </label>
+      </div>
     </div>
   );
 }

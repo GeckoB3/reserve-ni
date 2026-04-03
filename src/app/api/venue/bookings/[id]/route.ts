@@ -10,7 +10,7 @@ import {
   fetchAppointmentInput,
   computeAppointmentAvailability,
 } from '@/lib/availability/appointment-engine';
-import { enrichBookingEmailForAppointment, enrichBookingEmailForComms } from '@/lib/emails/booking-email-enrichment';
+import { enrichBookingEmailForComms } from '@/lib/emails/booking-email-enrichment';
 import { autoAssignTable } from '@/lib/table-availability';
 import { BOOKING_MUTABLE_STATUSES } from '@/lib/table-management/constants';
 import {
@@ -319,7 +319,7 @@ export async function PATCH(
           const refundMsg = refund_message;
           after(async () => {
             try {
-              const enriched = await enrichBookingEmailForAppointment(admin, id, cancelBookingEmail);
+              const enriched = await enrichBookingEmailForComms(admin, id, cancelBookingEmail);
               await sendCancellationNotification(enriched, cancelVenueEmail, vid, refundMsg);
             } catch (commsErr) {
               console.error('Staff cancellation notification failed:', commsErr);
@@ -800,7 +800,7 @@ export async function PATCH(
         const vid = staff.venue_id;
         after(async () => {
           try {
-            const enriched = await enrichBookingEmailForAppointment(admin, id, bookingEmail);
+            const enriched = await enrichBookingEmailForComms(admin, id, bookingEmail);
             await sendBookingModificationNotification(enriched, venueEmail, vid);
           } catch (commsErr) {
             console.error('Booking modification notification failed:', commsErr);

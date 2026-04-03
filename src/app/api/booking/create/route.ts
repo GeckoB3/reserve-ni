@@ -727,6 +727,7 @@ async function handleNonTableBooking(
     booking_end_time: booking_end_time ? (booking_end_time.length === 5 ? booking_end_time + ':00' : booking_end_time) : null,
     event_session_id: event_session_id ?? null,
     capacity_used: capacity_used ?? party_size,
+    booking_model: effectiveModel,
   };
 
   if (effectiveModel === 'unified_scheduling') {

@@ -1,7 +1,10 @@
 import type { ScheduleBlockDTO } from '@/types/schedule-blocks';
 import { inferBookingRowModel } from '@/lib/booking/infer-booking-row-model';
 
-/** Group blocks by `date` (YYYY-MM-DD), sorted by start_time within each day. */
+/**
+ * Group blocks by `date` (YYYY-MM-DD), sorted by start_time within each day.
+ * Used by week view (`WeekScheduleCdeStrip`) so each column only receives that day’s blocks.
+ */
 export function groupScheduleBlocksByDate(blocks: ScheduleBlockDTO[]): Map<string, ScheduleBlockDTO[]> {
   const m = new Map<string, ScheduleBlockDTO[]>();
   for (const b of blocks) {
@@ -85,6 +88,7 @@ export interface MonthDayScheduleCounts {
 /**
  * Per-day counts for month grid: practitioner/unified bookings (`isPractitionerGridBooking`) + schedule blocks by kind.
  * Appointments use infer rules only so C/D/E that also appear as schedule blocks are not double-counted in the blue lane.
+ * Each `scheduleBlocks` entry is counted only when `bl.date` is in `datesInGrid` (per calendar cell).
  */
 export function buildMonthDayScheduleCounts(
   bookings: Array<{
