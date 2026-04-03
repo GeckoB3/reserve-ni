@@ -3,7 +3,8 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { getBusinessConfig, formatSignupBusinessTypeLabel, isDirectModelBusinessType, isSignupSupportedBookingModel } from '@/lib/business-config';
-import { STANDARD_PRICE_PER_CALENDAR, BUSINESS_PRICE } from '@/lib/pricing-constants';
+import { SMS_OVERAGE_GBP_PER_MESSAGE, STANDARD_PRICE_PER_CALENDAR, BUSINESS_PRICE } from '@/lib/pricing-constants';
+import { SMS_INCLUDED_BUSINESS_TIER, SMS_INCLUDED_PER_CALENDAR_STANDARD } from '@/lib/billing/sms-allowance';
 
 export default function PaymentPage() {
   const router = useRouter();
@@ -136,8 +137,10 @@ export default function PaymentPage() {
             <div className="rounded-lg border border-slate-100 bg-slate-50/80 px-3 py-2 text-xs text-slate-600">
               <p className="font-medium text-slate-800">Reserve NI Business: &pound;{BUSINESS_PRICE}/month</p>
               <p className="mt-1 leading-relaxed">
-                Everything you need to run your business. Unlimited staff calendars, 800 SMS included, table management
-                for restaurants, and priority support. One flat price, no per-head costs.
+                Includes everything in Standard, plus unlimited bookable calendars, {SMS_INCLUDED_BUSINESS_TIER} SMS
+                messages per month, table management with timeline grid and floor plan (for restaurants), and priority
+                support. One flat price, no per-seat costs. Additional SMS at {Math.round(SMS_OVERAGE_GBP_PER_MESSAGE * 100)}
+                p each if you exceed the allowance.
               </p>
             </div>
           )}
@@ -148,8 +151,11 @@ export default function PaymentPage() {
                   Reserve NI Standard: {calendarCount} &times; &pound;{STANDARD_PRICE_PER_CALENDAR}/month = &pound;
                   {calendarCount * STANDARD_PRICE_PER_CALENDAR}/month
                 </p>
-                <p className="mt-1">
-                  {calendarCount} bookable calendar{calendarCount === 1 ? '' : 's'}. Email reminders.
+                <p className="mt-1 leading-relaxed">
+                  {calendarCount} bookable calendar{calendarCount === 1 ? '' : 's'}: all booking features, email and SMS
+                  communications, and email support. {SMS_INCLUDED_PER_CALENDAR_STANDARD} SMS per calendar per month
+                  included; additional SMS at {Math.round(SMS_OVERAGE_GBP_PER_MESSAGE * 100)}p each if you exceed the
+                  allowance.
                 </p>
               </div>
               <div className="flex justify-between text-sm">
@@ -162,7 +168,14 @@ export default function PaymentPage() {
           )}
           {plan === 'founding' && isRestaurant && (
             <div className="rounded-lg border border-emerald-100 bg-emerald-50/60 px-3 py-2 text-xs text-emerald-900">
-              <p className="font-medium">Founding Partner: Business plan free for 6 months, then &pound;{BUSINESS_PRICE}/month.</p>
+              <p className="font-medium">
+                Founding Partner: Business plan free for 6 months, then &pound;{BUSINESS_PRICE}/month.
+              </p>
+              <p className="mt-1 leading-relaxed">
+                Full Business access: unlimited bookable calendars, {SMS_INCLUDED_BUSINESS_TIER} SMS per month, deposit
+                collection and guest messaging, table management with timeline grid and floor plan, and priority support.
+                Additional SMS at {Math.round(SMS_OVERAGE_GBP_PER_MESSAGE * 100)}p each if you exceed the allowance.
+              </p>
             </div>
           )}
           <div className="border-t border-slate-100 pt-4">
