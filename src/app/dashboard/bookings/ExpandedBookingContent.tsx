@@ -11,6 +11,8 @@ import {
 } from '@/lib/table-management/booking-status';
 import { ModifyBookingInline } from '@/components/booking/ModifyBookingInline';
 import { BookingNotesEditablePanel } from '@/components/booking/BookingNotesEditablePanel';
+import type { BookingModel } from '@/types/booking-models';
+import { bookingModelShortLabel } from '@/lib/booking/infer-booking-row-model';
 
 interface BookingRow {
   id: string;
@@ -37,6 +39,7 @@ interface BookingDetailLite {
   special_requests: string | null;
   internal_notes: string | null;
   cancellation_deadline: string | null;
+  checked_in_at?: string | null;
   table_assignments?: Array<{ id: string; name: string }>;
   guest: {
     name: string | null;
@@ -46,6 +49,12 @@ interface BookingDetailLite {
   } | null;
   communications: Array<{ id: string; message_type: string; channel: string; status: string; created_at: string }>;
   events: Array<{ id: string; event_type: string; created_at: string }>;
+  cde_context?: {
+    inferred_model: BookingModel;
+    title: string;
+    subtitle?: string | null;
+  } | null;
+  inferred_booking_model?: BookingModel;
 }
 
 function formatRelative(value: string | null | undefined): string {
@@ -249,6 +258,24 @@ export function ExpandedBookingContent({
           isAppointment={isAppointment}
         />
       </div>
+
+      {detail?.cde_context && (
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50/40 p-3.5">
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-emerald-700/80">Booking type</p>
+          <p className="text-sm font-semibold text-slate-900">{bookingModelShortLabel(detail.cde_context.inferred_model)}</p>
+          <p className="mt-1 text-sm text-slate-800">{detail.cde_context.title}</p>
+          {detail.cde_context.subtitle ? (
+            <p className="mt-0.5 text-xs text-slate-600">{detail.cde_context.subtitle}</p>
+          ) : null}
+        </div>
+      )}
+
+      {detail?.checked_in_at ? (
+        <div className="rounded-xl border border-slate-200 bg-white p-3.5">
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Attendance</p>
+          <p className="text-sm font-medium text-slate-800">Checked in {formatRelative(detail.checked_in_at)}</p>
+        </div>
+      ) : null}
 
       {/* Group booking info */}
       {booking.group_booking_id && (

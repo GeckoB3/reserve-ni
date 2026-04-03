@@ -4,7 +4,13 @@ import { getDashboardStaff, getLinkedPractitionerId } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { ToastProvider } from '@/components/ui/Toast';
 import { PractitionerCalendarView } from '../practitioner-calendar/PractitionerCalendarView';
-import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
+import { normalizeEnabledModels } from '@/lib/booking/enabled-models';
+import type { BookingModel } from '@/types/booking-models';
+import {
+  isPractitionerScheduleCalendar,
+  isVenueScheduleCalendarEligible,
+} from '@/lib/booking/schedule-calendar-eligibility';
+import { StaffScheduleHub } from '@/components/calendar/StaffScheduleHub';
 
 export default async function CalendarPage() {
   const supabase = await createClient();
@@ -25,12 +31,24 @@ export default async function CalendarPage() {
   }
 
   const admin = getSupabaseAdminClient();
-  const { data: venue } = await admin.from('venues').select('currency, booking_model').eq('id', staff.venue_id).single();
-  if (!isUnifiedSchedulingVenue(venue?.booking_model)) {
+  const { data: venue } = await admin
+    .from('venues')
+    .select('currency, booking_model, enabled_models')
+    .eq('id', staff.venue_id)
+    .single();
+  const currency = (venue?.currency as string) ?? 'GBP';
+  const bookingModel = ((venue?.booking_model as string) ?? 'table_reservation') as BookingModel;
+  const enabledModels = normalizeEnabledModels(
+    (venue as { enabled_models?: unknown } | null)?.enabled_models,
+    bookingModel,
+  );
+
+  if (!isVenueScheduleCalendarEligible(bookingModel, enabledModels)) {
     redirect('/dashboard');
   }
 
-  const currency = (venue?.currency as string) ?? 'GBP';
+  const resourceScheduleEnabled =
+    bookingModel === 'resource_booking' || enabledModels.includes('resource_booking');
 
   const linkedPractitionerId =
     staff.role === 'staff' && staff.id
@@ -38,16 +56,30 @@ export default async function CalendarPage() {
       : null;
   const defaultPractitionerFilter: 'all' | string = linkedPractitionerId ?? 'all';
 
+  const showPractitionerCalendar = isPractitionerScheduleCalendar(bookingModel);
+
+  /**
+   * Unified / practitioner primaries: full `PractitionerCalendarView` (appointments + merged C/D/E lanes).
+   * Table + secondaries and other non-unified eligible venues: `StaffScheduleHub` (merged schedule API only;
+   * Model A stays on Day sheet / Floor plan — not in PractitionerCalendarView).
+   */
   return (
     <ToastProvider>
       <div className="p-4 md:p-6 lg:p-8">
         <div className="mx-auto max-w-[1600px]">
-          <PractitionerCalendarView
-            venueId={staff.venue_id}
-            currency={currency}
-            defaultPractitionerFilter={defaultPractitionerFilter}
-            linkedPractitionerId={linkedPractitionerId}
-          />
+          {showPractitionerCalendar ? (
+            <PractitionerCalendarView
+              venueId={staff.venue_id}
+              currency={currency}
+              defaultPractitionerFilter={defaultPractitionerFilter}
+              linkedPractitionerId={linkedPractitionerId}
+              resourceScheduleEnabled={resourceScheduleEnabled}
+              bookingModel={bookingModel}
+              enabledModels={enabledModels}
+            />
+          ) : (
+            <StaffScheduleHub bookingModel={bookingModel} enabledModels={enabledModels} />
+          )}
         </div>
       </div>
     </ToastProvider>

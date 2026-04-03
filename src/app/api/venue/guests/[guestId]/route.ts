@@ -4,6 +4,7 @@ import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 import { z } from 'zod';
 import { normalizeToE164 } from '@/lib/phone/e164';
 import { normaliseGuestTagsInput } from '@/lib/guests/tags';
+import { inferBookingRowModel, bookingModelShortLabel } from '@/lib/booking/infer-booking-row-model';
 
 const patchSchema = z
   .object({
@@ -21,6 +22,11 @@ const patchSchema = z
 function bookingTimeShort(t: string | null | undefined): string {
   if (!t || typeof t !== 'string') return '';
   return t.slice(0, 5);
+}
+
+function partySizeShort(ps: number | null): string {
+  if (ps == null || !Number.isFinite(ps)) return '—';
+  return String(ps);
 }
 
 /**
@@ -94,7 +100,7 @@ export async function GET(
     const { data: recentRaw, error: rbErr } = await staff.db
       .from('bookings')
       .select(
-        'id, booking_date, booking_time, party_size, status, deposit_status, practitioner_id, appointment_service_id',
+        'id, booking_date, booking_time, party_size, status, deposit_status, practitioner_id, appointment_service_id, calendar_id, service_item_id, experience_event_id, class_instance_id, resource_id, event_session_id',
       )
       .eq('guest_id', guestId)
       .eq('venue_id', staff.venue_id)
@@ -110,9 +116,19 @@ export async function GET(
     const recent = recentRaw ?? [];
     const practitionerIds = [...new Set(recent.map((r) => r.practitioner_id).filter(Boolean))] as string[];
     const serviceIds = [...new Set(recent.map((r) => r.appointment_service_id).filter(Boolean))] as string[];
+    const calendarIds = [...new Set(recent.map((r) => (r as { calendar_id?: string | null }).calendar_id).filter(Boolean))] as string[];
+    const serviceItemIds = [...new Set(recent.map((r) => (r as { service_item_id?: string | null }).service_item_id).filter(Boolean))] as string[];
+    const eventIds = [...new Set(recent.map((r) => (r as { experience_event_id?: string | null }).experience_event_id).filter(Boolean))] as string[];
+    const classInstIds = [...new Set(recent.map((r) => (r as { class_instance_id?: string | null }).class_instance_id).filter(Boolean))] as string[];
+    const resourceIds = [...new Set(recent.map((r) => (r as { resource_id?: string | null }).resource_id).filter(Boolean))] as string[];
 
     const prMap = new Map<string, string>();
     const svcMap = new Map<string, string>();
+    const calMap = new Map<string, string>();
+    const siMap = new Map<string, string>();
+    const evMap = new Map<string, string>();
+    const resMap = new Map<string, string>();
+    const classLabelMap = new Map<string, string>();
 
     if (practitionerIds.length > 0) {
       const { data: prs } = await staff.db.from('practitioners').select('id, name').in('id', practitionerIds);
@@ -126,6 +142,49 @@ export async function GET(
         svcMap.set((s as { id: string }).id, (s as { name: string }).name);
       }
     }
+    if (calendarIds.length > 0) {
+      const { data: cals } = await staff.db.from('unified_calendars').select('id, name').in('id', calendarIds);
+      for (const c of cals ?? []) {
+        calMap.set((c as { id: string }).id, (c as { name: string }).name);
+      }
+    }
+    if (serviceItemIds.length > 0) {
+      const { data: sis } = await staff.db.from('service_items').select('id, name').in('id', serviceItemIds);
+      for (const s of sis ?? []) {
+        siMap.set((s as { id: string }).id, (s as { name: string }).name);
+      }
+    }
+    if (eventIds.length > 0) {
+      const { data: evs } = await staff.db.from('experience_events').select('id, name').in('id', eventIds);
+      for (const e of evs ?? []) {
+        evMap.set((e as { id: string }).id, (e as { name: string }).name);
+      }
+    }
+    if (resourceIds.length > 0) {
+      const { data: vrs } = await staff.db.from('venue_resources').select('id, name').in('id', resourceIds);
+      for (const v of vrs ?? []) {
+        resMap.set((v as { id: string }).id, (v as { name: string }).name);
+      }
+    }
+    if (classInstIds.length > 0) {
+      const { data: instRows } = await staff.db
+        .from('class_instances')
+        .select('id, class_type_id')
+        .in('id', classInstIds);
+      const typeIds = [...new Set((instRows ?? []).map((r) => (r as { class_type_id?: string }).class_type_id).filter(Boolean))] as string[];
+      const typeMap = new Map<string, string>();
+      if (typeIds.length > 0) {
+        const { data: types } = await staff.db.from('class_types').select('id, name').in('id', typeIds);
+        for (const t of types ?? []) {
+          typeMap.set((t as { id: string }).id, (t as { name: string }).name);
+        }
+      }
+      for (const row of instRows ?? []) {
+        const id = (row as { id: string }).id;
+        const ct = (row as { class_type_id?: string }).class_type_id;
+        classLabelMap.set(id, ct ? typeMap.get(ct) ?? 'Class' : 'Class');
+      }
+    }
 
     const booking_history = recent.map((r) => {
       const row = r as {
@@ -137,7 +196,37 @@ export async function GET(
         deposit_status: string | null;
         practitioner_id: string | null;
         appointment_service_id: string | null;
+        calendar_id?: string | null;
+        service_item_id?: string | null;
+        experience_event_id?: string | null;
+        class_instance_id?: string | null;
+        resource_id?: string | null;
+        event_session_id?: string | null;
       };
+      const model = inferBookingRowModel(row);
+      const practitioner_name = row.practitioner_id ? prMap.get(row.practitioner_id) ?? null : null;
+      const service_name = row.appointment_service_id ? svcMap.get(row.appointment_service_id) ?? null : null;
+      const calendar_name = row.calendar_id ? calMap.get(row.calendar_id) ?? null : null;
+      const service_item_name = row.service_item_id ? siMap.get(row.service_item_id) ?? null : null;
+
+      let detail_label = '';
+      if (model === 'event_ticket' && row.experience_event_id) {
+        detail_label = evMap.get(row.experience_event_id) ?? 'Event';
+      } else if (model === 'class_session' && row.class_instance_id) {
+        detail_label = classLabelMap.get(row.class_instance_id) ?? 'Class';
+      } else if (model === 'resource_booking' && row.resource_id) {
+        detail_label = resMap.get(row.resource_id) ?? 'Resource';
+      } else if (model === 'unified_scheduling') {
+        const parts = [calendar_name, service_item_name].filter(Boolean);
+        detail_label = parts.length > 0 ? parts.join(' · ') : 'Appointment';
+      } else if (model === 'practitioner_appointment') {
+        const parts = [practitioner_name, service_name].filter(Boolean);
+        detail_label = parts.length > 0 ? parts.join(' · ') : 'Appointment';
+      } else {
+        detail_label =
+          partySizeShort(row.party_size) === '—' ? 'Table reservation' : `Table · ${partySizeShort(row.party_size)} guests`;
+      }
+
       return {
         id: row.id,
         booking_date: row.booking_date,
@@ -145,8 +234,11 @@ export async function GET(
         party_size: row.party_size,
         status: row.status,
         deposit_status: row.deposit_status,
-        practitioner_name: row.practitioner_id ? prMap.get(row.practitioner_id) ?? null : null,
-        service_name: row.appointment_service_id ? svcMap.get(row.appointment_service_id) ?? null : null,
+        booking_model: model,
+        kind_label: bookingModelShortLabel(model),
+        detail_label,
+        practitioner_name,
+        service_name,
       };
     });
 

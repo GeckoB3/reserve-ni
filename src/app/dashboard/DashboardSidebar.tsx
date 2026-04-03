@@ -5,8 +5,10 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useMemo, useState } from 'react';
 import { createClient } from '@/lib/supabase/browser';
 
+import { mergeModelNavEntries } from '@/lib/booking/enabled-models';
 import type { BookingModel } from '@/types/booking-models';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
+import { isVenueScheduleCalendarEligible } from '@/lib/booking/schedule-calendar-eligibility';
 
 type NavItem = { href: string; label: string; icon: React.ComponentType<{ className?: string }> };
 
@@ -45,6 +47,8 @@ interface Props {
   /** Business or Founding — with table_reservation and tableManagementEnabled, shows table grid / floor plan. */
   pricingTier?: string;
   bookingModel?: BookingModel;
+  /** Secondary bookable models (C/D/E); merged into model-specific nav. */
+  enabledModels?: BookingModel[];
   /** Reports and Availability nav items are admin-only. */
   isAdmin?: boolean;
   /** Venue `terminology` JSONB — drives booking list / new-booking labels (plan §6.4). */
@@ -60,6 +64,7 @@ export function DashboardSidebar({
   tableManagementEnabled,
   pricingTier = 'standard',
   bookingModel = 'table_reservation',
+  enabledModels = [],
   isAdmin = false,
   venueTerminology: _venueTerminology = null,
 }: Props) {
@@ -71,6 +76,11 @@ export function DashboardSidebar({
     Boolean(tableManagementEnabled) &&
     bookingModel === 'table_reservation' &&
     (pricingTier === 'business' || pricingTier === 'founding');
+
+  const calendarEligible = useMemo(
+    () => isVenueScheduleCalendarEligible(bookingModel, enabledModels),
+    [bookingModel, enabledModels],
+  );
 
   const navItems = useMemo(() => {
     const isTableReservation = bookingModel === 'table_reservation';
@@ -87,17 +97,22 @@ export function DashboardSidebar({
       return true;
     });
 
-    // Rename nav items for appointment businesses
+    // Rename nav items for appointment businesses; broader labels when secondaries are enabled.
+    const hasSecondaryModels = enabledModels.length > 0;
     if (isAppointment) {
       items = items.map((item) => {
-        if (item.href === '/dashboard/bookings') return { ...item, label: 'Appointments' };
-        if (item.href === '/dashboard/bookings/new') return { ...item, label: 'New Appointment' };
+        if (item.href === '/dashboard/bookings') {
+          return { ...item, label: hasSecondaryModels ? 'Bookings' : 'Appointments' };
+        }
+        if (item.href === '/dashboard/bookings/new') {
+          return { ...item, label: hasSecondaryModels ? 'New Booking' : 'New Appointment' };
+        }
         return item;
       });
     }
 
-    const modelItems = MODEL_NAV_ITEMS[bookingModel];
-    if (modelItems) {
+    const modelItems = mergeModelNavEntries(MODEL_NAV_ITEMS, bookingModel, enabledModels);
+    if (modelItems.length > 0) {
       const insertIdx = items.findIndex((i) => i.href === '/dashboard/bookings/new');
       if (insertIdx >= 0) {
         items = [...items.slice(0, insertIdx + 1), ...modelItems, ...items.slice(insertIdx + 1)];
@@ -122,7 +137,7 @@ export function DashboardSidebar({
     }
 
     return items;
-  }, [isAdmin, bookingModel]);
+  }, [isAdmin, bookingModel, enabledModels]);
 
   async function handleSignOut() {
     const supabase = createClient();
@@ -181,14 +196,13 @@ export function DashboardSidebar({
         <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-1">
           {navItems.map((item) => {
             if (item.href === '/dashboard/bookings' && !showTableManagementNav) {
-              const scheduleActive = isUnifiedSchedulingVenue(bookingModel)
+              const scheduleActive = calendarEligible
                 ? pathname.startsWith('/dashboard/calendar') || pathname.startsWith('/dashboard/practitioner-calendar')
                 : pathname.startsWith('/dashboard/day-sheet');
-              const isAppt = isUnifiedSchedulingVenue(bookingModel);
               return (
                 <div key="reservations-with-day-sheet" className="space-y-1">
                   <Link
-                    href={isAppt ? '/dashboard/calendar' : '/dashboard/day-sheet'}
+                    href={calendarEligible ? '/dashboard/calendar' : '/dashboard/day-sheet'}
                     onClick={() => setMobileOpen(false)}
                     className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
                       scheduleActive
@@ -196,12 +210,12 @@ export function DashboardSidebar({
                         : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
                     }`}
                   >
-                    {isAppt ? (
+                    {calendarEligible ? (
                       <CalendarIcon className={`h-5 w-5 flex-shrink-0 ${scheduleActive ? 'text-brand-600' : 'text-slate-400'}`} />
                     ) : (
                       <ClipboardIcon className={`h-5 w-5 flex-shrink-0 ${scheduleActive ? 'text-brand-600' : 'text-slate-400'}`} />
                     )}
-                    {isAppt ? 'Calendar' : 'Day Sheet'}
+                    {calendarEligible ? 'Calendar' : 'Day Sheet'}
                   </Link>
                   <Link
                     href={item.href}

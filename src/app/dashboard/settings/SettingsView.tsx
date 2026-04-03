@@ -21,6 +21,7 @@ import { StripeConnectSection } from './sections/StripeConnectSection';
 import { TableManagementSection } from './sections/TableManagementSection';
 import { AvailabilityConfigSection } from './sections/AvailabilityConfigSection';
 import { BookingRulesSection } from './sections/BookingRulesSection';
+import { BookingTypesSection } from './sections/BookingTypesSection';
 import { StaffPersonalSettingsSection } from './sections/StaffPersonalSettingsSection';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 import {
@@ -29,6 +30,8 @@ import {
   computeSmsMonthlyAllowance,
 } from '@/lib/billing/sms-allowance';
 import { BUSINESS_PRICE, SMS_OVERAGE_GBP_PER_MESSAGE, STANDARD_PRICE_PER_CALENDAR } from '@/lib/pricing-constants';
+import { normalizeEnabledModels } from '@/lib/booking/enabled-models';
+import type { BookingModel } from '@/types/booking-models';
 
 interface SettingsViewProps {
   initialVenue: VenueSettings | null;
@@ -642,6 +645,7 @@ export function SettingsView({
               <ProfileSection />
             )}
             <VenueProfileSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} bookingModel={bookingModel} />
+            <BookingTypesSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} />
             <OpeningHoursSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} />
             {!isAppointment && <TableManagementSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} />}
             {!isAppointment && !hasServiceConfig && (
@@ -671,7 +675,15 @@ export function SettingsView({
                 </div>
               </div>
             )}
-            {isAppointment && <BookingRulesSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} bookingModel={bookingModel} />}
+            {isAppointment && (
+              <BookingRulesSection
+                venue={venue}
+                onUpdate={onUpdate}
+                isAdmin={isAdmin}
+                bookingModel={bookingModel}
+                enabledModels={venue.enabled_models ?? []}
+              />
+            )}
             <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
               <h2 className="text-base font-semibold text-slate-900">Booking Widget & QR Code</h2>
               <p className="mt-1 text-sm text-slate-500">Get embed code and a printable QR code for your booking page.</p>
@@ -696,6 +708,7 @@ export function SettingsView({
             isAdmin={isAdmin}
             pricingTier={venue.pricing_tier ?? 'standard'}
             bookingModel={bookingModel}
+            enabledModels={normalizeEnabledModels(venue.enabled_models, (bookingModel as BookingModel) ?? 'table_reservation')}
             depositConfig={venue.deposit_config}
           />
         )}

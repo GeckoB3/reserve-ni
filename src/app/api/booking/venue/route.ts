@@ -21,7 +21,7 @@ export async function GET(request: NextRequest) {
     const supabase = getSupabaseAdminClient();
     const { data: venue, error } = await supabase
       .from('venues')
-      .select('id, name, slug, cover_photo_url, address, phone, website_url, deposit_config, booking_rules, opening_hours, timezone, booking_model, terminology, currency')
+      .select('id, name, slug, cover_photo_url, address, phone, website_url, deposit_config, booking_rules, opening_hours, timezone, booking_model, enabled_models, terminology, currency')
       .eq('slug', slug.trim())
       .single();
 
@@ -53,6 +53,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       ...venue,
       booking_model: venueMode.bookingModel,
+      enabled_models: venueMode.enabledModels,
       terminology: venueMode.terminology,
     });
   } catch (err) {

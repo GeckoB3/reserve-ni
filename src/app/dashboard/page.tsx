@@ -2,14 +2,19 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { SetupChecklist } from './SetupChecklist';
 import { DashboardStatCard } from '@/components/dashboard/DashboardStatCard';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
+import { normalizeEnabledModels } from '@/lib/booking/enabled-models';
+import { isVenueScheduleCalendarEligible } from '@/lib/booking/schedule-calendar-eligibility';
+import { bookingModelShortLabel } from '@/lib/booking/infer-booking-row-model';
+import type { BookingModel } from '@/types/booking-models';
 
 interface DashboardData {
   booking_model?: string;
+  enabled_models?: unknown;
+  today_by_booking_model?: Record<string, number>;
   today: {
     covers: number;
     bookings: number;
@@ -41,6 +46,8 @@ interface DashboardData {
     status: string;
     guest_name: string;
     deposit_status: string;
+    kind_label?: string;
+    booking_model?: string;
   }>;
 }
 
@@ -111,15 +118,8 @@ function formatTodayDate(): string {
 }
 
 export default function DashboardHomePage() {
-  const router = useRouter();
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    if (data?.booking_model && isUnifiedSchedulingVenue(data.booking_model)) {
-      router.replace('/dashboard/calendar');
-    }
-  }, [data, router]);
 
   useEffect(() => {
     async function load() {
@@ -161,17 +161,15 @@ export default function DashboardHomePage() {
     );
   }
 
-  if (data.booking_model && isUnifiedSchedulingVenue(data.booking_model)) {
-    return (
-      <div className="flex min-h-[50vh] flex-col items-center justify-center gap-3 p-8">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-brand-600 border-t-transparent" />
-        <p className="text-sm text-slate-500">Opening calendar…</p>
-      </div>
-    );
-  }
-
   const t = data.today;
-  const isAppointment = false;
+  const primaryModel = (data.booking_model as BookingModel) ?? 'table_reservation';
+  const enabledNorm = normalizeEnabledModels(data.enabled_models, primaryModel);
+  const isAppointment = isUnifiedSchedulingVenue(data.booking_model);
+  const calendarEligible = isVenueScheduleCalendarEligible(primaryModel, enabledNorm);
+  const scheduleHref = calendarEligible ? '/dashboard/calendar' : '/dashboard/day-sheet';
+  const hasSecondaryModels = enabledNorm.length > 0;
+  const showTypeColumn =
+    hasSecondaryModels || Object.keys(data.today_by_booking_model ?? {}).length > 1;
   const covers = n(t.covers);
   const bookings = n(t.bookings);
   const confirmed = n(t.confirmed);
@@ -195,13 +193,13 @@ export default function DashboardHomePage() {
         </div>
         <div className="flex gap-2 mt-2 sm:mt-0">
           <Link
-            href={isAppointment ? '/dashboard/calendar' : '/dashboard/day-sheet'}
+            href={scheduleHref}
             className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50"
           >
             <svg className="h-4 w-4 text-slate-400" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5" />
             </svg>
-            {isAppointment ? 'Calendar' : 'Day sheet'}
+            {calendarEligible ? 'Calendar' : 'Day sheet'}
           </Link>
           <Link
             href="/dashboard/bookings"
@@ -250,6 +248,27 @@ export default function DashboardHomePage() {
           subValue={t.next_booking ? (isAppointment ? 'next appointment' : `party of ${t.next_booking.party_size}`) : (isAppointment ? 'no upcoming appointments' : 'no upcoming bookings')}
         />
       </div>
+
+      {data.today_by_booking_model && Object.keys(data.today_by_booking_model).length > 0 && (
+        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Today by booking type</h2>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {Object.entries(data.today_by_booking_model).map(([k, count]) => (
+              <span
+                key={k}
+                className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm ${
+                  count === 0
+                    ? 'border-dashed border-slate-200 bg-slate-50/80 text-slate-500'
+                    : 'border-slate-100 bg-slate-50 text-slate-800'
+                }`}
+              >
+                <span className="font-medium">{bookingModelShortLabel(k as BookingModel)}</span>
+                <span className={`tabular-nums ${count === 0 ? 'text-slate-400' : 'text-slate-600'}`}>{count}</span>
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Today's Capacity (hidden for appointments) */}
       {!isAppointment && <div className="rounded-xl border border-slate-200 bg-white p-5">
@@ -433,10 +452,10 @@ export default function DashboardHomePage() {
         <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
           <h2 className="text-sm font-semibold text-slate-700">{isAppointment ? "Today's appointments" : "Today's bookings"}</h2>
           <Link
-            href="/dashboard/day-sheet"
+            href={isAppointment ? '/dashboard/bookings' : scheduleHref}
             className="text-xs font-medium text-brand-600 hover:text-brand-700 transition-colors"
           >
-            {isAppointment ? 'View all' : 'View day sheet'} &rarr;
+            {isAppointment ? 'View all' : calendarEligible ? 'View calendar' : 'View day sheet'} &rarr;
           </Link>
         </div>
 
@@ -458,6 +477,9 @@ export default function DashboardHomePage() {
                   <th className="whitespace-nowrap px-5 py-2.5 text-left text-xs font-medium text-slate-500">Time</th>
                   <th className="whitespace-nowrap px-5 py-2.5 text-left text-xs font-medium text-slate-500">{isAppointment ? 'Client' : 'Guest'}</th>
                   {!isAppointment && <th className="whitespace-nowrap px-5 py-2.5 text-left text-xs font-medium text-slate-500">Covers</th>}
+                  {showTypeColumn && (
+                    <th className="whitespace-nowrap px-5 py-2.5 text-left text-xs font-medium text-slate-500">Type</th>
+                  )}
                   <th className="whitespace-nowrap px-5 py-2.5 text-left text-xs font-medium text-slate-500">Status</th>
                   <th className="whitespace-nowrap px-5 py-2.5 text-left text-xs font-medium text-slate-500">Deposit</th>
                 </tr>
@@ -468,6 +490,9 @@ export default function DashboardHomePage() {
                     <td className="whitespace-nowrap px-5 py-3 font-medium tabular-nums text-slate-800">{b.time}</td>
                     <td className="max-w-[180px] truncate px-5 py-3 text-slate-700" title={b.guest_name}>{b.guest_name}</td>
                     {!isAppointment && <td className="whitespace-nowrap px-5 py-3 tabular-nums text-slate-600">{b.party_size}</td>}
+                    {showTypeColumn && (
+                      <td className="whitespace-nowrap px-5 py-3 text-xs text-slate-600">{b.kind_label ?? '—'}</td>
+                    )}
                     <td className="whitespace-nowrap px-5 py-3">
                       <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset ${getStatusBadge(b.status)}`}>
                         {b.status}
@@ -488,7 +513,7 @@ export default function DashboardHomePage() {
         {data.recent_bookings.length > 0 && bookings > 10 && (
           <div className="border-t border-slate-100 px-5 py-3 text-center">
             <Link
-              href="/dashboard/day-sheet"
+              href="/dashboard/bookings"
               className="text-xs font-medium text-brand-600 hover:text-brand-700 transition-colors"
             >
               {bookings - 10} more {isAppointment ? 'appointment' : 'booking'}{bookings - 10 !== 1 ? 's' : ''} — view all &rarr;

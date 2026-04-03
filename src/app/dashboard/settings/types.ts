@@ -1,3 +1,5 @@
+import type { BookingModel } from '@/types/booking-models';
+
 /** Venue shape used by the settings dashboard (matches API). */
 export interface VenueSettings {
   id: string;
@@ -28,6 +30,8 @@ export interface VenueSettings {
   subscription_current_period_end?: string | null;
   calendar_count?: number | null;
   booking_model?: string;
+  /** Secondary bookable models (C/D/E); admin-only. */
+  enabled_models?: BookingModel[];
   /** Included SMS per billing month (unified scheduling / tier). */
   sms_monthly_allowance?: number | null;
   /** Sent this calendar month (from sms_usage), when loaded. */
@@ -47,6 +51,10 @@ export interface BookingRulesSettings {
   min_notice_hours: number;
   cancellation_notice_hours?: number;
   allow_same_day_booking?: boolean;
+  cancellation_notice_hours_by_model?: Partial<Record<BookingModel, number>>;
+  reminder_hours_before_by_model?: Partial<
+    Record<BookingModel, { reminder_1?: number; reminder_2?: number }>
+  >;
 }
 
 export interface DepositConfigSettings {

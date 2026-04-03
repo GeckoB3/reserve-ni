@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CommunicationSettings } from '@/lib/communications/service';
 import type { CommMessageType } from '@/lib/emails/types';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
+import type { BookingModel } from '@/types/booking-models';
 import type { DepositConfigLike } from '@/lib/venue/deposit-workflow';
 import { venueUsesDepositWorkflow } from '@/lib/venue/deposit-workflow';
 import { UnifiedAppointmentNotificationSection } from './UnifiedAppointmentNotificationSection';
@@ -189,6 +190,8 @@ interface CommunicationTemplatesSectionProps {
   /** Standard tier on restaurants only: email-only deposit request; SMS comms hidden for several message types. */
   pricingTier?: string;
   bookingModel?: string;
+  /** Normalised secondaries (C/D/E); used to show merge-variable hints for multi-model venues. */
+  enabledModels?: BookingModel[];
   /** When unset, deposit-related template cards are shown for unified venues (conservative default). */
   depositConfig?: DepositConfigLike | null;
   onUpdate?: (patch: Record<string, unknown>) => void;
@@ -222,9 +225,16 @@ export function CommunicationTemplatesSection({
   isAdmin,
   pricingTier = 'standard',
   bookingModel,
+  enabledModels = [],
   depositConfig,
 }: CommunicationTemplatesSectionProps) {
   const unifiedVenue = isUnifiedSchedulingVenue(bookingModel);
+  const primary = (bookingModel as BookingModel | undefined) ?? 'table_reservation';
+  const showCdeMergeHints =
+    primary === 'event_ticket' ||
+    primary === 'class_session' ||
+    primary === 'resource_booking' ||
+    enabledModels.some((m) => m === 'event_ticket' || m === 'class_session' || m === 'resource_booking');
   const restrictSmsForStandard = pricingTier === 'standard' && !unifiedVenue;
   const cards = useMemo(
     () => buildCommunicationCards(restrictSmsForStandard, unifiedVenue),
@@ -395,6 +405,17 @@ export function CommunicationTemplatesSection({
               requests, day-of reminders, and change/cancel notices. Unified scheduling venues on Standard include SMS with a
               monthly allowance (see Plan).
             </p>
+          )}
+          {showCdeMergeHints && (
+            <details className="mt-3 rounded-lg border border-slate-200 bg-slate-50/80 px-3 py-2 text-xs text-slate-600">
+              <summary className="cursor-pointer font-medium text-slate-700">Template variables (events, classes, resources)</summary>
+              <p className="mt-2 leading-relaxed">
+                Confirmation and reminder emails for ticketed events, classes, and resources are enriched server-side with
+                titles and times (e.g. event name, class instance, resource window). Custom lines you add here are appended to
+                the standard body — use them for tone or extra instructions. Venue name, date, time, and manage links are
+                always included automatically.
+              </p>
+            </details>
           )}
         </div>
         <SaveIndicator status={mergedSaveStatus} />

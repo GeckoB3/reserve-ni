@@ -4,6 +4,8 @@ import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 import { z } from 'zod';
 import { normalizeToE164 } from '@/lib/phone/e164';
 import { normalizeWebsiteUrlForStorage } from '@/lib/urls/website-url';
+import { normalizeEnabledModels } from '@/lib/booking/enabled-models';
+import type { BookingModel } from '@/types/booking-models';
 
 const venueProfileSchema = z.object({
   name: z.string().min(1).max(200).optional(),
@@ -19,6 +21,8 @@ const venueProfileSchema = z.object({
   timezone: z.string().max(50).optional(),
   /** Public booking page link; empty clears. Stored as https URL or null. */
   website_url: z.string().max(2000).optional(),
+  /** Secondary bookable models (C/D/E); normalised with {@link normalizeEnabledModels}. */
+  enabled_models: z.array(z.string()).optional(),
 }).refine((data) => Object.keys(data).filter((k) => data[k as keyof typeof data] !== undefined).length > 0, { message: 'At least one field required' });
 
 /** GET /api/venue — return the authenticated user's venue profile. */
@@ -33,7 +37,7 @@ export async function GET() {
     let venue = null;
     const { data: fullVenue, error } = await staff.db
       .from('venues')
-      .select('id, name, slug, address, phone, email, cover_photo_url, cuisine_type, price_band, no_show_grace_minutes, kitchen_email, communication_templates, opening_hours, booking_rules, deposit_config, availability_config, stripe_connected_account_id, timezone, currency, website_url')
+      .select('id, name, slug, address, phone, email, cover_photo_url, cuisine_type, price_band, no_show_grace_minutes, kitchen_email, communication_templates, opening_hours, booking_rules, deposit_config, availability_config, stripe_connected_account_id, timezone, currency, website_url, booking_model, enabled_models, terminology')
       .eq('id', staff.venue_id)
       .single();
 
@@ -42,7 +46,7 @@ export async function GET() {
     } else {
       const { data: basicVenue } = await staff.db
         .from('venues')
-        .select('id, name, slug, address, phone, email, cover_photo_url, opening_hours, booking_rules, deposit_config, availability_config, stripe_connected_account_id, timezone, currency, website_url')
+        .select('id, name, slug, address, phone, email, cover_photo_url, opening_hours, booking_rules, deposit_config, availability_config, stripe_connected_account_id, timezone, currency, website_url, booking_model, enabled_models, terminology')
         .eq('id', staff.venue_id)
         .single();
       if (basicVenue) {
@@ -55,7 +59,14 @@ export async function GET() {
       return NextResponse.json({ error: 'Venue not found' }, { status: 404 });
     }
 
-    return NextResponse.json({ ...venue, current_user_role: staff.role });
+    const v = venue as Record<string, unknown>;
+    const primary = (v.booking_model as BookingModel) ?? 'table_reservation';
+    const enabledModels = normalizeEnabledModels(v.enabled_models, primary);
+    return NextResponse.json({
+      ...venue,
+      enabled_models: enabledModels,
+      current_user_role: staff.role,
+    });
   } catch (err) {
     console.error('GET /api/venue failed:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
@@ -116,11 +127,27 @@ export async function PATCH(request: NextRequest) {
       update.website_url = normalized;
     }
 
+    if (data.enabled_models !== undefined) {
+      const { data: venueRow, error: primaryErr } = await staff.db
+        .from('venues')
+        .select('booking_model')
+        .eq('id', staff.venue_id)
+        .single();
+      if (primaryErr || !venueRow) {
+        console.error('PATCH /api/venue: could not load booking_model for enabled_models', primaryErr);
+        return NextResponse.json({ error: 'Failed to validate venue' }, { status: 500 });
+      }
+      const primary = ((venueRow as { booking_model?: BookingModel }).booking_model as BookingModel) ?? 'table_reservation';
+      update.enabled_models = normalizeEnabledModels(data.enabled_models, primary);
+    }
+
     const { data: venue, error } = await staff.db
       .from('venues')
       .update(update)
       .eq('id', staff.venue_id)
-      .select('id, name, slug, address, phone, email, cover_photo_url, cuisine_type, price_band, no_show_grace_minutes, kitchen_email, timezone, website_url')
+      .select(
+        'id, name, slug, address, phone, email, cover_photo_url, cuisine_type, price_band, no_show_grace_minutes, kitchen_email, timezone, website_url, booking_model, enabled_models',
+      )
       .single();
 
     if (error) {
@@ -131,7 +158,10 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to update venue' }, { status: 500 });
     }
 
-    return NextResponse.json(venue);
+    const v = venue as Record<string, unknown>;
+    const primary = (v.booking_model as BookingModel) ?? 'table_reservation';
+    const enabledModels = normalizeEnabledModels(v.enabled_models, primary);
+    return NextResponse.json({ ...venue, enabled_models: enabledModels });
   } catch (err) {
     console.error('PATCH /api/venue failed:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

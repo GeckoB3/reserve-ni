@@ -5,7 +5,7 @@ import { generateConfirmToken, hashConfirmToken } from '@/lib/confirm-token';
 import { validateBookingStatusTransition } from '@/lib/table-management/lifecycle';
 import { sendBookingConfirmationNotifications, sendDepositConfirmationEmail } from '@/lib/communications/send-templated';
 import { isSelfServeBookingSource } from '@/lib/booking-source';
-import { enrichBookingEmailForAppointment } from '@/lib/emails/booking-email-enrichment';
+import { enrichBookingEmailForComms } from '@/lib/emails/booking-email-enrichment';
 import { createShortManageLink } from '@/lib/short-manage-link';
 
 /**
@@ -153,7 +153,7 @@ export async function POST(request: NextRequest) {
 
     after(async () => {
       try {
-        const enriched = await enrichBookingEmailForAppointment(supabase, bookingId, bookingData);
+        const enriched = await enrichBookingEmailForComms(supabase, bookingId, bookingData);
         const { email: confEmail, sms: confSms } = await sendBookingConfirmationNotifications(
           enriched,
           venueData,
@@ -170,7 +170,7 @@ export async function POST(request: NextRequest) {
       const skipDepositReceipt = isSelfServeBookingSource(booking.source as string | null);
       if (recipientEmail && booking.deposit_amount_pence && !skipDepositReceipt) {
         try {
-          const enrichedDep = await enrichBookingEmailForAppointment(supabase, bookingId, bookingData);
+          const enrichedDep = await enrichBookingEmailForComms(supabase, bookingId, bookingData);
           const depResult = await sendDepositConfirmationEmail(enrichedDep, venueData, booking.venue_id);
           if (!depResult.sent) console.warn('[after] confirm-payment deposit email not sent:', depResult.reason);
         } catch (err) {

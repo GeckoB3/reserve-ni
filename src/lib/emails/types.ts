@@ -1,3 +1,5 @@
+import type { BookingModel } from '@/types/booking-models';
+
 export interface VenueEmailData {
   name: string;
   address?: string | null;
@@ -33,6 +35,11 @@ export interface BookingEmailData {
   refund_cutoff?: string | null;
   manage_booking_link?: string | null;
   confirm_cancel_link?: string | null;
+  /**
+   * Effective booking model for this row (compile/render). Set for C/D/E so comms stay model-aware
+   * without separate message types per model.
+   */
+  booking_model?: BookingModel;
   /**
    * `appointment`: Model B. Copy and detail rows use service / staff / price wording.
    * Omit or `table`: restaurant / table reservations (covers, guests).

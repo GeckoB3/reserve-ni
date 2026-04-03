@@ -39,16 +39,6 @@ interface Report4 {
   total_forfeited_pence: number;
 }
 
-interface Report6Row {
-  guest_id: string;
-  name: string | null;
-  email: string | null;
-  phone: string | null;
-  visit_count: number;
-  last_visit_date: string | null;
-  bookings_in_period: number;
-}
-
 interface AppointmentInsightsPayload {
   by_practitioner: Array<{
     practitioner_id: string;
@@ -62,6 +52,17 @@ interface AppointmentInsightsPayload {
     booking_count: number;
   }>;
   by_booking_source: Record<string, number>;
+}
+
+interface ReportByBookingModelRow {
+  booking_model: BookingModel;
+  label: string;
+  booking_count: number;
+  covers: number;
+  cancelled_count: number;
+  completed_count: number;
+  checked_in_count: number;
+  deposit_pence_collected: number;
 }
 
 interface ReportsData {
@@ -81,6 +82,8 @@ interface ReportsData {
     available_hours: number;
   }>;
   report7_appointment_insights?: AppointmentInsightsPayload | null;
+  /** Inferred from booking row FKs — same labels as full export (plan §4.3). */
+  report_by_booking_model?: ReportByBookingModelRow[];
   client_summary?: ClientSummary | null;
 }
 
@@ -191,6 +194,31 @@ export function ReportsView({ bookingModel, terminology, venueId }: ReportsViewP
   }, [range.from, range.to]);
 
   useEffect(() => { fetchReports(); }, [fetchReports]);
+
+  const exportReportByModel = useCallback(() => {
+    const rows = data?.report_by_booking_model ?? [];
+    if (rows.length === 0) return;
+    downloadCsv(`report-by-booking-type-${data!.from}-${data!.to}.csv`, [
+      [
+        'Booking type',
+        'Bookings',
+        'Covers',
+        'Cancelled',
+        'Completed',
+        'Checked in',
+        'Deposit collected (£)',
+      ],
+      ...rows.map((row: ReportByBookingModelRow) => [
+        row.label,
+        String(row.booking_count),
+        String(row.covers),
+        String(row.cancelled_count),
+        String(row.completed_count),
+        String(row.checked_in_count),
+        (row.deposit_pence_collected / 100).toFixed(2),
+      ]),
+    ]);
+  }, [data]);
 
   const exportReport1 = useCallback(() => {
     if (!data?.report1_booking_summary) return;
@@ -326,6 +354,12 @@ export function ReportsView({ bookingModel, terminology, venueId }: ReportsViewP
   const r4 = data?.report4_deposit;
   const r5 = data?.report5_table_utilisation ?? [];
   const r7 = data?.report7_appointment_insights;
+  const rByModel = data?.report_by_booking_model ?? [];
+  const byModelBarData = rByModel.map((row) => ({
+    name: row.label,
+    bookings: row.booking_count,
+    covers: row.covers,
+  }));
 
   const resolvedBookingModel =
     (data?.booking_model as BookingModel | undefined) ?? bookingModel;
@@ -538,6 +572,71 @@ export function ReportsView({ bookingModel, terminology, venueId }: ReportsViewP
                   </ResponsiveContainer>
                 ) : <p className="text-sm text-slate-400">No data</p>}
               </div>
+            </div>
+          </>
+        )}
+      </ReportSection>
+
+      <ReportSection
+        title="By booking type"
+        onExport={exportReportByModel}
+        exportBlocked={rByModel.length === 0}
+        exportBlockedMessage="There are no bookings in this date range to break down by type."
+        onExportSuccess={() =>
+          notifyExport('success', 'Booking type breakdown CSV download started — check your downloads folder.')
+        }
+        onExportBlocked={(msg) => notifyExport('notice', msg)}
+      >
+        <p className="mb-4 text-sm text-slate-500">
+          Rows are inferred from each booking (tables, appointments, events, classes, resources). Deposits are
+          sums where deposit status is Paid. Checked in uses door check-in when recorded.
+        </p>
+        {rByModel.length === 0 ? (
+          <p className="text-sm text-slate-400">No bookings in this date range.</p>
+        ) : (
+          <>
+            <div className="mb-6 h-64">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={byModelBarData} margin={{ top: 8, right: 8, left: 0, bottom: 8 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                  <XAxis dataKey="name" tick={{ fontSize: 11 }} />
+                  <YAxis tick={{ fontSize: 12 }} allowDecimals={false} />
+                  <Tooltip />
+                  <Legend />
+                  <Bar dataKey="bookings" name="Bookings" fill="#4E6B78" radius={[6, 6, 0, 0]} />
+                  <Bar dataKey="covers" name="Covers" fill="#059669" radius={[6, 6, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+            <div className="overflow-x-auto rounded-lg border border-slate-100">
+              <table className="w-full min-w-[640px] text-left text-sm">
+                <thead>
+                  <tr className="border-b border-slate-100 bg-slate-50">
+                    <th className="px-3 py-2 font-semibold text-slate-700">Type</th>
+                    <th className="px-3 py-2 font-semibold text-slate-700">Bookings</th>
+                    <th className="px-3 py-2 font-semibold text-slate-700">Covers</th>
+                    <th className="px-3 py-2 font-semibold text-slate-700">Cancelled</th>
+                    <th className="px-3 py-2 font-semibold text-slate-700">Completed</th>
+                    <th className="px-3 py-2 font-semibold text-slate-700">Checked in</th>
+                    <th className="px-3 py-2 font-semibold text-slate-700">Deposits paid</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rByModel.map((row: ReportByBookingModelRow) => (
+                    <tr key={row.booking_model} className="border-b border-slate-50">
+                      <td className="px-3 py-2 font-medium text-slate-900">{row.label}</td>
+                      <td className="px-3 py-2 text-slate-700">{row.booking_count}</td>
+                      <td className="px-3 py-2 text-slate-700">{row.covers}</td>
+                      <td className="px-3 py-2 text-slate-700">{row.cancelled_count}</td>
+                      <td className="px-3 py-2 text-slate-700">{row.completed_count}</td>
+                      <td className="px-3 py-2 text-slate-700">{row.checked_in_count}</td>
+                      <td className="px-3 py-2 text-slate-700">
+                        £{(row.deposit_pence_collected / 100).toFixed(2)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </>
         )}

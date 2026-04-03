@@ -3,7 +3,8 @@ import { getSupabaseAdminClient } from '@/lib/supabase';
 import { stripe } from '@/lib/stripe';
 import { sendCancellationNotification } from '@/lib/communications/send-templated';
 import type { BookingEmailData, VenueEmailData } from '@/lib/emails/types';
-import { enrichBookingEmailForAppointment } from '@/lib/emails/booking-email-enrichment';
+import { enrichBookingEmailForComms } from '@/lib/emails/booking-email-enrichment';
+import { getCancellationNoticeHoursForBooking, parseExtendedBookingRules } from '@/lib/booking/venue-booking-rules';
 import { verifyConfirmToken } from '@/lib/confirm-token';
 import { verifyBookingHmac } from '@/lib/short-manage-link';
 import { validateBookingStatusTransition, applyBookingLifecycleStatusEffects } from '@/lib/table-management/lifecycle';
@@ -18,6 +19,9 @@ import {
 import { mergeAppointmentServiceWithPractitionerLink } from '@/lib/appointments/merge-service-with-overrides';
 import { cancellationDeadlineHoursBefore } from '@/lib/booking/cancellation-deadline';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
+import { inferBookingRowModel } from '@/lib/booking/infer-booking-row-model';
+import { logBookingOp } from '@/lib/observability/booking-ops-log';
+import type { BookingModel } from '@/types/booking-models';
 
 /**
  * GET /api/confirm?booking_id=uuid&token=xxx  (token-based)
@@ -37,7 +41,7 @@ export async function GET(request: NextRequest) {
     const { data: booking, error: bookErr } = await supabase
       .from('bookings')
       .select(
-        'id, venue_id, guest_id, booking_date, booking_time, party_size, status, deposit_status, deposit_amount_pence, confirm_token_hash, confirm_token_used_at, practitioner_id, appointment_service_id, calendar_id, service_item_id, updated_at, guest_attendance_confirmed_at',
+        'id, venue_id, guest_id, booking_date, booking_time, booking_end_time, party_size, status, deposit_status, deposit_amount_pence, stripe_payment_intent_id, cancellation_deadline, confirm_token_hash, confirm_token_used_at, practitioner_id, appointment_service_id, calendar_id, service_item_id, experience_event_id, class_instance_id, resource_id, event_session_id, updated_at, guest_attendance_confirmed_at',
       )
       .eq('id', bookingId)
       .single();
@@ -75,11 +79,60 @@ export async function GET(request: NextRequest) {
       appointment_service_id?: string | null;
       calendar_id?: string | null;
       service_item_id?: string | null;
+      experience_event_id?: string | null;
+      class_instance_id?: string | null;
+      resource_id?: string | null;
+      booking_end_time?: string | null;
+      event_session_id?: string | null;
+      cancellation_deadline?: string | null;
     };
+    const inferredModel: BookingModel = inferBookingRowModel(bookingRow);
     const unifiedVenue = isUnifiedSchedulingVenue(venue?.booking_model);
     const legacyAppt = Boolean(bookingRow.practitioner_id && bookingRow.appointment_service_id);
     const unifiedAppt = Boolean(unifiedVenue && bookingRow.calendar_id && bookingRow.service_item_id);
     const isAppointment = legacyAppt || unifiedAppt;
+
+    let event_name: string | null = null;
+    let class_summary: string | null = null;
+    let resource_name: string | null = null;
+    let booking_end_label: string | null = null;
+
+    if (bookingRow.experience_event_id) {
+      const { data: ev } = await supabase
+        .from('experience_events')
+        .select('name')
+        .eq('id', bookingRow.experience_event_id)
+        .maybeSingle();
+      event_name = (ev as { name?: string } | null)?.name ?? null;
+    }
+    if (bookingRow.class_instance_id) {
+      const { data: ci } = await supabase
+        .from('class_instances')
+        .select('instance_date, start_time, class_type_id')
+        .eq('id', bookingRow.class_instance_id)
+        .maybeSingle();
+      if (ci) {
+        const ctId = (ci as { class_type_id?: string }).class_type_id;
+        const { data: ct } = ctId
+          ? await supabase.from('class_types').select('name').eq('id', ctId).maybeSingle()
+          : { data: null };
+        const nm = (ct as { name?: string } | null)?.name ?? 'Class';
+        const d = String((ci as { instance_date?: string }).instance_date ?? '');
+        const st = String((ci as { start_time?: string }).start_time ?? '').slice(0, 5);
+        class_summary = `${nm} · ${d} ${st}`;
+      }
+    }
+    if (bookingRow.resource_id) {
+      const { data: vr } = await supabase
+        .from('venue_resources')
+        .select('name')
+        .eq('id', bookingRow.resource_id)
+        .maybeSingle();
+      resource_name = (vr as { name?: string } | null)?.name ?? null;
+    }
+    if (bookingRow.booking_end_time) {
+      booking_end_label = String(bookingRow.booking_end_time).slice(0, 5);
+    }
 
     if (unifiedAppt) {
       const [{ data: uc }, { data: si }] = await Promise.all([
@@ -100,12 +153,8 @@ export async function GET(request: NextRequest) {
     const practitionerIdForUi = (bookingRow.practitioner_id ?? bookingRow.calendar_id) as string | null | undefined;
     const serviceIdForUi = (bookingRow.appointment_service_id ?? bookingRow.service_item_id) as string | null | undefined;
 
-    const rules = (venue?.booking_rules as { cancellation_notice_hours?: number } | null) ?? null;
-    const refundNoticeHours =
-      isUnifiedSchedulingVenue(venue?.booking_model) &&
-      typeof rules?.cancellation_notice_hours === 'number'
-        ? rules.cancellation_notice_hours
-        : 48;
+    const rulesParsed = parseExtendedBookingRules(venue?.booking_rules);
+    const refundNoticeHours = getCancellationNoticeHoursForBooking(rulesParsed, inferredModel, 48);
 
     return NextResponse.json({
       booking_id: booking.id,
@@ -119,11 +168,17 @@ export async function GET(request: NextRequest) {
       deposit_paid: depositPaid,
       deposit_amount_pence: booking.deposit_amount_pence,
       status: booking.status,
+      booking_model: inferredModel,
       is_appointment: isAppointment,
       practitioner_id: isAppointment && practitionerIdForUi ? practitionerIdForUi : null,
       appointment_service_id: isAppointment && serviceIdForUi ? serviceIdForUi : null,
       practitioner_name,
       appointment_service_name,
+      event_name,
+      class_summary,
+      resource_name,
+      booking_end_time: booking_end_label,
+      cancellation_deadline: bookingRow.cancellation_deadline ?? null,
       refund_notice_hours: refundNoticeHours,
       guest_attendance_confirmed_at:
         (booking as { guest_attendance_confirmed_at?: string | null }).guest_attendance_confirmed_at ?? null,
@@ -173,7 +228,7 @@ export async function POST(request: NextRequest) {
     const { data: booking, error: bookErr } = await supabase
       .from('bookings')
       .select(
-        'id, venue_id, guest_id, booking_date, booking_time, party_size, status, deposit_status, deposit_amount_pence, stripe_payment_intent_id, cancellation_deadline, confirm_token_hash, confirm_token_used_at, service_id, practitioner_id, appointment_service_id, calendar_id, service_item_id, updated_at, guest_attendance_confirmed_at',
+        'id, venue_id, guest_id, booking_date, booking_time, booking_end_time, party_size, status, deposit_status, deposit_amount_pence, stripe_payment_intent_id, cancellation_deadline, confirm_token_hash, confirm_token_used_at, service_id, practitioner_id, appointment_service_id, calendar_id, service_item_id, experience_event_id, class_instance_id, resource_id, event_session_id, updated_at, guest_attendance_confirmed_at',
       )
       .eq('id', bookingId)
       .single();
@@ -261,6 +316,19 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: cancelCheck.error }, { status: 400 });
       }
 
+      const cancelInferred = inferBookingRowModel(
+        booking as {
+          experience_event_id?: string | null;
+          class_instance_id?: string | null;
+          resource_id?: string | null;
+          event_session_id?: string | null;
+          calendar_id?: string | null;
+          service_item_id?: string | null;
+          practitioner_id?: string | null;
+          appointment_service_id?: string | null;
+        },
+      );
+
       const previousStatus = booking.status as string;
       const deadline = booking.cancellation_deadline ? new Date(booking.cancellation_deadline) : null;
       const canRefund = deadline && new Date() <= deadline && booking.deposit_status === 'Paid' && booking.stripe_payment_intent_id;
@@ -276,7 +344,13 @@ export async function POST(request: NextRequest) {
             );
             refundSucceeded = true;
           } catch (refundErr) {
-            console.error('Refund failed:', refundErr);
+            logBookingOp({
+              operation: 'refund_failed',
+              venue_id: booking.venue_id as string,
+              booking_id: bookingId,
+              booking_model: cancelInferred,
+              error: refundErr instanceof Error ? refundErr.message : String(refundErr),
+            });
           }
         }
       }
@@ -299,7 +373,11 @@ export async function POST(request: NextRequest) {
         actorId: null,
       });
 
-      const { data: venue } = await supabase.from('venues').select('name, address, phone').eq('id', booking.venue_id).single();
+      const { data: venue } = await supabase
+        .from('venues')
+        .select('name, address, phone, booking_rules')
+        .eq('id', booking.venue_id)
+        .single();
       const { data: guest } = await supabase.from('guests').select('name, email, phone').eq('id', booking.guest_id).single();
       const timeStr = typeof booking.booking_time === 'string' ? booking.booking_time.slice(0, 5) : '';
 
@@ -307,11 +385,14 @@ export async function POST(request: NextRequest) {
         ? `\u00A3${(booking.deposit_amount_pence / 100).toFixed(2)}`
         : null;
 
+      const cancelRules = parseExtendedBookingRules(venue?.booking_rules);
+      const refundWindowHoursDisplay = getCancellationNoticeHoursForBooking(cancelRules, cancelInferred, 48);
+
       let refund_message: string;
       if (refundSucceeded) {
         refund_message = `Your deposit of ${depositAmountStr} will be refunded to your original payment method within 5-10 business days.`;
       } else if (booking.deposit_status === 'Paid' && !canRefund) {
-        refund_message = `Your deposit of ${depositAmountStr} is non-refundable as the cancellation was made less than 48 hours before the reservation.`;
+        refund_message = `Your deposit of ${depositAmountStr} is non-refundable as the cancellation was made less than ${refundWindowHoursDisplay} hours before the start of your booking.`;
       } else if (booking.deposit_status === 'Paid' && canRefund && !refundSucceeded) {
         refund_message = `We were unable to process your refund automatically. Please contact the venue directly to arrange your refund of ${depositAmountStr}.`;
       } else {
@@ -339,13 +420,20 @@ export async function POST(request: NextRequest) {
         const refundMsg = refund_message || null;
         after(async () => {
           try {
-            const enriched = await enrichBookingEmailForAppointment(supabase, bookingId, cancelBookingEmail);
+            const enriched = await enrichBookingEmailForComms(supabase, bookingId, cancelBookingEmail);
             await sendCancellationNotification(enriched, cancelVenueEmail, vid, refundMsg);
           } catch (commsErr) {
             console.error('Cancellation confirmation comms failed:', commsErr);
           }
         });
       }
+
+      logBookingOp({
+        operation: 'cancel',
+        venue_id: booking.venue_id as string,
+        booking_id: bookingId,
+        booking_model: cancelInferred,
+      });
 
       return NextResponse.json({
         success: true,

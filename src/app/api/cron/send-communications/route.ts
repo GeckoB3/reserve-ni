@@ -14,7 +14,8 @@ import { enrichBookingEmailForAppointment } from '@/lib/emails/booking-email-enr
 import type { BookingEmailData, VenueEmailData } from '@/lib/emails/types';
 import { requireCronAuthorisation } from '@/lib/cron-auth';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
-import { runUnifiedSchedulingComms } from '@/lib/cron/unified-scheduling-comms';
+import { isCdeBookingRow } from '@/lib/booking/cde-booking';
+import { runUnifiedSchedulingComms, runSecondaryModelScheduledComms } from '@/lib/cron/unified-scheduling-comms';
 
 /**
  * Unified cron handler for scheduled guest communications (every ~15 minutes).
@@ -22,8 +23,12 @@ import { runUnifiedSchedulingComms } from '@/lib/cron/unified-scheduling-comms';
  * **Legacy restaurant paths** (table_reservation, etc.): 56h reminder, day-of SMS/email, post-visit.
  * These loops **skip** `unified_scheduling` venues (`isUnifiedSchedulingVenue`) so they are not double-sent.
  *
- * **Unified scheduling** (`runUnifiedSchedulingComms`): reminder_1, reminder_2, post_visit driven by
- * `venues.notification_settings`. See §4.2 map in `src/lib/cron/unified-scheduling-comms.ts`.
+ * **Unified scheduling** (`runUnifiedSchedulingComms`): reminder_1, reminder_2, post_visit for Model B
+ * rows only (appointment-like bookings). See §4.2 map in `src/lib/cron/unified-scheduling-comms.ts`.
+ *
+ * **Models C/D/E** (`runSecondaryModelScheduledComms`): same notification_settings windows as unified,
+ * but only bookings with event/class/resource FKs. Runs for **all** venues (including unified primary
+ * with secondaries); inner loops filter to C/D/E rows — no double-send for Model B appointments.
  *
  * Confirmation, deposit, reschedule, cancellation, and no-show notifications use transactional / other
  * code paths (`send-templated`, webhooks, `CommunicationService`), not this cron.
@@ -41,6 +46,9 @@ export async function GET(request: NextRequest) {
     unified_reminder_1: 0,
     unified_reminder_2: 0,
     unified_post_visit: 0,
+    cde_reminder_1: 0,
+    cde_reminder_2: 0,
+    cde_post_visit: 0,
     errors: 0,
   };
 
@@ -53,11 +61,18 @@ export async function GET(request: NextRequest) {
       unified_post_visit: 0,
       errors: 0,
     };
-    const [r1, r2, r3, u1] = await Promise.allSettled([
+    const secondaryResults = {
+      cde_reminder_1: 0,
+      cde_reminder_2: 0,
+      cde_post_visit: 0,
+      errors: 0,
+    };
+    const [r1, r2, r3, u1, cdeRun] = await Promise.allSettled([
       send56hReminders(results),
       sendDayOfReminders(results),
       sendPostVisitEmails(results),
       runUnifiedSchedulingComms(supabase, unifiedResults),
+      runSecondaryModelScheduledComms(supabase, secondaryResults),
     ]);
 
     results.unified_reminder_1 = unifiedResults.unified_reminder_1;
@@ -65,7 +80,12 @@ export async function GET(request: NextRequest) {
     results.unified_post_visit = unifiedResults.unified_post_visit;
     results.errors += unifiedResults.errors;
 
-    for (const r of [r1, r2, r3, u1]) {
+    results.cde_reminder_1 = secondaryResults.cde_reminder_1;
+    results.cde_reminder_2 = secondaryResults.cde_reminder_2;
+    results.cde_post_visit = secondaryResults.cde_post_visit;
+    results.errors += secondaryResults.errors;
+
+    for (const r of [r1, r2, r3, u1, cdeRun]) {
       if (r.status === 'rejected') {
         console.error('[send-communications] sub-task failed:', r.reason);
         results.errors++;
@@ -111,10 +131,14 @@ interface BookingRow {
   deposit_status: string | null;
   cancellation_deadline: string | null;
   status: string;
+  experience_event_id: string | null;
+  class_instance_id: string | null;
+  resource_id: string | null;
   guest: GuestInfo | null;
 }
 
-const BOOKING_SELECT = 'id, venue_id, guest_id, guest_email, booking_date, booking_time, party_size, special_requests, dietary_notes, deposit_amount_pence, deposit_status, cancellation_deadline, status, guest:guests(name, email, phone)';
+const BOOKING_SELECT =
+  'id, venue_id, guest_id, guest_email, booking_date, booking_time, party_size, special_requests, dietary_notes, deposit_amount_pence, deposit_status, cancellation_deadline, status, experience_event_id, class_instance_id, resource_id, guest:guests(name, email, phone)';
 
 function normalizeBookings(rows: unknown[]): BookingRow[] {
   return rows.map((r) => {
@@ -211,6 +235,8 @@ async function send56hReminders(results: { reminders_56h: number; errors: number
 
       for (const b of emailBookings) {
         try {
+          if (isCdeBookingRow(b)) continue;
+
           const bookingDateTime = new Date(`${b.booking_date}T${b.booking_time}`);
           const bookingLocalMs = bookingDateTime.getTime();
           const diffMs = bookingLocalMs - nowLocalMs;
@@ -299,6 +325,8 @@ async function sendDayOfReminders(results: { day_of_reminders: number; errors: n
 
       for (const b of normalizeBookings(bookings)) {
         try {
+          if (isCdeBookingRow(b)) continue;
+
           const manageLinkDay = createShortManageLink(b.id);
           const confirmLinkDay = createShortConfirmLink(b.id);
           let bookingData = buildBookingData(b);
@@ -411,6 +439,8 @@ async function sendPostVisitEmails(results: { post_visit: number; errors: number
 
       for (const b of normalizeBookings(bookings)) {
         try {
+          if (isCdeBookingRow(b)) continue;
+
           const email = getGuestEmail(b);
           if (!email) continue;
 

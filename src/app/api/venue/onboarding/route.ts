@@ -107,7 +107,7 @@ export async function GET() {
     const { data: venue, error: venueError } = await admin
       .from('venues')
       .select(
-        'id, name, slug, address, phone, booking_model, business_type, business_category, terminology, pricing_tier, calendar_count, onboarding_step, onboarding_completed, currency'
+        'id, name, slug, address, phone, booking_model, enabled_models, business_type, business_category, terminology, pricing_tier, calendar_count, onboarding_step, onboarding_completed, currency'
       )
       .eq('id', staffRow.venue_id)
       .single();

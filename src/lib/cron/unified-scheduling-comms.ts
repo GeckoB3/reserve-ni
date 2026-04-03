@@ -8,7 +8,8 @@
  * - **Cancellation** — `cancellation_*` in `send-templated.ts` (not this cron).
  * - **Reminder 1 / 2** — **this file** (`reminder_1_email` / `reminder_1_sms` / `reminder_2_sms`). Email uses
  *   `communication_settings.reminder_email_custom_message`; first SMS uses `day_of_reminder_custom_message`; second SMS uses
- *   the same optional line. Legacy restaurants use
+ *   the same optional line. Reminder 2 does not require reminder 1 to have been sent (short-lead bookings may skip the
+ *   first window). Both reminders include Pending and Confirmed bookings (deposit-pending stays Pending). Legacy restaurants use
  *   `send-communications/route.ts` 56h + day-of paths, which **skip** unified venues (`isUnifiedSchedulingVenue`).
  * - **No-show** — staff-driven status + optional `no_show_notification` via `CommunicationService` (not scheduled here).
  * - **Post-visit** — **this file** (email). Legacy post-visit in `send-communications` skips unified venues.
@@ -25,18 +26,24 @@ import { sendEmail } from '@/lib/emails/send-email';
 import { sendSmsWithSegments } from '@/lib/emails/send-sms';
 import { isSmsAllowed } from '@/lib/tier-enforcement';
 import { createShortConfirmLink, createShortManageLink } from '@/lib/short-manage-link';
-import { enrichBookingEmailForAppointment } from '@/lib/emails/booking-email-enrichment';
+import { enrichBookingEmailForAppointment, enrichBookingEmailForComms } from '@/lib/emails/booking-email-enrichment';
+import { isCdeBookingRow } from '@/lib/booking/cde-booking';
 import type { BookingEmailData, VenueEmailData } from '@/lib/emails/types';
 import { renderReminder56h } from '@/lib/emails/templates/reminder-56h';
 import { renderDayOfReminderSms } from '@/lib/emails/templates/day-of-reminder-sms';
 import { renderPostVisitEmail } from '@/lib/emails/templates/post-visit';
 import { recordOutboundSms } from '@/lib/sms-usage';
 import { normalizePublicBaseUrl } from '@/lib/public-base-url';
+import {
+  parseExtendedBookingRules,
+  type ExtendedBookingRules,
+  getReminderHoursForBookingRow,
+} from '@/lib/booking/venue-booking-rules';
 
 const TOLERANCE_MS = 15 * 60 * 1000;
 
 const UNIFIED_BOOKING_SELECT =
-  'id, venue_id, guest_id, guest_email, booking_date, booking_time, booking_end_time, party_size, special_requests, dietary_notes, deposit_amount_pence, deposit_status, cancellation_deadline, status, reminder_sent_at, final_reminder_sent_at, post_visit_sent_at, calendar_id, guest:guests(name, email, phone)';
+  'id, venue_id, guest_id, guest_email, booking_date, booking_time, booking_end_time, party_size, special_requests, dietary_notes, deposit_amount_pence, deposit_status, cancellation_deadline, status, reminder_sent_at, final_reminder_sent_at, post_visit_sent_at, experience_event_id, class_instance_id, resource_id, calendar_id, guest:guests(name, email, phone)';
 
 interface GuestInfo {
   name: string | null;
@@ -62,6 +69,9 @@ interface BookingRow {
   reminder_sent_at: string | null;
   final_reminder_sent_at: string | null;
   post_visit_sent_at: string | null;
+  experience_event_id: string | null;
+  class_instance_id: string | null;
+  resource_id: string | null;
   calendar_id: string | null;
   guest: GuestInfo | null;
 }
@@ -137,7 +147,7 @@ export async function runUnifiedSchedulingComms(
 
   const { data: venues } = await supabase
     .from('venues')
-    .select('id, name, address, timezone, booking_model')
+    .select('id, name, address, timezone, booking_model, booking_rules')
     .in('booking_model', ['unified_scheduling', 'practitioner_appointment']);
 
   for (const venue of venues ?? []) {
@@ -145,12 +155,14 @@ export async function runUnifiedSchedulingComms(
     const vid = (venue as { id: string }).id;
     const ns = await getVenueNotificationSettings(vid);
     const comm = await getCommSettings(vid);
+    const rules = parseExtendedBookingRules((venue as { booking_rules?: unknown }).booking_rules);
 
     await sendUnifiedReminder1(
       supabase,
       venue as { id: string; name: string; address: string | null },
       tz,
       ns,
+      rules,
       comm,
       baseUrl,
       nowMs,
@@ -161,6 +173,7 @@ export async function runUnifiedSchedulingComms(
       venue as { id: string; name: string; address: string | null },
       tz,
       ns,
+      rules,
       comm,
       baseUrl,
       nowMs,
@@ -184,14 +197,13 @@ async function sendUnifiedReminder1(
   venue: { id: string; name: string; address: string | null },
   tz: string,
   ns: Awaited<ReturnType<typeof getVenueNotificationSettings>>,
+  rules: ExtendedBookingRules,
   comm: Awaited<ReturnType<typeof getCommSettings>>,
   _baseUrl: string,
   nowMs: number,
   results: UnifiedCommsResults,
 ) {
   if (!ns.reminder_1_enabled) return;
-  const hours = ns.reminder_1_hours_before;
-  const targetMs = hours * 60 * 60 * 1000;
 
   const { data: bookings } = await supabase
     .from('bookings')
@@ -205,6 +217,11 @@ async function sendUnifiedReminder1(
 
   for (const b of normalizeBookings(bookings ?? [])) {
     try {
+      if (isCdeBookingRow(b)) continue;
+
+      const { reminder_1_hours_before } = getReminderHoursForBookingRow(ns, rules, b);
+      const targetMs = reminder_1_hours_before * 60 * 60 * 1000;
+
       const startMs = bookingStartUtcMs(b, tz);
       const delta = startMs - nowMs;
       if (delta < targetMs - TOLERANCE_MS || delta > targetMs + TOLERANCE_MS) continue;
@@ -280,6 +297,7 @@ async function sendUnifiedReminder2(
   venue: { id: string; name: string; address: string | null },
   tz: string,
   ns: Awaited<ReturnType<typeof getVenueNotificationSettings>>,
+  rules: ExtendedBookingRules,
   comm: Awaited<ReturnType<typeof getCommSettings>>,
   _baseUrl: string,
   nowMs: number,
@@ -287,8 +305,6 @@ async function sendUnifiedReminder2(
 ) {
   if (!ns.reminder_2_enabled) return;
   if (!ns.reminder_2_channels.includes('sms')) return;
-  const hours = ns.reminder_2_hours_before;
-  const targetMs = hours * 60 * 60 * 1000;
   const smsOk = await isSmsAllowed(venue.id);
   if (!smsOk) return;
 
@@ -296,14 +312,18 @@ async function sendUnifiedReminder2(
     .from('bookings')
     .select(UNIFIED_BOOKING_SELECT)
     .eq('venue_id', venue.id)
-    .not('reminder_sent_at', 'is', null)
     .is('final_reminder_sent_at', null)
-    .eq('status', 'Confirmed');
+    .in('status', ['Pending', 'Confirmed']);
 
   const venueData = buildVenueData(venue);
 
   for (const b of normalizeBookings(bookings ?? [])) {
     try {
+      if (isCdeBookingRow(b)) continue;
+
+      const { reminder_2_hours_before } = getReminderHoursForBookingRow(ns, rules, b);
+      const targetMs = reminder_2_hours_before * 60 * 60 * 1000;
+
       const startMs = bookingStartUtcMs(b, tz);
       const delta = startMs - nowMs;
       if (delta < targetMs - TOLERANCE_MS || delta > targetMs + TOLERANCE_MS) continue;
@@ -372,6 +392,8 @@ async function sendUnifiedPostVisit(
 
   for (const b of normalizeBookings(bookings ?? [])) {
     try {
+      if (isCdeBookingRow(b)) continue;
+
       const email = getGuestEmail(b);
       if (!email) continue;
 
@@ -422,5 +444,332 @@ async function sendUnifiedPostVisit(
       console.error('[unified post_visit]', b.id, e);
       results.errors++;
     }
+  }
+}
+
+// ─── Models C/D/E at table-primary (or non-unified) venues: same notification_settings windows as USE,
+//     not legacy 56h/day-of/post-visit. `send-communications` skips C/D/E in legacy loops.
+
+export interface SecondaryModelCommsResults {
+  cde_reminder_1: number;
+  cde_reminder_2: number;
+  cde_post_visit: number;
+  errors: number;
+}
+
+/** Bookings that use event/class/resource FKs (secondary models). */
+const CDE_OR_FILTER =
+  'experience_event_id.not.is.null,class_instance_id.not.is.null,resource_id.not.is.null';
+
+async function sendCdeReminder1(
+  supabase: SupabaseClient,
+  venue: { id: string; name: string; address: string | null },
+  tz: string,
+  ns: Awaited<ReturnType<typeof getVenueNotificationSettings>>,
+  rules: ExtendedBookingRules,
+  comm: Awaited<ReturnType<typeof getCommSettings>>,
+  _baseUrl: string,
+  nowMs: number,
+  results: SecondaryModelCommsResults,
+) {
+  if (!ns.reminder_1_enabled) return;
+
+  const { data: bookings } = await supabase
+    .from('bookings')
+    .select(UNIFIED_BOOKING_SELECT)
+    .eq('venue_id', venue.id)
+    .is('reminder_sent_at', null)
+    .in('status', ['Pending', 'Confirmed'])
+    .or(CDE_OR_FILTER);
+
+  const venueData = buildVenueData(venue);
+  const smsOk = await isSmsAllowed(venue.id);
+
+  for (const b of normalizeBookings(bookings ?? [])) {
+    try {
+      if (!isCdeBookingRow(b)) continue;
+
+      const { reminder_1_hours_before } = getReminderHoursForBookingRow(ns, rules, b);
+      const targetMs = reminder_1_hours_before * 60 * 60 * 1000;
+
+      const startMs = bookingStartUtcMs(b, tz);
+      const delta = startMs - nowMs;
+      if (delta < targetMs - TOLERANCE_MS || delta > targetMs + TOLERANCE_MS) continue;
+
+      const confirmCancelLink = createShortConfirmLink(b.id);
+      const manageLink = createShortManageLink(b.id);
+      let bookingData = buildBookingData(b);
+      bookingData.confirm_cancel_link = confirmCancelLink;
+      bookingData.manage_booking_link = manageLink;
+      bookingData = await enrichBookingEmailForComms(supabase, b.id, bookingData);
+
+      const email = getGuestEmail(b);
+      const phone = getGuestPhone(b);
+
+      let sentAny = false;
+      if (ns.reminder_1_channels.includes('email') && email) {
+        const canSend = await logToCommLogs({
+          venue_id: venue.id,
+          booking_id: b.id,
+          message_type: 'reminder_1_email',
+          channel: 'email',
+          recipient: email,
+          status: 'pending',
+        });
+        if (canSend) {
+          const rendered = renderReminder56h(
+            bookingData,
+            venueData,
+            comm.reminder_email_custom_message ?? null,
+          );
+          await sendEmail({ to: email, ...rendered });
+          sentAny = true;
+        }
+      }
+
+      if (ns.reminder_1_channels.includes('sms') && phone && smsOk) {
+        const canSend = await logToCommLogs({
+          venue_id: venue.id,
+          booking_id: b.id,
+          message_type: 'reminder_1_sms',
+          channel: 'sms',
+          recipient: phone,
+          status: 'sent',
+        });
+        if (canSend) {
+          const sms = renderDayOfReminderSms(bookingData, venueData, comm.day_of_reminder_custom_message);
+          const { sid, segmentCount } = await sendSmsWithSegments(phone, sms.body);
+          await recordOutboundSms({
+            venueId: venue.id,
+            bookingId: b.id,
+            messageType: 'reminder_1_sms',
+            recipientPhone: phone,
+            twilioSid: sid ?? undefined,
+            segmentCount,
+          });
+          sentAny = true;
+        }
+      }
+
+      if (sentAny) {
+        await supabase.from('bookings').update({ reminder_sent_at: new Date().toISOString() }).eq('id', b.id);
+        results.cde_reminder_1++;
+      }
+    } catch (e) {
+      console.error('[cde reminder_1]', b.id, e);
+      results.errors++;
+    }
+  }
+}
+
+async function sendCdeReminder2(
+  supabase: SupabaseClient,
+  venue: { id: string; name: string; address: string | null },
+  tz: string,
+  ns: Awaited<ReturnType<typeof getVenueNotificationSettings>>,
+  rules: ExtendedBookingRules,
+  comm: Awaited<ReturnType<typeof getCommSettings>>,
+  _baseUrl: string,
+  nowMs: number,
+  results: SecondaryModelCommsResults,
+) {
+  if (!ns.reminder_2_enabled) return;
+  if (!ns.reminder_2_channels.includes('sms')) return;
+  const smsOk = await isSmsAllowed(venue.id);
+  if (!smsOk) return;
+
+  const { data: bookings } = await supabase
+    .from('bookings')
+    .select(UNIFIED_BOOKING_SELECT)
+    .eq('venue_id', venue.id)
+    .is('final_reminder_sent_at', null)
+    .in('status', ['Pending', 'Confirmed'])
+    .or(CDE_OR_FILTER);
+
+  const venueData = buildVenueData(venue);
+
+  for (const b of normalizeBookings(bookings ?? [])) {
+    try {
+      if (!isCdeBookingRow(b)) continue;
+
+      const { reminder_2_hours_before } = getReminderHoursForBookingRow(ns, rules, b);
+      const targetMs = reminder_2_hours_before * 60 * 60 * 1000;
+
+      const startMs = bookingStartUtcMs(b, tz);
+      const delta = startMs - nowMs;
+      if (delta < targetMs - TOLERANCE_MS || delta > targetMs + TOLERANCE_MS) continue;
+
+      const phone = getGuestPhone(b);
+      if (!phone) continue;
+
+      const manageLink = createShortManageLink(b.id);
+      let bookingData = buildBookingData(b);
+      bookingData.manage_booking_link = manageLink;
+      bookingData = await enrichBookingEmailForComms(supabase, b.id, bookingData);
+
+      const canSend = await logToCommLogs({
+        venue_id: venue.id,
+        booking_id: b.id,
+        message_type: 'reminder_2_sms',
+        channel: 'sms',
+        recipient: phone,
+        status: 'sent',
+      });
+      if (!canSend) continue;
+
+      const sms = renderDayOfReminderSms(
+        bookingData,
+        venueData,
+        comm.day_of_reminder_custom_message ?? null,
+      );
+      const { sid, segmentCount } = await sendSmsWithSegments(phone, sms.body);
+      await recordOutboundSms({
+        venueId: venue.id,
+        bookingId: b.id,
+        messageType: 'reminder_2_sms',
+        recipientPhone: phone,
+        twilioSid: sid ?? undefined,
+        segmentCount,
+      });
+      await supabase.from('bookings').update({ final_reminder_sent_at: new Date().toISOString() }).eq('id', b.id);
+      results.cde_reminder_2++;
+    } catch (e) {
+      console.error('[cde reminder_2]', b.id, e);
+      results.errors++;
+    }
+  }
+}
+
+async function sendCdePostVisit(
+  supabase: SupabaseClient,
+  venue: { id: string; name: string; address: string | null },
+  tz: string,
+  ns: Awaited<ReturnType<typeof getVenueNotificationSettings>>,
+  comm: Awaited<ReturnType<typeof getCommSettings>>,
+  _baseUrl: string,
+  nowMs: number,
+  results: SecondaryModelCommsResults,
+) {
+  if (!ns.post_visit_enabled) return;
+
+  const { data: bookings } = await supabase
+    .from('bookings')
+    .select(UNIFIED_BOOKING_SELECT)
+    .eq('venue_id', venue.id)
+    .is('post_visit_sent_at', null)
+    .eq('status', 'Completed')
+    .or(CDE_OR_FILTER);
+
+  const venueData = buildVenueData(venue);
+
+  for (const b of normalizeBookings(bookings ?? [])) {
+    try {
+      if (!isCdeBookingRow(b)) continue;
+
+      const email = getGuestEmail(b);
+      if (!email) continue;
+
+      const endMs = bookingEndUtcMs(b, tz);
+      const fourHoursAfter = endMs + 4 * 60 * 60 * 1000;
+
+      const hourFmt = new Intl.DateTimeFormat('en-GB', {
+        timeZone: tz,
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+      });
+      const endParts = hourFmt.formatToParts(new Date(endMs));
+      const endHour = Number(endParts.find((p) => p.type === 'hour')?.value ?? '12');
+      const endMinute = Number(endParts.find((p) => p.type === 'minute')?.value ?? '0');
+      const endMinutesOfDay = endHour * 60 + endMinute;
+
+      let eligible = false;
+      if (endMinutesOfDay <= 17 * 60) {
+        eligible = nowMs >= fourHoursAfter;
+      } else {
+        const endYmd = formatYmdInTimezone(endMs, tz);
+        const nextYmd = addDaysToYmd(endYmd, 1);
+        const nineMs = venueLocalDateTimeToUtcMs(nextYmd, '09:00', tz);
+        eligible = nowMs >= nineMs;
+      }
+
+      if (!eligible) continue;
+
+      let bookingData = buildBookingData(b);
+      bookingData = await enrichBookingEmailForComms(supabase, b.id, bookingData);
+      const rendered = renderPostVisitEmail(bookingData, venueData, comm.post_visit_email_custom_message);
+
+      const canSend = await logToCommLogs({
+        venue_id: venue.id,
+        booking_id: b.id,
+        message_type: 'unified_post_visit_email',
+        channel: 'email',
+        recipient: email,
+        status: 'sent',
+      });
+      if (!canSend) continue;
+
+      await sendEmail({ to: email, ...rendered });
+      await supabase.from('bookings').update({ post_visit_sent_at: new Date().toISOString() }).eq('id', b.id);
+      results.cde_post_visit++;
+    } catch (e) {
+      console.error('[cde post_visit]', b.id, e);
+      results.errors++;
+    }
+  }
+}
+
+export async function runSecondaryModelScheduledComms(
+  supabase: SupabaseClient,
+  results: SecondaryModelCommsResults,
+): Promise<void> {
+  const baseUrl = normalizePublicBaseUrl(process.env.NEXT_PUBLIC_BASE_URL);
+  const nowMs = Date.now();
+
+  const { data: venues } = await supabase
+    .from('venues')
+    .select('id, name, address, timezone, booking_model, booking_rules');
+
+  for (const venue of venues ?? []) {
+    // Process every venue: C/D/E rows are selected via CDE_OR_FILTER + isCdeBookingRow only.
+    // Unified-primary venues still need this path for secondary event/class/resource bookings.
+    const tz = (venue as { timezone?: string }).timezone ?? 'Europe/London';
+    const vid = (venue as { id: string }).id;
+    const ns = await getVenueNotificationSettings(vid);
+    const comm = await getCommSettings(vid);
+    const rules = parseExtendedBookingRules((venue as { booking_rules?: unknown }).booking_rules);
+
+    await sendCdeReminder1(
+      supabase,
+      venue as { id: string; name: string; address: string | null },
+      tz,
+      ns,
+      rules,
+      comm,
+      baseUrl,
+      nowMs,
+      results,
+    );
+    await sendCdeReminder2(
+      supabase,
+      venue as { id: string; name: string; address: string | null },
+      tz,
+      ns,
+      rules,
+      comm,
+      baseUrl,
+      nowMs,
+      results,
+    );
+    await sendCdePostVisit(
+      supabase,
+      venue as { id: string; name: string; address: string | null },
+      tz,
+      ns,
+      comm,
+      baseUrl,
+      nowMs,
+      results,
+    );
   }
 }

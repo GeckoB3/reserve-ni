@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
+import { bookingModelShortLabel } from '@/lib/booking/infer-booking-row-model';
+import type { BookingModel } from '@/types/booking-models';
 
 interface BookingDetails {
   booking_id: string;
@@ -14,8 +16,14 @@ interface BookingDetails {
   deposit_amount_pence: number | null;
   status: string;
   is_appointment?: boolean;
+  booking_model?: BookingModel;
   practitioner_name?: string | null;
   appointment_service_name?: string | null;
+  event_name?: string | null;
+  class_summary?: string | null;
+  resource_name?: string | null;
+  booking_end_time?: string | null;
+  refund_notice_hours?: number;
   guest_attendance_confirmed_at?: string | null;
 }
 
@@ -98,6 +106,21 @@ export function ConfirmCancelView({ bookingId, token, hmac }: { bookingId: strin
 
   const dateStr = new Date(details.booking_date + 'T12:00:00').toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
   const depositStr = details.deposit_amount_pence ? `£${(details.deposit_amount_pence / 100).toFixed(2)}` : null;
+  const bookingSummary =
+    details.event_name ??
+    details.class_summary ??
+    (details.resource_name
+      ? details.booking_end_time
+        ? `${details.resource_name} · until ${details.booking_end_time}`
+        : details.resource_name
+      : null) ??
+    (details.is_appointment && (details.practitioner_name || details.appointment_service_name)
+      ? [details.practitioner_name, details.appointment_service_name].filter(Boolean).join(' · ')
+      : null);
+  const refundHours = details.refund_notice_hours ?? 48;
+  const bookingModel = details.booking_model ?? 'table_reservation';
+  const isCde =
+    bookingModel === 'event_ticket' || bookingModel === 'class_session' || bookingModel === 'resource_booking';
 
   if (view === 'done') {
     const isConfirm = doneMessage.toLowerCase().includes('confirm');
@@ -128,9 +151,11 @@ export function ConfirmCancelView({ bookingId, token, hmac }: { bookingId: strin
               <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
                 <p className="font-medium">Deposit Policy</p>
                 <p className="mt-1 text-xs">
-                  {details.is_appointment
-                    ? 'Refund rules depend on the venue policy — check your confirmation email or contact the venue.'
-                    : 'Full refund if cancelled 48+ hours before your reservation. No refund within 48 hours or for no-shows.'}
+                  {isCde
+                    ? `Full refund if cancelled ${refundHours}+ hours before your booking starts. No refund within ${refundHours} hours or for no-shows.`
+                    : details.is_appointment
+                      ? `Full refund if cancelled ${refundHours}+ hours before your appointment. No refund within ${refundHours} hours or for no-shows.`
+                      : `Full refund if cancelled ${refundHours}+ hours before your reservation. No refund within ${refundHours} hours or for no-shows.`}
                 </p>
               </div>
             ) : (
@@ -173,6 +198,15 @@ export function ConfirmCancelView({ bookingId, token, hmac }: { bookingId: strin
             <DetailTile label="Guests" value={`${details.party_size} ${details.party_size === 1 ? 'guest' : 'guests'}`} />
             <DetailTile label="Deposit" value={details.deposit_paid ? `Paid ${depositStr ?? ''}` : 'Not required'} />
           </div>
+
+          {bookingSummary && (
+            <div className="rounded-xl border border-slate-100 bg-slate-50/80 px-3 py-2.5 text-sm text-slate-800">
+              <p className="text-xs font-medium text-slate-500">
+                {isCde ? bookingModelShortLabel(bookingModel) : 'Booking'}
+              </p>
+              <p className="mt-0.5 font-semibold leading-snug">{bookingSummary}</p>
+            </div>
+          )}
 
           <p className="text-sm text-slate-500">Please confirm you&apos;re coming or cancel if your plans have changed.</p>
 

@@ -1,6 +1,8 @@
 import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
 import { getDashboardStaff } from '@/lib/venue-auth';
+import { normalizeEnabledModels } from '@/lib/booking/enabled-models';
+import type { BookingModel } from '@/types/booking-models';
 import { NewBookingPageClient } from './NewBookingPageClient';
 
 export default async function NewBookingPage() {
@@ -23,13 +25,22 @@ export default async function NewBookingPage() {
 
   const { data: venue } = await staff.db
     .from('venues')
-    .select('table_management_enabled, booking_model, currency')
+    .select('table_management_enabled, booking_model, currency, enabled_models')
     .eq('id', venueId)
     .single();
 
   const advancedMode = Boolean(venue?.table_management_enabled);
-  const bookingModel = (venue?.booking_model as string) ?? 'table_reservation';
+  const bookingModel = ((venue?.booking_model as string) ?? 'table_reservation') as BookingModel;
   const currency = (venue?.currency as string) ?? 'GBP';
+  const enabledModels = normalizeEnabledModels(venue?.enabled_models, bookingModel);
 
-  return <NewBookingPageClient venueId={venueId} advancedMode={advancedMode} bookingModel={bookingModel} currency={currency} />;
+  return (
+    <NewBookingPageClient
+      venueId={venueId}
+      advancedMode={advancedMode}
+      bookingModel={bookingModel}
+      currency={currency}
+      enabledModels={enabledModels}
+    />
+  );
 }

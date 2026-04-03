@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
+import { bookingModelShortLabel, inferBookingRowModel } from '@/lib/booking/infer-booking-row-model';
 
 function escapeCsvCell(value: string | number | boolean | null | undefined): string {
   const str = value == null ? '' : String(value);
@@ -41,6 +42,14 @@ export async function GET(request: NextRequest) {
           dietary_notes,
           occasion,
           created_at,
+          experience_event_id,
+          class_instance_id,
+          resource_id,
+          event_session_id,
+          calendar_id,
+          service_item_id,
+          practitioner_id,
+          appointment_service_id,
           guests (
             name,
             email,
@@ -80,10 +89,23 @@ export async function GET(request: NextRequest) {
         const pence = b.deposit_amount_pence as number | null | undefined;
         const depositGbp =
           pence != null && Number.isFinite(pence) ? (pence / 100).toFixed(2) : '';
+        const row = b as Record<string, unknown>;
+        const inferred = inferBookingRowModel({
+          experience_event_id: row.experience_event_id as string | null | undefined,
+          class_instance_id: row.class_instance_id as string | null | undefined,
+          resource_id: row.resource_id as string | null | undefined,
+          event_session_id: row.event_session_id as string | null | undefined,
+          calendar_id: row.calendar_id as string | null | undefined,
+          service_item_id: row.service_item_id as string | null | undefined,
+          practitioner_id: row.practitioner_id as string | null | undefined,
+          appointment_service_id: row.appointment_service_id as string | null | undefined,
+        });
+        const typeLabel = bookingModelShortLabel(inferred);
         return [
           b.id,
           b.booking_date,
           timeDisplay,
+          typeLabel,
           b.party_size,
           b.status,
           b.deposit_status ?? '',

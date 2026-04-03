@@ -10,7 +10,7 @@ import {
   fetchAppointmentInput,
   computeAppointmentAvailability,
 } from '@/lib/availability/appointment-engine';
-import { enrichBookingEmailForAppointment } from '@/lib/emails/booking-email-enrichment';
+import { enrichBookingEmailForAppointment, enrichBookingEmailForComms } from '@/lib/emails/booking-email-enrichment';
 import { autoAssignTable } from '@/lib/table-availability';
 import { BOOKING_MUTABLE_STATUSES } from '@/lib/table-management/constants';
 import {
@@ -29,6 +29,10 @@ import { z } from 'zod';
 import { normalizeToE164 } from '@/lib/phone/e164';
 import { getVenueNotificationSettings } from '@/lib/notifications/notification-settings';
 import { communicationService } from '@/lib/communications';
+import { inferBookingRowModel } from '@/lib/booking/infer-booking-row-model';
+import { logBookingOp } from '@/lib/observability/booking-ops-log';
+import { resolveCdeBookingContext } from '@/lib/booking/cde-booking-context';
+import type { BookingModel } from '@/types/booking-models';
 
 const statusSchema = z.enum(BOOKING_MUTABLE_STATUSES);
 
@@ -97,6 +101,20 @@ export async function GET(
       return { id: tbl?.id ?? a.table_id, name: tbl?.name ?? 'Unknown' };
     });
 
+    const cde_context = await resolveCdeBookingContext(staff.db, booking as Parameters<typeof resolveCdeBookingContext>[1]);
+    const inferred_booking_model = inferBookingRowModel(
+      booking as {
+        experience_event_id?: string | null;
+        class_instance_id?: string | null;
+        resource_id?: string | null;
+        event_session_id?: string | null;
+        calendar_id?: string | null;
+        service_item_id?: string | null;
+        practitioner_id?: string | null;
+        appointment_service_id?: string | null;
+      },
+    );
+
     return NextResponse.json({
       ...booking,
       booking_time: bookingTimeStr,
@@ -104,6 +122,8 @@ export async function GET(
       events: events ?? [],
       communications: communications ?? [],
       table_assignments: assignedTables,
+      cde_context,
+      inferred_booking_model: inferred_booking_model as BookingModel,
     });
   } catch (err) {
     console.error('GET /api/venue/bookings/[id] failed:', err);
@@ -125,6 +145,16 @@ export async function PATCH(
 
     const { id } = await params;
     const body = await request.json();
+
+    if (body.ticket_lines !== undefined) {
+      return NextResponse.json(
+        {
+          error:
+            'Ticket line edits are not supported (v1). Cancel the booking if policy allows and create a new booking.',
+        },
+        { status: 400 },
+      );
+    }
 
     const { data: booking, error: fetchErr } = await staff.db
       .from('bookings')
@@ -212,7 +242,15 @@ export async function PATCH(
               );
               refundSucceeded = true;
             } catch (refundErr) {
-              console.error('Refund failed:', refundErr);
+              logBookingOp({
+                operation: 'refund_failed',
+                venue_id: staff.venue_id,
+                booking_id: id,
+                booking_model: inferBookingRowModel(
+                  booking as Parameters<typeof inferBookingRowModel>[0],
+                ),
+                error: refundErr instanceof Error ? refundErr.message : String(refundErr),
+              });
             }
           }
         }
@@ -235,6 +273,15 @@ export async function PATCH(
             })
             .in('id', idsToCancel);
         }
+
+        logBookingOp({
+          operation: 'cancel',
+          venue_id: staff.venue_id,
+          booking_id: id,
+          booking_model: inferBookingRowModel(
+            booking as Parameters<typeof inferBookingRowModel>[0],
+          ),
+        });
 
         const { data: guestRow } = await staff.db.from('guests').select('name, email, phone').eq('id', booking.guest_id).single();
         const { data: venueRow } = await staff.db.from('venues').select('name, address, phone').eq('id', staff.venue_id).single();
@@ -356,7 +403,8 @@ export async function PATCH(
             const vid = staff.venue_id;
             after(async () => {
               try {
-                const { email, sms } = await sendBookingConfirmationNotifications(emailData, venueEmailData, vid);
+                const enriched = await enrichBookingEmailForComms(getSupabaseAdminClient(), id, emailData);
+                const { email, sms } = await sendBookingConfirmationNotifications(enriched, venueEmailData, vid);
                 if (!email.sent) console.warn('[after] status-confirm email not sent:', email.reason);
                 if (!sms.sent && sms.reason !== 'skipped' && sms.reason !== 'no_phone') {
                   console.warn('[after] status-confirm SMS not sent:', sms.reason);
@@ -484,6 +532,30 @@ export async function PATCH(
     }
 
     if (body.booking_date !== undefined || body.booking_time !== undefined || body.party_size !== undefined) {
+      const inferredForModify = inferBookingRowModel({
+        experience_event_id: booking.experience_event_id as string | null | undefined,
+        class_instance_id: booking.class_instance_id as string | null | undefined,
+        resource_id: booking.resource_id as string | null | undefined,
+        event_session_id: booking.event_session_id as string | null | undefined,
+        calendar_id: booking.calendar_id as string | null | undefined,
+        service_item_id: booking.service_item_id as string | null | undefined,
+        practitioner_id: booking.practitioner_id as string | null | undefined,
+        appointment_service_id: booking.appointment_service_id as string | null | undefined,
+      });
+      if (
+        inferredForModify === 'event_ticket' ||
+        inferredForModify === 'class_session' ||
+        inferredForModify === 'resource_booking'
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              'Date, time, or party size cannot be changed here for this booking type. Cancel the booking if policy allows and create a new booking.',
+          },
+          { status: 400 },
+        );
+      }
+
       const newDate = (body.booking_date as string) ?? booking.booking_date;
       const newTimeRaw = (body.booking_time as string) ?? (typeof booking.booking_time === 'string' ? booking.booking_time.slice(0, 5) : '12:00');
       const newTime = newTimeRaw.length === 5 ? newTimeRaw + ':00' : newTimeRaw;

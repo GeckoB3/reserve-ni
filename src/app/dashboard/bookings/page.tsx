@@ -8,6 +8,7 @@ import { getSupabaseAdminClient } from '@/lib/supabase';
 import { ToastProvider } from '@/components/ui/Toast';
 import type { BookingModel } from '@/types/booking-models';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
+import { normalizeEnabledModels } from '@/lib/booking/enabled-models';
 
 export default async function BookingsPage() {
   const supabase = await createClient();
@@ -28,11 +29,20 @@ export default async function BookingsPage() {
   }
 
   const admin = getSupabaseAdminClient();
-  const { data: venue } = await admin.from('venues').select('booking_model, currency').eq('id', venueId).single();
+  const { data: venue } = await admin
+    .from('venues')
+    .select('booking_model, currency, enabled_models')
+    .eq('id', venueId)
+    .single();
   const bookingModel = (venue?.booking_model as BookingModel) ?? 'table_reservation';
+  const enabledModels = normalizeEnabledModels(
+    (venue as { enabled_models?: unknown } | null)?.enabled_models,
+    bookingModel,
+  );
   const currency = (venue?.currency as string) ?? 'GBP';
   const isAppointment = isUnifiedSchedulingVenue(bookingModel);
-  const title = isAppointment ? 'Appointments' : 'Reservations';
+  const title =
+    isAppointment ? 'Appointments' : enabledModels.length > 0 ? 'Bookings' : 'Reservations';
 
   const linkedPractitionerId =
     isAppointment && staff.role === 'staff' && staff.id
@@ -54,7 +64,12 @@ export default async function BookingsPage() {
                 linkedPractitionerId={linkedPractitionerId}
               />
             ) : (
-              <BookingsDashboard venueId={venueId} currency={currency} />
+              <BookingsDashboard
+                venueId={venueId}
+                currency={currency}
+                primaryBookingModel={bookingModel}
+                enabledModels={enabledModels}
+              />
             )}
           </Suspense>
         </ToastProvider>

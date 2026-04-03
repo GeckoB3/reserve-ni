@@ -1,0 +1,111 @@
+import { NextRequest, NextResponse, after } from 'next/server';
+import { createClient } from '@/lib/supabase/server';
+import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
+import { getSupabaseAdminClient } from '@/lib/supabase';
+import { cancelStaffBookingWithNotify } from '@/lib/booking/staff-cancel-booking';
+import { z } from 'zod';
+
+const bodySchema = z.object({
+  confirm: z.literal(true),
+});
+
+/**
+ * POST /api/venue/experience-events/[id]/cancel — admin only.
+ * Deactivates the event and cancels all active ticket bookings with refunds + comms per venue policy.
+ */
+export async function POST(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  try {
+    const supabase = await createClient();
+    const staff = await getVenueStaff(supabase);
+    if (!staff) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
+    if (!requireAdmin(staff)) return NextResponse.json({ error: 'Forbidden: admin only' }, { status: 403 });
+
+    const json = await request.json().catch(() => ({}));
+    const parsed = bodySchema.safeParse(json);
+    if (!parsed.success) {
+      return NextResponse.json({ error: 'Invalid request: confirm must be true' }, { status: 400 });
+    }
+
+    const { id: eventId } = await params;
+    const admin = getSupabaseAdminClient();
+    const venueId = staff.venue_id;
+
+    const { data: eventRow, error: evErr } = await admin
+      .from('experience_events')
+      .select('id, venue_id, name, is_active')
+      .eq('id', eventId)
+      .maybeSingle();
+
+    if (evErr || !eventRow || eventRow.venue_id !== venueId) {
+      return NextResponse.json({ error: 'Event not found' }, { status: 404 });
+    }
+
+    const { error: patchErr } = await admin
+      .from('experience_events')
+      .update({ is_active: false })
+      .eq('id', eventId)
+      .eq('venue_id', venueId);
+
+    if (patchErr) {
+      console.error('POST /experience-events/[id]/cancel: deactivate failed:', patchErr);
+      return NextResponse.json({ error: 'Failed to cancel event' }, { status: 500 });
+    }
+
+    const { data: bookingRows, error: bookErr } = await admin
+      .from('bookings')
+      .select('id, group_booking_id, status')
+      .eq('venue_id', venueId)
+      .eq('experience_event_id', eventId)
+      .in('status', ['Pending', 'Confirmed', 'Seated']);
+
+    if (bookErr) {
+      console.error('POST /experience-events/[id]/cancel: list bookings failed:', bookErr);
+      return NextResponse.json({ error: 'Failed to list bookings' }, { status: 500 });
+    }
+
+    const rows = bookingRows ?? [];
+    const seenGroups = new Set<string>();
+    let cancelledCount = 0;
+    let notifications = 0;
+
+    const prefix = `The venue has cancelled "${eventRow.name as string}".`;
+
+    for (const row of rows) {
+      const gid = (row as { group_booking_id?: string | null }).group_booking_id;
+      if (gid) {
+        if (seenGroups.has(gid)) continue;
+        seenGroups.add(gid);
+      }
+
+      const bid = (row as { id: string }).id;
+      const result = await cancelStaffBookingWithNotify(admin, staff.db, venueId, bid, {
+        refundMessagePrefix: prefix,
+        actorId: staff.id,
+      });
+
+      if (result.cancelled) {
+        cancelledCount += 1;
+        if (result.scheduleNotification) {
+          notifications += 1;
+          const work = result.scheduleNotification;
+          after(async () => {
+            await work();
+          });
+        }
+      }
+    }
+
+    return NextResponse.json({
+      success: true,
+      event_id: eventId,
+      bookings_cancelled: cancelledCount,
+      notifications_scheduled: notifications,
+    });
+  } catch (err) {
+    console.error('POST /api/venue/experience-events/[id]/cancel failed:', err);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
+}

@@ -27,9 +27,16 @@ import { fetchClassInput, computeClassAvailability } from '@/lib/availability/cl
 import { fetchResourceInput, computeResourceAvailability } from '@/lib/availability/resource-booking-engine';
 import { cancellationDeadlineHoursBefore } from '@/lib/booking/cancellation-deadline';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
-import { resolvePublicSiteOriginFromRequest } from '@/lib/public-base-url';
+import { getCancellationNoticeHoursForBooking, parseExtendedBookingRules } from '@/lib/booking/venue-booking-rules';
+import {
+  hasNonTableBookingPayload,
+  inferSecondaryBookingModelFromPayload,
+  venueExposesBookingModel,
+} from '@/lib/booking/enabled-models';
+import type { BookingModel } from '@/types/booking-models';
 import { createShortManageLink } from '@/lib/short-manage-link';
 import type { BookingEmailData } from '@/lib/emails/types';
+import { logBookingOp } from '@/lib/observability/booking-ops-log';
 
 const createBookingSchema = z.object({
   venue_id: z.string().uuid(),
@@ -75,6 +82,7 @@ function cancellationDeadline(bookingDate: string, bookingTime: string): string 
  * creates Stripe PaymentIntent on venue's connected account and returns client_secret.
  */
 export async function POST(request: NextRequest) {
+  let venueIdForLog: string | undefined;
   try {
     const ip = getClientIp(request);
     const rl = checkRateLimit(ip, 'booking-create', 8, 60_000);
@@ -93,6 +101,8 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
+
+    venueIdForLog = parsed.data.venue_id;
 
     const {
       venue_id,
@@ -129,7 +139,18 @@ export async function POST(request: NextRequest) {
 
     // Dispatch to model-specific create handlers (B, C, D, E)
     if (venueMode.bookingModel !== 'table_reservation') {
-      return handleNonTableBooking(request, supabase, venue, venueMode, parsed.data, phoneE164);
+      return handleNonTableBooking(request, supabase, venue, venueMode, parsed.data, phoneE164, venueMode.bookingModel);
+    }
+
+    const secondaryModel = inferSecondaryBookingModelFromPayload(parsed.data, venueMode.enabledModels);
+    if (secondaryModel) {
+      return handleNonTableBooking(request, supabase, venue, venueMode, parsed.data, phoneE164, secondaryModel);
+    }
+    if (hasNonTableBookingPayload(parsed.data)) {
+      return NextResponse.json(
+        { error: 'This booking type is not enabled for this venue' },
+        { status: 400 },
+      );
     }
 
     if (venueMode.availabilityEngine !== 'service') {
@@ -357,6 +378,13 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    logBookingOp({
+      operation: 'create',
+      venue_id: venue_id,
+      booking_id: booking.id,
+      booking_model: 'table_reservation',
+    });
+
     return NextResponse.json(
       {
         booking_id: booking.id,
@@ -369,7 +397,15 @@ export async function POST(request: NextRequest) {
       { status: 201 }
     );
   } catch (err) {
-    console.error('POST /api/booking/create failed:', err);
+    if (venueIdForLog) {
+      logBookingOp({
+        operation: 'error',
+        venue_id: venueIdForLog,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    } else {
+      console.error('POST /api/booking/create failed:', err);
+    }
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
@@ -385,6 +421,7 @@ async function handleNonTableBooking(
   venueMode: Awaited<ReturnType<typeof resolveVenueMode>>,
   data: z.infer<typeof createBookingSchema>,
   phoneE164: string,
+  effectiveModel: BookingModel,
 ) {
   const {
     venue_id, booking_date, booking_time, party_size, name, email,
@@ -400,6 +437,13 @@ async function handleNonTableBooking(
   const timeForDb = booking_time.length === 5 ? booking_time + ':00' : booking_time;
   const timeStr = timeForDb.slice(0, 5);
 
+  if (!venueExposesBookingModel(venueMode.bookingModel, venueMode.enabledModels, effectiveModel)) {
+    return NextResponse.json(
+      { error: 'This booking type is not enabled for this venue' },
+      { status: 400 },
+    );
+  }
+
   // ---- Validate slot availability per model ----
   let estimatedEndTime: string | null = null;
   let depositAmountPence: number | null = null;
@@ -409,14 +453,14 @@ async function handleNonTableBooking(
 
   const SESSION_CAPACITY_STATUSES = ['Pending', 'Confirmed', 'Seated'];
 
-  if (event_session_id && venueMode.bookingModel !== 'unified_scheduling') {
+  if (event_session_id && effectiveModel !== 'unified_scheduling') {
     return NextResponse.json(
       { error: 'event_session_id is only supported for unified_scheduling venues' },
       { status: 400 },
     );
   }
 
-  if (venueMode.bookingModel === 'unified_scheduling' && event_session_id) {
+  if (effectiveModel === 'unified_scheduling' && event_session_id) {
     const needSeats = capacity_used ?? party_size;
     const { data: session, error: sesErr } = await supabase
       .from('event_sessions')
@@ -513,7 +557,7 @@ async function handleNonTableBooking(
     }
 
     unifiedSessionAnchor = { calendar_id: sess.calendar_id, service_item_id: sess.service_item_id };
-  } else if (isUnifiedSchedulingVenue(venueMode.bookingModel)) {
+  } else if (isUnifiedSchedulingVenue(effectiveModel)) {
     if (!practitioner_id || !appointment_service_id) {
       return NextResponse.json({ error: 'practitioner_id and appointment_service_id are required' }, { status: 400 });
     }
@@ -551,7 +595,7 @@ async function handleNonTableBooking(
         depositAmountPence = svc.deposit_pence;
       }
     }
-  } else if (venueMode.bookingModel === 'event_ticket') {
+  } else if (effectiveModel === 'event_ticket') {
     if (!experience_event_id) {
       return NextResponse.json({ error: 'experience_event_id is required' }, { status: 400 });
     }
@@ -565,7 +609,18 @@ async function handleNonTableBooking(
       depositAmountPence = ticket_lines.reduce((sum, tl) => sum + tl.quantity * tl.unit_price_pence, 0);
       if (depositAmountPence > 0) requiresDeposit = true;
     }
-  } else if (venueMode.bookingModel === 'class_session') {
+    const ticketTotalDisplay =
+      depositAmountPence != null && depositAmountPence > 0
+        ? `£${(depositAmountPence / 100).toFixed(2)}`
+        : null;
+    appointmentEmailExtras = {
+      email_variant: 'appointment',
+      booking_model: 'event_ticket',
+      appointment_service_name: event.event_name,
+      practitioner_name: null,
+      appointment_price_display: ticketTotalDisplay,
+    };
+  } else if (effectiveModel === 'class_session') {
     if (!class_instance_id) {
       return NextResponse.json({ error: 'class_instance_id is required' }, { status: 400 });
     }
@@ -579,7 +634,16 @@ async function handleNonTableBooking(
       requiresDeposit = true;
       depositAmountPence = cls.price_pence * party_size;
     }
-  } else if (venueMode.bookingModel === 'resource_booking') {
+    const classPriceDisplay =
+      cls.price_pence != null ? `£${((cls.price_pence * party_size) / 100).toFixed(2)}` : null;
+    appointmentEmailExtras = {
+      email_variant: 'appointment',
+      booking_model: 'class_session',
+      appointment_service_name: cls.class_name,
+      practitioner_name: null,
+      appointment_price_display: classPriceDisplay,
+    };
+  } else if (effectiveModel === 'resource_booking') {
     if (!resource_id || !booking_end_time) {
       return NextResponse.json({ error: 'resource_id and booking_end_time are required' }, { status: 400 });
     }
@@ -600,6 +664,18 @@ async function handleNonTableBooking(
       depositAmountPence = res.price_per_slot_pence * numSlots;
       if (depositAmountPence > 0) requiresDeposit = true;
     }
+    const endHm = booking_end_time ? (booking_end_time.length === 5 ? booking_end_time + ':00' : booking_end_time) : '';
+    const resourcePriceDisplay =
+      depositAmountPence != null && depositAmountPence > 0
+        ? `£${(depositAmountPence / 100).toFixed(2)}`
+        : null;
+    appointmentEmailExtras = {
+      email_variant: 'appointment',
+      booking_model: 'resource_booking',
+      appointment_service_name: res?.name ?? 'Resource',
+      practitioner_name: endHm ? `Until ${endHm.slice(0, 5)}` : null,
+      appointment_price_display: resourcePriceDisplay,
+    };
   }
 
   if (requiresDeposit && !(venue.stripe_connected_account_id as string | null)) {
@@ -615,16 +691,13 @@ async function handleNonTableBooking(
     phone: phoneE164,
   });
 
-  const bookingRulesJson = (venue.booking_rules as { cancellation_notice_hours?: number } | null) ?? {};
-  const refundWindowHours =
-    isUnifiedSchedulingVenue(venueMode.bookingModel) && typeof bookingRulesJson.cancellation_notice_hours === 'number'
-      ? bookingRulesJson.cancellation_notice_hours
-      : 48;
+  const bookingRulesParsed = parseExtendedBookingRules(venue.booking_rules);
+  const refundWindowHours = getCancellationNoticeHoursForBooking(bookingRulesParsed, effectiveModel, 48);
 
   const cancellation_deadline = cancellationDeadlineHoursBefore(booking_date, booking_time, refundWindowHours);
   const cancellationPolicySnapshot = {
     refund_window_hours: refundWindowHours,
-    policy: `Full refund if cancelled ${refundWindowHours}+ hours before appointment start. No refund within ${refundWindowHours} hours of the appointment or for no-shows.`,
+    policy: `Full refund if cancelled ${refundWindowHours}+ hours before your booking start time. No refund within ${refundWindowHours} hours of the start or for no-shows.`,
   };
 
   const bookingInsert: Record<string, unknown> = {
@@ -654,7 +727,7 @@ async function handleNonTableBooking(
     capacity_used: capacity_used ?? party_size,
   };
 
-  if (venueMode.bookingModel === 'unified_scheduling') {
+  if (effectiveModel === 'unified_scheduling') {
     if (event_session_id && unifiedSessionAnchor) {
       bookingInsert.calendar_id = unifiedSessionAnchor.calendar_id;
       bookingInsert.service_item_id = unifiedSessionAnchor.service_item_id;
@@ -760,6 +833,13 @@ async function handleNonTableBooking(
       });
     }
   }
+
+  logBookingOp({
+    operation: 'create',
+    venue_id,
+    booking_id: booking.id,
+    booking_model: effectiveModel,
+  });
 
   return NextResponse.json(
     {

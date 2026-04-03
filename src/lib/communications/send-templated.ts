@@ -16,6 +16,7 @@ import { getCommSettings, logToCommLogs, updateCommLogStatus } from './service';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { isSmsAllowed } from '@/lib/tier-enforcement';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
+import { isCdeBookingModel } from '@/lib/booking/cde-booking';
 import { getVenueNotificationSettings } from '@/lib/notifications/notification-settings';
 import { renderBookingConfirmationSms } from '@/lib/emails/templates/booking-confirmation-sms';
 
@@ -96,15 +97,23 @@ export async function sendBookingConfirmationEmail(
   if (!booking.guest_email) return { sent: false, reason: 'no_email' };
 
   try {
+    const venuePrimaryModel = await fetchVenueBookingModel(venueId);
     const settings = await getCommSettings(venueId);
-    if (!settings.confirmation_email_enabled) return { sent: false, reason: 'disabled' };
 
-    const bookingModel = await fetchVenueBookingModel(venueId);
-    if (isUnifiedSchedulingVenue(bookingModel)) {
+    if (isUnifiedSchedulingVenue(venuePrimaryModel)) {
+      if (!settings.confirmation_email_enabled) return { sent: false, reason: 'disabled' };
       const ns = await getVenueNotificationSettings(venueId);
       if (!ns.confirmation_enabled || !ns.confirmation_channels.includes('email')) {
         return { sent: false, reason: 'disabled' };
       }
+    } else if (isCdeBookingModel(booking.booking_model)) {
+      if (!settings.confirmation_email_enabled) return { sent: false, reason: 'disabled' };
+      const ns = await getVenueNotificationSettings(venueId);
+      if (!ns.confirmation_enabled || !ns.confirmation_channels.includes('email')) {
+        return { sent: false, reason: 'disabled' };
+      }
+    } else {
+      if (!settings.confirmation_email_enabled) return { sent: false, reason: 'disabled' };
     }
 
     const rendered = renderBookingConfirmation(booking, venue, settings.confirmation_email_custom_message);
@@ -136,8 +145,10 @@ export async function sendBookingConfirmationSms(
   if (!phone) return { sent: false, reason: 'no_phone' };
 
   try {
-    const bookingModel = await fetchVenueBookingModel(venueId);
-    if (!isUnifiedSchedulingVenue(bookingModel)) return { sent: false, reason: 'skipped' };
+    const venuePrimaryModel = await fetchVenueBookingModel(venueId);
+    const useNotificationSettingsForConfirmation =
+      isUnifiedSchedulingVenue(venuePrimaryModel) || isCdeBookingModel(booking.booking_model);
+    if (!useNotificationSettingsForConfirmation) return { sent: false, reason: 'skipped' };
 
     const ns = await getVenueNotificationSettings(venueId);
     if (!ns.confirmation_enabled || !ns.confirmation_channels.includes('sms')) {

@@ -1,0 +1,163 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { createClient } from '@/lib/supabase/server';
+import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
+import { getSupabaseAdminClient } from '@/lib/supabase';
+import { z } from 'zod';
+
+const eventSchema = z.object({
+  name: z.string().min(1).max(200),
+  description: z.string().max(2000).optional(),
+  event_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  start_time: z.string().regex(/^\d{2}:\d{2}$/),
+  end_time: z.string().regex(/^\d{2}:\d{2}$/),
+  capacity: z.number().int().min(1),
+  image_url: z.string().url().optional(),
+  is_recurring: z.boolean().optional(),
+  recurrence_rule: z.string().optional(),
+  parent_event_id: z.string().uuid().optional(),
+  is_active: z.boolean().optional(),
+  ticket_types: z
+    .array(
+      z.object({
+        name: z.string().min(1),
+        price_pence: z.number().int().min(0),
+        capacity: z.number().int().min(1).optional(),
+        sort_order: z.number().int().optional(),
+      }),
+    )
+    .optional(),
+});
+
+/**
+ * GET /api/venue/experience-events/[id] — single event with ticket types.
+ * PATCH /api/venue/experience-events/[id] — update event (admin).
+ * DELETE /api/venue/experience-events/[id] — delete event (admin).
+ */
+export async function GET(
+  _request: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  try {
+    const supabase = await createClient();
+    const staff = await getVenueStaff(supabase);
+    if (!staff) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
+
+    const { id } = await params;
+    const admin = getSupabaseAdminClient();
+    const { data, error } = await admin
+      .from('experience_events')
+      .select('*, ticket_types:event_ticket_types(*)')
+      .eq('id', id)
+      .eq('venue_id', staff.venue_id)
+      .maybeSingle();
+
+    if (error) {
+      console.error('GET /api/venue/experience-events/[id] failed:', error);
+      return NextResponse.json({ error: 'Failed to fetch event' }, { status: 500 });
+    }
+    if (!data) {
+      return NextResponse.json({ error: 'Event not found' }, { status: 404 });
+    }
+
+    return NextResponse.json(data);
+  } catch (err) {
+    console.error('GET /api/venue/experience-events/[id] failed:', err);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
+}
+
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  try {
+    const supabase = await createClient();
+    const staff = await getVenueStaff(supabase);
+    if (!staff) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
+    if (!requireAdmin(staff)) return NextResponse.json({ error: 'Forbidden: admin only' }, { status: 403 });
+
+    const { id } = await params;
+    const body = await request.json();
+    const { ticket_types, ...rest } = body as { ticket_types?: unknown; [k: string]: unknown };
+
+    const parsed = eventSchema.partial().safeParse(rest);
+    if (!parsed.success) {
+      return NextResponse.json({ error: 'Invalid request', details: parsed.error.flatten() }, { status: 400 });
+    }
+
+    const admin = getSupabaseAdminClient();
+    const patch = parsed.data;
+    if (Object.keys(patch).length > 0) {
+      const { error } = await admin
+        .from('experience_events')
+        .update(patch)
+        .eq('id', id)
+        .eq('venue_id', staff.venue_id);
+
+      if (error) {
+        console.error('PATCH /api/venue/experience-events/[id] failed:', error);
+        return NextResponse.json({ error: 'Failed to update event' }, { status: 500 });
+      }
+    }
+
+    if (Array.isArray(ticket_types)) {
+      await admin.from('event_ticket_types').delete().eq('event_id', id);
+      if (ticket_types.length > 0) {
+        const ttRows = ticket_types.map(
+          (
+            tt: { name: string; price_pence: number; capacity?: number; sort_order?: number },
+            i: number,
+          ) => ({
+            event_id: id,
+            name: tt.name,
+            price_pence: tt.price_pence,
+            capacity: tt.capacity ?? null,
+            sort_order: tt.sort_order ?? i,
+          }),
+        );
+        await admin.from('event_ticket_types').insert(ttRows);
+      }
+    }
+
+    const { data: full } = await admin
+      .from('experience_events')
+      .select('*, ticket_types:event_ticket_types(*)')
+      .eq('id', id)
+      .single();
+
+    return NextResponse.json(full);
+  } catch (err) {
+    console.error('PATCH /api/venue/experience-events/[id] failed:', err);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
+}
+
+export async function DELETE(
+  _request: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  try {
+    const supabase = await createClient();
+    const staff = await getVenueStaff(supabase);
+    if (!staff) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
+    if (!requireAdmin(staff)) return NextResponse.json({ error: 'Forbidden: admin only' }, { status: 403 });
+
+    const { id } = await params;
+    const admin = getSupabaseAdminClient();
+    const { error } = await admin
+      .from('experience_events')
+      .delete()
+      .eq('id', id)
+      .eq('venue_id', staff.venue_id);
+
+    if (error) {
+      console.error('DELETE /api/venue/experience-events/[id] failed:', error);
+      return NextResponse.json({ error: 'Failed to delete event' }, { status: 500 });
+    }
+
+    return NextResponse.json({ success: true });
+  } catch (err) {
+    console.error('DELETE /api/venue/experience-events/[id] failed:', err);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
+}

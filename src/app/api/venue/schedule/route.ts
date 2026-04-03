@@ -1,0 +1,319 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { createClient } from '@/lib/supabase/server';
+import { getVenueStaff } from '@/lib/venue-auth';
+import { normalizeEnabledModels, venueExposesBookingModel } from '@/lib/booking/enabled-models';
+import { inferBookingRowModel } from '@/lib/booking/infer-booking-row-model';
+import { timeToMinutes, minutesToTime } from '@/lib/availability';
+import type { BookingModel } from '@/types/booking-models';
+import type { ScheduleBlockDTO, ScheduleBlockKind } from '@/types/schedule-blocks';
+
+function hhmm(t: string | null | undefined): string {
+  if (!t) return '09:00';
+  const s = String(t);
+  return s.length >= 5 ? s.slice(0, 5) : s;
+}
+
+function classTypeFromInstanceRow(
+  row: Record<string, unknown> | undefined,
+): { name?: string; colour?: string; duration_minutes?: number } | undefined {
+  if (!row) return undefined;
+  const ct = row.class_types;
+  if (!ct) return undefined;
+  if (Array.isArray(ct)) return ct[0] as { name?: string; colour?: string; duration_minutes?: number };
+  return ct as { name?: string; colour?: string; duration_minutes?: number };
+}
+
+/**
+ * GET /api/venue/schedule?date=YYYY-MM-DD | from=&to=
+ * Merged non–Model-A schedule blocks (events, classes, resources) for PractitionerCalendarView §4.2.
+ *
+ * Unified-scheduling appointment rows (calendar/service or `event_session_id`) are intentionally excluded from the
+ * booking loop below — they render on the practitioner grid only (see `ScheduleBlock` type comment, Option A).
+ *
+ * **Tenancy:** Uses `getVenueStaff` + venue-scoped queries; mutations belong in other routes. RLS on Supabase should
+ * still enforce `venue_id` for defence in depth (§4.6).
+ */
+export async function GET(request: NextRequest) {
+  try {
+    const supabase = await createClient();
+    const staff = await getVenueStaff(supabase);
+    if (!staff) {
+      return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
+    }
+
+    const date = request.nextUrl.searchParams.get('date');
+    const from = request.nextUrl.searchParams.get('from');
+    const to = request.nextUrl.searchParams.get('to');
+    const isoRe = /^\d{4}-\d{2}-\d{2}$/;
+
+    let fromStr: string;
+    let toStr: string;
+    if (date && isoRe.test(date)) {
+      fromStr = date;
+      toStr = date;
+    } else if (from && to && isoRe.test(from) && isoRe.test(to)) {
+      fromStr = from;
+      toStr = to;
+    } else {
+      return NextResponse.json({ error: 'Provide date=YYYY-MM-DD or from=...&to=...' }, { status: 400 });
+    }
+
+    const { data: venueRow, error: venueErr } = await staff.db
+      .from('venues')
+      .select('booking_model, enabled_models')
+      .eq('id', staff.venue_id)
+      .single();
+
+    if (venueErr || !venueRow) {
+      console.error('GET /api/venue/schedule venue load failed:', venueErr);
+      return NextResponse.json({ error: 'Failed to load venue' }, { status: 500 });
+    }
+
+    const primary = (venueRow.booking_model as BookingModel) ?? 'table_reservation';
+    const enabledModels = normalizeEnabledModels(
+      (venueRow as { enabled_models?: unknown }).enabled_models,
+      primary,
+    );
+
+    const wantEvents = venueExposesBookingModel(primary, enabledModels, 'event_ticket');
+    const wantClasses = venueExposesBookingModel(primary, enabledModels, 'class_session');
+    const wantResources = venueExposesBookingModel(primary, enabledModels, 'resource_booking');
+
+    if (!wantEvents && !wantClasses && !wantResources) {
+      return NextResponse.json({ blocks: [] as ScheduleBlockDTO[] });
+    }
+
+    const blocks: ScheduleBlockDTO[] = [];
+
+    const wantByKind: Record<ScheduleBlockKind, boolean> = {
+      event_ticket: wantEvents,
+      class_session: wantClasses,
+      resource_booking: wantResources,
+    };
+
+    const { data: bookingRows, error: bookErr } = await staff.db
+      .from('bookings')
+      .select(
+        'id, booking_date, booking_time, booking_end_time, estimated_end_time, booking_model, status, party_size, guest_id, experience_event_id, class_instance_id, resource_id',
+      )
+      .eq('venue_id', staff.venue_id)
+      .or('experience_event_id.not.is.null,class_instance_id.not.is.null,resource_id.not.is.null')
+      .gte('booking_date', fromStr)
+      .lte('booking_date', toStr)
+      .order('booking_date', { ascending: true })
+      .order('booking_time', { ascending: true });
+
+    if (bookErr) {
+      console.error('GET /api/venue/schedule bookings failed:', bookErr);
+      return NextResponse.json({ error: 'Failed to load schedule' }, { status: 500 });
+    }
+
+    const rows = (bookingRows ?? []).filter((r) => {
+      const inferred = inferBookingRowModel(r as Parameters<typeof inferBookingRowModel>[0]);
+      if (inferred === 'table_reservation' || inferred === 'practitioner_appointment' || inferred === 'unified_scheduling') {
+        return false;
+      }
+      const kind = inferred as ScheduleBlockKind;
+      return wantByKind[kind] === true;
+    });
+    const guestIds = [...new Set(rows.map((r) => r.guest_id).filter(Boolean))] as string[];
+    const { data: guestsRows } = guestIds.length
+      ? await staff.db.from('guests').select('id, name').in('id', guestIds)
+      : { data: [] };
+    const guestName = new Map((guestsRows ?? []).map((g: { id: string; name: string | null }) => [g.id, g.name ?? 'Guest']));
+
+    const eventIds = [...new Set(rows.map((r) => r.experience_event_id).filter(Boolean))] as string[];
+    const { data: expEvents } = eventIds.length
+      ? await staff.db.from('experience_events').select('id, name, end_time, start_time').in('id', eventIds)
+      : { data: [] };
+    const eventMap = new Map((expEvents ?? []).map((e: Record<string, unknown>) => [e.id as string, e]));
+
+    const classInstIds = [...new Set(rows.map((r) => r.class_instance_id).filter(Boolean))] as string[];
+    const { data: classInstRows } = classInstIds.length
+      ? await staff.db
+          .from('class_instances')
+          .select(
+            'id, start_time, class_types(id, name, colour, duration_minutes)',
+          )
+          .in('id', classInstIds)
+      : { data: [] };
+    const classInstMap = new Map<string, Record<string, unknown>>();
+    for (const row of classInstRows ?? []) {
+      const r = row as { id: string; class_types?: unknown };
+      classInstMap.set(r.id, row as Record<string, unknown>);
+    }
+
+    const resourceIds = [...new Set(rows.map((r) => r.resource_id).filter(Boolean))] as string[];
+    const { data: resourceRows } = resourceIds.length
+      ? await staff.db.from('venue_resources').select('id, name').in('id', resourceIds)
+      : { data: [] };
+    const resourceMap = new Map((resourceRows ?? []).map((r: { id: string; name: string }) => [r.id, r.name]));
+
+    const bookedEventIds = new Set<string>();
+    const bookedClassIds = new Set<string>();
+    for (const r of rows) {
+      if (r.status === 'Cancelled') continue;
+      if (r.experience_event_id) bookedEventIds.add(r.experience_event_id);
+      if (r.class_instance_id) bookedClassIds.add(r.class_instance_id);
+    }
+
+    function endForBooking(row: (typeof rows)[0], bm: ScheduleBlockKind): string {
+      if (row.booking_end_time) return hhmm(row.booking_end_time as string);
+      if (row.estimated_end_time) return hhmm(row.estimated_end_time as string);
+      if (bm === 'event_ticket' && row.experience_event_id) {
+        const ev = eventMap.get(row.experience_event_id) as { end_time?: string } | undefined;
+        if (ev?.end_time) return hhmm(ev.end_time);
+      }
+      if (bm === 'class_session' && row.class_instance_id) {
+        const ci = classInstMap.get(row.class_instance_id);
+        const ct = ci?.class_types as { duration_minutes?: number } | undefined;
+        if (ct?.duration_minutes) {
+          return minutesToTime(timeToMinutes(hhmm(row.booking_time as string)) + ct.duration_minutes);
+        }
+      }
+      if (bm === 'resource_booking' && row.resource_id) {
+        return minutesToTime(timeToMinutes(hhmm(row.booking_time as string)) + 60);
+      }
+      return minutesToTime(timeToMinutes(hhmm(row.booking_time as string)) + 60);
+    }
+
+    for (const r of rows) {
+      const bm = inferBookingRowModel(r as Parameters<typeof inferBookingRowModel>[0]) as ScheduleBlockKind;
+      if (!wantByKind[bm]) continue;
+
+      const gn = (guestName.get(r.guest_id as string) as string | undefined) ?? 'Guest';
+      let title = gn;
+      if (bm === 'event_ticket' && r.experience_event_id) {
+        const evn = (eventMap.get(r.experience_event_id) as { name?: string } | undefined)?.name ?? 'Event';
+        title = `${evn} · ${gn}`;
+      } else if (bm === 'class_session' && r.class_instance_id) {
+        const ci = classInstMap.get(r.class_instance_id);
+        const ct = classTypeFromInstanceRow(ci);
+        const cn = ct?.name ? `Class · ${ct.name}` : 'Class';
+        title = `${cn} · ${gn}`;
+      } else if (bm === 'resource_booking' && r.resource_id) {
+        const rn = resourceMap.get(r.resource_id) ?? 'Resource';
+        title = `${rn} · ${gn}`;
+      }
+
+      let accent: string | null = null;
+      if (bm === 'class_session' && r.class_instance_id) {
+        const ci = classInstMap.get(r.class_instance_id);
+        const ct = classTypeFromInstanceRow(ci);
+        accent = ct?.colour ?? '#22C55E';
+      } else if (bm === 'event_ticket') {
+        accent = '#F59E0B';
+      } else if (bm === 'resource_booking') {
+        accent = '#64748B';
+      }
+
+      blocks.push({
+        id: `bk-${r.id}`,
+        kind: bm,
+        date: r.booking_date as string,
+        start_time: hhmm(r.booking_time as string),
+        end_time: endForBooking(r, bm),
+        title,
+        subtitle: r.party_size && Number(r.party_size) > 1 ? `${r.party_size} guests` : null,
+        booking_id: r.id as string,
+        experience_event_id: r.experience_event_id as string | null,
+        class_instance_id: r.class_instance_id as string | null,
+        resource_id: r.resource_id as string | null,
+        status: r.status as string,
+        accent_colour: accent,
+      });
+    }
+
+    if (wantEvents) {
+      const { data: evRows, error: evErr } = await staff.db
+        .from('experience_events')
+        .select('id, name, event_date, start_time, end_time')
+        .eq('venue_id', staff.venue_id)
+        .eq('is_active', true)
+        .gte('event_date', fromStr)
+        .lte('event_date', toStr);
+
+      if (evErr) {
+        console.error('GET /api/venue/schedule experience_events failed:', evErr);
+      } else {
+        for (const ev of evRows ?? []) {
+          const e = ev as {
+            id: string;
+            name: string;
+            event_date: string;
+            start_time: string;
+            end_time: string;
+          };
+          if (bookedEventIds.has(e.id)) continue;
+          blocks.push({
+            id: `ev-${e.id}`,
+            kind: 'event_ticket',
+            date: e.event_date,
+            start_time: hhmm(e.start_time),
+            end_time: hhmm(e.end_time),
+            title: e.name,
+            subtitle: 'No bookings yet',
+            accent_colour: '#F59E0B',
+            experience_event_id: e.id,
+          });
+        }
+      }
+    }
+
+    if (wantClasses) {
+      const { data: ctRows } = await staff.db.from('class_types').select('id').eq('venue_id', staff.venue_id);
+      const ctIds = (ctRows ?? []).map((x: { id: string }) => x.id);
+      if (ctIds.length > 0) {
+        const { data: ciRows, error: ciErr } = await staff.db
+          .from('class_instances')
+          .select('id, instance_date, start_time, class_type_id')
+          .in('class_type_id', ctIds)
+          .eq('is_cancelled', false)
+          .gte('instance_date', fromStr)
+          .lte('instance_date', toStr);
+
+        if (ciErr) {
+          console.error('GET /api/venue/schedule class_instances failed:', ciErr);
+        } else {
+          const needTypeIds = [...new Set((ciRows ?? []).map((r: { class_type_id: string }) => r.class_type_id))];
+          const { data: types } = await staff.db
+            .from('class_types')
+            .select('id, name, colour, duration_minutes')
+            .in('id', needTypeIds);
+          const typeMap = new Map((types ?? []).map((t: { id: string; name: string; colour: string; duration_minutes: number }) => [t.id, t]));
+
+          for (const raw of ciRows ?? []) {
+            const row = raw as { id: string; instance_date: string; start_time: string; class_type_id: string };
+            if (bookedClassIds.has(row.id)) continue;
+            const ct = typeMap.get(row.class_type_id);
+            if (!ct) continue;
+            const start = hhmm(row.start_time);
+            const end = minutesToTime(timeToMinutes(start) + ct.duration_minutes);
+            blocks.push({
+              id: `ci-${row.id}`,
+              kind: 'class_session',
+              date: row.instance_date,
+              start_time: start,
+              end_time: end,
+              title: `Class · ${ct.name}`,
+              subtitle: 'No bookings yet',
+              accent_colour: ct.colour ?? '#22C55E',
+              class_instance_id: row.id,
+            });
+          }
+        }
+      }
+    }
+
+    blocks.sort((a, b) => {
+      const dc = a.date.localeCompare(b.date);
+      if (dc !== 0) return dc;
+      return a.start_time.localeCompare(b.start_time);
+    });
+
+    return NextResponse.json({ blocks });
+  } catch (err) {
+    console.error('GET /api/venue/schedule failed:', err);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
+}

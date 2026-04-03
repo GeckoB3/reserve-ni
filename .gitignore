@@ -42,3 +42,11 @@ next-env.d.ts
 
 .vercel
 .env*.local
+
+# tooling / local
+# local agent / IDE
+.claude/
+
+# eslint output captures (not source)
+eslint-output.txt
+eslint2.txt

@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import type { BookingModel } from '@/types/booking-models';
 import { getBusinessConfig } from '@/lib/business-config';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
+import { normalizeEnabledModels } from '@/lib/booking/enabled-models';
 import { buildAddress, parseAddress } from '@/lib/venue/address-format';
 import { defaultPractitionerWorkingHours } from '@/lib/availability/practitioner-defaults';
 import type { WorkingHours } from '@/types/booking-models';
@@ -48,6 +49,8 @@ interface VenueOnboarding {
   address: string | null;
   phone: string | null;
   booking_model: BookingModel;
+  /** Secondary C/D/E models; onboarding wizard stays primary-first — full setup for add-ons is on the dashboard checklist. */
+  enabled_models?: BookingModel[] | null;
   business_type: string | null;
   terminology: { client: string; booking: string; staff: string };
   pricing_tier: string;
@@ -270,6 +273,15 @@ export default function OnboardingPage() {
   const terms = useMemo(
     () => venue?.terminology ?? { client: 'Client', booking: 'Booking', staff: 'Staff' },
     [venue?.terminology],
+  );
+
+  /** Normalised secondaries (e.g. restaurant + events). Primary flow is unchanged; checklist on dashboard covers catalogue for each enabled add-on. */
+  const enabledSecondaryModels = useMemo(
+    () =>
+      venue
+        ? normalizeEnabledModels(venue.enabled_models, venue.booking_model)
+        : [],
+    [venue],
   );
 
   const modelSteps = useMemo(() => {
@@ -1581,6 +1593,40 @@ export default function OnboardingPage() {
                     </Link>
                     : breaks, time off, and fine-tune schedules anytime
                   </li>
+                </ul>
+              </div>
+            )}
+            {enabledSecondaryModels.length > 0 && (
+              <div className="mb-6 rounded-xl border border-slate-200 bg-slate-50/90 p-4 text-left">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  Additional booking types enabled
+                </p>
+                <p className="mb-3 text-sm text-slate-700">
+                  You have extra bookable types on this venue. Finish their catalogues from the dashboard — the setup
+                  checklist will link to Events, Classes, or Resources as needed.
+                </p>
+                <ul className="list-inside list-disc space-y-1.5 text-sm text-slate-600">
+                  {enabledSecondaryModels.includes('event_ticket') && (
+                    <li>
+                      <Link href="/dashboard/event-manager" className="font-medium text-brand-600 underline hover:text-brand-700">
+                        Events
+                      </Link>
+                    </li>
+                  )}
+                  {enabledSecondaryModels.includes('class_session') && (
+                    <li>
+                      <Link href="/dashboard/class-timetable" className="font-medium text-brand-600 underline hover:text-brand-700">
+                        Classes & timetable
+                      </Link>
+                    </li>
+                  )}
+                  {enabledSecondaryModels.includes('resource_booking') && (
+                    <li>
+                      <Link href="/dashboard/resource-timeline" className="font-medium text-brand-600 underline hover:text-brand-700">
+                        Resources
+                      </Link>
+                    </li>
+                  )}
                 </ul>
               </div>
             )}

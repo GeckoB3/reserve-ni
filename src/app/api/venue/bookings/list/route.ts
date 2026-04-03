@@ -33,7 +33,7 @@ export async function GET(request: NextRequest) {
     let query = staff.db
       .from('bookings')
       .select(
-        'id, booking_date, booking_time, party_size, status, source, deposit_status, deposit_amount_pence, dietary_notes, occasion, special_requests, internal_notes, client_arrived_at, guest_attendance_confirmed_at, estimated_end_time, created_at, guest_id, practitioner_id, appointment_service_id, calendar_id, service_item_id, experience_event_id, class_instance_id, resource_id, booking_end_time, group_booking_id, person_label',
+        'id, booking_date, booking_time, party_size, status, source, deposit_status, deposit_amount_pence, dietary_notes, occasion, special_requests, internal_notes, client_arrived_at, guest_attendance_confirmed_at, estimated_end_time, created_at, guest_id, practitioner_id, appointment_service_id, calendar_id, service_item_id, experience_event_id, class_instance_id, resource_id, booking_end_time, event_session_id, group_booking_id, person_label',
       )
       .eq('venue_id', staff.venue_id)
       .order('booking_date', { ascending: true })
@@ -119,6 +119,7 @@ export async function GET(request: NextRequest) {
         experience_event_id: r.experience_event_id ?? null,
         class_instance_id: r.class_instance_id ?? null,
         resource_id: r.resource_id ?? null,
+        event_session_id: r.event_session_id ?? null,
         group_booking_id: r.group_booking_id ?? null,
         person_label: r.person_label ?? null,
       };

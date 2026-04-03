@@ -28,6 +28,11 @@ export const openingHoursSchema = z.record(
   openingHoursDaySchema
 ).optional();
 
+const reminderEntrySchema = z.object({
+  reminder_1: z.number().int().min(0).max(336).optional(),
+  reminder_2: z.number().int().min(0).max(336).optional(),
+});
+
 /** Booking rules stored in venues.booking_rules. */
 export const bookingRulesSchema = z.object({
   min_party_size: z.number().int().min(1).max(20).default(1),
@@ -36,6 +41,9 @@ export const bookingRulesSchema = z.object({
   min_notice_hours: z.number().int().min(0).max(168).default(1),
   cancellation_notice_hours: z.number().int().min(0).max(168).optional(),
   allow_same_day_booking: z.boolean().optional(),
+  /** Sprint 1.5 — per-model overrides; keys are `BookingModel` strings. */
+  cancellation_notice_hours_by_model: z.record(z.string(), z.number().int().min(0).max(168)).optional(),
+  reminder_hours_before_by_model: z.record(z.string(), reminderEntrySchema).optional(),
 });
 
 /** Deposit config: which sources require deposit. */

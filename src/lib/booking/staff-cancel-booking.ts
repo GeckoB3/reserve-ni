@@ -1,0 +1,239 @@
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { stripe } from '@/lib/stripe';
+import {
+  applyBookingLifecycleStatusEffects,
+  validateBookingStatusTransition,
+} from '@/lib/table-management/lifecycle';
+import { enrichBookingEmailForComms } from '@/lib/emails/booking-email-enrichment';
+import { sendCancellationNotification } from '@/lib/communications/send-templated';
+import { inferBookingRowModel } from '@/lib/booking/infer-booking-row-model';
+import { getCancellationNoticeHoursForBooking, parseExtendedBookingRules } from '@/lib/booking/venue-booking-rules';
+import type { BookingEmailData, VenueEmailData } from '@/lib/emails/types';
+
+const CANCELLABLE = ['Pending', 'Confirmed', 'Seated'];
+
+export interface StaffCancelBookingNotifyOptions {
+  /** Prepended to refund lines (e.g. event cancelled by venue). */
+  refundMessagePrefix?: string | null;
+  actorId: string | null;
+}
+
+export interface StaffCancelBookingResult {
+  cancelled: boolean;
+  /** Run inside `after()` so the HTTP response is not blocked. */
+  scheduleNotification?: () => Promise<void>;
+}
+
+/**
+ * Staff-initiated cancellation with Stripe refund when policy allows, table lifecycle cleanup,
+ * and templated cancellation comms. Mirrors behaviour in PATCH /api/venue/bookings/[id].
+ */
+export async function cancelStaffBookingWithNotify(
+  admin: SupabaseClient,
+  staffDb: SupabaseClient,
+  venueId: string,
+  bookingId: string,
+  options: StaffCancelBookingNotifyOptions,
+): Promise<StaffCancelBookingResult> {
+  const { data: booking, error: bookErr } = await staffDb
+    .from('bookings')
+    .select(
+      'id, venue_id, guest_id, status, group_booking_id, stripe_payment_intent_id, deposit_status, deposit_amount_pence, cancellation_deadline, booking_date, booking_time, party_size, experience_event_id, class_instance_id, resource_id, event_session_id, calendar_id, service_item_id, practitioner_id, appointment_service_id',
+    )
+    .eq('id', bookingId)
+    .single();
+
+  if (bookErr || !booking) {
+    console.error('[staff-cancel-booking] load booking failed:', bookErr);
+    return { cancelled: false };
+  }
+
+  if (booking.venue_id !== venueId) {
+    return { cancelled: false };
+  }
+
+  const st = booking.status as string;
+  if (!CANCELLABLE.includes(st)) {
+    return { cancelled: false };
+  }
+
+  const transitionCheck = validateBookingStatusTransition(st, 'Cancelled');
+  if (!transitionCheck.ok) {
+    return { cancelled: false };
+  }
+
+  const groupBookingId = booking.group_booking_id as string | null | undefined;
+  let idsToCancel: string[] = [bookingId];
+  let paymentIntentForRefund: string | null =
+    typeof booking.stripe_payment_intent_id === 'string' ? booking.stripe_payment_intent_id : null;
+  let depositPenceForMessage: number | null =
+    typeof booking.deposit_amount_pence === 'number' ? booking.deposit_amount_pence : null;
+  let hadPaidDeposit = booking.deposit_status === 'Paid';
+
+  if (groupBookingId) {
+    const { data: groupRows } = await staffDb
+      .from('bookings')
+      .select('id, stripe_payment_intent_id, deposit_status, deposit_amount_pence, guest_id, status')
+      .eq('venue_id', venueId)
+      .eq('group_booking_id', groupBookingId)
+      .in('status', CANCELLABLE);
+
+    idsToCancel = (groupRows ?? []).map((r: { id: string }) => r.id);
+    if (idsToCancel.length === 0) {
+      idsToCancel = [bookingId];
+    }
+    const withPi = (groupRows ?? []).find(
+      (r: { stripe_payment_intent_id?: string | null }) => r.stripe_payment_intent_id,
+    );
+    paymentIntentForRefund =
+      typeof withPi?.stripe_payment_intent_id === 'string' ? withPi.stripe_payment_intent_id : paymentIntentForRefund;
+    const totalPence = (groupRows ?? []).reduce(
+      (sum: number, r: { deposit_amount_pence?: number | null }) => sum + (r.deposit_amount_pence ?? 0),
+      0,
+    );
+    if (totalPence > 0) {
+      depositPenceForMessage = totalPence;
+    }
+    hadPaidDeposit = (groupRows ?? []).some((r: { deposit_status?: string | null }) => r.deposit_status === 'Paid');
+  }
+
+  const deadline = booking.cancellation_deadline ? new Date(booking.cancellation_deadline) : null;
+  const canRefund =
+    Boolean(deadline && new Date() <= deadline && hadPaidDeposit && paymentIntentForRefund);
+
+  let refundSucceeded = false;
+  if (canRefund && paymentIntentForRefund) {
+    const { data: venueStripe } = await admin
+      .from('venues')
+      .select('stripe_connected_account_id')
+      .eq('id', venueId)
+      .single();
+    if (venueStripe?.stripe_connected_account_id) {
+      try {
+        await stripe.refunds.create(
+          { payment_intent: paymentIntentForRefund },
+          { stripeAccount: venueStripe.stripe_connected_account_id },
+        );
+        refundSucceeded = true;
+      } catch (refundErr) {
+        console.error('[staff-cancel-booking] refund failed:', refundErr);
+      }
+    }
+  }
+
+  const { data: beforeRows } = await admin
+    .from('bookings')
+    .select('id, guest_id, status')
+    .in('id', idsToCancel);
+
+  if (refundSucceeded) {
+    await staffDb
+      .from('bookings')
+      .update({
+        status: 'Cancelled',
+        deposit_status: 'Refunded',
+        updated_at: new Date().toISOString(),
+      })
+      .in('id', idsToCancel);
+  } else {
+    await staffDb
+      .from('bookings')
+      .update({
+        status: 'Cancelled',
+        updated_at: new Date().toISOString(),
+      })
+      .in('id', idsToCancel);
+  }
+
+  for (const row of beforeRows ?? []) {
+    const prev = (row as { status?: string }).status ?? st;
+    await applyBookingLifecycleStatusEffects(admin, {
+      bookingId: (row as { id: string }).id,
+      guestId: (row as { guest_id: string }).guest_id,
+      previousStatus: prev,
+      nextStatus: 'Cancelled',
+      actorId: options.actorId,
+    });
+  }
+
+  const { data: venueRow } = await staffDb
+    .from('venues')
+    .select('name, address, phone, booking_rules')
+    .eq('id', venueId)
+    .single();
+  const { data: guestRow } = await staffDb
+    .from('guests')
+    .select('name, email, phone')
+    .eq('id', booking.guest_id)
+    .single();
+
+  const cancelInferred = inferBookingRowModel(
+    booking as {
+      experience_event_id?: string | null;
+      class_instance_id?: string | null;
+      resource_id?: string | null;
+      event_session_id?: string | null;
+      calendar_id?: string | null;
+      service_item_id?: string | null;
+      practitioner_id?: string | null;
+      appointment_service_id?: string | null;
+    },
+  );
+  const cancelRules = parseExtendedBookingRules(venueRow?.booking_rules);
+  const refundWindowHoursDisplay = getCancellationNoticeHoursForBooking(cancelRules, cancelInferred, 48);
+
+  const depositAmountStr = depositPenceForMessage
+    ? `£${(depositPenceForMessage / 100).toFixed(2)}`
+    : null;
+
+  let refundLine: string;
+  if (refundSucceeded && depositAmountStr) {
+    refundLine = `Your deposit of ${depositAmountStr} will be refunded to your original payment method within 5–10 business days.`;
+  } else if (hadPaidDeposit && !canRefund && depositAmountStr) {
+    refundLine = `Your deposit of ${depositAmountStr} is non-refundable as the cancellation was made less than ${refundWindowHoursDisplay} hours before the start of your booking.`;
+  } else if (hadPaidDeposit && canRefund && !refundSucceeded && depositAmountStr) {
+    refundLine = `We were unable to process your refund automatically. Please contact the venue directly to arrange your refund of ${depositAmountStr}.`;
+  } else {
+    refundLine = '';
+  }
+
+  const prefix = (options.refundMessagePrefix ?? '').trim();
+  const refundMsgCombined =
+    prefix && refundLine
+      ? `${prefix} ${refundLine}`
+      : prefix
+        ? prefix
+        : refundLine || null;
+
+  const bookingTime = typeof booking.booking_time === 'string' ? booking.booking_time.slice(0, 5) : '';
+  const cancelBookingEmail: BookingEmailData = {
+    id: bookingId,
+    guest_name: guestRow?.name ?? 'Guest',
+    guest_email: guestRow?.email ?? null,
+    guest_phone: guestRow?.phone ?? null,
+    booking_date: booking.booking_date as string,
+    booking_time: bookingTime,
+    party_size: booking.party_size as number,
+    deposit_amount_pence: depositPenceForMessage ?? (booking.deposit_amount_pence as number | null) ?? null,
+    deposit_status: booking.deposit_status as string | null,
+  };
+  const cancelVenueEmail: VenueEmailData = {
+    name: venueRow?.name ?? 'Venue',
+    address: venueRow?.address ?? null,
+    phone: venueRow?.phone ?? null,
+  };
+
+  let scheduleNotification: (() => Promise<void>) | undefined;
+  if (guestRow && venueRow?.name) {
+    scheduleNotification = async () => {
+      try {
+        const enriched = await enrichBookingEmailForComms(admin, bookingId, cancelBookingEmail);
+        await sendCancellationNotification(enriched, cancelVenueEmail, venueId, refundMsgCombined);
+      } catch (commsErr) {
+        console.error('[staff-cancel-booking] cancellation notification failed:', commsErr);
+      }
+    };
+  }
+
+  return { cancelled: true, scheduleNotification };
+}

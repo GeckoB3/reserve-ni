@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
+import { bookingModelShortLabel } from '@/lib/booking/infer-booking-row-model';
+import type { BookingModel } from '@/types/booking-models';
 
 interface BookingDetails {
   booking_id: string;
@@ -16,13 +18,22 @@ interface BookingDetails {
   deposit_amount_pence: number | null;
   status: string;
   is_appointment?: boolean;
+  booking_model?: BookingModel;
   practitioner_id?: string | null;
   appointment_service_id?: string | null;
   practitioner_name?: string | null;
   appointment_service_name?: string | null;
+  event_name?: string | null;
+  class_summary?: string | null;
+  resource_name?: string | null;
+  booking_end_time?: string | null;
   refund_notice_hours?: number;
   /** ISO timestamp for optimistic concurrency on guest modify */
   updated_at?: string;
+}
+
+function isCdeModel(m: BookingModel): boolean {
+  return m === 'event_ticket' || m === 'class_session' || m === 'resource_booking';
 }
 
 interface Slot {
@@ -139,16 +150,23 @@ export function ManageBookingView({ bookingId, token, hmac }: { bookingId: strin
 
   if (cancelled) {
     const appt = details?.is_appointment;
+    const cde = details?.booking_model ? isCdeModel(details.booking_model) : false;
+    const title =
+      appt && !cde ? 'Appointment cancelled' : 'Booking cancelled';
+    const subtitle =
+      appt && !cde
+        ? 'Your appointment has been cancelled.'
+        : cde
+          ? 'Your booking has been cancelled.'
+          : 'Your reservation has been cancelled.';
     return (
       <div className="w-full max-w-md text-center">
         <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm space-y-4">
           <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-full bg-slate-100">
             <svg className="h-6 w-6 text-slate-500" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" /></svg>
           </div>
-          <h2 className="text-lg font-semibold text-slate-900">{appt ? 'Appointment cancelled' : 'Booking cancelled'}</h2>
-          <p className="text-sm text-slate-500">
-            {appt ? 'Your appointment has been cancelled.' : 'Your reservation has been cancelled.'}
-          </p>
+          <h2 className="text-lg font-semibold text-slate-900">{title}</h2>
+          <p className="text-sm text-slate-500">{subtitle}</p>
           {refundMessage && (
             <div className="rounded-xl bg-blue-50 border border-blue-200 px-4 py-3 text-left">
               <p className="text-sm font-medium text-blue-800">Deposit refund</p>
@@ -167,7 +185,24 @@ export function ManageBookingView({ bookingId, token, hmac }: { bookingId: strin
   const canModify = details.status === 'Confirmed' || details.status === 'Pending';
   const canCancel = details.status === 'Confirmed' || details.status === 'Pending';
   const isAppointment = Boolean(details.is_appointment);
+  const bookingModel: BookingModel = details.booking_model ?? 'table_reservation';
+  const isCde = isCdeModel(bookingModel);
+  const isTableBooking = bookingModel === 'table_reservation';
   const refundHours = details.refund_notice_hours ?? 48;
+
+  const cdeSummary =
+    details.event_name ??
+    details.class_summary ??
+    (details.resource_name
+      ? details.booking_end_time
+        ? `${details.resource_name} · until ${details.booking_end_time}`
+        : details.resource_name
+      : null);
+
+  const showGuestModify = canModify && !isCde && (isAppointment || isTableBooking);
+  const modifyButtonLabel = isAppointment ? 'Change appointment' : 'Modify booking';
+  const cancelButtonLabel = isCde ? 'Cancel booking' : isAppointment ? 'Cancel appointment' : 'Cancel reservation';
+  const keepButtonLabel = isCde ? 'Keep booking' : isAppointment ? 'Keep appointment' : 'Keep booking';
 
   return (
     <div className="w-full max-w-lg">
@@ -188,7 +223,20 @@ export function ManageBookingView({ bookingId, token, hmac }: { bookingId: strin
             </div>
           )}
 
-          {isAppointment ? (
+          {isCde ? (
+            <div className="space-y-3">
+              <div className="rounded-xl border border-slate-100 bg-slate-50/80 px-3 py-2.5">
+                <p className="text-xs font-medium text-slate-500">{bookingModelShortLabel(bookingModel)} booking</p>
+                {cdeSummary && <p className="mt-1 text-sm font-semibold text-slate-800 leading-snug">{cdeSummary}</p>}
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <DetailTile label="Date" value={dateStr} />
+                <DetailTile label="Time" value={details.booking_time.slice(0, 5)} />
+                <DetailTile label="Guests" value={`${details.party_size}`} />
+                <DetailTile label="Status" value={details.status} />
+              </div>
+            </div>
+          ) : isAppointment ? (
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <DetailTile label="Service" value={details.appointment_service_name ?? '-'} />
               <DetailTile label="Staff" value={details.practitioner_name ?? '-'} />
@@ -213,17 +261,17 @@ export function ManageBookingView({ bookingId, token, hmac }: { bookingId: strin
             </div>
           )}
 
-          {canModify && !showModify && !showCancelConfirm && (
+          {showGuestModify && !showModify && !showCancelConfirm && (
             <button
               type="button"
               onClick={() => { setShowModify(true); setShowCancelConfirm(false); }}
               className="w-full rounded-xl border border-brand-200 bg-white px-4 py-3 text-sm font-medium text-brand-600 hover:bg-brand-50"
             >
-              {isAppointment ? 'Change appointment' : 'Modify booking'}
+              {modifyButtonLabel}
             </button>
           )}
 
-          {canModify && showModify && isAppointment && details.practitioner_id && details.appointment_service_id && (
+          {showGuestModify && showModify && isAppointment && details.practitioner_id && details.appointment_service_id && (
             <ModifyAppointmentSection
               bookingId={bookingId}
               venueId={details.venue_id}
@@ -259,7 +307,7 @@ export function ManageBookingView({ bookingId, token, hmac }: { bookingId: strin
               onClick={() => { setShowCancelConfirm(true); setShowModify(false); }}
               className="w-full rounded-xl border border-red-200 bg-white px-4 py-3 text-sm font-medium text-red-600 hover:bg-red-50"
             >
-              {isAppointment ? 'Cancel appointment' : 'Cancel reservation'}
+              {cancelButtonLabel}
             </button>
           )}
 
@@ -283,7 +331,7 @@ export function ManageBookingView({ bookingId, token, hmac }: { bookingId: strin
                   {cancelling ? 'Cancelling...' : 'Yes, cancel'}
                 </button>
                 <button type="button" onClick={() => { setShowCancelConfirm(false); setError(null); }} className="flex-1 rounded-lg border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-50">
-                  {isAppointment ? 'Keep appointment' : 'Keep booking'}
+                  {keepButtonLabel}
                 </button>
               </div>
             </div>

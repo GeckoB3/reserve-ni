@@ -1,5 +1,7 @@
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { hasServiceConfig } from '@/lib/availability';
+import { normalizeEnabledModels } from '@/lib/booking/enabled-models';
+import type { BookingModel } from '@/types/booking-models';
 import type { VenuePublic } from '@/components/booking/types';
 
 /** Loads a venue for the public /book/[slug] pages (admin client; slug is public). */
@@ -8,13 +10,15 @@ export async function getPublicVenueForBookBySlug(slug: string): Promise<VenuePu
   const { data, error } = await supabase
     .from('venues')
     .select(
-      'id, name, slug, cover_photo_url, address, phone, website_url, deposit_config, booking_rules, opening_hours, timezone, booking_model, terminology, currency',
+      'id, name, slug, cover_photo_url, address, phone, website_url, deposit_config, booking_rules, opening_hours, timezone, booking_model, enabled_models, terminology, currency',
     )
     .eq('slug', slug)
     .single();
   if (error || !data) return null;
 
-  const bookingModel = (data.booking_model as string) ?? 'table_reservation';
+  const bookingModel = (data.booking_model as BookingModel) ?? 'table_reservation';
+  const row = data as { enabled_models?: unknown };
+  (data as VenuePublic).enabled_models = normalizeEnabledModels(row.enabled_models, bookingModel);
 
   if (bookingModel === 'table_reservation') {
     const usesNewEngine = await hasServiceConfig(supabase, data.id);

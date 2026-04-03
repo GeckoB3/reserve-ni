@@ -1,4 +1,5 @@
-import { BookingFlowRouter, type LockedPractitionerBooking } from '@/components/booking/BookingFlowRouter';
+import { BookPublicBookingFlow } from '@/components/booking/BookPublicBookingFlow';
+import type { LockedPractitionerBooking } from '@/components/booking/BookingFlowRouter';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 import { BookVenueTitle } from '@/components/booking/BookVenueTitle';
 import type { VenuePublic, OpeningHours } from '@/components/booking/types';
@@ -152,11 +153,7 @@ export function BookPublicLayout({ venue, lockedPractitioner }: BookPublicLayout
       {venue.opening_hours && <OpeningHoursDisplay hours={venue.opening_hours} />}
 
       <div className="mx-auto max-w-lg px-4 py-8 pb-24">
-        <BookingFlowRouter
-          venue={venue}
-          cancellationPolicy={CANCELLATION_POLICY}
-          lockedPractitioner={lockedPractitioner ?? undefined}
-        />
+        <BookPublicBookingFlow venue={venue} lockedPractitioner={lockedPractitioner ?? undefined} />
       </div>
 
       <footer className="fixed bottom-0 left-0 right-0 border-t border-slate-200 bg-white/90 backdrop-blur py-3 text-center text-xs text-slate-400">

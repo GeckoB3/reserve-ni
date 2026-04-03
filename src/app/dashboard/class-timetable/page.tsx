@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
 import { getDashboardStaff } from '@/lib/venue-auth';
+import { getSupabaseAdminClient } from '@/lib/supabase';
 import { ClassTimetableView } from './ClassTimetableView';
 
 export default async function ClassTimetablePage() {
@@ -19,10 +20,14 @@ export default async function ClassTimetablePage() {
     );
   }
 
+  const admin = getSupabaseAdminClient();
+  const { data: venue } = await admin.from('venues').select('currency').eq('id', staff.venue_id).single();
+  const currency = (venue?.currency as string) ?? 'GBP';
+
   return (
     <div className="p-4 md:p-6 lg:p-8">
       <div className="mx-auto max-w-6xl">
-        <ClassTimetableView venueId={staff.venue_id} isAdmin={staff.role === 'admin'} />
+        <ClassTimetableView venueId={staff.venue_id} isAdmin={staff.role === 'admin'} currency={currency} />
       </div>
     </div>
   );

@@ -6,8 +6,10 @@ import type { SetupStatus } from '@/app/api/venue/setup-status/route';
 import type { BookingModel } from '@/types/booking-models';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 
+type SetupStepKey = keyof Omit<SetupStatus, 'is_admin' | 'booking_model' | 'enabled_models'>;
+
 interface Step {
-  key: keyof Omit<SetupStatus, 'is_admin' | 'booking_model'>;
+  key: SetupStepKey;
   label: string;
   description: string;
   href: string;
@@ -66,7 +68,10 @@ function isSetupComplete(s: SetupStatus) {
     s.availability_set &&
     s.guest_booking_ready &&
     s.stripe_connected &&
-    s.first_booking_made
+    s.first_booking_made &&
+    s.secondary_event_catalog_ready &&
+    s.secondary_class_catalog_ready &&
+    s.secondary_resource_catalog_ready
   );
 }
 
@@ -94,7 +99,39 @@ function getGuestBookingStep(model: BookingModel): Step {
   }
 }
 
-function getSteps(model: BookingModel): Step[] {
+function getSecondaryCatalogSteps(enabledModels: BookingModel[]): Step[] {
+  const steps: Step[] = [];
+  if (enabledModels.includes('event_ticket')) {
+    steps.push({
+      key: 'secondary_event_catalog_ready',
+      label: 'Events (add-on)',
+      description: 'Add at least one ticketed event so guests can book it from the Events tab.',
+      href: '/dashboard/event-manager',
+      actionLabel: 'View events',
+    });
+  }
+  if (enabledModels.includes('class_session')) {
+    steps.push({
+      key: 'secondary_class_catalog_ready',
+      label: 'Classes & timetable (add-on)',
+      description: 'Add at least one class type and schedule so guests can book classes.',
+      href: '/dashboard/class-timetable',
+      actionLabel: 'View timetable',
+    });
+  }
+  if (enabledModels.includes('resource_booking')) {
+    steps.push({
+      key: 'secondary_resource_catalog_ready',
+      label: 'Resources (add-on)',
+      description: 'Add at least one bookable resource so guests can book it.',
+      href: '/dashboard/resource-timeline',
+      actionLabel: 'View resources',
+    });
+  }
+  return steps;
+}
+
+function getSteps(model: BookingModel, enabledModels: BookingModel[]): Step[] {
   const base: Step[] = [
     {
       key: 'profile_complete',
@@ -108,6 +145,7 @@ function getSteps(model: BookingModel): Step[] {
   if (model === 'table_reservation' || isUnifiedSchedulingVenue(model)) {
     base.push(getGuestBookingStep(model));
   }
+  base.push(...getSecondaryCatalogSteps(enabledModels));
   base.push(
     {
       key: 'stripe_connected',
@@ -158,8 +196,8 @@ export function SetupChecklist() {
   }, []);
 
   const steps = useMemo(
-    () => getSteps(status?.booking_model ?? 'table_reservation'),
-    [status?.booking_model]
+    () => getSteps(status?.booking_model ?? 'table_reservation', status?.enabled_models ?? []),
+    [status?.booking_model, status?.enabled_models],
   );
 
   function dismiss() {

@@ -138,7 +138,9 @@ export function ResourceBookingFlow({ venue, cancellationPolicy }: { venue: Venu
           {loading ? (
             <div className="space-y-3">{[1, 2].map((i) => <div key={i} className="h-20 animate-pulse rounded-xl bg-slate-100" />)}</div>
           ) : resources.length === 0 ? (
-            <p className="text-sm text-slate-500">No resources available on this date.</p>
+            <p className="text-sm text-slate-500">
+              No resources available on this date. Try another date or contact the venue.
+            </p>
           ) : (
             <div className="space-y-3">
               {resources.map((r) => (
@@ -171,7 +173,9 @@ export function ResourceBookingFlow({ venue, cancellationPolicy }: { venue: Venu
           <button onClick={() => { setSelectedResource(null); setStep('resource'); }} className="mb-4 text-sm text-brand-600 hover:underline">&larr; Back</button>
           <h2 className="mb-4 text-lg font-semibold text-slate-900">{selectedResource.name} — Pick a time</h2>
           {selectedResource.slots.length === 0 ? (
-            <p className="text-sm text-slate-500">No available times for this duration.</p>
+            <p className="text-sm text-slate-500">
+              No available times for this duration. Try a different length or date, or contact the venue.
+            </p>
           ) : (
             <div className="flex flex-wrap gap-2">
               {selectedResource.slots.map((slot) => (

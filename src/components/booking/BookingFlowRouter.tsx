@@ -1,6 +1,7 @@
 'use client';
 
 import type { VenuePublic } from './types';
+import type { BookingModel } from '@/types/booking-models';
 import { BookingFlow } from './BookingFlow';
 import { AppointmentBookingFlow } from './AppointmentBookingFlow';
 import { EventBookingFlow } from './EventBookingFlow';
@@ -16,6 +17,8 @@ export interface LockedPractitionerBooking {
 
 interface Props {
   venue: VenuePublic;
+  /** Multi-tab public page: which flow to render; defaults to `venue.booking_model`. */
+  activeBookingModel?: BookingModel;
   embed?: boolean;
   onHeightChange?: (height: number) => void;
   cancellationPolicy?: string;
@@ -37,13 +40,17 @@ interface Props {
  */
 export function BookingFlowRouter({
   venue,
+  activeBookingModel,
   embed,
   onHeightChange,
   cancellationPolicy,
   accentColour,
   lockedPractitioner,
 }: Props) {
-  switch (venue.booking_model) {
+  const model: BookingModel =
+    activeBookingModel ?? ((venue.booking_model as BookingModel | undefined) ?? 'table_reservation');
+
+  switch (model) {
     case 'practitioner_appointment':
     case 'unified_scheduling':
       return (

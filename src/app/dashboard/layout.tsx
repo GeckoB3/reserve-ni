@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { DashboardSidebar } from './DashboardSidebar';
 import { SessionTimeoutGuard } from '@/components/SessionTimeoutGuard';
+import { normalizeEnabledModels } from '@/lib/booking/enabled-models';
 import type { BookingModel } from '@/types/booking-models';
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -19,6 +20,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   let tableManagementEnabled = false;
   let pricingTier = 'standard';
   let bookingModel: BookingModel = 'table_reservation';
+  let enabledModels: BookingModel[] = [];
   let venueId: string | undefined;
   let isAdmin = false;
   let planStatus: string = 'active';
@@ -44,7 +46,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
       const { data: venue } = await admin
         .from('venues')
         .select(
-          'name, slug, table_management_enabled, booking_model, plan_status, onboarding_completed, pricing_tier, terminology',
+          'name, slug, table_management_enabled, booking_model, enabled_models, plan_status, onboarding_completed, pricing_tier, terminology',
         )
         .eq('id', venueId)
         .single();
@@ -53,6 +55,10 @@ export default async function DashboardLayout({ children }: { children: React.Re
       tableManagementEnabled = venue?.table_management_enabled ?? false;
       pricingTier = (venue?.pricing_tier as string) ?? 'standard';
       bookingModel = (venue?.booking_model as BookingModel) ?? 'table_reservation';
+      enabledModels = normalizeEnabledModels(
+        (venue as { enabled_models?: unknown } | null)?.enabled_models,
+        bookingModel,
+      );
       planStatus = (venue?.plan_status as string) ?? 'active';
       onboardingCompleted = (venue?.onboarding_completed as boolean) ?? true;
       const rawTerms = (venue as { terminology?: unknown } | null)?.terminology;
@@ -79,6 +85,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
         tableManagementEnabled={tableManagementEnabled}
         pricingTier={pricingTier}
         bookingModel={bookingModel}
+        enabledModels={enabledModels}
         isAdmin={isAdmin}
         venueTerminology={venueTerminology}
       />

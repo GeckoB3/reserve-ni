@@ -4,7 +4,7 @@ import { getVenueStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { generateConfirmToken, hashConfirmToken } from '@/lib/confirm-token';
 import { sendBookingConfirmationNotifications } from '@/lib/communications/send-templated';
-import { enrichBookingEmailForAppointment } from '@/lib/emails/booking-email-enrichment';
+import { enrichBookingEmailForComms } from '@/lib/emails/booking-email-enrichment';
 import { createShortManageLink } from '@/lib/short-manage-link';
 
 export async function POST(
@@ -67,7 +67,7 @@ export async function POST(
     deposit_status: booking.deposit_status ?? null,
     manage_booking_link: manageBookingLink,
   };
-  const enriched = await enrichBookingEmailForAppointment(admin, booking.id, basePayload);
+  const enriched = await enrichBookingEmailForComms(admin, booking.id, basePayload);
   await sendBookingConfirmationNotifications(
     enriched,
     { name: venue.name, address: venue.address ?? undefined },

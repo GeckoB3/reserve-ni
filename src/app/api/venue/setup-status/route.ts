@@ -6,6 +6,7 @@ import { stripe } from '@/lib/stripe';
 import { hasServiceConfig } from '@/lib/availability';
 import { computeGuestBookingReady } from '@/lib/setup-guest-booking-ready';
 import type { BookingModel } from '@/types/booking-models';
+import { normalizeEnabledModels } from '@/lib/booking/enabled-models';
 
 export interface SetupStatus {
   profile_complete: boolean;
@@ -16,6 +17,15 @@ export interface SetupStatus {
   first_booking_made: boolean;
   is_admin: boolean;
   booking_model: BookingModel;
+  /** Normalised secondary models (C/D/E). */
+  enabled_models: BookingModel[];
+  /**
+   * When `event_ticket` is in `enabled_models`, true if at least one experience event exists.
+   * When not enabled, always true (N/A).
+   */
+  secondary_event_catalog_ready: boolean;
+  secondary_class_catalog_ready: boolean;
+  secondary_resource_catalog_ready: boolean;
 }
 
 async function checkAvailabilitySet(
@@ -65,26 +75,44 @@ export async function GET() {
     const staff = await getVenueStaff(supabase);
     if (!staff) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
 
+    const venueId = staff.venue_id;
+
     const { data: venue } = await staff.db
       .from('venues')
-      .select('name, address, phone, stripe_connected_account_id, booking_model')
-      .eq('id', staff.venue_id)
+      .select('name, address, phone, stripe_connected_account_id, booking_model, enabled_models')
+      .eq('id', venueId)
       .single();
 
     if (!venue) return NextResponse.json({ error: 'Venue not found' }, { status: 404 });
 
     const bookingModel = (venue.booking_model as BookingModel) ?? 'table_reservation';
+    const enabledModels = normalizeEnabledModels(
+      (venue as { enabled_models?: unknown }).enabled_models,
+      bookingModel,
+    );
     const profileComplete = Boolean(venue.name && venue.address && venue.phone);
 
     const admin = getSupabaseAdminClient();
-    const availabilitySet = await checkAvailabilitySet(admin, staff.venue_id, bookingModel);
+    const availabilitySet = await checkAvailabilitySet(admin, venueId, bookingModel);
 
     const guestBookingReady = await computeGuestBookingReady(
       admin,
-      staff.venue_id,
+      venueId,
       bookingModel,
       availabilitySet,
     );
+
+    async function secondaryCatalogReady(m: BookingModel): Promise<boolean> {
+      if (!enabledModels.includes(m)) return true;
+      return checkAvailabilitySet(admin, venueId, m);
+    }
+
+    const [secondaryEventCatalogReady, secondaryClassCatalogReady, secondaryResourceCatalogReady] =
+      await Promise.all([
+        secondaryCatalogReady('event_ticket'),
+        secondaryCatalogReady('class_session'),
+        secondaryCatalogReady('resource_booking'),
+      ]);
 
     let stripeConnected = false;
     if (venue.stripe_connected_account_id) {
@@ -99,7 +127,7 @@ export async function GET() {
     const { count: bookingCount } = await staff.db
       .from('bookings')
       .select('id', { count: 'exact', head: true })
-      .eq('venue_id', staff.venue_id);
+      .eq('venue_id', venueId);
 
     const firstBookingMade = (bookingCount ?? 0) > 0;
 
@@ -111,6 +139,10 @@ export async function GET() {
       first_booking_made: firstBookingMade,
       is_admin: staff.role === 'admin',
       booking_model: bookingModel,
+      enabled_models: enabledModels,
+      secondary_event_catalog_ready: secondaryEventCatalogReady,
+      secondary_class_catalog_ready: secondaryClassCatalogReady,
+      secondary_resource_catalog_ready: secondaryResourceCatalogReady,
     };
 
     return NextResponse.json(status);

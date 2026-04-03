@@ -3,7 +3,86 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff } from '@/lib/venue-auth';
 import type { BookingModel } from '@/types/booking-models';
+import { BOOKING_MODEL_ORDER } from '@/lib/booking/enabled-models';
+import { inferBookingRowModel, bookingModelShortLabel } from '@/lib/booking/infer-booking-row-model';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
+
+export interface ReportByBookingModelRow {
+  booking_model: BookingModel;
+  label: string;
+  booking_count: number;
+  covers: number;
+  cancelled_count: number;
+  completed_count: number;
+  checked_in_count: number;
+  deposit_pence_collected: number;
+}
+
+type BookingBreakdownInput = {
+  party_size: number | null;
+  status: string | null;
+  deposit_amount_pence: number | null;
+  deposit_status: string | null;
+  experience_event_id: string | null;
+  class_instance_id: string | null;
+  resource_id: string | null;
+  event_session_id: string | null;
+  calendar_id: string | null;
+  service_item_id: string | null;
+  practitioner_id: string | null;
+  appointment_service_id: string | null;
+  checked_in_at: string | null;
+};
+
+function buildBookingModelBreakdown(rows: BookingBreakdownInput[]): ReportByBookingModelRow[] {
+  const acc = new Map<
+    BookingModel,
+    {
+      booking_count: number;
+      covers: number;
+      cancelled_count: number;
+      completed_count: number;
+      checked_in_count: number;
+      deposit_pence_collected: number;
+    }
+  >();
+
+  for (const r of rows) {
+    const m = inferBookingRowModel(r);
+    const cur =
+      acc.get(m) ?? {
+        booking_count: 0,
+        covers: 0,
+        cancelled_count: 0,
+        completed_count: 0,
+        checked_in_count: 0,
+        deposit_pence_collected: 0,
+      };
+    cur.booking_count += 1;
+    cur.covers += typeof r.party_size === 'number' && r.party_size > 0 ? r.party_size : 0;
+    if (r.status === 'Cancelled') cur.cancelled_count += 1;
+    if (r.status === 'Completed') cur.completed_count += 1;
+    if (r.checked_in_at) cur.checked_in_count += 1;
+    if (r.deposit_status === 'Paid' && typeof r.deposit_amount_pence === 'number') {
+      cur.deposit_pence_collected += r.deposit_amount_pence;
+    }
+    acc.set(m, cur);
+  }
+
+  return BOOKING_MODEL_ORDER.filter((bm) => acc.has(bm)).map((booking_model) => {
+    const v = acc.get(booking_model)!;
+    return {
+      booking_model,
+      label: bookingModelShortLabel(booking_model),
+      booking_count: v.booking_count,
+      covers: v.covers,
+      cancelled_count: v.cancelled_count,
+      completed_count: v.completed_count,
+      checked_in_count: v.checked_in_count,
+      deposit_pence_collected: v.deposit_pence_collected,
+    };
+  });
+}
 
 export interface AppointmentInsightsRow {
   practitioner_id: string;
@@ -175,6 +254,20 @@ export async function GET(request: NextRequest) {
       console.error('report_client_summary failed:', eClient);
     }
 
+    const { data: bookingRowsForModel, error: eBm } = await supabase
+      .from('bookings')
+      .select(
+        `party_size, status, deposit_amount_pence, deposit_status, experience_event_id, class_instance_id, resource_id, event_session_id, calendar_id, service_item_id, practitioner_id, appointment_service_id, checked_in_at`,
+      )
+      .eq('venue_id', staff.venue_id)
+      .gte('booking_date', from)
+      .lte('booking_date', to);
+
+    if (eBm) {
+      console.error('[reports] booking model breakdown query failed:', eBm);
+    }
+    const report_by_booking_model = buildBookingModelBreakdown((bookingRowsForModel ?? []) as BookingBreakdownInput[]);
+
     const clientSummaryParsed = clientSummaryRaw as Record<string, unknown> | null;
     const client_summary = {
       identified_clients_total: Number(clientSummaryParsed?.identified_clients_total ?? 0),
@@ -250,6 +343,7 @@ export async function GET(request: NextRequest) {
       report4_deposit: depositObj ?? null,
       report5_table_utilisation: tableUtilisation,
       report7_appointment_insights: report7_appointment_insights,
+      report_by_booking_model,
       client_summary,
     });
   } catch (err) {

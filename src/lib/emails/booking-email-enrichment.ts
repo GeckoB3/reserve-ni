@@ -186,3 +186,88 @@ export async function enrichBookingEmailForAppointment(
     ...(groupAppointments && groupAppointments.length > 0 ? { group_appointments: groupAppointments } : {}),
   };
 }
+
+/**
+ * Models C/D/E: event, class, resource — labels for confirmation/reminder templates from FK ids.
+ * Run after `enrichBookingEmailForAppointment` so USE/Model B wins when both anchors exist.
+ */
+export async function enrichBookingEmailForSecondaryModels(
+  supabase: SupabaseClient,
+  bookingId: string,
+  base: BookingEmailData,
+): Promise<BookingEmailData> {
+  const { data: row, error } = await supabase
+    .from('bookings')
+    .select('experience_event_id, class_instance_id, resource_id, booking_end_time')
+    .eq('id', bookingId)
+    .maybeSingle();
+
+  if (error || !row) return base;
+
+  const r = row as {
+    experience_event_id: string | null;
+    class_instance_id: string | null;
+    resource_id: string | null;
+    booking_end_time: string | null;
+  };
+
+  if (r.experience_event_id) {
+    const { data: ev } = await supabase
+      .from('experience_events')
+      .select('name')
+      .eq('id', r.experience_event_id)
+      .maybeSingle();
+    return {
+      ...base,
+      email_variant: 'appointment',
+      booking_model: 'event_ticket',
+      appointment_service_name: ev?.name ?? base.appointment_service_name ?? null,
+    };
+  }
+
+  if (r.class_instance_id) {
+    const { data: inst } = await supabase
+      .from('class_instances')
+      .select('class_type_id')
+      .eq('id', r.class_instance_id)
+      .maybeSingle();
+    const ctId = inst?.class_type_id;
+    if (ctId) {
+      const { data: ct } = await supabase.from('class_types').select('name').eq('id', ctId).maybeSingle();
+      return {
+        ...base,
+        email_variant: 'appointment',
+        booking_model: 'class_session',
+        appointment_service_name: ct?.name ?? base.appointment_service_name ?? null,
+      };
+    }
+  }
+
+  if (r.resource_id) {
+    const { data: res } = await supabase
+      .from('venue_resources')
+      .select('name')
+      .eq('id', r.resource_id)
+      .maybeSingle();
+    const end = r.booking_end_time ? String(r.booking_end_time).slice(0, 5) : null;
+    return {
+      ...base,
+      email_variant: 'appointment',
+      booking_model: 'resource_booking',
+      appointment_service_name: res?.name ?? base.appointment_service_name ?? null,
+      practitioner_name: end ? `Until ${end}` : base.practitioner_name ?? null,
+    };
+  }
+
+  return base;
+}
+
+/** Appointment/USE enrichment then C/D/E labels for transactional and scheduled comms. */
+export async function enrichBookingEmailForComms(
+  supabase: SupabaseClient,
+  bookingId: string,
+  base: BookingEmailData,
+): Promise<BookingEmailData> {
+  const appt = await enrichBookingEmailForAppointment(supabase, bookingId, base);
+  return enrichBookingEmailForSecondaryModels(supabase, bookingId, appt);
+}

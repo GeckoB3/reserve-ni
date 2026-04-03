@@ -1,3 +1,5 @@
+import type { BookingModel } from '@/types/booking-models';
+
 export type OpeningHourDay =
   | { closed: true }
   | { periods: { open: string; close: string }[] };
@@ -18,6 +20,8 @@ export interface VenuePublic {
   opening_hours: OpeningHours | null;
   timezone: string;
   booking_model?: string;
+  /** Normalised secondary models (C/D/E); from `venues.enabled_models`. */
+  enabled_models?: BookingModel[];
   terminology?: { client: string; booking: string; staff: string };
   currency?: string;
 }

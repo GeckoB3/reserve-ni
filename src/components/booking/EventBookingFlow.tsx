@@ -125,7 +125,9 @@ export function EventBookingFlow({ venue, cancellationPolicy }: { venue: VenuePu
           {loading ? (
             <div className="space-y-3">{[1, 2].map((i) => <div key={i} className="h-24 animate-pulse rounded-xl bg-slate-100" />)}</div>
           ) : events.length === 0 ? (
-            <p className="text-sm text-slate-500">No events on this date.</p>
+            <p className="text-sm text-slate-500">
+              No events on this date. Try another date or contact the venue.
+            </p>
           ) : (
             <div className="space-y-3">
               {events.map((event) => (

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
-import { BookingFlowRouter } from '@/components/booking/BookingFlowRouter';
+import { BookPublicBookingFlow } from '@/components/booking/BookPublicBookingFlow';
 import type { VenuePublic } from '@/components/booking/types';
 import { displayLabelForWebsiteUrl } from '@/lib/urls/website-url';
 
@@ -96,7 +96,12 @@ export default function EmbedPage() {
           </a>
         </p>
       ) : null}
-      <BookingFlowRouter venue={venue} embed onHeightChange={onHeightChange} accentColour={accentColour ?? undefined} cancellationPolicy="Full refund if cancelled 48+ hours before your reservation. No refund within 48 hours or for no-shows." />
+      <BookPublicBookingFlow
+        venue={venue}
+        embed
+        onHeightChange={onHeightChange}
+        accentColour={accentColour ?? undefined}
+      />
     </main>
   );
 }

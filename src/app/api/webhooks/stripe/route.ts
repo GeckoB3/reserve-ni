@@ -5,7 +5,7 @@ import { getSupabaseAdminClient } from '@/lib/supabase';
 import { sendCommunication } from '@/lib/communications';
 import { generateConfirmToken, hashConfirmToken } from '@/lib/confirm-token';
 import { sendBookingConfirmationNotifications, sendDepositConfirmationEmail } from '@/lib/communications/send-templated';
-import { enrichBookingEmailForAppointment } from '@/lib/emails/booking-email-enrichment';
+import { enrichBookingEmailForComms } from '@/lib/emails/booking-email-enrichment';
 import { isSelfServeBookingSource } from '@/lib/booking-source';
 import { createShortManageLink } from '@/lib/short-manage-link';
 
@@ -129,7 +129,7 @@ export async function POST(request: NextRequest) {
       const skipDepositReceipt = isSelfServeBookingSource(booking.source as string | null);
       after(async () => {
         try {
-          const enriched = await enrichBookingEmailForAppointment(getSupabaseAdminClient(), bookingId, bookingData);
+          const enriched = await enrichBookingEmailForComms(getSupabaseAdminClient(), bookingId, bookingData);
           const { email: confEmail, sms: confSms } = await sendBookingConfirmationNotifications(
             enriched,
             venueData,
@@ -145,7 +145,7 @@ export async function POST(request: NextRequest) {
 
         if (hasDeposit && !skipDepositReceipt) {
           try {
-            const enrichedDep = await enrichBookingEmailForAppointment(getSupabaseAdminClient(), bookingId, bookingData);
+            const enrichedDep = await enrichBookingEmailForComms(getSupabaseAdminClient(), bookingId, bookingData);
             const depResult = await sendDepositConfirmationEmail(enrichedDep, venueData, venueIdForAfter);
             if (!depResult.sent) console.warn('[after] webhook deposit email not sent:', depResult.reason);
           } catch (err) {

@@ -22,6 +22,9 @@ import {
 } from '@/lib/table-management/booking-status';
 import { useToast } from '@/components/ui/Toast';
 import { DashboardStatCard } from '@/components/dashboard/DashboardStatCard';
+import type { BookingModel } from '@/types/booking-models';
+import { BOOKING_MODEL_ORDER } from '@/lib/booking/enabled-models';
+import { inferBookingRowModel, bookingModelShortLabel } from '@/lib/booking/infer-booking-row-model';
 
 interface BookingRow {
   id: string;
@@ -46,6 +49,12 @@ interface BookingRow {
   appointment_service_id?: string | null;
   group_booking_id?: string | null;
   person_label?: string | null;
+  experience_event_id?: string | null;
+  class_instance_id?: string | null;
+  resource_id?: string | null;
+  event_session_id?: string | null;
+  calendar_id?: string | null;
+  service_item_id?: string | null;
 }
 
 interface BookingDetailLite {
@@ -53,6 +62,7 @@ interface BookingDetailLite {
   special_requests: string | null;
   internal_notes: string | null;
   cancellation_deadline: string | null;
+  checked_in_at?: string | null;
   table_assignments?: Array<{ id: string; name: string }>;
   guest: {
     name: string | null;
@@ -62,6 +72,13 @@ interface BookingDetailLite {
   } | null;
   communications: Array<{ id: string; message_type: string; channel: string; status: string; created_at: string }>;
   events: Array<{ id: string; event_type: string; created_at: string }>;
+  /** Populated for C/D/E rows (see GET /api/venue/bookings/[id]). */
+  cde_context?: {
+    inferred_model: BookingModel;
+    title: string;
+    subtitle?: string | null;
+  } | null;
+  inferred_booking_model?: BookingModel;
 }
 
 type ViewMode = 'day' | 'week' | 'month' | 'custom';
@@ -146,13 +163,24 @@ function buildCoversOccupancyMap(dayData: DaySheetForTableChange | null, exclude
   return map;
 }
 
-export function BookingsDashboard({ venueId, currency }: { venueId: string; currency?: string }) {
+export function BookingsDashboard({
+  venueId,
+  currency,
+  primaryBookingModel = 'table_reservation',
+  enabledModels = [],
+}: {
+  venueId: string;
+  currency?: string;
+  primaryBookingModel?: BookingModel;
+  enabledModels?: BookingModel[];
+}) {
   const { addToast } = useToast();
   const [viewMode, setViewMode] = useState<ViewMode>('day');
   const [anchorDate, setAnchorDate] = useState(todayISO);
   const [customFrom, setCustomFrom] = useState(todayISO);
   const [customTo, setCustomTo] = useState(todayISO);
   const [statusFilter, setStatusFilter] = useState<string>('All');
+  const [modelFilter, setModelFilter] = useState<'all' | BookingModel>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [bookings, setBookings] = useState<BookingRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -189,6 +217,12 @@ export function BookingsDashboard({ venueId, currency }: { venueId: string; curr
     return { from: customFrom, to: customTo };
   }, [viewMode, anchorDate, customFrom, customTo]);
   const invalidCustomRange = viewMode === 'custom' && customFrom > customTo;
+
+  const showModelFilters = enabledModels.length > 0;
+  const filterModels = useMemo(() => {
+    const uniq = new Set<BookingModel>([primaryBookingModel, ...enabledModels]);
+    return [...uniq].sort((a, b) => BOOKING_MODEL_ORDER.indexOf(a) - BOOKING_MODEL_ORDER.indexOf(b));
+  }, [primaryBookingModel, enabledModels]);
 
   const filterGuestId = useMemo(() => {
     const g = searchParams.get('guest');
@@ -648,17 +682,22 @@ export function BookingsDashboard({ venueId, currency }: { venueId: string; curr
 
   const goToToday = () => setAnchorDate(todayISO());
 
+  const modelScopedBookings = useMemo(() => {
+    if (modelFilter === 'all') return bookings;
+    return bookings.filter((b) => inferBookingRowModel(b) === modelFilter);
+  }, [bookings, modelFilter]);
+
   const filteredBookings = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    if (!q) return bookings;
-    return bookings.filter((booking) =>
+    if (!q) return modelScopedBookings;
+    return modelScopedBookings.filter((booking) =>
       booking.guest_name.toLowerCase().includes(q)
       || (booking.guest_phone ?? '').toLowerCase().includes(q)
       || (booking.guest_email ?? '').toLowerCase().includes(q)
       || booking.id.toLowerCase().includes(q)
       || booking.source.toLowerCase().includes(q)
     );
-  }, [bookings, searchQuery]);
+  }, [modelScopedBookings, searchQuery]);
 
   const groupedByDate = useMemo(() => {
     if (viewMode === 'day') return null;
@@ -699,6 +738,37 @@ export function BookingsDashboard({ venueId, currency }: { venueId: string; curr
           >
             Clear guest filter
           </button>
+        </div>
+      )}
+
+      {showModelFilters && (
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+          <span className="text-xs font-medium text-slate-600">Type:</span>
+          <button
+            type="button"
+            onClick={() => setModelFilter('all')}
+            className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
+              modelFilter === 'all'
+                ? 'bg-brand-600 text-white shadow-sm'
+                : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+            }`}
+          >
+            All
+          </button>
+          {filterModels.map((m) => (
+            <button
+              key={m}
+              type="button"
+              onClick={() => setModelFilter(m)}
+              className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
+                modelFilter === m
+                  ? 'bg-brand-600 text-white shadow-sm'
+                  : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+              }`}
+            >
+              {bookingModelShortLabel(m)}
+            </button>
+          ))}
         </div>
       )}
 
@@ -857,6 +927,7 @@ export function BookingsDashboard({ venueId, currency }: { venueId: string; curr
           onSendMessage={sendMessageToBooking}
           onStatusAction={requestStatusChange}
           onDetailUpdated={handleDetailUpdated}
+          showModelBadges={showModelFilters}
         />
       ) : (
         <div className="space-y-4">
@@ -890,6 +961,7 @@ export function BookingsDashboard({ venueId, currency }: { venueId: string; curr
                 onSendMessage={sendMessageToBooking}
                 onStatusAction={requestStatusChange}
                 onDetailUpdated={handleDetailUpdated}
+                showModelBadges={showModelFilters}
               />
             </div>
           ))}
@@ -1081,6 +1153,7 @@ function BookingsAccordionList({
   onSendMessage,
   onStatusAction,
   onDetailUpdated,
+  showModelBadges = false,
 }: {
   bookings: BookingRow[];
   selectedIds: string[];
@@ -1100,6 +1173,7 @@ function BookingsAccordionList({
   onSendMessage: (id: string, message: string) => void;
   onStatusAction: (booking: BookingRow, status: BookingStatus) => void;
   onDetailUpdated: (bookingId: string) => void;
+  showModelBadges?: boolean;
 }) {
   const allSelected = bookings.length > 0 && bookings.every((b) => selectedIds.includes(b.id));
   return (
@@ -1140,7 +1214,6 @@ function BookingsAccordionList({
               className={`cursor-pointer px-3 py-3 transition-colors sm:px-4 ${expanded ? 'bg-slate-50/60' : 'hover:bg-slate-50/40'}`}
             >
               <div className="flex items-center gap-2">
-                { }
                 <div onClick={(e) => e.stopPropagation()} className="pt-0.5">
                   <input
                     type="checkbox"
@@ -1154,6 +1227,11 @@ function BookingsAccordionList({
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
                     <span className="font-semibold text-slate-900">{booking.guest_name}</span>
+                    {showModelBadges && (
+                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-600">
+                        {bookingModelShortLabel(inferBookingRowModel(booking))}
+                      </span>
+                    )}
                     {statusBadge(booking.status)}
                     {booking.dietary_notes && (
                       <span className="hidden rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700 sm:inline-block" title={booking.dietary_notes}>

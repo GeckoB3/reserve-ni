@@ -56,6 +56,9 @@ interface GuestDetailResponse {
     party_size: number | null;
     status: string;
     deposit_status: string | null;
+    booking_model: BookingModel;
+    kind_label: string;
+    detail_label: string;
     practitioner_name: string | null;
     service_name: string | null;
   }>;
@@ -586,7 +589,9 @@ export function ClientsSection({
                                               {b.booking_date} {b.booking_time}
                                             </span>
                                             <span className="text-xs text-slate-600">
-                                              {b.service_name ?? `${b.party_size ?? '—'} covers`} · {b.status}
+                                              <span className="font-medium text-slate-700">{b.kind_label}</span>
+                                              {' · '}
+                                              {b.detail_label} · {b.status}
                                               {b.practitioner_name ? ` · ${b.practitioner_name}` : ''}
                                             </span>
                                           </Link>

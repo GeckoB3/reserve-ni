@@ -22,7 +22,9 @@ import {
   type DragStartEvent,
 } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
+import Link from 'next/link';
 import { createClient } from '@/lib/supabase/browser';
+import { ResourceCalendarGrid } from '@/components/calendar/ResourceCalendarGrid';
 import { AppointmentBookingForm } from '@/components/booking/AppointmentBookingForm';
 import { AppointmentWalkInModal } from '@/components/booking/AppointmentWalkInModal';
 import {
@@ -33,6 +35,22 @@ import { useToast } from '@/components/ui/Toast';
 import { getCalendarGridBounds } from '@/lib/venue-calendar-bounds';
 import { canMarkNoShowForSlot, type BookingStatus } from '@/lib/table-management/booking-status';
 import type { OpeningHours } from '@/types/availability';
+import type { BookingModel } from '@/types/booking-models';
+import { venueExposesBookingModel } from '@/lib/booking/enabled-models';
+import type { ScheduleBlockDTO } from '@/types/schedule-blocks';
+import {
+  addCalendarDays,
+  monthGridDateRange,
+  groupScheduleBlocksByDate,
+  filterScheduleBlocksByModel,
+  buildMonthDayScheduleCounts,
+  type ScheduleModelFilter,
+} from '@/lib/calendar/schedule-blocks-grouping';
+import { ScheduleFeedColumn } from './ScheduleFeedColumn';
+import { WeekScheduleCdeStrip } from './WeekScheduleCdeStrip';
+import { ScheduleCalendarLegend } from './ScheduleCalendarLegend';
+import { MonthScheduleGrid } from './MonthScheduleGrid';
+import { PractitionerCalendarToolbar } from './PractitionerCalendarToolbar';
 
 interface Practitioner {
   id: string;
@@ -73,6 +91,10 @@ interface Booking {
   deposit_amount_pence: number | null;
   deposit_status: string;
   group_booking_id?: string | null;
+  experience_event_id?: string | null;
+  class_instance_id?: string | null;
+  resource_id?: string | null;
+  event_session_id?: string | null;
 }
 
 interface CalendarBlock {
@@ -176,12 +198,6 @@ function formatDateLabel(dateStr: string): string {
   return `${WEEKDAY_LONG_EN_GB[d.getDay()]}, ${d.getDate()} ${MONTH_LONG_EN_GB[d.getMonth()]} ${d.getFullYear()}`;
 }
 
-function addDays(date: string, days: number): string {
-  const d = new Date(date + 'T12:00:00');
-  d.setDate(d.getDate() + days);
-  return d.toISOString().slice(0, 10);
-}
-
 function startOfMonth(date: string): string {
   return `${date.slice(0, 7)}-01`;
 }
@@ -191,16 +207,10 @@ function formatMonthYearGb(monthAnchor: string): string {
   return `${MONTH_LONG_EN_GB[d.getMonth()]} ${d.getFullYear()}`;
 }
 
-function endOfMonth(date: string): string {
-  const [y, m] = date.split('-').map(Number);
-  const last = new Date(y!, m!, 0).getDate();
-  return `${date.slice(0, 7)}-${String(last).padStart(2, '0')}`;
-}
-
 const WEEK_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 function weekDatesFrom(start: string): string[] {
-  return Array.from({ length: 7 }, (_, i) => addDays(start, i));
+  return Array.from({ length: 7 }, (_, i) => addCalendarDays(start, i));
 }
 
 function overlapsRange(a0: number, a1: number, b0: number, b1: number): boolean {
@@ -509,11 +519,20 @@ export function PractitionerCalendarView({
   currency = 'GBP',
   defaultPractitionerFilter = 'all',
   linkedPractitionerId = null,
+  resourceScheduleEnabled = false,
+  bookingModel = 'unified_scheduling',
+  enabledModels = [],
 }: {
   venueId: string;
   currency?: string;
   defaultPractitionerFilter?: 'all' | string;
   linkedPractitionerId?: string | null;
+  /** When the venue offers resource bookings (primary or secondary), show Resources tab with day grid. */
+  resourceScheduleEnabled?: boolean;
+  /** Primary bookable model (for merged schedule feeds §4.2). */
+  bookingModel?: BookingModel;
+  /** Secondary models; used to show Events / Classes / Resources lanes on the day grid. */
+  enabledModels?: BookingModel[];
 }) {
   const { addToast } = useToast();
   const [viewMode, setViewMode] = useState<ViewMode>('day');
@@ -537,7 +556,7 @@ export function PractitionerCalendarView({
   const [blocks, setBlocks] = useState<CalendarBlock[]>([]);
   const [loading, setLoading] = useState(true);
   const [detailBookingId, setDetailBookingId] = useState<string | null>(null);
-  const [filterPractitioner, setFilterPractitioner] = useState<string>('all');
+  const [filterPractitioner, setFilterPractitioner] = useState<string>(defaultPractitionerFilter);
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [showNewAppointment, setShowNewAppointment] = useState(false);
@@ -565,12 +584,20 @@ export function PractitionerCalendarView({
   const [flashIds, setFlashIds] = useState<Set<string>>(() => new Set());
   const [quickActionId, setQuickActionId] = useState<string | null>(null);
   const [noShowGraceMinutes, setNoShowGraceMinutes] = useState(15);
+  const [scheduleKind, setScheduleKind] = useState<'appointments' | 'resources'>('appointments');
+  const [scheduleBlocks, setScheduleBlocks] = useState<ScheduleBlockDTO[]>([]);
+  const [scheduleModelFilter, setScheduleModelFilter] = useState<ScheduleModelFilter>('all');
   const scrollRef = useRef<HTMLDivElement>(null);
   const touchX = useRef<number | null>(null);
   /** Snapshot when a touch starts; if scrollLeft/scrollTop move during the gesture, it was scrolling, not a day swipe. */
   const scrollSnapshotAtTouch = useRef<{ left: number; top: number } | null>(null);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 10 } }));
+
+  const showEventsColumn = venueExposesBookingModel(bookingModel, enabledModels, 'event_ticket');
+  const showClassesColumn = venueExposesBookingModel(bookingModel, enabledModels, 'class_session');
+  const showResourcesLane = venueExposesBookingModel(bookingModel, enabledModels, 'resource_booking');
+  const showMergedFeeds = showEventsColumn || showClassesColumn || showResourcesLane;
 
   const activeDayDate = viewMode === 'day' ? date : viewMode === 'week' ? weekStart : monthAnchor;
   const { startHour, endHour } = useMemo(
@@ -581,8 +608,8 @@ export function PractitionerCalendarView({
 
   const listFromTo = useMemo(() => {
     if (viewMode === 'day') return { from: date, to: date };
-    if (viewMode === 'week') return { from: weekStart, to: addDays(weekStart, 6) };
-    return { from: startOfMonth(monthAnchor), to: endOfMonth(monthAnchor) };
+    if (viewMode === 'week') return { from: weekStart, to: addCalendarDays(weekStart, 6) };
+    return monthGridDateRange(monthAnchor);
   }, [viewMode, date, weekStart, monthAnchor]);
 
   const fetchData = useCallback(
@@ -615,7 +642,7 @@ export function PractitionerCalendarView({
           svcRes.json(),
         ]);
         setPractitioners(pracData.practitioners ?? []);
-        setBookings((bookData.bookings ?? []).filter((b: Booking) => Boolean(columnIdForBooking(b))));
+        setBookings((bookData.bookings ?? []) as Booking[]);
         setServices(svcData.services ?? []);
         if (blockRes.ok) {
           const bjson = await blockRes.json();
@@ -623,18 +650,42 @@ export function PractitionerCalendarView({
         } else {
           setBlocks([]);
         }
+
+        if (showMergedFeeds) {
+          const schQuery =
+            listFromTo.from === listFromTo.to
+              ? `date=${encodeURIComponent(listFromTo.from)}`
+              : `from=${encodeURIComponent(listFromTo.from)}&to=${encodeURIComponent(listFromTo.to)}`;
+          const schRes = await fetch(`/api/venue/schedule?${schQuery}`);
+          if (schRes.ok) {
+            const schJson = (await schRes.json()) as { blocks?: ScheduleBlockDTO[] };
+            setScheduleBlocks(schJson.blocks ?? []);
+          } else {
+            setScheduleBlocks([]);
+          }
+        } else {
+          setScheduleBlocks([]);
+        }
       } catch {
         setFetchError('Failed to load calendar data. Please check your connection.');
       } finally {
         if (!silent) setLoading(false);
       }
     },
-    [listFromTo],
+    [listFromTo, showMergedFeeds],
   );
 
   useEffect(() => {
     void fetchData();
   }, [fetchData]);
+
+  useEffect(() => {
+    if (scheduleKind === 'resources') setViewMode('day');
+  }, [scheduleKind]);
+
+  useEffect(() => {
+    if (!resourceScheduleEnabled && scheduleKind === 'resources') setScheduleKind('appointments');
+  }, [resourceScheduleEnabled, scheduleKind]);
 
   useEffect(() => {
     void fetch('/api/venue')
@@ -758,12 +809,15 @@ export function PractitionerCalendarView({
   }
 
   function navigateDay(dir: -1 | 1) {
-    if (viewMode === 'day') setDate((d) => addDays(d, dir));
-    else if (viewMode === 'week') setWeekStart((d) => addDays(d, dir * 7));
+    if (viewMode === 'day') setDate((d) => addCalendarDays(d, dir));
+    else if (viewMode === 'week') setWeekStart((d) => addCalendarDays(d, dir * 7));
     else {
-      const d = new Date(`${monthAnchor}T12:00:00`);
+      const som = startOfMonth(monthAnchor);
+      const d = new Date(`${som}T12:00:00`);
       d.setMonth(d.getMonth() + dir);
-      setMonthAnchor(d.toISOString().slice(0, 10));
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      setMonthAnchor(`${y}-${m}-01`);
     }
   }
 
@@ -972,26 +1026,54 @@ export function PractitionerCalendarView({
     });
   }, [bookings, filterPractitioner, filterStatus]);
 
-  const todayBookings = bookingsMatchingFilters.filter((b) => !['Cancelled', 'No-Show'].includes(b.status));
-  const confirmedCount = bookingsMatchingFilters.filter((b) => b.status === 'Confirmed').length;
-  const completedCount = bookingsMatchingFilters.filter((b) => b.status === 'Completed').length;
+  /** Toolbar + status counts: team-column bookings only (matches day/week grid), scoped to the visible period — not the 6-week fetch padding in month view. */
+  const bookingsForToolbarStats = useMemo(() => {
+    return bookingsMatchingFilters.filter((b) => {
+      if (!columnIdForBooking(b)) return false;
+      if (viewMode === 'day') return b.booking_date === date;
+      if (viewMode === 'week') {
+        const weekEnd = addCalendarDays(weekStart, 6);
+        return b.booking_date >= weekStart && b.booking_date <= weekEnd;
+      }
+      return b.booking_date.slice(0, 7) === monthAnchor.slice(0, 7);
+    });
+  }, [bookingsMatchingFilters, viewMode, date, weekStart, monthAnchor]);
+
+  const activeToolbarBookings = bookingsForToolbarStats.filter(
+    (b) => !['Cancelled', 'No-Show'].includes(b.status),
+  );
+  const confirmedCount = bookingsForToolbarStats.filter((b) => b.status === 'Confirmed').length;
+  const completedCount = bookingsForToolbarStats.filter((b) => b.status === 'Completed').length;
 
   const weekDays = useMemo(() => weekDatesFrom(weekStart), [weekStart]);
 
   const monthCells = useMemo(() => {
     const first = new Date(`${startOfMonth(monthAnchor)}T12:00:00`);
     const startPad = first.getDay();
-    const from = addDays(startOfMonth(monthAnchor), -startPad);
-    return Array.from({ length: 42 }, (_, i) => addDays(from, i));
+    const from = addCalendarDays(startOfMonth(monthAnchor), -startPad);
+    return Array.from({ length: 42 }, (_, i) => addCalendarDays(from, i));
   }, [monthAnchor]);
 
-  const countsByDate = useMemo(() => {
-    const m: Record<string, number> = {};
-    for (const b of bookingsMatchingFilters) {
-      m[b.booking_date] = (m[b.booking_date] ?? 0) + 1;
-    }
-    return m;
-  }, [bookingsMatchingFilters]);
+  const filteredScheduleBlocks = useMemo(
+    () => filterScheduleBlocksByModel(scheduleBlocks, scheduleModelFilter),
+    [scheduleBlocks, scheduleModelFilter],
+  );
+
+  const scheduleBlocksByDate = useMemo(
+    () => groupScheduleBlocksByDate(filteredScheduleBlocks),
+    [filteredScheduleBlocks],
+  );
+
+  const monthDayScheduleCounts = useMemo(
+    () =>
+      buildMonthDayScheduleCounts(
+        bookingsMatchingFilters,
+        scheduleBlocks,
+        monthCells,
+        scheduleModelFilter,
+      ),
+    [bookingsMatchingFilters, scheduleBlocks, monthCells, scheduleModelFilter],
+  );
 
   const detailPrefetch = useMemo((): AppointmentDetailPrefetch | null => {
     if (!detailBookingId) return null;
@@ -1003,143 +1085,133 @@ export function PractitionerCalendarView({
     viewMode === 'day'
       ? formatDateLabel(date)
       : viewMode === 'week'
-        ? `${WEEK_SHORT[new Date(`${weekStart}T12:00:00`).getDay()]} ${weekStart.slice(8, 10)} – ${addDays(weekStart, 6)}`
+        ? `${WEEK_SHORT[new Date(`${weekStart}T12:00:00`).getDay()]} ${weekStart.slice(8, 10)} – ${addCalendarDays(weekStart, 6)}`
         : formatMonthYearGb(monthAnchor);
 
   return (
     <div className="flex min-h-0 flex-col h-[calc(100dvh-72px)] md:h-[calc(100dvh-100px)] lg:h-[calc(100dvh-120px)]">
       <div className="flex-shrink-0 space-y-3 pb-3">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <h1 className="text-xl font-semibold text-slate-900 sm:text-2xl">Calendar</h1>
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="flex rounded-lg border border-slate-200 p-0.5 text-xs font-medium">
-              {(['day', 'week', 'month'] as const).map((m) => (
-                <button
-                  key={m}
-                  type="button"
-                  onClick={() => setViewMode(m)}
-                  className={`rounded-md px-2.5 py-1 capitalize ${
-                    viewMode === m ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-50'
-                  }`}
-                >
-                  {m}
-                </button>
-              ))}
-            </div>
-            <button
-              type="button"
-              onClick={() => navigateDay(-1)}
-              className="rounded-lg border border-slate-300 px-2 py-1.5 text-sm hover:bg-slate-50"
-            >
-              &larr;
-            </button>
-            <button
-              type="button"
-              onClick={goToday}
-              className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium hover:bg-slate-50"
-            >
-              Today
-            </button>
-            <button
-              type="button"
-              onClick={() => navigateDay(1)}
-              className="rounded-lg border border-slate-300 px-2 py-1.5 text-sm hover:bg-slate-50"
-            >
-              &rarr;
-            </button>
-            {viewMode === 'day' && (
-              <input
-                type="date"
-                value={date}
-                onChange={(e) => setDate(e.target.value)}
-                className="rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
-              />
-            )}
-          </div>
-        </div>
+        <PractitionerCalendarToolbar
+          resourceScheduleEnabled={resourceScheduleEnabled}
+          scheduleKind={scheduleKind}
+          onScheduleKindChange={setScheduleKind}
+          viewMode={viewMode}
+          onViewModeChange={setViewMode}
+          onNavigateDay={navigateDay}
+          onGoToday={goToday}
+          date={date}
+          onDateChange={setDate}
+        />
 
         <div className="text-sm text-slate-500">{headerTitle}</div>
 
-        <div className="flex flex-wrap items-center gap-3">
-          <select
-            value={filterPractitioner}
-            onChange={(e) => setFilterPractitioner(e.target.value)}
-            className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
-          >
-            <option value="all">All appointments</option>
-            {linkedPractitionerId === null ? (
-              activePractitioners.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))
-            ) : (
-              <>
-                <option value={linkedPractitionerId}>My appointments</option>
-                {activePractitioners
-                  .filter((p) => p.id !== linkedPractitionerId)
-                  .map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}
-                    </option>
-                  ))}
-              </>
-            )}
-          </select>
-          <select
-            value={filterStatus}
-            onChange={(e) => setFilterStatus(e.target.value)}
-            className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
-          >
-            <option value="all">All statuses</option>
-            <option value="Pending">Pending</option>
-            <option value="Confirmed">Confirmed</option>
-            <option value="Seated">In Progress</option>
-            <option value="Completed">Completed</option>
-            <option value="No-Show">No Show</option>
-            <option value="Cancelled">Cancelled</option>
-          </select>
+        {scheduleKind === 'appointments' && showMergedFeeds ? (
+          <ScheduleCalendarLegend
+            showMergedFeeds={showMergedFeeds}
+            showEventsColumn={showEventsColumn}
+            showClassesColumn={showClassesColumn}
+            showResourcesLane={showResourcesLane}
+            scheduleModelFilter={scheduleModelFilter}
+            onScheduleModelFilterChange={setScheduleModelFilter}
+            viewMode={viewMode}
+          />
+        ) : null}
 
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() => {
-                setPrefillDate(viewMode === 'day' ? date : undefined);
-                setPrefillTime(undefined);
-                setPrefillPractitionerId(filterPractitioner === 'all' ? undefined : filterPractitioner);
-                setShowNewAppointment(true);
-              }}
-              className="flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-brand-700"
+        {scheduleKind === 'appointments' ? (
+          <div className="flex flex-wrap items-center gap-3">
+            <select
+              value={filterPractitioner}
+              onChange={(e) => setFilterPractitioner(e.target.value)}
+              className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
             >
-              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-              </svg>
-              New Appointment
-            </button>
-            <button
-              type="button"
-              onClick={() => setShowWalkIn(true)}
-              className="flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-emerald-700"
+              <option value="all">All appointments</option>
+              {linkedPractitionerId === null ? (
+                activePractitioners.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))
+              ) : (
+                <>
+                  <option value={linkedPractitionerId}>My appointments</option>
+                  {activePractitioners
+                    .filter((p) => p.id !== linkedPractitionerId)
+                    .map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                </>
+              )}
+            </select>
+            <select
+              value={filterStatus}
+              onChange={(e) => setFilterStatus(e.target.value)}
+              className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
             >
-              Walk-in
-            </button>
-          </div>
+              <option value="all">All statuses</option>
+              <option value="Pending">Pending</option>
+              <option value="Confirmed">Confirmed</option>
+              <option value="Seated">In Progress</option>
+              <option value="Completed">Completed</option>
+              <option value="No-Show">No Show</option>
+              <option value="Cancelled">Cancelled</option>
+            </select>
 
-          <div className="ml-auto flex flex-wrap items-center gap-4 text-sm">
-            <span className="text-slate-500">
-              <span className="font-semibold text-slate-900">{todayBookings.length}</span> appointments
-            </span>
-            <span className="hidden sm:inline text-slate-500">
-              <span className="font-semibold text-blue-600">{confirmedCount}</span> confirmed
-            </span>
-            <span className="hidden sm:inline text-slate-500">
-              <span className="font-semibold text-green-600">{completedCount}</span> completed
-            </span>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setPrefillDate(viewMode === 'day' ? date : undefined);
+                  setPrefillTime(undefined);
+                  setPrefillPractitionerId(filterPractitioner === 'all' ? undefined : filterPractitioner);
+                  setShowNewAppointment(true);
+                }}
+                className="flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-brand-700"
+              >
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                </svg>
+                New Appointment
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowWalkIn(true)}
+                className="flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-emerald-700"
+              >
+                Walk-in
+              </button>
+            </div>
+
+            <div
+              className="ml-auto flex flex-wrap items-center gap-4 text-sm"
+              title="Bookings on a team column in the visible date range (day, week, or calendar month). Excludes padding weeks around month view."
+            >
+              <span className="text-slate-500">
+                <span className="font-semibold text-slate-900">{activeToolbarBookings.length}</span> on grid
+              </span>
+              <span className="hidden sm:inline text-slate-500">
+                <span className="font-semibold text-blue-600">{confirmedCount}</span> confirmed
+              </span>
+              <span className="hidden sm:inline text-slate-500">
+                <span className="font-semibold text-green-600">{completedCount}</span> completed
+              </span>
+            </div>
           </div>
-        </div>
+        ) : (
+          <div className="flex flex-wrap items-center gap-3 text-sm text-slate-600">
+            <Link
+              href="/dashboard/bookings/new"
+              className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 font-medium text-slate-800 shadow-sm hover:bg-slate-50"
+            >
+              New resource booking
+            </Link>
+            <span className="text-slate-500">Day view · resource columns · bookings and optional free starts</span>
+          </div>
+        )}
       </div>
 
-      {fetchError && (
+      {fetchError && !(scheduleKind === 'resources' && resourceScheduleEnabled) && (
         <div className="mb-3 flex items-center justify-between rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           <span>{fetchError}</span>
           <button type="button" onClick={() => setFetchError(null)} className="ml-2 text-red-400 hover:text-red-600">
@@ -1148,7 +1220,17 @@ export function PractitionerCalendarView({
         </div>
       )}
 
-      {loading ? (
+      {scheduleKind === 'resources' && resourceScheduleEnabled ? (
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          <ResourceCalendarGrid
+            venueId={venueId}
+            date={date}
+            currency={currency}
+            onDateChange={setDate}
+            compactToolbar
+          />
+        </div>
+      ) : loading ? (
         <div className="flex min-h-0 flex-1 items-center justify-center">
           <div className="h-8 w-8 animate-spin rounded-full border-4 border-blue-600 border-t-transparent" />
         </div>
@@ -1159,45 +1241,23 @@ export function PractitionerCalendarView({
           </div>
         </div>
       ) : viewMode === 'month' ? (
-        <div className="min-h-0 flex-1 overflow-auto rounded-xl border border-slate-200 bg-white p-4">
-          <div className="grid grid-cols-7 gap-1 text-center text-xs font-medium text-slate-500">
-            {WEEK_SHORT.map((d) => (
-              <div key={d} className="py-2">
-                {d}
-              </div>
-            ))}
-          </div>
-          <div className="grid grid-cols-7 gap-1">
-            {monthCells.map((cell) => {
-              const inMonth = cell.startsWith(monthAnchor.slice(0, 7));
-              const c = countsByDate[cell] ?? 0;
-              const maxC = Math.max(1, ...Object.values(countsByDate));
-              const intensity = c === 0 ? 0 : Math.min(1, c / maxC);
-              return (
-                <button
-                  key={cell}
-                  type="button"
-                  onClick={() => {
-                    setDate(cell);
-                    setWeekStart(cell);
-                    setMonthAnchor(cell);
-                    setViewMode('day');
-                  }}
-                  className={`flex min-h-[52px] flex-col items-center justify-center rounded-lg border text-sm transition-colors ${
-                    inMonth ? 'border-slate-200 bg-white hover:bg-slate-50' : 'border-transparent bg-slate-50/50 text-slate-400'
-                  }`}
-                  style={{
-                    backgroundColor:
-                      c > 0 ? `rgba(99, 102, 241, ${0.12 + intensity * 0.45})` : undefined,
-                  }}
-                >
-                  <span className="font-semibold text-slate-900">{Number(cell.slice(8, 10))}</span>
-                  {c > 0 && <span className="text-[10px] text-slate-600">{c}</span>}
-                </button>
-              );
-            })}
-          </div>
-        </div>
+        <MonthScheduleGrid
+          monthAnchor={monthAnchor}
+          monthCells={monthCells}
+          monthDayScheduleCounts={monthDayScheduleCounts}
+          showMergedFeeds={showMergedFeeds}
+          filterAlignmentNote={
+            filterPractitioner !== 'all' && showMergedFeeds
+              ? 'Appointment numbers in each day follow the team filter above. Events, classes and resources are venue-wide.'
+              : undefined
+          }
+          onSelectDay={(cell) => {
+            setDate(cell);
+            setWeekStart(cell);
+            setMonthAnchor(cell);
+            setViewMode('day');
+          }}
+        />
       ) : viewMode === 'week' ? (
         <div className="min-h-0 flex-1 overflow-auto rounded-xl border border-slate-200 bg-white">
           <div className="min-w-[720px] overflow-x-auto">
@@ -1248,6 +1308,13 @@ export function PractitionerCalendarView({
                     })}
                   </tr>
                 ))}
+                {scheduleKind === 'appointments' && showMergedFeeds && scheduleModelFilter !== 'appointments' ? (
+                  <WeekScheduleCdeStrip
+                    weekDays={weekDays}
+                    blocksByDate={scheduleBlocksByDate}
+                    onBookingClick={(id) => setDetailBookingId(id)}
+                  />
+                ) : null}
               </tbody>
             </table>
           </div>
@@ -1281,8 +1348,8 @@ export function PractitionerCalendarView({
                 }
               }
               if (Math.abs(dx) < 72) return;
-              if (dx > 0) setDate((d) => addDays(d, -1));
-              else setDate((d) => addDays(d, 1));
+              if (dx > 0) setDate((d) => addCalendarDays(d, -1));
+              else setDate((d) => addCalendarDays(d, 1));
             }}
             onTouchCancel={() => {
               touchX.current = null;
@@ -1549,6 +1616,40 @@ export function PractitionerCalendarView({
                   </div>
                 );
               })}
+              {viewMode === 'day' && scheduleKind === 'appointments' && showMergedFeeds && scheduleModelFilter !== 'appointments' ? (
+                <>
+                  {showEventsColumn ? (
+                    <ScheduleFeedColumn
+                      label="Events"
+                      date={date}
+                      blocks={filteredScheduleBlocks.filter((b) => b.kind === 'event_ticket')}
+                      startHour={startHour}
+                      endHour={endHour}
+                      onBookingClick={(id) => setDetailBookingId(id)}
+                    />
+                  ) : null}
+                  {showClassesColumn ? (
+                    <ScheduleFeedColumn
+                      label="Classes"
+                      date={date}
+                      blocks={filteredScheduleBlocks.filter((b) => b.kind === 'class_session')}
+                      startHour={startHour}
+                      endHour={endHour}
+                      onBookingClick={(id) => setDetailBookingId(id)}
+                    />
+                  ) : null}
+                  {showResourcesLane ? (
+                    <ScheduleFeedColumn
+                      label="Resources"
+                      date={date}
+                      blocks={filteredScheduleBlocks.filter((b) => b.kind === 'resource_booking')}
+                      startHour={startHour}
+                      endHour={endHour}
+                      onBookingClick={(id) => setDetailBookingId(id)}
+                    />
+                  ) : null}
+                </>
+              ) : null}
             </div>
           </div>
           <DragOverlay dropAnimation={null}>
@@ -1664,21 +1765,23 @@ export function PractitionerCalendarView({
         </div>
       )}
 
-      <button
-        type="button"
-        onClick={() => {
-          setPrefillDate(date);
-          setPrefillTime(undefined);
-          setPrefillPractitionerId(filterPractitioner === 'all' ? undefined : filterPractitioner);
-          setShowNewAppointment(true);
-        }}
-        className="fixed bottom-6 right-6 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-brand-600 text-white shadow-lg hover:bg-brand-700 md:hidden"
-        aria-label="New appointment"
-      >
-        <svg className="h-7 w-7" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-        </svg>
-      </button>
+      {scheduleKind === 'appointments' && (
+        <button
+          type="button"
+          onClick={() => {
+            setPrefillDate(date);
+            setPrefillTime(undefined);
+            setPrefillPractitionerId(filterPractitioner === 'all' ? undefined : filterPractitioner);
+            setShowNewAppointment(true);
+          }}
+          className="fixed bottom-6 right-6 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-brand-600 text-white shadow-lg hover:bg-brand-700 md:hidden"
+          aria-label="New appointment"
+        >
+          <svg className="h-7 w-7" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+          </svg>
+        </button>
+      )}
 
       <AppointmentDetailSheet
         open={detailBookingId !== null}
@@ -1687,6 +1790,7 @@ export function PractitionerCalendarView({
         onUpdated={() => void fetchData({ silent: true })}
         currency={currency}
         practitioners={activePractitioners}
+        requirePractitionerBooking={false}
         prefetchedBooking={detailPrefetch}
         services={services.map((s) => ({
           id: s.id,
