@@ -37,6 +37,18 @@ export async function POST(request: Request) {
       );
     }
 
+    if (
+      (config.model === 'event_ticket' ||
+        config.model === 'class_session' ||
+        config.model === 'resource_booking') &&
+      plan === 'standard'
+    ) {
+      return NextResponse.json(
+        { error: 'Events, class, and resource businesses require the Business plan.' },
+        { status: 400 },
+      );
+    }
+
     // Founding Partner: skip Stripe, create venue directly
     if (plan === 'founding') {
       if (config.model !== 'table_reservation') {

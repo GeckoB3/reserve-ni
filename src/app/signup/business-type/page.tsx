@@ -2,7 +2,7 @@
 
 import { useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { getBusinessTypesByCategory, BOOKING_MODEL_SIGNUP_CARDS } from '@/lib/business-config';
+import { getBusinessTypesByCategory, BOOKING_MODEL_SIGNUP_CARDS, BOOKING_MODEL_CHIP_LABEL } from '@/lib/business-config';
 
 const CATEGORY_LABELS: Record<string, string> = {
   hospitality: 'Restaurants & hospitality',
@@ -13,6 +13,13 @@ const CATEGORY_LABELS: Record<string, string> = {
   creative: 'Creative',
   professional: 'Professional services',
   pets: 'Pets',
+  experiences: 'Experiences & activities',
+  entertainment: 'Entertainment',
+  family: 'Family',
+  sports: 'Sports',
+  business: 'Business',
+  leisure: 'Leisure',
+  accommodation: 'Accommodation',
 };
 
 const CATEGORY_ORDER = [
@@ -24,6 +31,13 @@ const CATEGORY_ORDER = [
   'creative',
   'professional',
   'pets',
+  'experiences',
+  'entertainment',
+  'family',
+  'sports',
+  'business',
+  'leisure',
+  'accommodation',
 ];
 
 export default function BusinessTypePage() {
@@ -52,9 +66,8 @@ export default function BusinessTypePage() {
       <div className="mb-8 text-center">
         <h1 className="text-2xl font-bold text-slate-900">What kind of business are you?</h1>
         <p className="mt-2 text-sm text-slate-500">
-          Reserve NI supports <span className="font-medium text-slate-700">table &amp; cover booking</span> for hospitality,
-          and <span className="font-medium text-slate-700">appointments &amp; services</span> for everyone else. Pick the
-          trade that fits you best. We&apos;ll tailor wording and defaults.
+          Pick the booking model that fits your business. We&apos;ll tailor wording,
+          dashboard views, and defaults to your trade.
         </p>
       </div>
 
@@ -83,10 +96,46 @@ export default function BusinessTypePage() {
           <p className="text-sm font-semibold text-slate-900">Appointments &amp; services</p>
           <p className="mt-1 text-xs text-slate-600">Clients book with a calendar or team member for a set duration.</p>
         </button>
+        <button
+          type="button"
+          onClick={() => setSelected('model_event_ticket')}
+          className={`rounded-2xl border px-4 py-4 text-left transition-all ${
+            selected === 'model_event_ticket'
+              ? 'border-brand-500 bg-brand-50 ring-1 ring-brand-500'
+              : 'border-slate-200 bg-white hover:border-slate-300'
+          }`}
+        >
+          <p className="text-sm font-semibold text-slate-900">Events &amp; experiences</p>
+          <p className="mt-1 text-xs text-slate-600">Guests buy tickets for events — escape rooms, tours, shows.</p>
+        </button>
+        <button
+          type="button"
+          onClick={() => setSelected('model_class_session')}
+          className={`rounded-2xl border px-4 py-4 text-left transition-all ${
+            selected === 'model_class_session'
+              ? 'border-brand-500 bg-brand-50 ring-1 ring-brand-500'
+              : 'border-slate-200 bg-white hover:border-slate-300'
+          }`}
+        >
+          <p className="text-sm font-semibold text-slate-900">Classes &amp; group sessions</p>
+          <p className="mt-1 text-xs text-slate-600">Members book spots in recurring classes from a timetable.</p>
+        </button>
+        <button
+          type="button"
+          onClick={() => setSelected('model_resource_booking')}
+          className={`rounded-2xl border px-4 py-4 text-left transition-all ${
+            selected === 'model_resource_booking'
+              ? 'border-brand-500 bg-brand-50 ring-1 ring-brand-500'
+              : 'border-slate-200 bg-white hover:border-slate-300'
+          }`}
+        >
+          <p className="text-sm font-semibold text-slate-900">Spaces &amp; facilities</p>
+          <p className="mt-1 text-xs text-slate-600">Customers book a named space or resource by the slot.</p>
+        </button>
       </div>
 
       <details className="mb-6 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm shadow-sm open:pb-4">
-        <summary className="cursor-pointer font-semibold text-slate-800">The two booking types</summary>
+        <summary className="cursor-pointer font-semibold text-slate-800">Our booking models</summary>
         <ul className="mt-3 space-y-3 border-t border-slate-100 pt-3">
           {BOOKING_MODEL_SIGNUP_CARDS.map((card) => (
             <li key={card.model}>
@@ -137,7 +186,7 @@ export default function BusinessTypePage() {
                   >
                     <span className="block">{bt.label}</span>
                     <span className="mt-1 block text-xs font-normal text-slate-500">
-                      {bt.model === 'table_reservation' ? 'Table booking' : 'Appointments'}
+                      {BOOKING_MODEL_CHIP_LABEL[bt.model]}
                     </span>
                   </button>
                 ))}

@@ -31,7 +31,7 @@ export default async function ResourceTimelinePage() {
     <ToastProvider>
       <div className="p-4 md:p-6 lg:p-8">
         <div className="mx-auto max-w-[1600px]">
-          <ResourceTimelineView venueId={staff.venue_id} currency={currency} />
+          <ResourceTimelineView venueId={staff.venue_id} isAdmin={staff.role === 'admin'} currency={currency} />
         </div>
       </div>
     </ToastProvider>

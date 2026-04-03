@@ -40,6 +40,10 @@ export default function PlanPage() {
   }, [config, router]);
 
   const isRestaurant = config?.model === 'table_reservation';
+  const isCDE =
+    config?.model === 'event_ticket' ||
+    config?.model === 'class_session' ||
+    config?.model === 'resource_booking';
 
   useEffect(() => {
     if (!isRestaurant) return;
@@ -74,8 +78,9 @@ export default function PlanPage() {
   }, [isRestaurant, searchParams]);
 
   function handleContinue() {
-    sessionStorage.setItem('signup_plan', plan);
-    sessionStorage.setItem('signup_calendar_count', String(isRestaurant ? 1 : calendarCount));
+    const planToStore = isCDE ? 'business' : plan;
+    sessionStorage.setItem('signup_plan', planToStore);
+    sessionStorage.setItem('signup_calendar_count', String(isRestaurant || isCDE ? 1 : calendarCount));
     router.push('/signup/payment');
   }
 
@@ -83,6 +88,44 @@ export default function PlanPage() {
     return (
       <div className="flex min-h-[40vh] items-center justify-center">
         <div className="h-8 w-8 animate-spin rounded-full border-4 border-brand-200 border-t-brand-600" />
+      </div>
+    );
+  }
+
+  if (isCDE) {
+    return (
+      <div className="w-full max-w-xl">
+        <div className="mb-8 text-center">
+          <h1 className="text-2xl font-bold text-slate-900">Your plan</h1>
+          <p className="mt-2 text-sm text-slate-500">
+            Your selection: {formatSignupBusinessTypeLabel(businessType)}
+          </p>
+        </div>
+        <div className="rounded-2xl border border-brand-200 bg-brand-50/30 p-6 shadow-sm">
+          <h2 className="text-lg font-bold text-slate-900">Business</h2>
+          <div className="mt-2 flex items-baseline gap-1">
+            <span className="text-2xl font-extrabold text-slate-900">&pound;{BUSINESS_PRICE}</span>
+            <span className="text-sm text-slate-500">/month flat</span>
+          </div>
+          <p className="mt-2 text-sm font-medium leading-snug text-slate-700">
+            Full access: event management, class timetables, or resource booking. Unlimited capacity. SMS reminders.
+          </p>
+          <ul className="mt-4 space-y-2 text-sm text-slate-600">
+            <FeatureItem text="Unlimited events, class types, or resources" />
+            <FeatureItem text="Guest SMS reminders and confirmations" />
+            <FeatureItem text="Deposit and payment collection via Stripe" />
+            <FeatureItem text="Priority support" />
+          </ul>
+        </div>
+        <div className="mt-8 flex justify-center">
+          <button
+            type="button"
+            onClick={handleContinue}
+            className="rounded-xl bg-brand-600 px-8 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 transition-colors"
+          >
+            Continue to Payment
+          </button>
+        </div>
       </div>
     );
   }
