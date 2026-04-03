@@ -43,6 +43,8 @@ interface TicketTypeDraft {
   capacity: string;
 }
 
+type ScheduleMode = 'single' | 'weekly' | 'custom';
+
 interface EventFormState {
   name: string;
   description: string;
@@ -52,6 +54,21 @@ interface EventFormState {
   capacity: number;
   image_url: string;
   ticket_types: TicketTypeDraft[];
+  scheduleMode: ScheduleMode;
+  recurrenceUntil: string;
+  customDatesText: string;
+}
+
+function parseCustomDatesFromText(text: string): string[] {
+  const parts = text
+    .split(/[\s,;\n]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const set = new Set<string>();
+  for (const p of parts) {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(p)) set.add(p);
+  }
+  return [...set].sort();
 }
 
 const BLANK_EVENT: EventFormState = {
@@ -63,6 +80,9 @@ const BLANK_EVENT: EventFormState = {
   capacity: 20,
   image_url: '',
   ticket_types: [{ name: 'General Admission', price_pence: '0.00', capacity: '' }],
+  scheduleMode: 'single',
+  recurrenceUntil: '',
+  customDatesText: '',
 };
 
 export function EventManagerView({
@@ -160,26 +180,48 @@ export function EventManagerView({
       setEventError('Event name is required.');
       return;
     }
-    if (!eventForm.event_date) {
-      setEventError('Event date is required.');
-      return;
-    }
-    if (!eventForm.start_time || !eventForm.end_time) {
-      setEventError('Start and end time are required.');
-      return;
-    }
     const validTickets = eventForm.ticket_types.filter((tt) => tt.name.trim());
     if (validTickets.length === 0) {
       setEventError('At least one ticket type with a name is required.');
       return;
     }
+
+    let eventDateForPayload = eventForm.event_date;
+    if (!editingEventId && eventForm.scheduleMode === 'custom') {
+      const customDates = parseCustomDatesFromText(eventForm.customDatesText);
+      if (customDates.length === 0) {
+        setEventError('Add at least one date (YYYY-MM-DD), separated by commas or new lines.');
+        return;
+      }
+      eventDateForPayload = customDates[0];
+    } else if (!eventForm.event_date) {
+      setEventError('Event date is required.');
+      return;
+    }
+
+    if (!eventForm.start_time || !eventForm.end_time) {
+      setEventError('Start and end time are required.');
+      return;
+    }
+
+    if (!editingEventId && eventForm.scheduleMode === 'weekly') {
+      if (!eventForm.recurrenceUntil) {
+        setEventError('End date is required for weekly recurrence.');
+        return;
+      }
+      if (eventForm.recurrenceUntil < eventForm.event_date) {
+        setEventError('End date must be on or after the first occurrence date.');
+        return;
+      }
+    }
+
     setEventSaving(true);
     setEventError(null);
     try {
-      const payload = {
+      const basePayload = {
         name: eventForm.name.trim(),
         description: eventForm.description.trim() || null,
-        event_date: eventForm.event_date,
+        event_date: eventDateForPayload,
         start_time: eventForm.start_time,
         end_time: eventForm.end_time,
         capacity: eventForm.capacity,
@@ -190,21 +232,43 @@ export function EventManagerView({
           ...(tt.capacity !== '' && { capacity: parseInt(tt.capacity) }),
         })),
       };
+
+      let postBody: Record<string, unknown> = { ...basePayload };
+      if (!editingEventId) {
+        if (eventForm.scheduleMode === 'weekly') {
+          postBody = {
+            ...basePayload,
+            event_date: eventForm.event_date,
+            schedule: { type: 'weekly' as const, until_date: eventForm.recurrenceUntil },
+          };
+        } else if (eventForm.scheduleMode === 'custom') {
+          const dates = parseCustomDatesFromText(eventForm.customDatesText);
+          postBody = {
+            ...basePayload,
+            event_date: dates[0],
+            schedule: { type: 'custom' as const, dates },
+          };
+        }
+      }
+
       const res = editingEventId
         ? await fetch('/api/venue/experience-events', {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ id: editingEventId, ...payload }),
+            body: JSON.stringify({ id: editingEventId, ...basePayload }),
           })
         : await fetch('/api/venue/experience-events', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
+            body: JSON.stringify(postBody),
           });
-      const json = await res.json();
+      const json = (await res.json()) as { error?: string; created?: number };
       if (!res.ok) {
-        setEventError((json as { error?: string }).error ?? 'Save failed');
+        setEventError(json.error ?? 'Save failed');
         return;
+      }
+      if (!editingEventId && typeof json.created === 'number' && json.created > 1) {
+        window.alert(`Created ${json.created} separate event rows (one per date).`);
       }
       setShowEventForm(false);
       setEditingEventId(null);
@@ -234,6 +298,9 @@ export function EventManagerView({
               capacity: tt.capacity != null ? String(tt.capacity) : '',
             }))
           : [{ name: 'General Admission', price_pence: '0.00', capacity: '' }],
+      scheduleMode: 'single',
+      recurrenceUntil: '',
+      customDatesText: '',
     });
     setEditingEventId(event.id);
     setEventError(null);
@@ -338,6 +405,46 @@ export function EventManagerView({
             <h2 className="font-semibold text-slate-800">{editingEventId ? 'Edit event' : 'Create event'}</h2>
           </div>
           <div className="px-5 py-4 space-y-4">
+            {!editingEventId && (
+              <div className="rounded-lg border border-slate-100 bg-slate-50/80 p-3">
+                <p className="mb-2 text-xs font-medium text-slate-700">Schedule</p>
+                <div className="flex flex-wrap gap-4 text-sm">
+                  <label className="flex cursor-pointer items-center gap-2">
+                    <input
+                      type="radio"
+                      name="sched"
+                      checked={eventForm.scheduleMode === 'single'}
+                      onChange={() => setEventForm((f) => ({ ...f, scheduleMode: 'single' }))}
+                      className="text-brand-600 focus:ring-brand-500"
+                    />
+                    <span className="text-slate-700">One date</span>
+                  </label>
+                  <label className="flex cursor-pointer items-center gap-2">
+                    <input
+                      type="radio"
+                      name="sched"
+                      checked={eventForm.scheduleMode === 'weekly'}
+                      onChange={() => setEventForm((f) => ({ ...f, scheduleMode: 'weekly' }))}
+                      className="text-brand-600 focus:ring-brand-500"
+                    />
+                    <span className="text-slate-700">Weekly (same weekday)</span>
+                  </label>
+                  <label className="flex cursor-pointer items-center gap-2">
+                    <input
+                      type="radio"
+                      name="sched"
+                      checked={eventForm.scheduleMode === 'custom'}
+                      onChange={() => setEventForm((f) => ({ ...f, scheduleMode: 'custom' }))}
+                      className="text-brand-600 focus:ring-brand-500"
+                    />
+                    <span className="text-slate-700">Custom dates</span>
+                  </label>
+                </div>
+                <p className="mt-2 text-xs text-slate-500">
+                  Weekly and custom create one event row per date (same ticket setup on each).
+                </p>
+              </div>
+            )}
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="sm:col-span-2">
                 <label className="mb-1 block text-xs font-medium text-slate-600">Event name *</label>
@@ -349,15 +456,43 @@ export function EventManagerView({
                   className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
                 />
               </div>
-              <div>
-                <label className="mb-1 block text-xs font-medium text-slate-600">Date *</label>
-                <input
-                  type="date"
-                  value={eventForm.event_date}
-                  onChange={(e) => setEventForm((f) => ({ ...f, event_date: e.target.value }))}
-                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
-                />
-              </div>
+              {editingEventId || eventForm.scheduleMode !== 'custom' ? (
+                <>
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-slate-600">
+                      {eventForm.scheduleMode === 'weekly' && !editingEventId ? 'First occurrence *' : 'Date *'}
+                    </label>
+                    <input
+                      type="date"
+                      value={eventForm.event_date}
+                      onChange={(e) => setEventForm((f) => ({ ...f, event_date: e.target.value }))}
+                      className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
+                    />
+                  </div>
+                  {!editingEventId && eventForm.scheduleMode === 'weekly' && (
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-slate-600">Repeat until *</label>
+                      <input
+                        type="date"
+                        value={eventForm.recurrenceUntil}
+                        onChange={(e) => setEventForm((f) => ({ ...f, recurrenceUntil: e.target.value }))}
+                        className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
+                      />
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="sm:col-span-2">
+                  <label className="mb-1 block text-xs font-medium text-slate-600">Dates * (YYYY-MM-DD)</label>
+                  <textarea
+                    rows={4}
+                    value={eventForm.customDatesText}
+                    onChange={(e) => setEventForm((f) => ({ ...f, customDatesText: e.target.value }))}
+                    placeholder={'2026-06-01\n2026-06-15\n2026-07-01'}
+                    className="w-full rounded-lg border border-slate-200 px-3 py-2 font-mono text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
+                  />
+                </div>
+              )}
               <div>
                 <label className="mb-1 block text-xs font-medium text-slate-600">Capacity *</label>
                 <input

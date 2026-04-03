@@ -18,6 +18,8 @@ interface TimetableEntry {
   day_of_week: number;
   start_time: string;
   is_active: boolean;
+  interval_weeks?: number;
+  created_at?: string;
 }
 
 interface ClassInstance {
@@ -118,8 +120,15 @@ export function ClassTimetableView({
 
   // Timetable entry state
   const [showTimetableForm, setShowTimetableForm] = useState<string | null>(null); // class_type_id
-  const [timetableForm, setTimetableForm] = useState({ day_of_week: 1, start_time: '09:00' });
+  const [timetableForm, setTimetableForm] = useState({ day_of_week: 1, start_time: '09:00', interval_weeks: 1 });
   const [timetableSaving, setTimetableSaving] = useState(false);
+
+  // One-off instance (no weekly timetable)
+  const [oneOffClassTypeId, setOneOffClassTypeId] = useState('');
+  const [oneOffDate, setOneOffDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [oneOffTime, setOneOffTime] = useState('09:00');
+  const [oneOffCapacity, setOneOffCapacity] = useState('');
+  const [oneOffSaving, setOneOffSaving] = useState(false);
 
   // Generate instances state
   const [generating, setGenerating] = useState(false);
@@ -273,6 +282,7 @@ export function ClassTimetableView({
           class_type_id: showTimetableForm,
           day_of_week: timetableForm.day_of_week,
           start_time: timetableForm.start_time,
+          ...(timetableForm.interval_weeks > 1 ? { interval_weeks: timetableForm.interval_weeks } : {}),
         }),
       });
       if (!res.ok) {
@@ -281,7 +291,7 @@ export function ClassTimetableView({
         return;
       }
       setShowTimetableForm(null);
-      setTimetableForm({ day_of_week: 1, start_time: '09:00' });
+      setTimetableForm({ day_of_week: 1, start_time: '09:00', interval_weeks: 1 });
       await fetchData();
     } catch {
       window.alert('Failed to add schedule entry');
@@ -305,6 +315,37 @@ export function ClassTimetableView({
       await fetchData();
     } catch {
       window.alert('Failed to remove schedule entry');
+    }
+  };
+
+  const handleAddOneOffInstance = async () => {
+    if (!oneOffClassTypeId) {
+      window.alert('Choose a class type.');
+      return;
+    }
+    setOneOffSaving(true);
+    try {
+      const res = await fetch('/api/venue/class-instances', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          class_type_id: oneOffClassTypeId,
+          instance_date: oneOffDate,
+          start_time: oneOffTime,
+          ...(oneOffCapacity.trim() !== '' && { capacity_override: parseInt(oneOffCapacity, 10) }),
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        window.alert((json as { error?: string }).error ?? 'Failed to add session');
+        return;
+      }
+      await fetchData();
+      setGenerateMsg('One-off session added.');
+    } catch {
+      window.alert('Failed to add session');
+    } finally {
+      setOneOffSaving(false);
     }
   };
 
@@ -452,7 +493,7 @@ export function ClassTimetableView({
                           type="button"
                           onClick={() => {
                             setShowTimetableForm(ct.id);
-                            setTimetableForm({ day_of_week: 1, start_time: '09:00' });
+                            setTimetableForm({ day_of_week: 1, start_time: '09:00', interval_weeks: 1 });
                           }}
                           className="text-xs font-medium text-brand-600 hover:text-brand-800"
                         >
@@ -482,6 +523,9 @@ export function ClassTimetableView({
                             className="flex items-center gap-1.5 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-0.5 text-xs text-slate-600"
                           >
                             {DAY_LABELS_FULL[e.day_of_week]} {e.start_time.slice(0, 5)}
+                            {(e.interval_weeks ?? 1) > 1 && (
+                              <span className="text-slate-400"> · every {e.interval_weeks} wks</span>
+                            )}
                             <button
                               type="button"
                               onClick={() => void handleDeleteTimetableEntry(e.id)}
@@ -516,6 +560,21 @@ export function ClassTimetableView({
                             onChange={(e) => setTimetableForm((f) => ({ ...f, start_time: e.target.value }))}
                             className="rounded border border-slate-200 bg-white px-2 py-1.5 text-xs"
                           />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-xs font-medium text-slate-600">Every N weeks</label>
+                          <select
+                            value={timetableForm.interval_weeks}
+                            onChange={(e) =>
+                              setTimetableForm((f) => ({ ...f, interval_weeks: parseInt(e.target.value, 10) || 1 }))
+                            }
+                            className="rounded border border-slate-200 bg-white px-2 py-1.5 text-xs"
+                          >
+                            <option value={1}>Weekly</option>
+                            <option value={2}>Every 2 weeks</option>
+                            <option value={3}>Every 3 weeks</option>
+                            <option value={4}>Every 4 weeks</option>
+                          </select>
                         </div>
                         <button
                           type="button"
@@ -702,6 +761,70 @@ export function ClassTimetableView({
               </tbody>
             </table>
           </div>
+
+          {/* One-off session (no weekly slot) */}
+          {isAdmin && classTypes.length > 0 && (
+            <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-4">
+              <h3 className="mb-2 text-sm font-semibold text-slate-800">Add one-off session</h3>
+              <p className="mb-3 text-xs text-slate-500">
+                Creates a single dated instance without adding a weekly timetable row. Use for extras or one-off classes.
+              </p>
+              <div className="flex flex-wrap items-end gap-3">
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-slate-600">Class</label>
+                  <select
+                    value={oneOffClassTypeId}
+                    onChange={(e) => setOneOffClassTypeId(e.target.value)}
+                    className="min-w-[160px] rounded border border-slate-200 bg-white px-2 py-1.5 text-xs"
+                  >
+                    <option value="">Select…</option>
+                    {classTypes.map((ct) => (
+                      <option key={ct.id} value={ct.id}>
+                        {ct.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-slate-600">Date</label>
+                  <input
+                    type="date"
+                    value={oneOffDate}
+                    onChange={(e) => setOneOffDate(e.target.value)}
+                    className="rounded border border-slate-200 bg-white px-2 py-1.5 text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-slate-600">Start time</label>
+                  <input
+                    type="time"
+                    value={oneOffTime}
+                    onChange={(e) => setOneOffTime(e.target.value)}
+                    className="rounded border border-slate-200 bg-white px-2 py-1.5 text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-slate-600">Capacity override</label>
+                  <input
+                    type="number"
+                    min={1}
+                    placeholder="optional"
+                    value={oneOffCapacity}
+                    onChange={(e) => setOneOffCapacity(e.target.value)}
+                    className="w-24 rounded border border-slate-200 bg-white px-2 py-1.5 text-xs"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void handleAddOneOffInstance()}
+                  disabled={oneOffSaving}
+                  className="rounded-lg bg-slate-800 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-700 disabled:opacity-50"
+                >
+                  {oneOffSaving ? 'Adding…' : 'Add session'}
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Generate instances */}
           {isAdmin && timetable.filter((e) => e.is_active).length > 0 && (

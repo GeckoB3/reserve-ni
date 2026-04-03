@@ -86,27 +86,28 @@ export async function fetchClassInput(params: {
 }): Promise<ClassEngineInput> {
   const { supabase, venueId, date } = params;
 
-  const [typesRes, instancesRes, bookingsRes] = await Promise.all([
-    supabase
-      .from('class_types')
-      .select('*')
-      .eq('venue_id', venueId)
-      .eq('is_active', true),
-    supabase
-      .from('class_instances')
-      .select('*')
-      .eq('instance_date', date)
-      .eq('is_cancelled', false)
-      .in(
-        'class_type_id',
-        (await supabase
-          .from('class_types')
-          .select('id')
-          .eq('venue_id', venueId)
-          .eq('is_active', true)
-        ).data?.map((ct) => ct.id) ?? []
-      )
-      .order('start_time'),
+  const typesRes = await supabase
+    .from('class_types')
+    .select('*')
+    .eq('venue_id', venueId)
+    .eq('is_active', true);
+
+  const classTypes = (typesRes.data ?? []) as ClassType[];
+  const classTypeIds = classTypes.map((ct) => ct.id);
+
+  const instancesPromise =
+    classTypeIds.length === 0
+      ? Promise.resolve({ data: [] as ClassInstance[] })
+      : supabase
+          .from('class_instances')
+          .select('*')
+          .eq('instance_date', date)
+          .eq('is_cancelled', false)
+          .in('class_type_id', classTypeIds)
+          .order('start_time');
+
+  const [instancesRes, bookingsRes] = await Promise.all([
+    instancesPromise,
     supabase
       .from('bookings')
       .select('id, class_instance_id, party_size, status')
@@ -116,7 +117,6 @@ export async function fetchClassInput(params: {
       .in('status', CAPACITY_CONSUMING_STATUSES),
   ]);
 
-  const classTypes = (typesRes.data ?? []) as ClassType[];
   const instances = (instancesRes.data ?? []) as ClassInstance[];
 
   const bookedByInstance: Record<string, number> = {};

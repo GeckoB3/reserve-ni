@@ -71,6 +71,21 @@ function getAvailabilityRanges(hours: WorkingHours, dateStr: string): Array<{ st
   return ranges.map((r) => ({ start: timeToMinutes(r.start), end: timeToMinutes(r.end) }));
 }
 
+function getEffectiveAvailabilityRanges(
+  resource: VenueResource,
+  dateStr: string,
+): Array<{ start: number; end: number }> {
+  const raw = resource.availability_exceptions;
+  const ex = raw?.[dateStr];
+  if (ex && 'closed' in ex && ex.closed === true) {
+    return [];
+  }
+  if (ex && 'periods' in ex && Array.isArray(ex.periods) && ex.periods.length > 0) {
+    return ex.periods.map((r) => ({ start: timeToMinutes(r.start), end: timeToMinutes(r.end) }));
+  }
+  return getAvailabilityRanges(resource.availability_hours, dateStr);
+}
+
 function overlaps(startA: number, endA: number, startB: number, endB: number): boolean {
   return startA < endB && startB < endA;
 }
@@ -94,7 +109,7 @@ export function computeResourceAvailability(
       Math.min(requestedDurationMinutes, resource.max_booking_minutes),
     );
 
-    const ranges = getAvailabilityRanges(resource.availability_hours, date);
+    const ranges = getEffectiveAvailabilityRanges(resource, date);
     if (ranges.length === 0) continue;
 
     const resourceBookings = existingBookings.filter(

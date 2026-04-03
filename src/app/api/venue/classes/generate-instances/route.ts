@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
+import { matchesTimetableIntervalWeeks } from '@/lib/scheduling/class-timetable-interval';
 
 /**
  * POST /api/venue/classes/generate-instances
@@ -71,6 +72,17 @@ export async function POST(request: NextRequest) {
 
       for (const entry of timetable) {
         if (entry.day_of_week !== dow) continue;
+        const intervalWeeks = (entry as { interval_weeks?: number }).interval_weeks ?? 1;
+        const createdAt = (entry as { created_at?: string }).created_at ?? `${dateStr}T00:00:00Z`;
+        if (
+          !matchesTimetableIntervalWeeks({
+            intervalWeeks,
+            timetableCreatedAt: createdAt,
+            instanceDateStr: dateStr,
+          })
+        ) {
+          continue;
+        }
         const startTime = (entry.start_time as string).slice(0, 5);
         const key = `${entry.class_type_id}|${dateStr}|${startTime}`;
         if (existingSet.has(key)) continue;

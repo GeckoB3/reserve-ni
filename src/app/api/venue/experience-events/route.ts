@@ -2,7 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
-import { checkCalendarLimit } from '@/lib/tier-enforcement';
+import { checkExperienceEventBatchLimit } from '@/lib/tier-enforcement';
+import { requireVenueExposesSecondaryModel } from '@/lib/booking/require-venue-secondary-model';
+import { expandWeeklyOccurrences, normaliseCustomDates } from '@/lib/scheduling/experience-event-dates';
+import { MAX_MATERIALISED_EVENT_OCCURRENCES } from '@/lib/scheduling/cde-scheduling-rules';
 import { z } from 'zod';
 
 const eventSchema = z.object({
@@ -12,7 +15,7 @@ const eventSchema = z.object({
   start_time: z.string().regex(/^\d{2}:\d{2}$/),
   end_time: z.string().regex(/^\d{2}:\d{2}$/),
   capacity: z.number().int().min(1),
-  image_url: z.string().url().optional(),
+  image_url: z.preprocess((v) => (v === '' || v === null ? undefined : v), z.string().url().optional()),
   is_recurring: z.boolean().optional(),
   recurrence_rule: z.string().optional(),
   parent_event_id: z.string().uuid().optional(),
@@ -23,6 +26,22 @@ const eventSchema = z.object({
     capacity: z.number().int().min(1).optional(),
     sort_order: z.number().int().optional(),
   })).optional(),
+});
+
+const scheduleSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('single') }),
+  z.object({
+    type: z.literal('weekly'),
+    until_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  }),
+  z.object({
+    type: z.literal('custom'),
+    dates: z.array(z.string().regex(/^\d{4}-\d{2}-\d{2}$/)).min(1),
+  }),
+]);
+
+const createEventBodySchema = eventSchema.extend({
+  schedule: scheduleSchema.optional(),
 });
 
 /** GET /api/venue/experience-events — list events with ticket types. */
@@ -66,52 +85,105 @@ export async function POST(request: NextRequest) {
     if (!staff) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
     if (!requireAdmin(staff)) return NextResponse.json({ error: 'Forbidden: admin only' }, { status: 403 });
 
+    const admin = getSupabaseAdminClient();
+    const modelGate = await requireVenueExposesSecondaryModel(admin, staff.venue_id, 'event_ticket');
+    if (!modelGate.ok) return modelGate.response;
+
     const body = await request.json();
-    const parsed = eventSchema.safeParse(body);
+    const parsed = createEventBodySchema.safeParse(body);
     if (!parsed.success) {
       return NextResponse.json({ error: 'Invalid request', details: parsed.error.flatten() }, { status: 400 });
     }
 
-    const limitCheck = await checkCalendarLimit(staff.venue_id, 'experience_events');
-    if (!limitCheck.allowed) {
+    const { ticket_types, schedule, ...eventFields } = parsed.data;
+
+    let datesToCreate: string[] = [eventFields.event_date];
+    const sched = schedule ?? { type: 'single' as const };
+    if (sched.type === 'weekly') {
+      datesToCreate = expandWeeklyOccurrences(eventFields.event_date, sched.until_date);
+    } else if (sched.type === 'custom') {
+      datesToCreate = normaliseCustomDates(sched.dates);
+    }
+
+    if (datesToCreate.length === 0) {
+      return NextResponse.json({ error: 'No valid event dates to create' }, { status: 400 });
+    }
+    if (datesToCreate.length > MAX_MATERIALISED_EVENT_OCCURRENCES) {
       return NextResponse.json(
-        { error: 'Calendar limit reached', current: limitCheck.current, limit: limitCheck.limit, upgrade_required: true },
-        { status: 403 }
+        { error: `At most ${MAX_MATERIALISED_EVENT_OCCURRENCES} occurrences per save` },
+        { status: 400 },
       );
     }
 
-    const { ticket_types, ...eventData } = parsed.data;
-    const admin = getSupabaseAdminClient();
-
-    const { data: event, error } = await admin
-      .from('experience_events')
-      .insert({ venue_id: staff.venue_id, ...eventData })
-      .select()
-      .single();
-
-    if (error) {
-      console.error('POST /api/venue/experience-events failed:', error);
-      return NextResponse.json({ error: 'Failed to create event' }, { status: 500 });
+    const batchCheck = await checkExperienceEventBatchLimit(staff.venue_id, datesToCreate.length);
+    if (!batchCheck.allowed) {
+      return NextResponse.json(
+        {
+          error: 'Calendar limit reached for your plan',
+          current: batchCheck.current,
+          limit: batchCheck.limit,
+          upgrade_required: true,
+        },
+        { status: 403 },
+      );
     }
 
-    if (ticket_types && ticket_types.length > 0) {
-      const ttRows = ticket_types.map((tt, i) => ({
-        event_id: event.id,
-        name: tt.name,
-        price_pence: tt.price_pence,
-        capacity: tt.capacity ?? null,
-        sort_order: tt.sort_order ?? i,
-      }));
-      await admin.from('event_ticket_types').insert(ttRows);
+    const baseInsert = {
+      venue_id: staff.venue_id,
+      name: eventFields.name,
+      description: eventFields.description ?? null,
+      start_time: eventFields.start_time.length === 5 ? `${eventFields.start_time}:00` : eventFields.start_time,
+      end_time: eventFields.end_time.length === 5 ? `${eventFields.end_time}:00` : eventFields.end_time,
+      capacity: eventFields.capacity,
+      image_url: eventFields.image_url ?? null,
+      is_recurring: false,
+      recurrence_rule: null as string | null,
+      parent_event_id: null as string | null,
+      is_active: eventFields.is_active ?? true,
+    };
+
+    const createdIds: string[] = [];
+
+    for (const eventDate of datesToCreate) {
+      const { data: event, error } = await admin
+        .from('experience_events')
+        .insert({
+          ...baseInsert,
+          event_date: eventDate,
+        })
+        .select('id')
+        .single();
+
+      if (error || !event) {
+        console.error('POST /api/venue/experience-events failed:', error);
+        return NextResponse.json({ error: 'Failed to create event' }, { status: 500 });
+      }
+
+      const eid = event.id as string;
+      createdIds.push(eid);
+
+      if (ticket_types && ticket_types.length > 0) {
+        const ttRows = ticket_types.map((tt, i) => ({
+          event_id: eid,
+          name: tt.name,
+          price_pence: tt.price_pence,
+          capacity: tt.capacity ?? null,
+          sort_order: tt.sort_order ?? i,
+        }));
+        await admin.from('event_ticket_types').insert(ttRows);
+      }
     }
 
     const { data: full } = await admin
       .from('experience_events')
       .select('*, ticket_types:event_ticket_types(*)')
-      .eq('id', event.id)
+      .eq('id', createdIds[0]!)
       .single();
 
-    return NextResponse.json(full, { status: 201 });
+    return NextResponse.json(
+      { created: createdIds.length, event_ids: createdIds, ...(full ?? {}) },
+      { status: 201 },
+    );
   } catch (err) {
     console.error('POST /api/venue/experience-events failed:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
@@ -126,6 +198,10 @@ export async function PATCH(request: NextRequest) {
     if (!staff) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
     if (!requireAdmin(staff)) return NextResponse.json({ error: 'Forbidden: admin only' }, { status: 403 });
 
+    const admin = getSupabaseAdminClient();
+    const modelGate = await requireVenueExposesSecondaryModel(admin, staff.venue_id, 'event_ticket');
+    if (!modelGate.ok) return modelGate.response;
+
     const body = await request.json();
     const { id, ticket_types, ...rest } = body;
     if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 });
@@ -135,7 +211,6 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid request', details: parsed.error.flatten() }, { status: 400 });
     }
 
-    const admin = getSupabaseAdminClient();
     const { error } = await admin
       .from('experience_events')
       .update(parsed.data)
@@ -187,6 +262,8 @@ export async function DELETE(request: NextRequest) {
     if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 });
 
     const admin = getSupabaseAdminClient();
+    const modelGate = await requireVenueExposesSecondaryModel(admin, staff.venue_id, 'event_ticket');
+    if (!modelGate.ok) return modelGate.response;
     const { error } = await admin
       .from('experience_events')
       .delete()

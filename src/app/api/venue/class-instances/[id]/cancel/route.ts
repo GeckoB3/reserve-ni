@@ -2,6 +2,7 @@ import { NextRequest, NextResponse, after } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
+import { requireVenueExposesSecondaryModel } from '@/lib/booking/require-venue-secondary-model';
 import { cancelStaffBookingWithNotify } from '@/lib/booking/staff-cancel-booking';
 import { z } from 'zod';
 
@@ -24,6 +25,10 @@ export async function POST(
     if (!staff) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
     if (!requireAdmin(staff)) return NextResponse.json({ error: 'Forbidden: admin only' }, { status: 403 });
 
+    const admin = getSupabaseAdminClient();
+    const modelGate = await requireVenueExposesSecondaryModel(admin, staff.venue_id, 'class_session');
+    if (!modelGate.ok) return modelGate.response;
+
     const json = await request.json().catch(() => ({}));
     const parsed = bodySchema.safeParse(json);
     if (!parsed.success) {
@@ -31,7 +36,6 @@ export async function POST(
     }
 
     const { id: instanceId } = await params;
-    const admin = getSupabaseAdminClient();
     const venueId = staff.venue_id;
 
     const { data: inst, error: instErr } = await admin

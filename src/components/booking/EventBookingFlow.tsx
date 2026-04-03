@@ -42,7 +42,9 @@ export function EventBookingFlow({ venue, cancellationPolicy }: { venue: VenuePu
   const fetchEvents = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/booking/availability?venue_id=${venue.id}&date=${date}`);
+      const res = await fetch(
+        `/api/booking/availability?venue_id=${venue.id}&date=${date}&booking_model=event_ticket`,
+      );
       const data = await res.json();
       setEvents(data.events ?? []);
     } catch {

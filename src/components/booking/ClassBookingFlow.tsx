@@ -37,7 +37,9 @@ export function ClassBookingFlow({ venue, cancellationPolicy }: { venue: VenuePu
   const fetchClasses = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/booking/availability?venue_id=${venue.id}&date=${date}`);
+      const res = await fetch(
+        `/api/booking/availability?venue_id=${venue.id}&date=${date}&booking_model=class_session`,
+      );
       const data = await res.json();
       setClasses(data.classes ?? []);
     } catch {

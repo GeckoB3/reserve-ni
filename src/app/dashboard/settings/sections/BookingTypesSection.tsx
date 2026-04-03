@@ -1,12 +1,17 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import type { VenueSettings } from '../types';
 import type { BookingModel } from '@/types/booking-models';
 import { normalizeEnabledModels } from '@/lib/booking/enabled-models';
 
-const OPTIONAL_SECONDARIES: Array<{ model: Extract<BookingModel, 'event_ticket' | 'class_session' | 'resource_booking'>; title: string; description: string; href: string }> = [
+const OPTIONAL_SECONDARIES: Array<{
+  model: Extract<BookingModel, 'event_ticket' | 'class_session' | 'resource_booking'>;
+  title: string;
+  description: string;
+  href: string;
+}> = [
   {
     model: 'event_ticket',
     title: 'Ticketed events',
@@ -34,9 +39,11 @@ interface Props {
 }
 
 export function BookingTypesSection({ venue, onUpdate, isAdmin }: Props) {
+  const router = useRouter();
   const primary = (venue.booking_model as BookingModel) ?? 'table_reservation';
   const [draft, setDraft] = useState<BookingModel[]>(normalizeEnabledModels(venue.enabled_models, primary));
   const [saving, setSaving] = useState(false);
+  const [setupNavigating, setSetupNavigating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -51,12 +58,10 @@ export function BookingTypesSection({ venue, onUpdate, isAdmin }: Props) {
     JSON.stringify([...draft].sort()) !==
     JSON.stringify([...normalizeEnabledModels(venue.enabled_models, primary)].sort());
 
-  const save = useCallback(async () => {
-    if (!isAdmin) return;
-    setSaving(true);
-    setError(null);
+  const persistDraft = useCallback(async (): Promise<boolean> => {
+    if (!isAdmin) return false;
+    const normalized = normalizeEnabledModels(draft, primary);
     try {
-      const normalized = normalizeEnabledModels(draft, primary);
       const res = await fetch('/api/venue', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -65,24 +70,56 @@ export function BookingTypesSection({ venue, onUpdate, isAdmin }: Props) {
       const json = await res.json().catch(() => ({}));
       if (!res.ok) {
         setError((json as { error?: string }).error ?? 'Save failed');
-        return;
+        return false;
       }
       onUpdate({
         enabled_models: (json as { enabled_models?: BookingModel[] }).enabled_models ?? normalized,
       });
       setDraft(normalizeEnabledModels((json as { enabled_models?: unknown }).enabled_models, primary));
+      return true;
+    } catch {
+      setError('Save failed');
+      return false;
+    }
+  }, [draft, isAdmin, onUpdate, primary]);
+
+  const save = useCallback(async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      await persistDraft();
     } catch {
       setError('Save failed');
     } finally {
       setSaving(false);
     }
-  }, [draft, isAdmin, onUpdate, primary, venue.enabled_models]);
+  }, [persistDraft]);
+
+  const handleSetUp = useCallback(
+    async (href: string) => {
+      setError(null);
+      setSetupNavigating(true);
+      try {
+        if (dirty) {
+          const ok = await persistDraft();
+          if (!ok) return;
+        }
+        await router.refresh();
+        router.push(href);
+      } finally {
+        setSetupNavigating(false);
+      }
+    },
+    [dirty, persistDraft, router],
+  );
 
   if (!isAdmin) return null;
 
   const visible = OPTIONAL_SECONDARIES.filter((o) => o.model !== primary);
 
   if (visible.length === 0) return null;
+
+  const busy = saving || setupNavigating;
 
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -99,7 +136,7 @@ export function BookingTypesSection({ venue, onUpdate, isAdmin }: Props) {
               key={opt.model}
               className="flex flex-wrap items-start justify-between gap-3 rounded-lg border border-slate-100 bg-slate-50/80 px-3 py-3"
             >
-              <label className="flex cursor-pointer items-start gap-3 min-w-0">
+              <label className="flex min-w-0 cursor-pointer items-start gap-3">
                 <input
                   type="checkbox"
                   className="mt-1 h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
@@ -112,12 +149,14 @@ export function BookingTypesSection({ venue, onUpdate, isAdmin }: Props) {
                 </span>
               </label>
               {checked && (
-                <Link
-                  href={opt.href}
-                  className="shrink-0 text-sm font-medium text-brand-600 hover:text-brand-800"
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void handleSetUp(opt.href)}
+                  className="shrink-0 text-sm font-medium text-brand-600 hover:text-brand-800 disabled:opacity-50"
                 >
-                  Set up →
-                </Link>
+                  {setupNavigating ? 'Opening…' : 'Set up →'}
+                </button>
               )}
             </li>
           );

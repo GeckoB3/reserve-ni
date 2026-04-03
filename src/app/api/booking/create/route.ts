@@ -139,7 +139,9 @@ export async function POST(request: NextRequest) {
 
     // Dispatch to model-specific create handlers (B, C, D, E)
     if (venueMode.bookingModel !== 'table_reservation') {
-      return handleNonTableBooking(request, supabase, venue, venueMode, parsed.data, phoneE164, venueMode.bookingModel);
+      const inferredSecondary = inferSecondaryBookingModelFromPayload(parsed.data, venueMode.enabledModels);
+      const effectiveModel = inferredSecondary ?? venueMode.bookingModel;
+      return handleNonTableBooking(request, supabase, venue, venueMode, parsed.data, phoneE164, effectiveModel);
     }
 
     const secondaryModel = inferSecondaryBookingModelFromPayload(parsed.data, venueMode.enabledModels);

@@ -61,6 +61,49 @@ export async function checkCalendarLimit(
 }
 
 /**
+ * Standard tier: total active `experience_events` rows must not exceed `calendar_count`.
+ * Use when creating multiple event occurrences in one request.
+ */
+export async function checkExperienceEventBatchLimit(
+  venueId: string,
+  eventsToAdd: number
+): Promise<{ allowed: boolean; current?: number; limit?: number }> {
+  const admin = getSupabaseAdminClient();
+
+  const { data: venue } = await admin
+    .from('venues')
+    .select('pricing_tier, calendar_count')
+    .eq('id', venueId)
+    .single();
+
+  if (!venue) return { allowed: false };
+
+  const tier = ((venue as VenueTier).pricing_tier ?? 'standard') as PricingTier;
+  if (tier !== 'standard') {
+    return { allowed: true };
+  }
+
+  const limit = (venue as VenueTier).calendar_count ?? 1;
+
+  const { count, error } = await admin
+    .from('experience_events')
+    .select('id', { count: 'exact', head: true })
+    .eq('venue_id', venueId)
+    .eq('is_active', true);
+
+  if (error) {
+    console.error('[checkExperienceEventBatchLimit] count failed:', error);
+    return { allowed: false };
+  }
+
+  const current = count ?? 0;
+  if (current + eventsToAdd <= limit) {
+    return { allowed: true, current, limit };
+  }
+  return { allowed: false, current, limit };
+}
+
+/**
  * Check if a venue's tier allows SMS communications.
  * Unified Scheduling plan §1.1: Standard, Business, and Founding all include SMS (allowances differ).
  */

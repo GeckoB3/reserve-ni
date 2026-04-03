@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
+import { requireVenueExposesSecondaryModel } from '@/lib/booking/require-venue-secondary-model';
 import { z } from 'zod';
 
 const eventSchema = z.object({
@@ -76,6 +77,10 @@ export async function PATCH(
     if (!staff) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
     if (!requireAdmin(staff)) return NextResponse.json({ error: 'Forbidden: admin only' }, { status: 403 });
 
+    const admin = getSupabaseAdminClient();
+    const modelGate = await requireVenueExposesSecondaryModel(admin, staff.venue_id, 'event_ticket');
+    if (!modelGate.ok) return modelGate.response;
+
     const { id } = await params;
     const body = await request.json();
     const { ticket_types, ...rest } = body as { ticket_types?: unknown; [k: string]: unknown };
@@ -85,7 +90,6 @@ export async function PATCH(
       return NextResponse.json({ error: 'Invalid request', details: parsed.error.flatten() }, { status: 400 });
     }
 
-    const admin = getSupabaseAdminClient();
     const patch = parsed.data;
     if (Object.keys(patch).length > 0) {
       const { error } = await admin
@@ -142,8 +146,11 @@ export async function DELETE(
     if (!staff) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
     if (!requireAdmin(staff)) return NextResponse.json({ error: 'Forbidden: admin only' }, { status: 403 });
 
-    const { id } = await params;
     const admin = getSupabaseAdminClient();
+    const modelGate = await requireVenueExposesSecondaryModel(admin, staff.venue_id, 'event_ticket');
+    if (!modelGate.ok) return modelGate.response;
+
+    const { id } = await params;
     const { error } = await admin
       .from('experience_events')
       .delete()

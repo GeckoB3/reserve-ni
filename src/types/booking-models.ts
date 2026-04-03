@@ -201,6 +201,11 @@ export interface ClassInstance {
 // Model E: Resource / facility
 // ---------------------------------------------------------------------------
 
+/** Per-date override for resource opening hours (`venue_resources.availability_exceptions`). */
+export type ResourceAvailabilityException = { closed: true } | { periods: Array<{ start: string; end: string }> };
+
+export type ResourceAvailabilityExceptions = Record<string, ResourceAvailabilityException>;
+
 export interface VenueResource {
   id: string;
   venue_id: string;
@@ -211,6 +216,8 @@ export interface VenueResource {
   slot_interval_minutes: number;
   price_per_slot_pence: number | null;
   availability_hours: WorkingHours;
+  /** Optional per-date closed days or replacement `periods` for that date only. */
+  availability_exceptions?: ResourceAvailabilityExceptions;
   is_active: boolean;
   sort_order: number;
   created_at: string;

@@ -43,7 +43,12 @@ export function ResourceBookingFlow({ venue, cancellationPolicy }: { venue: Venu
   const fetchResources = useCallback(async () => {
     setLoading(true);
     try {
-      const params = new URLSearchParams({ venue_id: venue.id, date, duration: String(duration) });
+      const params = new URLSearchParams({
+        venue_id: venue.id,
+        date,
+        duration: String(duration),
+        booking_model: 'resource_booking',
+      });
       if (selectedResource) params.set('resource_id', selectedResource.id);
       const res = await fetch(`/api/booking/availability?${params}`);
       const data = await res.json();

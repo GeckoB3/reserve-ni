@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { checkCalendarLimit } from '@/lib/tier-enforcement';
+import { requireVenueExposesSecondaryModel } from '@/lib/booking/require-venue-secondary-model';
 import { z } from 'zod';
 
 const classTypeSchema = z.object({
@@ -21,6 +22,7 @@ const timetableEntrySchema = z.object({
   day_of_week: z.number().int().min(0).max(6),
   start_time: z.string().regex(/^\d{2}:\d{2}$/),
   is_active: z.boolean().optional(),
+  interval_weeks: z.number().int().min(1).max(8).optional(),
 });
 
 /** GET /api/venue/classes — list class types, timetable, and upcoming instances. */
@@ -32,20 +34,44 @@ export async function GET() {
 
     const admin = getSupabaseAdminClient();
 
-    const [typesRes, timetableRes, instancesRes] = await Promise.all([
-      admin.from('class_types').select('*').eq('venue_id', staff.venue_id).order('name'),
-      admin.from('class_timetable').select('*').in(
-        'class_type_id',
-        (await admin.from('class_types').select('id').eq('venue_id', staff.venue_id)).data?.map((ct) => ct.id) ?? []
-      ),
-      admin.from('class_instances').select('*').in(
-        'class_type_id',
-        (await admin.from('class_types').select('id').eq('venue_id', staff.venue_id)).data?.map((ct) => ct.id) ?? []
-      ).gte('instance_date', new Date().toISOString().slice(0, 10)).order('instance_date').limit(200),
+    const { data: classTypes, error: typesError } = await admin
+      .from('class_types')
+      .select('*')
+      .eq('venue_id', staff.venue_id)
+      .order('name');
+
+    if (typesError) {
+      console.error('GET /api/venue/classes failed (class_types):', typesError);
+      return NextResponse.json({ error: 'Failed to fetch class types' }, { status: 500 });
+    }
+
+    const ids = (classTypes ?? []).map((ct) => ct.id as string);
+    if (ids.length === 0) {
+      return NextResponse.json({ class_types: [], timetable: [], instances: [] });
+    }
+
+    const [timetableRes, instancesRes] = await Promise.all([
+      admin.from('class_timetable').select('*').in('class_type_id', ids),
+      admin
+        .from('class_instances')
+        .select('*')
+        .in('class_type_id', ids)
+        .gte('instance_date', new Date().toISOString().slice(0, 10))
+        .order('instance_date')
+        .limit(200),
     ]);
 
+    if (timetableRes.error) {
+      console.error('GET /api/venue/classes failed (timetable):', timetableRes.error);
+      return NextResponse.json({ error: 'Failed to fetch timetable' }, { status: 500 });
+    }
+    if (instancesRes.error) {
+      console.error('GET /api/venue/classes failed (instances):', instancesRes.error);
+      return NextResponse.json({ error: 'Failed to fetch instances' }, { status: 500 });
+    }
+
     return NextResponse.json({
-      class_types: typesRes.data ?? [],
+      class_types: classTypes ?? [],
       timetable: timetableRes.data ?? [],
       instances: instancesRes.data ?? [],
     });
@@ -63,8 +89,11 @@ export async function POST(request: NextRequest) {
     if (!staff) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
     if (!requireAdmin(staff)) return NextResponse.json({ error: 'Forbidden: admin only' }, { status: 403 });
 
-    const body = await request.json();
     const admin = getSupabaseAdminClient();
+    const modelGate = await requireVenueExposesSecondaryModel(admin, staff.venue_id, 'class_session');
+    if (!modelGate.ok) return modelGate.response;
+
+    const body = await request.json();
 
     // Determine what to create based on body shape
     if (body.day_of_week !== undefined) {
@@ -121,11 +150,13 @@ export async function PATCH(request: NextRequest) {
     if (!staff) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
     if (!requireAdmin(staff)) return NextResponse.json({ error: 'Forbidden: admin only' }, { status: 403 });
 
+    const admin = getSupabaseAdminClient();
+    const modelGate = await requireVenueExposesSecondaryModel(admin, staff.venue_id, 'class_session');
+    if (!modelGate.ok) return modelGate.response;
+
     const body = await request.json();
     const { id, entity_type, ...rest } = body;
     if (!id || !entity_type) return NextResponse.json({ error: 'Missing id or entity_type' }, { status: 400 });
-
-    const admin = getSupabaseAdminClient();
 
     if (entity_type === 'timetable') {
       const { data, error } = await admin.from('class_timetable').update(rest).eq('id', id).select().single();
@@ -177,6 +208,8 @@ export async function DELETE(request: NextRequest) {
     if (!id || !entity_type) return NextResponse.json({ error: 'Missing id or entity_type' }, { status: 400 });
 
     const admin = getSupabaseAdminClient();
+    const modelGate = await requireVenueExposesSecondaryModel(admin, staff.venue_id, 'class_session');
+    if (!modelGate.ok) return modelGate.response;
 
     const table = entity_type === 'timetable' ? 'class_timetable' :
                   entity_type === 'instance' ? 'class_instances' : 'class_types';

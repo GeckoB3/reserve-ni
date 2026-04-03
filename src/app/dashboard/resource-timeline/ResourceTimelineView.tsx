@@ -13,6 +13,7 @@ interface Resource {
   price_per_slot_pence: number | null;
   is_active: boolean;
   availability_hours: Record<string, Array<{ start: string; end: string }>> | null;
+  availability_exceptions?: Record<string, { closed: true } | { periods: Array<{ start: string; end: string }> }> | null;
 }
 
 interface ResourceFormState {
@@ -24,6 +25,7 @@ interface ResourceFormState {
   price_per_slot_pence: string;
   is_active: boolean;
   availability_hours_json: string;
+  availability_exceptions_json: string;
 }
 
 const DEFAULT_AVAILABILITY_HOURS_JSON =
@@ -38,6 +40,7 @@ const BLANK_RESOURCE: ResourceFormState = {
   price_per_slot_pence: '',
   is_active: true,
   availability_hours_json: DEFAULT_AVAILABILITY_HOURS_JSON,
+  availability_exceptions_json: '{}',
 };
 
 export function ResourceTimelineView({
@@ -93,6 +96,19 @@ export function ResourceTimelineView({
       setResourceError('Availability hours is not valid JSON. Check the format and try again.');
       return;
     }
+    let availability_exceptions: Record<string, { closed: true } | { periods: Array<{ start: string; end: string }> }>;
+    try {
+      availability_exceptions = JSON.parse(
+        resourceForm.availability_exceptions_json.trim() || '{}',
+      ) as Record<string, { closed: true } | { periods: Array<{ start: string; end: string }> }>;
+      if (typeof availability_exceptions !== 'object' || availability_exceptions === null || Array.isArray(availability_exceptions)) {
+        setResourceError('Availability exceptions must be a JSON object keyed by YYYY-MM-DD.');
+        return;
+      }
+    } catch {
+      setResourceError('Availability exceptions is not valid JSON.');
+      return;
+    }
     setResourceSaving(true);
     setResourceError(null);
     try {
@@ -107,12 +123,13 @@ export function ResourceTimelineView({
         }),
         is_active: resourceForm.is_active,
         availability_hours,
+        availability_exceptions,
       };
       const res = editingResourceId
-        ? await fetch(`/api/venue/resources/${editingResourceId}`, {
+        ? await fetch('/api/venue/resources', {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
+            body: JSON.stringify({ id: editingResourceId, ...payload }),
           })
         : await fetch('/api/venue/resources', {
             method: 'POST',
@@ -147,6 +164,9 @@ export function ResourceTimelineView({
       availability_hours_json: r.availability_hours
         ? JSON.stringify(r.availability_hours, null, 2)
         : DEFAULT_AVAILABILITY_HOURS_JSON,
+      availability_exceptions_json: r.availability_exceptions
+        ? JSON.stringify(r.availability_exceptions, null, 2)
+        : '{}',
     });
     setEditingResourceId(r.id);
     setResourceError(null);
@@ -156,7 +176,11 @@ export function ResourceTimelineView({
   const handleDeleteResource = async (id: string) => {
     if (!window.confirm('Delete this resource? Existing bookings are not affected.')) return;
     try {
-      const res = await fetch(`/api/venue/resources/${id}`, { method: 'DELETE' });
+      const res = await fetch('/api/venue/resources', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id }),
+      });
       if (!res.ok) {
         const json = await res.json();
         window.alert((json as { error?: string }).error ?? 'Delete failed');
@@ -363,6 +387,24 @@ export function ResourceTimelineView({
                 />
                 <p className="mt-1 text-xs text-slate-400">
                   Keys 0–6 = Sun–Sat. Each entry: {'{'}&#34;start&#34;:&#34;09:00&#34;,&#34;end&#34;:&#34;17:00&#34;{'}'}
+                </p>
+              </div>
+
+              <div className="mt-3">
+                <label className="mb-1 block text-xs font-medium text-slate-600">
+                  Date overrides (JSON)
+                </label>
+                <textarea
+                  value={resourceForm.availability_exceptions_json}
+                  onChange={(e) => setResourceForm((f) => ({ ...f, availability_exceptions_json: e.target.value }))}
+                  rows={5}
+                  placeholder={'{\n  "2026-12-25": { "closed": true },\n  "2026-12-31": { "periods": [{ "start": "18:00", "end": "23:00" }] }\n}'}
+                  className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 font-mono text-xs focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
+                />
+                <p className="mt-1 text-xs text-slate-400">
+                  Per-date overrides on top of weekly hours. Use{' '}
+                  <code className="rounded bg-slate-100 px-0.5">{`{ "closed": true }`}</code> or{' '}
+                  <code className="rounded bg-slate-100 px-0.5">{`{ "periods": [...] }`}</code> for custom hours.
                 </p>
               </div>
 

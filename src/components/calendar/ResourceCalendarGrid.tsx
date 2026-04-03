@@ -11,6 +11,8 @@ import {
 
 const SLOT_HEIGHT = 48;
 const SLOT_MINUTES = 15;
+/** Guard against pathological opening_hours producing huge slot arrays. */
+const MAX_TIME_SLOTS = 384;
 
 const STATUS_COLOURS: Record<string, { bg: string; text: string; border: string }> = {
   Pending: { bg: 'bg-orange-50', text: 'text-orange-900', border: 'border-orange-200' },
@@ -135,12 +137,22 @@ export function ResourceCalendarGrid({
   const [availSlots, setAvailSlots] = useState<Record<string, AvailSlot[]>>({});
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  const { startHour, endHour } = useMemo(
+  const bounds = useMemo(
     () => getCalendarGridBounds(date, openingHours ?? undefined, 7, 21),
     [date, openingHours],
   );
 
-  const TOTAL_SLOTS = ((endHour - startHour) * 60) / SLOT_MINUTES;
+  const startHour = Number.isFinite(bounds.startHour) ? bounds.startHour : 7;
+  const endHour = Number.isFinite(bounds.endHour) ? bounds.endHour : 21;
+
+  const TOTAL_SLOTS = useMemo(() => {
+    const span = endHour - startHour;
+    if (!Number.isFinite(span) || span <= 0) {
+      return Math.min(Math.floor((14 * 60) / SLOT_MINUTES), MAX_TIME_SLOTS);
+    }
+    const n = Math.floor((span * 60) / SLOT_MINUTES);
+    return Math.min(Math.max(n, 1), MAX_TIME_SLOTS);
+  }, [endHour, startHour]);
 
   const timeLabels = useMemo(
     () =>

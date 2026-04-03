@@ -23,6 +23,11 @@ import { computeEventAvailability, fetchEventInput } from '@/lib/availability/ev
 import { computeClassAvailability, fetchClassInput } from '@/lib/availability/class-session-engine';
 import { computeResourceAvailability, fetchResourceInput } from '@/lib/availability/resource-booking-engine';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
+import { venueExposesBookingModel } from '@/lib/booking/enabled-models';
+import type { BookingModel } from '@/types/booking-models';
+
+/** Public availability can request C/D/E explicitly when the venue primary is another model (multi-tab embed). */
+const AVAILABILITY_REQUEST_MODELS = new Set<BookingModel>(['event_ticket', 'class_session', 'resource_booking']);
 
 function toMinutes(value: string): number {
   const [h, m] = value.slice(0, 5).split(':').map(Number);
@@ -136,7 +141,7 @@ async function buildTableFilterByTime(
   return timesWithTable;
 }
 
-/** GET /api/booking/availability?venue_id=uuid&date=YYYY-MM-DD&party_size=N */
+/** GET /api/booking/availability?venue_id=uuid&date=YYYY-MM-DD&party_size=N [&booking_model=event_ticket|class_session|resource_booking] */
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
@@ -170,7 +175,31 @@ export async function GET(request: NextRequest) {
     const supabase = getSupabaseAdminClient();
     const venueMode = await resolveVenueMode(supabase, venueId);
 
-    // Dispatch to model-specific availability engines
+    const bookingModelParam = searchParams.get('booking_model');
+    if (bookingModelParam) {
+      if (!AVAILABILITY_REQUEST_MODELS.has(bookingModelParam as BookingModel)) {
+        return NextResponse.json(
+          { error: 'Invalid booking_model; use event_ticket, class_session, or resource_booking' },
+          { status: 400 },
+        );
+      }
+      const requested = bookingModelParam as BookingModel;
+      if (!venueExposesBookingModel(venueMode.bookingModel, venueMode.enabledModels, requested)) {
+        return NextResponse.json(
+          { error: 'This booking type is not enabled for this venue' },
+          { status: 403 },
+        );
+      }
+      if (requested === 'event_ticket') {
+        return handleEventAvailability(supabase, venueId, dateStr);
+      }
+      if (requested === 'class_session') {
+        return handleClassAvailability(supabase, venueId, dateStr);
+      }
+      return handleResourceAvailability(supabase, venueId, dateStr, searchParams);
+    }
+
+    // Dispatch to model-specific availability engines (primary model when booking_model omitted)
     if (isUnifiedSchedulingVenue(venueMode.bookingModel)) {
       return handleAppointmentAvailability(supabase, venueId, dateStr, searchParams);
     }

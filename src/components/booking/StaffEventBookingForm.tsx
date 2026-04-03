@@ -50,7 +50,9 @@ export function StaffEventBookingForm({
   const fetchEvents = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/booking/availability?venue_id=${venueId}&date=${date}`);
+      const res = await fetch(
+        `/api/booking/availability?venue_id=${venueId}&date=${date}&booking_model=event_ticket`,
+      );
       const data = await res.json();
       setEvents(data.events ?? []);
       setSelectedEvent(null);
