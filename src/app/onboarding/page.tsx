@@ -190,16 +190,10 @@ export default function OnboardingPage() {
                 }),
               ),
             );
-          } else if (
-            v.booking_model === 'practitioner_appointment' ||
-            v.booking_model === 'unified_scheduling'
-          ) {
+          } else if (isUnifiedSchedulingVenue(v.booking_model)) {
             setServices([createEmptyAppointmentServiceDraft()]);
           }
-        } else if (
-          v.booking_model === 'practitioner_appointment' ||
-          v.booking_model === 'unified_scheduling'
-        ) {
+        } else if (isUnifiedSchedulingVenue(v.booking_model)) {
           setServices([createEmptyAppointmentServiceDraft()]);
         }
 
@@ -295,9 +289,6 @@ export default function OnboardingPage() {
         steps.push({ key: 'restaurant_setup', label: 'Restaurant Setup' });
         break;
       case 'practitioner_appointment':
-        steps.push({ key: 'team', label: `Your ${terms.staff}s` });
-        steps.push({ key: 'services', label: 'Services' });
-        break;
       case 'unified_scheduling':
         steps.push({ key: 'team', label: unifiedTeamStepLabel(terms) });
         steps.push({ key: 'services', label: 'Services' });
@@ -325,7 +316,7 @@ export default function OnboardingPage() {
 
   useEffect(() => {
     if (!venue) return;
-    if (venue.booking_model !== 'practitioner_appointment' && venue.booking_model !== 'unified_scheduling') {
+    if (!isUnifiedSchedulingVenue(venue.booking_model)) {
       return;
     }
     if (currentStepKey !== 'services' && currentStepKey !== 'hours') return;
@@ -598,9 +589,7 @@ export default function OnboardingPage() {
         setError('Please add at least one service.');
         return;
       }
-      const needsRoster =
-        venue?.booking_model === 'practitioner_appointment' ||
-        venue?.booking_model === 'unified_scheduling';
+      const needsRoster = venue ? isUnifiedSchedulingVenue(venue.booking_model) : false;
       if (needsRoster && rosterIds.length === 0) {
         setError('Your team could not be loaded. Go back one step and save your team again.');
         return;
@@ -638,10 +627,6 @@ export default function OnboardingPage() {
 
     if (currentStepKey === 'hours') {
       if (step < maxCompletedStep) {
-        setStep((s) => s + 1);
-        return;
-      }
-      if (!venue || !isUnifiedSchedulingVenue(venue.booking_model)) {
         setStep((s) => s + 1);
         return;
       }
@@ -772,10 +757,21 @@ export default function OnboardingPage() {
           });
           if (!ttRes.ok) throw new Error('Failed to create timetable entry');
         }
+
+        const genRes = await fetch('/api/venue/classes/generate-instances', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ weeks: 8 }),
+        });
+        if (!genRes.ok) {
+          const errBody = (await genRes.json().catch(() => ({}))) as { error?: string };
+          throw new Error(errBody.error ?? 'Failed to generate class sessions from your timetable');
+        }
+
         await saveProgress(step + 1);
         setMaxCompletedStep((prev) => Math.max(prev, step + 1));
-      } catch {
-        setError('Failed to save classes. Please try again.');
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Failed to save classes. Please try again.');
         setSaving(false);
         return;
       }
@@ -801,6 +797,7 @@ export default function OnboardingPage() {
             body: JSON.stringify({
               name: r.name.trim(),
               price_per_slot_pence: poundsToMinor(r.pricePerSlot),
+              availability_hours: defaultPractitionerWorkingHours(),
             }),
           });
           if (!res.ok) throw new Error('Failed to create resource');
@@ -816,23 +813,20 @@ export default function OnboardingPage() {
     }
 
     if (currentStepKey === 'restaurant_setup') {
+      if (step < maxCompletedStep) {
+        setStep((s) => s + 1);
+        return;
+      }
       setSaving(true);
       try {
-        const res = await fetch('/api/venue/onboarding', {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            onboarding_completed: true,
-            onboarding_step: totalSteps,
-          }),
-        });
-        if (!res.ok) throw new Error('Failed to save');
-        router.push('/dashboard/onboarding');
+        await saveProgress(step + 1);
+        setMaxCompletedStep((prev) => Math.max(prev, step + 1));
       } catch {
         setError('Failed to save. Please try again.');
         setSaving(false);
+        return;
       }
-      return;
+      setSaving(false);
     }
 
     setStep((s) => s + 1);
@@ -851,7 +845,11 @@ export default function OnboardingPage() {
         }),
       });
       if (!res.ok) throw new Error('Failed to complete onboarding');
-      router.push('/dashboard');
+      if (venue?.booking_model === 'table_reservation') {
+        router.push('/dashboard/onboarding');
+      } else {
+        router.push('/dashboard');
+      }
     } catch {
       setError('Failed to complete setup. Please try again.');
     } finally {
@@ -876,8 +874,7 @@ export default function OnboardingPage() {
   }
 
   const wideOnboardingStep =
-    (venue.booking_model === 'practitioner_appointment' ||
-      isUnifiedSchedulingVenue(venue.booking_model)) &&
+    isUnifiedSchedulingVenue(venue.booking_model) &&
     (currentStepKey === 'services' || currentStepKey === 'hours');
 
   return (
@@ -1006,12 +1003,13 @@ export default function OnboardingPage() {
           </div>
         )}
 
-        {/* Restaurant setup redirect */}
         {currentStepKey === 'restaurant_setup' && (
           <div className="text-center">
             <h2 className="mb-2 text-lg font-bold text-slate-900">Restaurant setup</h2>
             <p className="mb-4 text-sm text-slate-500">
-              We&apos;ll now set up your service periods, capacity, and deposit settings.
+              Next you&apos;ll see a short summary and your booking link. After that, a dedicated step on your
+              dashboard will set up service periods, table capacity, party sizes, and deposit rules for your
+              reservations.
             </p>
           </div>
         )}
@@ -1174,31 +1172,20 @@ export default function OnboardingPage() {
           </div>
         )}
 
-        {/* Model B: Services */}
-        {currentStepKey === 'services' &&
-          (venue.booking_model === 'practitioner_appointment' ||
-            venue.booking_model === 'unified_scheduling') && (
+        {currentStepKey === 'services' && isUnifiedSchedulingVenue(venue.booking_model) && (
             <div>
               <h2 className="mb-1 text-lg font-bold text-slate-900">Your services</h2>
               <p className="mb-6 text-sm text-slate-500">
-                {isUnifiedSchedulingVenue(venue.booking_model) ? (
-                  <>
-                    Add each service with the same detail as in the dashboard: duration, buffer, price, deposits,
-                    which {terms.staff.toLowerCase()} offers it, and optional staff customisation rules.
-                  </>
-                ) : (
-                  <>
-                    Define what {terms.client.toLowerCase()}s can book. Use the fields below; you can refine services
-                    later under{' '}
-                    <Link
-                      href="/dashboard/appointment-services"
-                      className="font-medium text-brand-600 underline hover:text-brand-700"
-                    >
-                      Services
-                    </Link>
-                    .
-                  </>
-                )}
+                Add each service with the same detail as in the dashboard: duration, buffer, price, deposits, which{' '}
+                {terms.staff.toLowerCase()} offers it, and optional staff customisation rules. You can refine services
+                later under{' '}
+                <Link
+                  href="/dashboard/appointment-services"
+                  className="font-medium text-brand-600 underline hover:text-brand-700"
+                >
+                  Services
+                </Link>
+                .
               </p>
               <OnboardingAppointmentServiceList
                 currencySymbol={currencySymbol(currency)}
@@ -1568,9 +1555,28 @@ export default function OnboardingPage() {
             </div>
             <h2 className="mb-2 text-lg font-bold text-slate-900">You&apos;re all set!</h2>
             <p className="mb-4 text-sm text-slate-500">
-              Your booking page is ready. Share the link below with your{' '}
-              {terms.client.toLowerCase()}s.
+              {venue.booking_model === 'table_reservation' ? (
+                <>
+                  Your public booking link is below. Next, finish table and sitting setup on your dashboard so guests
+                  can reserve covers and pay deposits as you configure.
+                </>
+              ) : (
+                <>
+                  Your booking page is ready. Share the link below with your {terms.client.toLowerCase()}s.
+                </>
+              )}
             </p>
+            {venue.booking_model === 'table_reservation' && (
+              <div className="mb-6 rounded-xl border border-amber-100 bg-amber-50/80 p-4 text-left">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-amber-900/80">
+                  Next step
+                </p>
+                <p className="text-sm text-slate-700">
+                  You&apos;ll set service periods, capacity, party-size durations, and optional deposits in the hosted
+                  restaurant setup wizard.
+                </p>
+              </div>
+            )}
             {isUnifiedSchedulingVenue(venue.booking_model) && (
               <div className="mb-6 rounded-xl border border-amber-100 bg-amber-50/80 p-4 text-left">
                 <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-amber-900/80">
@@ -1662,7 +1668,11 @@ export default function OnboardingPage() {
               disabled={saving}
               className="rounded-lg bg-brand-600 px-6 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
             >
-              {saving ? 'Finishing...' : 'Go to Dashboard'}
+              {saving
+                ? 'Finishing...'
+                : venue.booking_model === 'table_reservation'
+                  ? 'Continue to restaurant setup'
+                  : 'Go to Dashboard'}
             </button>
           ) : (
             <button
