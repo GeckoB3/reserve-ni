@@ -133,7 +133,7 @@ export async function GET(request: NextRequest) {
       ? await staff.db
           .from('class_instances')
           .select(
-            'id, start_time, class_types(id, name, colour, duration_minutes)',
+            'id, instance_date, start_time, capacity_override, class_types(id, name, colour, duration_minutes, capacity)',
           )
           .in('id', classInstIds)
       : { data: [] };
@@ -151,10 +151,29 @@ export async function GET(request: NextRequest) {
 
     const bookedEventIds = new Set<string>();
     const bookedClassIds = new Set<string>();
+    const classEnrolledByInstance = new Map<string, number>();
     for (const r of rows) {
       if (r.status === 'Cancelled') continue;
       if (r.experience_event_id) bookedEventIds.add(r.experience_event_id);
       if (r.class_instance_id) bookedClassIds.add(r.class_instance_id);
+      const bmRow = inferBookingRowModel(r as Parameters<typeof inferBookingRowModel>[0]);
+      if (bmRow === 'class_session' && r.class_instance_id) {
+        const cid = r.class_instance_id as string;
+        classEnrolledByInstance.set(
+          cid,
+          (classEnrolledByInstance.get(cid) ?? 0) + Number(r.party_size ?? 1),
+        );
+      }
+    }
+
+    function capacityForClassInstanceRow(row: Record<string, unknown> | undefined): number | null {
+      if (!row) return null;
+      const ov = row.capacity_override as number | null | undefined;
+      if (ov != null && ov > 0) return ov;
+      const ctRaw = row.class_types;
+      const ct = Array.isArray(ctRaw) ? ctRaw[0] : ctRaw;
+      const cap = (ct as { capacity?: number } | undefined)?.capacity;
+      return cap != null ? cap : null;
     }
 
     function endForBooking(row: (typeof rows)[0], bm: ScheduleBlockKind): string {
@@ -207,6 +226,15 @@ export async function GET(request: NextRequest) {
         accent = '#64748B';
       }
 
+      const classCap =
+        bm === 'class_session' && r.class_instance_id
+          ? capacityForClassInstanceRow(classInstMap.get(r.class_instance_id as string))
+          : null;
+      const classBooked =
+        bm === 'class_session' && r.class_instance_id
+          ? (classEnrolledByInstance.get(r.class_instance_id as string) ?? null)
+          : null;
+
       blocks.push({
         id: `bk-${r.id}`,
         kind: bm,
@@ -221,6 +249,8 @@ export async function GET(request: NextRequest) {
         resource_id: r.resource_id as string | null,
         status: r.status as string,
         accent_colour: accent,
+        class_capacity: classCap,
+        class_booked_spots: classBooked,
       });
     }
 
@@ -261,12 +291,16 @@ export async function GET(request: NextRequest) {
     }
 
     if (wantClasses) {
-      const { data: ctRows } = await staff.db.from('class_types').select('id').eq('venue_id', staff.venue_id);
+      const { data: ctRows } = await staff.db
+        .from('class_types')
+        .select('id')
+        .eq('venue_id', staff.venue_id)
+        .eq('is_active', true);
       const ctIds = (ctRows ?? []).map((x: { id: string }) => x.id);
       if (ctIds.length > 0) {
         const { data: ciRows, error: ciErr } = await staff.db
           .from('class_instances')
-          .select('id, instance_date, start_time, class_type_id')
+          .select('id, instance_date, start_time, class_type_id, capacity_override')
           .in('class_type_id', ctIds)
           .eq('is_cancelled', false)
           .gte('instance_date', fromStr)
@@ -278,17 +312,31 @@ export async function GET(request: NextRequest) {
           const needTypeIds = [...new Set((ciRows ?? []).map((r: { class_type_id: string }) => r.class_type_id))];
           const { data: types } = await staff.db
             .from('class_types')
-            .select('id, name, colour, duration_minutes')
-            .in('id', needTypeIds);
-          const typeMap = new Map((types ?? []).map((t: { id: string; name: string; colour: string; duration_minutes: number }) => [t.id, t]));
+            .select('id, name, colour, duration_minutes, capacity')
+            .in('id', needTypeIds)
+            .eq('is_active', true);
+          const typeMap = new Map(
+            (types ?? []).map((t: { id: string; name: string; colour: string; duration_minutes: number; capacity: number }) => [
+              t.id,
+              t,
+            ]),
+          );
 
           for (const raw of ciRows ?? []) {
-            const row = raw as { id: string; instance_date: string; start_time: string; class_type_id: string };
+            const row = raw as {
+              id: string;
+              instance_date: string;
+              start_time: string;
+              class_type_id: string;
+              capacity_override?: number | null;
+            };
             if (bookedClassIds.has(row.id)) continue;
             const ct = typeMap.get(row.class_type_id);
             if (!ct) continue;
             const start = hhmm(row.start_time);
             const end = minutesToTime(timeToMinutes(start) + ct.duration_minutes);
+            const cap =
+              row.capacity_override != null && row.capacity_override > 0 ? row.capacity_override : ct.capacity;
             blocks.push({
               id: `ci-${row.id}`,
               kind: 'class_session',
@@ -296,9 +344,11 @@ export async function GET(request: NextRequest) {
               start_time: start,
               end_time: end,
               title: `Class · ${ct.name}`,
-              subtitle: 'No bookings yet',
+              subtitle: cap != null ? `No bookings yet · ${cap} spots` : 'No bookings yet',
               accent_colour: ct.colour ?? '#22C55E',
               class_instance_id: row.id,
+              class_capacity: cap,
+              class_booked_spots: 0,
             });
           }
         }

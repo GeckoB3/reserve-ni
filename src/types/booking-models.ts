@@ -171,7 +171,11 @@ export interface ClassType {
   duration_minutes: number;
   capacity: number;
   instructor_id: string | null;
+  /** Guest-facing label when no FK or as display override. */
+  instructor_name: string | null;
   price_pence: number | null;
+  /** When false, booking flow skips online payment even if price_pence is set. */
+  requires_online_payment?: boolean;
   colour: string;
   is_active: boolean;
   created_at: string;

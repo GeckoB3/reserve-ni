@@ -25,4 +25,8 @@ export interface ScheduleBlockDTO {
   status?: string | null;
   /** Left border / legend (hex), optional */
   accent_colour?: string | null;
+  /** Model D: total capacity for this class instance (when known). */
+  class_capacity?: number | null;
+  /** Model D: total spots booked (all guests) for this instance. */
+  class_booked_spots?: number | null;
 }

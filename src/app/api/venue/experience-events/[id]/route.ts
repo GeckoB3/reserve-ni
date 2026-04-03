@@ -3,6 +3,10 @@ import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { requireVenueExposesSecondaryModel } from '@/lib/booking/require-venue-secondary-model';
+import {
+  assertExperienceEventDeletable,
+  resolveExperienceEventPatch,
+} from '@/lib/experience-events/experience-event-guards';
 import { z } from 'zod';
 
 const eventSchema = z.object({
@@ -33,6 +37,9 @@ const eventSchema = z.object({
  * GET /api/venue/experience-events/[id] — single event with ticket types.
  * PATCH /api/venue/experience-events/[id] — update event (admin).
  * DELETE /api/venue/experience-events/[id] — delete event (admin).
+ *
+ * Behaviour matches the collection `/api/venue/experience-events` PATCH/DELETE (shared guards in
+ * `lib/experience-events/experience-event-guards.ts`). The dashboard uses the collection route.
  */
 export async function GET(
   _request: NextRequest,
@@ -90,11 +97,15 @@ export async function PATCH(
       return NextResponse.json({ error: 'Invalid request', details: parsed.error.flatten() }, { status: 400 });
     }
 
-    const patch = parsed.data;
-    if (Object.keys(patch).length > 0) {
+    const resolved = await resolveExperienceEventPatch(admin, staff.venue_id, id, parsed.data);
+    if (!resolved.ok) {
+      return NextResponse.json({ error: resolved.error }, { status: resolved.error === 'Event not found' ? 404 : 400 });
+    }
+
+    if (Object.keys(resolved.payload).length > 0) {
       const { error } = await admin
         .from('experience_events')
-        .update(patch)
+        .update(resolved.payload)
         .eq('id', id)
         .eq('venue_id', staff.venue_id);
 
@@ -151,6 +162,15 @@ export async function DELETE(
     if (!modelGate.ok) return modelGate.response;
 
     const { id } = await params;
+
+    const canDelete = await assertExperienceEventDeletable(admin, staff.venue_id, id);
+    if (!canDelete.ok) {
+      return NextResponse.json(
+        { error: canDelete.error, booking_count: canDelete.booking_count },
+        { status: 409 },
+      );
+    }
+
     const { error } = await admin
       .from('experience_events')
       .delete()

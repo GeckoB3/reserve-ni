@@ -14,6 +14,9 @@ import { DashboardStatCard } from '@/components/dashboard/DashboardStatCard';
 import { useToast } from '@/components/ui/Toast';
 import { buildCsvFromRows, downloadCsvString, formatMoneyPence } from '@/lib/appointments-csv';
 import { BOOKING_MUTABLE_STATUSES } from '@/lib/table-management/constants';
+import type { BookingModel } from '@/types/booking-models';
+import { BOOKING_MODEL_ORDER, venueExposesBookingModel } from '@/lib/booking/enabled-models';
+import { inferBookingRowModel, bookingModelShortLabel } from '@/lib/booking/infer-booking-row-model';
 
 type ViewMode = 'day' | 'week' | 'month' | 'custom';
 
@@ -126,18 +129,56 @@ function serviceIdForRegistry(b: RegistryAppointment): string | null {
   return b.appointment_service_id ?? b.service_item_id ?? null;
 }
 
+function rowForInference(b: RegistryAppointment): Parameters<typeof inferBookingRowModel>[0] {
+  return {
+    experience_event_id: b.experience_event_id,
+    class_instance_id: b.class_instance_id,
+    resource_id: b.resource_id,
+    event_session_id: b.event_session_id,
+    calendar_id: b.calendar_id,
+    service_item_id: b.service_item_id,
+    practitioner_id: b.practitioner_id,
+    appointment_service_id: b.appointment_service_id,
+  };
+}
+
+function inferRegistryModel(b: RegistryAppointment): BookingModel {
+  return inferBookingRowModel(rowForInference(b));
+}
+
+const CDE_MODELS = new Set<BookingModel>(['event_ticket', 'class_session', 'resource_booking']);
+
+function isCdeModel(m: BookingModel): boolean {
+  return CDE_MODELS.has(m);
+}
+
+/** When a staff member filter is set, still show event/class/resource rows (they are venue-wide, not tied to one practitioner). When service filter is set, still show those rows so enabled secondaries are not hidden. */
 function filterRegistryAppointments(
   list: RegistryAppointment[],
   practitionerFilter: 'all' | string,
   serviceFilter: 'all' | string,
   searchQuery: string,
+  primary: BookingModel,
+  enabledModels: BookingModel[],
 ): RegistryAppointment[] {
   let result = list;
   if (practitionerFilter !== 'all') {
-    result = result.filter((b) => columnIdForRegistry(b) === practitionerFilter);
+    result = result.filter((b) => {
+      const inferred = inferRegistryModel(b);
+      if (isCdeModel(inferred) && venueExposesBookingModel(primary, enabledModels, inferred)) {
+        return true;
+      }
+      return columnIdForRegistry(b) === practitionerFilter;
+    });
   }
   if (serviceFilter !== 'all') {
-    result = result.filter((b) => serviceIdForRegistry(b) === serviceFilter);
+    result = result.filter((b) => {
+      const inferred = inferRegistryModel(b);
+      if (isCdeModel(inferred) && venueExposesBookingModel(primary, enabledModels, inferred)) {
+        return true;
+      }
+      return serviceIdForRegistry(b) === serviceFilter;
+    });
   }
   const q = searchQuery.trim().toLowerCase();
   if (!q) return result;
@@ -173,7 +214,7 @@ function registryToPrefetch(b: RegistryAppointment): AppointmentDetailPrefetch {
   };
 }
 
-type SortKey = 'date' | 'time' | 'client' | 'service' | 'practitioner' | 'status' | 'deposit';
+type SortKey = 'date' | 'time' | 'type' | 'client' | 'service' | 'practitioner' | 'status' | 'deposit';
 
 const GUEST_UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -181,11 +222,15 @@ const GUEST_UUID_RE =
 export function AppointmentBookingsDashboard({
   venueId,
   currency = 'GBP',
+  primaryBookingModel = 'unified_scheduling',
+  enabledModels = [],
   defaultPractitionerFilter = 'all',
   linkedPractitionerId = null,
 }: {
   venueId: string;
   currency?: string;
+  primaryBookingModel?: BookingModel;
+  enabledModels?: BookingModel[];
   /** Server-resolved: staff linked to a calendar default to their practitioner id; admins use `all`. */
   defaultPractitionerFilter?: 'all' | string;
   linkedPractitionerId?: string | null;
@@ -197,8 +242,9 @@ export function AppointmentBookingsDashboard({
   const [customFrom, setCustomFrom] = useState(todayISO);
   const [customTo, setCustomTo] = useState(addDays(todayISO(), 7));
   const [statusKey, setStatusKey] = useState<string>('All');
-  const [practitionerFilter, setPractitionerFilter] = useState<'all' | string>('all');
+  const [practitionerFilter, setPractitionerFilter] = useState<'all' | string>(defaultPractitionerFilter);
   const [serviceFilter, setServiceFilter] = useState<'all' | string>('all');
+  const [modelFilter, setModelFilter] = useState<'all' | BookingModel>('all');
   const [sortKey, setSortKey] = useState<SortKey>('date');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [searchQuery, setSearchQuery] = useState('');
@@ -229,6 +275,13 @@ export function AppointmentBookingsDashboard({
     const g = searchParams.get('guest');
     return g && GUEST_UUID_RE.test(g) ? g : null;
   }, [searchParams]);
+
+  const showModelFilters = enabledModels.length > 0;
+  const filterModels = useMemo(() => {
+    const uniq = new Set<BookingModel>([primaryBookingModel, ...enabledModels]);
+    return [...uniq].sort((a, b) => BOOKING_MODEL_ORDER.indexOf(a) - BOOKING_MODEL_ORDER.indexOf(b));
+  }, [primaryBookingModel, enabledModels]);
+  const statsPrimaryLabel = enabledModels.length > 0 ? 'Bookings' : 'Appointments';
 
   const clearGuestFilter = useCallback(() => {
     const next = new URLSearchParams(searchParams.toString());
@@ -310,8 +363,10 @@ export function AppointmentBookingsDashboard({
         }
         const data = await res.json();
         const raw = (data.bookings ?? []) as RegistryAppointment[];
-        const apptOnly = raw.filter((b) => columnIdForRegistry(b));
-        setBookings(apptOnly);
+        const visible = raw.filter((b) =>
+          venueExposesBookingModel(primaryBookingModel, enabledModels, inferRegistryModel(b)),
+        );
+        setBookings(visible);
       } catch {
         setError('Network error loading appointments');
       } finally {
@@ -319,7 +374,7 @@ export function AppointmentBookingsDashboard({
         else setLoading(false);
       }
     },
-    [filterGuestId, from, to, viewMode, selectedStatusApi, invalidCustomRange],
+    [filterGuestId, from, to, viewMode, selectedStatusApi, invalidCustomRange, primaryBookingModel, enabledModels],
   );
 
 
@@ -335,11 +390,15 @@ export function AppointmentBookingsDashboard({
       if (!res.ok) return;
       const data = await res.json();
       const raw = (data.bookings ?? []) as RegistryAppointment[];
-      setAllStatusBookings(raw.filter((b) => columnIdForRegistry(b)));
+      setAllStatusBookings(
+        raw.filter((b) =>
+          venueExposesBookingModel(primaryBookingModel, enabledModels, inferRegistryModel(b)),
+        ),
+      );
     } catch {
       setAllStatusBookings([]);
     }
-  }, [filterGuestId, from, to, viewMode, invalidCustomRange]);
+  }, [filterGuestId, from, to, viewMode, invalidCustomRange, primaryBookingModel, enabledModels]);
 
   useEffect(() => {
     void fetchBookings();
@@ -405,16 +464,44 @@ export function AppointmentBookingsDashboard({
     };
   }, [venueId, fetchBookings, fetchBookingsForStats]);
 
-  const filteredBookings = useMemo(
-    () => filterRegistryAppointments(bookings, practitionerFilter, serviceFilter, searchQuery),
-    [bookings, practitionerFilter, serviceFilter, searchQuery],
+  const registryFiltered = useMemo(
+    () =>
+      filterRegistryAppointments(
+        bookings,
+        practitionerFilter,
+        serviceFilter,
+        searchQuery,
+        primaryBookingModel,
+        enabledModels,
+      ),
+    [bookings, practitionerFilter, serviceFilter, searchQuery, primaryBookingModel, enabledModels],
   );
 
-  const statsBookings = useMemo(
-    () =>
-      filterRegistryAppointments(allStatusBookings, practitionerFilter, serviceFilter, searchQuery),
-    [allStatusBookings, practitionerFilter, serviceFilter, searchQuery],
-  );
+  const filteredBookings = useMemo(() => {
+    if (modelFilter === 'all') return registryFiltered;
+    return registryFiltered.filter((b) => inferRegistryModel(b) === modelFilter);
+  }, [registryFiltered, modelFilter]);
+
+  const statsBookings = useMemo(() => {
+    const reg = filterRegistryAppointments(
+      allStatusBookings,
+      practitionerFilter,
+      serviceFilter,
+      searchQuery,
+      primaryBookingModel,
+      enabledModels,
+    );
+    if (modelFilter === 'all') return reg;
+    return reg.filter((b) => inferRegistryModel(b) === modelFilter);
+  }, [
+    allStatusBookings,
+    practitionerFilter,
+    serviceFilter,
+    searchQuery,
+    primaryBookingModel,
+    enabledModels,
+    modelFilter,
+  ]);
 
   const sortedBookings = useMemo(() => {
     const dir = sortDir === 'asc' ? 1 : -1;
@@ -429,6 +516,13 @@ export function AppointmentBookingsDashboard({
         case 'time':
           cmp = a.booking_time.localeCompare(b.booking_time);
           if (cmp === 0) cmp = a.booking_date.localeCompare(b.booking_date);
+          break;
+        case 'type':
+          cmp = bookingModelShortLabel(inferRegistryModel(a)).localeCompare(
+            bookingModelShortLabel(inferRegistryModel(b)),
+            undefined,
+            { sensitivity: 'base' },
+          );
           break;
         case 'client':
           cmp = a.guest_name.localeCompare(b.guest_name, undefined, { sensitivity: 'base' });
@@ -526,7 +620,9 @@ export function AppointmentBookingsDashboard({
   const detailPrefetch = useMemo((): AppointmentDetailPrefetch | null => {
     if (!detailBookingId) return null;
     const b = bookings.find((x) => x.id === detailBookingId);
-    return b ? registryToPrefetch(b) : null;
+    if (!b) return null;
+    if (isCdeModel(inferRegistryModel(b))) return null;
+    return registryToPrefetch(b);
   }, [detailBookingId, bookings]);
 
   function tableStatusLabel(s: string): string {
@@ -567,11 +663,14 @@ export function AppointmentBookingsDashboard({
         return;
       }
       const data = await res.json();
-      const rows = ((data.bookings ?? []) as RegistryAppointment[]).filter((b) => columnIdForRegistry(b));
+      const rows = ((data.bookings ?? []) as RegistryAppointment[]).filter((b) =>
+        venueExposesBookingModel(primaryBookingModel, enabledModels, inferRegistryModel(b)),
+      );
 
       const header = [
         'Date',
         'Time',
+        'Type',
         'Booking ref (full)',
         'Status',
         'Source',
@@ -596,6 +695,7 @@ export function AppointmentBookingsDashboard({
         return [
           b.booking_date,
           b.booking_time.slice(0, 5),
+          bookingModelShortLabel(inferRegistryModel(b)),
           b.id,
           statusLabelForCsv(b.status),
           sourceLabelForCsv(b.source),
@@ -613,7 +713,7 @@ export function AppointmentBookingsDashboard({
       });
 
       const csv = buildCsvFromRows(header, csvRows);
-      downloadCsvString(csv, `appointments_${csvFrom}_to_${csvTo}.csv`);
+      downloadCsvString(csv, `bookings_${csvFrom}_to_${csvTo}.csv`);
       setCsvModalOpen(false);
     } catch {
       setError('Failed to export CSV');
@@ -648,6 +748,7 @@ export function AppointmentBookingsDashboard({
       const sid = serviceIdForRegistry(b);
       const pracName = cid ? practitionerMap.get(cid)?.name ?? '—' : '—';
       const svcName = sid ? serviceMap.get(sid)?.name ?? '—' : '—';
+      const typeLabel = bookingModelShortLabel(inferRegistryModel(b));
       const dep =
         b.deposit_amount_pence != null
           ? `${formatMoneyPence(b.deposit_amount_pence, sym)} (${b.deposit_status})`
@@ -656,6 +757,11 @@ export function AppointmentBookingsDashboard({
         <tr key={b.id} className="border-b border-slate-100 hover:bg-slate-50/80">
           <td className="whitespace-nowrap px-3 py-2.5 text-sm text-slate-800">{b.booking_date}</td>
           <td className="whitespace-nowrap px-3 py-2.5 text-sm text-slate-800">{b.booking_time.slice(0, 5)}</td>
+          <td className="whitespace-nowrap px-2 py-2.5 sm:px-3">
+            <span className="inline-block rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700">
+              {typeLabel}
+            </span>
+          </td>
           <td className="max-w-[140px] truncate px-3 py-2.5 text-sm font-medium text-slate-900">{b.guest_name}</td>
           <td className="hidden max-w-[120px] truncate px-3 py-2.5 text-sm text-slate-600 lg:table-cell">
             {svcName}
@@ -698,6 +804,7 @@ export function AppointmentBookingsDashboard({
           const sid = serviceIdForRegistry(b);
           const pracName = cid ? practitionerMap.get(cid)?.name ?? '—' : '—';
           const svcName = sid ? serviceMap.get(sid)?.name ?? '—' : '—';
+          const typeLabel = bookingModelShortLabel(inferRegistryModel(b));
           const dep =
             b.deposit_amount_pence != null
               ? `${formatMoneyPence(b.deposit_amount_pence, sym)} (${b.deposit_status})`
@@ -708,7 +815,12 @@ export function AppointmentBookingsDashboard({
               className="rounded-xl border border-slate-200 bg-white p-3.5 shadow-sm ring-1 ring-slate-100/80 sm:p-4"
             >
               <div className="min-w-0">
-                <p className="break-words font-semibold leading-snug text-slate-900">{b.guest_name}</p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="break-words font-semibold leading-snug text-slate-900">{b.guest_name}</p>
+                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
+                    {typeLabel}
+                  </span>
+                </div>
                 <p className="mt-0.5 text-sm tabular-nums text-slate-600">
                   {b.booking_date} · {b.booking_time.slice(0, 5)}
                 </p>
@@ -763,9 +875,40 @@ export function AppointmentBookingsDashboard({
           </button>
         </div>
       )}
+      {showModelFilters && (
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-3 shadow-sm sm:px-4">
+          <span className="text-xs font-medium text-slate-600">Type:</span>
+          <button
+            type="button"
+            onClick={() => setModelFilter('all')}
+            className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
+              modelFilter === 'all'
+                ? 'bg-brand-600 text-white shadow-sm'
+                : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+            }`}
+          >
+            All
+          </button>
+          {filterModels.map((m) => (
+            <button
+              key={m}
+              type="button"
+              onClick={() => setModelFilter(m)}
+              className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
+                modelFilter === m
+                  ? 'bg-brand-600 text-white shadow-sm'
+                  : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+              }`}
+            >
+              {bookingModelShortLabel(m)}
+            </button>
+          ))}
+        </div>
+      )}
+
       {filterGuestId && (
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-700 sm:px-4">
-          <span>Showing appointments for one client in the selected date range.</span>
+          <span>Showing bookings for one client in the selected date range.</span>
           <button
             type="button"
             onClick={clearGuestFilter}
@@ -913,7 +1056,7 @@ export function AppointmentBookingsDashboard({
       )}
 
       <div className="grid min-w-0 grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-3">
-        <DashboardStatCard label="Appointments" value={stats.total} color="blue" />
+        <DashboardStatCard label={statsPrimaryLabel} value={stats.total} color="blue" />
         <DashboardStatCard label="Confirmed" value={stats.confirmed} color="emerald" />
         <DashboardStatCard label="Completed" value={stats.completed} color="violet" />
         <DashboardStatCard label="No-shows" value={stats.noShows} color="slate" />
@@ -1005,18 +1148,19 @@ export function AppointmentBookingsDashboard({
         </div>
       ) : filteredBookings.length === 0 ? (
         <div className="rounded-xl border border-slate-200 bg-white px-4 py-14 text-center shadow-sm sm:py-16">
-          <p className="text-sm font-medium text-slate-500">No appointments match this period and filters.</p>
+          <p className="text-sm font-medium text-slate-500">No bookings match this period and filters.</p>
           <p className="mt-1 text-xs text-slate-400">Try another date range or clear search.</p>
         </div>
       ) : viewMode === 'day' ? (
         <>
           {renderMobileCards(sortedBookings)}
           <div className="hidden overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm md:block">
-            <table className="w-full min-w-[720px] border-collapse text-left">
+            <table className="w-full min-w-[800px] border-collapse text-left">
               <thead>
                 <tr className="border-b border-slate-200 bg-slate-50">
                   <SortTh k="date" label="Date" />
                   <SortTh k="time" label="Time" />
+                  <SortTh k="type" label="Type" />
                   <SortTh k="client" label="Client" />
                   <SortTh k="service" label="Service" className="hidden lg:table-cell" />
                   <SortTh k="practitioner" label="Staff" className="hidden xl:table-cell" />
@@ -1039,22 +1183,23 @@ export function AppointmentBookingsDashboard({
               <section
                 key={date}
                 className="overflow-hidden rounded-xl border border-slate-200 bg-slate-50/40 shadow-sm"
-                aria-label={`Appointments on ${date}`}
+                aria-label={`Bookings on ${date}`}
               >
                 <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200/80 bg-white/80 px-3 py-2.5 sm:px-4 sm:py-3">
                   <h3 className="min-w-0 text-sm font-semibold text-slate-800">{formatDayHeader(date)}</h3>
                   <span className="shrink-0 text-xs tabular-nums text-slate-500">
-                    {dayBookings.length} appointment{dayBookings.length !== 1 ? 's' : ''}
+                    {dayBookings.length} booking{dayBookings.length !== 1 ? 's' : ''}
                   </span>
                 </div>
                 <div className="min-w-0 p-2.5 sm:p-3">
                   {renderMobileCards(dayBookings)}
                   <div className="hidden overflow-x-auto md:block">
-                    <table className="w-full min-w-[720px] border-collapse text-left">
+                    <table className="w-full min-w-[800px] border-collapse text-left">
                       <thead>
                         <tr className="border-b border-slate-200 bg-white">
                           <SortTh k="date" label="Date" />
                           <SortTh k="time" label="Time" />
+                          <SortTh k="type" label="Type" />
                           <SortTh k="client" label="Client" />
                           <SortTh k="service" label="Service" className="hidden lg:table-cell" />
                           <SortTh k="practitioner" label="Staff" className="hidden xl:table-cell" />
@@ -1088,10 +1233,10 @@ export function AppointmentBookingsDashboard({
             onClick={(e) => e.stopPropagation()}
           >
             <h3 id="csv-export-title" className="text-lg font-semibold text-slate-900">
-              Export appointments (CSV)
+              Export bookings (CSV)
             </h3>
             <p className="mt-1 text-sm text-slate-600">
-              Choose a date range. All appointment statuses are included in the file.
+              Choose a date range. All booking statuses are included in the file.
             </p>
             <div className="mt-4 flex flex-col gap-3">
               <label className="flex flex-col gap-1">

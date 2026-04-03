@@ -30,7 +30,9 @@ export interface ClassAvailabilitySlot {
   capacity: number;
   remaining: number;
   instructor_id: string | null;
+  instructor_name: string | null;
   price_pence: number | null;
+  requires_online_payment: boolean;
   colour: string;
 }
 
@@ -66,7 +68,9 @@ export function computeClassAvailability(input: ClassEngineInput): ClassAvailabi
       capacity,
       remaining,
       instructor_id: classType.instructor_id,
+      instructor_name: classType.instructor_name ?? null,
       price_pence: classType.price_pence,
+      requires_online_payment: classType.requires_online_payment !== false,
       colour: classType.colour,
     });
   }

@@ -32,7 +32,7 @@ export async function GET(
     const { data: rows, error } = await admin
       .from('bookings')
       .select(
-        'id,status,party_size,deposit_amount_pence,deposit_status,booking_date,booking_time,checked_in_at,guest:guests(name,email,phone)',
+        'id,status,party_size,deposit_amount_pence,deposit_status,booking_date,booking_time,checked_in_at,guest:guests(name,email,phone),ticket_lines:booking_ticket_lines(label,quantity,unit_price_pence)',
       )
       .eq('venue_id', staff.venue_id)
       .eq('experience_event_id', eventId)
@@ -46,6 +46,17 @@ export async function GET(
 
     const attendees = (rows ?? []).map((r: Record<string, unknown>) => {
       const g = r.guest as { name?: string | null; email?: string | null; phone?: string | null } | null;
+      const rawLines = r.ticket_lines as
+        | Array<{ label?: string; quantity?: number; unit_price_pence?: number }>
+        | null
+        | undefined;
+      const ticket_lines = Array.isArray(rawLines)
+        ? rawLines.map((line) => ({
+            label: line.label ?? '',
+            quantity: line.quantity ?? 0,
+            unit_price_pence: line.unit_price_pence ?? 0,
+          }))
+        : [];
       return {
         booking_id: r.id,
         status: r.status,
@@ -58,6 +69,7 @@ export async function GET(
         guest_name: g?.name ?? null,
         guest_email: g?.email ?? null,
         guest_phone: g?.phone ?? null,
+        ticket_lines,
       };
     });
 

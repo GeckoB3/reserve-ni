@@ -16,6 +16,7 @@ interface ClassSlot {
   capacity: number;
   remaining: number;
   price_pence: number | null;
+  requires_online_payment: boolean;
   colour: string;
 }
 
@@ -162,7 +163,9 @@ export function ClassBookingFlow({ venue, cancellationPolicy }: { venue: VenuePu
             partySize={spots}
             onSubmit={handleDetailsSubmit}
             onBack={() => setStep('classes')}
-            requiresDeposit={(selectedClass.price_pence ?? 0) > 0}
+            requiresDeposit={
+              (selectedClass.price_pence ?? 0) > 0 && selectedClass.requires_online_payment !== false
+            }
             phoneDefaultCountry={phoneDefaultCountry}
           />
         </div>

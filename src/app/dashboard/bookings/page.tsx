@@ -42,7 +42,11 @@ export default async function BookingsPage() {
   const currency = (venue?.currency as string) ?? 'GBP';
   const isAppointment = isUnifiedSchedulingVenue(bookingModel);
   const title =
-    isAppointment ? 'Appointments' : enabledModels.length > 0 ? 'Bookings' : 'Reservations';
+    isAppointment && enabledModels.length === 0
+      ? 'Appointments'
+      : isAppointment || enabledModels.length > 0
+        ? 'Bookings'
+        : 'Reservations';
 
   const linkedPractitionerId =
     isAppointment && staff.role === 'staff' && staff.id
@@ -60,6 +64,8 @@ export default async function BookingsPage() {
               <AppointmentBookingsDashboard
                 venueId={venueId}
                 currency={currency}
+                primaryBookingModel={bookingModel}
+                enabledModels={enabledModels}
                 defaultPractitionerFilter={defaultAppointmentPractitionerFilter}
                 linkedPractitionerId={linkedPractitionerId}
               />

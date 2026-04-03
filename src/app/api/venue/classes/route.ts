@@ -8,11 +8,13 @@ import { z } from 'zod';
 
 const classTypeSchema = z.object({
   name: z.string().min(1).max(200),
-  description: z.string().max(2000).optional(),
+  description: z.string().max(2000).optional().nullable(),
   duration_minutes: z.number().int().min(5).max(480),
   capacity: z.number().int().min(1),
-  instructor_id: z.string().uuid().optional(),
-  price_pence: z.number().int().min(0).optional(),
+  instructor_id: z.string().uuid().optional().nullable(),
+  instructor_name: z.string().max(200).optional().nullable(),
+  price_pence: z.number().int().min(0).optional().nullable(),
+  requires_online_payment: z.boolean().optional(),
   colour: z.string().max(20).optional(),
   is_active: z.boolean().optional(),
 });
@@ -47,10 +49,20 @@ export async function GET() {
 
     const ids = (classTypes ?? []).map((ct) => ct.id as string);
     if (ids.length === 0) {
-      return NextResponse.json({ class_types: [], timetable: [], instances: [] });
+      const { data: practitioners } = await admin
+        .from('practitioners')
+        .select('id, name, sort_order')
+        .eq('venue_id', staff.venue_id)
+        .order('sort_order', { ascending: true });
+      return NextResponse.json({
+        class_types: [],
+        timetable: [],
+        instances: [],
+        practitioners: practitioners ?? [],
+      });
     }
 
-    const [timetableRes, instancesRes] = await Promise.all([
+    const [timetableRes, instancesRes, practitionersRes] = await Promise.all([
       admin.from('class_timetable').select('*').in('class_type_id', ids),
       admin
         .from('class_instances')
@@ -59,6 +71,7 @@ export async function GET() {
         .gte('instance_date', new Date().toISOString().slice(0, 10))
         .order('instance_date')
         .limit(200),
+      admin.from('practitioners').select('id, name, sort_order').eq('venue_id', staff.venue_id).order('sort_order', { ascending: true }),
     ]);
 
     if (timetableRes.error) {
@@ -69,11 +82,43 @@ export async function GET() {
       console.error('GET /api/venue/classes failed (instances):', instancesRes.error);
       return NextResponse.json({ error: 'Failed to fetch instances' }, { status: 500 });
     }
+    if (practitionersRes.error) {
+      console.error('GET /api/venue/classes failed (practitioners):', practitionersRes.error);
+      return NextResponse.json({ error: 'Failed to fetch practitioners' }, { status: 500 });
+    }
+
+    const rawInstances = instancesRes.data ?? [];
+    const instanceIds = rawInstances.map((row: { id: string }) => row.id);
+    const bookedByInstance: Record<string, number> = {};
+    if (instanceIds.length > 0) {
+      const { data: bookingRows, error: bookErr } = await admin
+        .from('bookings')
+        .select('class_instance_id, party_size, status')
+        .eq('venue_id', staff.venue_id)
+        .in('class_instance_id', instanceIds);
+      if (bookErr) {
+        console.error('GET /api/venue/classes booking counts failed:', bookErr);
+      } else {
+        for (const b of bookingRows ?? []) {
+          if ((b as { status?: string }).status === 'Cancelled') continue;
+          const cid = (b as { class_instance_id: string | null }).class_instance_id;
+          if (!cid) continue;
+          bookedByInstance[cid] =
+            (bookedByInstance[cid] ?? 0) + Number((b as { party_size?: number }).party_size ?? 1);
+        }
+      }
+    }
+
+    const instances = rawInstances.map((row: { id: string }) => ({
+      ...row,
+      booked_spots: bookedByInstance[row.id] ?? 0,
+    }));
 
     return NextResponse.json({
       class_types: classTypes ?? [],
       timetable: timetableRes.data ?? [],
-      instances: instancesRes.data ?? [],
+      instances,
+      practitioners: practitionersRes.data ?? [],
     });
   } catch (err) {
     console.error('GET /api/venue/classes failed:', err);

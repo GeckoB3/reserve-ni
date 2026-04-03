@@ -57,6 +57,12 @@ export function ScheduleFeedColumn({
           const height = slotHeight(b.start_time, b.end_time);
           const accent = b.accent_colour ?? '#64748B';
           const clickable = Boolean(b.booking_id);
+          const classUptake =
+            b.kind === 'class_session' &&
+            b.class_capacity != null &&
+            b.class_booked_spots != null
+              ? `${b.class_booked_spots}/${b.class_capacity} booked`
+              : null;
           const body = (
             <div
               className={`flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-slate-200 bg-white px-1.5 py-1 text-left shadow-sm ${
@@ -66,6 +72,9 @@ export function ScheduleFeedColumn({
             >
               <span className="truncate text-xs font-semibold text-slate-900">{b.title}</span>
               {b.subtitle ? <span className="truncate text-[10px] text-slate-500">{b.subtitle}</span> : null}
+              {classUptake ? (
+                <span className="truncate text-[10px] font-medium text-slate-600">{classUptake}</span>
+              ) : null}
               <span className="text-[10px] text-slate-400">
                 {b.start_time} – {b.end_time}
               </span>

@@ -6,6 +6,11 @@ import { checkExperienceEventBatchLimit } from '@/lib/tier-enforcement';
 import { requireVenueExposesSecondaryModel } from '@/lib/booking/require-venue-secondary-model';
 import { expandWeeklyOccurrences, normaliseCustomDates } from '@/lib/scheduling/experience-event-dates';
 import { MAX_MATERIALISED_EVENT_OCCURRENCES } from '@/lib/scheduling/cde-scheduling-rules';
+import {
+  assertExperienceEventDeletable,
+  resolveExperienceEventPatch,
+  validateStartEndTimes,
+} from '@/lib/experience-events/experience-event-guards';
 import { z } from 'zod';
 
 const eventSchema = z.object({
@@ -96,6 +101,11 @@ export async function POST(request: NextRequest) {
     }
 
     const { ticket_types, schedule, ...eventFields } = parsed.data;
+
+    const timeErr = validateStartEndTimes(eventFields.start_time, eventFields.end_time);
+    if (timeErr) {
+      return NextResponse.json({ error: timeErr }, { status: 400 });
+    }
 
     let datesToCreate: string[] = [eventFields.event_date];
     const sched = schedule ?? { type: 'single' as const };
@@ -211,15 +221,22 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid request', details: parsed.error.flatten() }, { status: 400 });
     }
 
-    const { error } = await admin
-      .from('experience_events')
-      .update(parsed.data)
-      .eq('id', id)
-      .eq('venue_id', staff.venue_id);
+    const resolved = await resolveExperienceEventPatch(admin, staff.venue_id, id, parsed.data);
+    if (!resolved.ok) {
+      return NextResponse.json({ error: resolved.error }, { status: resolved.error === 'Event not found' ? 404 : 400 });
+    }
 
-    if (error) {
-      console.error('PATCH /api/venue/experience-events failed:', error);
-      return NextResponse.json({ error: 'Failed to update event' }, { status: 500 });
+    if (Object.keys(resolved.payload).length > 0) {
+      const { error } = await admin
+        .from('experience_events')
+        .update(resolved.payload)
+        .eq('id', id)
+        .eq('venue_id', staff.venue_id);
+
+      if (error) {
+        console.error('PATCH /api/venue/experience-events failed:', error);
+        return NextResponse.json({ error: 'Failed to update event' }, { status: 500 });
+      }
     }
 
     // Replace ticket types if provided
@@ -264,6 +281,15 @@ export async function DELETE(request: NextRequest) {
     const admin = getSupabaseAdminClient();
     const modelGate = await requireVenueExposesSecondaryModel(admin, staff.venue_id, 'event_ticket');
     if (!modelGate.ok) return modelGate.response;
+
+    const canDelete = await assertExperienceEventDeletable(admin, staff.venue_id, id);
+    if (!canDelete.ok) {
+      return NextResponse.json(
+        { error: canDelete.error, booking_count: canDelete.booking_count },
+        { status: 409 },
+      );
+    }
+
     const { error } = await admin
       .from('experience_events')
       .delete()

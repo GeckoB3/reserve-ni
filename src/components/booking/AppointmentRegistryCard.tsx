@@ -24,6 +24,11 @@ export interface RegistryAppointment {
   client_arrived_at: string | null;
   /** Guest tapped "I'll be there" on the reminder link */
   guest_attendance_confirmed_at?: string | null;
+  /** For inferring booking model (list API includes these when present). */
+  experience_event_id?: string | null;
+  class_instance_id?: string | null;
+  resource_id?: string | null;
+  event_session_id?: string | null;
 }
 
 const STATUS_BADGE: Record<string, string> = {

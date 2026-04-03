@@ -29,6 +29,12 @@ export function WeekScheduleCdeStrip({ weekDays, blocksByDate, onBookingClick }:
                 dayBlocks.map((b) => {
                   const shell = !b.booking_id;
                   const accent = b.accent_colour ?? '#64748B';
+                  const classUptake =
+                    b.kind === 'class_session' &&
+                    b.class_capacity != null &&
+                    b.class_booked_spots != null
+                      ? `${b.class_booked_spots}/${b.class_capacity} booked`
+                      : null;
                   const body = (
                     <div
                       className={`rounded border px-1.5 py-1 text-left text-[10px] shadow-sm ${
@@ -37,6 +43,10 @@ export function WeekScheduleCdeStrip({ weekDays, blocksByDate, onBookingClick }:
                       style={{ borderLeftWidth: 3, borderLeftColor: accent }}
                     >
                       <div className="truncate font-semibold text-slate-900">{b.title}</div>
+                      {b.subtitle ? <div className="truncate text-slate-500">{b.subtitle}</div> : null}
+                      {classUptake ? (
+                        <div className="truncate font-medium text-slate-600">{classUptake}</div>
+                      ) : null}
                       <div className="text-slate-500">
                         {b.start_time.slice(0, 5)}–{b.end_time.slice(0, 5)}
                       </div>

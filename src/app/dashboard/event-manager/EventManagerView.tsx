@@ -1,6 +1,10 @@
 'use client';
 
+import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
+import { useToast } from '@/components/ui/Toast';
+import { validateStartEndTimes } from '@/lib/experience-events/experience-event-validation';
+import { downloadCsvFile, escapeCsvCell } from './event-manager-utils';
 
 interface TicketType {
   id: string;
@@ -35,6 +39,7 @@ interface AttendeeRow {
   guest_name: string | null;
   guest_email: string | null;
   guest_phone: string | null;
+  ticket_lines?: Array<{ label: string; quantity: number; unit_price_pence: number }>;
 }
 
 interface TicketTypeDraft {
@@ -89,11 +94,14 @@ export function EventManagerView({
   venueId: _venueId,
   isAdmin,
   currency = 'GBP',
+  publicBookingUrl,
 }: {
   venueId: string;
   isAdmin: boolean;
   currency?: string;
+  publicBookingUrl: string;
 }) {
+  const { addToast } = useToast();
   const sym = currency === 'EUR' ? '€' : '£';
 
   function formatPrice(pence: number): string {
@@ -102,6 +110,9 @@ export function EventManagerView({
 
   const [events, setEvents] = useState<ExperienceEvent[]>([]);
   const [loading, setLoading] = useState(true);
+  const [listError, setListError] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [checkInBusy, setCheckInBusy] = useState<Record<string, boolean>>({});
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<ExperienceEvent | null>(null);
   const [attendees, setAttendees] = useState<AttendeeRow[]>([]);
@@ -118,12 +129,19 @@ export function EventManagerView({
 
   const fetchEvents = useCallback(async () => {
     setLoading(true);
+    setListError(null);
     try {
       const res = await fetch('/api/venue/experience-events');
-      const data = await res.json();
+      const data = (await res.json()) as { events?: ExperienceEvent[]; error?: string };
+      if (!res.ok) {
+        setListError(data.error ?? `Could not load events (${res.status})`);
+        setEvents([]);
+        return;
+      }
       setEvents(data.events ?? []);
     } catch {
-      console.error('Failed to load events');
+      setListError('Network error while loading events.');
+      setEvents([]);
     } finally {
       setLoading(false);
     }
@@ -204,6 +222,12 @@ export function EventManagerView({
       return;
     }
 
+    const timeErr = validateStartEndTimes(eventForm.start_time, eventForm.end_time);
+    if (timeErr) {
+      setEventError(timeErr);
+      return;
+    }
+
     if (!editingEventId && eventForm.scheduleMode === 'weekly') {
       if (!eventForm.recurrenceUntil) {
         setEventError('End date is required for weekly recurrence.');
@@ -262,13 +286,27 @@ export function EventManagerView({
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(postBody),
           });
-      const json = (await res.json()) as { error?: string; created?: number };
+      const json = (await res.json()) as {
+        error?: string;
+        created?: number;
+        upgrade_required?: boolean;
+        current?: number;
+        limit?: number;
+      };
       if (!res.ok) {
+        if (res.status === 403 && json.upgrade_required) {
+          setEventError(
+            `Plan limit reached: ${json.current ?? '?'} of ${json.limit ?? '?'} active events. Upgrade your plan or deactivate old events.`,
+          );
+          return;
+        }
         setEventError(json.error ?? 'Save failed');
         return;
       }
       if (!editingEventId && typeof json.created === 'number' && json.created > 1) {
-        window.alert(`Created ${json.created} separate event rows (one per date).`);
+        addToast(`Created ${json.created} separate event rows (one per date).`, 'success');
+      } else {
+        addToast(editingEventId ? 'Event updated.' : 'Event created.', 'success');
       }
       setShowEventForm(false);
       setEditingEventId(null);
@@ -317,14 +355,24 @@ export function EventManagerView({
         body: JSON.stringify({ id }),
       });
       if (!res.ok) {
-        const json = await res.json();
-        window.alert((json as { error?: string }).error ?? 'Delete failed');
+        const json = (await res.json()) as { error?: string; booking_count?: number };
+        if (res.status === 409) {
+          addToast(
+            json.booking_count
+              ? `${json.error} (${json.booking_count} booking(s))`
+              : (json.error ?? 'Cannot delete this event'),
+            'error',
+          );
+        } else {
+          addToast(json.error ?? 'Delete failed', 'error');
+        }
         return;
       }
+      addToast('Event deleted.', 'success');
       if (selectedId === id) setSelectedId(null);
       await fetchEvents();
     } catch {
-      window.alert('Delete failed');
+      addToast('Delete failed', 'error');
     }
   };
 
@@ -343,13 +391,14 @@ export function EventManagerView({
       });
       const data = await res.json();
       if (!res.ok) {
-        window.alert(data.error ?? 'Could not cancel event');
+        addToast(data.error ?? 'Could not cancel event', 'error');
         return;
       }
+      addToast('Event cancelled and guests notified per your policy.', 'success');
       setSelectedId(null);
       await fetchEvents();
     } catch {
-      window.alert('Could not cancel event');
+      addToast('Could not cancel event', 'error');
     } finally {
       setCancelLoading(false);
     }
@@ -375,28 +424,152 @@ export function EventManagerView({
   };
 
   const today = new Date().toISOString().slice(0, 10);
-  const upcoming = events.filter((e) => e.event_date >= today);
-  const past = events.filter((e) => e.event_date < today);
+  const q = searchQuery.trim().toLowerCase();
+  const visibleEvents =
+    q.length === 0
+      ? events
+      : events.filter(
+          (e) =>
+            e.name.toLowerCase().includes(q) ||
+            e.event_date.includes(q) ||
+            (e.description ?? '').toLowerCase().includes(q),
+        );
+  const upcoming = visibleEvents.filter((e) => e.event_date >= today);
+  const past = visibleEvents.filter((e) => e.event_date < today);
+
+  const handleToggleCheckIn = async (bookingId: string, checkedIn: boolean) => {
+    setCheckInBusy((s) => ({ ...s, [bookingId]: true }));
+    try {
+      const res = await fetch(`/api/venue/bookings/${bookingId}/check-in`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ checked_in: checkedIn }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) {
+        addToast(data.error ?? 'Check-in update failed', 'error');
+        return;
+      }
+      if (selectedId) await loadDetail(selectedId);
+      addToast(checkedIn ? 'Guest checked in.' : 'Check-in cleared.', 'success');
+    } finally {
+      setCheckInBusy((s) => ({ ...s, [bookingId]: false }));
+    }
+  };
+
+  const exportAttendeesCsv = () => {
+    if (!detail) return;
+    const header = [
+      'Guest',
+      'Email',
+      'Phone',
+      'Qty',
+      'Status',
+      'Deposit_pence',
+      'Ticket_lines',
+      'Checked_in_utc',
+    ].join(',');
+    const lines = attendees.map((a) =>
+      [
+        escapeCsvCell(a.guest_name),
+        escapeCsvCell(a.guest_email),
+        escapeCsvCell(a.guest_phone),
+        escapeCsvCell(a.party_size),
+        escapeCsvCell(a.status),
+        escapeCsvCell(a.deposit_amount_pence),
+        escapeCsvCell(
+          (a.ticket_lines ?? []).map((l) => `${l.label} x${l.quantity}`).join('; '),
+        ),
+        escapeCsvCell(a.checked_in_at ? new Date(a.checked_in_at).toISOString() : ''),
+      ].join(','),
+    );
+    downloadCsvFile(
+      `event-attendees-${detail.event_date}-${detail.name.slice(0, 40).replace(/[^\w-]+/g, '_')}.csv`,
+      [header, ...lines].join('\n'),
+    );
+    addToast('CSV downloaded.', 'success');
+  };
+
+  const copyPublicBookingLink = async () => {
+    try {
+      await navigator.clipboard.writeText(publicBookingUrl);
+      addToast('Public booking link copied.', 'success');
+    } catch {
+      addToast('Could not copy link', 'error');
+    }
+  };
 
   return (
     <div>
-      <div className="mb-6 flex items-center justify-between">
+      <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="text-2xl font-semibold text-slate-900">Event Manager</h1>
-        {isAdmin && (
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            type="search"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search events…"
+            className="min-w-[180px] rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
+            aria-label="Search events"
+          />
+          {publicBookingUrl.includes('/book/') && (
+            <button
+              type="button"
+              onClick={() => void copyPublicBookingLink()}
+              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            >
+              Copy booking link
+            </button>
+          )}
+          {isAdmin && (
+            <button
+              type="button"
+              onClick={() => {
+                setEditingEventId(null);
+                setEventForm({ ...BLANK_EVENT });
+                setEventError(null);
+                setShowEventForm(true);
+              }}
+              className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700"
+            >
+              + Create event
+            </button>
+          )}
+        </div>
+      </div>
+
+      {!isAdmin && (
+        <p className="mb-4 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+          View-only: only venue admins can create, edit, or delete events. You can browse events and attendees.
+        </p>
+      )}
+
+      {publicBookingUrl.includes('/book/') && (
+        <p className="mb-4 text-sm text-slate-500">
+          Guests book ticketed events on your public page:{' '}
+          <Link
+            href={publicBookingUrl}
+            className="font-medium text-brand-600 underline hover:text-brand-700"
+            target="_blank"
+            rel="noreferrer"
+          >
+            Open booking page
+          </Link>
+        </p>
+      )}
+
+      {listError && (
+        <div className="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+          <span>{listError}</span>
           <button
             type="button"
-            onClick={() => {
-              setEditingEventId(null);
-              setEventForm({ ...BLANK_EVENT });
-              setEventError(null);
-              setShowEventForm(true);
-            }}
-            className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700"
+            onClick={() => void fetchEvents()}
+            className="rounded-md border border-red-300 bg-white px-3 py-1 text-sm font-medium text-red-800 hover:bg-red-100"
           >
-            + Create event
+            Retry
           </button>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* Create / edit event form */}
       {showEventForm && isAdmin && (
@@ -544,6 +717,19 @@ export function EventManagerView({
                   placeholder="https://…"
                   className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
                 />
+                {/^https?:\/\//i.test(eventForm.image_url.trim()) && (
+                  <div className="mt-2">
+                    <p className="mb-1 text-xs text-slate-500">Preview</p>
+                    <img
+                      src={eventForm.image_url.trim()}
+                      alt=""
+                      className="max-h-40 max-w-full rounded-lg border border-slate-200 object-contain"
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).style.display = 'none';
+                      }}
+                    />
+                  </div>
+                )}
               </div>
             </div>
 
@@ -693,7 +879,18 @@ export function EventManagerView({
       {selectedId && (
         <div className="mt-8 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
           {detailLoading && <p className="text-sm text-slate-500">Loading details…</p>}
-          {detailError && <p className="text-sm text-red-600">{detailError}</p>}
+          {detailError && (
+            <div className="mb-3 flex flex-wrap items-center gap-2">
+              <p className="text-sm text-red-600">{detailError}</p>
+              <button
+                type="button"
+                onClick={() => selectedId && void loadDetail(selectedId)}
+                className="rounded-md border border-slate-200 px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
+              >
+                Retry
+              </button>
+            </div>
+          )}
           {!detailLoading && detail && (
             <>
               <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
@@ -739,7 +936,18 @@ export function EventManagerView({
                 )}
               </div>
 
-              <h4 className="mb-2 text-sm font-medium text-slate-700">Attendees</h4>
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                <h4 className="text-sm font-medium text-slate-700">Attendees</h4>
+                {attendees.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => exportAttendeesCsv()}
+                    className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                  >
+                    Export CSV
+                  </button>
+                )}
+              </div>
               {attendees.length === 0 ? (
                 <p className="text-sm text-slate-500">No bookings for this event.</p>
               ) : (
@@ -749,10 +957,12 @@ export function EventManagerView({
                       <tr className="border-b border-slate-200 text-slate-500">
                         <th className="py-2 pr-3 font-medium">Guest</th>
                         <th className="py-2 pr-3 font-medium">Contact</th>
+                        <th className="py-2 pr-3 font-medium">Tickets</th>
                         <th className="py-2 pr-3 font-medium">Qty</th>
                         <th className="py-2 pr-3 font-medium">Status</th>
                         <th className="py-2 pr-3 font-medium">Deposit</th>
-                        <th className="py-2 font-medium">Checked in</th>
+                        <th className="py-2 pr-3 font-medium">Checked in</th>
+                        <th className="py-2 font-medium">Actions</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -763,6 +973,11 @@ export function EventManagerView({
                             <div className="max-w-[200px] truncate">{a.guest_email ?? '—'}</div>
                             <div className="text-xs text-slate-500">{a.guest_phone ?? ''}</div>
                           </td>
+                          <td className="py-2 pr-3 text-xs text-slate-600">
+                            {(a.ticket_lines ?? []).length > 0
+                              ? (a.ticket_lines ?? []).map((l) => `${l.label} ×${l.quantity}`).join(', ')
+                              : '—'}
+                          </td>
                           <td className="py-2 pr-3">{a.party_size}</td>
                           <td className="py-2 pr-3">{a.status}</td>
                           <td className="py-2 pr-3">
@@ -771,8 +986,26 @@ export function EventManagerView({
                               <span className="ml-1 text-xs text-slate-500">({a.deposit_status})</span>
                             ) : null}
                           </td>
-                          <td className="py-2 text-slate-600">
+                          <td className="py-2 pr-3 text-slate-600">
                             {a.checked_in_at ? new Date(a.checked_in_at).toLocaleString('en-GB') : '—'}
+                          </td>
+                          <td className="py-2">
+                            {a.status !== 'Cancelled' && (
+                              <button
+                                type="button"
+                                disabled={checkInBusy[a.booking_id]}
+                                onClick={() =>
+                                  void handleToggleCheckIn(a.booking_id, !a.checked_in_at)
+                                }
+                                className="rounded-md border border-slate-200 px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                              >
+                                {checkInBusy[a.booking_id]
+                                  ? '…'
+                                  : a.checked_in_at
+                                    ? 'Clear check-in'
+                                    : 'Check in'}
+                              </button>
+                            )}
                           </td>
                         </tr>
                       ))}

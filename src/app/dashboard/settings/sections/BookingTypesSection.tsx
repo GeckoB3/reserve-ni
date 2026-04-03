@@ -45,10 +45,17 @@ export function BookingTypesSection({ venue, onUpdate, isAdmin }: Props) {
   const [saving, setSaving] = useState(false);
   const [setupNavigating, setSetupNavigating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [saveSuccess, setSaveSuccess] = useState(false);
 
   useEffect(() => {
     setDraft(normalizeEnabledModels(venue.enabled_models, primary));
   }, [venue.enabled_models, primary]);
+
+  useEffect(() => {
+    if (!saveSuccess) return;
+    const t = setTimeout(() => setSaveSuccess(false), 2500);
+    return () => clearTimeout(t);
+  }, [saveSuccess]);
 
   const toggle = useCallback((m: (typeof OPTIONAL_SECONDARIES)[number]['model']) => {
     setDraft((prev) => (prev.includes(m) ? prev.filter((x) => x !== m) : [...prev, m]));
@@ -86,14 +93,19 @@ export function BookingTypesSection({ venue, onUpdate, isAdmin }: Props) {
   const save = useCallback(async () => {
     setSaving(true);
     setError(null);
+    setSaveSuccess(false);
     try {
-      await persistDraft();
+      const ok = await persistDraft();
+      if (ok) {
+        await router.refresh();
+        setSaveSuccess(true);
+      }
     } catch {
       setError('Save failed');
     } finally {
       setSaving(false);
     }
-  }, [persistDraft]);
+  }, [persistDraft, router]);
 
   const handleSetUp = useCallback(
     async (href: string) => {
@@ -174,7 +186,12 @@ export function BookingTypesSection({ venue, onUpdate, isAdmin }: Props) {
         >
           {saving ? 'Saving…' : 'Save booking types'}
         </button>
-        {!dirty && <span className="text-xs text-slate-400">No unsaved changes</span>}
+        {saveSuccess && (
+          <span className="text-sm font-medium text-green-700" role="status">
+            Saved
+          </span>
+        )}
+        {!dirty && !saveSuccess && <span className="text-xs text-slate-400">No unsaved changes</span>}
       </div>
     </div>
   );

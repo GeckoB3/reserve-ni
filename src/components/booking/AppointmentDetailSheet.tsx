@@ -9,6 +9,8 @@ import {
   isBookingStatus,
   type BookingStatus,
 } from '@/lib/table-management/booking-status';
+import type { BookingModel } from '@/types/booking-models';
+import { inferBookingRowModel, bookingModelShortLabel } from '@/lib/booking/infer-booking-row-model';
 
 export interface DetailPractitionerOption {
   id: string;
@@ -73,6 +75,18 @@ export interface BookingDetailRecord {
   dietary_notes?: string | null;
   occasion?: string | null;
   guest: GuestDetail | null;
+  experience_event_id?: string | null;
+  class_instance_id?: string | null;
+  resource_id?: string | null;
+  event_session_id?: string | null;
+  calendar_id?: string | null;
+  service_item_id?: string | null;
+  cde_context?: {
+    inferred_model: BookingModel;
+    title: string;
+    subtitle?: string | null;
+  } | null;
+  inferred_booking_model?: BookingModel;
 }
 
 function prefetchToDetailRecord(p: AppointmentDetailPrefetch): BookingDetailRecord {
@@ -118,6 +132,18 @@ const STATUS_STYLES: Record<string, string> = {
   'No-Show': 'bg-red-100 text-red-900 ring-1 ring-red-200/70',
   Cancelled: 'bg-slate-100 text-slate-500 ring-1 ring-slate-200/80',
 };
+
+function inferredForDetail(d: BookingDetailRecord): BookingModel {
+  return d.inferred_booking_model ?? inferBookingRowModel(d);
+}
+
+function isAppointmentStyleModel(m: BookingModel): boolean {
+  return m === 'practitioner_appointment' || m === 'unified_scheduling';
+}
+
+function isCdeModelType(m: BookingModel): boolean {
+  return m === 'event_ticket' || m === 'class_session' || m === 'resource_booking';
+}
 
 function timeToMinutes(t: string): number {
   const [hh, mm] = t.slice(0, 5).split(':').map(Number);
@@ -201,8 +227,9 @@ export function AppointmentDetailSheet({
         dietary_notes?: string | null;
         occasion?: string | null;
       };
-      if (requirePractitionerBooking && !data.practitioner_id) {
-        setLoadError('This booking is not an appointment.');
+      const inferred = inferredForDetail(data);
+      if (requirePractitionerBooking && inferred === 'table_reservation') {
+        setLoadError('This booking is not available in this view.');
         setDetail(null);
         return;
       }
@@ -258,6 +285,10 @@ export function AppointmentDetailSheet({
 
   const serviceMap = new Map(services.map((s) => [s.id, s]));
   const activePractitioners = practitioners.filter((p) => p.is_active);
+
+  const inferredModel = detail ? inferredForDetail(detail) : null;
+  const isApptStyle = inferredModel != null && isAppointmentStyleModel(inferredModel);
+  const isCde = inferredModel != null && isCdeModelType(inferredModel);
 
   async function patchJson(body: Record<string, unknown>): Promise<boolean> {
     if (!bookingId) return false;
@@ -319,7 +350,9 @@ export function AppointmentDetailSheet({
   const durationMins =
     detail?.booking_end_time != null
       ? timeToMinutes(detail.booking_end_time) - timeToMinutes(detail.booking_time)
-      : (detail?.appointment_service_id ? serviceMap.get(detail.appointment_service_id)?.duration_minutes ?? 30 : 30);
+      : isApptStyle
+        ? (detail?.appointment_service_id ? serviceMap.get(detail.appointment_service_id)?.duration_minutes ?? 30 : 30)
+        : 30;
 
   const endLabel = minutesToTime(timeToMinutes(detail?.booking_time ?? '00:00') + Math.max(durationMins, 0));
 
@@ -352,7 +385,7 @@ export function AppointmentDetailSheet({
         <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-100 bg-white px-4 py-3 lg:px-5">
           <div className="min-w-0">
             <h2 id="appointment-detail-title" className="text-lg font-semibold text-slate-900">
-              Appointment
+              {isCde ? 'Booking' : 'Appointment'}
             </h2>
             {refreshing && detail && (
               <p className="text-xs text-slate-400 motion-safe:animate-pulse">Syncing latest…</p>
@@ -388,6 +421,19 @@ export function AppointmentDetailSheet({
 
           {detail && (
             <>
+              {detail.cde_context && (
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50/40 p-3.5">
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-emerald-700/80">Booking type</p>
+                  <p className="text-sm font-semibold text-slate-900">
+                    {bookingModelShortLabel(detail.cde_context.inferred_model)}
+                  </p>
+                  <p className="mt-1 text-sm text-slate-800">{detail.cde_context.title}</p>
+                  {detail.cde_context.subtitle ? (
+                    <p className="mt-0.5 text-xs text-slate-600">{detail.cde_context.subtitle}</p>
+                  ) : null}
+                </div>
+              )}
+
               <div>
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="text-xl font-semibold text-slate-900">{detail.guest?.name ?? 'Guest'}</span>
@@ -398,13 +444,18 @@ export function AppointmentDetailSheet({
                   >
                     {STATUS_LABELS[detail.status] ?? detail.status}
                   </span>
-                  {arrived && detail.status !== 'Seated' && ['Pending', 'Confirmed'].includes(detail.status) && (
+                  {isApptStyle &&
+                    arrived &&
+                    detail.status !== 'Seated' &&
+                    ['Pending', 'Confirmed'].includes(detail.status) && (
                     <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-950 ring-1 ring-amber-300/70">
                       <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-500" aria-hidden />
                       Waiting
                     </span>
                   )}
-                  {detail.guest_attendance_confirmed_at && ['Pending', 'Confirmed'].includes(detail.status) && (
+                  {isApptStyle &&
+                    detail.guest_attendance_confirmed_at &&
+                    ['Pending', 'Confirmed'].includes(detail.status) && (
                     <span className="inline-flex items-center gap-1 rounded-full bg-teal-100 px-2 py-0.5 text-xs font-semibold text-teal-900 ring-1 ring-teal-200/80">
                       Guest confirmed
                     </span>
@@ -412,6 +463,7 @@ export function AppointmentDetailSheet({
                 </div>
               </div>
 
+              {isApptStyle ? (
               <dl className="grid gap-3 text-sm sm:grid-cols-2">
                 <div>
                   <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">Client name</dt>
@@ -522,6 +574,44 @@ export function AppointmentDetailSheet({
                   </dd>
                 </div>
               </dl>
+              ) : (
+              <dl className="grid gap-3 text-sm sm:grid-cols-2">
+                <div>
+                  <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">Date</dt>
+                  <dd className="mt-0.5 text-slate-900">{detail.booking_date}</dd>
+                </div>
+                <div>
+                  <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">Time</dt>
+                  <dd className="mt-0.5 font-medium text-slate-800">
+                    {detail.booking_time.slice(0, 5)} – {endLabel}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">Party size</dt>
+                  <dd className="mt-0.5 text-slate-900">{detail.party_size}</dd>
+                </div>
+                {detail.deposit_amount_pence != null && detail.deposit_amount_pence > 0 && (
+                  <div>
+                    <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">Deposit</dt>
+                    <dd className="mt-0.5 text-slate-700">
+                      {formatMoneyPence(detail.deposit_amount_pence, sym)} ({detail.deposit_status ?? '—'})
+                    </dd>
+                  </div>
+                )}
+                {detail.source ? (
+                  <div>
+                    <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">Source</dt>
+                    <dd className="mt-0.5 text-slate-700">{detail.source}</dd>
+                  </div>
+                ) : null}
+                <div className="sm:col-span-2">
+                  <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">Customer comments</dt>
+                  <dd className="mt-0.5 whitespace-pre-wrap text-slate-700">
+                    {detail.special_requests?.trim() || '—'}
+                  </dd>
+                </div>
+              </dl>
+              )}
 
               <div>
                 <label htmlFor="internal-notes-detail" className="text-xs font-medium uppercase tracking-wide text-slate-500">
@@ -555,7 +645,7 @@ export function AppointmentDetailSheet({
               <div className="border-t border-slate-100 pt-4">
                 <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Actions</p>
                 <div className="mt-2 flex flex-wrap gap-2">
-                  {['Pending', 'Confirmed'].includes(detail.status) && (
+                  {isApptStyle && ['Pending', 'Confirmed'].includes(detail.status) && (
                     <button
                       type="button"
                       disabled={busy}

@@ -632,7 +632,11 @@ async function handleNonTableBooking(
     if (!cls || cls.remaining < party_size) {
       return NextResponse.json({ error: 'This class is full or unavailable' }, { status: 409 });
     }
-    if (cls.price_pence != null && cls.price_pence > 0) {
+    if (
+      cls.requires_online_payment &&
+      cls.price_pence != null &&
+      cls.price_pence > 0
+    ) {
       requiresDeposit = true;
       depositAmountPence = cls.price_pence * party_size;
     }
