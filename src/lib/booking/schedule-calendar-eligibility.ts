@@ -5,7 +5,7 @@ import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 const SCHEDULE_CALENDAR_MODELS: BookingModel[] = ['event_ticket', 'class_session', 'resource_booking'];
 
 /**
- * Whether `/dashboard/calendar` should be available — Docs/ReserveNI_Unified_Booking_Functionality.md §4.2 entry rule.
+ * Whether `/dashboard/calendar` should be available - Docs/ReserveNI_Unified_Booking_Functionality.md §4.2 entry rule.
  * Table-only venues (no C/D/E primary or secondary) use day sheet / table tools instead.
  */
 export function isVenueScheduleCalendarEligible(
@@ -18,7 +18,7 @@ export function isVenueScheduleCalendarEligible(
 }
 
 /**
- * Full practitioner/appointment grid (`PractitionerCalendarView`) — **unified / practitioner primaries only**.
+ * Full practitioner/appointment grid (`PractitionerCalendarView`) - **unified / practitioner primaries only**.
  * Table reservations (`table_reservation`) never use this view; they use **Day sheet / Floor plan** for Model A and
  * {@link StaffScheduleHub} (merged C/D/E from `/api/venue/schedule`) when secondaries are enabled.
  */

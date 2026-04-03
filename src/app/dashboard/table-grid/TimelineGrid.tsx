@@ -146,7 +146,7 @@ interface Props {
 const SLOT_WIDTH_DEFAULT = 64;
 const ROW_HEIGHT = 48;
 const HEADER_HEIGHT = 40;
-/** Left/right unassigned toolbar row height — stacked label + full-width “Assign All” (matches narrow sidebar). */
+/** Left/right unassigned toolbar row height - stacked label + full-width “Assign All” (matches narrow sidebar). */
 const UNASSIGNED_HEADER_HEIGHT = 64;
 
 /** Prefer timeline cells over parent row droppables so drop target + drag preview match the slot under the pointer. */
@@ -215,12 +215,12 @@ export function TimelineGrid({
   const leftScrollRef = useRef<HTMLDivElement>(null);
   const [activeDrag, setActiveDrag] = useState<BookingBlock | null>(null);
   const activeDragRef = useRef<BookingBlock | null>(null);
-  /** Touch/pen start position for a booking — used to avoid opening the context menu after a drag-intent move. */
+  /** Touch/pen start position for a booking - used to avoid opening the context menu after a drag-intent move. */
   const bookingPointerDownRef = useRef<{ bookingId: string; x: number; y: number } | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; booking: BookingBlock } | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<{ message: string; resolve: (value: boolean) => void } | null>(null);
   const [resizeVisual, setResizeVisual] = useState<{ bookingId: string; deltaSlots: number } | null>(null);
-  /** Hovered drop target while dragging — time (same table) or table/combination name (table move). */
+  /** Hovered drop target while dragging - time (same table) or table/combination name (table move). */
   const [dragDropPreview, setDragDropPreview] = useState<DragDropPreview | null>(null);
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportHeight, setViewportHeight] = useState(600);
@@ -615,7 +615,7 @@ export function TimelineGrid({
         } else {
           onAssign(bookingId, targetTableIds);
         }
-        // Never change booking time when changing table — time updates only on same-table cell drops below.
+        // Never change booking time when changing table - time updates only on same-table cell drops below.
         return;
       }
 

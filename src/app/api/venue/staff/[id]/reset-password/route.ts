@@ -8,7 +8,7 @@ const schema = z.object({
   new_password: z.string().min(8, 'Password must be at least 8 characters'),
 });
 
-/** POST /api/venue/staff/[id]/reset-password — admin resets another user's password. */
+/** POST /api/venue/staff/[id]/reset-password - admin resets another user's password. */
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },

@@ -88,7 +88,7 @@ const practitionerSchema = z.object({
   name: z.string().min(1).max(200),
   email: optionalEmail,
   phone: z.string().max(24).optional().or(z.literal('')),
-  /** Public URL segment: /book/{venue-slug}/{slug} — lowercase, numbers, hyphens; empty clears */
+  /** Public URL segment: /book/{venue-slug}/{slug} - lowercase, numbers, hyphens; empty clears */
   slug: z.string().max(64).nullable().optional(),
   working_hours: z.record(z.string(), timeRangeArraySchema).optional(),
   break_times: z.array(z.object({ start: z.string(), end: z.string() })).optional(),
@@ -101,9 +101,9 @@ const practitionerSchema = z.object({
 });
 
 /**
- * GET /api/venue/practitioners — list practitioners for the venue.
+ * GET /api/venue/practitioners - list practitioners for the venue.
  * Non-admin staff normally receive only their linked practitioner row (settings / availability).
- * Pass `?roster=1` for the full venue roster (read-only) — used by appointments list and calendar
+ * Pass `?roster=1` for the full venue roster (read-only) - used by appointments list and calendar
  * so staff can filter by colleague while other flows stay scoped.
  */
 export async function GET(request: NextRequest) {
@@ -165,7 +165,7 @@ export async function GET(request: NextRequest) {
   }
 }
 
-/** POST /api/venue/practitioners — create a new practitioner (admin only). */
+/** POST /api/venue/practitioners - create a new practitioner (admin only). */
 export async function POST(request: NextRequest) {
   try {
     const supabase = await createClient();
@@ -288,7 +288,7 @@ const staffBreaksOnlySchema = z.object({
   break_times_by_day: practitionerSchema.shape.break_times_by_day.optional(),
 });
 
-/** PATCH /api/venue/practitioners — admin: any field; staff: only breaks for their linked practitioner row. */
+/** PATCH /api/venue/practitioners - admin: any field; staff: only breaks for their linked practitioner row. */
 export async function PATCH(request: NextRequest) {
   try {
     const supabase = await createClient();
@@ -487,7 +487,7 @@ export async function PATCH(request: NextRequest) {
   }
 }
 
-/** DELETE /api/venue/practitioners — delete a practitioner (admin only). */
+/** DELETE /api/venue/practitioners - delete a practitioner (admin only). */
 export async function DELETE(request: NextRequest) {
   try {
     const supabase = await createClient();

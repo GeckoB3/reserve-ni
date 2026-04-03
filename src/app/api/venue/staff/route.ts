@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 
-/** GET /api/venue/staff — list staff for the venue (admin only). Includes linked practitioner for Model B. */
+/** GET /api/venue/staff - list staff for the venue (admin only). Includes linked practitioner for Model B. */
 export async function GET() {
   try {
     const supabase = await createClient();

@@ -681,7 +681,6 @@ export function SettingsView({
                 onUpdate={onUpdate}
                 isAdmin={isAdmin}
                 bookingModel={bookingModel}
-                enabledModels={venue.enabled_models ?? []}
               />
             )}
             <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">

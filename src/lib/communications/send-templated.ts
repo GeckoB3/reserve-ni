@@ -295,7 +295,7 @@ export async function sendDepositConfirmationEmail(
 }
 
 /**
- * Upsert a comm log row — modifications can happen multiple times per booking,
+ * Upsert a comm log row - modifications can happen multiple times per booking,
  * so we update the existing row rather than failing on the unique constraint.
  */
 async function upsertCommLog(opts: {
@@ -331,7 +331,7 @@ async function upsertCommLog(opts: {
 
 /**
  * Send booking modification notification email and/or SMS based on venue settings.
- * No dedup — the same booking can be modified multiple times.
+ * No dedup - the same booking can be modified multiple times.
  */
 export async function sendBookingModificationNotification(
   booking: BookingEmailData,

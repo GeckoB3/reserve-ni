@@ -75,7 +75,7 @@ async function calendarOffersServiceItem(
 }
 
 /**
- * PATCH — staff only. Upsert per-practitioner overrides for one service (price, duration, etc.)
+ * PATCH - staff only. Upsert per-practitioner overrides for one service (price, duration, etc.)
  * when the venue admin has enabled the matching staff_may_customize_* flags on the service.
  */
 export async function PATCH(request: NextRequest) {

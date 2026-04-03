@@ -44,14 +44,14 @@ interface Props {
   venueName?: string;
   venueSlug?: string;
   tableManagementEnabled?: boolean;
-  /** Business or Founding — with table_reservation and tableManagementEnabled, shows table grid / floor plan. */
+  /** Business or Founding - with table_reservation and tableManagementEnabled, shows table grid / floor plan. */
   pricingTier?: string;
   bookingModel?: BookingModel;
   /** Secondary bookable models (C/D/E); merged into model-specific nav. */
   enabledModels?: BookingModel[];
   /** Reports and Availability nav items are admin-only. */
   isAdmin?: boolean;
-  /** Venue `terminology` JSONB — drives booking list / new-booking labels (plan §6.4). */
+  /** Venue `terminology` JSONB - drives booking list / new-booking labels (plan §6.4). */
   venueTerminology?: Record<string, unknown> | null;
 }
 
@@ -301,7 +301,7 @@ export function DashboardSidebar({
             );
           })}
 
-          {/* Your Booking Page — external link */}
+          {/* Your Booking Page - external link */}
           {venueSlug && (
             <a
               href={`/book/${venueSlug}`}

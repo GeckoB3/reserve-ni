@@ -1,4 +1,4 @@
-/** §1.1 ReserveNI Unified Scheduling Engine Plan — Standard tier unit price (GBP/month per bookable calendar). */
+/** §1.1 ReserveNI Unified Scheduling Engine Plan - Standard tier unit price (GBP/month per bookable calendar). */
 export const STANDARD_PRICE_PER_CALENDAR = 20;
 export const BUSINESS_PRICE = 79;
 

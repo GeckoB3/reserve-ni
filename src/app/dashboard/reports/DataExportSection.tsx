@@ -26,7 +26,7 @@ export function DataExportSection({
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         const msg =
-          typeof body.error === 'string' ? body.error : 'Export failed — please try again.';
+          typeof body.error === 'string' ? body.error : 'Export failed - please try again.';
         if (onExportFlash) onExportFlash('notice', msg);
         else alert(msg);
         return;
@@ -50,10 +50,10 @@ export function DataExportSection({
             : 'Guest list';
       onExportFlash?.(
         'success',
-        `${label} CSV download started — check your downloads folder.`,
+        `${label} CSV download started - check your downloads folder.`,
       );
     } catch {
-      const msg = 'Export failed — please check your connection and try again.';
+      const msg = 'Export failed - please check your connection and try again.';
       if (onExportFlash) onExportFlash('notice', msg);
       else alert(msg);
     } finally {

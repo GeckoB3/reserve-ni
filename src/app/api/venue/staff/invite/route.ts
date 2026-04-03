@@ -9,7 +9,7 @@ const inviteSchema = z.object({
   role: z.enum(['admin', 'staff']),
 });
 
-/** POST /api/venue/staff/invite — invite staff by email (admin only). Sends Supabase magic link. */
+/** POST /api/venue/staff/invite - invite staff by email (admin only). Sends Supabase magic link. */
 export async function POST(request: NextRequest) {
   try {
     const supabase = await createClient();

@@ -86,7 +86,7 @@ export function ConfirmationStep({ venue, date, slot, partySize, guest, requires
         Add to Calendar
       </button>
 
-      {/* Cancellation policy — only relevant when a deposit was taken */}
+      {/* Cancellation policy - only relevant when a deposit was taken */}
       {requiresDeposit && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
           <p className="font-medium">Cancellation Policy</p>

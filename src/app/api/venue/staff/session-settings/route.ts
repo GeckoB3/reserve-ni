@@ -8,7 +8,7 @@ const putSchema = z.object({
   session_timeout_minutes: z.number().int().min(0).max(43200).nullable(),
 });
 
-/** GET /api/venue/staff/session-settings — get session timeout setting. */
+/** GET /api/venue/staff/session-settings - get session timeout setting. */
 export async function GET() {
   try {
     const supabase = await createClient();
@@ -31,7 +31,7 @@ export async function GET() {
   }
 }
 
-/** PUT /api/venue/staff/session-settings — update session timeout (admin only). */
+/** PUT /api/venue/staff/session-settings - update session timeout (admin only). */
 export async function PUT(request: NextRequest) {
   try {
     const supabase = await createClient();

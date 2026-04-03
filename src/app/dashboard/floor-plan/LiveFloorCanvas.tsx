@@ -32,7 +32,7 @@ const STATUS_COLORS: Record<string, string> = {
   bussing: STAT_TILE_TEXT_BLUE_700,
 };
 
-/** Valid drop target — amber reads on both emerald-tinted empty and blue-tinted occupied fills */
+/** Valid drop target - amber reads on both emerald-tinted empty and blue-tinted occupied fills */
 const VALID_TARGET_COLOR = '#d97706';
 const DRAG_GHOST_OPACITY = 0.35;
 

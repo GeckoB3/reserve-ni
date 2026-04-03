@@ -2,7 +2,7 @@ import Link from 'next/link';
 import Image from 'next/image';
 
 export const metadata = {
-  title: 'Privacy Policy — Reserve NI',
+  title: 'Privacy Policy - Reserve NI',
   description: 'How Reserve NI collects, uses, and protects your personal data.',
 };
 
@@ -48,7 +48,7 @@ export default function PrivacyPage() {
               <ul className="mt-2 list-disc pl-5 space-y-1">
                 <li>Your name, email address, and phone number</li>
                 <li>The details of your reservation (date, time, party size, occasion, dietary notes)</li>
-                <li>Payment status information (we store only a Stripe payment reference — we never store card numbers)</li>
+                <li>Payment status information (we store only a Stripe payment reference - we never store card numbers)</li>
                 <li>Communications sent to you regarding your booking</li>
               </ul>
               <p className="mt-3">
@@ -77,13 +77,13 @@ export default function PrivacyPage() {
               <p>We process your personal data under the following legal bases:</p>
               <ul className="mt-2 list-disc pl-5 space-y-1">
                 <li>
-                  <strong>Contract performance</strong> — to fulfil and manage your reservation
+                  <strong>Contract performance</strong> - to fulfil and manage your reservation
                 </li>
                 <li>
-                  <strong>Legitimate interests</strong> — to operate our service, prevent fraud, and improve our platform
+                  <strong>Legitimate interests</strong> - to operate our service, prevent fraud, and improve our platform
                 </li>
                 <li>
-                  <strong>Consent</strong> — where you have provided explicit consent (e.g. marketing communications)
+                  <strong>Consent</strong> - where you have provided explicit consent (e.g. marketing communications)
                 </li>
               </ul>
             </section>
@@ -93,20 +93,20 @@ export default function PrivacyPage() {
               <p>We share data only where necessary:</p>
               <ul className="mt-2 list-disc pl-5 space-y-1">
                 <li>
-                  <strong>The venue</strong> — the restaurant receives your booking details in order to prepare for
+                  <strong>The venue</strong> - the restaurant receives your booking details in order to prepare for
                   your visit
                 </li>
                 <li>
-                  <strong>Stripe</strong> — for secure payment processing (subject to{' '}
+                  <strong>Stripe</strong> - for secure payment processing (subject to{' '}
                   <a href="https://stripe.com/gb/privacy" target="_blank" rel="noopener noreferrer" className="text-brand-600 hover:underline">
                     Stripe&apos;s Privacy Policy
                   </a>)
                 </li>
                 <li>
-                  <strong>SendGrid / Twilio</strong> — for email and SMS delivery
+                  <strong>SendGrid / Twilio</strong> - for email and SMS delivery
                 </li>
                 <li>
-                  <strong>Supabase</strong> — for secure database hosting (data stored in EU data centres)
+                  <strong>Supabase</strong> - for secure database hosting (data stored in EU data centres)
                 </li>
               </ul>
             </section>

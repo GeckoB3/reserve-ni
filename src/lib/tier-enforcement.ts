@@ -14,10 +14,12 @@ interface VenueTier {
  *
  * For `unified_scheduling` venues, bookable calendars live in `unified_calendars` (plan §2.2);
  * counting `practitioners` alone would diverge from subscription limits.
+ *
+ * Do not use this for `class_types`: class offerings are unlimited; subscription limits are for staff calendars.
  */
 export async function checkCalendarLimit(
   venueId: string,
-  countTable: 'practitioners' | 'venue_resources' | 'class_types' | 'experience_events'
+  countTable: 'practitioners' | 'venue_resources' | 'experience_events'
 ): Promise<{ allowed: boolean; current?: number; limit?: number }> {
   const admin = getSupabaseAdminClient();
 

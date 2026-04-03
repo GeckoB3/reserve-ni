@@ -206,7 +206,7 @@ export function ModifyBookingInline({
           >
             {slots.map((slot) => (
               <option key={slot.key} value={slot.start_time.slice(0, 5)}>
-                {slot.label} — {slot.available_covers} cover
+                {slot.label} - {slot.available_covers} cover
                 {slot.available_covers !== 1 ? 's' : ''} available
               </option>
             ))}

@@ -35,7 +35,7 @@ function resolveSort(raw: string | null): string {
 }
 
 /**
- * GET /api/venue/guests — paginated guest list (admin only).
+ * GET /api/venue/guests - paginated guest list (admin only).
  * Query: search, tags, sort (last_visit|visit_count|name|created or legacy *_desc), filter (all|identified|anonymous), page (0-based), limit (max 50, default 25).
  */
 export async function GET(request: NextRequest) {

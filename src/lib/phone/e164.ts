@@ -115,7 +115,7 @@ export function parseStoredPhoneForUi(
     return { countryCode: 'GB', nationalNumber: national };
   }
 
-  // National number only — strip leading 0 for UK-style
+  // National number only - strip leading 0 for UK-style
   const national = digits.replace(/^0+/, '');
   return { countryCode: fallbackCountry, nationalNumber: national };
 }

@@ -72,7 +72,7 @@ export function BookPublicBookingFlow({
     const next = new URLSearchParams(searchParams.toString());
     next.set('tab', resolved);
     router.replace(`${pathname}?${next.toString()}`, { scroll: false });
-    // Intentionally omit `searchParams` object identity — use tabParam + pathname only.
+    // Intentionally omit `searchParams` object identity - use tabParam + pathname only.
   }, [tabs.length, tabParam, primary, enabled, venue.terminology, pathname, router]);
 
   return (

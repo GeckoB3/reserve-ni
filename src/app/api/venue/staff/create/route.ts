@@ -23,7 +23,7 @@ const createSchema = z
     path: ['password_confirm'],
   });
 
-/** POST /api/venue/staff/create — admin creates a new staff user with email and password. */
+/** POST /api/venue/staff/create - admin creates a new staff user with email and password. */
 export async function POST(request: NextRequest) {
   try {
     const supabase = await createClient();
@@ -187,7 +187,7 @@ export async function POST(request: NextRequest) {
     try {
       const messageId = await sendEmail({
         to: normalisedEmail,
-        subject: `Your ${venueName} dashboard login — Reserve NI`,
+        subject: `Your ${venueName} dashboard login - Reserve NI`,
         html,
         text,
       });

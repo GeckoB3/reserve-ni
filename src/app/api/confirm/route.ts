@@ -258,13 +258,13 @@ export async function POST(request: NextRequest) {
       const attendanceAlready = (booking as { guest_attendance_confirmed_at?: string | null })
         .guest_attendance_confirmed_at;
 
-      // Pre-visit reminder: booking is often already Confirmed — record guest attendance instead of
+      // Pre-visit reminder: booking is often already Confirmed - record guest attendance instead of
       // attempting Confirmed → Confirmed (invalid transition).
       if (currentStatus === 'Confirmed') {
         if (attendanceAlready) {
           return NextResponse.json({
             success: true,
-            message: 'Thanks — we already have your confirmation on file.',
+            message: 'Thanks - we already have your confirmation on file.',
             guest_attendance_confirmed_at: attendanceAlready,
           });
         }
@@ -278,7 +278,7 @@ export async function POST(request: NextRequest) {
 
         return NextResponse.json({
           success: true,
-          message: "Thanks — we've noted that you're coming. We look forward to seeing you.",
+          message: "Thanks - we've noted that you're coming. We look forward to seeing you.",
           guest_attendance_confirmed_at: now,
         });
       }

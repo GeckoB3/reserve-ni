@@ -178,7 +178,7 @@ If the deposit is not paid within 24 hours, your booking will be automatically c
 {{venue_name}}`,
   },
   deposit_payment_reminder: {
-    subject: 'Reminder: pay your deposit — {{venue_name}}',
+    subject: 'Reminder: pay your deposit - {{venue_name}}',
     body: `Hi {{guest_name}},
 
 This is a reminder to pay your deposit for your reservation at {{venue_name}} on {{booking_date}} at {{booking_time}} (party of {{party_size}}).

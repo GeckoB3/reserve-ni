@@ -14,7 +14,7 @@ const features = [
   {
     title: "Smart Communications",
     description:
-      "Automated confirmations, deposit requests, reminders, and post-visit messages across email and SMS — channels and allowances follow your tier and notification settings.",
+      "Automated confirmations, deposit requests, reminders, and post-visit messages across email and SMS - channels and allowances follow your tier and notification settings.",
     icon: ChatIcon,
   },
   {
@@ -208,7 +208,7 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Founding Partner — restaurants & hospitality */}
+          {/* Founding Partner - restaurants & hospitality */}
           <div className="mx-auto mt-10 max-w-4xl overflow-hidden rounded-2xl border border-emerald-200 bg-gradient-to-br from-emerald-50 to-white shadow-sm">
             <div className="flex flex-col gap-4 p-6 sm:flex-row sm:items-center sm:justify-between sm:gap-8">
               <div>
@@ -222,7 +222,7 @@ export default function Home() {
                   </span>
                 </div>
                 <p className="mt-2 text-sm font-medium text-emerald-900">
-                  Free for six months — full Business plan, no card to start. We onboard you personally.
+                  Free for six months - full Business plan, no card to start. We onboard you personally.
                 </p>
                 <p className="mt-1 text-xs text-emerald-700">Only {FOUNDING_PARTNER_CAP} spots available.</p>
               </div>

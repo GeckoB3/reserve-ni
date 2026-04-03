@@ -1,5 +1,5 @@
 /**
- * Unified Scheduling Engine — availability for unified_calendars + service_items.
+ * Unified Scheduling Engine - availability for unified_calendars + service_items.
  * Practitioner calendars reuse the same UUIDs as legacy practitioners after migration;
  * this module merges calendar_blocks and delegates practitioner slots to appointment-engine.
  */

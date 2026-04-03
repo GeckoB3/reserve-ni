@@ -422,7 +422,7 @@ export function UnifiedBookingForm({
 
       if (asModal) {
         addToast(
-          requireDeposit ? 'Booking created — deposit link sent' : 'Booking confirmed',
+          requireDeposit ? 'Booking created - deposit link sent' : 'Booking confirmed',
           'success',
         );
         onCreated(bookingResult);
@@ -436,7 +436,7 @@ export function UnifiedBookingForm({
     }
   };
 
-  // Success state (inline mode only — modals close on success)
+  // Success state (inline mode only - modals close on success)
   if (!asModal && result) {
     const hasDeposit = Boolean(result.payment_url);
     return (
@@ -449,7 +449,7 @@ export function UnifiedBookingForm({
               </svg>
             </div>
             <p className={`text-base font-semibold ${hasDeposit ? 'text-amber-800' : 'text-emerald-800'}`}>
-              {hasDeposit ? 'Booking Created — Deposit Requested' : 'Booking Confirmed'}
+              {hasDeposit ? 'Booking Created - Deposit Requested' : 'Booking Confirmed'}
             </p>
           </div>
           <p className={`text-sm ${hasDeposit ? 'text-amber-700' : 'text-emerald-700'}`}>

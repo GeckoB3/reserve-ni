@@ -1,50 +1,56 @@
 import { describe, expect, it } from 'vitest';
+import type { ClassPaymentRequirement } from '@/types/booking-models';
 
 /**
- * Mirrors the class_session branch in POST /api/booking/create:
- * Stripe deposit only when online payment is required and list price is positive.
+ * Mirrors Stripe requirement for class_session from availability slot fields.
  */
-function classSessionRequiresStripeDeposit(cls: {
-  requires_online_payment: boolean;
+function classSessionRequiresStripeDeposit(slot: {
+  payment_requirement: ClassPaymentRequirement;
   price_pence: number | null;
+  deposit_amount_pence: number | null;
 }): boolean {
-  return (
-    cls.requires_online_payment &&
-    cls.price_pence != null &&
-    cls.price_pence > 0
-  );
+  if (slot.payment_requirement === 'full_payment') return (slot.price_pence ?? 0) > 0;
+  if (slot.payment_requirement === 'deposit') return (slot.deposit_amount_pence ?? 0) > 0;
+  return false;
 }
 
 describe('class_session Stripe deposit rule', () => {
-  it('requires deposit when online payment is on and price is set', () => {
+  it('requires deposit when full_payment and price is set', () => {
     expect(
       classSessionRequiresStripeDeposit({
-        requires_online_payment: true,
+        payment_requirement: 'full_payment',
         price_pence: 500,
+        deposit_amount_pence: null,
       }),
     ).toBe(true);
   });
 
-  it('skips deposit when online payment is off even if price is set', () => {
+  it('requires deposit when deposit mode and deposit per person set', () => {
     expect(
       classSessionRequiresStripeDeposit({
-        requires_online_payment: false,
+        payment_requirement: 'deposit',
+        price_pence: 1000,
+        deposit_amount_pence: 300,
+      }),
+    ).toBe(true);
+  });
+
+  it('skips Stripe for none even if price is set', () => {
+    expect(
+      classSessionRequiresStripeDeposit({
+        payment_requirement: 'none',
         price_pence: 500,
+        deposit_amount_pence: null,
       }),
     ).toBe(false);
   });
 
-  it('skips deposit when price is zero or null', () => {
+  it('skips when price is zero for full_payment', () => {
     expect(
       classSessionRequiresStripeDeposit({
-        requires_online_payment: true,
+        payment_requirement: 'full_payment',
         price_pence: 0,
-      }),
-    ).toBe(false);
-    expect(
-      classSessionRequiresStripeDeposit({
-        requires_online_payment: true,
-        price_pence: null,
+        deposit_amount_pence: null,
       }),
     ).toBe(false);
   });

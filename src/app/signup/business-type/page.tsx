@@ -106,7 +106,7 @@ export default function BusinessTypePage() {
           }`}
         >
           <p className="text-sm font-semibold text-slate-900">Events &amp; experiences</p>
-          <p className="mt-1 text-xs text-slate-600">Guests buy tickets for events — escape rooms, tours, shows.</p>
+          <p className="mt-1 text-xs text-slate-600">Guests buy tickets for events - escape rooms, tours, shows.</p>
         </button>
         <button
           type="button"

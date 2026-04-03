@@ -1,7 +1,7 @@
 import type { TableServiceStatus } from '@/lib/table-management/constants';
 
 /**
- * Table management types — optional layer on top of covers-based availability.
+ * Table management types - optional layer on top of covers-based availability.
  */
 
 export type TableShape = 'rectangle' | 'circle' | 'square' | 'oval' | 'l-shape';
@@ -268,7 +268,7 @@ export function computeGridPositions(
 
 /**
  * Generates chair positions (in local coordinates) around a table.
- * When `blocked` is provided, chairs on those edges are omitted — used when
+ * When `blocked` is provided, chairs on those edges are omitted - used when
  * tables are snapped edge-to-edge to form a combination.
  */
 export function generateChairPositions(

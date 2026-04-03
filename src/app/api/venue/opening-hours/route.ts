@@ -3,7 +3,7 @@ import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 import { openingHoursSchema } from '@/types/config-schemas';
 
-/** PATCH /api/venue/opening-hours — update opening_hours (admin only). */
+/** PATCH /api/venue/opening-hours - update opening_hours (admin only). */
 export async function PATCH(request: NextRequest) {
   try {
     const supabase = await createClient();

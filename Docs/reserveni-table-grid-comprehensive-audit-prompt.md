@@ -1,7 +1,7 @@
-# ReserveNI — Table Grid: Comprehensive Functionality Audit & Implementation
+# ReserveNI - Table Grid: Comprehensive Functionality Audit & Implementation
 
 **Prompt Type:** Codebase Audit + Bug Fix + Full Feature Implementation  
-**Scope:** Table Grid screen — every feature, interaction, and behaviour required for professional live service operation  
+**Scope:** Table Grid screen - every feature, interaction, and behaviour required for professional live service operation  
 **Prerequisite:** Floor Plan & Table Grid Full Functionality prompt and Automatic Table Combination Engine prompt must be complete before running this one.  
 **Reference Standard:** ResDiary, OpenTable, SevenRooms, Resy
 
@@ -9,13 +9,13 @@
 
 ## Context & Objective
 
-The Table Grid is the primary operational surface for restaurant staff running a live service in Advanced Table Management mode. It must function as a complete, professional booking management tool — equivalent in capability to the diary grid view in ResDiary or the grid view in OpenTable. This prompt defines every feature the Table Grid must support, asks the agent to audit what is currently built against that definition, fix all bugs, and implement everything that is missing.
+The Table Grid is the primary operational surface for restaurant staff running a live service in Advanced Table Management mode. It must function as a complete, professional booking management tool - equivalent in capability to the diary grid view in ResDiary or the grid view in OpenTable. This prompt defines every feature the Table Grid must support, asks the agent to audit what is currently built against that definition, fix all bugs, and implement everything that is missing.
 
 Work methodically. Complete the audit and produce the gap report before writing any new code. Address bugs in existing functionality before building new features.
 
 ---
 
-## Step 1 — Full Codebase Audit
+## Step 1 - Full Codebase Audit
 
 Read all components, hooks, utilities, and API routes related to the Table Grid screen. For every item in the checklist below, record its current state:
 
@@ -25,7 +25,7 @@ Record your findings in a gap report (format defined at the end of Step 1) befor
 
 ---
 
-### 1.1 — Grid Structure & Layout
+### 1.1 - Grid Structure & Layout
 
 - [ ] Grid renders with tables as rows on the y-axis and time slots as columns on the x-axis
 - [ ] Time slots are in 15-minute increments
@@ -44,7 +44,7 @@ Record your findings in a gap report (format defined at the end of Step 1) befor
 
 ---
 
-### 1.2 — Date & Navigation
+### 1.2 - Date & Navigation
 
 - [ ] A date selector is present at the top of the screen
 - [ ] Previous day / Next day arrow buttons are present and functional
@@ -57,7 +57,7 @@ Record your findings in a gap report (format defined at the end of Step 1) befor
 
 ---
 
-### 1.3 — Booking Blocks — Rendering
+### 1.3 - Booking Blocks - Rendering
 
 - [ ] Each confirmed, pending, seated, and completed booking renders as a block on the correct table row
 - [ ] Booking blocks span the correct number of columns based on booking duration
@@ -67,7 +67,7 @@ Record your findings in a gap report (format defined at the end of Step 1) befor
 - [ ] Booking blocks display booking start time
 - [ ] Booking blocks display deposit status indicator (paid / unpaid / waived icon)
 - [ ] Booking blocks display a special requests indicator if notes exist (small icon)
-- [ ] Booking block colour reflects booking status — consistent with floor plan colour convention
+- [ ] Booking block colour reflects booking status - consistent with floor plan colour convention
 - [ ] Cancelled and no-show bookings are hidden from the grid by default (but accessible via filter)
 - [ ] Very narrow booking blocks (under 30 minutes) show a condensed view with tooltip on hover
 - [ ] Multi-table (combination) bookings show a linked block on each assigned table row with a link indicator icon
@@ -76,7 +76,7 @@ Record your findings in a gap report (format defined at the end of Step 1) befor
 
 ---
 
-### 1.4 — Booking Blocks — Click Interaction
+### 1.4 - Booking Blocks - Click Interaction
 
 - [ ] Clicking a booking block opens the Booking Detail Panel
 - [ ] The Booking Detail Panel opens as a side panel (not a full page navigation)
@@ -87,7 +87,7 @@ Record your findings in a gap report (format defined at the end of Step 1) befor
 
 ---
 
-### 1.5 — Booking Blocks — Drag Interactions
+### 1.5 - Booking Blocks - Drag Interactions
 
 - [ ] Booking blocks are draggable
 - [ ] Dragging a block to a different table row reassigns the booking to that table
@@ -103,20 +103,20 @@ Record your findings in a gap report (format defined at the end of Step 1) befor
 
 ---
 
-### 1.6 — Booking Blocks — Resize Interaction
+### 1.6 - Booking Blocks - Resize Interaction
 
 - [ ] A drag handle is visible on the right edge of each booking block
 - [ ] Dragging the right edge extends or shortens the booking duration
 - [ ] Duration snaps to 15-minute increments during resize
 - [ ] A tooltip shows the new end time during resize
 - [ ] Resizing is blocked if the new duration would overlap a booking on the same table
-- [ ] Minimum duration is enforced (suggest 15 minutes — or the venue's minimum booking duration if configured)
+- [ ] Minimum duration is enforced (suggest 15 minutes - or the venue's minimum booking duration if configured)
 - [ ] Resizing updates the booking end time in the database on release
 - [ ] Resizing updates the floor plan in real time
 
 ---
 
-### 1.7 — Empty Cell Interactions
+### 1.7 - Empty Cell Interactions
 
 - [ ] Clicking an empty cell opens the New Booking modal
 - [ ] The New Booking modal is pre-filled with the table from the clicked row
@@ -130,7 +130,7 @@ Record your findings in a gap report (format defined at the end of Step 1) befor
 
 ---
 
-### 1.8 — Right-Click Context Menu on Booking Blocks
+### 1.8 - Right-Click Context Menu on Booking Blocks
 
 - [ ] Right-clicking a booking block opens a context menu
 - [ ] Context menu option: Edit Booking (opens Booking Detail Panel in edit mode)
@@ -145,7 +145,7 @@ Record your findings in a gap report (format defined at the end of Step 1) befor
 
 ---
 
-### 1.9 — Table Blocks (Holds & Closures)
+### 1.9 - Table Blocks (Holds & Closures)
 
 - [ ] Blocked time ranges render on the grid as visually distinct from bookings (hatched or striped fill recommended)
 - [ ] Blocks display the block reason if one was recorded
@@ -159,7 +159,7 @@ Record your findings in a gap report (format defined at the end of Step 1) befor
 
 ---
 
-### 1.10 — Toolbar & Controls
+### 1.10 - Toolbar & Controls
 
 - [ ] Date navigator: previous day / date picker / next day / Today button
 - [ ] Walk-in button in toolbar (primary operational shortcut)
@@ -169,12 +169,12 @@ Record your findings in a gap report (format defined at the end of Step 1) befor
 - [ ] Show/hide no-show bookings toggle
 - [ ] Status legend: colour key visible or accessible from toolbar (hover tooltip or collapsible panel)
 - [ ] Manual refresh button (fallback for real-time disconnection)
-- [ ] A real-time connection status indicator (subtle — green dot when live, amber when reconnecting)
+- [ ] A real-time connection status indicator (subtle - green dot when live, amber when reconnecting)
 - [ ] Print / Export button (see Section 2.7)
 
 ---
 
-### 1.11 — Real-Time Synchronisation
+### 1.11 - Real-Time Synchronisation
 
 - [ ] New bookings created from the Reservations list appear on the grid without page refresh
 - [ ] New bookings created from the Floor Plan appear on the grid without page refresh
@@ -186,23 +186,23 @@ Record your findings in a gap report (format defined at the end of Step 1) befor
 - [ ] Supabase Realtime subscription is scoped to the current venue and current date
 - [ ] Subscription is cleaned up correctly when navigating away from the grid
 - [ ] When Realtime connection drops, the grid falls back to polling every 30 seconds
-- [ ] A "Live updates paused — reconnecting" indicator is shown when connection drops
+- [ ] A "Live updates paused - reconnecting" indicator is shown when connection drops
 - [ ] The indicator clears when connection is restored
 
 ---
 
-### 1.12 — Performance
+### 1.12 - Performance
 
 - [ ] Grid renders without perceptible lag for venues with up to 30 tables and 100 bookings per day
 - [ ] Table rows are virtualised if more than 20 tables are present (only visible rows rendered)
-- [ ] Status updates from Realtime do not re-render the full grid — only the affected booking block updates
-- [ ] Date navigation does not cause a full component remount — fetches new data and updates in place
-- [ ] Drag interactions maintain 60fps — no jank during drag
+- [ ] Status updates from Realtime do not re-render the full grid - only the affected booking block updates
+- [ ] Date navigation does not cause a full component remount - fetches new data and updates in place
+- [ ] Drag interactions maintain 60fps - no jank during drag
 - [ ] The grid does not make redundant Supabase calls on re-render
 
 ---
 
-### 1.13 — Gap Report Format
+### 1.13 - Gap Report Format
 
 After completing the audit, produce a structured gap report before writing any code:
 
@@ -214,7 +214,7 @@ Category: [Grid Structure | Date Navigation | Booking Blocks | Drag | Resize |
 Current State: [Built but Broken | Partially Built | Not Built]
 Description: [Precise description of what is wrong or missing]
 Affected Component/File: [File path or component name if known]
-Priority: [P1 — Blocks live service use | P2 — Major gap vs competitors | P3 — Polish & edge cases]
+Priority: [P1 - Blocks live service use | P2 - Major gap vs competitors | P3 - Polish & edge cases]
 Estimated Complexity: [Low | Medium | High]
 ```
 
@@ -224,15 +224,15 @@ Sort the gap report: P1 items first, then P2, then P3. Within each priority, sor
 
 ---
 
-## Step 2 — Implementation: Full Feature Specification
+## Step 2 - Implementation: Full Feature Specification
 
 Work through all gaps identified. The sections below define the complete target behaviour for every feature area. Where a feature is already working correctly, skip it. Where it is broken or missing, implement to the specification below.
 
 ---
 
-### 2.1 — Grid Structure Requirements
+### 2.1 - Grid Structure Requirements
 
-The grid must use a **CSS Grid or absolutely-positioned canvas layout** — not a table element. A `<table>` HTML element will not handle the required interactions (drag, resize, virtual scrolling) adequately.
+The grid must use a **CSS Grid or absolutely-positioned canvas layout** - not a table element. A `<table>` HTML element will not handle the required interactions (drag, resize, virtual scrolling) adequately.
 
 **Layout architecture:**
 
@@ -257,7 +257,7 @@ The table label column and time header must remain fixed (sticky) as the user sc
 
 ---
 
-### 2.2 — Booking Status State Machine
+### 2.2 - Booking Status State Machine
 
 Confirm the shared status state machine from the Floor Plan prompt is being used. If the Table Grid has its own local status definitions, consolidate them to use the shared constants. The valid status transitions are:
 
@@ -272,20 +272,20 @@ CANCELLED  → (terminal)
 
 The context menu "Change Status" submenu must only show valid next statuses for the booking's current status. It must never show terminal statuses as options when the booking is already terminal. It must never show backwards transitions.
 
-**Status colours (apply consistently — match floor plan):**
+**Status colours (apply consistently - match floor plan):**
 
 | Status | Recommended colour treatment |
 |---|---|
 | PENDING | Amber / yellow |
 | CONFIRMED | Teal / green |
 | SEATED | Deep blue or dark green |
-| COMPLETED | Light grey (muted — service is done) |
+| COMPLETED | Light grey (muted - service is done) |
 | NO_SHOW | Muted red |
 | CANCELLED | Hidden by default; if shown, strikethrough + grey |
 
 ---
 
-### 2.3 — Booking Detail Panel
+### 2.3 - Booking Detail Panel
 
 This is the primary booking management interface on the Table Grid. It slides in from the right when a booking block is clicked. It must be comprehensive enough that staff can manage every aspect of a booking without leaving the grid.
 
@@ -295,27 +295,27 @@ This is the primary booking management interface on the Table Grid. It slides in
 - Guest full name (large, prominent)
 - Booking reference number (small, copyable)
 - Current status badge (coloured, matches grid colour)
-- Close button (×) — closes panel, grid remains in place
+- Close button (×) - closes panel, grid remains in place
 
 #### Booking Summary (read-only by default, editable on click)
 - Date
 - Start time and end time
 - Duration (auto-calculated, displayed)
 - Party size
-- Assigned table(s) — shows combination if multi-table, with link icon
+- Assigned table(s) - shows combination if multi-table, with link icon
 - Service period (if applicable)
 - Source (how the booking was made: Online / Phone / Walk-in / Staff)
 
 #### Guest Details
 - First name, last name
-- Phone number — clickable to dial on mobile, click-to-copy on desktop
-- Email address — clickable to open email client
+- Phone number - clickable to dial on mobile, click-to-copy on desktop
+- Email address - clickable to open email client
 - Previous visits: derive count from booking history for this phone number/email ("2nd visit", "5th visit" etc.). Show "First visit" if no prior bookings found.
 - Guest tags or notes from previous visits (if stored on a guest profile record)
 
 #### This Booking
-- Special requests / dietary requirements (displayed prominently — staff need this immediately)
-- Internal staff notes (editable inline — click to edit, auto-save on blur)
+- Special requests / dietary requirements (displayed prominently - staff need this immediately)
+- Internal staff notes (editable inline - click to edit, auto-save on blur)
 - Booking channel / source
 - Created at timestamp and created by (staff member name if available)
 
@@ -324,18 +324,18 @@ Display one of the following states with appropriate actions:
 
 **Deposit not required:**
 > No deposit required for this booking.
-> [Request Deposit] button — allows staff to request a deposit post-booking if needed
+> [Request Deposit] button - allows staff to request a deposit post-booking if needed
 
 **Deposit pending / unpaid:**
-> Deposit of £[amount] requested — not yet paid
-> [Send Payment Link] — resends the Stripe payment link via SMS/email
-> [Mark as Waived] — with confirmation ("Are you sure? This cannot be undone.")
-> [Record Cash Deposit] — opens a form to manually record a cash deposit amount
+> Deposit of £[amount] requested - not yet paid
+> [Send Payment Link] - resends the Stripe payment link via SMS/email
+> [Mark as Waived] - with confirmation ("Are you sure? This cannot be undone.")
+> [Record Cash Deposit] - opens a form to manually record a cash deposit amount
 
 **Deposit paid:**
 > Deposit of £[amount] paid ✓
 > Paid at: [timestamp]
-> [Issue Refund] — opens refund confirmation with amount field (defaults to full deposit, allows partial)
+> [Issue Refund] - opens refund confirmation with amount field (defaults to full deposit, allows partial)
 
 **Deposit waived:**
 > Deposit waived by [staff name] on [date]
@@ -344,16 +344,16 @@ Display one of the following states with appropriate actions:
 > Deposit of £[amount] refunded on [date]
 
 #### Status Action Bar
-Primary CTA buttons based on current status — shown prominently at the top of the panel, not buried at the bottom:
+Primary CTA buttons based on current status - shown prominently at the top of the panel, not buried at the bottom:
 
 | Current Status | Primary CTA | Secondary Actions |
 |---|---|---|
 | PENDING | Confirm Booking | Cancel |
 | CONFIRMED | Mark as Seated | No Show · Cancel |
 | SEATED | Mark as Completed | Cancel |
-| COMPLETED | (none — terminal) | — |
-| NO_SHOW | (none — terminal) | — |
-| CANCELLED | (none — terminal) | — |
+| COMPLETED | (none - terminal) | - |
+| NO_SHOW | (none - terminal) | - |
+| CANCELLED | (none - terminal) | - |
 
 All status changes must:
 1. Apply optimistically to the UI immediately
@@ -365,32 +365,32 @@ All status changes must:
 A collapsible section at the bottom of the panel:
 - List of all SMS and email messages sent for this booking
 - Each entry: message type, channel (SMS/Email), sent at, delivery status
-- [Send Custom Message] button — opens a free-text SMS/email composer within the panel
+- [Send Custom Message] button - opens a free-text SMS/email composer within the panel
 - Delivery status should reflect Twilio/SendGrid webhook updates where available
 
 #### Edit Mode
 An [Edit Booking] button in the panel header opens all booking fields for editing:
 - Guest name
-- Party size (re-validates table capacity on change — warns if party exceeds table capacity)
-- Date and time (re-validates table availability on change — warns if new time conflicts)
+- Party size (re-validates table capacity on change - warns if party exceeds table capacity)
+- Date and time (re-validates table availability on change - warns if new time conflicts)
 - Duration
 - Special requests / notes
-- Assigned table(s) — opens the combination suggestion UI (from the combination engine prompt) if party size has changed
+- Assigned table(s) - opens the combination suggestion UI (from the combination engine prompt) if party size has changed
 
-[Save Changes] and [Cancel] buttons — Save writes to database, closes edit mode. Cancel discards changes, closes edit mode.
+[Save Changes] and [Cancel] buttons - Save writes to database, closes edit mode. Cancel discards changes, closes edit mode.
 
 ---
 
-### 2.4 — New Booking Modal
+### 2.4 - New Booking Modal
 
-The New Booking modal opened from the Table Grid must be the same shared component used across the application — not a separate implementation. Verify it is shared. If it is duplicated, consolidate.
+The New Booking modal opened from the Table Grid must be the same shared component used across the application - not a separate implementation. Verify it is shared. If it is duplicated, consolidate.
 
 When opened from an empty grid cell, pre-fill:
 - Table: from the clicked row
 - Date: from the current grid date
 - Time: from the clicked column, rounded to the nearest valid slot start time
 
-The time selector must show only valid slot start times for the selected table — slots already occupied or within a blocked range must not be selectable. The table selector must show availability indicators for the selected date and time.
+The time selector must show only valid slot start times for the selected table - slots already occupied or within a blocked range must not be selectable. The table selector must show availability indicators for the selected date and time.
 
 If the party size entered exceeds any single table's capacity, trigger the automatic combination suggestion UI from the combination engine.
 
@@ -401,15 +401,15 @@ On successful booking creation:
 
 ---
 
-### 2.5 — Walk-in Flow
+### 2.5 - Walk-in Flow
 
 The Walk-in button in the toolbar opens a streamlined modal optimised for speed. During a busy service, staff need to create a walk-in in under 10 seconds.
 
 **Walk-in modal fields:**
-- Party size — large number input, prominent, auto-focused on modal open
-- Guest name — optional (labelled as optional clearly)
-- Phone number — optional (labelled as optional)
-- Table assignment — auto-suggested based on party size and current availability; staff can override
+- Party size - large number input, prominent, auto-focused on modal open
+- Guest name - optional (labelled as optional clearly)
+- Phone number - optional (labelled as optional)
+- Table assignment - auto-suggested based on party size and current availability; staff can override
 
 **Table suggestion for walk-ins:**
 - Highlight the single best available table for the party size on a mini floor plan preview within the modal
@@ -425,7 +425,7 @@ The Walk-in button in the toolbar opens a streamlined modal optimised for speed.
 
 ---
 
-### 2.6 — Toolbar: Full Specification
+### 2.6 - Toolbar: Full Specification
 
 The toolbar sits above the grid at all times and contains:
 
@@ -436,35 +436,35 @@ The toolbar sits above the grid at all times and contains:
 - Today button
 
 **Centre section:**
-- Service period filter — if the venue has multiple service periods (lunch, dinner), allow filtering the grid to show only one period's time range. Default: show all.
-- Area/room filter — if areas are configured, filter the grid to show only tables in one area. Default: show all.
-- Status filter — show/hide bookings by status. Checkboxes or multi-select dropdown. Default: show Pending, Confirmed, Seated. Hide Cancelled and No-show by default.
+- Service period filter - if the venue has multiple service periods (lunch, dinner), allow filtering the grid to show only one period's time range. Default: show all.
+- Area/room filter - if areas are configured, filter the grid to show only tables in one area. Default: show all.
+- Status filter - show/hide bookings by status. Checkboxes or multi-select dropdown. Default: show Pending, Confirmed, Seated. Hide Cancelled and No-show by default.
 
 **Right section:**
-- Walk-in button (primary — always visible)
+- Walk-in button (primary - always visible)
 - New Booking button (secondary)
-- Zoom control — a slider or +/- buttons that adjust the time slot column width between a minimum of 30px and maximum of 80px per 15-minute slot. Default: 40px. Persist zoom preference per user in localStorage.
+- Zoom control - a slider or +/- buttons that adjust the time slot column width between a minimum of 30px and maximum of 80px per 15-minute slot. Default: 40px. Persist zoom preference per user in localStorage.
 - Print / Export button (see Section 2.7)
 - Real-time status indicator (green dot = live / amber dot = reconnecting)
 - Manual refresh button (circular arrow icon)
 
 ---
 
-### 2.7 — Print & Export
+### 2.7 - Print & Export
 
 From the Print/Export button in the toolbar, offer:
 
 **Print Day Sheet:**
-Generates a print-optimised view of the current grid date — a formatted list of all bookings for the day, grouped by service period and table, showing guest name, party size, time, status, and special requests. This is the equivalent of ResDiary's printable day sheet. Use `window.print()` with a print-specific CSS stylesheet that hides the toolbar and renders the booking list clearly.
+Generates a print-optimised view of the current grid date - a formatted list of all bookings for the day, grouped by service period and table, showing guest name, party size, time, status, and special requests. This is the equivalent of ResDiary's printable day sheet. Use `window.print()` with a print-specific CSS stylesheet that hides the toolbar and renders the booking list clearly.
 
 **Export to CSV:**
 Downloads a CSV file of all bookings for the current grid date with columns: Booking Reference, Guest Name, Party Size, Table, Start Time, End Time, Duration, Status, Deposit Status, Special Requests, Phone, Email, Source, Created At.
 
-Do not implement PDF export at this stage — the CSV and print view cover the immediate need.
+Do not implement PDF export at this stage - the CSV and print view cover the immediate need.
 
 ---
 
-### 2.8 — Drag & Drop: Full Implementation
+### 2.8 - Drag & Drop: Full Implementation
 
 Drag and drop is the most technically complex feature on the Table Grid. Implement it carefully and test thoroughly.
 
@@ -476,7 +476,7 @@ Drag and drop is the most technically complex feature on the Table Grid. Impleme
 3. As the cursor moves over different table rows, the target row highlights
 4. Rows that cannot accept the booking (table too small for party, slot occupied, table blocked) render with a red/unavailable highlight and a tooltip: "Table [X] is occupied at this time" or "Table [X] capacity ([N]) is too small for a party of [N]"
 5. Rows that can accept the booking render with a green/available highlight
-6. On drop over a valid row: show a confirmation dialog — "Move [Guest Name]'s booking from [Table A] to [Table B]?" — Confirm / Cancel
+6. On drop over a valid row: show a confirmation dialog - "Move [Guest Name]'s booking from [Table A] to [Table B]?" - Confirm / Cancel
 7. On confirm: update `table_assignments` in database, update grid immediately
 8. On cancel or drop over invalid row: snap back to original position
 
@@ -484,35 +484,35 @@ Drag and drop is the most technically complex feature on the Table Grid. Impleme
 1. User begins dragging a booking block left or right
 2. Ghost element follows cursor along the same table row
 3. Time slots that would cause a conflict (overlapping another booking on the same table) are highlighted as invalid
-4. On drop over a valid time: show confirmation dialog — "Move [Guest Name]'s booking to [New Time]?" — Confirm / Cancel
+4. On drop over a valid time: show confirmation dialog - "Move [Guest Name]'s booking to [New Time]?" - Confirm / Cancel
 5. On confirm: update booking start time and end time in database (preserving duration), update grid
 6. On cancel or invalid drop: snap back
 
 **Drag for combined bookings:**
 1. Dragging any block of a combined (multi-table) booking shows a prompt before drag begins: "Move just this table's assignment, or move the full booking to a new table combination?"
-2. Option A — Move full booking: all table assignments update together
-3. Option B — Move this table only: only the dragged table's assignment changes (the booking becomes partially reassigned — flag this as a potentially unusual state and log it)
-4. Implement Option A fully. Implement Option B as a confirmation that writes the partial reassignment without additional logic — this edge case can be handled manually by staff.
+2. Option A - Move full booking: all table assignments update together
+3. Option B - Move this table only: only the dragged table's assignment changes (the booking becomes partially reassigned - flag this as a potentially unusual state and log it)
+4. Implement Option A fully. Implement Option B as a confirmation that writes the partial reassignment without additional logic - this edge case can be handled manually by staff.
 
 ---
 
-### 2.9 — Resize: Full Implementation
+### 2.9 - Resize: Full Implementation
 
 **Drag handle:**
-A visually distinct handle on the right edge of each booking block — a thin vertical bar or resize cursor indicator. The handle should be 8px wide and span the full height of the block. It must be visually distinct from the block itself so staff know it is interactive.
+A visually distinct handle on the right edge of each booking block - a thin vertical bar or resize cursor indicator. The handle should be 8px wide and span the full height of the block. It must be visually distinct from the block itself so staff know it is interactive.
 
 **Resize behaviour:**
 1. User clicks and drags the right edge handle
 2. The block's right edge follows the cursor, snapping to 15-minute column boundaries
 3. A tooltip above the handle shows the new end time (e.g. "21:30") updating in real time
 4. If the new end time would overlap the next booking on the same table row, the block stops expanding at the start time of that booking
-5. Minimum duration: 15 minutes (or the venue's configured minimum — whichever is greater)
-6. On release: if duration has changed, update the booking end time in the database immediately (no confirmation required for resize — it is low-risk compared to reassignment)
+5. Minimum duration: 15 minutes (or the venue's configured minimum - whichever is greater)
+6. On release: if duration has changed, update the booking end time in the database immediately (no confirmation required for resize - it is low-risk compared to reassignment)
 7. If the database update fails: roll back the visual resize and show an error notification
 
 ---
 
-### 2.10 — Table Blocks: Full Implementation
+### 2.10 - Table Blocks: Full Implementation
 
 **Rendering:**
 Table blocks must render as a visually distinct element that is clearly not a booking. Use a diagonal hatching pattern or a distinct background texture. Use a neutral colour (grey or slate) that does not suggest a booking status. Show the block reason text if it fits; otherwise show on hover tooltip.
@@ -524,10 +524,10 @@ Two entry points:
 
 **Block form fields:**
 - Table (pre-filled, editable)
-- Start time (pre-filled, editable — time picker)
-- End time (required — time picker, must be after start)
-- Reason (optional free text — e.g. "Private event setup", "Staff meal", "Maintenance")
-- Repeat options: None (default) / Every day this week / Custom dates — implement None and "Every day this week" only; custom dates can be a future feature
+- Start time (pre-filled, editable - time picker)
+- End time (required - time picker, must be after start)
+- Reason (optional free text - e.g. "Private event setup", "Staff meal", "Maintenance")
+- Repeat options: None (default) / Every day this week / Custom dates - implement None and "Every day this week" only; custom dates can be a future feature
 
 **Block detail popover (click existing block):**
 - Table name
@@ -542,7 +542,7 @@ Confirm that the availability engine treats blocked slots as unavailable. A bloc
 
 ---
 
-### 2.11 — Real-Time: Full Implementation
+### 2.11 - Real-Time: Full Implementation
 
 Refer to the shared Supabase Realtime hook built in the Full Functionality prompt. Confirm the Table Grid is using this shared hook. If it has its own subscription implementation, consolidate.
 
@@ -570,7 +570,7 @@ If the Supabase Realtime connection drops:
 
 ---
 
-### 2.12 — Communication Triggers from Table Grid
+### 2.12 - Communication Triggers from Table Grid
 
 Every status change made from the Table Grid must trigger the correct communication via the existing Twilio/SendGrid communication engine. Confirm each trigger is firing correctly:
 
@@ -586,7 +586,7 @@ Every status change made from the Table Grid must trigger the correct communicat
 
 ---
 
-### 2.13 — Performance Requirements
+### 2.13 - Performance Requirements
 
 The grid must meet the following performance targets. Test against these after implementation:
 
@@ -601,7 +601,7 @@ Implement it now if the venue has more than 20 tables. Use a virtualisation appr
 
 ---
 
-## Step 3 — Bug Fixes
+## Step 3 - Bug Fixes
 
 After producing the gap report and before building new features, fix all bugs identified as "Built but Broken" or "Partially Built." Common issues to check specifically:
 
@@ -612,7 +612,7 @@ After producing the gap report and before building new features, fix all bugs id
 
 **Data bugs:**
 - Bookings appearing on wrong table row (table_id mismatch)
-- Booking duration calculated incorrectly (timezone issues — confirm all times are stored and displayed in the venue's local timezone)
+- Booking duration calculated incorrectly (timezone issues - confirm all times are stored and displayed in the venue's local timezone)
 - Bookings from previous days appearing on today's grid (date filter not applied correctly)
 - Completed or cancelled bookings appearing when they should be hidden
 
@@ -629,7 +629,7 @@ After producing the gap report and before building new features, fix all bugs id
 
 ---
 
-## Step 4 — Final Validation Checklist
+## Step 4 - Final Validation Checklist
 
 Work through every item. Do not mark as complete until manually tested.
 
@@ -731,25 +731,25 @@ Work through every item. Do not mark as complete until manually tested.
 
 Work in this order:
 
-1. Produce gap report — do not skip
+1. Produce gap report - do not skip
 2. Fix all P1 bugs identified in gap report
 3. Grid structure fixes (sticky columns, alignment, timezone)
 4. Booking block rendering (all statuses, icons, combined blocks)
-5. Booking Detail Panel — complete implementation
+5. Booking Detail Panel - complete implementation
 6. Status change actions + communication triggers
 7. Empty cell click → New Booking modal integration
 8. Right-click context menus (empty cells and booking blocks)
 9. Walk-in flow
-10. Table blocks — rendering, creation, editing, removal
+10. Table blocks - rendering, creation, editing, removal
 11. Drag to reassign table (vertical)
 12. Drag to reschedule time (horizontal)
 13. Combined booking drag behaviour
 14. Resize implementation
-15. Toolbar — service period filter, area filter, status filter, zoom control
+15. Toolbar - service period filter, area filter, status filter, zoom control
 16. Print day sheet + CSV export
-17. Real-time — audit shared hook, fix subscription cleanup, implement reconnection logic
+17. Real-time - audit shared hook, fix subscription cleanup, implement reconnection logic
 18. Optimistic updates + rollback on all actions
-19. Performance — virtualisation, memoisation, redundant call elimination
+19. Performance - virtualisation, memoisation, redundant call elimination
 20. Fix all P2 and P3 gaps from gap report
 21. Full validation checklist
 
@@ -757,7 +757,7 @@ Work in this order:
 
 ## Scope Notes
 
-**Do not** rebuild the availability engine, Stripe integration, Twilio/SendGrid sending infrastructure, or the combination detection algorithm. These exist — integrate with them correctly.
+**Do not** rebuild the availability engine, Stripe integration, Twilio/SendGrid sending infrastructure, or the combination detection algorithm. These exist - integrate with them correctly.
 
 **Do not** build a mobile layout for the Table Grid. Below 900px, show a clear message directing staff to use the Floor Plan or Reservations list.
 

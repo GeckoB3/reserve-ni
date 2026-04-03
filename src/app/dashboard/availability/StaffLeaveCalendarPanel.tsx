@@ -558,7 +558,7 @@ export function StaffLeaveCalendarPanel({
                       <span>
                         <span className="font-medium text-slate-900">Whole team (all active)</span>
                         <span className="mt-0.5 block text-xs text-slate-500">
-                          Creates the same leave for every active team member — ideal for bank holidays or training.
+                          Creates the same leave for every active team member - ideal for bank holidays or training.
                         </span>
                       </span>
                     </label>
@@ -637,7 +637,7 @@ export function StaffLeaveCalendarPanel({
                   value={formNotes}
                   onChange={(e) => setFormNotes(e.target.value)}
                   rows={3}
-                  placeholder="e.g. Half-day not needed — full day blocked for simplicity"
+                  placeholder="e.g. Half-day not needed - full day blocked for simplicity"
                   className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
                 />
               </div>

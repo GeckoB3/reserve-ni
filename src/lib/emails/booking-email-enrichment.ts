@@ -188,7 +188,7 @@ export async function enrichBookingEmailForAppointment(
 }
 
 /**
- * Models C/D/E: event, class, resource — labels for confirmation/reminder templates from FK ids.
+ * Models C/D/E: event, class, resource - labels for confirmation/reminder templates from FK ids.
  * Run after `enrichBookingEmailForAppointment` so USE/Model B wins when both anchors exist.
  */
 export async function enrichBookingEmailForSecondaryModels(

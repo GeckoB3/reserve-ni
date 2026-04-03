@@ -2,7 +2,7 @@ import Link from 'next/link';
 import Image from 'next/image';
 
 export const metadata = {
-  title: 'Terms of Service — Reserve NI',
+  title: 'Terms of Service - Reserve NI',
   description: 'Terms and conditions for using the Reserve NI booking platform.',
 };
 
@@ -35,7 +35,7 @@ export default function TermsPage() {
               </p>
               <p className="mt-3">
                 Reserve NI is a technology platform that connects guests with participating venues. We are not
-                a party to the contract between you and the venue — that contract is between you and the
+                a party to the contract between you and the venue - that contract is between you and the
                 restaurant or hospitality business you are booking with.
               </p>
             </section>
@@ -63,7 +63,7 @@ export default function TermsPage() {
               <h2 className="text-lg font-semibold text-slate-900 mb-3">3. Deposits and payments</h2>
               <p>
                 Where a deposit is required, payment is processed securely through Stripe. Deposits are paid
-                directly to the venue&apos;s Stripe account — Reserve NI does not hold or handle your funds.
+                directly to the venue&apos;s Stripe account - Reserve NI does not hold or handle your funds.
               </p>
               <p className="mt-3">
                 The refund policy is set by each venue and will be shown to you at the time of booking.

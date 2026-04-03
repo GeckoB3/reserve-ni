@@ -1,7 +1,7 @@
-# ReserveNI — Floor Plan & Table Grid: Full Functionality Implementation
+# ReserveNI - Floor Plan & Table Grid: Full Functionality Implementation
 
 **Prompt Type:** Codebase Audit + Full Feature Implementation  
-**Scope:** Floor Plan screen and Table Grid screen — complete booking and table management functionality to competitive standard  
+**Scope:** Floor Plan screen and Table Grid screen - complete booking and table management functionality to competitive standard  
 **Prerequisite:** System Harmony Audit and Table Management Consolidation prompts must be complete before running this one.  
 **Reference Standard:** ResDiary, OpenTable, SevenRooms
 
@@ -15,11 +15,11 @@ This is the most complex prompt in the ReserveNI build sequence. Work methodical
 
 ---
 
-## Step 1 — Codebase Audit: Map Current Functionality
+## Step 1 - Codebase Audit: Map Current Functionality
 
 Before writing any new code, read and document the current state of both screens. For each item below, note: **Built & Working / Built but Broken / Partially Built / Not Built**.
 
-### 1.1 — Floor Plan Screen Audit
+### 1.1 - Floor Plan Screen Audit
 
 **Canvas & Layout**
 - [ ] Tables render in correct positions from saved floor plan data
@@ -53,7 +53,7 @@ Before writing any new code, read and document the current state of both screens
 
 ---
 
-### 1.2 — Table Grid Screen Audit
+### 1.2 - Table Grid Screen Audit
 
 **Grid Structure**
 - [ ] Timeline renders correctly (x-axis = time slots, y-axis = tables)
@@ -88,7 +88,7 @@ Before writing any new code, read and document the current state of both screens
 
 ---
 
-### 1.3 — Shared Systems Audit
+### 1.3 - Shared Systems Audit
 
 - [ ] Booking status state machine is consistently defined and used across both screens (and the Reservations list)
 - [ ] Supabase Realtime subscriptions are correctly set up, scoped, and cleaned up on unmount
@@ -98,7 +98,7 @@ Before writing any new code, read and document the current state of both screens
 
 ---
 
-### 1.4 — Produce a Gap Report
+### 1.4 - Produce a Gap Report
 
 After completing the audit, produce a structured gap report:
 
@@ -108,20 +108,20 @@ Screen: [Floor Plan | Table Grid | Both]
 Category: [Booking Management | Table Management | Real-time | Edit Mode | UI/UX]
 Current State: [Not Built | Partially Built | Built but Broken]
 Description: [What is missing or broken]
-Priority: [P1 — Blocks live service | P2 — Major gap vs competitors | P3 — Polish]
+Priority: [P1 - Blocks live service | P2 - Major gap vs competitors | P3 - Polish]
 ```
 
 Present this gap report before proceeding. Address all P1 gaps first, then P2, then P3.
 
 ---
 
-## Step 2 — Floor Plan: Full Implementation
+## Step 2 - Floor Plan: Full Implementation
 
 Implement all missing or broken functionality identified in the audit. The sections below define the complete target behaviour for each feature area.
 
 ---
 
-### 2.1 — Booking Status State Machine
+### 2.1 - Booking Status State Machine
 
 Before building any status-change interactions, confirm a single shared status state machine exists and is used consistently. If it does not exist as a shared definition, create it now as a constants/types file that both screens import.
 
@@ -131,49 +131,49 @@ Before building any status-change interactions, confirm a single shared status s
 PENDING      → CONFIRMED, CANCELLED
 CONFIRMED    → SEATED, NO_SHOW, CANCELLED
 SEATED       → COMPLETED, CANCELLED
-COMPLETED    → (terminal — no further transitions)
-NO_SHOW      → (terminal — no further transitions)
-CANCELLED    → (terminal — no further transitions)
+COMPLETED    → (terminal - no further transitions)
+NO_SHOW      → (terminal - no further transitions)
+CANCELLED    → (terminal - no further transitions)
 ```
 
-**Additional table-level states (not booking statuses — these are operational overlays):**
+**Additional table-level states (not booking statuses - these are operational overlays):**
 
 ```
-AVAILABLE    — no booking currently active
-BOOKED       — confirmed booking exists for this time window, not yet seated
-SEATED       — booking is currently marked as seated
-HELD/BLOCKED — manually blocked by staff, no booking
-PENDING      — unconfirmed booking exists for this time window
+AVAILABLE    - no booking currently active
+BOOKED       - confirmed booking exists for this time window, not yet seated
+SEATED       - booking is currently marked as seated
+HELD/BLOCKED - manually blocked by staff, no booking
+PENDING      - unconfirmed booking exists for this time window
 ```
 
 Implement a utility function `getTableStatus(tableId, datetime, bookings, blocks)` that derives the correct table-level state for any given moment. Both screens must use this same function for status overlays.
 
 ---
 
-### 2.2 — Floor Plan Operational View
+### 2.2 - Floor Plan Operational View
 
 #### Table Status Overlays
 
 Each table on the canvas must render with a clear visual status indicator. Use the following colour convention (adjust to match ReserveNI's existing colour palette if one is established, but maintain clear visual distinction):
 
-- **Available:** neutral/light — no fill or very light grey
+- **Available:** neutral/light - no fill or very light grey
 - **Booked/Confirmed:** green or teal
-- **Seated:** deep green or blue — visually distinct from Booked
+- **Seated:** deep green or blue - visually distinct from Booked
 - **Pending:** amber/yellow
 - **Held/Blocked:** grey with a distinct pattern or icon
 - **No Show:** red or muted red
 
 Each table should display:
 - Table name/number
-- If booked/seated: guest surname and party size (e.g. "Smith — 4")
+- If booked/seated: guest surname and party size (e.g. "Smith - 4")
 - If booked: booking time (e.g. "19:30")
 - A small status badge or colour band
 
 #### Date/Time Scrubber
 
-A date picker and time scrubber at the top of the screen. Changing the date or time reruns `getTableStatus()` for all tables and updates the canvas overlays. This must not trigger a new Supabase query on every scrub movement — debounce time changes by 300ms and derive status from already-fetched booking data where possible. Only re-fetch when the date changes.
+A date picker and time scrubber at the top of the screen. Changing the date or time reruns `getTableStatus()` for all tables and updates the canvas overlays. This must not trigger a new Supabase query on every scrub movement - debounce time changes by 300ms and derive status from already-fetched booking data where possible. Only re-fetch when the date changes.
 
-#### Table Click — Action Popover
+#### Table Click - Action Popover
 
 Clicking any table in Operational View opens a popover or slide-in panel. The content of this panel depends on the table's current status:
 
@@ -187,7 +187,7 @@ Clicking any table in Operational View opens a popover or slide-in panel. The co
 - Guest name, party size, booking time, booking reference
 - Deposit status badge (Paid / Unpaid / Partial / Waived)
 - Special notes/dietary requirements
-- "Mark as Seated" button (primary CTA) — transitions booking to SEATED, updates overlay immediately
+- "Mark as Seated" button (primary CTA) - transitions booking to SEATED, updates overlay immediately
 - "Edit Booking" button → opens full booking edit modal
 - "Move to Different Table" button → enters table-reassignment mode (see 2.4)
 - "Mark as No Show" button (secondary, with confirmation)
@@ -197,9 +197,9 @@ Clicking any table in Operational View opens a popover or slide-in panel. The co
 **If SEATED:**
 - Guest name, party size, time seated (derived from status change timestamp)
 - Duration seated (live timer: "Seated 1h 23m ago")
-- "Mark as Completed / Table Clear" button (primary CTA) — transitions to COMPLETED, returns table to AVAILABLE
+- "Mark as Completed / Table Clear" button (primary CTA) - transitions to COMPLETED, returns table to AVAILABLE
 - "Edit Booking" button
-- "Extend Stay" option (extends the booking's end time — useful for yield management)
+- "Extend Stay" option (extends the booking's end time - useful for yield management)
 
 **If HELD/BLOCKED:**
 - Block reason (if recorded)
@@ -209,9 +209,9 @@ Clicking any table in Operational View opens a popover or slide-in panel. The co
 
 ---
 
-### 2.3 — New Booking Modal (from Floor Plan)
+### 2.3 - New Booking Modal (from Floor Plan)
 
-When "New Booking" is triggered from the floor plan, open a modal with the following fields. This modal should reuse the same booking creation component used elsewhere in the application (New Booking page) — do not build a separate one. If the existing component cannot be opened as a modal, refactor it to support both page and modal rendering.
+When "New Booking" is triggered from the floor plan, open a modal with the following fields. This modal should reuse the same booking creation component used elsewhere in the application (New Booking page) - do not build a separate one. If the existing component cannot be opened as a modal, refactor it to support both page and modal rendering.
 
 **Pre-filled from context:**
 - Table assignment (the table that was clicked)
@@ -219,7 +219,7 @@ When "New Booking" is triggered from the floor plan, open a modal with the follo
 
 **Required fields:**
 - Guest first name, last name
-- Party size (constrained to table capacity — show a warning if party size exceeds table capacity, allow override with confirmation)
+- Party size (constrained to table capacity - show a warning if party size exceeds table capacity, allow override with confirmation)
 - Date and time (time constrained to available slots for the selected table on that date)
 - Duration (auto-calculated from service period settings, editable)
 - Phone number (required for SMS confirmation)
@@ -239,23 +239,23 @@ When "New Booking" is triggered from the floor plan, open a modal with the follo
 
 ---
 
-### 2.4 — Table Reassignment (Move Booking)
+### 2.4 - Table Reassignment (Move Booking)
 
 When "Move to Different Table" is selected from the action popover:
 
 1. The popover closes
-2. The canvas enters **reassignment mode** — a banner appears: *"Select the table you want to move [Guest Name]'s booking to"*
+2. The canvas enters **reassignment mode** - a banner appears: *"Select the table you want to move [Guest Name]'s booking to"*
 3. Tables that can accommodate the booking (correct capacity, available at that time) highlight in green. Tables that cannot are dimmed.
 4. The user clicks a destination table
 5. A confirmation prompt: *"Move [Guest Name]'s booking from Table [X] to Table [Y]?"*
 6. On confirm: update the table assignment in the database, update both tables' overlays immediately, exit reassignment mode
 7. An "Cancel Move" button in the banner exits reassignment mode without changes
 
-Table availability during reassignment must account for the current booking's time window — a table is only shown as available if it has no conflicting bookings for the same time range.
+Table availability during reassignment must account for the current booking's time window - a table is only shown as available if it has no conflicting bookings for the same time range.
 
 ---
 
-### 2.5 — Block Table
+### 2.5 - Block Table
 
 The Block Table form (accessible from the AVAILABLE popover, and from a right-click/long-press context menu on any table):
 
@@ -263,18 +263,18 @@ The Block Table form (accessible from the AVAILABLE popover, and from a right-cl
 - Table (pre-filled, not editable from table click)
 - Start time
 - End time
-- Reason (optional free text — e.g. "Staff lunch", "Private event setup", "Maintenance")
-- Repeat (None / Daily / This week only) — optional, implement as a stub if complex
+- Reason (optional free text - e.g. "Staff lunch", "Private event setup", "Maintenance")
+- Repeat (None / Daily / This week only) - optional, implement as a stub if complex
 
 **Behaviour:**
-- Blocked ranges are stored in a `table_blocks` table (or equivalent — confirm schema)
+- Blocked ranges are stored in a `table_blocks` table (or equivalent - confirm schema)
 - Blocked tables show as HELD on the floor plan and as a distinct block on the Table Grid
 - Blocks prevent the availability engine from offering these tables for booking during the blocked period
 - Blocks can be removed from the floor plan popover or from the Table Grid
 
 ---
 
-### 2.6 — Walk-in Flow from Floor Plan
+### 2.6 - Walk-in Flow from Floor Plan
 
 A **"Walk-in"** button must be accessible from the floor plan toolbar (top of screen, not buried in a table popover). This is a primary operational action during service.
 
@@ -287,14 +287,14 @@ Walk-in flow:
    - Special notes (optional)
 3. The system recommends the best available table based on party size and current occupancy (highlight it on the canvas)
 4. Staff can accept the recommendation or click a different table
-5. On confirm: booking is created with status SEATED immediately (walk-ins are seated on arrival — no PENDING/CONFIRMED stage)
+5. On confirm: booking is created with status SEATED immediately (walk-ins are seated on arrival - no PENDING/CONFIRMED stage)
 6. Table overlay updates immediately
 
 ---
 
-## Step 3 — Table Grid: Full Implementation
+## Step 3 - Table Grid: Full Implementation
 
-### 3.1 — Grid Structure & Rendering
+### 3.1 - Grid Structure & Rendering
 
 The grid is the primary scheduling surface for table management, equivalent to ResDiary's diary grid view. It must render with the following structure:
 
@@ -311,11 +311,11 @@ The grid is the primary scheduling surface for table management, equivalent to R
 - Deposit status indicator (small icon: paid/unpaid)
 - If the block is too narrow to show text, show only a coloured bar with a tooltip on hover
 
-**Performance:** The grid may contain many tables and many bookings. Virtualise the row rendering if there are more than 20 tables to avoid performance issues. Do not re-render the entire grid when a single booking status changes — update only the affected booking block reactively.
+**Performance:** The grid may contain many tables and many bookings. Virtualise the row rendering if there are more than 20 tables to avoid performance issues. Do not re-render the entire grid when a single booking status changes - update only the affected booking block reactively.
 
 ---
 
-### 3.2 — Booking Block Interactions
+### 3.2 - Booking Block Interactions
 
 **Click:** Opens the Booking Detail Panel (see 3.3) as a side panel or modal.
 
@@ -351,7 +351,7 @@ The grid is the primary scheduling surface for table management, equivalent to R
 
 ---
 
-### 3.3 — Booking Detail Panel
+### 3.3 - Booking Detail Panel
 
 When a booking block is clicked, a panel slides in from the right (or opens as a modal on smaller viewports). This is the primary booking management surface on the grid. It must contain:
 
@@ -371,7 +371,7 @@ When a booking block is clicked, a panel slides in from the right (or opens as a
 **Guest Details:**
 - Phone number (click to call on mobile, click to copy on desktop)
 - Email address
-- Previous visits count (if derivable from booking history — "3rd visit")
+- Previous visits count (if derivable from booking history - "3rd visit")
 - Guest notes/preferences from previous visits (if stored)
 
 **This Booking:**
@@ -400,20 +400,20 @@ When a booking block is clicked, a panel slides in from the right (or opens as a
 
 ---
 
-### 3.4 — New Booking from Grid
+### 3.4 - New Booking from Grid
 
 Clicking an empty cell on the grid opens the New Booking modal (same component as 2.3) with:
 - Table pre-filled from the row clicked
 - Date pre-filled from the current grid date
 - Time pre-filled from the column clicked (rounded to nearest available slot start)
 
-The time field should show only valid slot start times for the selected table — slots that are already occupied or fall within a blocked range should not be selectable.
+The time field should show only valid slot start times for the selected table - slots that are already occupied or fall within a blocked range should not be selectable.
 
 ---
 
-### 3.5 — Table Blocks on the Grid
+### 3.5 - Table Blocks on the Grid
 
-Blocked time ranges must render as a visually distinct element on the grid — use a hatched or striped fill to clearly distinguish them from bookings. Blocks should show the block reason if one was recorded.
+Blocked time ranges must render as a visually distinct element on the grid - use a hatched or striped fill to clearly distinguish them from bookings. Blocks should show the block reason if one was recorded.
 
 Clicking a block opens a small popover:
 - Block time range
@@ -423,24 +423,24 @@ Clicking a block opens a small popover:
 
 ---
 
-### 3.6 — Grid Toolbar
+### 3.6 - Grid Toolbar
 
 The grid toolbar (top of the screen, above the grid) must contain:
 
 - **Date navigator:** Previous day arrow / Date picker / Next day arrow / "Today" button
-- **View filter:** "All Tables" dropdown — can filter to a specific area/room if areas are configured
-- **Walk-in button** (same as floor plan — consistent placement across both screens)
+- **View filter:** "All Tables" dropdown - can filter to a specific area/room if areas are configured
+- **Walk-in button** (same as floor plan - consistent placement across both screens)
 - **New Booking button** (opens new booking modal without a pre-selected table)
 - **Legend** (collapsible or hover tooltip): shows colour key for all booking statuses and block types
 - **Refresh button** (manual refresh fallback in case real-time subscription drops)
 
 ---
 
-## Step 4 — Real-time Synchronisation
+## Step 4 - Real-time Synchronisation
 
 Both screens must stay in sync with each other and with the Reservations list in real time. A status change made on the floor plan must immediately reflect on the Table Grid, and vice versa.
 
-### 4.1 — Supabase Realtime Setup
+### 4.1 - Supabase Realtime Setup
 
 Implement a single shared Supabase Realtime subscription hook that both screens use. This hook should:
 
@@ -449,11 +449,11 @@ Implement a single shared Supabase Realtime subscription hook that both screens 
 - Subscribe to changes on the `table_blocks` table for the current venue
 - On any change event (INSERT, UPDATE, DELETE): update the relevant local state without triggering a full re-fetch
 - Clean up subscriptions correctly on component unmount
-- Handle subscription failure gracefully — fall back to a polling mechanism (every 30 seconds) if the Realtime connection drops, and display a subtle "Live updates paused — reconnecting..." indicator
+- Handle subscription failure gracefully - fall back to a polling mechanism (every 30 seconds) if the Realtime connection drops, and display a subtle "Live updates paused - reconnecting..." indicator
 
-### 4.2 — Optimistic Updates
+### 4.2 - Optimistic Updates
 
-For status changes initiated by the current user (e.g. clicking "Mark as Seated"), apply an **optimistic update** to local state immediately — do not wait for the database write to complete before updating the UI. If the database write fails, roll back the optimistic update and show an error notification.
+For status changes initiated by the current user (e.g. clicking "Mark as Seated"), apply an **optimistic update** to local state immediately - do not wait for the database write to complete before updating the UI. If the database write fails, roll back the optimistic update and show an error notification.
 
 This applies to:
 - Status changes (all transitions)
@@ -464,7 +464,7 @@ It does not apply to booking creation (where the new record's ID is unknown unti
 
 ---
 
-## Step 5 — Communication Triggers
+## Step 5 - Communication Triggers
 
 Status changes made from either screen must correctly trigger the appropriate SMS/email communications via the existing Twilio/SendGrid communication engine. Verify and implement the following triggers:
 
@@ -472,17 +472,17 @@ Status changes made from either screen must correctly trigger the appropriate SM
 |---|---|
 | PENDING → CONFIRMED | Booking confirmation SMS + email |
 | Any status → CANCELLED | Cancellation notification SMS + email (if guest contact exists) |
-| CONFIRMED → NO_SHOW | No internal trigger — but log the no-show against the guest record |
+| CONFIRMED → NO_SHOW | No internal trigger - but log the no-show against the guest record |
 | Deposit payment link sent | Payment link SMS |
 | Deposit received (Stripe webhook) | Payment confirmation SMS |
 
 **Important:** Do not fire duplicate communications. If a confirmation has already been sent for a booking, triggering "Confirm" again from the grid should not send a second confirmation. Check for existing communication log entries before firing.
 
-If the communication engine is handled via an API route or server action, ensure the calls from the Floor Plan and Table Grid go through the same route — do not duplicate the sending logic.
+If the communication engine is handled via an API route or server action, ensure the calls from the Floor Plan and Table Grid go through the same route - do not duplicate the sending logic.
 
 ---
 
-## Step 6 — Validation & Final Checklist
+## Step 6 - Validation & Final Checklist
 
 ### Floor Plan
 
@@ -525,9 +525,9 @@ If the communication engine is handled via an API route or server action, ensure
 
 - [ ] Status changes on either screen are immediately reflected on the other
 - [ ] Status changes on either screen are immediately reflected in the Reservations list
-- [ ] Communication log is consistent — no duplicate messages sent
+- [ ] Communication log is consistent - no duplicate messages sent
 - [ ] Walk-in flow produces identical results whether initiated from Floor Plan or Table Grid
-- [ ] All error states (network failure, Supabase error, Stripe error) are handled gracefully with user-facing error messages — no silent failures
+- [ ] All error states (network failure, Supabase error, Stripe error) are handled gracefully with user-facing error messages - no silent failures
 
 ---
 
@@ -535,9 +535,9 @@ If the communication engine is handled via an API route or server action, ensure
 
 Work in this order. Do not skip ahead.
 
-1. Booking status state machine — shared constants/types file
-2. `getTableStatus()` utility function — tested independently
-3. Supabase Realtime shared hook — verified with console logging before UI integration
+1. Booking status state machine - shared constants/types file
+2. `getTableStatus()` utility function - tested independently
+3. Supabase Realtime shared hook - verified with console logging before UI integration
 4. Floor Plan: table status overlays + date/time scrubber
 5. Floor Plan: table click action popover (all four status variants)
 6. Floor Plan: New Booking modal integration (reuse existing component)
@@ -552,18 +552,18 @@ Work in this order. Do not skip ahead.
 15. Table Grid: right-click context menus
 16. Table Grid: block rendering and management
 17. Table Grid: toolbar (date navigator, walk-in, new booking, filter)
-18. Communication triggers — verify all status transitions fire correctly
-19. Optimistic updates — implement across all status change interactions
+18. Communication triggers - verify all status transitions fire correctly
+19. Optimistic updates - implement across all status change interactions
 20. Full end-to-end validation against the checklist above
 
 ---
 
 ## Notes on Scope
 
-**Do not** rebuild the deposit collection flow, Stripe Connect integration, or SMS/email sending infrastructure. These are existing systems — the task is to ensure the Floor Plan and Table Grid correctly call into them.
+**Do not** rebuild the deposit collection flow, Stripe Connect integration, or SMS/email sending infrastructure. These are existing systems - the task is to ensure the Floor Plan and Table Grid correctly call into them.
 
 **Do not** rebuild the availability engine. The task is to ensure these screens correctly query and respect availability when creating or moving bookings.
 
 **Do** flag immediately if any existing system (communications, deposits, availability) has a broken interface that prevents these screens from integrating with it. Resolve the interface issue before proceeding with the UI.
 
-**Mobile:** The Table Grid requires a minimum of 900px viewport width to be usable — below this, show a message directing staff to use the Floor Plan view or the Reservations list. The Floor Plan operational view should be functional on tablet (768px+). Edit mode remains desktop-only.
+**Mobile:** The Table Grid requires a minimum of 900px viewport width to be usable - below this, show a message directing staff to use the Floor Plan view or the Reservations list. The Floor Plan operational view should be functional on tablet (768px+). Edit mode remains desktop-only.

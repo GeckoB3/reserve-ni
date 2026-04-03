@@ -7,10 +7,10 @@ globs:
 # API Route Rules
 
 ## Namespacing
-- `/api/venue/` — Authenticated venue staff endpoints. Require valid session. Check role (Admin vs Staff) where relevant.
-- `/api/booking/` — Public guest-facing endpoints. No authentication. Used by booking page and iFrame widget.
-- `/api/webhooks/stripe/` — Stripe webhook receivers. Verify Stripe signature. No user authentication.
-- `/api/consumer/` — Reserved for Phase 2. Do not implement any routes here.
+- `/api/venue/` - Authenticated venue staff endpoints. Require valid session. Check role (Admin vs Staff) where relevant.
+- `/api/booking/` - Public guest-facing endpoints. No authentication. Used by booking page and iFrame widget.
+- `/api/webhooks/stripe/` - Stripe webhook receivers. Verify Stripe signature. No user authentication.
+- `/api/consumer/` - Reserved for Phase 2. Do not implement any routes here.
 
 ## Request/Response Pattern
 ```typescript

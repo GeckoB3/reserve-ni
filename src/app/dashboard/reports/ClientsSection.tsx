@@ -253,11 +253,11 @@ export function ClientsSection({
     const rows = detail.booking_history.map((b) => [
       b.booking_date,
       b.booking_time,
-      b.service_name ?? '—',
-      String(b.party_size ?? '—'),
+      b.service_name ?? '-',
+      String(b.party_size ?? '-'),
       b.status,
-      b.deposit_status ?? '—',
-      b.practitioner_name ?? '—',
+      b.deposit_status ?? '-',
+      b.practitioner_name ?? '-',
     ]);
     downloadCsvString(buildCsvFromRows(headers, rows), `guest-${detail.guest.id}-bookings.csv`);
   }, [detail]);
@@ -464,8 +464,8 @@ export function ClientsSection({
                             {displayName(g)}
                           </button>
                         </td>
-                        <td className="max-w-[160px] truncate px-3 py-2.5 text-slate-600">{g.email ?? '—'}</td>
-                        <td className="whitespace-nowrap px-3 py-2.5 text-slate-600">{g.phone ?? '—'}</td>
+                        <td className="max-w-[160px] truncate px-3 py-2.5 text-slate-600">{g.email ?? '-'}</td>
+                        <td className="whitespace-nowrap px-3 py-2.5 text-slate-600">{g.phone ?? '-'}</td>
                         <td className="px-3 py-2.5 text-right tabular-nums text-slate-800">{g.total_bookings}</td>
                         <td className="px-3 py-2.5 text-right text-slate-700">
                           <span className="tabular-nums">{g.visit_count}</span>
@@ -473,7 +473,7 @@ export function ClientsSection({
                             <span className="ml-1 text-xs font-medium text-red-600">{g.no_show_count} NS</span>
                           )}
                         </td>
-                        <td className="whitespace-nowrap px-3 py-2.5 text-slate-600">{g.last_visit_date ?? '—'}</td>
+                        <td className="whitespace-nowrap px-3 py-2.5 text-slate-600">{g.last_visit_date ?? '-'}</td>
                         <td className="whitespace-nowrap px-3 py-2.5 text-right">
                           <div className="flex flex-wrap justify-end gap-2">
                             <Link
@@ -561,8 +561,8 @@ export function ClientsSection({
                                       label="Deposits paid"
                                       value={`£${(detail.stats.total_deposit_pence_paid / 100).toFixed(2)}`}
                                     />
-                                    <StatMini label="First visit" value={detail.stats.first_visit_date ?? '—'} />
-                                    <StatMini label="Last visit" value={detail.stats.last_visit_date ?? '—'} />
+                                    <StatMini label="First visit" value={detail.stats.first_visit_date ?? '-'} />
+                                    <StatMini label="Last visit" value={detail.stats.last_visit_date ?? '-'} />
                                   </div>
                                   <div className="flex flex-wrap gap-2">
                                     <button

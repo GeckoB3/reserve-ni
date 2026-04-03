@@ -1,4 +1,4 @@
--- Reserve NI: Staff table — allow staff to see all staff for their venue(s); allow admins to insert.
+-- Reserve NI: Staff table - allow staff to see all staff for their venue(s); allow admins to insert.
 
 -- Drop the restrictive select so we can allow venue-scoped select
 DROP POLICY IF EXISTS "staff_select_own" ON staff;

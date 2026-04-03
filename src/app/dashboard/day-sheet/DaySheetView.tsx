@@ -160,12 +160,12 @@ function formatDateFull(date: string): string {
   const d = new Date(date + 'T12:00:00');
   return `${WEEKDAYS[d.getDay()]} ${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
 }
-/** Long heading — matches table grid / live floor date strip. */
+/** Long heading - matches table grid / live floor date strip. */
 function formatDateHeading(date: string): string {
   const d = new Date(`${date}T12:00:00`);
   return d.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 }
-/** Relative day label — matches dashboard/bookings concertina. */
+/** Relative day label - matches dashboard/bookings concertina. */
 function formatDateNice(dateStr: string): string {
   const d = new Date(`${dateStr}T12:00:00`);
   if (Number.isNaN(d.getTime())) return dateStr;
@@ -251,7 +251,7 @@ function DaySheetStatsRow({
         />
         <DashboardStatCard
           label="Available now"
-          value={avail != null ? avail : '—'}
+          value={avail != null ? avail : '-'}
           color="violet"
         />
         <DashboardStatCard label="Bookings" value={summary.total_bookings} color="emerald" />
@@ -271,7 +271,7 @@ function DaySheetStatsRow({
       <DashboardStatCard label="Total covers" value={summary.total_covers} color="blue" />
       <DashboardStatCard
         label="Remaining"
-        value={rem != null ? rem : '—'}
+        value={rem != null ? rem : '-'}
         color="violet"
       />
       <DashboardStatCard label="Bookings" value={summary.total_bookings} color="emerald" />
@@ -603,7 +603,7 @@ function DaySheetWalkInModal({
 
   const capacityWarning = useMemo(() => {
     if (remainingCapacity == null) return null;
-    if (remainingCapacity <= 0) return 'No capacity remaining — are you sure?';
+    if (remainingCapacity <= 0) return 'No capacity remaining - are you sure?';
     if (partySize > remainingCapacity) return 'This may exceed your remaining capacity';
     return null;
   }, [remainingCapacity, partySize]);
@@ -789,7 +789,7 @@ function DepositActions({ booking, onAction }: { booking: DaySheetBooking; onAct
   if (ds === 'Paid') {
     return (
       <div className="space-y-1.5">
-        <p className="text-sm text-emerald-700">Deposit of {amount ? formatPence(amount) : '—'} paid ✓</p>
+        <p className="text-sm text-emerald-700">Deposit of {amount ? formatPence(amount) : '-'} paid ✓</p>
         <button type="button" disabled={loading} onClick={() => void doAction('refund')} className="text-xs font-medium text-red-600 hover:text-red-700 disabled:opacity-50">
           Issue Refund
         </button>
@@ -802,13 +802,13 @@ function DepositActions({ booking, onAction }: { booking: DaySheetBooking; onAct
   }
 
   if (ds === 'Refunded') {
-    return <p className="text-sm text-slate-500">Deposit of {amount ? formatPence(amount) : '—'} refunded</p>;
+    return <p className="text-sm text-slate-500">Deposit of {amount ? formatPence(amount) : '-'} refunded</p>;
   }
 
   if (ds === 'Pending' || ds === 'Requested' || ds === 'Unpaid') {
     return (
       <div className="space-y-1.5">
-        <p className="text-sm text-amber-700">Deposit of {amount ? formatPence(amount) : '—'} requested — not yet paid</p>
+        <p className="text-sm text-amber-700">Deposit of {amount ? formatPence(amount) : '-'} requested - not yet paid</p>
         <div className="flex flex-wrap gap-2">
           <button type="button" disabled={loading} onClick={() => void doAction('send_link')} className="rounded-md bg-brand-50 px-2.5 py-1 text-xs font-medium text-brand-700 hover:bg-brand-100 disabled:opacity-50">Send Payment Link</button>
           <button type="button" disabled={loading} onClick={() => void doAction('waive')} className="rounded-md bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50">Mark as Waived</button>
@@ -818,7 +818,7 @@ function DepositActions({ booking, onAction }: { booking: DaySheetBooking; onAct
     );
   }
 
-  // Walk-ins and "Not Required" — no deposit actions needed
+  // Walk-ins and "Not Required" - no deposit actions needed
   if (isWalkIn || ds === 'Not Required') {
     return <p className="text-sm text-slate-400">No deposit required</p>;
   }
@@ -975,7 +975,7 @@ export function DaySheetView({ venueId, currency }: { venueId: string; currency?
     return () => { if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; } };
   }, [connection, fetchDaySheet]);
 
-  // Expand booking — fetch comms
+  // Expand booking - fetch comms
   useEffect(() => {
     if (!expandedId) { setExpandedComms(null); return; }
     let cancelled = false;
@@ -1002,7 +1002,7 @@ export function DaySheetView({ venueId, currency }: { venueId: string; currency?
       return;
     }
 
-    // Optimistic update — recalculate booked_covers and summary
+    // Optimistic update - recalculate booked_covers and summary
     const snapshot = data;
     setData((prev) => {
       if (!prev) return prev;
@@ -1086,7 +1086,7 @@ export function DaySheetView({ venueId, currency }: { venueId: string; currency?
     await changeStatus(bookingId, previousStatus);
   }, [undoAction, changeStatus]);
 
-  // Remaining capacity for walk-in — use time-aware API data
+  // Remaining capacity for walk-in - use time-aware API data
   const walkInCapacity = useMemo(() => {
     if (!data || !data.capacity_configured) return null;
     return data.summary.covers_available_now;
@@ -1144,7 +1144,7 @@ export function DaySheetView({ venueId, currency }: { venueId: string; currency?
 
   return (
     <div className="daysheet-root space-y-4">
-      {/* Row 1 — matches table grid / live floor (Operations + primary actions) */}
+      {/* Row 1 - matches table grid / live floor (Operations + primary actions) */}
       <div className="flex flex-col gap-3 print:hidden sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
           <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Operations</p>
@@ -1217,7 +1217,7 @@ export function DaySheetView({ venueId, currency }: { venueId: string; currency?
         </div>
       </div>
 
-      {/* Row 2 — date navigator (same card treatment as table grid / floor) */}
+      {/* Row 2 - date navigator (same card treatment as table grid / floor) */}
       <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-3 shadow-sm print:hidden sm:px-4">
         <button
           type="button"
@@ -1268,7 +1268,7 @@ export function DaySheetView({ venueId, currency }: { venueId: string; currency?
       {connection !== 'green' && (
         <div className="flex items-center gap-2 rounded-lg bg-amber-50 px-3 py-1.5 text-xs text-amber-700 print:hidden">
           <span className="h-2 w-2 animate-pulse rounded-full bg-amber-400" />
-          {connection === 'amber' ? 'Live updates paused — polling every 30 seconds' : 'Offline — showing last loaded data'}
+          {connection === 'amber' ? 'Live updates paused - polling every 30 seconds' : 'Offline - showing last loaded data'}
         </div>
       )}
 
@@ -1288,10 +1288,10 @@ export function DaySheetView({ venueId, currency }: { venueId: string; currency?
         <p className="text-sm font-medium text-slate-700">{formatDateFull(date)}</p>
       </div>
 
-      {/* Row 3 — stat cards (aligned with table grid / floor plan) */}
+      {/* Row 3 - stat cards (aligned with table grid / floor plan) */}
       <DaySheetStatsRow summary={data.summary} periods={data.periods} />
 
-      {/* Row 4 — filters (toolbar tools card, same as grid/floor filter strip) */}
+      {/* Row 4 - filters (toolbar tools card, same as grid/floor filter strip) */}
       <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm print:hidden sm:flex-row sm:flex-wrap sm:items-center">
         <select
           value={filters.periodKey}
@@ -1375,7 +1375,7 @@ export function DaySheetView({ venueId, currency }: { venueId: string; currency?
               <button
                 key={table.id}
                 type="button"
-                title={isOccupied ? `${table.name} — ${occupant.guestName}` : `${table.name} (${table.max_covers} seats) — available`}
+                title={isOccupied ? `${table.name} - ${occupant.guestName}` : `${table.name} (${table.max_covers} seats) - available`}
                 onClick={() => {
                   if (isOccupied) {
                     setHighlightBookingId(occupant.bookingId);
@@ -1784,7 +1784,7 @@ export function DaySheetView({ venueId, currency }: { venueId: string; currency?
                                   />
                                 </div>
 
-                                {/* Actions bar — matches bookings concertina toolbar */}
+                                {/* Actions bar - matches bookings concertina toolbar */}
                                 <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-slate-50/60 px-3.5 py-2.5 print:hidden">
                                   <button type="button" onClick={() => setEditBooking(b)} className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50">
                                     Edit Booking
@@ -2076,7 +2076,7 @@ export function DaySheetView({ venueId, currency }: { venueId: string; currency?
 
       {/* ── Print Footer (print only) ── */}
       <div className="hidden print:block print:fixed print:bottom-0 print:left-0 print:right-0 print:border-t print:border-slate-200 print:py-2 print:px-6 print:text-xs print:text-slate-400 print:text-center">
-        Printed {new Date().toLocaleString()} — ReserveNI
+        Printed {new Date().toLocaleString()} - ReserveNI
       </div>
 
       {/* ── Print styles ── */}

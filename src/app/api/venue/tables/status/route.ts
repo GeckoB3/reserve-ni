@@ -17,7 +17,7 @@ const statusUpdateSchema = z.object({
 });
 
 /**
- * GET /api/venue/tables/status — all table statuses for the venue.
+ * GET /api/venue/tables/status - all table statuses for the venue.
  */
 export async function GET() {
   const supabase = await createClient();
@@ -38,7 +38,7 @@ export async function GET() {
 }
 
 /**
- * PUT /api/venue/tables/status — update a table's status.
+ * PUT /api/venue/tables/status - update a table's status.
  * Logs event to the events table.
  */
 export async function PUT(request: NextRequest) {

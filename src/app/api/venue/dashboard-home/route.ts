@@ -75,7 +75,7 @@ function toLoadBookings(
   }));
 }
 
-/** GET /api/venue/dashboard-home — summary data for the dashboard home page */
+/** GET /api/venue/dashboard-home - summary data for the dashboard home page */
 export async function GET() {
   try {
     const supabase = await createClient();

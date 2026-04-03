@@ -649,7 +649,7 @@ export function AppointmentAvailabilitySettings({
                       selectedPrac &&
                       !canEditWorkingHoursFor(selectedPrac, isAdmin, currentStaffId) && (
                         <p className="mt-2 text-sm text-slate-600">
-                          View only — you can change hours and breaks for your own calendar; ask an admin to edit someone
+                          View only - you can change hours and breaks for your own calendar; ask an admin to edit someone
                           else’s schedule.
                         </p>
                       )}
@@ -663,7 +663,7 @@ export function AppointmentAvailabilitySettings({
                       readOnly={!canEditWorkingHoursFor(selectedPrac, isAdmin, currentStaffId)}
                       readOnlyHint={
                         !canEditWorkingHoursFor(selectedPrac, isAdmin, currentStaffId) && !isAdmin
-                          ? 'View only — this is another team member’s schedule. You can edit working hours on your own calendar, or ask an admin.'
+                          ? 'View only - this is another team member’s schedule. You can edit working hours on your own calendar, or ask an admin.'
                           : undefined
                       }
                     />
@@ -685,7 +685,7 @@ export function AppointmentAvailabilitySettings({
                         readOnly={!canEditBreaksFor(selectedPrac, isAdmin, currentStaffId)}
                         readOnlyHint={
                           !canEditBreaksFor(selectedPrac, isAdmin, currentStaffId) && !isAdmin
-                            ? 'View only — you can edit breaks for your own calendar only.'
+                            ? 'View only - you can edit breaks for your own calendar only.'
                             : undefined
                         }
                       />
@@ -1011,7 +1011,7 @@ function BreaksScheduleEditor({
                 )}
               </div>
               {ranges.length === 0 ? (
-                <p className="mt-1 text-xs text-slate-400">No breaks — bookable for the full working hours</p>
+                <p className="mt-1 text-xs text-slate-400">No breaks - bookable for the full working hours</p>
               ) : (
                 <div className="mt-2 space-y-2">
                   {ranges.map((r, ri) => (
@@ -1310,7 +1310,7 @@ function ServiceLinkingGrid({
                             onChange={() => toggleCell(prac.id, svc.id)}
                             disabled={!canEditPractitionerRow(prac.id)}
                             className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-2 focus:ring-blue-500 focus:ring-offset-0 disabled:opacity-50"
-                            aria-label={`${prac.name} — ${svc.name}`}
+                            aria-label={`${prac.name} - ${svc.name}`}
                           />
                         </label>
                       </td>

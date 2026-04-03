@@ -68,7 +68,7 @@ function cancellationDeadline(bookingDate: string, bookingTime: string): string 
 }
 
 /**
- * POST /api/venue/bookings — create a phone booking (staff). Status Pending, deposit Pending.
+ * POST /api/venue/bookings - create a phone booking (staff). Status Pending, deposit Pending.
  * Returns payment_url if deposit required (stub: log SMS send).
  */
 export async function POST(request: NextRequest) {

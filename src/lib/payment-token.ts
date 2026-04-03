@@ -3,7 +3,7 @@ import { normalizePublicBaseUrl } from '@/lib/public-base-url';
 
 /**
  * Secret for HMAC signing of payment links and manage-link tokens.
- * Must be set via PAYMENT_TOKEN_SECRET — never use STRIPE_SECRET_KEY or hardcoded fallbacks.
+ * Must be set via PAYMENT_TOKEN_SECRET - never use STRIPE_SECRET_KEY or hardcoded fallbacks.
  */
 export function getPaymentTokenSecret(): string {
   const secret = process.env.PAYMENT_TOKEN_SECRET?.trim();
@@ -21,7 +21,7 @@ export function tryGetPaymentTokenSecret(): string | null {
 /**
  * Compact signed payment token (24h expiry).
  * Format: base64url(16-byte uuid + 4-byte unix expiry seconds).12-char HMAC
- * — much shorter than legacy `uuid:ms` string encoding for SMS.
+ * - much shorter than legacy `uuid:ms` string encoding for SMS.
  */
 export function createPaymentLinkToken(bookingId: string): string {
   const secret = getPaymentTokenSecret();

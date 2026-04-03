@@ -1,4 +1,4 @@
-# Public booking embed — URL contract for partners
+# Public booking embed - URL contract for partners
 
 This document describes the **same** query parameters as the full-page public booking flow (`/book/[venue-slug]`). The embed route (`/embed/[venue-slug]`) uses **`BookPublicBookingFlow`** and must stay aligned.
 
@@ -9,7 +9,7 @@ This document describes the **same** query parameters as the full-page public bo
 
 Optional: `?accent=<RRGGBB>` (no `#`) for accent colour on the embed page.
 
-## `?tab=` — canonical tab slugs
+## `?tab=` - canonical tab slugs
 
 Use **`?tab=<slug>`** to open a specific bookable service tab. Invalid or missing values fall back to the venue **primary** model tab (see `resolvePublicBookTabFromQuery` in `src/lib/booking/public-book-tabs.ts`).
 
@@ -25,7 +25,7 @@ Use **`?tab=<slug>`** to open a specific bookable service tab. Invalid or missin
 
 1. Only tabs for models in **`venues.booking_model`** ∪ **`venues.enabled_models`** are valid; anything else resolves to the primary tab.
 2. If the venue exposes only one tab, `?tab=` is ignored and the primary tab is always shown.
-3. Canonical slug list: `PUBLIC_BOOK_TAB_SLUGS` in `src/lib/booking/public-book-tabs.ts` — do not introduce alternate names (e.g. hash-only or postMessage-only tab APIs) without updating that module and this document.
+3. Canonical slug list: `PUBLIC_BOOK_TAB_SLUGS` in `src/lib/booking/public-book-tabs.ts` - do not introduce alternate names (e.g. hash-only or postMessage-only tab APIs) without updating that module and this document.
 
 ## Example
 

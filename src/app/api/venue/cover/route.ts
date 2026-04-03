@@ -7,7 +7,7 @@ const BUCKET = 'venue-covers';
 const MAX_SIZE = 5 * 1024 * 1024; // 5MB
 const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 
-/** POST /api/venue/cover — upload cover photo (admin only). Returns public URL. */
+/** POST /api/venue/cover - upload cover photo (admin only). Returns public URL. */
 export async function POST(request: NextRequest) {
   try {
     const supabase = await createClient();

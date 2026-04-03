@@ -49,7 +49,7 @@ const createEventBodySchema = eventSchema.extend({
   schedule: scheduleSchema.optional(),
 });
 
-/** GET /api/venue/experience-events — list events with ticket types. */
+/** GET /api/venue/experience-events - list events with ticket types. */
 export async function GET(request: NextRequest) {
   try {
     const supabase = await createClient();
@@ -82,7 +82,7 @@ export async function GET(request: NextRequest) {
   }
 }
 
-/** POST /api/venue/experience-events — create an event with ticket types (admin only). */
+/** POST /api/venue/experience-events - create an event with ticket types (admin only). */
 export async function POST(request: NextRequest) {
   try {
     const supabase = await createClient();
@@ -200,7 +200,7 @@ export async function POST(request: NextRequest) {
   }
 }
 
-/** PATCH /api/venue/experience-events — update an event (admin only). */
+/** PATCH /api/venue/experience-events - update an event (admin only). */
 export async function PATCH(request: NextRequest) {
   try {
     const supabase = await createClient();
@@ -267,7 +267,7 @@ export async function PATCH(request: NextRequest) {
   }
 }
 
-/** DELETE /api/venue/experience-events — delete an event (admin only). */
+/** DELETE /api/venue/experience-events - delete an event (admin only). */
 export async function DELETE(request: NextRequest) {
   try {
     const supabase = await createClient();

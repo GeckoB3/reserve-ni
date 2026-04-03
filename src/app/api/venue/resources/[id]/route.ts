@@ -4,7 +4,7 @@ import { getVenueStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 
 /**
- * GET /api/venue/resources/[id] — single resource (venue-scoped).
+ * GET /api/venue/resources/[id] - single resource (venue-scoped).
  */
 export async function GET(
   _request: NextRequest,

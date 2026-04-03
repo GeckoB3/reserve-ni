@@ -6,6 +6,11 @@ import type { ScheduleBlockDTO } from '@/types/schedule-blocks';
 const SLOT_HEIGHT = 48;
 const SLOT_MINUTES = 15;
 
+/** Matches Confirmed appointment lane styling in PractitionerCalendarView. */
+const CLASS_LANE_BG = 'bg-blue-50';
+const CLASS_LANE_BORDER = 'border-blue-200';
+const CLASS_LANE_TEXT = 'text-blue-900';
+
 function timeToMinutes(t: string): number {
   const [hh, mm] = t.slice(0, 5).split(':').map(Number);
   return (hh ?? 0) * 60 + (mm ?? 0);
@@ -18,6 +23,8 @@ interface ScheduleFeedColumnProps {
   startHour: number;
   endHour: number;
   onBookingClick: (bookingId: string) => void;
+  /** When set, class session blocks open this handler (full session roster) instead of a single booking. */
+  onClassInstanceClick?: (block: ScheduleBlockDTO) => void;
 }
 
 /**
@@ -30,6 +37,7 @@ export function ScheduleFeedColumn({
   startHour,
   endHour,
   onBookingClick,
+  onClassInstanceClick,
 }: ScheduleFeedColumnProps) {
   const totalSlots = ((endHour - startHour) * 60) / SLOT_MINUTES;
 
@@ -63,27 +71,48 @@ export function ScheduleFeedColumn({
             b.class_booked_spots != null
               ? `${b.class_booked_spots}/${b.class_capacity} booked`
               : null;
+          const isClass = b.kind === 'class_session';
+          const cardClass = isClass
+            ? `flex h-full min-h-0 flex-col overflow-hidden rounded-lg border shadow-sm ${CLASS_LANE_BG} ${CLASS_LANE_BORDER} px-2 py-1.5 text-left`
+            : `flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-slate-200 bg-white px-1.5 py-1 text-left shadow-sm`;
           const body = (
             <div
-              className={`flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-slate-200 bg-white px-1.5 py-1 text-left shadow-sm ${
-                clickable ? 'cursor-pointer hover:bg-slate-50' : ''
-              }`}
+              className={`${cardClass} ${clickable ? 'cursor-pointer hover:brightness-[0.98]' : ''}`}
               style={{ borderLeftWidth: 3, borderLeftColor: accent }}
             >
-              <span className="truncate text-xs font-semibold text-slate-900">{b.title}</span>
-              {b.subtitle ? <span className="truncate text-[10px] text-slate-500">{b.subtitle}</span> : null}
-              {classUptake ? (
-                <span className="truncate text-[10px] font-medium text-slate-600">{classUptake}</span>
+              <span className={`truncate text-xs font-semibold ${isClass ? CLASS_LANE_TEXT : 'text-slate-900'}`}>
+                {b.title}
+              </span>
+              {b.subtitle ? (
+                <span className={`truncate text-[10px] ${isClass ? 'text-blue-800/90' : 'text-slate-500'}`}>
+                  {b.subtitle}
+                </span>
               ) : null}
-              <span className="text-[10px] text-slate-400">
+              {classUptake ? (
+                <span className={`truncate text-[10px] font-medium ${isClass ? 'text-blue-800' : 'text-slate-600'}`}>
+                  {classUptake}
+                </span>
+              ) : null}
+              <span className={`text-[10px] ${isClass ? 'text-blue-700/80' : 'text-slate-400'}`}>
                 {b.start_time} – {b.end_time}
               </span>
             </div>
           );
 
+          const classOpensRoster =
+            b.kind === 'class_session' && b.class_instance_id && typeof onClassInstanceClick === 'function';
+
           return (
             <div key={b.id} className="absolute left-1 right-1 z-[12]" style={{ top, height }}>
-              {clickable && b.booking_id ? (
+              {classOpensRoster ? (
+                <button
+                  type="button"
+                  onClick={() => onClassInstanceClick(b)}
+                  className="h-full w-full text-left"
+                >
+                  {body}
+                </button>
+              ) : clickable && b.booking_id ? (
                 <button type="button" onClick={() => onBookingClick(b.booking_id!)} className="h-full w-full text-left">
                   {body}
                 </button>

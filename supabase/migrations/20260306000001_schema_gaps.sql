@@ -12,7 +12,7 @@ ALTER TABLE guests ADD COLUMN IF NOT EXISTS no_show_count int NOT NULL DEFAULT 0
 ALTER TABLE guests ADD COLUMN IF NOT EXISTS last_visit_date date;
 ALTER TABLE guests ADD COLUMN IF NOT EXISTS dietary_preferences text;
 
--- 3. Booking field — snapshot of cancellation policy at booking time
+-- 3. Booking field - snapshot of cancellation policy at booking time
 ALTER TABLE bookings ADD COLUMN IF NOT EXISTS cancellation_policy_snapshot jsonb;
 
 -- 4. Communications log table (every message sent)

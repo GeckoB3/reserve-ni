@@ -25,11 +25,11 @@ globs:
 
 ## Booking Pages (Guest-Facing)
 - Located in `src/app/book/[venue-slug]/`.
-- Public — no authentication required.
+- Public - no authentication required.
 - Must be fast. Target < 2 second load time on mobile.
 - Booking flow: date → time slot/sitting → party size → guest details → dietary/occasion → deposit payment → confirmation.
 - Show cancellation policy clearly before payment.
-- Stripe payment uses Stripe Elements (Stripe's own iFrame) — never a custom card input.
+- Stripe payment uses Stripe Elements (Stripe's own iFrame) - never a custom card input.
 
 ## iFrame Widget
 - Same booking flow as the hosted page, rendered for iFrame embedding.
@@ -55,7 +55,7 @@ globs:
 ## Accessibility
 - All interactive elements must be keyboard accessible.
 - Use semantic HTML: `<button>` for actions, `<a>` for navigation, `<form>` for forms.
-- Colour is not the only indicator — use icons or text alongside colour coding.
+- Colour is not the only indicator - use icons or text alongside colour coding.
 - Form inputs must have associated labels.
 
 ## Loading and Error States

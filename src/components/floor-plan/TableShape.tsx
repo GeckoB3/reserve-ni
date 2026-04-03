@@ -254,7 +254,7 @@ export default function TableShape({
     displayName = truncateForWidth(topLabel, nm);
     displayCap = truncateForWidth(bottomLabel, cm);
 
-    /* Centre the two-line block on the table origin (0,0) — same for rect, circle, oval. */
+    /* Centre the two-line block on the table origin (0,0) - same for rect, circle, oval. */
     nameY = -blockH / 2;
     capY = nameY + nameLineH + gap;
 

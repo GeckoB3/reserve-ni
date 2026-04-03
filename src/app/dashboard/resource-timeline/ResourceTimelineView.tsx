@@ -195,7 +195,7 @@ export function ResourceTimelineView({
   return (
     <div className="flex min-h-0 flex-1 flex-col">
 
-      {/* Resource management panel — admin only */}
+      {/* Resource management panel - admin only */}
       {isAdmin && (
         <div className="mb-6 rounded-xl border border-slate-200 bg-white shadow-sm">
           <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
@@ -249,12 +249,12 @@ export function ResourceTimelineView({
                     {resources.map((r) => (
                       <tr key={r.id}>
                         <td className="px-5 py-3 font-medium text-slate-900">{r.name}</td>
-                        <td className="px-3 py-3 text-slate-500">{r.resource_type ?? '—'}</td>
+                        <td className="px-3 py-3 text-slate-500">{r.resource_type ?? '-'}</td>
                         <td className="px-3 py-3 text-slate-500">
-                          {r.slot_interval_minutes ? `${r.slot_interval_minutes} min` : '—'}
+                          {r.slot_interval_minutes ? `${r.slot_interval_minutes} min` : '-'}
                         </td>
                         <td className="px-3 py-3 text-slate-500">
-                          {r.price_per_slot_pence != null ? `${formatPrice(r.price_per_slot_pence)}/slot` : '—'}
+                          {r.price_per_slot_pence != null ? `${formatPrice(r.price_per_slot_pence)}/slot` : '-'}
                         </td>
                         <td className="px-3 py-3">
                           {r.is_active ? (

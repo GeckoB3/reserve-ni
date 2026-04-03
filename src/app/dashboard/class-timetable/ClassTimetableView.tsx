@@ -2,11 +2,15 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { ClassScheduleModal } from './ClassScheduleModal';
+import { ClassTimetableReadOnlyCalendar } from './ClassTimetableReadOnlyCalendar';
 
 interface PractitionerOption {
   id: string;
   name: string;
 }
+
+type PaymentRequirement = 'none' | 'deposit' | 'full_payment';
 
 interface ClassType {
   id: string;
@@ -19,7 +23,8 @@ interface ClassType {
   is_active: boolean;
   instructor_id?: string | null;
   instructor_name?: string | null;
-  requires_online_payment?: boolean;
+  payment_requirement?: PaymentRequirement;
+  deposit_amount_pence?: number | null;
 }
 
 interface TimetableEntry {
@@ -30,6 +35,9 @@ interface TimetableEntry {
   is_active: boolean;
   interval_weeks?: number;
   created_at?: string;
+  recurrence_type?: string;
+  recurrence_end_date?: string | null;
+  total_occurrences?: number | null;
 }
 
 interface ClassInstance {
@@ -73,7 +81,6 @@ interface AttendeeRow {
 
 type Notice = { kind: 'success' | 'error'; message: string };
 
-const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const DAY_LABELS_FULL = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
 const BLANK_CT = {
@@ -86,7 +93,17 @@ const BLANK_CT = {
   is_active: true,
   instructor_staff_id: '' as string,
   instructor_custom_name: '',
-  requires_online_payment: true,
+  payment_requirement: 'none' as PaymentRequirement,
+  deposit_pounds: '',
+};
+
+const INITIAL_TIMETABLE_FORM = {
+  day_of_week: 1,
+  start_time: '09:00',
+  interval_weeks: 1,
+  end_condition: 'never' as 'never' | 'until' | 'count',
+  recurrence_end_date: '',
+  total_occurrences: '',
 };
 
 function escapeCsvCell(s: string | number | null | undefined): string {
@@ -114,6 +131,8 @@ export function ClassTimetableView({
   const [timetable, setTimetable] = useState<TimetableEntry[]>([]);
   const [instances, setInstances] = useState<ClassInstance[]>([]);
   const [practitioners, setPractitioners] = useState<PractitionerOption[]>([]);
+  /** Bookable calendars (USE); names usually match staff for class instructor selection. */
+  const [unifiedCalendars, setUnifiedCalendars] = useState<PractitionerOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState<Notice | null>(null);
 
@@ -130,43 +149,61 @@ export function ClassTimetableView({
   const [classTypeSaving, setClassTypeSaving] = useState(false);
   const [classTypeError, setClassTypeError] = useState<string | null>(null);
 
-  const [showTimetableForm, setShowTimetableForm] = useState<string | null>(null);
-  const [timetableForm, setTimetableForm] = useState({ day_of_week: 1, start_time: '09:00', interval_weeks: 1 });
-  const [timetableSaving, setTimetableSaving] = useState(false);
+  const [timetableForm, setTimetableForm] = useState({ ...INITIAL_TIMETABLE_FORM });
 
-  const [scheduleExpandedId, setScheduleExpandedId] = useState<string | null>(null);
-  const [oneOffByClass, setOneOffByClass] = useState<Record<string, { date: string; time: string; capacity: string }>>(
-    {},
-  );
-  const [oneOffSaving, setOneOffSaving] = useState(false);
-
-  const [generateWeeks, setGenerateWeeks] = useState(8);
-  const [generating, setGenerating] = useState(false);
+  const [scheduleModalOpen, setScheduleModalOpen] = useState(false);
 
   const [editingTimetable, setEditingTimetable] = useState<TimetableEntry | null>(null);
   const [editingInstance, setEditingInstance] = useState<ClassInstance | null>(null);
   const [editInstanceForm, setEditInstanceForm] = useState({ date: '', time: '', capacity: '' });
   const [patchSaving, setPatchSaving] = useState(false);
+  const [instanceDeletingId, setInstanceDeletingId] = useState<string | null>(null);
 
-  const fetchData = useCallback(async () => {
-    setLoading(true);
+  const fetchData = useCallback(async (opts?: { silent?: boolean }) => {
+    const silent = opts?.silent ?? false;
+    if (!silent) setLoading(true);
     try {
-      const res = await fetch('/api/venue/classes');
+      const res = await fetch('/api/venue/classes', { cache: 'no-store' });
       const data = await res.json();
       setClassTypes(data.class_types ?? []);
       setTimetable(data.timetable ?? []);
       setInstances(data.instances ?? []);
       setPractitioners(data.practitioners ?? []);
+      setUnifiedCalendars(data.unified_calendars ?? []);
     } catch {
       setNotice({ kind: 'error', message: 'Failed to load class data.' });
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
     void fetchData();
   }, [fetchData]);
+
+  /** After mutations, refetch without replacing the whole block with the loading skeleton. */
+  const refreshClassData = useCallback(async () => {
+    await fetchData({ silent: true });
+  }, [fetchData]);
+
+  /** If a session row is removed (e.g. deleted elsewhere), drop selection and detail. */
+  useEffect(() => {
+    if (selectedId && !instances.some((i) => i.id === selectedId)) {
+      setSelectedId(null);
+    }
+  }, [instances, selectedId]);
+
+  useEffect(() => {
+    if (detail && !instances.some((i) => i.id === detail.id)) {
+      setDetail(null);
+      setAttendees([]);
+    }
+  }, [instances, detail]);
+
+  const removeInstanceFromList = useCallback((id: string) => {
+    setInstances((prev) => prev.filter((i) => i.id !== id));
+    setSelectedId((sid) => (sid === id ? null : sid));
+  }, []);
 
   const loadDetail = useCallback(async (id: string) => {
     setDetailLoading(true);
@@ -212,12 +249,64 @@ export function ClassTimetableView({
 
   const typeMap = useMemo(() => new Map(classTypes.map((ct) => [ct.id, ct])), [classTypes]);
 
+  const stats = useMemo(() => {
+    const activeClassTypes = classTypes.filter((c) => c.is_active).length;
+    const todayLocal = (() => {
+      const n = new Date();
+      return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-${String(n.getDate()).padStart(2, '0')}`;
+    })();
+    const end7 = new Date();
+    end7.setDate(end7.getDate() + 6);
+    const weekEndLocal = `${end7.getFullYear()}-${String(end7.getMonth() + 1).padStart(2, '0')}-${String(end7.getDate()).padStart(2, '0')}`;
+    const sessionsNext7Days = instances.filter(
+      (i) => !i.is_cancelled && i.instance_date >= todayLocal && i.instance_date <= weekEndLocal,
+    ).length;
+    const upcomingSessions = instances.filter((i) => !i.is_cancelled).length;
+    const totalBookedSpots = instances.reduce((sum, i) => sum + (i.booked_spots ?? 0), 0);
+    return { activeClassTypes, sessionsNext7Days, upcomingSessions, totalBookedSpots };
+  }, [classTypes, instances]);
+
+  /** Instructor id no longer in calendar/practitioner lists (deleted); keep selectable in the dropdown. */
+  const orphanInstructorOption = useMemo(() => {
+    if (!editingClassTypeId || !showClassTypeForm) return null;
+    const ct = classTypes.find((c) => c.id === editingClassTypeId);
+    const id = ct?.instructor_id;
+    if (!id) return null;
+    if (unifiedCalendars.some((c) => c.id === id)) return null;
+    if (practitioners.some((p) => p.id === id)) return null;
+    return { id, label: ct.instructor_name?.trim() || 'Saved instructor' };
+  }, [editingClassTypeId, showClassTypeForm, classTypes, unifiedCalendars, practitioners]);
+
   const buildClassTypePayload = () => {
     const priceRaw = classTypeForm.price_pence.trim();
     const pricePence =
       priceRaw === '' ? null : Math.max(0, Math.round(parseFloat(priceRaw) * 100));
     const staffId = classTypeForm.instructor_staff_id.trim();
     const custom = classTypeForm.instructor_custom_name.trim();
+    const depositRaw = classTypeForm.deposit_pounds.trim();
+    const depositPence =
+      classTypeForm.payment_requirement === 'deposit' && depositRaw !== ''
+        ? Math.max(0, Math.round(parseFloat(depositRaw) * 100))
+        : null;
+
+    let instructor_id: string | null = null;
+    let instructor_name: string | null = null;
+    if (!staffId) {
+      instructor_name = custom || null;
+    } else {
+      const cal = unifiedCalendars.find((c) => c.id === staffId);
+      if (cal) {
+        instructor_id = staffId;
+        instructor_name = cal.name;
+      } else if (practitioners.some((p) => p.id === staffId)) {
+        instructor_id = staffId;
+        instructor_name = null;
+      } else {
+        instructor_id = staffId;
+        instructor_name = custom || null;
+      }
+    }
+
     return {
       name: classTypeForm.name.trim(),
       description: classTypeForm.description.trim() || null,
@@ -225,10 +314,31 @@ export function ClassTimetableView({
       capacity: classTypeForm.capacity,
       colour: classTypeForm.colour,
       is_active: classTypeForm.is_active,
-      requires_online_payment: classTypeForm.requires_online_payment,
+      payment_requirement: classTypeForm.payment_requirement,
+      deposit_amount_pence: depositPence,
       price_pence: pricePence,
-      instructor_id: staffId ? staffId : null,
-      instructor_name: staffId ? null : custom || null,
+      instructor_id,
+      instructor_name,
+    };
+  };
+
+  const buildTimetableRecurrencePayload = () => {
+    let recurrence_end_date: string | null = null;
+    let total_occurrences: number | null = null;
+    if (timetableForm.end_condition === 'until' && timetableForm.recurrence_end_date.trim() !== '') {
+      recurrence_end_date = timetableForm.recurrence_end_date.trim();
+    }
+    if (timetableForm.end_condition === 'count' && timetableForm.total_occurrences.trim() !== '') {
+      const n = parseInt(timetableForm.total_occurrences, 10);
+      if (!Number.isNaN(n) && n > 0) total_occurrences = n;
+    }
+    return {
+      day_of_week: timetableForm.day_of_week,
+      start_time: timetableForm.start_time,
+      interval_weeks: timetableForm.interval_weeks,
+      recurrence_type: 'weekly',
+      recurrence_end_date,
+      total_occurrences,
     };
   };
 
@@ -261,7 +371,7 @@ export function ClassTimetableView({
       setEditingClassTypeId(null);
       setClassTypeForm({ ...BLANK_CT });
       setNotice({ kind: 'success', message: editingClassTypeId ? 'Class updated.' : 'Class created.' });
-      await fetchData();
+      await fetchData({ silent: true });
     } catch {
       setClassTypeError('Save failed');
     } finally {
@@ -271,6 +381,11 @@ export function ClassTimetableView({
 
   const handleEditClassType = (ct: ClassType) => {
     const staffId = ct.instructor_id ?? '';
+    const payReq = ct.payment_requirement ?? 'none';
+    const depositPounds =
+      payReq === 'deposit' && ct.deposit_amount_pence != null
+        ? (ct.deposit_amount_pence / 100).toFixed(2)
+        : '';
     setClassTypeForm({
       name: ct.name,
       description: (ct.description ?? '').trim(),
@@ -281,7 +396,8 @@ export function ClassTimetableView({
       is_active: ct.is_active,
       instructor_staff_id: staffId,
       instructor_custom_name: !staffId ? (ct.instructor_name ?? '') : '',
-      requires_online_payment: ct.requires_online_payment !== false,
+      payment_requirement: payReq,
+      deposit_pounds: depositPounds,
     });
     setEditingClassTypeId(ct.id);
     setClassTypeError(null);
@@ -302,39 +418,9 @@ export function ClassTimetableView({
         return;
       }
       setNotice({ kind: 'success', message: 'Class type deleted.' });
-      await fetchData();
+      await fetchData({ silent: true });
     } catch {
       setNotice({ kind: 'error', message: 'Delete failed' });
-    }
-  };
-
-  const handleSaveTimetableEntry = async () => {
-    if (!showTimetableForm) return;
-    setTimetableSaving(true);
-    try {
-      const res = await fetch('/api/venue/classes', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          class_type_id: showTimetableForm,
-          day_of_week: timetableForm.day_of_week,
-          start_time: timetableForm.start_time,
-          ...(timetableForm.interval_weeks > 1 ? { interval_weeks: timetableForm.interval_weeks } : {}),
-        }),
-      });
-      if (!res.ok) {
-        const json = await res.json();
-        setNotice({ kind: 'error', message: (json as { error?: string }).error ?? 'Failed to add schedule entry' });
-        return;
-      }
-      setShowTimetableForm(null);
-      setTimetableForm({ day_of_week: 1, start_time: '09:00', interval_weeks: 1 });
-      setNotice({ kind: 'success', message: 'Weekly schedule added. Generate instances to publish dates.' });
-      await fetchData();
-    } catch {
-      setNotice({ kind: 'error', message: 'Failed to add schedule entry' });
-    } finally {
-      setTimetableSaving(false);
     }
   };
 
@@ -342,15 +428,14 @@ export function ClassTimetableView({
     if (!editingTimetable) return;
     setPatchSaving(true);
     try {
+      const recurrence = buildTimetableRecurrencePayload();
       const res = await fetch('/api/venue/classes', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           id: editingTimetable.id,
           entity_type: 'timetable',
-          day_of_week: timetableForm.day_of_week,
-          start_time: timetableForm.start_time,
-          interval_weeks: timetableForm.interval_weeks,
+          ...recurrence,
           is_active: true,
         }),
       });
@@ -361,7 +446,7 @@ export function ClassTimetableView({
       }
       setEditingTimetable(null);
       setNotice({ kind: 'success', message: 'Schedule updated.' });
-      await fetchData();
+      await fetchData({ silent: true });
     } catch {
       setNotice({ kind: 'error', message: 'Update failed' });
     } finally {
@@ -370,7 +455,12 @@ export function ClassTimetableView({
   };
 
   const handleDeleteTimetableEntry = async (id: string) => {
-    if (!window.confirm('Remove this schedule entry?')) return;
+    if (
+      !window.confirm(
+        'Remove this weekly rule? Existing dated sessions stay on the calendar; only future generation from this rule stops. Delete individual sessions from the list if needed.',
+      )
+    )
+      return;
     try {
       const res = await fetch('/api/venue/classes', {
         method: 'DELETE',
@@ -382,77 +472,9 @@ export function ClassTimetableView({
         return;
       }
       setNotice({ kind: 'success', message: 'Schedule entry removed.' });
-      await fetchData();
+      await fetchData({ silent: true });
     } catch {
       setNotice({ kind: 'error', message: 'Failed to remove schedule entry' });
-    }
-  };
-
-  const getOneOffDefaults = (classTypeId: string) =>
-    oneOffByClass[classTypeId] ?? {
-      date: new Date().toISOString().slice(0, 10),
-      time: '09:00',
-      capacity: '',
-    };
-
-  const setOneOffField = (classTypeId: string, patch: Partial<{ date: string; time: string; capacity: string }>) => {
-    setOneOffByClass((prev) => ({
-      ...prev,
-      [classTypeId]: { ...getOneOffDefaults(classTypeId), ...patch },
-    }));
-  };
-
-  const handleAddOneOffInstance = async (classTypeId: string) => {
-    const o = getOneOffDefaults(classTypeId);
-    setOneOffSaving(true);
-    try {
-      const res = await fetch('/api/venue/class-instances', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          class_type_id: classTypeId,
-          instance_date: o.date,
-          start_time: o.time,
-          ...(o.capacity.trim() !== '' && { capacity_override: parseInt(o.capacity, 10) }),
-        }),
-      });
-      const json = await res.json();
-      if (!res.ok) {
-        setNotice({ kind: 'error', message: (json as { error?: string }).error ?? 'Failed to add session' });
-        return;
-      }
-      setNotice({ kind: 'success', message: 'One-off session added.' });
-      await fetchData();
-    } catch {
-      setNotice({ kind: 'error', message: 'Failed to add session' });
-    } finally {
-      setOneOffSaving(false);
-    }
-  };
-
-  const handleGenerateInstances = async () => {
-    setGenerating(true);
-    try {
-      const w = Math.min(12, Math.max(1, generateWeeks));
-      const res = await fetch('/api/venue/classes/generate-instances', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ weeks: w }),
-      });
-      const json = await res.json();
-      if (!res.ok) {
-        setNotice({ kind: 'error', message: (json as { error?: string }).error ?? 'Failed to generate instances' });
-        return;
-      }
-      setNotice({
-        kind: 'success',
-        message: `Generated ${(json as { created?: number }).created ?? 0} upcoming instances (${w} weeks).`,
-      });
-      await fetchData();
-    } catch {
-      setNotice({ kind: 'error', message: 'Failed to generate instances' });
-    } finally {
-      setGenerating(false);
     }
   };
 
@@ -481,7 +503,7 @@ export function ClassTimetableView({
       }
       setEditingInstance(null);
       setNotice({ kind: 'success', message: 'Session updated.' });
-      await fetchData();
+      await fetchData({ silent: true });
       if (selectedId === editingInstance.id) void loadDetail(editingInstance.id);
     } catch {
       setNotice({ kind: 'error', message: 'Failed to update session' });
@@ -510,7 +532,7 @@ export function ClassTimetableView({
       }
       setSelectedId(null);
       setNotice({ kind: 'success', message: 'Class cancelled.' });
-      await fetchData();
+      await fetchData({ silent: true });
     } catch {
       setNotice({ kind: 'error', message: 'Could not cancel class' });
     } finally {
@@ -547,10 +569,15 @@ export function ClassTimetableView({
 
   const openEditTimetable = (e: TimetableEntry) => {
     setEditingTimetable(e);
+    const hasEnd = e.recurrence_end_date != null && String(e.recurrence_end_date).trim() !== '';
+    const hasCount = e.total_occurrences != null && e.total_occurrences > 0;
     setTimetableForm({
       day_of_week: e.day_of_week,
       start_time: e.start_time.slice(0, 5),
       interval_weeks: e.interval_weeks ?? 1,
+      end_condition: hasEnd ? 'until' : hasCount ? 'count' : 'never',
+      recurrence_end_date: hasEnd ? String(e.recurrence_end_date).slice(0, 10) : '',
+      total_occurrences: hasCount ? String(e.total_occurrences) : '',
     });
   };
 
@@ -563,8 +590,35 @@ export function ClassTimetableView({
     });
   };
 
-  const instancesForType = (classTypeId: string) =>
-    instances.filter((i) => i.class_type_id === classTypeId).sort((a, b) => a.instance_date.localeCompare(b.instance_date));
+  const handleDeleteInstance = async (inst: ClassInstance) => {
+    const booked = inst.booked_spots ?? 0;
+    const msg =
+      booked > 0
+        ? `Remove this session from the calendar? ${booked} booking(s) will stay on file but will no longer be linked to this class time.`
+        : 'Remove this session from the calendar?';
+    if (!window.confirm(msg)) return;
+    setInstanceDeletingId(inst.id);
+    try {
+      const res = await fetch('/api/venue/classes', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: inst.id, entity_type: 'instance' }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        setNotice({ kind: 'error', message: (json as { error?: string }).error ?? 'Could not remove session' });
+        return;
+      }
+      setEditingInstance(null);
+      removeInstanceFromList(inst.id);
+      setNotice({ kind: 'success', message: 'Session removed from the calendar.' });
+      await fetchData({ silent: true });
+    } catch {
+      setNotice({ kind: 'error', message: 'Could not remove session' });
+    } finally {
+      setInstanceDeletingId(null);
+    }
+  };
 
   return (
     <div>
@@ -574,7 +628,8 @@ export function ClassTimetableView({
           <Link href="/dashboard/calendar" className="font-medium text-brand-600 underline hover:text-brand-700">
             dashboard calendar
           </Link>{' '}
-          with bookings and capacity. Generate dated sessions from your weekly rules, or add one-off dates below.
+          with bookings and capacity. Use the Schedule classes button in{' '}
+          <span className="font-medium text-slate-700">Scheduled sessions</span> below to add or change sessions.
         </p>
       </div>
 
@@ -615,27 +670,24 @@ export function ClassTimetableView({
         )}
       </div>
 
-      {isAdmin && timetable.filter((e) => e.is_active).length > 0 && (
-        <div className="mb-6 flex flex-wrap items-end gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-          <div>
-            <label className="mb-1 block text-xs font-medium text-slate-600">Materialise sessions (weeks ahead)</label>
-            <input
-              type="number"
-              min={1}
-              max={12}
-              value={generateWeeks}
-              onChange={(e) => setGenerateWeeks(parseInt(e.target.value, 10) || 8)}
-              className="w-24 rounded-lg border border-slate-200 px-3 py-2 text-sm"
-            />
+      {!loading && classTypes.length > 0 && (
+        <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+            <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Active class types</p>
+            <p className="mt-1 text-2xl font-semibold text-slate-900">{stats.activeClassTypes}</p>
           </div>
-          <button
-            type="button"
-            onClick={() => void handleGenerateInstances()}
-            disabled={generating}
-            className="rounded-lg bg-slate-800 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-50"
-          >
-            {generating ? 'Generating…' : 'Generate upcoming instances'}
-          </button>
+          <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+            <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Sessions (next 7 days)</p>
+            <p className="mt-1 text-2xl font-semibold text-slate-900">{stats.sessionsNext7Days}</p>
+          </div>
+          <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+            <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Upcoming sessions</p>
+            <p className="mt-1 text-2xl font-semibold text-slate-900">{stats.upcomingSessions}</p>
+          </div>
+          <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+            <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Booked spots (all upcoming)</p>
+            <p className="mt-1 text-2xl font-semibold text-slate-900">{stats.totalBookedSpots}</p>
+          </div>
         </div>
       )}
 
@@ -666,7 +718,6 @@ export function ClassTimetableView({
             <div className="divide-y divide-slate-50">
               {classTypes.map((ct) => {
                 const entries = timetable.filter((e) => e.class_type_id === ct.id && e.is_active);
-                const expanded = scheduleExpandedId === ct.id;
                 return (
                   <div key={ct.id} className="px-5 py-3">
                     <div className="flex flex-wrap items-center gap-3">
@@ -676,27 +727,17 @@ export function ClassTimetableView({
                       {ct.price_pence != null && (
                         <span className="text-sm text-slate-500">{formatPrice(ct.price_pence)}</span>
                       )}
+                      <span className="text-xs text-slate-500">
+                        {ct.payment_requirement === 'deposit' && ct.deposit_amount_pence != null
+                          ? ` · Deposit ${formatPrice(ct.deposit_amount_pence)} online`
+                          : ct.payment_requirement === 'full_payment'
+                            ? ' · Full payment online'
+                            : ' · No online payment'}
+                      </span>
                       {!ct.is_active && (
                         <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-500">Inactive</span>
                       )}
                       <div className="ml-auto flex gap-2">
-                        <button
-                          type="button"
-                          onClick={() => setScheduleExpandedId(expanded ? null : ct.id)}
-                          className="text-xs font-medium text-brand-600 hover:text-brand-800"
-                        >
-                          {expanded ? 'Hide schedule' : 'Schedule & sessions'}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setShowTimetableForm(ct.id);
-                            setTimetableForm({ day_of_week: 1, start_time: '09:00', interval_weeks: 1 });
-                          }}
-                          className="text-xs font-medium text-brand-600 hover:text-brand-800"
-                        >
-                          + Weekly rule
-                        </button>
                         <button
                           type="button"
                           onClick={() => handleEditClassType(ct)}
@@ -728,6 +769,15 @@ export function ClassTimetableView({
                             {(e.interval_weeks ?? 1) > 1 && (
                               <span className="text-slate-400"> · every {e.interval_weeks} wks</span>
                             )}
+                            {e.recurrence_end_date && (
+                              <span className="text-slate-400" title="Recurrence end date">
+                                {' '}
+                                · until {String(e.recurrence_end_date).slice(0, 10)}
+                              </span>
+                            )}
+                            {e.total_occurrences != null && e.total_occurrences > 0 && (
+                              <span className="text-slate-400"> · max {e.total_occurrences} sessions</span>
+                            )}
                             <button
                               type="button"
                               onClick={() => openEditTimetable(e)}
@@ -749,146 +799,6 @@ export function ClassTimetableView({
                       </div>
                     )}
 
-                    {showTimetableForm === ct.id && (
-                      <div className="mt-3 flex flex-wrap items-end gap-2 rounded-lg border border-brand-100 bg-brand-50/40 px-3 py-3 pl-6">
-                        <div>
-                          <label className="mb-1 block text-xs font-medium text-slate-600">Day</label>
-                          <select
-                            value={timetableForm.day_of_week}
-                            onChange={(e) => setTimetableForm((f) => ({ ...f, day_of_week: parseInt(e.target.value) }))}
-                            className="rounded border border-slate-200 bg-white px-2 py-1.5 text-xs"
-                          >
-                            {DAY_LABELS_FULL.map((label, i) => (
-                              <option key={i} value={i}>{label}</option>
-                            ))}
-                          </select>
-                        </div>
-                        <div>
-                          <label className="mb-1 block text-xs font-medium text-slate-600">Start time</label>
-                          <input
-                            type="time"
-                            value={timetableForm.start_time}
-                            onChange={(e) => setTimetableForm((f) => ({ ...f, start_time: e.target.value }))}
-                            className="rounded border border-slate-200 bg-white px-2 py-1.5 text-xs"
-                          />
-                        </div>
-                        <div>
-                          <label className="mb-1 block text-xs font-medium text-slate-600">Every N weeks</label>
-                          <select
-                            value={timetableForm.interval_weeks}
-                            onChange={(e) =>
-                              setTimetableForm((f) => ({ ...f, interval_weeks: parseInt(e.target.value, 10) || 1 }))
-                            }
-                            className="rounded border border-slate-200 bg-white px-2 py-1.5 text-xs"
-                          >
-                            <option value={1}>Weekly</option>
-                            <option value={2}>Every 2 weeks</option>
-                            <option value={3}>Every 3 weeks</option>
-                            <option value={4}>Every 4 weeks</option>
-                          </select>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => void handleSaveTimetableEntry()}
-                          disabled={timetableSaving}
-                          className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-700 disabled:opacity-50"
-                        >
-                          {timetableSaving ? 'Adding…' : 'Add'}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setShowTimetableForm(null)}
-                          className="text-xs font-medium text-slate-500 hover:text-slate-700"
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    )}
-
-                    {expanded && (
-                      <div className="mt-4 space-y-4 rounded-lg border border-slate-100 bg-slate-50/50 p-4 pl-6">
-                        <div>
-                          <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                            One-off session
-                          </h4>
-                          <p className="mb-2 text-xs text-slate-500">
-                            Adds a single dated session for this class (no weekly rule). Use for extras or special dates.
-                          </p>
-                          <div className="flex flex-wrap items-end gap-2">
-                            <div>
-                              <label className="mb-1 block text-xs text-slate-600">Date</label>
-                              <input
-                                type="date"
-                                value={getOneOffDefaults(ct.id).date}
-                                onChange={(e) => setOneOffField(ct.id, { date: e.target.value })}
-                                className="rounded border border-slate-200 bg-white px-2 py-1.5 text-xs"
-                              />
-                            </div>
-                            <div>
-                              <label className="mb-1 block text-xs text-slate-600">Start</label>
-                              <input
-                                type="time"
-                                value={getOneOffDefaults(ct.id).time}
-                                onChange={(e) => setOneOffField(ct.id, { time: e.target.value })}
-                                className="rounded border border-slate-200 bg-white px-2 py-1.5 text-xs"
-                              />
-                            </div>
-                            <div>
-                              <label className="mb-1 block text-xs text-slate-600">Capacity override</label>
-                              <input
-                                type="number"
-                                min={1}
-                                placeholder="optional"
-                                value={getOneOffDefaults(ct.id).capacity}
-                                onChange={(e) => setOneOffField(ct.id, { capacity: e.target.value })}
-                                className="w-24 rounded border border-slate-200 bg-white px-2 py-1.5 text-xs"
-                              />
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => void handleAddOneOffInstance(ct.id)}
-                              disabled={oneOffSaving}
-                              className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-700 disabled:opacity-50"
-                            >
-                              {oneOffSaving ? 'Adding…' : 'Add one-off'}
-                            </button>
-                          </div>
-                        </div>
-                        <div>
-                          <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                            Upcoming sessions for this class
-                          </h4>
-                          <ul className="max-h-40 space-y-1 overflow-y-auto text-xs text-slate-600">
-                            {instancesForType(ct.id).slice(0, 20).map((inst) => {
-                              const cap = inst.capacity_override ?? ct.capacity;
-                              const booked = inst.booked_spots ?? 0;
-                              return (
-                                <li key={inst.id} className="flex flex-wrap items-center justify-between gap-2">
-                                  <span>
-                                    {inst.instance_date} {inst.start_time.slice(0, 5)}
-                                    {inst.is_cancelled ? (
-                                      <span className="font-medium text-red-600"> (cancelled)</span>
-                                    ) : (
-                                      ` · ${booked}/${cap} booked`
-                                    )}
-                                  </span>
-                                  <button
-                                    type="button"
-                                    onClick={() => openEditInstance(inst)}
-                                    className="text-brand-600 hover:underline"
-                                  >
-                                    Edit
-                                  </button>
-                                </li>
-                              );
-                            })}
-                            {instancesForType(ct.id).length === 0 && (
-                              <li className="text-slate-400">No upcoming instances — add a weekly rule and generate.</li>
-                            )}
-                          </ul>
-                        </div>
-                      </div>
-                    )}
                   </div>
                 );
               })}
@@ -956,17 +866,61 @@ export function ClassTimetableView({
                     className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
                   />
                 </div>
-                <div className="flex items-center gap-2 pt-6">
-                  <input
-                    id="ct-pay"
-                    type="checkbox"
-                    checked={classTypeForm.requires_online_payment}
-                    onChange={(e) => setClassTypeForm((f) => ({ ...f, requires_online_payment: e.target.checked }))}
-                    className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
-                  />
-                  <label htmlFor="ct-pay" className="text-sm text-slate-700">
-                    Require online payment when price is set (Stripe)
-                  </label>
+                <div className="sm:col-span-2">
+                  <label className="mb-2 block text-xs font-medium text-slate-600">Online payment (Stripe)</label>
+                  <div className="space-y-2">
+                    <label className="flex cursor-pointer items-start gap-2 text-sm text-slate-700">
+                      <input
+                        type="radio"
+                        name="payment_requirement"
+                        className="mt-0.5"
+                        checked={classTypeForm.payment_requirement === 'none'}
+                        onChange={() =>
+                          setClassTypeForm((f) => ({ ...f, payment_requirement: 'none', deposit_pounds: '' }))
+                        }
+                      />
+                      <span>None - pay at venue or free class</span>
+                    </label>
+                    <label className="flex cursor-pointer items-start gap-2 text-sm text-slate-700">
+                      <input
+                        type="radio"
+                        name="payment_requirement"
+                        className="mt-0.5"
+                        checked={classTypeForm.payment_requirement === 'deposit'}
+                        onChange={() => setClassTypeForm((f) => ({ ...f, payment_requirement: 'deposit' }))}
+                      />
+                      <span>Deposit per person (partial payment online)</span>
+                    </label>
+                    <label className="flex cursor-pointer items-start gap-2 text-sm text-slate-700">
+                      <input
+                        type="radio"
+                        name="payment_requirement"
+                        className="mt-0.5"
+                        checked={classTypeForm.payment_requirement === 'full_payment'}
+                        onChange={() =>
+                          setClassTypeForm((f) => ({ ...f, payment_requirement: 'full_payment', deposit_pounds: '' }))
+                        }
+                      />
+                      <span>Full payment online (per person)</span>
+                    </label>
+                  </div>
+                  {classTypeForm.payment_requirement === 'deposit' && (
+                    <div className="mt-3 max-w-xs">
+                      <label className="mb-1 block text-xs font-medium text-slate-600">Deposit amount ({sym}) *</label>
+                      <input
+                        type="number"
+                        min={0}
+                        step={0.01}
+                        value={classTypeForm.deposit_pounds}
+                        onChange={(e) => setClassTypeForm((f) => ({ ...f, deposit_pounds: e.target.value }))}
+                        placeholder="e.g. 5.00"
+                        className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
+                      />
+                    </div>
+                  )}
+                  <p className="mt-2 text-xs text-slate-500">
+                    Deposit and full payment require a price per person and a connected Stripe account.
+                  </p>
                 </div>
                 <div className="sm:col-span-2">
                   <label className="mb-1 block text-xs font-medium text-slate-600">Instructor</label>
@@ -976,14 +930,30 @@ export function ClassTimetableView({
                       onChange={(e) =>
                         setClassTypeForm((f) => ({ ...f, instructor_staff_id: e.target.value, instructor_custom_name: '' }))
                       }
-                      className="w-full max-w-xs rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                      className="w-full max-w-md rounded-lg border border-slate-200 px-3 py-2 text-sm"
                     >
-                      <option value="">— No team member</option>
-                      {practitioners.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.name}
-                        </option>
-                      ))}
+                      <option value="">- No team member</option>
+                      {unifiedCalendars.length > 0 && (
+                        <optgroup label="Calendars (staff)">
+                          {unifiedCalendars.map((c) => (
+                            <option key={c.id} value={c.id}>
+                              {c.name}
+                            </option>
+                          ))}
+                        </optgroup>
+                      )}
+                      {practitioners.length > 0 && (
+                        <optgroup label="Practitioners (legacy)">
+                          {practitioners.map((p) => (
+                            <option key={p.id} value={p.id}>
+                              {p.name}
+                            </option>
+                          ))}
+                        </optgroup>
+                      )}
+                      {orphanInstructorOption && (
+                        <option value={orphanInstructorOption.id}>{orphanInstructorOption.label}</option>
+                      )}
                     </select>
                     <span className="text-xs text-slate-500">or custom label</span>
                     <input
@@ -997,7 +967,10 @@ export function ClassTimetableView({
                       className="w-full flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm disabled:bg-slate-100"
                     />
                   </div>
-                  <p className="mt-1 text-xs text-slate-500">Leave both empty if the instructor is not listed yet.</p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Pick a bookable calendar to match this class to a team member (same names as on your appointment
+                    calendars), or enter a custom label. Leave both empty if unknown.
+                  </p>
                 </div>
                 <div>
                   <label className="mb-1 block text-xs font-medium text-slate-600">Colour</label>
@@ -1061,53 +1034,24 @@ export function ClassTimetableView({
         )
       ) : (
         <div className="space-y-6">
-          <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-slate-100">
-                  {DAY_LABELS.map((day, i) => (
-                    <th key={i} className="px-4 py-3 text-left font-medium text-slate-600">
-                      {day}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  {DAY_LABELS.map((_, dow) => {
-                    const entries = timetable
-                      .filter((e) => e.day_of_week === dow && e.is_active)
-                      .sort((a, b) => a.start_time.localeCompare(b.start_time));
-                    return (
-                      <td key={dow} className="align-top border-r border-slate-50 px-3 py-3 last:border-r-0">
-                        <div className="min-h-[80px] space-y-2">
-                          {entries.map((entry) => {
-                            const ct = typeMap.get(entry.class_type_id);
-                            return (
-                              <div
-                                key={entry.id}
-                                className="rounded-lg px-3 py-2 text-xs"
-                                style={{
-                                  backgroundColor: ct?.colour ? `${ct.colour}20` : '#f1f5f9',
-                                  borderLeft: `3px solid ${ct?.colour ?? '#94a3b8'}`,
-                                }}
-                              >
-                                <div className="font-medium" style={{ color: ct?.colour ?? '#475569' }}>
-                                  {ct?.name ?? 'Unknown'}
-                                </div>
-                                <div className="text-slate-500">{entry.start_time.slice(0, 5)}</div>
-                              </div>
-                            );
-                          })}
-                          {entries.length === 0 && <div className="text-xs text-slate-300">—</div>}
-                        </div>
-                      </td>
-                    );
-                  })}
-                </tr>
-              </tbody>
-            </table>
-          </div>
+          <ClassTimetableReadOnlyCalendar
+            classTypes={classTypes.map((ct) => ({
+              id: ct.id,
+              name: ct.name,
+              colour: ct.colour ?? '#6366f1',
+            }))}
+            instances={instances}
+            isAdmin={isAdmin}
+            onEditInstance={
+              isAdmin
+                ? (ro) => {
+                    const full = instances.find((i) => i.id === ro.id);
+                    if (full) openEditInstance(full);
+                  }
+                : undefined
+            }
+            onOpenSchedule={isAdmin ? () => setScheduleModalOpen(true) : undefined}
+          />
 
           {instances.length > 0 && (
             <section>
@@ -1139,13 +1083,23 @@ export function ClassTimetableView({
                         )}
                       </button>
                       {isAdmin && (
-                        <button
-                          type="button"
-                          onClick={() => openEditInstance(inst)}
-                          className="text-xs font-medium text-brand-600 hover:text-brand-800"
-                        >
-                          Edit
-                        </button>
+                        <span className="flex gap-3">
+                          <button
+                            type="button"
+                            onClick={() => openEditInstance(inst)}
+                            className="text-xs font-medium text-brand-600 hover:text-brand-800"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void handleDeleteInstance(inst)}
+                            disabled={instanceDeletingId === inst.id}
+                            className="text-xs font-medium text-red-600 hover:text-red-800 disabled:opacity-50"
+                          >
+                            {instanceDeletingId === inst.id ? 'Removing…' : 'Remove'}
+                          </button>
+                        </span>
                       )}
                     </div>
                   );
@@ -1154,6 +1108,24 @@ export function ClassTimetableView({
             </section>
           )}
         </div>
+      )}
+
+      {scheduleModalOpen && classTypes.length > 0 && (
+        <ClassScheduleModal
+          open={scheduleModalOpen}
+          onClose={() => setScheduleModalOpen(false)}
+          classTypes={classTypes.map((ct) => ({
+            id: ct.id,
+            name: ct.name,
+            colour: ct.colour ?? '#6366f1',
+            capacity: ct.capacity,
+          }))}
+          instances={instances}
+          onRefresh={refreshClassData}
+          onInstanceRemoved={removeInstanceFromList}
+          setNotice={setNotice}
+          openEditInstance={openEditInstance}
+        />
       )}
 
       {editingTimetable && (
@@ -1197,6 +1169,67 @@ export function ClassTimetableView({
                   <option value={4}>Every 4 weeks</option>
                 </select>
               </div>
+              <div>
+                <label className="mb-2 block text-xs font-medium text-slate-600">End recurrence (optional)</label>
+                <div className="space-y-2 text-sm text-slate-700">
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="radio"
+                      name="edit-tt-end"
+                      checked={timetableForm.end_condition === 'never'}
+                      onChange={() =>
+                        setTimetableForm((f) => ({
+                          ...f,
+                          end_condition: 'never',
+                          recurrence_end_date: '',
+                          total_occurrences: '',
+                        }))
+                      }
+                    />
+                    Ongoing (no end)
+                  </label>
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="radio"
+                      name="edit-tt-end"
+                      checked={timetableForm.end_condition === 'until'}
+                      onChange={() => setTimetableForm((f) => ({ ...f, end_condition: 'until' }))}
+                    />
+                    Until a fixed date
+                  </label>
+                  {timetableForm.end_condition === 'until' && (
+                    <input
+                      type="date"
+                      value={timetableForm.recurrence_end_date}
+                      onChange={(e) =>
+                        setTimetableForm((f) => ({ ...f, recurrence_end_date: e.target.value }))
+                      }
+                      className="ml-6 w-full max-w-xs rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                    />
+                  )}
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="radio"
+                      name="edit-tt-end"
+                      checked={timetableForm.end_condition === 'count'}
+                      onChange={() => setTimetableForm((f) => ({ ...f, end_condition: 'count' }))}
+                    />
+                    After N generated sessions
+                  </label>
+                  {timetableForm.end_condition === 'count' && (
+                    <input
+                      type="number"
+                      min={1}
+                      placeholder="e.g. 12"
+                      value={timetableForm.total_occurrences}
+                      onChange={(e) =>
+                        setTimetableForm((f) => ({ ...f, total_occurrences: e.target.value }))
+                      }
+                      className="ml-6 w-full max-w-xs rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                    />
+                  )}
+                </div>
+              </div>
             </div>
             <div className="mt-6 flex justify-end gap-2">
               <button
@@ -1222,8 +1255,13 @@ export function ClassTimetableView({
       {editingInstance && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-6 shadow-xl">
-            <h3 className="mb-4 text-lg font-semibold text-slate-900">Edit session</h3>
-            <div className="space-y-3">
+            <h3 className="text-lg font-semibold text-slate-900">Edit session</h3>
+            {typeMap.get(editingInstance.class_type_id)?.name ? (
+              <p className="mt-1 text-base font-medium text-slate-800">
+                {typeMap.get(editingInstance.class_type_id)?.name}
+              </p>
+            ) : null}
+            <div className="mt-4 space-y-3">
               <div>
                 <label className="mb-1 block text-xs font-medium text-slate-600">Date</label>
                 <input
@@ -1253,22 +1291,34 @@ export function ClassTimetableView({
                 />
               </div>
             </div>
-            <div className="mt-6 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setEditingInstance(null)}
-                className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={() => void handleSaveInstanceEdit()}
-                disabled={patchSaving}
-                className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
-              >
-                {patchSaving ? 'Saving…' : 'Save'}
-              </button>
+            <div className="mt-6 flex flex-wrap items-center justify-between gap-2">
+              {isAdmin && editingInstance && (
+                <button
+                  type="button"
+                  onClick={() => void handleDeleteInstance(editingInstance)}
+                  disabled={instanceDeletingId === editingInstance.id || patchSaving}
+                  className="rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-medium text-red-800 hover:bg-red-100 disabled:opacity-50"
+                >
+                  {instanceDeletingId === editingInstance.id ? 'Removing…' : 'Remove from calendar'}
+                </button>
+              )}
+              <div className="ml-auto flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingInstance(null)}
+                  className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleSaveInstanceEdit()}
+                  disabled={patchSaving}
+                  className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
+                >
+                  {patchSaving ? 'Saving…' : 'Save'}
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -1335,21 +1385,21 @@ export function ClassTimetableView({
                     <tbody>
                       {attendees.map((a) => (
                         <tr key={a.booking_id} className="border-b border-slate-100">
-                          <td className="py-2 pr-3 text-slate-800">{a.guest_name ?? '—'}</td>
+                          <td className="py-2 pr-3 text-slate-800">{a.guest_name ?? '-'}</td>
                           <td className="py-2 pr-3 text-slate-600">
-                            <div className="max-w-[200px] truncate">{a.guest_email ?? '—'}</div>
+                            <div className="max-w-[200px] truncate">{a.guest_email ?? '-'}</div>
                             <div className="text-xs text-slate-500">{a.guest_phone ?? ''}</div>
                           </td>
                           <td className="py-2 pr-3">{a.party_size}</td>
                           <td className="py-2 pr-3">{a.status}</td>
                           <td className="py-2 pr-3">
-                            {a.deposit_amount_pence != null ? formatPrice(a.deposit_amount_pence) : '—'}
+                            {a.deposit_amount_pence != null ? formatPrice(a.deposit_amount_pence) : '-'}
                             {a.deposit_status ? (
                               <span className="ml-1 text-xs text-slate-500">({a.deposit_status})</span>
                             ) : null}
                           </td>
                           <td className="py-2 text-slate-600">
-                            {a.checked_in_at ? new Date(a.checked_in_at).toLocaleString('en-GB') : '—'}
+                            {a.checked_in_at ? new Date(a.checked_in_at).toLocaleString('en-GB') : '-'}
                           </td>
                         </tr>
                       ))}

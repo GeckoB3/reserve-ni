@@ -1,14 +1,14 @@
-# Cursor Prompt — ReserveNI Homepage Contact Form
+# Cursor Prompt - ReserveNI Homepage Contact Form
 
 ## Context
 
 ReserveNI is a Next.js App Router project deployed on Vercel. It uses Supabase for auth/database, Stripe Connect for payments, Twilio for SMS, and **SendGrid for email** (already configured and authenticated with domain `reserveni.com`). Styling uses the existing project conventions (check for Tailwind). The primary brand colour is `#4E6B78`.
 
-The SendGrid API key is already available as `SENDGRID_API_KEY` in the environment variables. The `@sendgrid/mail` package should already be installed — confirm this in `package.json` before proceeding. If it is not installed, install it.
+The SendGrid API key is already available as `SENDGRID_API_KEY` in the environment variables. The `@sendgrid/mail` package should already be installed - confirm this in `package.json` before proceeding. If it is not installed, install it.
 
 ## Objective
 
-Add a contact form section directly on the **homepage** so prospective restaurant owners can get in touch. When submitted, the form data should be emailed to **andrew@reserveni.com** via SendGrid. There is **no need** to store submissions in Supabase — just send the email.
+Add a contact form section directly on the **homepage** so prospective restaurant owners can get in touch. When submitted, the form data should be emailed to **andrew@reserveni.com** via SendGrid. There is **no need** to store submissions in Supabase - just send the email.
 
 ---
 
@@ -29,26 +29,26 @@ Create a POST-only API route that:
   - `email` must be a valid email format.
   - `phone`, if provided, must match a reasonable phone pattern (digits, spaces, `+`, `-`, parentheses, 7–20 chars).
   - `message`, if provided, must be under 2000 characters.
-- Checks for a **honeypot field** called `company_website` — if it has a value, return a 200 success response silently (don't actually send anything). This catches bots.
-- Sends a **notification email** to `andrew@reserveni.com` via SendGrid containing all the submitted fields in a clean, readable HTML format. Use `hello@reserveni.com` as the sender with display name `ReserveNI`. The subject line should be: `New enquiry from {name}` — and if `restaurantName` is provided, append it: `New enquiry from {name} ({restaurantName})`.
+- Checks for a **honeypot field** called `company_website` - if it has a value, return a 200 success response silently (don't actually send anything). This catches bots.
+- Sends a **notification email** to `andrew@reserveni.com` via SendGrid containing all the submitted fields in a clean, readable HTML format. Use `hello@reserveni.com` as the sender with display name `ReserveNI`. The subject line should be: `New enquiry from {name}` - and if `restaurantName` is provided, append it: `New enquiry from {name} ({restaurantName})`.
 - Sends a **confirmation email** to the person who submitted the form. Keep it short and warm:
   - Subject: `Thanks for your interest in ReserveNI`
   - Body: Thank them by name, tell them you've received their enquiry and will be in touch shortly. Sign off as "The ReserveNI Team".
   - Sender: `hello@reserveni.com` with display name `ReserveNI`.
 - Returns `{ success: true }` on success, or `{ success: false, error: "message" }` on validation failure (400) or server error (500).
-- Wraps each SendGrid call in its own try/catch — a failure to send the confirmation email should NOT prevent the notification email from being sent or cause the request to fail.
+- Wraps each SendGrid call in its own try/catch - a failure to send the confirmation email should NOT prevent the notification email from being sent or cause the request to fail.
 
 ### 2. Contact Form Component: `src/components/ContactForm.tsx`
 
 Create a `'use client'` component with:
 
 - A form with the following fields:
-  - **Name** — text input, required
-  - **Email** — email input, required
-  - **Phone** — tel input, optional
-  - **Restaurant Name** — text input, optional
-  - **Message** — textarea (4 rows), optional, with a 2000-character maxLength
-- A **hidden honeypot field** named `company_website` — hidden via CSS (`className="hidden"`), with `tabIndex={-1}` and `autoComplete="off"` and `aria-hidden="true"`. This should be included in the submitted data but never visible to real users.
+  - **Name** - text input, required
+  - **Email** - email input, required
+  - **Phone** - tel input, optional
+  - **Restaurant Name** - text input, optional
+  - **Message** - textarea (4 rows), optional, with a 2000-character maxLength
+- A **hidden honeypot field** named `company_website` - hidden via CSS (`className="hidden"`), with `tabIndex={-1}` and `autoComplete="off"` and `aria-hidden="true"`. This should be included in the submitted data but never visible to real users.
 - State management using `useState`:
   - `formData` object for all field values
   - `status`: `'idle' | 'submitting' | 'success' | 'error'`
@@ -74,7 +74,7 @@ Create a `'use client'` component with:
 Find the homepage file (likely `src/app/page.tsx` or similar) and add a contact section. Place it **near the bottom of the page, above the footer** as a distinct section.
 
 - Give the section an `id="contact"` anchor so it can be linked to from elsewhere on the page (e.g. nav links, CTA buttons).
-- Add a heading: "Get in Touch" (or similar — match the tone of the rest of the page).
+- Add a heading: "Get in Touch" (or similar - match the tone of the rest of the page).
 - Add a short subheading below it, e.g.: "Whether you're ready to get started or just want to learn more, we'd love to hear from you."
 - Import and render the `<ContactForm />` component below the subheading.
 - Style the section with appropriate padding and a subtle background colour to visually separate it from adjacent sections. Match the existing page's section styling.
@@ -84,7 +84,7 @@ Find the homepage file (likely `src/app/page.tsx` or similar) and add a contact 
 
 ## Important Notes
 
-- **Do NOT create a Supabase table** for contact submissions. This is intentionally kept simple — just email.
+- **Do NOT create a Supabase table** for contact submissions. This is intentionally kept simple - just email.
 - **Do NOT create a separate `/contact` page.** The form lives directly on the homepage.
 - Ensure `hello@reserveni.com` is set up as a verified sender in SendGrid. If the project already uses a different verified sender address for SendGrid, use that instead and note it.
 - Look at how SendGrid is used elsewhere in the project (e.g. the communications engine) and follow the same import/configuration patterns for consistency.
@@ -96,10 +96,10 @@ Find the homepage file (likely `src/app/page.tsx` or similar) and add a contact 
 
 After building, verify:
 
-1. Submit the form with all fields filled — confirm the notification email arrives at andrew@reserveni.com and the confirmation email arrives at the submitted address.
-2. Submit with only the required fields (name + email) — confirm it works.
-3. Submit with invalid email — confirm a validation error is shown.
-4. Submit with an empty name — confirm a validation error is shown.
+1. Submit the form with all fields filled - confirm the notification email arrives at andrew@reserveni.com and the confirmation email arrives at the submitted address.
+2. Submit with only the required fields (name + email) - confirm it works.
+3. Submit with invalid email - confirm a validation error is shown.
+4. Submit with an empty name - confirm a validation error is shown.
 5. After a successful submission, confirm the form is replaced with the thank-you message.
 6. Check the form looks correct on mobile viewports.
 7. If a hero CTA was updated to `#contact`, confirm it scrolls to the form.

@@ -4,7 +4,7 @@ import { getVenueStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 
 /**
- * GET /api/venue/class-instances/[id] — single instance with class type (venue-scoped).
+ * GET /api/venue/class-instances/[id] - single instance with class type (venue-scoped).
  */
 export async function GET(
   _request: NextRequest,

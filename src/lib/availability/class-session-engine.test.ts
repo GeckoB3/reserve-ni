@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { computeClassAvailability } from './class-session-engine';
+import {
+  computeClassAvailability,
+  isClassInstanceBookableForGuest,
+  resolveClassPaymentRequirement,
+} from './class-session-engine';
 import type { ClassInstance, ClassType } from '@/types/booking-models';
 
 const baseType = (overrides: Partial<ClassType> = {}): ClassType => ({
@@ -14,7 +18,8 @@ const baseType = (overrides: Partial<ClassType> = {}): ClassType => ({
   price_pence: 500,
   instructor_id: null,
   instructor_name: null,
-  requires_online_payment: true,
+  payment_requirement: 'full_payment',
+  deposit_amount_pence: null,
   created_at: '2026-01-01T00:00:00Z',
   ...overrides,
 });
@@ -32,9 +37,31 @@ const baseInstance = (overrides: Partial<ClassInstance> = {}): ClassInstance => 
   ...overrides,
 });
 
+describe('resolveClassPaymentRequirement', () => {
+  it('prefers explicit payment_requirement', () => {
+    expect(resolveClassPaymentRequirement(baseType({ payment_requirement: 'none' }))).toBe('none');
+  });
+
+  it('maps legacy requires_online_payment false to none', () => {
+    expect(
+      resolveClassPaymentRequirement(
+        baseType({ payment_requirement: undefined, requires_online_payment: false, price_pence: 500 }),
+      ),
+    ).toBe('none');
+  });
+
+  it('maps legacy missing flag with price to full_payment', () => {
+    expect(
+      resolveClassPaymentRequirement(
+        baseType({ payment_requirement: undefined, requires_online_payment: undefined, price_pence: 500 }),
+      ),
+    ).toBe('full_payment');
+  });
+});
+
 describe('computeClassAvailability', () => {
-  it('sets requires_online_payment true when class type omits the flag (legacy rows)', () => {
-    const t = baseType({ requires_online_payment: undefined });
+  it('sets requires_stripe_checkout for full_payment with price', () => {
+    const t = baseType({ payment_requirement: 'full_payment', price_pence: 500 });
     const slots = computeClassAvailability({
       date: '2026-04-10',
       classTypes: [t],
@@ -42,17 +69,58 @@ describe('computeClassAvailability', () => {
       bookedByInstance: {},
     });
     expect(slots).toHaveLength(1);
-    expect(slots[0]?.requires_online_payment).toBe(true);
+    expect(slots[0]?.requires_stripe_checkout).toBe(true);
+    expect(slots[0]?.payment_requirement).toBe('full_payment');
   });
 
-  it('sets requires_online_payment false when class type disables online payment', () => {
-    const t = baseType({ requires_online_payment: false });
+  it('skips Stripe for none with list price', () => {
+    const t = baseType({ payment_requirement: 'none', price_pence: 500 });
     const slots = computeClassAvailability({
       date: '2026-04-10',
       classTypes: [t],
       instances: [baseInstance()],
       bookedByInstance: {},
     });
-    expect(slots[0]?.requires_online_payment).toBe(false);
+    expect(slots[0]?.requires_stripe_checkout).toBe(false);
+  });
+
+  it('excludes instances inside guest min-notice window', () => {
+    const t = baseType();
+    const inst = baseInstance({ instance_date: '2026-06-15', start_time: '14:00:00' });
+    const ref = Date.parse('2026-06-15T13:30:00.000Z');
+    const window = {
+      minNoticeHours: 1,
+      venueTimezone: 'Etc/UTC',
+      referenceNowMs: ref,
+    };
+    expect(isClassInstanceBookableForGuest(inst, window)).toBe(false);
+    const slots = computeClassAvailability({
+      date: '2026-06-15',
+      classTypes: [t],
+      instances: [inst],
+      bookedByInstance: {},
+      guestBookingWindow: window,
+    });
+    expect(slots).toHaveLength(0);
+  });
+
+  it('includes instances after guest min-notice window', () => {
+    const t = baseType();
+    const inst = baseInstance({ instance_date: '2026-06-15', start_time: '18:00:00' });
+    const ref = Date.parse('2026-06-15T09:00:00.000Z');
+    const window = {
+      minNoticeHours: 2,
+      venueTimezone: 'Etc/UTC',
+      referenceNowMs: ref,
+    };
+    expect(isClassInstanceBookableForGuest(inst, window)).toBe(true);
+    const slots = computeClassAvailability({
+      date: '2026-06-15',
+      classTypes: [t],
+      instances: [inst],
+      bookedByInstance: {},
+      guestBookingWindow: window,
+    });
+    expect(slots).toHaveLength(1);
   });
 });

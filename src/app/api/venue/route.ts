@@ -25,7 +25,7 @@ const venueProfileSchema = z.object({
   enabled_models: z.array(z.string()).optional(),
 }).refine((data) => Object.keys(data).filter((k) => data[k as keyof typeof data] !== undefined).length > 0, { message: 'At least one field required' });
 
-/** GET /api/venue — return the authenticated user's venue profile. */
+/** GET /api/venue - return the authenticated user's venue profile. */
 export async function GET() {
   try {
     const supabase = await createClient();
@@ -73,7 +73,7 @@ export async function GET() {
   }
 }
 
-/** PATCH /api/venue — update venue profile (admin only). */
+/** PATCH /api/venue - update venue profile (admin only). */
 export async function PATCH(request: NextRequest) {
   try {
     const supabase = await createClient();

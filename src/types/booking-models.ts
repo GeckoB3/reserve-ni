@@ -77,7 +77,7 @@ export interface Practitioner {
   parallel_clients?: number;
 }
 
-/** Dated time off (annual / sick) — stored in `practitioner_leave_periods`. */
+/** Dated time off (annual / sick) - stored in `practitioner_leave_periods`. */
 export type PractitionerLeaveType = 'annual' | 'sick' | 'other';
 
 export interface PractitionerLeavePeriod {
@@ -163,6 +163,9 @@ export interface EventTicketType {
 // Model D: Class / group session
 // ---------------------------------------------------------------------------
 
+/** Stored as Postgres enum `class_payment_requirement`. */
+export type ClassPaymentRequirement = 'none' | 'deposit' | 'full_payment';
+
 export interface ClassType {
   id: string;
   venue_id: string;
@@ -174,7 +177,11 @@ export interface ClassType {
   /** Guest-facing label when no FK or as display override. */
   instructor_name: string | null;
   price_pence: number | null;
-  /** When false, booking flow skips online payment even if price_pence is set. */
+  /** Replaces legacy requires_online_payment boolean. */
+  payment_requirement?: ClassPaymentRequirement;
+  /** Per-person deposit when payment_requirement is deposit; must be <= price_pence. */
+  deposit_amount_pence?: number | null;
+  /** @deprecated Use payment_requirement; kept for older API responses until fully migrated. */
   requires_online_payment?: boolean;
   colour: string;
   is_active: boolean;
@@ -187,6 +194,12 @@ export interface ClassTimetableEntry {
   day_of_week: number; // 0=Sun, 6=Sat
   start_time: string;  // "HH:mm"
   is_active: boolean;
+  /** Repeat every N weeks (1 = weekly, 2 = bi-weekly). */
+  interval_weeks?: number;
+  /** weekly | custom_interval (uses interval_weeks). */
+  recurrence_type?: string;
+  recurrence_end_date?: string | null;
+  total_occurrences?: number | null;
 }
 
 export interface ClassInstance {

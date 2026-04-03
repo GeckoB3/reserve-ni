@@ -54,7 +54,7 @@ interface DetailsStepProps {
   onBack: () => void;
   requiresDeposit?: boolean;
   depositPerPerson?: number;
-  variant?: 'restaurant' | 'appointment';
+  variant?: 'restaurant' | 'appointment' | 'class';
   appointmentDepositPence?: number | null;
   currencySymbol?: string;
   refundNoticeHours?: number;
@@ -98,8 +98,10 @@ export function DetailsStep({
 
   const dateStr = formatDate(date);
   const isAppointment = variant === 'appointment';
+  const isClass = variant === 'class';
+  const useAppointmentFields = isAppointment || isClass;
   const depositPence = appointmentDepositPence ?? 0;
-  const hasDeposit = isAppointment && depositPence > 0;
+  const hasDeposit = useAppointmentFields && depositPence > 0;
 
   const refundClassification = (() => {
     if (!hasDeposit || !slot.start_time) return null;
@@ -134,7 +136,7 @@ export function DetailsStep({
         </div>
       </div>
 
-      {isAppointment && (
+      {useAppointmentFields && (
         <div
           className={`rounded-xl border px-4 py-3 ${
             hasDeposit ? 'border-amber-200 bg-amber-50' : 'border-slate-200 bg-slate-50'
@@ -147,7 +149,9 @@ export function DetailsStep({
               <p className="text-sm font-medium text-amber-900">
                 Deposit: {currencySymbol}
                 {(depositPence / 100).toFixed(2)}
-                {partySize > 1 ? ` (total for ${partySize} appointments)` : ''}
+                {partySize > 1
+                  ? ` (total for ${partySize} ${isClass ? 'spots' : 'appointments'})`
+                  : ''}
               </p>
               {partySize <= 1 && refundDeadlineLabel && refundClassification && (
                 <>
@@ -157,7 +161,7 @@ export function DetailsStep({
                     </p>
                   ) : (
                     <p className="text-sm text-amber-900">
-                      Refund cut-off was <span className="font-semibold">{refundDeadlineLabel}</span> ({refundNoticeHours}h before start). That time has passed —
+                      Refund cut-off was <span className="font-semibold">{refundDeadlineLabel}</span> ({refundNoticeHours}h before start). That time has passed -
                       this deposit is not refundable if you cancel.
                     </p>
                   )}
@@ -172,12 +176,12 @@ export function DetailsStep({
                   )}
                   {refundClassification.groupClass === 'none_refundable' && (
                     <p className="text-sm text-amber-900">
-                      Refund cut-off has passed for at least one appointment — the matching share of this deposit isn&apos;t refundable if you cancel.
+                      Refund cut-off has passed for at least one appointment - the matching share of this deposit isn&apos;t refundable if you cancel.
                     </p>
                   )}
                   {refundClassification.groupClass === 'mixed' && (
                     <p className="text-sm text-amber-900">
-                      Rules apply per appointment (≥{refundNoticeHours}h before start). Cut-off has passed for some slots — those shares aren&apos;t refundable.
+                      Rules apply per appointment (≥{refundNoticeHours}h before start). Cut-off has passed for some slots - those shares aren&apos;t refundable.
                     </p>
                   )}
                 </>
@@ -212,10 +216,10 @@ export function DetailsStep({
             name: d.name,
             email: d.email || '',
             phone: normalizeToE164(d.phone, phoneDefaultCountry) ?? d.phone,
-            dietary_notes: isAppointment
+            dietary_notes: useAppointmentFields
               ? (d.comments_requests?.trim() ? d.comments_requests.trim() : undefined)
               : (d.dietary_notes?.trim() ? d.dietary_notes.trim() : undefined),
-            occasion: isAppointment ? undefined : (d.occasion?.trim() ? d.occasion.trim() : undefined),
+            occasion: useAppointmentFields ? undefined : (d.occasion?.trim() ? d.occasion.trim() : undefined),
           }),
         )}
         className="space-y-4"
@@ -245,7 +249,7 @@ export function DetailsStep({
           />
         </FormField>
 
-        {!isAppointment && (
+        {!useAppointmentFields && (
           <>
             <FormField label="Dietary notes" error={errors.dietary_notes?.message}>
               <textarea {...register('dietary_notes')} rows={2} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm placeholder:text-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500" placeholder="Allergies, vegetarian, etc." />
@@ -268,6 +272,17 @@ export function DetailsStep({
           </FormField>
         )}
 
+        {isClass && (
+          <FormField label="Notes" error={errors.comments_requests?.message}>
+            <textarea
+              {...register('comments_requests')}
+              rows={3}
+              className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm placeholder:text-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+              placeholder="Any requirements, injuries, or things we should know?"
+            />
+          </FormField>
+        )}
+
         <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 bg-slate-50/50 px-4 py-3">
           <input type="checkbox" {...register('acceptTerms')} className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500" />
           <span className="text-sm text-slate-600">
@@ -286,9 +301,9 @@ export function DetailsStep({
         >
           {isSubmitting
             ? 'Processing...'
-            : isAppointment && hasDeposit
+            : (isAppointment || isClass) && hasDeposit
               ? 'Continue to payment'
-              : !isAppointment && requiresDeposit
+              : !useAppointmentFields && requiresDeposit
                 ? 'Continue to Payment'
                 : 'Confirm Booking'}
         </button>

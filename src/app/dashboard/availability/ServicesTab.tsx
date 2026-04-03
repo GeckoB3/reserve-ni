@@ -52,7 +52,7 @@ export function ServicesTab({ services, setServices, showToast }: Props) {
       setCreating(false);
       setDraft(emptyService());
       if (data.overlapWarnings?.length > 0) {
-        showToast(`Service created — Warning: ${data.overlapWarnings[0]}`);
+        showToast(`Service created - Warning: ${data.overlapWarnings[0]}`);
       } else {
         showToast('Service created');
       }
@@ -76,7 +76,7 @@ export function ServicesTab({ services, setServices, showToast }: Props) {
       setServices(services.map((s) => (s.id === service.id ? data.service : s)));
       setEditing(null);
       if (data.overlapWarnings?.length > 0) {
-        showToast(`Service updated — Warning: ${data.overlapWarnings[0]}`);
+        showToast(`Service updated - Warning: ${data.overlapWarnings[0]}`);
       } else {
         showToast('Service updated');
       }

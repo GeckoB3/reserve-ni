@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { requireVenueExposesSecondaryModel } from '@/lib/booking/require-venue-secondary-model';
+import { syncCalendarBlockForClassInstance } from '@/lib/class-instances/instructor-calendar-block';
 import { z } from 'zod';
 
 const createBodySchema = z.object({
@@ -13,7 +14,7 @@ const createBodySchema = z.object({
 });
 
 /**
- * POST /api/venue/class-instances — create a one-off class instance (no timetable entry).
+ * POST /api/venue/class-instances - create a one-off class instance (no timetable entry).
  */
 export async function POST(request: NextRequest) {
   try {
@@ -65,6 +66,16 @@ export async function POST(request: NextRequest) {
       console.error('POST /api/venue/class-instances failed:', error);
       return NextResponse.json({ error: 'Failed to create class instance' }, { status: 500 });
     }
+
+    await syncCalendarBlockForClassInstance(admin, {
+      venueId: staff.venue_id,
+      classInstanceId: row.id as string,
+      instanceDate: instance_date,
+      startTime: startNorm,
+      classTypeId: class_type_id,
+      skipBlock: false,
+      createdByStaffId: staff.id,
+    });
 
     return NextResponse.json(row, { status: 201 });
   } catch (err) {

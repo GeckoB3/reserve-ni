@@ -53,7 +53,7 @@ function PaymentForm({ clientSecret, onComplete, onBack }: { clientSecret: strin
         setLoading(false);
         return;
       }
-      // Payment succeeded without a redirect — advance to confirmation step.
+      // Payment succeeded without a redirect - advance to confirmation step.
       onComplete();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Payment failed');

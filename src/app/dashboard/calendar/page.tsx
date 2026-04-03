@@ -61,7 +61,7 @@ export default async function CalendarPage() {
   /**
    * Unified / practitioner primaries: full `PractitionerCalendarView` (appointments + merged C/D/E lanes).
    * Table + secondaries and other non-unified eligible venues: `StaffScheduleHub` (merged schedule API only;
-   * Model A stays on Day sheet / Floor plan — not in PractitionerCalendarView).
+   * Model A stays on Day sheet / Floor plan - not in PractitionerCalendarView).
    */
   return (
     <ToastProvider>

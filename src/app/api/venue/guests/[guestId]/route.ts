@@ -25,12 +25,12 @@ function bookingTimeShort(t: string | null | undefined): string {
 }
 
 function partySizeShort(ps: number | null): string {
-  if (ps == null || !Number.isFinite(ps)) return '—';
+  if (ps == null || !Number.isFinite(ps)) return '-';
   return String(ps);
 }
 
 /**
- * GET /api/venue/guests/[guestId] — guest profile, stats, recent bookings (admin only).
+ * GET /api/venue/guests/[guestId] - guest profile, stats, recent bookings (admin only).
  */
 export async function GET(
   _request: NextRequest,
@@ -224,7 +224,7 @@ export async function GET(
         detail_label = parts.length > 0 ? parts.join(' · ') : 'Appointment';
       } else {
         detail_label =
-          partySizeShort(row.party_size) === '—' ? 'Table reservation' : `Table · ${partySizeShort(row.party_size)} guests`;
+          partySizeShort(row.party_size) === '-' ? 'Table reservation' : `Table · ${partySizeShort(row.party_size)} guests`;
       }
 
       return {
@@ -276,7 +276,7 @@ export async function GET(
 }
 
 /**
- * PATCH /api/venue/guests/[guestId] — update guest (venue staff).
+ * PATCH /api/venue/guests/[guestId] - update guest (venue staff).
  */
 export async function PATCH(
   request: NextRequest,

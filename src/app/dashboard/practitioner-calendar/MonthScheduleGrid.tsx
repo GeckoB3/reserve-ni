@@ -10,8 +10,6 @@ interface Props {
   monthCells: string[];
   monthDayScheduleCounts: Record<string, MonthDayScheduleCounts>;
   showMergedFeeds: boolean;
-  /** Shown when practitioner filter is narrowed but C/D/E counts stay venue-wide. */
-  filterAlignmentNote?: string;
   onSelectDay: (isoDate: string) => void;
 }
 
@@ -23,7 +21,6 @@ export function MonthScheduleGrid({
   monthCells,
   monthDayScheduleCounts,
   showMergedFeeds,
-  filterAlignmentNote,
   onSelectDay,
 }: Props) {
   const maxTotalForIntensity = useMemo(() => {
@@ -35,9 +32,6 @@ export function MonthScheduleGrid({
 
   return (
     <div className="min-h-0 flex-1 overflow-auto rounded-xl border border-slate-200 bg-white p-4">
-      {filterAlignmentNote ? (
-        <p className="mb-3 text-xs text-slate-500">{filterAlignmentNote}</p>
-      ) : null}
       <div className="grid grid-cols-7 gap-1 text-center text-xs font-medium text-slate-500">
         {WEEK_SHORT.map((d) => (
           <div key={d} className="py-2">

@@ -219,7 +219,7 @@ describe('computeAppointmentAvailability', () => {
     const r = computeAppointmentAvailability(input);
     const inBlock = r.practitioners[0]?.slots.some((s) => s.start_time === '15:30');
     expect(inBlock).toBe(false);
-    // 14:30 + 30m ends at 15:00 (block start) — must not overlap closed interval
+    // 14:30 + 30m ends at 15:00 (block start) - must not overlap closed interval
     const beforeBlock = r.practitioners[0]?.slots.some((s) => s.start_time === '14:30');
     expect(beforeBlock).toBe(true);
   });

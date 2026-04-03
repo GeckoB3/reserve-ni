@@ -92,7 +92,7 @@ export function WidgetSection({ venueName, venueSlug, baseUrl }: WidgetSectionPr
           Copy code
         </button>
         <p className="mt-4 text-sm text-neutral-600">
-          <span className="font-medium text-neutral-800">Open a specific tab (embed matches /book)</span> — append{' '}
+          <span className="font-medium text-neutral-800">Open a specific tab (embed matches /book)</span> - append{' '}
           <code className="rounded bg-neutral-100 px-1 py-0.5 text-xs">?tab=</code> with the same slug as the full-page
           booking URL. Canonical values: {PUBLIC_BOOK_TAB_SLUGS.join(', ')}. Combine with accent using{' '}
           <code className="rounded bg-neutral-100 px-1 py-0.5 text-xs">&amp;</code> (e.g.{' '}

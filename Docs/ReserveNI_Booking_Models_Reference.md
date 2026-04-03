@@ -1,4 +1,4 @@
-# Reserve NI — Booking models reference
+# Reserve NI - Booking models reference
 
 This document is the **single place** we align on what each `BookingModel` means in product and code. It reflects the **current** setup (see `src/types/booking-models.ts` and `src/lib/business-config.ts`). It does not prescribe implementation tasks; for delivery plans see `Docs/ReserveNI_Unified_Booking_Functionality.md` and related specs.
 
@@ -20,20 +20,20 @@ Using the same vocabulary in docs, support, and engineering avoids confusion bet
 
 | Enum value | Plain-language role |
 |------------|---------------------|
-| `table_reservation` | **Restaurant / hospitality** — covers, tables, combinations, deposits. |
-| `unified_scheduling` | **Appointment-style businesses using the Unified Scheduling Engine** — calendars, `service_items`, online booking. **This is what new appointment signups use.** |
-| `practitioner_appointment` | **Legacy** appointment model — **same product behaviour as `unified_scheduling`** in almost all code paths; kept for existing `venues` rows. |
-| `event_ticket` | **Ticketed / dated experiences** — `experience_events`, ticket lines, `EventBookingFlow`. |
-| `class_session` | **Recurring group classes** — class types, timetable, instances, `ClassBookingFlow`. |
-| `resource_booking` | **Bookable rooms / courts / equipment** — `venue_resources`, slots, `ResourceBookingFlow`. |
+| `table_reservation` | **Restaurant / hospitality** - covers, tables, combinations, deposits. |
+| `unified_scheduling` | **Appointment-style businesses using the Unified Scheduling Engine** - calendars, `service_items`, online booking. **This is what new appointment signups use.** |
+| `practitioner_appointment` | **Legacy** appointment model - **same product behaviour as `unified_scheduling`** in almost all code paths; kept for existing `venues` rows. |
+| `event_ticket` | **Ticketed / dated experiences** - `experience_events`, ticket lines, `EventBookingFlow`. |
+| `class_session` | **Recurring group classes** - class types, timetable, instances, `ClassBookingFlow`. |
+| `resource_booking` | **Bookable rooms / courts / equipment** - `venue_resources`, slots, `ResourceBookingFlow`. |
 
 ---
 
-## Model A — `table_reservation` (restaurants)
+## Model A - `table_reservation` (restaurants)
 
-**Use for:** Restaurants, cafés, pubs, hotel dining — anywhere the unit of sale is **table or cover** for a sitting.
+**Use for:** Restaurants, cafés, pubs, hotel dining - anywhere the unit of sale is **table or cover** for a sitting.
 
-**Public:** `BookingFlow` — party size, date/time from **table** availability (not `unified_calendars`).
+**Public:** `BookingFlow` - party size, date/time from **table** availability (not `unified_calendars`).
 
 **Staff dashboard:** Table management (where the plan allows), bookings as reservations, waitlist, availability and rules tuned to **tables** and deposits.
 
@@ -41,13 +41,13 @@ Using the same vocabulary in docs, support, and engineering avoids confusion bet
 
 ---
 
-## Model B — `unified_scheduling` and `practitioner_appointment` (appointments)
+## Model B - `unified_scheduling` and `practitioner_appointment` (appointments)
 
 ### `unified_scheduling` (current)
 
-**Use for:** Salons, clinics, tutors, trades — any **appointment-style** venue that uses the **Unified Scheduling Engine**: `unified_calendars`, `service_items`, assignments, availability, and **Stripe Connect** for the flows that require payment.
+**Use for:** Salons, clinics, tutors, trades - any **appointment-style** venue that uses the **Unified Scheduling Engine**: `unified_calendars`, `service_items`, assignments, availability, and **Stripe Connect** for the flows that require payment.
 
-**Public:** `AppointmentBookingFlow` — same component as legacy practitioner (see above).
+**Public:** `AppointmentBookingFlow` - same component as legacy practitioner (see above).
 
 **Staff:** Services, staff/calendars, appointment bookings list, practitioner calendar, unified onboarding steps, etc.
 
@@ -55,7 +55,7 @@ Using the same vocabulary in docs, support, and engineering avoids confusion bet
 
 ### `practitioner_appointment` (legacy)
 
-**Use for:** **Historical** venues only — rows where `venues.booking_model` was set before the product standardised on `unified_scheduling`, or venues never migrated.
+**Use for:** **Historical** venues only - rows where `venues.booking_model` was set before the product standardised on `unified_scheduling`, or venues never migrated.
 
 **Behaviour:** Code treats **`practitioner_appointment` and `unified_scheduling` identically** wherever `isUnifiedSchedulingVenue()` is used (`src/lib/booking/unified-scheduling.ts`): same public flow (`AppointmentBookingFlow`), same sidebar pattern, same unified comms eligibility, etc.
 
@@ -65,7 +65,7 @@ Using the same vocabulary in docs, support, and engineering avoids confusion bet
 
 ---
 
-## Models C, D, E — events, classes, resources
+## Models C, D, E - events, classes, resources
 
 These are **not** the restaurant stack and **not** the same as `unified_scheduling`, though they share the generic **`bookings`** table and venue-level settings.
 
@@ -75,7 +75,7 @@ These are **not** the restaurant stack and **not** the same as `unified_scheduli
 | `class_session` | Timetabled classes | `ClassBookingFlow` | Class timetable, class types, instances, roster |
 | `resource_booking` | Bookable assets | `ResourceBookingFlow` | Resources, availability, timeline |
 
-**Business types in `BUSINESS_TYPE_CONFIG`:** Many directory entries (e.g. escape rooms, yoga studios, meeting rooms) map to C/D/E models, but **self-serve signup today** only lists **`table_reservation`** and **`unified_scheduling`** on the main cards. Venues with primary `event_ticket`, `class_session`, or `resource_booking` may be **admin-provisioned** or added when signup expands — see `isSignupSupportedBookingModel` and product rules.
+**Business types in `BUSINESS_TYPE_CONFIG`:** Many directory entries (e.g. escape rooms, yoga studios, meeting rooms) map to C/D/E models, but **self-serve signup today** only lists **`table_reservation`** and **`unified_scheduling`** on the main cards. Venues with primary `event_ticket`, `class_session`, or `resource_booking` may be **admin-provisioned** or added when signup expands - see `isSignupSupportedBookingModel` and product rules.
 
 ---
 
@@ -100,8 +100,8 @@ These are **not** the restaurant stack and **not** the same as `unified_scheduli
 
 The codebase has **two** ways something “event-like” can appear:
 
-1. **`event_ticket` + `experience_events`** — Ticketed / marketing events, guest-facing `EventBookingFlow`, ticket lines on bookings.
-2. **`unified_scheduling` + `event_sessions`** — **Calendar sessions** (group slots on a `unified_calendar`), booked with `event_session_id` in the unified booking API — same **appointment** signup, different **product** shape than ticketed events.
+1. **`event_ticket` + `experience_events`** - Ticketed / marketing events, guest-facing `EventBookingFlow`, ticket lines on bookings.
+2. **`unified_scheduling` + `event_sessions`** - **Calendar sessions** (group slots on a `unified_calendar`), booked with `event_session_id` in the unified booking API - same **appointment** signup, different **product** shape than ticketed events.
 
 They are **different data** and **different flows**. Copy and internal docs should **name them distinctly** (e.g. “Events (tickets)” vs “Calendar sessions” / “Group sessions”) wherever both could apply.
 
@@ -117,15 +117,15 @@ Default labels per model live in `DEFAULT_TERMINOLOGY` in `src/types/booking-mod
 
 | Question | Answer |
 |----------|--------|
-| Is `unified_scheduling` the “new” appointment path? | **Yes** — it is the canonical model for **new** appointment-style signups using the Unified Scheduling Engine. |
-| Is `practitioner_appointment` only for old venues? | **Effectively yes** — it is **legacy**; behaviour is aligned with `unified_scheduling` in code. |
-| Are restaurants part of unified scheduling? | **No** — **`table_reservation`** is a separate model, flow, and data model. |
+| Is `unified_scheduling` the “new” appointment path? | **Yes** - it is the canonical model for **new** appointment-style signups using the Unified Scheduling Engine. |
+| Is `practitioner_appointment` only for old venues? | **Effectively yes** - it is **legacy**; behaviour is aligned with `unified_scheduling` in code. |
+| Are restaurants part of unified scheduling? | **No** - **`table_reservation`** is a separate model, flow, and data model. |
 | What do `EventBookingFlow`, `ClassBookingFlow`, `ResourceBookingFlow` map to? | **`event_ticket`**, **`class_session`**, **`resource_booking`** respectively. |
 
 ---
 
 ## Related documents
 
-- `Docs/ReserveNI_Unified_Booking_Functionality.md` — multi-model product and delivery plan (`enabled_models`, settings, calendar, etc.).
-- `Docs/ReserveNI_Unified_Scheduling_Engine_Plan.md` — Unified Scheduling Engine (USE) details.
-- `Docs/ReserveNI_Bookable_Services_Landscape_Plan.md` — broader services landscape.
+- `Docs/ReserveNI_Unified_Booking_Functionality.md` - multi-model product and delivery plan (`enabled_models`, settings, calendar, etc.).
+- `Docs/ReserveNI_Unified_Scheduling_Engine_Plan.md` - Unified Scheduling Engine (USE) details.
+- `Docs/ReserveNI_Bookable_Services_Landscape_Plan.md` - broader services landscape.

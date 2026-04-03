@@ -1,6 +1,6 @@
 /**
  * Minimal structured logs for observability (docs §Observability).
- * Uses JSON on one line — avoid PII beyond what is needed for support.
+ * Uses JSON on one line - avoid PII beyond what is needed for support.
  */
 
 export interface BookingOpLogFields {

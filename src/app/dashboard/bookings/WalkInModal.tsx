@@ -352,7 +352,7 @@ export function WalkInModal({
             />
           </div>
 
-          {/* Table assignment — covers mode (simple chips) */}
+          {/* Table assignment - covers mode (simple chips) */}
           {!advancedMode && coversTablesLoaded && coversTables.length > 0 && (
             <div>
               <p className="mb-1.5 text-sm font-medium text-slate-700">
@@ -389,7 +389,7 @@ export function WalkInModal({
             </div>
           )}
 
-          {/* Table assignment — advanced mode only */}
+          {/* Table assignment - advanced mode only */}
           {advancedMode && (
             <div>
               <p className="mb-1.5 text-sm font-medium text-slate-700">Table assignment</p>

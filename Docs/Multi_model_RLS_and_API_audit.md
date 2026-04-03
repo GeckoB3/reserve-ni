@@ -1,4 +1,4 @@
-# Multi-model tenancy — API and RLS audit checklist
+# Multi-model tenancy - API and RLS audit checklist
 
 Reference: [ReserveNI_Unified_Booking_Functionality.md](ReserveNI_Unified_Booking_Functionality.md) §4.6.
 
@@ -27,7 +27,7 @@ For each table touched by C/D/E, confirm policies restrict **read/write** to the
 - `venue_resources`
 - `communication_logs`
 
-Use Supabase SQL editor or `migrations/` history; add or tighten policies if any route uses the **anon** key where RLS must block cross-venue access. Server routes using **service role** bypass RLS — ensure those handlers enforce `venue_id` from authenticated staff context.
+Use Supabase SQL editor or `migrations/` history; add or tighten policies if any route uses the **anon** key where RLS must block cross-venue access. Server routes using **service role** bypass RLS - ensure those handlers enforce `venue_id` from authenticated staff context.
 
 ## Release checklist (per new venue-scoped route)
 
@@ -38,7 +38,7 @@ Use Supabase SQL editor or `migrations/` history; add or tighten policies if any
 
 | Area | Finding |
 |------|---------|
-| `bookings` | `staff_manage_bookings` — `venue_id` must match staff’s venue ([`20260301000007_rls_policies.sql`](../supabase/migrations/20260301000007_rls_policies.sql)). |
+| `bookings` | `staff_manage_bookings` - `venue_id` must match staff’s venue ([`20260301000007_rls_policies.sql`](../supabase/migrations/20260301000007_rls_policies.sql)). |
 | C/D/E catalogue tables | [`20260327000001_multi_model_foundation.sql`](../supabase/migrations/20260327000001_multi_model_foundation.sql): `staff_manage_*` on `experience_events`, `class_types`, `class_instances`, `venue_resources`, `booking_ticket_lines`, etc.; `public_read_*` for guest-facing availability; `service_role_*` for server jobs. |
 | Unified scheduling | [`20260430120000_unified_scheduling_engine.sql`](../supabase/migrations/20260430120000_unified_scheduling_engine.sql): RLS on `unified_calendars`, `event_sessions`, etc. |
 

@@ -129,7 +129,7 @@ describe('isDateBlocked / isSlotBlocked', () => {
   });
 });
 
-describe('getAvailableSlots — fixed intervals, no turn time', () => {
+describe('getAvailableSlots - fixed intervals, no turn time', () => {
   const date = '2026-03-07'; // Saturday: 30 covers per slot
 
   it('returns slots with full capacity when no bookings', () => {
@@ -194,7 +194,7 @@ describe('getAvailableSlots — fixed intervals, no turn time', () => {
   });
 });
 
-describe('getAvailableSlots — fixed intervals with turn time', () => {
+describe('getAvailableSlots - fixed intervals with turn time', () => {
   const date = '2026-03-07';
 
   it('available = min across spanned slots (90 min)', () => {
@@ -233,7 +233,7 @@ describe('getAvailableSlots — fixed intervals with turn time', () => {
   });
 });
 
-describe('getAvailableSlots — named sittings', () => {
+describe('getAvailableSlots - named sittings', () => {
   const date = '2026-03-07';
 
   it('returns sittings with full capacity when no bookings', () => {

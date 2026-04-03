@@ -28,7 +28,7 @@ export const BUSINESS_TYPE_CONFIG: Record<string, BusinessConfig> = {
   pub:              { model: 'table_reservation', category: 'hospitality', terms: { client: 'Guest', booking: 'Reservation', staff: 'Staff' } },
   hotel_restaurant: { model: 'table_reservation', category: 'hospitality', terms: { client: 'Guest', booking: 'Reservation', staff: 'Staff' } },
 
-  // MODEL B: Unified scheduling (appointments / calendars — USE)
+  // MODEL B: Unified scheduling (appointments / calendars - USE)
   barber: {
     model: 'unified_scheduling', category: 'beauty_grooming',
     terms: { client: 'Client', booking: 'Appointment', staff: 'Barber' },
@@ -134,7 +134,7 @@ export const BUSINESS_TYPE_CONFIG: Record<string, BusinessConfig> = {
     category: 'other',
     terms: { ...DEFAULT_TERMINOLOGY.table_reservation },
   },
-  /** Direct signup: “Appointments with a person” — stored as `venues.business_type`. */
+  /** Direct signup: “Appointments with a person” - stored as `venues.business_type`. */
   model_unified_scheduling: {
     model: 'unified_scheduling',
     category: 'other',

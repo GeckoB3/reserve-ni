@@ -70,7 +70,7 @@ export function ViewToolbar({
 
   return (
     <div className="space-y-2 sm:space-y-3 lg:space-y-4">
-      {/* Row 1 — matches bookings: title + primary actions */}
+      {/* Row 1 - matches bookings: title + primary actions */}
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
         <div className="min-w-0">
           <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Operations</p>
@@ -130,7 +130,7 @@ export function ViewToolbar({
         </div>
       </div>
 
-      {/* Row 2 — date navigator (bookings-style) */}
+      {/* Row 2 - date navigator (bookings-style) */}
       <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-2 py-2 shadow-sm sm:px-3 sm:py-3 lg:px-4">
         <button
           type="button"
@@ -158,10 +158,10 @@ export function ViewToolbar({
         </button>
       </div>
 
-      {/* Row 3 — stat cards (same grid language as bookings) */}
+      {/* Row 3 - stat cards (same grid language as bookings) */}
       <SummaryBar summary={summary} />
 
-      {/* Row 4 — filters & tools */}
+      {/* Row 4 - filters & tools */}
       {children && (
         <div className="flex flex-col gap-2 rounded-xl border border-slate-200 bg-white px-2 py-2 shadow-sm sm:flex-row sm:flex-wrap sm:items-center sm:gap-3 sm:px-4 sm:py-3">
           {children}

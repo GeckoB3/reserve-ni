@@ -3,7 +3,7 @@
  * Run with: npx tsx scripts/create-stripe-products.ts
  *
  * Prerequisites: STRIPE_SECRET_KEY must be set in the environment (or .env.local).
- * This uses Stripe Test Mode — safe to run repeatedly (creates new products each time).
+ * This uses Stripe Test Mode - safe to run repeatedly (creates new products each time).
  *
  * After running, copy the printed Price IDs into your .env.local file.
  */
@@ -28,7 +28,7 @@ async function main() {
   // Standard tier: £10/month per calendar (metered via quantity)
   const standardProduct = await stripe.products.create({
     name: 'Reserve NI Standard',
-    description: 'Per-calendar booking management — £10/month per bookable calendar. All booking features, email communications.',
+    description: 'Per-calendar booking management - £10/month per bookable calendar. All booking features, email communications.',
   });
 
   const standardPrice = await stripe.prices.create({
@@ -44,7 +44,7 @@ async function main() {
   // Business tier: £79/month flat
   const businessProduct = await stripe.products.create({
     name: 'Reserve NI Business',
-    description: 'Unlimited calendars, SMS communications, table management, priority support — £79/month.',
+    description: 'Unlimited calendars, SMS communications, table management, priority support - £79/month.',
   });
 
   const businessPrice = await stripe.prices.create({

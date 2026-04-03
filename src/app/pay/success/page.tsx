@@ -11,7 +11,7 @@ function redirectStatusFromParams(redirectStatus: string | null): Status {
   if (redirectStatus === 'succeeded') return 'succeeded';
   if (redirectStatus === 'failed') return 'failed';
   if (redirectStatus === 'processing') return 'pending';
-  // No Stripe redirect params — could be a direct visit or non-redirect payment completion.
+  // No Stripe redirect params - could be a direct visit or non-redirect payment completion.
   return 'succeeded';
 }
 

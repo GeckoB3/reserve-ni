@@ -4,7 +4,7 @@ import { getVenueStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 
 /**
- * GET /api/venue/class-instances/[id]/attendees — roster for this class instance.
+ * GET /api/venue/class-instances/[id]/attendees - roster for this class instance.
  */
 export async function GET(
   _request: NextRequest,

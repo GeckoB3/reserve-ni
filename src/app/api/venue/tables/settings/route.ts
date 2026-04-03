@@ -13,7 +13,7 @@ const settingsSchema = z.object({
 });
 
 /**
- * GET /api/venue/tables/settings — table-management settings plus safety flags.
+ * GET /api/venue/tables/settings - table-management settings plus safety flags.
  */
 export async function GET() {
   const supabase = await createClient();
@@ -62,7 +62,7 @@ export async function GET() {
 }
 
 /**
- * PUT /api/venue/tables/settings — update table management settings on venue.
+ * PUT /api/venue/tables/settings - update table management settings on venue.
  */
 export async function PUT(request: NextRequest) {
   const supabase = await createClient();

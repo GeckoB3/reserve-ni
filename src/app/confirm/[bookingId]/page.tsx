@@ -13,7 +13,7 @@ function ConfirmContent({ paramsPromise }: { paramsPromise: Promise<{ bookingId:
     return (
       <div className="w-full max-w-md text-center">
         <div className="rounded-2xl border border-red-200 bg-white p-8 shadow-sm">
-          <p className="text-sm text-red-600">Invalid link — missing authentication.</p>
+          <p className="text-sm text-red-600">Invalid link - missing authentication.</p>
         </div>
       </div>
     );

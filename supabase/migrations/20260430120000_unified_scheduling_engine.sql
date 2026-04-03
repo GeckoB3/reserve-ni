@@ -1,4 +1,4 @@
--- Reserve NI: Unified Scheduling Engine (USE) — tables, enum value, bookings columns,
+-- Reserve NI: Unified Scheduling Engine (USE) - tables, enum value, bookings columns,
 -- data copy from practitioners/appointment_services, RLS, SMS usage RPC.
 -- Model A (table_reservation) unchanged in behaviour; legacy B tables kept.
 

@@ -6,7 +6,7 @@ import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 
 /**
  * GET /api/booking/appointment-catalog?venue_id=uuid
- * Active practitioners and services for guest pickers — no date, no slot computation.
+ * Active practitioners and services for guest pickers - no date, no slot computation.
  */
 export async function GET(request: NextRequest) {
   try {

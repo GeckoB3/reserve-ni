@@ -82,7 +82,7 @@ interface ReportsData {
     available_hours: number;
   }>;
   report7_appointment_insights?: AppointmentInsightsPayload | null;
-  /** Inferred from booking row FKs — same labels as full export (plan §4.3). */
+  /** Inferred from booking row FKs - same labels as full export (plan §4.3). */
   report_by_booking_model?: ReportByBookingModelRow[];
   client_summary?: ClientSummary | null;
 }
@@ -500,7 +500,7 @@ export function ReportsView({ bookingModel, terminology, venueId }: ReportsViewP
         onExportSuccess={() =>
           notifyExport(
             'success',
-            `${isAppointment ? 'Appointment activity' : 'Booking summary'} CSV download started — check your downloads folder.`,
+            `${isAppointment ? 'Appointment activity' : 'Booking summary'} CSV download started - check your downloads folder.`,
           )
         }
         onExportBlocked={(msg) => notifyExport('notice', msg)}
@@ -583,7 +583,7 @@ export function ReportsView({ bookingModel, terminology, venueId }: ReportsViewP
         exportBlocked={rByModel.length === 0}
         exportBlockedMessage="There are no bookings in this date range to break down by type."
         onExportSuccess={() =>
-          notifyExport('success', 'Booking type breakdown CSV download started — check your downloads folder.')
+          notifyExport('success', 'Booking type breakdown CSV download started - check your downloads folder.')
         }
         onExportBlocked={(msg) => notifyExport('notice', msg)}
       >
@@ -649,7 +649,7 @@ export function ReportsView({ bookingModel, terminology, venueId }: ReportsViewP
           exportBlocked={!hasAppointmentInsights}
           exportBlockedMessage="There is no appointment breakdown to export for this period."
           onExportSuccess={() =>
-            notifyExport('success', 'Team & services report CSV download started — check your downloads folder.')
+            notifyExport('success', 'Team & services report CSV download started - check your downloads folder.')
           }
           onExportBlocked={(msg) => notifyExport('notice', msg)}
         >
@@ -755,7 +755,7 @@ export function ReportsView({ bookingModel, terminology, venueId }: ReportsViewP
         onExport={exportReport2}
         exportBlocked={r2.length === 0}
         exportBlockedMessage="There is no no-show rate data to export for this period."
-        onExportSuccess={() => notifyExport('success', 'No-show rate CSV download started — check your downloads folder.')}
+        onExportSuccess={() => notifyExport('success', 'No-show rate CSV download started - check your downloads folder.')}
         onExportBlocked={(msg) => notifyExport('notice', msg)}
       >
         {isAppointment && (
@@ -788,14 +788,14 @@ export function ReportsView({ bookingModel, terminology, venueId }: ReportsViewP
         onExport={exportReport3}
         exportBlocked={!r3}
         exportBlockedMessage="There is no cancellation data to export for this period."
-        onExportSuccess={() => notifyExport('success', 'Cancellation rate CSV download started — check your downloads folder.')}
+        onExportSuccess={() => notifyExport('success', 'Cancellation rate CSV download started - check your downloads folder.')}
         onExportBlocked={(msg) => notifyExport('notice', msg)}
       >
         {r3 && (
           <>
             {isAppointment && (
               <p className="mb-3 text-sm text-slate-500">
-                Auto (unpaid) counts {bookingWord.toLowerCase()}s that moved from Pending to Cancelled — for example
+                Auto (unpaid) counts {bookingWord.toLowerCase()}s that moved from Pending to Cancelled - for example
                 when a required deposit was not completed in time.
               </p>
             )}
@@ -826,7 +826,7 @@ export function ReportsView({ bookingModel, terminology, venueId }: ReportsViewP
         onExportSuccess={() =>
           notifyExport(
             'success',
-            `${isAppointment ? 'Payment' : 'Deposit'} summary CSV download started — check your downloads folder.`,
+            `${isAppointment ? 'Payment' : 'Deposit'} summary CSV download started - check your downloads folder.`,
           )
         }
         onExportBlocked={(msg) => notifyExport('notice', msg)}
@@ -846,7 +846,7 @@ export function ReportsView({ bookingModel, terminology, venueId }: ReportsViewP
           onExport={exportReport5}
           exportBlocked={r5.length === 0}
           exportBlockedMessage="There is no table utilisation data to export for this period."
-          onExportSuccess={() => notifyExport('success', 'Table utilisation CSV download started — check your downloads folder.')}
+          onExportSuccess={() => notifyExport('success', 'Table utilisation CSV download started - check your downloads folder.')}
           onExportBlocked={(msg) => notifyExport('notice', msg)}
         >
           {r5.length > 0 ? (

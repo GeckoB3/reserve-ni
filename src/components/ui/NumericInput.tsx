@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * Adaptive numeric input — mobile-friendly while preserving desktop UX.
+ * Adaptive numeric input - mobile-friendly while preserving desktop UX.
  *
  * Desktop: renders a standard type="number" input with native spinners.
  * Mobile/touch: renders type="text" + inputMode="numeric" so the numeric
@@ -34,7 +34,7 @@ export const NumericInput = forwardRef<HTMLInputElement, NumericInputProps>(
     useImperativeHandle(ref, () => inputRef.current as HTMLInputElement);
 
     // ─── Desktop path ────────────────────────────────────────────────
-    // Standard type="number" — spinners, native validation, no change.
+    // Standard type="number" - spinners, native validation, no change.
     if (!isTouch) {
       return (
         <input

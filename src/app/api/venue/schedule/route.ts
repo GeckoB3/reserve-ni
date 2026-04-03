@@ -28,7 +28,7 @@ function classTypeFromInstanceRow(
  * Merged non–Model-A schedule blocks (events, classes, resources) for PractitionerCalendarView §4.2.
  *
  * Unified-scheduling appointment rows (calendar/service or `event_session_id`) are intentionally excluded from the
- * booking loop below — they render on the practitioner grid only (see `ScheduleBlock` type comment, Option A).
+ * booking loop below - they render on the practitioner grid only (see `ScheduleBlock` type comment, Option A).
  *
  * **Tenancy:** Uses `getVenueStaff` + venue-scoped queries; mutations belong in other routes. RLS on Supabase should
  * still enforce `venue_id` for defence in depth (§4.6).
@@ -94,7 +94,7 @@ export async function GET(request: NextRequest) {
     const { data: bookingRows, error: bookErr } = await staff.db
       .from('bookings')
       .select(
-        'id, booking_date, booking_time, booking_end_time, estimated_end_time, booking_model, status, party_size, guest_id, experience_event_id, class_instance_id, resource_id',
+        'id, booking_date, booking_time, booking_end_time, estimated_end_time, status, party_size, guest_id, experience_event_id, class_instance_id, resource_id',
       )
       .eq('venue_id', staff.venue_id)
       .or('experience_event_id.not.is.null,class_instance_id.not.is.null,resource_id.not.is.null')
@@ -208,8 +208,8 @@ export async function GET(request: NextRequest) {
       } else if (bm === 'class_session' && r.class_instance_id) {
         const ci = classInstMap.get(r.class_instance_id);
         const ct = classTypeFromInstanceRow(ci);
-        const cn = ct?.name ? `Class · ${ct.name}` : 'Class';
-        title = `${cn} · ${gn}`;
+        const cn = ct?.name ?? 'Class';
+        title = cn;
       } else if (bm === 'resource_booking' && r.resource_id) {
         const rn = resourceMap.get(r.resource_id) ?? 'Resource';
         title = `${rn} · ${gn}`;
@@ -235,6 +235,13 @@ export async function GET(request: NextRequest) {
           ? (classEnrolledByInstance.get(r.class_instance_id as string) ?? null)
           : null;
 
+      const subtitle =
+        bm === 'class_session'
+          ? null
+          : r.party_size && Number(r.party_size) > 1
+            ? `${r.party_size} guests`
+            : null;
+
       blocks.push({
         id: `bk-${r.id}`,
         kind: bm,
@@ -242,7 +249,7 @@ export async function GET(request: NextRequest) {
         start_time: hhmm(r.booking_time as string),
         end_time: endForBooking(r, bm),
         title,
-        subtitle: r.party_size && Number(r.party_size) > 1 ? `${r.party_size} guests` : null,
+        subtitle,
         booking_id: r.id as string,
         experience_event_id: r.experience_event_id as string | null,
         class_instance_id: r.class_instance_id as string | null,
@@ -343,8 +350,8 @@ export async function GET(request: NextRequest) {
               date: row.instance_date,
               start_time: start,
               end_time: end,
-              title: `Class · ${ct.name}`,
-              subtitle: cap != null ? `No bookings yet · ${cap} spots` : 'No bookings yet',
+              title: ct.name,
+              subtitle: null,
               accent_colour: ct.colour ?? '#22C55E',
               class_instance_id: row.id,
               class_capacity: cap,

@@ -214,7 +214,7 @@ AS $$
   );
 $$;
 
--- Report 4: Deposit summary (from bookings — deposit state not in events)
+-- Report 4: Deposit summary (from bookings - deposit state not in events)
 -- We use bookings table filtered by created_at in range for consistency with "period"
 CREATE OR REPLACE FUNCTION report_deposit_summary(
   p_venue_id uuid,

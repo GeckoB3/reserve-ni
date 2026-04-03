@@ -57,7 +57,7 @@ export async function GET() {
   }
 }
 
-/** POST /api/venue/availability-blocks — create a block (admin only). */
+/** POST /api/venue/availability-blocks - create a block (admin only). */
 export async function POST(request: NextRequest) {
   try {
     const supabase = await createClient();

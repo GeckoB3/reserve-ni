@@ -1,4 +1,4 @@
-# ReserveNI — Table Management Grid Implementation Plan
+# ReserveNI - Table Management Grid Implementation Plan
 
 **Comprehensive Implementation Guide for Cursor AI Agents**
 **March 2026 | Version 1.0**
@@ -13,24 +13,24 @@ This section analyses how OpenTable, SevenRooms, ResDiary, Resy, and Eat App imp
 
 Every serious table management platform provides three complementary views of the same data. Each serves a different purpose during different moments of a restaurant's day:
 
-**Floor Plan View** — A visual representation of the restaurant's physical layout. Tables are shown as shapes (circles for round tables, rectangles for rectangular) positioned where they actually sit on the floor. Colour-coded by status. Used primarily for at-a-glance spatial awareness during service: "where is the open table?" SevenRooms and OpenTable treat this as the primary view during live service.
+**Floor Plan View** - A visual representation of the restaurant's physical layout. Tables are shown as shapes (circles for round tables, rectangles for rectangular) positioned where they actually sit on the floor. Colour-coded by status. Used primarily for at-a-glance spatial awareness during service: "where is the open table?" SevenRooms and OpenTable treat this as the primary view during live service.
 
-**Timeline Grid View** — Tables on the Y-axis, time slots on the X-axis. Bookings appear as horizontal bars spanning their expected duration. This is the power view for planning and optimisation: hosts can see gaps between bookings, identify where a walk-in could fit, and drag bookings between tables. ResDiary and Resy treat this as the primary planning view. SevenRooms calls it "Grid View" and describes it as the tool to "plan out shifts and improve the flow of service."
+**Timeline Grid View** - Tables on the Y-axis, time slots on the X-axis. Bookings appear as horizontal bars spanning their expected duration. This is the power view for planning and optimisation: hosts can see gaps between bookings, identify where a walk-in could fit, and drag bookings between tables. ResDiary and Resy treat this as the primary planning view. SevenRooms calls it "Grid View" and describes it as the tool to "plan out shifts and improve the flow of service."
 
-**List View** — A traditional sorted list of bookings, essentially the day sheet. This is the fallback for quick reference and for staff who are less comfortable with visual interfaces. Every platform keeps this available as a simpler alternative.
+**List View** - A traditional sorted list of bookings, essentially the day sheet. This is the fallback for quick reference and for staff who are less comfortable with visual interfaces. Every platform keeps this available as a simpler alternative.
 
 ### 1.2 Key Features from Industry Leaders
 
 | Feature | OpenTable | SevenRooms | ResDiary | Resy |
 |---|---|---|---|---|
 | Floor plan editor | Drag-and-drop with shapes and zones | Drag-and-drop with custom areas | Table plan with zones | Custom layouts |
-| Timeline grid | Yes — tables × time with booking blocks | "Grid View" for shift planning | Yes — core planning tool | "Smart Grid" — 15-min slots |
-| Drag-and-drop rebooking | Yes — between tables and times | Yes — with auto-validation | Yes — with capacity checks | Yes |
+| Timeline grid | Yes - tables × time with booking blocks | "Grid View" for shift planning | Yes - core planning tool | "Smart Grid" - 15-min slots |
+| Drag-and-drop rebooking | Yes - between tables and times | Yes - with auto-validation | Yes - with capacity checks | Yes |
 | Table status tracking | Available → Seated → Mains → Dessert → Bill → Bussing | Custom statuses with POS integration | Basic status tracking | Custom statuses |
 | Table combinations | Flexible linking for large parties | Dynamic table linking | Table groups for large parties | Flexible combinations |
 | Auto-assignment | "Smart Assign" recommends optimal table | AI auto-seating algorithm | Manual or rule-based | Automated table optimisation |
 | Colour coding | Status-based colours | Status + VIP + occasion colours | Status-based | Status-based with urgency |
-| Real-time updates | Yes — across all devices | Yes — all views synchronise | Yes | Yes |
+| Real-time updates | Yes - across all devices | Yes - all views synchronise | Yes | Yes |
 | Walk-in accommodation | Visual gap identification | AI suggests best table | Manual identification | Grid shows gaps |
 | Server sections | Assign tables to servers, rotate sections | Server section management | Basic server assignment | Server rotation |
 
@@ -38,27 +38,27 @@ Every serious table management platform provides three complementary views of th
 
 Based on analysis, the features that separate excellent from mediocre are:
 
-1. **Speed of interaction** — Every action during service must be achievable in 1-2 taps/clicks. Hosts are under pressure. A drag-and-drop that takes 3 seconds is too slow if it could take 1 second. OpenTable and SevenRooms optimise ruthlessly for interaction speed.
+1. **Speed of interaction** - Every action during service must be achievable in 1-2 taps/clicks. Hosts are under pressure. A drag-and-drop that takes 3 seconds is too slow if it could take 1 second. OpenTable and SevenRooms optimise ruthlessly for interaction speed.
 
-2. **Information density without clutter** — The timeline grid shows a lot of data (table names, booking names, party sizes, statuses, dietary flags, VIP markers, durations) but must never feel overwhelming. The best implementations use colour, iconography, and progressive disclosure (hover/tap for details, not everything visible at once).
+2. **Information density without clutter** - The timeline grid shows a lot of data (table names, booking names, party sizes, statuses, dietary flags, VIP markers, durations) but must never feel overwhelming. The best implementations use colour, iconography, and progressive disclosure (hover/tap for details, not everything visible at once).
 
-3. **Visual gap identification** — The single most valuable feature of a timeline grid is making empty time gaps immediately visible. A host should be able to glance at the grid and instantly see "table 5 has a 2-hour gap from 7:30pm" without counting slots. This is achieved through whitespace contrast and optional "gap highlight" overlays.
+3. **Visual gap identification** - The single most valuable feature of a timeline grid is making empty time gaps immediately visible. A host should be able to glance at the grid and instantly see "table 5 has a 2-hour gap from 7:30pm" without counting slots. This is achieved through whitespace contrast and optional "gap highlight" overlays.
 
-4. **Drag-and-drop with guardrails** — Dragging a booking to a new table must validate in real-time: does the table have enough capacity? Does it overlap with another booking? Is the table available for the full duration? Invalid drops should be visually indicated (red highlight on the target) before the user releases, not after.
+4. **Drag-and-drop with guardrails** - Dragging a booking to a new table must validate in real-time: does the table have enough capacity? Does it overlap with another booking? Is the table available for the full duration? Invalid drops should be visually indicated (red highlight on the target) before the user releases, not after.
 
-5. **Seamless toggle between modes** — Venues must be able to switch between covers-based (simple) and table management (advanced) without data loss. Existing bookings should remain valid. The toggle should be frictionless — not a migration.
+5. **Seamless toggle between modes** - Venues must be able to switch between covers-based (simple) and table management (advanced) without data loss. Existing bookings should remain valid. The toggle should be frictionless - not a migration.
 
-6. **Offline resilience** — During service, if the WiFi drops, the grid should remain readable from its last state, queue any actions, and sync when reconnected. A blank screen during peak service is unacceptable.
+6. **Offline resilience** - During service, if the WiFi drops, the grid should remain readable from its last state, queue any actions, and sync when reconnected. A blank screen during peak service is unacceptable.
 
 ### 1.4 Common Complaints About Competitor Implementations
 
 From review analysis, the most frequent frustrations restaurant staff report are:
 
-- **Slow load times** — Grids with many tables and bookings can become sluggish. Performance must be a first-class concern.
-- **Confusing table combination UX** — Linking/unlinking tables for large parties is often unintuitive. This needs to feel natural.
-- **No undo** — Accidentally dragging a booking to the wrong table with no way to reverse it is infuriating mid-service.
-- **Status updates require too many clicks** — Changing a table from "Seated" to "Mains" should be one tap, not three.
-- **Floor plan editor is fiddly** — Positioning tables precisely is annoying on a tablet. The editor needs to be forgiving and snap-to-grid.
+- **Slow load times** - Grids with many tables and bookings can become sluggish. Performance must be a first-class concern.
+- **Confusing table combination UX** - Linking/unlinking tables for large parties is often unintuitive. This needs to feel natural.
+- **No undo** - Accidentally dragging a booking to the wrong table with no way to reverse it is infuriating mid-service.
+- **Status updates require too many clicks** - Changing a table from "Seated" to "Mains" should be one tap, not three.
+- **Floor plan editor is fiddly** - Positioning tables precisely is annoying on a tablet. The editor needs to be forgiving and snap-to-grid.
 
 ---
 
@@ -68,17 +68,17 @@ Based on the implemented availability engine improvement plan, ReserveNI now has
 
 ### 2.1 Existing Architecture to Build On
 
-- **`venue_services` table** — Named services (Lunch, Dinner) with independent rules, days of week, start/end times.
-- **`service_capacity_rules` table** — Yield management with max covers per slot, max bookings per slot, slot intervals, buffer minutes, day/time overrides.
-- **`party_size_durations` table** — Duration by party size per service.
-- **`booking_restrictions` table** — Advance booking limits, party size limits, large party threshold.
-- **`availability_blocks` table** — Closures and overrides.
-- **`bookings` table** — Now includes `service_id`, `estimated_end_time`, `actual_seated_time`, `actual_departed_time`.
-- **Availability engine** at `lib/availability-engine.ts` — Calculates slots using dual-constraint yield management.
-- **Events table** — Immutable audit log for all booking actions.
-- **Supabase Realtime** — Already used for dashboard and day sheet live updates.
-- **Unified Reservations Dashboard** — Booking list with status management, modification, walk-in entry.
-- **Day Sheet** — Service view with check-in, no-show recording, dietary highlights.
+- **`venue_services` table** - Named services (Lunch, Dinner) with independent rules, days of week, start/end times.
+- **`service_capacity_rules` table** - Yield management with max covers per slot, max bookings per slot, slot intervals, buffer minutes, day/time overrides.
+- **`party_size_durations` table** - Duration by party size per service.
+- **`booking_restrictions` table** - Advance booking limits, party size limits, large party threshold.
+- **`availability_blocks` table** - Closures and overrides.
+- **`bookings` table** - Now includes `service_id`, `estimated_end_time`, `actual_seated_time`, `actual_departed_time`.
+- **Availability engine** at `lib/availability-engine.ts` - Calculates slots using dual-constraint yield management.
+- **Events table** - Immutable audit log for all booking actions.
+- **Supabase Realtime** - Already used for dashboard and day sheet live updates.
+- **Unified Reservations Dashboard** - Booking list with status management, modification, walk-in entry.
+- **Day Sheet** - Service view with check-in, no-show recording, dietary highlights.
 
 ### 2.2 What Table Management Adds
 
@@ -91,14 +91,14 @@ Table-level availability (new)       = OPTIONAL layer, venue toggle
 
 When table management is **disabled** (default): Everything works exactly as it does today. Availability is calculated purely on covers. No tables, no floor plan, no grid.
 
-When table management is **enabled**: The system checks BOTH covers-based capacity AND table-level availability. A booking is only allowed if there are enough covers in the slot AND a suitable table (or combination) is available for the full duration. The tighter constraint wins — this is the hybrid model identified as the gold standard in the availability engine plan.
+When table management is **enabled**: The system checks BOTH covers-based capacity AND table-level availability. A booking is only allowed if there are enough covers in the slot AND a suitable table (or combination) is available for the full duration. The tighter constraint wins - this is the hybrid model identified as the gold standard in the availability engine plan.
 
 ### 2.3 Design Principles for ReserveNI's Implementation
 
-1. **Toggle, not migration** — Venues enable table management with a single switch. Existing bookings become "unassigned" and can be allocated to tables at the venue's pace.
-2. **Mobile-first timeline grid** — The grid must work beautifully on a tablet at the host stand. This is the primary use case.
-3. **Progressive complexity** — Start simple (add tables, see the grid), unlock advanced features as needed (combinations, server sections, custom statuses).
-4. **Always fall back gracefully** — If a venue turns off table management, everything reverts to covers-based with zero data loss.
+1. **Toggle, not migration** - Venues enable table management with a single switch. Existing bookings become "unassigned" and can be allocated to tables at the venue's pace.
+2. **Mobile-first timeline grid** - The grid must work beautifully on a tablet at the host stand. This is the primary use case.
+3. **Progressive complexity** - Start simple (add tables, see the grid), unlock advanced features as needed (combinations, server sections, custom statuses).
+4. **Always fall back gracefully** - If a venue turns off table management, everything reverts to covers-based with zero data loss.
 
 ---
 
@@ -106,7 +106,7 @@ When table management is **enabled**: The system checks BOTH covers-based capaci
 
 ### 3.1 New Tables
 
-**A) `venue_tables`** — Physical tables in the restaurant.
+**A) `venue_tables`** - Physical tables in the restaurant.
 
 ```sql
 CREATE TABLE venue_tables (
@@ -130,7 +130,7 @@ CREATE TABLE venue_tables (
 );
 ```
 
-**B) `table_combinations`** — Defines which tables can be combined for larger parties.
+**B) `table_combinations`** - Defines which tables can be combined for larger parties.
 
 ```sql
 CREATE TABLE table_combinations (
@@ -151,7 +151,7 @@ CREATE TABLE table_combination_members (
 );
 ```
 
-**C) `booking_table_assignments`** — Links bookings to tables (or table combinations).
+**C) `booking_table_assignments`** - Links bookings to tables (or table combinations).
 
 ```sql
 CREATE TABLE booking_table_assignments (
@@ -165,7 +165,7 @@ CREATE TABLE booking_table_assignments (
 -- A booking assigned to a combination will have multiple rows (one per table in the combination)
 ```
 
-**D) `table_statuses`** — Tracks real-time status progression of each table during service.
+**D) `table_statuses`** - Tracks real-time status progression of each table during service.
 
 ```sql
 CREATE TABLE table_statuses (
@@ -181,7 +181,7 @@ CREATE TABLE table_statuses (
 );
 ```
 
-**E) Venue-level toggle** — Add to existing `venues` table:
+**E) Venue-level toggle** - Add to existing `venues` table:
 
 ```sql
 ALTER TABLE venues ADD COLUMN table_management_enabled BOOLEAN NOT NULL DEFAULT false;
@@ -268,7 +268,7 @@ function getAvailableTablesForBooking(
 When a booking is created (online or phone) and table management is enabled:
 1. Run the table availability function.
 2. If a suitable table/combination is found, auto-assign it (create `booking_table_assignments` rows).
-3. If no suitable table is found but covers capacity allows it, create the booking as "unassigned" — it appears in the grid's unassigned sidebar for manual allocation by staff.
+3. If no suitable table is found but covers capacity allows it, create the booking as "unassigned" - it appears in the grid's unassigned sidebar for manual allocation by staff.
 4. Log a `booking.table_assigned` or `booking.table_unassigned` event.
 
 Staff can always override auto-assignment by dragging the booking to a different table in the grid.
@@ -285,11 +285,11 @@ When a venue enables table management for the first time:
 - All existing future bookings become "unassigned" (no table assignments exist).
 - The grid shows them in an "Unassigned" sidebar.
 - Staff can drag them onto tables at their own pace.
-- No disruption to the booking flow — guests are unaffected.
+- No disruption to the booking flow - guests are unaffected.
 
 ---
 
-## 5. Timeline Grid View — Specification
+## 5. Timeline Grid View - Specification
 
 This is the centrepiece feature. It must be the best version of this view available in any restaurant platform at this price point.
 
@@ -358,7 +358,7 @@ Each booking block is a horizontal bar whose width represents the booking durati
   - ♿ Wheelchair (from special_requests)
   - ⭐ VIP / repeat guest (visit_count >= 3)
   - 💳 Deposit paid indicator
-- **Combination indicator** — If the booking spans multiple tables, show a subtle bracket/connector spanning the rows
+- **Combination indicator** - If the booking spans multiple tables, show a subtle bracket/connector spanning the rows
 
 ### 5.4 Table Column (Y-Axis)
 
@@ -366,7 +366,7 @@ Each table row header shows:
 - **Table name** (e.g. "Table 1", "Booth A")
 - **Capacity** in small text (e.g. "2-4" meaning min 2, max 4 covers)
 - **Zone badge** if zones are configured (e.g. "Terrace" in a small coloured pill)
-- **Current status dot** — colour matches the current table_status
+- **Current status dot** - colour matches the current table_status
 
 Tables are grouped by zone (if configured) with collapsible zone headers. Within each zone, tables are ordered by `sort_order`. An "Unassigned" section always appears at the bottom when there are unassigned bookings.
 
@@ -402,7 +402,7 @@ Above the grid, a persistent summary bar shows:
 
 ---
 
-## 6. Floor Plan View — Specification
+## 6. Floor Plan View - Specification
 
 ### 6.1 Floor Plan Editor (Settings)
 
@@ -453,7 +453,7 @@ Available → Reserved → Seated → Starters → Mains → Dessert → Bill �
 
 ---
 
-## 7. Floor Plan Editor — Detailed Specification
+## 7. Floor Plan Editor - Detailed Specification
 
 ### 7.1 Technology Choice
 
@@ -496,7 +496,7 @@ Save is automatic (debounced 1 second after last change) with a "Saved" indicato
 ```sql
 ALTER TABLE venue_tables ADD COLUMN server_section TEXT;
 -- e.g. 'Section A', 'Section B', 'Bar'
--- Nullable — not all venues will use this
+-- Nullable - not all venues will use this
 ```
 
 ### 8.2 Functionality
@@ -511,25 +511,25 @@ ALTER TABLE venue_tables ADD COLUMN server_section TEXT;
 
 ## 9. Cursor Agent Implementation Prompts
 
-### Prompt 16: Database Schema — Tables, Combinations, and Assignments
+### Prompt 16: Database Schema - Tables, Combinations, and Assignments
 
 > **Cursor Prompt:**
 >
-> "Create Supabase migrations for the ReserveNI table management feature. This is an OPTIONAL feature that venues can toggle on or off — when off, the existing covers-based availability system works unchanged.
+> "Create Supabase migrations for the ReserveNI table management feature. This is an OPTIONAL feature that venues can toggle on or off - when off, the existing covers-based availability system works unchanged.
 >
 > Add to the existing `venues` table: `table_management_enabled` (boolean, default false), `floor_plan_background_url` (text, nullable).
 >
 > Create these new tables:
 >
-> (1) `venue_tables` — `id` (uuid PK, default gen_random_uuid()), `venue_id` (FK venues, ON DELETE CASCADE), `name` (text, not null), `min_covers` (int, default 1), `max_covers` (int, default 2), `shape` (text, default 'rectangle' — values: 'rectangle', 'circle', 'square'), `zone` (text, nullable), `position_x` (numeric, nullable — percentage 0-100 for floor plan), `position_y` (numeric, nullable), `width` (numeric, default 10), `height` (numeric, default 8), `rotation` (numeric, default 0), `sort_order` (int, default 0), `server_section` (text, nullable), `is_active` (boolean, default true), `created_at` (timestamptz), `updated_at` (timestamptz). Add UNIQUE constraint on (venue_id, name).
+> (1) `venue_tables` - `id` (uuid PK, default gen_random_uuid()), `venue_id` (FK venues, ON DELETE CASCADE), `name` (text, not null), `min_covers` (int, default 1), `max_covers` (int, default 2), `shape` (text, default 'rectangle' - values: 'rectangle', 'circle', 'square'), `zone` (text, nullable), `position_x` (numeric, nullable - percentage 0-100 for floor plan), `position_y` (numeric, nullable), `width` (numeric, default 10), `height` (numeric, default 8), `rotation` (numeric, default 0), `sort_order` (int, default 0), `server_section` (text, nullable), `is_active` (boolean, default true), `created_at` (timestamptz), `updated_at` (timestamptz). Add UNIQUE constraint on (venue_id, name).
 >
-> (2) `table_combinations` — `id` (uuid PK), `venue_id` (FK venues, CASCADE), `name` (text, not null), `combined_min_covers` (int, not null), `combined_max_covers` (int, not null), `is_active` (boolean, default true), `created_at` (timestamptz).
+> (2) `table_combinations` - `id` (uuid PK), `venue_id` (FK venues, CASCADE), `name` (text, not null), `combined_min_covers` (int, not null), `combined_max_covers` (int, not null), `is_active` (boolean, default true), `created_at` (timestamptz).
 >
-> (3) `table_combination_members` — `id` (uuid PK), `combination_id` (FK table_combinations, CASCADE), `table_id` (FK venue_tables, CASCADE). UNIQUE on (combination_id, table_id).
+> (3) `table_combination_members` - `id` (uuid PK), `combination_id` (FK table_combinations, CASCADE), `table_id` (FK venue_tables, CASCADE). UNIQUE on (combination_id, table_id).
 >
-> (4) `booking_table_assignments` — `id` (uuid PK), `booking_id` (FK bookings, CASCADE), `table_id` (FK venue_tables, CASCADE), `assigned_at` (timestamptz, default now()), `assigned_by` (uuid, FK staff, nullable). UNIQUE on (booking_id, table_id). A booking on a combination has multiple rows.
+> (4) `booking_table_assignments` - `id` (uuid PK), `booking_id` (FK bookings, CASCADE), `table_id` (FK venue_tables, CASCADE), `assigned_at` (timestamptz, default now()), `assigned_by` (uuid, FK staff, nullable). UNIQUE on (booking_id, table_id). A booking on a combination has multiple rows.
 >
-> (5) `table_statuses` — `id` (uuid PK), `table_id` (FK venue_tables, CASCADE), `booking_id` (FK bookings, nullable), `status` (text, default 'available' — values: 'available', 'reserved', 'seated', 'starters', 'mains', 'dessert', 'bill', 'paid', 'bussing'), `updated_at` (timestamptz, default now()), `updated_by` (uuid, FK staff, nullable). UNIQUE on (table_id) — one status per table.
+> (5) `table_statuses` - `id` (uuid PK), `table_id` (FK venue_tables, CASCADE), `booking_id` (FK bookings, nullable), `status` (text, default 'available' - values: 'available', 'reserved', 'seated', 'starters', 'mains', 'dessert', 'bill', 'paid', 'bussing'), `updated_at` (timestamptz, default now()), `updated_by` (uuid, FK staff, nullable). UNIQUE on (table_id) - one status per table.
 >
 > Add RLS policies on ALL new tables: SELECT for staff whose venue_id matches via the staff table; ALL operations for admin staff only. For `booking_table_assignments`, chain through bookings.venue_id.
 >
@@ -543,7 +543,7 @@ ALTER TABLE venue_tables ADD COLUMN server_section TEXT;
 
 > **Cursor Prompt:**
 >
-> "Create the table-aware availability layer for ReserveNI at `lib/table-availability.ts`. This integrates with the existing availability engine — it does NOT replace it. The existing covers-based check always runs first. This table check is a second gate that only runs when `venue.table_management_enabled` is true.
+> "Create the table-aware availability layer for ReserveNI at `lib/table-availability.ts`. This integrates with the existing availability engine - it does NOT replace it. The existing covers-based check always runs first. This table check is a second gate that only runs when `venue.table_management_enabled` is true.
 >
 > Export a function `getAvailableTablesForBooking(venueId, date, startTime, durationMinutes, bufferMinutes, partySize)` that returns `{ available: boolean, suggestedTable, suggestedCombination, allOptions }`.
 >
@@ -555,7 +555,7 @@ ALTER TABLE venue_tables ADD COLUMN server_section TEXT;
 > (5) Sort results by best fit: prefer single tables over combinations, prefer smallest adequate table (don't put a 2 on a 6-top if a 2-top is free), use sort_order as tiebreaker.
 > (6) Return the best suggestion and all options.
 >
-> Also export `getTableAvailabilityGrid(venueId, date, serviceId)` — returns a full grid of table × timeslot availability for the timeline view. For each table and each timeslot, return: { tableId, time, isAvailable, bookingId (if occupied), bookingDetails (guest name, party size, status, duration) }. This powers the entire grid UI and must be optimised for performance — batch all DB queries, don't query per-cell. Target: under 200ms for a venue with 30 tables and a full evening service.
+> Also export `getTableAvailabilityGrid(venueId, date, serviceId)` - returns a full grid of table × timeslot availability for the timeline view. For each table and each timeslot, return: { tableId, time, isAvailable, bookingId (if occupied), bookingDetails (guest name, party size, status, duration) }. This powers the entire grid UI and must be optimised for performance - batch all DB queries, don't query per-cell. Target: under 200ms for a venue with 30 tables and a full evening service.
 >
 > Modify the existing booking creation flow: after the covers-based availability check passes, if `table_management_enabled`, run the table availability check. If a suitable table is found, auto-assign it (insert into `booking_table_assignments`). If no table fits but covers allow it, create the booking as unassigned and log a `booking.table_unassigned` event. Always log `booking.table_assigned` when a table is assigned.
 >
@@ -575,13 +575,13 @@ ALTER TABLE venue_tables ADD COLUMN server_section TEXT;
 >
 > Below the toggle (visible only when enabled):
 >
-> **Table List** — A sortable, editable list of all venue tables. Each row: name (editable inline), shape (dropdown: rectangle/circle/square), min covers (number input), max covers (number input), zone (editable text or dropdown of existing zones), server section (text), active toggle, drag handle for reordering. 'Add Table' button at the bottom. 'Add Multiple' button that creates a batch (e.g. 'Create 10 tables named Table 1 through Table 10, all 4-tops'). Delete button with confirmation on each row.
+> **Table List** - A sortable, editable list of all venue tables. Each row: name (editable inline), shape (dropdown: rectangle/circle/square), min covers (number input), max covers (number input), zone (editable text or dropdown of existing zones), server section (text), active toggle, drag handle for reordering. 'Add Table' button at the bottom. 'Add Multiple' button that creates a batch (e.g. 'Create 10 tables named Table 1 through Table 10, all 4-tops'). Delete button with confirmation on each row.
 >
-> **Zones** — A simple section to define zone names and colours. Zones are just text labels — they don't need complex configuration. Pre-suggest common zones: 'Main Dining', 'Terrace', 'Bar Area', 'Private Dining'.
+> **Zones** - A simple section to define zone names and colours. Zones are just text labels - they don't need complex configuration. Pre-suggest common zones: 'Main Dining', 'Terrace', 'Bar Area', 'Private Dining'.
 >
-> **Combinations** — Show existing table combinations. Each shows the component tables, combined capacity, and a delete button. 'Create Combination' button opens a modal: multi-select tables from a list, auto-calculate combined capacity (sum of individual max_covers), allow override of combined min/max, name the combination (auto-suggest from table names, e.g. 'Tables 1 + 2').
+> **Combinations** - Show existing table combinations. Each shows the component tables, combined capacity, and a delete button. 'Create Combination' button opens a modal: multi-select tables from a list, auto-calculate combined capacity (sum of individual max_covers), allow override of combined min/max, name the combination (auto-suggest from table names, e.g. 'Tables 1 + 2').
 >
-> **Table Status Settings** — Checkboxes for which statuses this venue uses. Minimum: Available, Seated, Paid. Optional: Reserved, Starters, Mains, Dessert, Bill, Bussing. Default: all enabled. Also: 'Auto-bussing time' — number input for minutes after 'Paid' status before table auto-reverts to 'Available' (default: 10 minutes, 0 = immediate).
+> **Table Status Settings** - Checkboxes for which statuses this venue uses. Minimum: Available, Seated, Paid. Optional: Reserved, Starters, Mains, Dessert, Bill, Bussing. Default: all enabled. Also: 'Auto-bussing time' - number input for minutes after 'Paid' status before table auto-reverts to 'Available' (default: 10 minutes, 0 = immediate).
 >
 > **Floor Plan Editor** at `/dashboard/settings/floor-plan` (linked from table settings):
 >
@@ -596,23 +596,23 @@ ALTER TABLE venue_tables ADD COLUMN server_section TEXT;
 > **Auto-save:** Debounce 1 second after any change. Show a 'Saved' / 'Saving...' indicator. All position/size data saved to venue_tables rows as percentages (0-100) of canvas dimensions for responsive scaling.
 >
 > **First-time setup wizard** (shown when table management is toggled on and no tables exist):
-> Step 1: 'How many tables do you have?' — number input with quick presets (10, 15, 20, 25, 30).
-> Step 2: 'What are your typical table sizes?' — select from presets: 'Mostly 2-tops and 4-tops', 'Mix of 2, 4, and 6-tops', 'Varied sizes', 'Custom'. Auto-generates tables based on selection.
-> Step 3: 'Do you have separate dining areas?' — toggle to define zones. If yes, name them and assign tables.
-> Step 4: 'Arrange your floor plan' — opens the floor plan editor with the generated tables ready to position.
+> Step 1: 'How many tables do you have?' - number input with quick presets (10, 15, 20, 25, 30).
+> Step 2: 'What are your typical table sizes?' - select from presets: 'Mostly 2-tops and 4-tops', 'Mix of 2, 4, and 6-tops', 'Varied sizes', 'Custom'. Auto-generates tables based on selection.
+> Step 3: 'Do you have separate dining areas?' - toggle to define zones. If yes, name them and assign tables.
+> Step 4: 'Arrange your floor plan' - opens the floor plan editor with the generated tables ready to position.
 > A 'Skip floor plan for now' option lets venues use the timeline grid without positioning tables (they appear in a list order)."
 
 ### Prompt 19: Timeline Grid View
 
 > **Cursor Prompt:**
 >
-> "Build the timeline grid view for ReserveNI at `/dashboard/table-grid`. This is the world-class table management grid — it must be visually impressive, incredibly responsive, and intuitive for restaurant hosts using a tablet during busy service.
+> "Build the timeline grid view for ReserveNI at `/dashboard/table-grid`. This is the world-class table management grid - it must be visually impressive, incredibly responsive, and intuitive for restaurant hosts using a tablet during busy service.
 >
 > **Only show this page in the dashboard navigation when `venue.table_management_enabled` is true.** When false, hide it completely.
 >
 > **Layout:** A fixed table column on the left (Y-axis) with scrollable time columns (X-axis). Tables are grouped by zone (collapsible zone headers) and ordered by sort_order within each zone. Time columns are generated from the selected service's start_time to end_time at the configured slot_interval_minutes. An 'Unassigned' section at the bottom shows any bookings without table assignments as compact cards.
 >
-> **Data loading:** On mount and on date/service change, call `GET /api/venue/tables/availability` to get the full grid data. Subscribe to Supabase Realtime on `bookings`, `booking_table_assignments`, and `table_statuses` tables for live updates — when a change arrives, update the relevant cells without reloading the full grid.
+> **Data loading:** On mount and on date/service change, call `GET /api/venue/tables/availability` to get the full grid data. Subscribe to Supabase Realtime on `bookings`, `booking_table_assignments`, and `table_statuses` tables for live updates - when a change arrives, update the relevant cells without reloading the full grid.
 >
 > **Booking blocks:** Each booking renders as a horizontal bar spanning from its start time to estimated_end_time. Bar colour indicates status: Pending = amber with stripe pattern, Confirmed = #3B82F6 (blue), Seated = #22C55E (green), Starters = #86EFAC, Mains = #16A34A, Dessert = #14B8A6, Bill/Paid = #8B5CF6 (purple), Bussing = #9CA3AF (grey), No-show = #EF4444 (red), Cancelled = light grey with 50% opacity. Each block shows: guest name (truncated), party size in a circle badge, and small icons for occasions/dietary/VIP. On hover (desktop) or tap (tablet), show a popover with full booking details and action buttons.
 >
@@ -638,7 +638,7 @@ ALTER TABLE venue_tables ADD COLUMN server_section TEXT;
 >
 > **Performance requirements:** The grid must render smoothly with 30+ tables and 100+ bookings visible. Use React virtualisation if needed for many tables. Memoize booking block components. Batch Supabase Realtime updates to avoid excessive re-renders. Target: initial load < 500ms, drag interaction at 60fps, no perceptible lag on iPad.
 >
-> **Responsive design:** On desktop (>1024px): full grid with all features. On tablet (768-1024px): full grid optimised for touch — larger tap targets, touch-friendly drag handles, bottom sheet for booking details instead of popovers. On phone (<768px): redirect to the existing day sheet view with a note that 'Table grid is best used on a tablet or desktop'. The grid should NOT attempt to render on a phone screen — it would be unusable.
+> **Responsive design:** On desktop (>1024px): full grid with all features. On tablet (768-1024px): full grid optimised for touch - larger tap targets, touch-friendly drag handles, bottom sheet for booking details instead of popovers. On phone (<768px): redirect to the existing day sheet view with a note that 'Table grid is best used on a tablet or desktop'. The grid should NOT attempt to render on a phone screen - it would be unusable.
 >
 > **Empty state:** When table management is enabled but no tables are defined: 'Set up your tables to use the timeline grid.' with a button linking to `/dashboard/settings/tables`. When tables exist but no bookings for the selected date: show the empty grid with a friendly message and the '+ Walk-in' button."
 
@@ -673,10 +673,10 @@ ALTER TABLE venue_tables ADD COLUMN server_section TEXT;
 > Bussing: grey (#9CA3AF)
 >
 > **Interactions:**
-> - Tap an occupied table: show a detail card (overlay or side panel) with full booking details and quick action buttons: 'Next Status' (advance to next in sequence — this is the primary large button), status jump buttons (for skipping statuses), 'View Guest', 'Move to Another Table'. The 'Next Status' button should be colour-coded for the NEXT status, with clear text: e.g. if currently Seated, the button says '→ Starters' in the starters colour.
+> - Tap an occupied table: show a detail card (overlay or side panel) with full booking details and quick action buttons: 'Next Status' (advance to next in sequence - this is the primary large button), status jump buttons (for skipping statuses), 'View Guest', 'Move to Another Table'. The 'Next Status' button should be colour-coded for the NEXT status, with clear text: e.g. if currently Seated, the button says '→ Starters' in the starters colour.
 > - Tap an available table: show options: 'Seat Walk-in' (quick form: party size, optional name), 'Assign Booking' (shows a list of today's unassigned bookings that fit this table's capacity, sorted by time), 'Block Table' (mark unavailable with a reason).
 > - Pinch-to-zoom on tablet for zooming in on specific areas.
-> - Pan by dragging the background (not tables — tables are not draggable in live view, only in the editor).
+> - Pan by dragging the background (not tables - tables are not draggable in live view, only in the editor).
 >
 > **Animation:** When a table status changes (either from a user action or from a Realtime update), the table shape briefly pulses/scales up and back (a subtle bounce animation, ~300ms). This draws attention to changes without being distracting.
 >
@@ -700,13 +700,13 @@ ALTER TABLE venue_tables ADD COLUMN server_section TEXT;
 >
 > **Booking detail integration:** Update the existing booking detail view (in the reservations dashboard) to show table assignment when table management is enabled. Show: assigned table name(s), zone, and a 'Reassign Table' button that opens a dropdown of available tables for this booking's time window. If unassigned, show 'No table assigned' with an 'Assign Table' button.
 >
-> **Day sheet integration:** When table management is enabled, add a 'Table' column to the day sheet showing the assigned table name for each booking. Unassigned bookings show '—' with an amber background. Add a count of unassigned bookings to the day sheet summary bar.
+> **Day sheet integration:** When table management is enabled, add a 'Table' column to the day sheet showing the assigned table name for each booking. Unassigned bookings show '-' with an amber background. Add a count of unassigned bookings to the day sheet summary bar.
 >
-> **Booking confirmation update:** When table management is enabled and a table is auto-assigned, optionally include the table name in the confirmation email and on the confirmation screen: 'You've been assigned to [Table Name]'. Add a venue setting `show_table_in_confirmation` (boolean, default false) — many venues prefer NOT to tell guests their table number as it reduces flexibility.
+> **Booking confirmation update:** When table management is enabled and a table is auto-assigned, optionally include the table name in the confirmation email and on the confirmation screen: 'You've been assigned to [Table Name]'. Add a venue setting `show_table_in_confirmation` (boolean, default false) - many venues prefer NOT to tell guests their table number as it reduces flexibility.
 >
 > **Event logging:** Ensure all table-related actions log to the events table: `booking.table_assigned` (payload: table_id, table_name, auto: true/false), `booking.table_reassigned` (payload: from_table_id, to_table_id, reassigned_by), `booking.table_unassigned` (payload: table_id, reason), `table.status_changed` (payload: table_id, from_status, to_status, changed_by, booking_id).
 >
-> **Reports integration:** Add a new section to the reporting page (only when table management enabled): 'Table Utilisation' — for a date range, show each table's utilisation percentage (hours occupied / hours available in service). Show as a simple bar chart. Highlight underperforming tables (< 50% utilisation) and overperforming tables (> 90%). This helps venues understand which tables are their workhorses and which might be poorly positioned.
+> **Reports integration:** Add a new section to the reporting page (only when table management enabled): 'Table Utilisation' - for a date range, show each table's utilisation percentage (hours occupied / hours available in service). Show as a simple bar chart. Highlight underperforming tables (< 50% utilisation) and overperforming tables (> 90%). This helps venues understand which tables are their workhorses and which might be poorly positioned.
 >
 > **Covers-based fallback:** Verify thoroughly that when `table_management_enabled` is toggled OFF: the Table Grid and Floor Plan nav items disappear, the booking flow skips the table availability check entirely, existing table assignments are preserved in the database but hidden from all views, the day sheet hides the table column, reports hide the table utilisation section. When toggled back ON: everything reappears with existing data intact.
 >
@@ -781,7 +781,7 @@ These are all well-maintained, widely-used libraries with strong React integrati
 
 With this table management implementation, ReserveNI offers a feature set that matches or exceeds what independent restaurants get from significantly more expensive platforms:
 
-**vs. OpenTable** ($149-499/month + per-cover fees): ReserveNI's timeline grid with drag-and-drop and floor plan view matches OpenTable's core table management. OpenTable's advantages are POS integration for auto-statusing and the diner network — neither of which are relevant to ReserveNI's target market of independent NI restaurants at £79/month flat fee.
+**vs. OpenTable** ($149-499/month + per-cover fees): ReserveNI's timeline grid with drag-and-drop and floor plan view matches OpenTable's core table management. OpenTable's advantages are POS integration for auto-statusing and the diner network - neither of which are relevant to ReserveNI's target market of independent NI restaurants at £79/month flat fee.
 
 **vs. ResDiary** ($99-289/month): ReserveNI matches ResDiary's yield management (from the availability engine) AND adds a more modern, visually appealing timeline grid. ResDiary's interface has been criticised in reviews for poor ease of use. ReserveNI's clean, mobile-first design is a genuine differentiator.
 
@@ -789,4 +789,4 @@ With this table management implementation, ReserveNI offers a feature set that m
 
 **vs. Tablein / Table Agent** (budget tools): ReserveNI significantly exceeds these simpler platforms, which lack timeline grids, drag-and-drop, and floor plans entirely.
 
-**The unique ReserveNI advantage:** The toggle between simple covers-based mode and full table management means ReserveNI serves BOTH ends of the market — the small bistro that just wants easy booking and deposits, AND the larger restaurant that wants granular table control. No competitor offers this flexibility at this price point with the deposit-first, no-show-reduction focus that defines ReserveNI.
+**The unique ReserveNI advantage:** The toggle between simple covers-based mode and full table management means ReserveNI serves BOTH ends of the market - the small bistro that just wants easy booking and deposits, AND the larger restaurant that wants granular table control. No competitor offers this flexibility at this price point with the deposit-first, no-show-reduction focus that defines ReserveNI.

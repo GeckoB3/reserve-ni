@@ -49,7 +49,7 @@ async function getVenueBookingModel(
   return ((data as { booking_model?: string } | null)?.booking_model as string) ?? '';
 }
 
-/** GET /api/venue/appointment-services — list appointment services for the venue. */
+/** GET /api/venue/appointment-services - list appointment services for the venue. */
 export async function GET() {
   try {
     const supabase = await createClient();
@@ -148,7 +148,7 @@ export async function GET() {
   }
 }
 
-/** POST /api/venue/appointment-services — create an appointment service (admin only). */
+/** POST /api/venue/appointment-services - create an appointment service (admin only). */
 export async function POST(request: NextRequest) {
   try {
     const supabase = await createClient();
@@ -240,7 +240,7 @@ export async function POST(request: NextRequest) {
   }
 }
 
-/** PATCH /api/venue/appointment-services — update a service (admin only). */
+/** PATCH /api/venue/appointment-services - update a service (admin only). */
 export async function PATCH(request: NextRequest) {
   try {
     const supabase = await createClient();
@@ -325,7 +325,7 @@ export async function PATCH(request: NextRequest) {
   }
 }
 
-/** DELETE /api/venue/appointment-services — delete a service (admin only). */
+/** DELETE /api/venue/appointment-services - delete a service (admin only). */
 export async function DELETE(request: NextRequest) {
   try {
     const supabase = await createClient();

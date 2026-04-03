@@ -296,7 +296,7 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    // Summary — deduplicate by booking ID as a safety net
+    // Summary - deduplicate by booking ID as a safety net
     const allMappedRaw = periods.flatMap((p) => p.bookings);
     const seenIds = new Set<string>();
     const allMapped = allMappedRaw.filter((b) => {
@@ -322,7 +322,7 @@ export async function GET(request: NextRequest) {
       .filter((b) => b.status === 'Cancelled')
       .reduce((s, b) => s + b.party_size, 0);
 
-    // Venue-level max CONCURRENT capacity (physical seats — the most covers that can be
+    // Venue-level max CONCURRENT capacity (physical seats - the most covers that can be
     // seated at the same time). Use MAX across periods, not SUM, because all periods
     // share the same physical space.
     let venueMaxCapacity: number | null = null;
@@ -412,7 +412,7 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // Dietary summary (only active bookings — includes special_requests for allergy detection)
+    // Dietary summary (only active bookings - includes special_requests for allergy detection)
     const dietaryInput = allBookings
       .filter((b) => ACTIVE_STATUSES.includes(b.status))
       .map((b) => ({ dietary_notes: b.dietary_notes, occasion: b.occasion, special_requests: b.special_requests }));

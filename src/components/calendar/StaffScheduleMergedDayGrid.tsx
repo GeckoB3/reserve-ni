@@ -21,7 +21,7 @@ interface Props {
 
 /**
  * Merged Events / Classes / Resources day columns for non–unified-scheduling venues
- * (e.g. table + secondaries, or C/D/E primary). Uses GET /api/venue/schedule — same
+ * (e.g. table + secondaries, or C/D/E primary). Uses GET /api/venue/schedule - same
  * feed as PractitionerCalendarView merged lanes; does not include Model A tables.
  */
 export function StaffScheduleMergedDayGrid({ date, bookingModel, enabledModels }: Props) {

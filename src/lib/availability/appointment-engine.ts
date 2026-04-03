@@ -1,6 +1,6 @@
 /**
  * Model B: Practitioner appointment availability engine.
- * Pure functions — given practitioners, services, and existing bookings,
+ * Pure functions - given practitioners, services, and existing bookings,
  * returns available appointment start times per practitioner.
  */
 
@@ -42,7 +42,7 @@ export interface AppointmentEngineInput {
   practitionerBlockedRanges?: PractitionerCalendarBlockedRange[];
   /**
    * When true, do not hide today's slots before the current clock time.
-   * Used for staff reschedule validation — the guest booking may move to a time
+   * Used for staff reschedule validation - the guest booking may move to a time
    * that is already "past" relative to when staff edit (same-day corrections).
    */
   skipPastSlotFilter?: boolean;
@@ -120,7 +120,7 @@ export interface AppointmentAvailabilityResult {
 
 const DAY_NAMES = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const;
 
-/** Align with dashboard working-hours keys (JS getDay, 0=Sun) — same as getDayOfWeek() in engine.ts. */
+/** Align with dashboard working-hours keys (JS getDay, 0=Sun) - same as getDayOfWeek() in engine.ts. */
 function dayKeyForDate(dateStr: string): string {
   return String(getDayOfWeek(dateStr));
 }

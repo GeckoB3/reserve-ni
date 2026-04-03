@@ -144,8 +144,8 @@ export function WalkInFab({ tables, cells, onCreated }: Props) {
                     return (
                       <option key={t.id} value={t.id} disabled={isOccupied || tooSmall}>
                         {t.name} (max {t.max_covers})
-                        {isOccupied ? ' — Occupied' : ''}
-                        {tooSmall && !isOccupied ? ' — Too small' : ''}
+                        {isOccupied ? ' - Occupied' : ''}
+                        {tooSmall && !isOccupied ? ' - Too small' : ''}
                       </option>
                     );
                   })}

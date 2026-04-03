@@ -34,7 +34,7 @@ function parseShortCode(code: string): string | null {
 }
 
 /**
- * GET /m/:signedCode — Verify the short-link HMAC and redirect to the manage
+ * GET /m/:signedCode - Verify the short-link HMAC and redirect to the manage
  * page using HMAC-based auth. This avoids overwriting the token hash in the
  * database (which would invalidate email manage links).
  */

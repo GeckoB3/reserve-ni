@@ -18,7 +18,7 @@ function timeToMinutes(t: string): number {
   return (hh ?? 0) * 60 + (mm ?? 0);
 }
 
-/** PATCH — update block end time and/or reason. */
+/** PATCH - update block end time and/or reason. */
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -87,7 +87,7 @@ export async function PATCH(
   }
 }
 
-/** DELETE — remove a block. */
+/** DELETE - remove a block. */
 export async function DELETE(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> },

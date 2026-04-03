@@ -45,7 +45,7 @@ The MVP uses a single binary policy for all venues:
 - Timezone for all calculations: `Europe/London`.
 - The policy version in effect at booking time is stored on the booking record (`cancellation_policy_snapshot`). Policy changes never retroactively affect existing bookings.
 
-## Webhook Handlers — CRITICAL
+## Webhook Handlers - CRITICAL
 All webhook handlers in `/api/webhooks/stripe/` MUST be:
 
 1. **Idempotent:** Check if the event has already been processed before taking action. Use the Stripe event ID as the idempotency key.
@@ -75,10 +75,10 @@ await supabase.from('webhook_events').insert({
 ```
 
 ## Key Webhook Events to Handle
-- `payment_intent.succeeded` — Mark deposit as Paid, update booking to Confirmed, trigger confirmation communication.
-- `payment_intent.payment_failed` — Mark deposit as Failed, notify venue.
-- `charge.refunded` — Confirm refund completion, update deposit status to Refunded.
-- `charge.dispute.created` — Alert founding team (email notification). Log the dispute.
+- `payment_intent.succeeded` - Mark deposit as Paid, update booking to Confirmed, trigger confirmation communication.
+- `payment_intent.payment_failed` - Mark deposit as Failed, notify venue.
+- `charge.refunded` - Confirm refund completion, update deposit status to Refunded.
+- `charge.dispute.created` - Alert founding team (email notification). Log the dispute.
 
 ## Phone Booking Deposit Flow
 1. Staff enters phone booking → booking created with status Pending.

@@ -13,12 +13,12 @@ globs:
 The database schema is defined in `docs/schema.sql`. Always reference it before writing queries.
 
 ### Key Tables
-- **venues** — Core venue profile. Contains JSONB config fields: `booking_rules`, `deposit_config`, `opening_hours`, `availability_config`, `communication_templates`. Each JSONB field has a defined schema — validate on write.
-- **bookings** — Individual booking record. Status enum: Pending, Confirmed, Arrived, NoShow, Cancelled. Source enum: Widget, BookingPage, Phone, WalkIn. Includes `cancellation_policy_snapshot` storing the policy in effect at time of booking.
-- **guests** — One record per unique guest per venue. Matched on normalised email or phone. Contains `global_guest_hash` (computed, not used in MVP but must be populated).
-- **events** — Immutable event log. Every booking action recorded: booking_created, booking_confirmed, guest_arrived, no_show_recorded, deposit_paid, refund_processed, booking_cancelled, booking_modified. Never update or delete events rows.
-- **staff** — Venue staff accounts. Role: Admin or Staff.
-- **communications** — Log of every message sent. Message type, channel, recipient, timestamp, delivery status.
+- **venues** - Core venue profile. Contains JSONB config fields: `booking_rules`, `deposit_config`, `opening_hours`, `availability_config`, `communication_templates`. Each JSONB field has a defined schema - validate on write.
+- **bookings** - Individual booking record. Status enum: Pending, Confirmed, Arrived, NoShow, Cancelled. Source enum: Widget, BookingPage, Phone, WalkIn. Includes `cancellation_policy_snapshot` storing the policy in effect at time of booking.
+- **guests** - One record per unique guest per venue. Matched on normalised email or phone. Contains `global_guest_hash` (computed, not used in MVP but must be populated).
+- **events** - Immutable event log. Every booking action recorded: booking_created, booking_confirmed, guest_arrived, no_show_recorded, deposit_paid, refund_processed, booking_cancelled, booking_modified. Never update or delete events rows.
+- **staff** - Venue staff accounts. Role: Admin or Staff.
+- **communications** - Log of every message sent. Message type, channel, recipient, timestamp, delivery status.
 
 ## Guest Identity Matching
 When creating a booking, match guests in this order:
@@ -28,7 +28,7 @@ When creating a booking, match guests in this order:
 Always increment `visit_count` when linking to an existing guest.
 
 ## Supabase Patterns
-- Use `createClient` from `@supabase/supabase-js` — separate clients for server (service role) and client (anon key).
+- Use `createClient` from `@supabase/supabase-js` - separate clients for server (service role) and client (anon key).
 - Server-side API routes use the service role client when bypassing RLS is needed (e.g., cross-venue reconciliation). All other operations use the anon client with RLS.
 - Always use parameterised queries. Never interpolate user input into SQL strings.
 - For real-time subscriptions, always implement a connection status check and fallback to polling (30-second interval) on disconnection.

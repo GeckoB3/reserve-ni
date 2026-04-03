@@ -6,7 +6,7 @@ const schema = z.object({
   new_password: z.string().min(8, 'Password must be at least 8 characters'),
 });
 
-/** POST /api/venue/staff/change-password — change the currently logged-in user's password. */
+/** POST /api/venue/staff/change-password - change the currently logged-in user's password. */
 export async function POST(request: NextRequest) {
   try {
     const supabase = await createClient();

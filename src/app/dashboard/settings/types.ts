@@ -51,10 +51,6 @@ export interface BookingRulesSettings {
   min_notice_hours: number;
   cancellation_notice_hours?: number;
   allow_same_day_booking?: boolean;
-  cancellation_notice_hours_by_model?: Partial<Record<BookingModel, number>>;
-  reminder_hours_before_by_model?: Partial<
-    Record<BookingModel, { reminder_1?: number; reminder_2?: number }>
-  >;
 }
 
 export interface DepositConfigSettings {

@@ -2,7 +2,7 @@
  * Normalized schedule items for staff calendar (Docs §4.2).
  * Excludes Model A (table_reservation). Appointments use the practitioner grid; this feed is for C/D/E + empty shells.
  *
- * **Option A (v1):** Unified / practitioner appointments and `event_session` rows are **not** emitted here — they
+ * **Option A (v1):** Unified / practitioner appointments and `event_session` rows are **not** emitted here - they
  * appear only on the practitioner columns in `PractitionerCalendarView`. Extending this feed with a separate
  * `event_session` block kind (Option B) would require deduping against the grid.
  */

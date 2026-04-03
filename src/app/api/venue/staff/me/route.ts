@@ -15,7 +15,7 @@ const patchSchema = z
     message: 'Provide at least one field to update',
   });
 
-/** GET /api/venue/staff/me — current user's staff profile (name, email, phone, role). */
+/** GET /api/venue/staff/me - current user's staff profile (name, email, phone, role). */
 export async function GET() {
   try {
     const supabase = await createClient();
@@ -48,7 +48,7 @@ export async function GET() {
   }
 }
 
-/** PATCH /api/venue/staff/me — update own display name, phone, and/or sign-in email. */
+/** PATCH /api/venue/staff/me - update own display name, phone, and/or sign-in email. */
 export async function PATCH(request: NextRequest) {
   try {
     const supabase = await createClient();

@@ -50,7 +50,7 @@ export default function EmbedPage() {
     sendHeight(document.documentElement.scrollHeight);
   }, []);
 
-  // ResizeObserver — catches every layout change automatically
+  // ResizeObserver - catches every layout change automatically
   useEffect(() => {
     const el = contentRef.current ?? document.body;
     const observer = new ResizeObserver(() => {

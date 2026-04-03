@@ -46,7 +46,7 @@ available = Math.min(...slotsSpanned.map(slot => slot.max_covers - slot.booked_c
 ## Blocking
 - Venues can block entire dates or specific time slots.
 - Blocked slots return as unavailable across all booking channels.
-- Blocking does NOT affect existing confirmed bookings — only prevents new ones.
+- Blocking does NOT affect existing confirmed bookings - only prevents new ones.
 
 ## Implementation Notes
 - All availability functions must be pure: given venue config + existing bookings + date → return available slots. No side effects.

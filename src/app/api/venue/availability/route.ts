@@ -3,7 +3,7 @@ import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff } from '@/lib/venue-auth';
 import type { AvailabilityConfig, BlockedSlot } from '@/types/availability';
 
-/** GET /api/venue/availability — return blocked dates/slots for the authenticated venue. */
+/** GET /api/venue/availability - return blocked dates/slots for the authenticated venue. */
 export async function GET() {
   try {
     const supabase = await createClient();
@@ -37,7 +37,7 @@ export async function GET() {
   }
 }
 
-/** POST /api/venue/availability — add or remove a blocked date or slot. */
+/** POST /api/venue/availability - add or remove a blocked date or slot. */
 export async function POST(request: NextRequest) {
   try {
     const supabase = await createClient();

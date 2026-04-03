@@ -18,7 +18,22 @@ function toPgTime(s: string): string {
   return s.length === 5 ? `${s}:00` : s;
 }
 
-/** GET — list blocks for date=YYYY-MM-DD or from & to (inclusive). */
+/** Merged shape for GET: legacy practitioner blocks + unified `calendar_blocks`. */
+type MergedBlockRow = {
+  id: string;
+  practitioner_id: string | null;
+  calendar_id: string | null;
+  block_date: string;
+  start_time: string;
+  end_time: string;
+  reason: string | null;
+  block_type: string;
+  source: string;
+  class_instance_id: string | null;
+  created_at: unknown;
+};
+
+/** GET - list blocks for date=YYYY-MM-DD or from & to (inclusive). */
 export async function GET(request: NextRequest) {
   try {
     const supabase = await createClient();
@@ -52,24 +67,64 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to load blocks' }, { status: 500 });
     }
 
-    const blocks = (data ?? []).map((row: Record<string, unknown>) => ({
-      id: row.id,
-      practitioner_id: row.practitioner_id,
-      block_date: row.block_date,
+    const legacyBlocks: MergedBlockRow[] = (data ?? []).map((row: Record<string, unknown>) => ({
+      id: row.id as string,
+      practitioner_id: row.practitioner_id as string,
+      calendar_id: null,
+      block_date: row.block_date as string,
       start_time: String(row.start_time).slice(0, 5),
       end_time: String(row.end_time).slice(0, 5),
-      reason: row.reason ?? null,
+      reason: (row.reason as string | null) ?? null,
+      block_type: 'manual',
+      source: 'practitioner_table',
+      class_instance_id: null,
       created_at: row.created_at,
     }));
 
-    return NextResponse.json({ blocks });
+    /** Unified calendars: manual + class teaching blocks (`calendar_blocks`). */
+    const unifiedBlocks: MergedBlockRow[] = [];
+    let uq = staff.db
+      .from('calendar_blocks')
+      .select('id, calendar_id, block_date, start_time, end_time, reason, block_type, class_instance_id')
+      .eq('venue_id', staff.venue_id)
+      .order('block_date', { ascending: true })
+      .order('start_time', { ascending: true });
+    if (date && isoDate.test(date)) {
+      uq = uq.eq('block_date', date);
+    } else if (from && to && isoDate.test(from) && isoDate.test(to)) {
+      uq = uq.gte('block_date', from).lte('block_date', to);
+    }
+    const { data: ucRows, error: ucErr } = await uq;
+
+    if (!ucErr) {
+      for (const row of ucRows ?? []) {
+        const r = row as Record<string, unknown>;
+        unifiedBlocks.push({
+          id: r.id as string,
+          practitioner_id: null,
+          calendar_id: r.calendar_id as string,
+          block_date: r.block_date as string,
+          start_time: String(r.start_time).slice(0, 5),
+          end_time: String(r.end_time).slice(0, 5),
+          reason: (r.reason as string | null) ?? null,
+          block_type: String(r.block_type ?? 'manual'),
+          source: 'calendar_blocks',
+          class_instance_id: (r.class_instance_id as string | null) ?? null,
+          created_at: null,
+        });
+      }
+    } else {
+      console.error('GET practitioner-calendar-blocks (calendar_blocks):', ucErr);
+    }
+
+    return NextResponse.json({ blocks: [...legacyBlocks, ...unifiedBlocks] });
   } catch (err) {
     console.error('GET practitioner-calendar-blocks failed:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
 
-/** POST — create a block. */
+/** POST - create a block. */
 export async function POST(request: NextRequest) {
   try {
     const supabase = await createClient();

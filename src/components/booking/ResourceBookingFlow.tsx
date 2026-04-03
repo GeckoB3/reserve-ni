@@ -176,7 +176,7 @@ export function ResourceBookingFlow({ venue, cancellationPolicy }: { venue: Venu
       {step === 'slot' && selectedResource && (
         <div>
           <button onClick={() => { setSelectedResource(null); setStep('resource'); }} className="mb-4 text-sm text-brand-600 hover:underline">&larr; Back</button>
-          <h2 className="mb-4 text-lg font-semibold text-slate-900">{selectedResource.name} — Pick a time</h2>
+          <h2 className="mb-4 text-lg font-semibold text-slate-900">{selectedResource.name} - Pick a time</h2>
           {selectedResource.slots.length === 0 ? (
             <p className="text-sm text-slate-500">
               No available times for this duration. Try a different length or date, or contact the venue.

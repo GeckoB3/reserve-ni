@@ -60,7 +60,7 @@ export interface SnapRemoveUpdate {
 /**
  * Checks whether the dragged table can snap-join to any nearby table.
  *
- * Only rectangular / square tables participate in snapping — circles and
+ * Only rectangular / square tables participate in snapping - circles and
  * ovals are skipped.  Returns the best candidate (most overlap) or `null`.
  */
 export function detectSnap(

@@ -8,7 +8,7 @@ import type { AvailabilityConfig } from '@/types/availability';
 const LEGACY_CONFIG_LOCKED_MESSAGE =
   'Availability is managed under Dashboard → Availability. Remove or deactivate services there to edit legacy settings, or contact support.';
 
-/** PATCH /api/venue/availability-config — update availability_config (admin only). Blocked when any active venue_service exists. */
+/** PATCH /api/venue/availability-config - update availability_config (admin only). Blocked when any active venue_service exists. */
 export async function PATCH(request: NextRequest) {
   try {
     const supabase = await createClient();

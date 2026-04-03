@@ -1,4 +1,4 @@
-# ReserveNI — Bookable Services Landscape & Unified Architecture Plan
+# ReserveNI - Bookable Services Landscape & Unified Architecture Plan
 
 **From Restaurant Bookings to Every Bookable Service in Northern Ireland**  
 **March 2026** · **Last reviewed:** March 2026
@@ -9,7 +9,7 @@ This document is the **master reference** for ReserveNI’s five booking models:
 
 ## 1. The Complete Landscape of Bookable Services
 
-Every bookable business in Northern Ireland falls into one of five fundamental booking models. The critical insight — and the thing that will save you from building dozens of bespoke dashboards — is that while there are hundreds of specific business types, they all use one of a small number of scheduling patterns. If you build for the pattern, you cover every business in the category.
+Every bookable business in Northern Ireland falls into one of five fundamental booking models. The critical insight - and the thing that will save you from building dozens of bespoke dashboards - is that while there are hundreds of specific business types, they all use one of a small number of scheduling patterns. If you build for the pattern, you cover every business in the category.
 
 ### 1.1 The Five Booking Models
 
@@ -34,13 +34,13 @@ A recurring scheduled session with a fixed capacity. Clients book a spot in a sp
 Businesses: Yoga studios, pilates studios, spin/cycling studios, CrossFit boxes, martial arts schools, dance schools, swimming lessons, fitness bootcamps, gym classes, language classes, music schools (group lessons), kids activity clubs, baby/toddler classes (e.g. baby sensory, messy play), adult education workshops, sewing classes, cooking schools (recurring), book clubs, sports coaching groups.
 
 **Model E: Resource/Facility Booking**  
-The client books a physical space or resource for a defined time period. No specific staff member is required — it’s the resource that’s being reserved.
+The client books a physical space or resource for a defined time period. No specific staff member is required - it’s the resource that’s being reserved.
 
 Businesses: Meeting rooms, co-working desks, sports pitches (5-a-side, tennis courts, padel courts), golf tee times, bowling lanes, hot tub hire, sauna rooms, photography studios, rehearsal rooms, recording studios, party rooms, function rooms, event spaces, caravan/glamping sites, holiday cottage changeover slots, equipment hire (bikes, paddleboards, kayaks), car wash bays, self-service dog wash, launderette machines.
 
 ### 1.2 Why Five Models Is Enough
 
-You might look at this list and see 100+ business types. But every single one maps to one of five booking models. A barber and a physiotherapist use the exact same scheduling logic (practitioner appointment) — the only differences are the service names, the typical durations, and the industry-specific labels (a barber has "clients" and "cuts"; a physio has "patients" and "assessments"). Those are cosmetic differences handled by templates, not code.
+You might look at this list and see 100+ business types. But every single one maps to one of five booking models. A barber and a physiotherapist use the exact same scheduling logic (practitioner appointment) - the only differences are the service names, the typical durations, and the industry-specific labels (a barber has "clients" and "cuts"; a physio has "patients" and "assessments"). Those are cosmetic differences handled by templates, not code.
 
 This is the key architectural decision: **build five booking engines, not fifty dashboards.**
 
@@ -56,15 +56,15 @@ This is the key architectural decision: **build five booking engines, not fifty 
 
 | Area | What exists (code pointers) |
 |------|------------------------------|
-| Team | `practitioners` via venue API; working hours, breaks, days off in dashboard — [`src/app/dashboard/availability/AppointmentAvailabilitySettings.tsx`](../src/app/dashboard/availability/AppointmentAvailabilitySettings.tsx) |
+| Team | `practitioners` via venue API; working hours, breaks, days off in dashboard - [`src/app/dashboard/availability/AppointmentAvailabilitySettings.tsx`](../src/app/dashboard/availability/AppointmentAvailabilitySettings.tsx) |
 | Services | `appointment_services` + `practitioner_services`; `/dashboard/appointment-services` |
-| Calendar | Practitioner calendar — [`src/app/dashboard/practitioner-calendar/PractitionerCalendarView.tsx`](../src/app/dashboard/practitioner-calendar/PractitionerCalendarView.tsx); registry-style view `/dashboard/calendar`; detail sheet (edit time, drag reschedule); [`src/app/api/venue/practitioner-calendar-blocks/`](../src/app/api/venue/practitioner-calendar-blocks/); calendar entitlement — [`src/app/api/venue/calendar-entitlement/route.ts`](../src/app/api/venue/calendar-entitlement/route.ts) |
+| Calendar | Practitioner calendar - [`src/app/dashboard/practitioner-calendar/PractitionerCalendarView.tsx`](../src/app/dashboard/practitioner-calendar/PractitionerCalendarView.tsx); registry-style view `/dashboard/calendar`; detail sheet (edit time, drag reschedule); [`src/app/api/venue/practitioner-calendar-blocks/`](../src/app/api/venue/practitioner-calendar-blocks/); calendar entitlement - [`src/app/api/venue/calendar-entitlement/route.ts`](../src/app/api/venue/calendar-entitlement/route.ts) |
 | Availability | [`src/lib/availability/appointment-engine.ts`](../src/lib/availability/appointment-engine.ts) + `fetchAppointmentInput`; working-hours keys align with JS `getDay()` / [`getDayOfWeek`](../src/lib/availability/engine.ts) (0 = Sunday … 6 = Saturday) |
 | Staff edits | [`PATCH` venue booking](../src/app/api/venue/bookings/[id]/route.ts): exclude current booking from overlap; `skipPastSlotFilter` for same-day time moves; existing bookings use per-link **custom duration** where set |
 | Bookings | Appointments-oriented bookings UI; walk-in API for appointment venues; group booking support where enabled; `client_arrived_at` (arrived/waiting before “Seated”) |
-| Payments / comms | Stripe Connect; templated email/SMS; deposit-request and comm log types — see migration [`supabase/migrations/20260402000000_deposit_request_email_and_comm_logs_types.sql`](../supabase/migrations/20260402000000_deposit_request_email_and_comm_logs_types.sql) |
+| Payments / comms | Stripe Connect; templated email/SMS; deposit-request and comm log types - see migration [`supabase/migrations/20260402000000_deposit_request_email_and_comm_logs_types.sql`](../supabase/migrations/20260402000000_deposit_request_email_and_comm_logs_types.sql) |
 
-**Tooling note:** Linting uses **Next.js ESLint** ([`eslint.config.mjs`](../eslint.config.mjs) — `eslint-config-next` core-web-vitals + TypeScript). **`eslint-plugin-react-compiler` is not enabled** in this repo; adopt it deliberately (e.g. warn-only on a directory first) if you want compiler-oriented rules in CI.
+**Tooling note:** Linting uses **Next.js ESLint** ([`eslint.config.mjs`](../eslint.config.mjs) - `eslint-config-next` core-web-vitals + TypeScript). **`eslint-plugin-react-compiler` is not enabled** in this repo; adopt it deliberately (e.g. warn-only on a directory first) if you want compiler-oriented rules in CI.
 
 **Honest gaps (iterate as needed):** Consumer discovery / marketing site is out of app scope unless specified. Model B onboarding vs §6.2 is documented in **§6.3** (wizard today + dashboard source of truth).
 
@@ -74,28 +74,28 @@ This is the key architectural decision: **build five booking engines, not fifty 
 
 - **Database:** Core tables and `bookings` FKs created in [`supabase/migrations/20260327000001_multi_model_foundation.sql`](../supabase/migrations/20260327000001_multi_model_foundation.sql) (see §5).
 - **Availability:** Dedicated engines (e.g. [`src/lib/availability/event-ticket-engine.ts`](../src/lib/availability/event-ticket-engine.ts) and siblings) + `POST /api/booking/create` validation branches in [`src/app/api/booking/create/route.ts`](../src/app/api/booking/create/route.ts).
-- **Dashboard:** Sidebar entries for event manager, class timetable, resource timeline — [`src/app/dashboard/DashboardSidebar.tsx`](../src/app/dashboard/DashboardSidebar.tsx); depth varies by screen.
+- **Dashboard:** Sidebar entries for event manager, class timetable, resource timeline - [`src/app/dashboard/DashboardSidebar.tsx`](../src/app/dashboard/DashboardSidebar.tsx); depth varies by screen.
 
 **Remaining build-out (phrasing for all three):** Guest-facing booking UX to parity with Model B; staff CRUD and polish; communications and reporting parity; venue `PATCH` reschedule rules per model (mirror Model B: exclude self from capacity, model-specific “invalid slot” edge cases).
 
 ---
 
-## 2. What Each Model Needs — Feature Matrix
+## 2. What Each Model Needs - Feature Matrix
 
 | Feature | A: Table | B: Appointment | C: Event | D: Class | E: Resource |
 |---|---|---|---|---|---|
 | Calendar type | Slot/sitting grid | Practitioner day calendar + registry calendar | Event listing by date | Recurring timetable | Resource timeline |
 | Capacity unit | Covers/tables | 1 client per practitioner | Tickets per event | Spots per class | Time slots per resource |
 | Duration set by | Venue (turn time) | Service duration (+ buffer) | Event duration (fixed) | Class duration (fixed) | Client (booking length) |
-| Multiple staff | N/A (table-based) | Yes — each has own calendar | Optional (instructor) | Yes (instructor per class) | N/A (resource-based) |
-| Service menu | N/A | Yes — `appointment_services` + links | Ticket types/tiers | Class types | Resource types |
+| Multiple staff | N/A (table-based) | Yes - each has own calendar | Optional (instructor) | Yes (instructor per class) | N/A (resource-based) |
+| Service menu | N/A | Yes - `appointment_services` + links | Ticket types/tiers | Class types | Resource types |
 | Recurring schedule | Opening hours | Practitioner working hours | One-off or repeating | Weekly timetable | `availability_hours` on resource |
 | Deposit/payment | Deposit per cover | Full or deposit per service (Stripe) | Full payment upfront | Per-class or package | Full or slot-based |
 | Client record | Guest record | Guest/client with history | Attendee list | Member/participant | Booker details |
 | No-show handling | Deposit forfeit | Cancellation fee or forfeit | Usually non-refundable | Spot released | Slot released |
-| Walk-ins | Yes (walk-in queue) | Yes — venue walk-in API for appointment venues | No (ticketed) | Yes (if spots remain) | No (must book) |
+| Walk-ins | Yes (walk-in queue) | Yes - venue walk-in API for appointment venues | No (ticketed) | Yes (if spots remain) | No (must book) |
 | Check-in | Day sheet / table status | `client_arrived_at` + status (e.g. Seated) | Attendee check-in | Class roster check-in | N/A |
-| Staff unavailability | Table / floor blocks | Per-practitioner **calendar blocks** (not table blocks) | — | — | — |
+| Staff unavailability | Table / floor blocks | Per-practitioner **calendar blocks** (not table blocks) | - | - | - |
 | Key dashboard view | Day sheet + table grid | Practitioner calendar, calendar registry, services, availability | Event management (partial) | Timetable (partial) | Resource timeline (partial) |
 | Reminders | SMS 24h before | SMS/email per settings | Email with ticket/details | Email day before | Email day before |
 | Online payment | Deposit via Stripe | Full or deposit via Stripe | Full via Stripe | Per-class or membership | Full via Stripe |
@@ -106,7 +106,7 @@ These features are identical regardless of booking model and are already built o
 
 - Authentication and user management (Supabase Auth)
 - Stripe Connect for payments (direct charges to venue)
-- Communication engine (SendGrid email + Twilio SMS) — [`src/lib/communications/`](../src/lib/communications/)
+- Communication engine (SendGrid email + Twilio SMS) - [`src/lib/communications/`](../src/lib/communications/)
 - Confirm-or-cancel flow
 - Guest/client record with identity matching
 - Events / audit logging
@@ -129,7 +129,7 @@ Instead of building separate applications for each business type, build a **temp
 4. **Which default services/settings** are pre-populated
 5. **Which booking page layout** guests see
 
-Everything else — auth, payments, communications, reporting — is shared.
+Everything else - auth, payments, communications, reporting - is shared.
 
 ### 3.2 Cross-model implementation pattern (follow Model B)
 
@@ -166,16 +166,16 @@ flowchart LR
 | **Public API** | Guest actions under [`src/app/api/booking/`](../src/app/api/booking/) (`create`, `availability`, etc.). |
 | **Staff API** | CRUD and staff actions under [`src/app/api/venue/`](../src/app/api/venue/) namespaced by entity (`experience-events`, `classes`, `resources`, …). |
 | **Staff reschedule** | When venue `PATCH` changes date/time, validate with the same engine, **excluding** the current booking id from capacity; add model-specific flags if “past slot” or equivalent matters (see Model B `skipPastSlotFilter`). |
-| **Dashboard** | Add nav via `MODEL_NAV_ITEMS` and conditional labels in [`DashboardSidebar.tsx`](../src/app/dashboard/DashboardSidebar.tsx) — do not fork apps. |
+| **Dashboard** | Add nav via `MODEL_NAV_ITEMS` and conditional labels in [`DashboardSidebar.tsx`](../src/app/dashboard/DashboardSidebar.tsx) - do not fork apps. |
 
 ### 3.3 Business type → model mapping
 
 At onboarding, the business picks a type; the system sets `booking_model`, `business_type`, and default `terminology`. **The runtime source of truth is the database** (`venues` columns) plus code in `resolveVenueMode` and [`src/types/booking-models.ts`](../src/types/booking-models.ts).
 
-The long pseudo-config below is **illustrative only** — not a copy-paste of production code:
+The long pseudo-config below is **illustrative only** - not a copy-paste of production code:
 
 ```typescript
-// Illustrative — real defaults may live in signup/onboarding + DB
+// Illustrative - real defaults may live in signup/onboarding + DB
 const EXAMPLES: Record<string, { model: BookingModel; terms: VenueTerminology }> = {
   restaurant: { model: 'table_reservation', terms: { client: 'Guest', booking: 'Reservation', staff: 'Staff' } },
   barber: {
@@ -199,18 +199,18 @@ Each booking model shows a different set of dashboard pages. **Model B** reflect
 |---|---|---|---|---|---|
 | Bookings / appointments list | ✅ | ✅ | ✅ | ✅ | ✅ |
 | New booking / appointment | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Day sheet | ✅ | ✅ (appointment-oriented day view) | — | — | — |
-| Table grid / floor plan | ✅ (if enabled) | — | — | — | — |
-| Practitioner calendar | — | ✅ | — | — | — |
-| Calendar (registry) | — | ✅ `/dashboard/calendar` | — | — | — |
-| Appointment services + team hours | — | ✅ Services + Availability | — | — | — |
-| Event manager | — | — | ⚠️ Partial | — | — |
-| Class timetable | — | — | — | ⚠️ Partial | — |
-| Resource timeline | — | — | — | — | ⚠️ Partial |
-| Waitlist | ✅ | — | — | — | — |
+| Day sheet | ✅ | ✅ (appointment-oriented day view) | - | - | - |
+| Table grid / floor plan | ✅ (if enabled) | - | - | - | - |
+| Practitioner calendar | - | ✅ | - | - | - |
+| Calendar (registry) | - | ✅ `/dashboard/calendar` | - | - | - |
+| Appointment services + team hours | - | ✅ Services + Availability | - | - | - |
+| Event manager | - | - | ⚠️ Partial | - | - |
+| Class timetable | - | - | - | ⚠️ Partial | - |
+| Resource timeline | - | - | - | - | ⚠️ Partial |
+| Waitlist | ✅ | - | - | - | - |
 | Reports / settings | ✅ (admin) | ✅ (admin) | ✅ (admin) | ✅ (admin) | ✅ (admin) |
 
-Legend: ✅ shipped for MVP · ⚠️ route/feature present; product depth TBD · — not applicable
+Legend: ✅ shipped for MVP · ⚠️ route/feature present; product depth TBD · - not applicable
 
 ### 3.5 Terminology system
 
@@ -220,7 +220,7 @@ Labels are **not** driven by a giant static `BUSINESS_TYPE_CONFIG` at runtime. P
 - Per-venue overrides: `venues.terminology` JSONB merged in [`resolveVenueMode`](../src/lib/venue-mode.ts)
 - UI helpers: [`src/lib/terminology.ts`](../src/lib/terminology.ts) where used
 
-A physiotherapist can see Patient / Appointment / Physio; a barber sees Client / Appointment / Barber — via stored terminology, without forking components.
+A physiotherapist can see Patient / Appointment / Physio; a barber sees Client / Appointment / Barber - via stored terminology, without forking components.
 
 ---
 
@@ -228,28 +228,28 @@ A physiotherapist can see Patient / Appointment / Physio; a barber sees Client /
 
 ### 4.1 Delivered
 
-- **Model A** — MVP complete (restaurant / table reservation).
-- **Model B** — MVP shipped (practitioner appointments as in §1.3).
+- **Model A** - MVP complete (restaurant / table reservation).
+- **Model B** - MVP shipped (practitioner appointments as in §1.3).
 
 ### 4.2 Remaining work (product completion, not greenfield schema)
 
-Phases below assume **migrations already applied** (see §5). Effort is guest UX, staff tooling, comms/reporting parity, and hardening — not inventing new tables from scratch.
+Phases below assume **migrations already applied** (see §5). Effort is guest UX, staff tooling, comms/reporting parity, and hardening - not inventing new tables from scratch.
 
-**Phase 2 — Model C (`event_ticket`)**  
+**Phase 2 - Model C (`event_ticket`)**  
 Complete guest event listing + ticket purchase flow; staff event CRUD parity with Model B admin patterns; attendee management; reminders; reporting. Reuse `experience_events` + `event_ticket_types` + `event-ticket-engine`.
 
-**Phase 3 — Model D (`class_session`)**  
+**Phase 3 - Model D (`class_session`)**  
 Timetable UX, instance generation/management, spot booking UI, roster/check-in. Shares “dated occurrence + capacity” mental model with C; reuses `class_types`, `class_timetable`, `class_instances` and class availability engine.
 
-**Phase 4 — Model E (`resource_booking`)**  
+**Phase 4 - Model E (`resource_booking`)**  
 Resource timeline UX, duration-based booking UI, pricing rules. Close to Model B’s “grid of bookable intervals” but keyed by `resource_id` and `venue_resources.availability_hours`.
 
 ### 4.3 Phased estimate (from current codebase)
 
 | Phase | Model | Status | Remaining focus |
 |---|---|---|---|
-| — | A: Table | Complete | Maintenance + founding venues |
-| — | B: Appointment | MVP shipped | Polish, lint/CI, onboarding parity |
+| - | A: Table | Complete | Maintenance + founding venues |
+| - | B: Appointment | MVP shipped | Polish, lint/CI, onboarding parity |
 | 2 | C: Event | Foundation | Guest + staff product completion |
 | 3 | D: Class | Foundation | Timetable + roster product completion |
 | 4 | E: Resource | Foundation | Timeline + booking UX |
@@ -258,7 +258,7 @@ Resource timeline UX, duration-based booking UI, pricing rules. Close to Model B
 
 ## 5. Database schema strategy
 
-**Canonical DDL lives in Supabase migrations** — do not treat this section as SQL to run manually. Key files:
+**Canonical DDL lives in Supabase migrations** - do not treat this section as SQL to run manually. Key files:
 
 | Migration | Contents |
 |-----------|----------|
@@ -270,34 +270,34 @@ Resource timeline UX, duration-based booking UI, pricing rules. Close to Model B
 
 ### 5.1 Shared tables
 
-- **`venues`** — `booking_model`, `business_type`, `business_category`, `terminology` (and existing venue fields).
-- **`bookings`** — Nullable FKs: `practitioner_id`, `appointment_service_id`, `experience_event_id`, `class_instance_id`, `resource_id` (only relevant columns populated per model). Additional columns: e.g. `booking_end_time`, `estimated_end_time`, `client_arrived_at`, group fields per migrations.
-- **`guests`** — Universal client/guest identity.
-- **Audit / comms** — e.g. `events` (booking audit trail), `communications`, `communication_logs` (see migrations for exact columns).
+- **`venues`** - `booking_model`, `business_type`, `business_category`, `terminology` (and existing venue fields).
+- **`bookings`** - Nullable FKs: `practitioner_id`, `appointment_service_id`, `experience_event_id`, `class_instance_id`, `resource_id` (only relevant columns populated per model). Additional columns: e.g. `booking_end_time`, `estimated_end_time`, `client_arrived_at`, group fields per migrations.
+- **`guests`** - Universal client/guest identity.
+- **Audit / comms** - e.g. `events` (booking audit trail), `communications`, `communication_logs` (see migrations for exact columns).
 
-### 5.2 Model B — core tables (names as implemented)
+### 5.2 Model B - core tables (names as implemented)
 
-- **`practitioners`** — `working_hours` JSONB (keys `"0"`–`"6"` for Sun–Sat, aligned with dashboard + `getDayOfWeek`), `break_times`, `days_off`, etc.
-- **`appointment_services`** — venue service menu (duration, buffer, price, deposit, colour).
-- **`practitioner_services`** — links practitioner ↔ service; optional `custom_duration_minutes`, `custom_price_pence`.
-- **`practitioner_calendar_blocks`** — date-scoped blocked intervals per practitioner (see migration above).
+- **`practitioners`** - `working_hours` JSONB (keys `"0"`–`"6"` for Sun–Sat, aligned with dashboard + `getDayOfWeek`), `break_times`, `days_off`, etc.
+- **`appointment_services`** - venue service menu (duration, buffer, price, deposit, colour).
+- **`practitioner_services`** - links practitioner ↔ service; optional `custom_duration_minutes`, `custom_price_pence`.
+- **`practitioner_calendar_blocks`** - date-scoped blocked intervals per practitioner (see migration above).
 
-### 5.3 Model C — core tables
+### 5.3 Model C - core tables
 
-- **`experience_events`** — not `venue_events`; stores dated experiences, capacity, recurrence fields, `parent_event_id`.
-- **`event_ticket_types`** — `event_id` references **`experience_events.id`**.
+- **`experience_events`** - not `venue_events`; stores dated experiences, capacity, recurrence fields, `parent_event_id`.
+- **`event_ticket_types`** - `event_id` references **`experience_events.id`**.
 
-Implementation status: tables + engine + `booking/create` branch — see §1.3.
+Implementation status: tables + engine + `booking/create` branch - see §1.3.
 
-### 5.4 Model D — core tables
+### 5.4 Model D - core tables
 
-- **`class_types`**, **`class_timetable`**, **`class_instances`** — as created in multi-model migration; `instructor_id` may reference `practitioners`.
+- **`class_types`**, **`class_timetable`**, **`class_instances`** - as created in multi-model migration; `instructor_id` may reference `practitioners`.
 
 Implementation status: see §1.3.
 
-### 5.5 Model E — core tables
+### 5.5 Model E - core tables
 
-- **`venue_resources`** — availability JSONB, slot length, min/max booking, pricing.
+- **`venue_resources`** - availability JSONB, slot length, min/max booking, pricing.
 
 Implementation status: see §1.3.
 
@@ -307,8 +307,8 @@ Implementation status: see §1.3.
 
 ### 6.1 Shared steps (all models)
 
-- Early steps: business identity (name, address, phone, photo — as implemented in signup/onboarding).
-- Final steps: preview, go-live, Stripe Connect, QR/widget — as implemented.
+- Early steps: business identity (name, address, phone, photo - as implemented in signup/onboarding).
+- Final steps: preview, go-live, Stripe Connect, QR/widget - as implemented.
 
 ### 6.2 Target model-specific steps (product vision)
 
@@ -324,7 +324,7 @@ Implementation status: see §1.3.
 
 ### 6.3 Current vs target (Model B)
 
-Today, appointment venues typically configure **team, services, and hours** through **Settings → Availability** (appointment team/hours), **Appointment services**, and related venue APIs — not necessarily a single linear wizard that matches every bullet in §6.2. When onboarding copy and dashboard settings diverge, treat **§6.2 as the target UX** and the dashboard routes as **source of truth for what works today**.
+Today, appointment venues typically configure **team, services, and hours** through **Settings → Availability** (appointment team/hours), **Appointment services**, and related venue APIs - not necessarily a single linear wizard that matches every bullet in §6.2. When onboarding copy and dashboard settings diverge, treat **§6.2 as the target UX** and the dashboard routes as **source of truth for what works today**.
 
 #### Model B wizard today (`practitioner_appointment`)
 
@@ -332,10 +332,10 @@ The linear flow in [`src/app/onboarding/page.tsx`](../src/app/onboarding/page.ts
 
 | §6.2 target | In onboarding wizard today | Configure after onboarding (dashboard) |
 |-------------|---------------------------|----------------------------------------|
-| Practitioners + **working hours** | Names (and optional emails) only; no `working_hours` payload | **Availability** — [`src/app/dashboard/availability/AppointmentAvailabilitySettings.tsx`](../src/app/dashboard/availability/AppointmentAvailabilitySettings.tsx) (`/dashboard/availability`) |
-| Services + **who offers what** | Creates `appointment_services` only; no `practitioner_services` links | **Services** — [`src/app/dashboard/appointment-services/AppointmentServicesView.tsx`](../src/app/dashboard/appointment-services/AppointmentServicesView.tsx) (`/dashboard/appointment-services`) |
+| Practitioners + **working hours** | Names (and optional emails) only; no `working_hours` payload | **Availability** - [`src/app/dashboard/availability/AppointmentAvailabilitySettings.tsx`](../src/app/dashboard/availability/AppointmentAvailabilitySettings.tsx) (`/dashboard/availability`) |
+| Services + **who offers what** | Creates `appointment_services` only; no `practitioner_services` links | **Services** - [`src/app/dashboard/appointment-services/AppointmentServicesView.tsx`](../src/app/dashboard/appointment-services/AppointmentServicesView.tsx) (`/dashboard/appointment-services`) |
 | **Deposits / payments** | No dedicated step | Stripe Connect and payment/deposit settings via **Settings** (`/dashboard/settings`) and service-level deposits on Appointment services |
-| Preview / go-live | Yes | — |
+| Preview / go-live | Yes | - |
 
 The onboarding **preview** step surfaces short reminders and links to these routes so venues are not left assuming §6.2 is fully completed inside the wizard.
 
@@ -345,7 +345,7 @@ When the user selects a business type, pre-populate sensible defaults (services,
 
 ---
 
-## 7. Maintaining simplicity — guidelines
+## 7. Maintaining simplicity - guidelines
 
 ### 7.1 Rules for what's configurable vs fixed
 
@@ -376,7 +376,7 @@ When the user selects a business type, pre-populate sensible defaults (services,
 
 ### 7.2 The "Other" escape hatch
 
-**Other** should default to **`practitioner_appointment`** with blank or minimal service templates — flexible for unknown service businesses.
+**Other** should default to **`practitioner_appointment`** with blank or minimal service templates - flexible for unknown service businesses.
 
 ### 7.3 One codebase, one dashboard shell
 
@@ -398,7 +398,7 @@ Solo practitioners get low entry; multi-practitioner businesses scale; venue-bas
 
 ---
 
-## 9. Summary — what to do next
+## 9. Summary - what to do next
 
 1. **Now:** Operate and harden Model A and Model B for founding venues (reliability, comms, payments, support).
 2. **Next:** Complete **Model C** guest + staff product on top of existing `experience_events` / engines (Phase 2).

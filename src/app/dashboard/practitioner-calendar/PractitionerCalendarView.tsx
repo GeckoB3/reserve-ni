@@ -31,6 +31,7 @@ import {
   AppointmentDetailSheet,
   type AppointmentDetailPrefetch,
 } from '@/components/booking/AppointmentDetailSheet';
+import { ClassInstanceDetailSheet } from '@/components/practitioner-calendar/ClassInstanceDetailSheet';
 import { useToast } from '@/components/ui/Toast';
 import { getCalendarGridBounds } from '@/lib/venue-calendar-bounds';
 import { canMarkNoShowForSlot, type BookingStatus } from '@/lib/table-management/booking-status';
@@ -99,16 +100,25 @@ interface Booking {
 
 interface CalendarBlock {
   id: string;
-  practitioner_id: string;
+  /** Legacy Model B blocks; null when block is from `calendar_blocks` (unified calendar). */
+  practitioner_id: string | null;
+  /** Unified calendar column id; set for `calendar_blocks` rows. */
+  calendar_id: string | null;
   block_date: string;
   start_time: string;
   end_time: string;
   reason: string | null;
+  block_type?: string;
+  class_instance_id?: string | null;
 }
 
 /** Staff column: legacy practitioner row or unified calendar row (same id used in roster). */
 function columnIdForBooking(b: Booking): string | null {
   return b.practitioner_id ?? b.calendar_id ?? null;
+}
+
+function columnIdForBlock(bl: CalendarBlock): string | null {
+  return bl.calendar_id ?? bl.practitioner_id ?? null;
 }
 
 function serviceIdForBooking(b: Booking): string | null {
@@ -129,7 +139,7 @@ const STATUS_COLOURS: Record<string, { bg: string; text: string; border: string 
   Cancelled: { bg: 'bg-slate-100', text: 'text-slate-500', border: 'border-slate-200' },
 };
 
-/** Marked arrived, not yet started — amber block (matches waiting dot). */
+/** Marked arrived, not yet started - amber block (matches waiting dot). */
 const ARRIVED_WAITING_STYLE = {
   bg: 'bg-amber-50',
   text: 'text-amber-950',
@@ -419,7 +429,7 @@ function slotOccupied(
     if (overlapsRange(slotStart, slotStart + SLOT_MINUTES, b0, b1)) return true;
   }
   for (const bl of blocks) {
-    if (bl.practitioner_id !== pracId || bl.block_date !== dateStr) continue;
+    if (columnIdForBlock(bl) !== pracId || bl.block_date !== dateStr) continue;
     const b0 = timeToMinutes(bl.start_time);
     const b1 = timeToMinutes(bl.end_time);
     if (overlapsRange(slotStart, slotStart + SLOT_MINUTES, b0, b1)) return true;
@@ -556,6 +566,10 @@ export function PractitionerCalendarView({
   const [blocks, setBlocks] = useState<CalendarBlock[]>([]);
   const [loading, setLoading] = useState(true);
   const [detailBookingId, setDetailBookingId] = useState<string | null>(null);
+  const [classInstanceSheet, setClassInstanceSheet] = useState<{
+    instanceId: string;
+    block: ScheduleBlockDTO;
+  } | null>(null);
   const [filterPractitioner, setFilterPractitioner] = useState<string>(defaultPractitionerFilter);
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [fetchError, setFetchError] = useState<string | null>(null);
@@ -747,6 +761,13 @@ export function PractitionerCalendarView({
           void fetchData({ silent: true });
         },
       )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'calendar_blocks', filter: `venue_id=eq.${venueId}` },
+        () => {
+          void fetchData({ silent: true });
+        },
+      )
       .subscribe();
     return () => {
       void supabase.removeChannel(channel);
@@ -851,11 +872,16 @@ export function PractitionerCalendarView({
   }
 
   function openEditBlockModal(bl: CalendarBlock) {
+    if (bl.block_type === 'class_session') {
+      return;
+    }
+    const colId = columnIdForBlock(bl);
+    if (!colId) return;
     const st = bl.start_time.length >= 5 ? bl.start_time.slice(0, 5) : bl.start_time;
     const en = bl.end_time.length >= 5 ? bl.end_time.slice(0, 5) : bl.end_time;
     setBlockModal({
       blockId: bl.id,
-      pracId: bl.practitioner_id,
+      pracId: colId,
       dateStr: bl.block_date,
       startTime: st,
       endTime: en,
@@ -1026,7 +1052,7 @@ export function PractitionerCalendarView({
     });
   }, [bookings, filterPractitioner, filterStatus]);
 
-  /** Toolbar + status counts: team-column bookings only (matches day/week grid), scoped to the visible period — not the 6-week fetch padding in month view. */
+  /** Toolbar + status counts: team-column bookings only (matches day/week grid), scoped to the visible period - not the 6-week fetch padding in month view. */
   const bookingsForToolbarStats = useMemo(() => {
     return bookingsMatchingFilters.filter((b) => {
       if (!columnIdForBooking(b)) return false;
@@ -1074,6 +1100,17 @@ export function PractitionerCalendarView({
       ),
     [bookingsMatchingFilters, scheduleBlocks, monthCells, scheduleModelFilter],
   );
+
+  const openBookingDetail = useCallback((id: string) => {
+    setClassInstanceSheet(null);
+    setDetailBookingId(id);
+  }, []);
+
+  const openClassInstanceDetail = useCallback((b: ScheduleBlockDTO) => {
+    if (!b.class_instance_id) return;
+    setDetailBookingId(null);
+    setClassInstanceSheet({ instanceId: b.class_instance_id, block: b });
+  }, []);
 
   const detailPrefetch = useMemo((): AppointmentDetailPrefetch | null => {
     if (!detailBookingId) return null;
@@ -1246,11 +1283,6 @@ export function PractitionerCalendarView({
           monthCells={monthCells}
           monthDayScheduleCounts={monthDayScheduleCounts}
           showMergedFeeds={showMergedFeeds}
-          filterAlignmentNote={
-            filterPractitioner !== 'all' && showMergedFeeds
-              ? 'Appointment numbers in each day follow the team filter above. Events, classes and resources are venue-wide.'
-              : undefined
-          }
           onSelectDay={(cell) => {
             setDate(cell);
             setWeekStart(cell);
@@ -1291,7 +1323,7 @@ export function PractitionerCalendarView({
                                 <button
                                   key={b.id}
                                   type="button"
-                                  onClick={() => setDetailBookingId(b.id)}
+                                  onClick={() => openBookingDetail(b.id)}
                                   className={`rounded-md border px-2 py-1 text-left text-xs ${st.bg} ${st.border}`}
                                   style={{ borderLeftWidth: 3, borderLeftColor: col }}
                                 >
@@ -1312,7 +1344,8 @@ export function PractitionerCalendarView({
                   <WeekScheduleCdeStrip
                     weekDays={weekDays}
                     blocksByDate={scheduleBlocksByDate}
-                    onBookingClick={(id) => setDetailBookingId(id)}
+                    onBookingClick={openBookingDetail}
+                    onClassInstanceClick={openClassInstanceDetail}
                   />
                 ) : null}
               </tbody>
@@ -1376,7 +1409,9 @@ export function PractitionerCalendarView({
 
               {filteredPractitioners.map((prac) => {
                 const pracBookings = bookingsForPractitioner(prac.id, date);
-                const pracBlocks = blocks.filter((bl) => bl.practitioner_id === prac.id && bl.block_date === date);
+                const pracBlocks = blocks.filter(
+                  (bl) => columnIdForBlock(bl) === prac.id && bl.block_date === date,
+                );
                 return (
                   <div key={prac.id} className="min-w-[180px] flex-1 border-r border-slate-100 last:border-r-0">
                     <div className="sticky top-0 z-10 flex h-10 items-center justify-center border-b border-slate-100 bg-white px-3 py-2">
@@ -1423,16 +1458,47 @@ export function PractitionerCalendarView({
                           ((timeToMinutes(bl.end_time) - timeToMinutes(bl.start_time)) / SLOT_MINUTES) * SLOT_HEIGHT,
                           SLOT_HEIGHT * 0.5,
                         );
-                        return (
+                        const isClassTeaching = bl.block_type === 'class_session';
+                        const label = isClassTeaching ? (bl.reason?.trim() || 'Class') : `Blocked${bl.reason ? `: ${bl.reason}` : ''}`;
+                        const shellClass = `absolute left-1 right-1 z-[15] block overflow-hidden rounded-lg border px-1.5 py-1 text-left text-[10px] font-semibold shadow-sm ${
+                          isClassTeaching
+                            ? 'border-violet-200 bg-violet-50 text-violet-900 ring-1 ring-violet-100'
+                            : 'cursor-pointer border-slate-300 bg-slate-200/90 font-medium text-slate-700 hover:bg-slate-300/90'
+                        }`;
+                        const shellStyle = {
+                          top,
+                          height: h,
+                          borderLeftWidth: 3,
+                          borderLeftColor: isClassTeaching ? '#7C3AED' : '#94a3b8',
+                        } as const;
+                        const body = (
+                          <>
+                            <span className="line-clamp-3">{label}</span>
+                            <span className="mt-0.5 block font-normal text-[9px] opacity-90">
+                              {bl.start_time.slice(0, 5)} – {bl.end_time.slice(0, 5)}
+                            </span>
+                          </>
+                        );
+                        return isClassTeaching ? (
+                          <Link
+                            key={bl.id}
+                            href="/dashboard/class-timetable"
+                            className={shellClass}
+                            style={shellStyle}
+                            title="Open class timetable"
+                          >
+                            {body}
+                          </Link>
+                        ) : (
                           <button
                             key={bl.id}
                             type="button"
                             onClick={() => openEditBlockModal(bl)}
-                            className="absolute left-1 right-1 z-[15] cursor-pointer overflow-hidden rounded-md border border-slate-300 bg-slate-200/90 px-1 py-0.5 text-left text-[10px] font-medium text-slate-700 hover:bg-slate-300/90"
-                            style={{ top, height: h }}
+                            className={shellClass}
+                            style={shellStyle}
                             title="Click to edit block"
                           >
-                            Blocked{bl.reason ? `: ${bl.reason}` : ''}
+                            {body}
                           </button>
                         );
                       })}
@@ -1474,7 +1540,7 @@ export function PractitionerCalendarView({
                                   <div className="flex min-h-0 min-w-0 flex-1 flex-row items-start gap-0">
                                     <button
                                       type="button"
-                                      onClick={() => setDetailBookingId(b.id)}
+                                      onClick={() => openBookingDetail(b.id)}
                                       className="min-h-0 min-w-0 flex-1 px-1.5 py-1 text-left"
                                     >
                                       <div className="flex flex-wrap items-center gap-1">
@@ -1561,7 +1627,7 @@ export function PractitionerCalendarView({
                                       >
                                         <button
                                           type="button"
-                                          onClick={() => setDetailBookingId(b.id)}
+                                          onClick={() => openBookingDetail(b.id)}
                                           className="flex min-h-0 min-w-0 flex-1 flex-col px-1.5 py-0.5 text-left"
                                         >
                                           <div className="flex flex-wrap items-center gap-1">
@@ -1625,7 +1691,7 @@ export function PractitionerCalendarView({
                       blocks={filteredScheduleBlocks.filter((b) => b.kind === 'event_ticket')}
                       startHour={startHour}
                       endHour={endHour}
-                      onBookingClick={(id) => setDetailBookingId(id)}
+                      onBookingClick={openBookingDetail}
                     />
                   ) : null}
                   {showClassesColumn ? (
@@ -1635,7 +1701,8 @@ export function PractitionerCalendarView({
                       blocks={filteredScheduleBlocks.filter((b) => b.kind === 'class_session')}
                       startHour={startHour}
                       endHour={endHour}
-                      onBookingClick={(id) => setDetailBookingId(id)}
+                      onBookingClick={openBookingDetail}
+                      onClassInstanceClick={openClassInstanceDetail}
                     />
                   ) : null}
                   {showResourcesLane ? (
@@ -1645,7 +1712,7 @@ export function PractitionerCalendarView({
                       blocks={filteredScheduleBlocks.filter((b) => b.kind === 'resource_booking')}
                       startHour={startHour}
                       endHour={endHour}
-                      onBookingClick={(id) => setDetailBookingId(id)}
+                      onBookingClick={openBookingDetail}
                     />
                   ) : null}
                 </>
@@ -1782,6 +1849,12 @@ export function PractitionerCalendarView({
           </svg>
         </button>
       )}
+
+      <ClassInstanceDetailSheet
+        selection={classInstanceSheet}
+        onClose={() => setClassInstanceSheet(null)}
+        currency={currency}
+      />
 
       <AppointmentDetailSheet
         open={detailBookingId !== null}

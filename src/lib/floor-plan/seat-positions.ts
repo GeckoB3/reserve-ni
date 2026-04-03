@@ -63,7 +63,7 @@ export function allocateSeatsToEdges(
     return alloc;
   }
 
-  // 5+ seats — walk the perimeter clockwise from the top-left corner and
+  // 5+ seats - walk the perimeter clockwise from the top-left corner and
   // count how many evenly-spaced seats fall on each edge.
   const perimeter = 2 * (width + height);
   const spacing = perimeter / seatCount;
@@ -136,7 +136,7 @@ function positionsOnEdge(
  * @param height      Table height in **pixels**
  * @param maxCovers   Total number of seats
  * @param hiddenSides Optional set of edge names whose seats are omitted
- *                    (used when tables are joined — the joined side loses its seats)
+ *                    (used when tables are joined - the joined side loses its seats)
  * @returns Array of seat positions relative to the table centre
  */
 export function calculateSeatPositions(

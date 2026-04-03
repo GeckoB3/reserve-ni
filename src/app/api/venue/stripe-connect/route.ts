@@ -13,7 +13,7 @@ interface StripeConnectGetResponse {
   details_submitted: boolean;
 }
 
-/** POST /api/venue/stripe-connect — create or resume Stripe Connect onboarding. */
+/** POST /api/venue/stripe-connect - create or resume Stripe Connect onboarding. */
 export async function POST(request: NextRequest) {
   try {
     const supabase = await createClient();
@@ -32,7 +32,7 @@ export async function POST(request: NextRequest) {
       .single();
 
     if (fetchError || !venue) {
-      console.error('POST /api/venue/stripe-connect — venue lookup failed:', fetchError);
+      console.error('POST /api/venue/stripe-connect - venue lookup failed:', fetchError);
       return NextResponse.json({ error: 'Venue not found' }, { status: 404 });
     }
 
@@ -61,7 +61,7 @@ export async function POST(request: NextRequest) {
         .eq('id', staff.venue_id);
 
       if (updateError) {
-        console.error('POST /api/venue/stripe-connect — failed to store account ID:', updateError);
+        console.error('POST /api/venue/stripe-connect - failed to store account ID:', updateError);
         return NextResponse.json({ error: 'Failed to save Stripe account' }, { status: 500 });
       }
     }
@@ -82,7 +82,7 @@ export async function POST(request: NextRequest) {
   }
 }
 
-/** GET /api/venue/stripe-connect — check Stripe Connect account status. */
+/** GET /api/venue/stripe-connect - check Stripe Connect account status. */
 export async function GET() {
   try {
     const supabase = await createClient();
@@ -98,7 +98,7 @@ export async function GET() {
       .single();
 
     if (fetchError || !venue) {
-      console.error('GET /api/venue/stripe-connect — venue lookup failed:', fetchError);
+      console.error('GET /api/venue/stripe-connect - venue lookup failed:', fetchError);
       return NextResponse.json({ error: 'Venue not found' }, { status: 404 });
     }
 

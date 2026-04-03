@@ -912,7 +912,7 @@ export function FloorPlanLiveView({ isAdmin = false, venueId, currency }: { isAd
         />
       )}
 
-      {/* Block table — start time + duration */}
+      {/* Block table - start time + duration */}
       {floorBlockModal && (
         <div
           className="fixed inset-0 z-[60] flex items-end justify-center bg-black/30 p-4 backdrop-blur-sm sm:items-center"
@@ -929,7 +929,7 @@ export function FloorPlanLiveView({ isAdmin = false, venueId, currency }: { isAd
               Block {floorBlockModal.tableName}
             </h3>
             <p className="mt-1 text-xs text-slate-500">
-              The table will be unavailable for new bookings for the period you set. Existing bookings that overlap this time are not allowed—you’ll need to reschedule them first.
+              The table will be unavailable for new bookings for the period you set. Existing bookings that overlap this time are not allowed-you’ll need to reschedule them first.
             </p>
             <p className="mt-2 text-xs font-medium text-slate-600">
               Date:{' '}

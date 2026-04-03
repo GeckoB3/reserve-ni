@@ -26,7 +26,7 @@ export interface FetchEngineInputParams {
 
 /**
  * True when the venue has at least one **active** service (matches Dashboard → Availability
- * and Settings). Inactive-only rows do not count — use Dashboard to reactivate or add services.
+ * and Settings). Inactive-only rows do not count - use Dashboard to reactivate or add services.
  */
 export async function hasServiceConfig(
   supabase: SupabaseClient,

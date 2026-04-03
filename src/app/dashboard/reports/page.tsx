@@ -100,7 +100,7 @@ export default async function ReportsPage() {
             </div>
             {smsUsage.overage_count > 0 && (
               <p className="mt-2 text-xs text-amber-800">
-                {smsUsage.overage_count} over included allowance — ≈ £{(smsUsage.overage_amount_pence / 100).toFixed(2)}{' '}
+                {smsUsage.overage_count} over included allowance - ≈ £{(smsUsage.overage_amount_pence / 100).toFixed(2)}{' '}
                 at 5p each (billed at month end)
               </p>
             )}

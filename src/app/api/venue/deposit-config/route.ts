@@ -3,7 +3,7 @@ import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 import { depositConfigSchema } from '@/types/config-schemas';
 
-/** PATCH /api/venue/deposit-config — update deposit_config (admin only). */
+/** PATCH /api/venue/deposit-config - update deposit_config (admin only). */
 export async function PATCH(request: NextRequest) {
   try {
     const supabase = await createClient();

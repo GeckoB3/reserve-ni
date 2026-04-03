@@ -4,7 +4,7 @@ import { getVenueStaff } from '@/lib/venue-auth';
 
 /**
  * POST /api/venue/bookings/[id]/check-in
- * Body: { checked_in?: boolean } — default true. Sets `bookings.checked_in_at` to now, or clears when false.
+ * Body: { checked_in?: boolean } - default true. Sets `bookings.checked_in_at` to now, or clears when false.
  * Staff-only. Used for event / class / resource rosters (Sprint 2).
  */
 export async function POST(

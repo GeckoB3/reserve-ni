@@ -249,7 +249,7 @@ export function AppointmentBookingsDashboard({
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [searchQuery, setSearchQuery] = useState('');
   const [bookings, setBookings] = useState<RegistryAppointment[]>([]);
-  /** All statuses in range — used for summary tiles (list may be status-filtered). */
+  /** All statuses in range - used for summary tiles (list may be status-filtered). */
   const [allStatusBookings, setAllStatusBookings] = useState<RegistryAppointment[]>([]);
   const [practitioners, setPractitioners] = useState<Practitioner[]>([]);
   const [services, setServices] = useState<AppointmentService[]>([]);
@@ -746,8 +746,8 @@ export function AppointmentBookingsDashboard({
     return list.map((b) => {
       const cid = columnIdForRegistry(b);
       const sid = serviceIdForRegistry(b);
-      const pracName = cid ? practitionerMap.get(cid)?.name ?? '—' : '—';
-      const svcName = sid ? serviceMap.get(sid)?.name ?? '—' : '—';
+      const pracName = cid ? practitionerMap.get(cid)?.name ?? '-' : '-';
+      const svcName = sid ? serviceMap.get(sid)?.name ?? '-' : '-';
       const typeLabel = bookingModelShortLabel(inferRegistryModel(b));
       const dep =
         b.deposit_amount_pence != null
@@ -802,8 +802,8 @@ export function AppointmentBookingsDashboard({
         {list.map((b) => {
           const cid = columnIdForRegistry(b);
           const sid = serviceIdForRegistry(b);
-          const pracName = cid ? practitionerMap.get(cid)?.name ?? '—' : '—';
-          const svcName = sid ? serviceMap.get(sid)?.name ?? '—' : '—';
+          const pracName = cid ? practitionerMap.get(cid)?.name ?? '-' : '-';
+          const svcName = sid ? serviceMap.get(sid)?.name ?? '-' : '-';
           const typeLabel = bookingModelShortLabel(inferRegistryModel(b));
           const dep =
             b.deposit_amount_pence != null

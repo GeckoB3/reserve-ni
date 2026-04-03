@@ -626,19 +626,27 @@ async function handleNonTableBooking(
     if (!class_instance_id) {
       return NextResponse.json({ error: 'class_instance_id is required' }, { status: 400 });
     }
-    const input = await fetchClassInput({ supabase, venueId: venue_id, date: booking_date });
+    const isPublicGuestSource = source === 'online' || source === 'widget' || source === 'booking_page';
+    const input = await fetchClassInput({
+      supabase,
+      venueId: venue_id,
+      date: booking_date,
+      forPublicBooking: isPublicGuestSource,
+    });
     const result = computeClassAvailability(input);
     const cls = result.find((c) => c.instance_id === class_instance_id);
     if (!cls || cls.remaining < party_size) {
       return NextResponse.json({ error: 'This class is full or unavailable' }, { status: 409 });
     }
-    if (
-      cls.requires_online_payment &&
-      cls.price_pence != null &&
-      cls.price_pence > 0
-    ) {
+    const classPayReq = cls.payment_requirement;
+    const priceP = cls.price_pence ?? 0;
+    const depPer = cls.deposit_amount_pence ?? 0;
+    if (classPayReq === 'full_payment' && priceP > 0) {
       requiresDeposit = true;
-      depositAmountPence = cls.price_pence * party_size;
+      depositAmountPence = priceP * party_size;
+    } else if (classPayReq === 'deposit' && depPer > 0) {
+      requiresDeposit = true;
+      depositAmountPence = depPer * party_size;
     }
     const classPriceDisplay =
       cls.price_pence != null ? `£${((cls.price_pence * party_size) / 100).toFixed(2)}` : null;
@@ -731,7 +739,6 @@ async function handleNonTableBooking(
     booking_end_time: booking_end_time ? (booking_end_time.length === 5 ? booking_end_time + ':00' : booking_end_time) : null,
     event_session_id: event_session_id ?? null,
     capacity_used: capacity_used ?? party_size,
-    booking_model: effectiveModel,
   };
 
   if (effectiveModel === 'unified_scheduling') {

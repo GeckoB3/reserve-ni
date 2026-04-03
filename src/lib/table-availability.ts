@@ -1,10 +1,10 @@
 /**
- * Table availability engine — optional layer on top of covers-based system.
+ * Table availability engine - optional layer on top of covers-based system.
  *
  * When table_management_enabled, BOTH covers AND table availability must pass.
  * This module provides two core functions:
- *   1. getAvailableTablesForBooking — find best table(s) for a booking
- *   2. getTableAvailabilityGrid — full grid data for timeline view
+ *   1. getAvailableTablesForBooking - find best table(s) for a booking
+ *   2. getTableAvailabilityGrid - full grid data for timeline view
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';

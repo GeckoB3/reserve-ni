@@ -199,7 +199,7 @@ export function ClosuresTab({ services, showToast }: Props) {
               <div key={block.id} className="rounded-lg border border-slate-100 bg-slate-50 p-3 text-xs text-slate-400">
                 <span className={`mr-2 rounded px-1.5 py-0.5 text-[10px] font-medium ${BLOCK_TYPE_COLORS[block.block_type]}`}>{BLOCK_TYPE_LABELS[block.block_type]}</span>
                 {block.date_start === block.date_end ? block.date_start : `${block.date_start} – ${block.date_end}`}
-                {block.reason && ` — ${block.reason}`}
+                {block.reason && ` - ${block.reason}`}
               </div>
             ))}
           </div>

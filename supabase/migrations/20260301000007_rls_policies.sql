@@ -1,4 +1,4 @@
--- Reserve NI: Row-Level Security — staff can only read/write data for their venue(s)
+-- Reserve NI: Row-Level Security - staff can only read/write data for their venue(s)
 -- Staff are identified by email from Supabase Auth JWT (auth.jwt() ->> 'email').
 
 ALTER TABLE venues ENABLE ROW LEVEL SECURITY;

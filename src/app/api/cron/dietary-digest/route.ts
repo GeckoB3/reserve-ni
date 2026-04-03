@@ -46,7 +46,7 @@ export async function POST(request: NextRequest) {
         const time = typeof b.booking_time === 'string' ? b.booking_time.slice(0, 5) : '?';
         const { data: guest } = await supabase.from('guests').select('name').eq('id', b.guest_id).single();
         const guestName = guest?.name ?? 'Guest';
-        lines.push(`${time} — ${guestName} (${b.party_size} covers): ${b.dietary_notes}`);
+        lines.push(`${time} - ${guestName} (${b.party_size} covers): ${b.dietary_notes}`);
       }
 
       const dietarySummary = lines.join('\n');

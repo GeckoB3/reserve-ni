@@ -4,7 +4,7 @@ import { getVenueStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 
 /**
- * GET /api/venue/experience-events/[id]/attendees — bookings for this event with guest details.
+ * GET /api/venue/experience-events/[id]/attendees - bookings for this event with guest details.
  */
 export async function GET(
   _request: NextRequest,

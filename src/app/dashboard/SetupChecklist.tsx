@@ -219,7 +219,7 @@ export function SetupChecklist() {
         <div className="flex-1">
           <div className="flex items-center gap-2">
             <span className="text-sm font-semibold text-slate-900">
-              Get your venue ready — {completedCount}/{totalCount} steps complete
+              Get your venue ready - {completedCount}/{totalCount} steps complete
             </span>
             <span className="rounded-full bg-brand-100 px-2 py-0.5 text-xs font-medium text-brand-700">
               {progressPct}%

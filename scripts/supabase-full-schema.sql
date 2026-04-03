@@ -1,4 +1,4 @@
--- Reserve NI: Full schema — paste this entire file into Supabase SQL Editor and run once.
+-- Reserve NI: Full schema - paste this entire file into Supabase SQL Editor and run once.
 -- Order: enums → tables → RLS → triggers → storage → staff policies → stripe/webhook
 --        → reminder columns → reconciliation & reporting → staff RLS fix → schema gaps
 
@@ -150,7 +150,7 @@ CREATE TRIGGER events_append_only
   EXECUTE PROCEDURE events_deny_update_delete();
 
 -- ========== 20260301000007_rls_policies.sql ==========
--- Reserve NI: Row-Level Security — staff can only read/write data for their venue(s)
+-- Reserve NI: Row-Level Security - staff can only read/write data for their venue(s)
 -- Staff are identified by email from Supabase Auth JWT (auth.jwt() ->> 'email').
 
 ALTER TABLE venues ENABLE ROW LEVEL SECURITY;
@@ -304,7 +304,7 @@ TO public
 USING (bucket_id = 'venue-covers');
 
 -- ========== 20260302000002_staff_policies.sql ==========
--- Reserve NI: Staff table — allow staff to see all staff for their venue(s); allow admins to insert.
+-- Reserve NI: Staff table - allow staff to see all staff for their venue(s); allow admins to insert.
 
 -- Drop the restrictive select so we can allow venue-scoped select
 DROP POLICY IF EXISTS "staff_select_own" ON staff;
@@ -579,7 +579,7 @@ AS $$
   );
 $$;
 
--- Report 4: Deposit summary (from bookings — deposit state not in events)
+-- Report 4: Deposit summary (from bookings - deposit state not in events)
 -- We use bookings table filtered by created_at in range for consistency with "period"
 CREATE OR REPLACE FUNCTION report_deposit_summary(
   p_venue_id uuid,
@@ -685,7 +685,7 @@ ALTER TABLE guests ADD COLUMN IF NOT EXISTS no_show_count int NOT NULL DEFAULT 0
 ALTER TABLE guests ADD COLUMN IF NOT EXISTS last_visit_date date;
 ALTER TABLE guests ADD COLUMN IF NOT EXISTS dietary_preferences text;
 
--- 3. Booking field — snapshot of cancellation policy at booking time
+-- 3. Booking field - snapshot of cancellation policy at booking time
 ALTER TABLE bookings ADD COLUMN IF NOT EXISTS cancellation_policy_snapshot jsonb;
 
 -- 4. Communications log table (every message sent)

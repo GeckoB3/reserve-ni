@@ -1357,10 +1357,10 @@ export function TableGridView({ venueId, currency }: { venueId: string; currency
                   <h3 className="text-base font-semibold text-slate-900">Block Details</h3>
                   <div className="mt-3 space-y-1 text-sm text-slate-700">
                     <p><span className="font-medium">Table:</span> {tableName}</p>
-                    <p><span className="font-medium">Time:</span> {block ? `${new Date(block.start_at).toISOString().slice(11, 16)}-${new Date(block.end_at).toISOString().slice(11, 16)}` : '—'}</p>
-                    <p><span className="font-medium">Reason:</span> {block?.reason ?? '—'}</p>
-                    <p><span className="font-medium">Created:</span> {block ? new Date(block.created_at).toLocaleString() : '—'}</p>
-                    <p><span className="font-medium">Created by:</span> {block?.created_by ?? '—'}</p>
+                    <p><span className="font-medium">Time:</span> {block ? `${new Date(block.start_at).toISOString().slice(11, 16)}-${new Date(block.end_at).toISOString().slice(11, 16)}` : '-'}</p>
+                    <p><span className="font-medium">Reason:</span> {block?.reason ?? '-'}</p>
+                    <p><span className="font-medium">Created:</span> {block ? new Date(block.created_at).toLocaleString() : '-'}</p>
+                    <p><span className="font-medium">Created by:</span> {block?.created_by ?? '-'}</p>
                   </div>
                   <div className="mt-4 flex gap-2">
                     <button

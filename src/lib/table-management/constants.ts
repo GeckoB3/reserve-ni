@@ -39,7 +39,7 @@ export const TABLE_STATUS_SEQUENCE: Record<TableServiceStatus, TableServiceStatu
 /**
  * Statuses that represent active/live bookings for table availability checks.
  * IMPORTANT: These values MUST exist in the booking_status PostgreSQL enum.
- * 'Arrived' is NOT in the database enum — do NOT add it here.
+ * 'Arrived' is NOT in the database enum - do NOT add it here.
  */
 export const BOOKING_ACTIVE_STATUSES = ['Pending', 'Confirmed', 'Seated'] as const;
 

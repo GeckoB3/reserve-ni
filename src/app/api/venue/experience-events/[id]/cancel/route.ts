@@ -11,7 +11,7 @@ const bodySchema = z.object({
 });
 
 /**
- * POST /api/venue/experience-events/[id]/cancel — admin only.
+ * POST /api/venue/experience-events/[id]/cancel - admin only.
  * Deactivates the event and cancels all active ticket bookings with refunds + comms per venue policy.
  */
 export async function POST(

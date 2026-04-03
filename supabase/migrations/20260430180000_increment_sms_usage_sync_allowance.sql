@@ -1,5 +1,5 @@
 -- Keep sms_usage.messages_included aligned with venues.sms_monthly_allowance on every increment
--- (Standard: 200 × calendar_count; Business/Founding: 800 — see §1.1 implementation plan).
+-- (Standard: 200 × calendar_count; Business/Founding: 800 - see §1.1 implementation plan).
 
 CREATE OR REPLACE FUNCTION increment_sms_usage(p_venue_id uuid, p_billing_month date)
 RETURNS void

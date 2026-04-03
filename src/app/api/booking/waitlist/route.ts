@@ -15,7 +15,7 @@ const joinSchema = z.object({
   notes: z.string().max(500).optional(),
 });
 
-/** POST /api/booking/waitlist — public endpoint: guest joins the standby list */
+/** POST /api/booking/waitlist - public endpoint: guest joins the standby list */
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();

@@ -1124,7 +1124,7 @@ function depositBadge(status: string, amountPence: number | null) {
     Paid: { bg: 'bg-emerald-50', text: 'text-emerald-700', label: amt ? `${amt} Paid` : 'Paid' },
     Refunded: { bg: 'bg-blue-50', text: 'text-blue-700', label: amt ? `${amt} Refunded` : 'Refunded' },
     Pending: { bg: 'bg-amber-50', text: 'text-amber-700', label: 'Pending' },
-    'Not Required': { bg: 'bg-slate-50', text: 'text-slate-500', label: '—' },
+    'Not Required': { bg: 'bg-slate-50', text: 'text-slate-500', label: '-' },
   };
   const style = map[status] ?? { bg: 'bg-slate-50', text: 'text-slate-500', label: status };
   return (

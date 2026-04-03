@@ -28,7 +28,7 @@ import { runUnifiedSchedulingComms, runSecondaryModelScheduledComms } from '@/li
  *
  * **Models C/D/E** (`runSecondaryModelScheduledComms`): same notification_settings windows as unified,
  * but only bookings with event/class/resource FKs. Runs for **all** venues (including unified primary
- * with secondaries); inner loops filter to C/D/E rows — no double-send for Model B appointments.
+ * with secondaries); inner loops filter to C/D/E rows - no double-send for Model B appointments.
  *
  * Confirmation, deposit, reschedule, cancellation, and no-show notifications use transactional / other
  * code paths (`send-templated`, webhooks, `CommunicationService`), not this cron.

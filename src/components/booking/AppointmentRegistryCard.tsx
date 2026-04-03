@@ -197,23 +197,23 @@ export function AppointmentRegistryCard({
               )}
               <div>
                 <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">Email</dt>
-                <dd className="mt-0.5 break-all text-slate-700">{booking.guest_email ?? '—'}</dd>
+                <dd className="mt-0.5 break-all text-slate-700">{booking.guest_email ?? '-'}</dd>
               </div>
               <div>
                 <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">Phone</dt>
-                <dd className="mt-0.5 text-slate-700">{booking.guest_phone ?? '—'}</dd>
+                <dd className="mt-0.5 text-slate-700">{booking.guest_phone ?? '-'}</dd>
               </div>
               <div>
                 <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">Service</dt>
-                <dd className="mt-0.5 text-slate-900">{serviceName ?? '—'}</dd>
+                <dd className="mt-0.5 text-slate-900">{serviceName ?? '-'}</dd>
               </div>
               <div>
                 <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">Service price</dt>
-                <dd className="mt-0.5 text-slate-800">{servicePriceFormatted ?? '—'}</dd>
+                <dd className="mt-0.5 text-slate-800">{servicePriceFormatted ?? '-'}</dd>
               </div>
               <div>
                 <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">Staff member</dt>
-                <dd className="mt-0.5 text-slate-900">{practitionerName ?? '—'}</dd>
+                <dd className="mt-0.5 text-slate-900">{practitionerName ?? '-'}</dd>
               </div>
               <div>
                 <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">How booked</dt>
@@ -231,13 +231,13 @@ export function AppointmentRegistryCard({
               <div className="sm:col-span-2">
                 <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">Customer comments</dt>
                 <dd className="mt-0.5 whitespace-pre-wrap text-slate-700">
-                  {booking.special_requests?.trim() || '—'}
+                  {booking.special_requests?.trim() || '-'}
                 </dd>
               </div>
               <div className="sm:col-span-2">
                 <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">Staff notes</dt>
                 <dd className="mt-0.5 whitespace-pre-wrap text-slate-700">
-                  {booking.internal_notes?.trim() || '—'}
+                  {booking.internal_notes?.trim() || '-'}
                 </dd>
               </div>
             </dl>

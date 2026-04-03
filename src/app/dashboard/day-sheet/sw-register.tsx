@@ -34,7 +34,7 @@ export function SwRegister() {
       role="status"
       className="mb-3 rounded-md bg-amber-100 border border-amber-300 px-4 py-2 text-sm text-amber-900"
     >
-      <p className="font-medium">You are offline — showing cached data</p>
+      <p className="font-medium">You are offline - showing cached data</p>
       <p className="text-amber-700">Data may be stale</p>
     </div>
   );

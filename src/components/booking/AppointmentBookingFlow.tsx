@@ -700,7 +700,7 @@ export function AppointmentBookingFlow({
     if (isDepositRefundAvailableAt(iso)) {
       return cancellationPolicy ?? `Full deposit refund if you cancel ≥${refundNoticeHours}h before start.`;
     }
-    return `Refund cut-off has passed — this deposit is not refundable if you cancel.`;
+    return `Refund cut-off has passed - this deposit is not refundable if you cancel.`;
   }, [date, selectedTime, refundNoticeHours, cancellationPolicy]);
 
   const groupAppointmentPaymentPolicy = useMemo(() => {
@@ -711,9 +711,9 @@ export function AppointmentBookingFlow({
       return cancellationPolicy ?? paymentCancellationBlurb;
     }
     if (cls === 'none_refundable') {
-      return `Refund cut-off has passed for at least one appointment — not all of this deposit is refundable if you cancel.`;
+      return `Refund cut-off has passed for at least one appointment - not all of this deposit is refundable if you cancel.`;
     }
-    return `Refund is per appointment (≥${refundNoticeHours}h before each start). Some cut-offs have passed — those shares are not refundable.`;
+    return `Refund is per appointment (≥${refundNoticeHours}h before each start). Some cut-offs have passed - those shares are not refundable.`;
   }, [groupPeople, refundNoticeHours, cancellationPolicy]);
 
   const singleConfirmationDepositCopy = useMemo(() => {
@@ -724,7 +724,7 @@ export function AppointmentBookingFlow({
     if (isDepositRefundAvailableAt(iso)) {
       return `Full refund of ${sym}${amt} if you cancel ≥${hrs}h before start.`;
     }
-    return `${sym}${amt} deposit not refundable — the refund cut-off for this appointment has passed.`;
+    return `${sym}${amt} deposit not refundable - the refund cut-off for this appointment has passed.`;
   }, [date, selectedTime, refundNoticeHours, createResult, sym]);
 
   const groupConfirmationDepositCopy = useMemo(() => {
@@ -736,9 +736,9 @@ export function AppointmentBookingFlow({
       return `Full refund of each share (${sym}${amt} total) if you cancel ≥${hrs}h before each start.`;
     }
     if (cls === 'none_refundable') {
-      return `${sym}${amt} total not fully refundable — refund cut-off has passed for every appointment.`;
+      return `${sym}${amt} total not fully refundable - refund cut-off has passed for every appointment.`;
     }
-    return `${sym}${amt} total: refund per appointment (≥${hrs}h before start); cut-off passed for some — those shares are not refundable.`;
+    return `${sym}${amt} total: refund per appointment (≥${hrs}h before start); cut-off passed for some - those shares are not refundable.`;
   }, [groupPeople, refundNoticeHours, groupCreateResult, sym]);
 
   return (
@@ -1034,7 +1034,7 @@ export function AppointmentBookingFlow({
                 </button>
                 {addingExtraService && (
                   <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3">
-                    <p className="mb-2 text-xs font-medium text-slate-500">Choose a service — next start time is calculated automatically.</p>
+                    <p className="mb-2 text-xs font-medium text-slate-500">Choose a service - next start time is calculated automatically.</p>
                     <div className="flex flex-wrap gap-2">
                       {selectedPrac.services.map((svc) => (
                         <button

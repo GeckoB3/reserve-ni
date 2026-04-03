@@ -8,7 +8,7 @@ import { resolveVenueMode } from '@/lib/venue-mode';
 import { syncTableStatusesForBooking } from '@/lib/table-management/lifecycle';
 import { resolveTableAssignmentDurationBuffer } from '@/lib/table-management/booking-table-duration';
 
-/** GET /api/venue/waitlist — list waitlist entries for the venue */
+/** GET /api/venue/waitlist - list waitlist entries for the venue */
 export async function GET() {
   try {
     const supabase = await createClient();
@@ -34,7 +34,7 @@ export async function GET() {
   }
 }
 
-/** PATCH /api/venue/waitlist — update entry status (offer, confirm, cancel). Body: { id, status, expires_at? } */
+/** PATCH /api/venue/waitlist - update entry status (offer, confirm, cancel). Body: { id, status, expires_at? } */
 export async function PATCH(request: NextRequest) {
   try {
     const supabase = await createClient();
@@ -166,7 +166,7 @@ export async function PATCH(request: NextRequest) {
   }
 }
 
-/** DELETE /api/venue/waitlist — remove an entry. Body: { id } */
+/** DELETE /api/venue/waitlist - remove an entry. Body: { id } */
 export async function DELETE(request: NextRequest) {
   try {
     const supabase = await createClient();

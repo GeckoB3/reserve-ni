@@ -2,17 +2,17 @@
  * Unified scheduling scheduled comms (`booking_model === unified_scheduling`).
  *
  * §4.2 message-type audit (unified vs legacy cron split):
- * - **Confirmation** — transactional: `send-templated` + booking create / payment webhooks (not this cron).
- * - **Deposit request / deposit confirmation** — same shared paths as confirmation (not this cron).
- * - **Reschedule** — `booking_modification_*` in `send-templated.ts` (not this cron).
- * - **Cancellation** — `cancellation_*` in `send-templated.ts` (not this cron).
- * - **Reminder 1 / 2** — **this file** (`reminder_1_email` / `reminder_1_sms` / `reminder_2_sms`). Email uses
+ * - **Confirmation** - transactional: `send-templated` + booking create / payment webhooks (not this cron).
+ * - **Deposit request / deposit confirmation** - same shared paths as confirmation (not this cron).
+ * - **Reschedule** - `booking_modification_*` in `send-templated.ts` (not this cron).
+ * - **Cancellation** - `cancellation_*` in `send-templated.ts` (not this cron).
+ * - **Reminder 1 / 2** - **this file** (`reminder_1_email` / `reminder_1_sms` / `reminder_2_sms`). Email uses
  *   `communication_settings.reminder_email_custom_message`; first SMS uses `day_of_reminder_custom_message`; second SMS uses
  *   the same optional line. Reminder 2 does not require reminder 1 to have been sent (short-lead bookings may skip the
  *   first window). Both reminders include Pending and Confirmed bookings (deposit-pending stays Pending). Legacy restaurants use
  *   `send-communications/route.ts` 56h + day-of paths, which **skip** unified venues (`isUnifiedSchedulingVenue`).
- * - **No-show** — staff-driven status + optional `no_show_notification` via `CommunicationService` (not scheduled here).
- * - **Post-visit** — **this file** (email). Legacy post-visit in `send-communications` skips unified venues.
+ * - **No-show** - staff-driven status + optional `no_show_notification` via `CommunicationService` (not scheduled here).
+ * - **Post-visit** - **this file** (email). Legacy post-visit in `send-communications` skips unified venues.
  *
  * SMS segments: `sendSmsWithSegments` prefers Twilio `numSegments`, else GSM/UCS-2 estimate (plan §4.6).
  */

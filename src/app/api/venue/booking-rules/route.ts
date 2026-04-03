@@ -3,7 +3,7 @@ import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 import { bookingRulesSchema } from '@/types/config-schemas';
 
-/** PATCH /api/venue/booking-rules — update booking_rules (admin only). */
+/** PATCH /api/venue/booking-rules - update booking_rules (admin only). */
 export async function PATCH(request: NextRequest) {
   try {
     const supabase = await createClient();

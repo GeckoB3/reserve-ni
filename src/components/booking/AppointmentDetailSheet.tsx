@@ -157,7 +157,7 @@ function minutesToTime(m: number): string {
 }
 
 function formatMoneyPence(pence: number | null | undefined, sym: string): string {
-  if (pence == null) return '—';
+  if (pence == null) return '-';
   return `${sym}${(pence / 100).toFixed(2)}`;
 }
 
@@ -171,7 +171,7 @@ interface Props {
   services: DetailServiceOption[];
   /** When false, only appointment-style bookings should open this sheet */
   requirePractitionerBooking?: boolean;
-  /** Same row as the list/calendar — shows full layout instantly while the detail request runs. */
+  /** Same row as the list/calendar - shows full layout instantly while the detail request runs. */
   prefetchedBooking?: AppointmentDetailPrefetch | null;
 }
 
@@ -467,7 +467,7 @@ export function AppointmentDetailSheet({
               <dl className="grid gap-3 text-sm sm:grid-cols-2">
                 <div>
                   <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">Client name</dt>
-                  <dd className="mt-0.5 text-slate-900">{detail.guest?.name ?? '—'}</dd>
+                  <dd className="mt-0.5 text-slate-900">{detail.guest?.name ?? '-'}</dd>
                 </div>
                 <div>
                   <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">Email</dt>
@@ -477,7 +477,7 @@ export function AppointmentDetailSheet({
                         {detail.guest.email}
                       </a>
                     ) : (
-                      '—'
+                      '-'
                     )}
                   </dd>
                 </div>
@@ -489,7 +489,7 @@ export function AppointmentDetailSheet({
                         {detail.guest.phone}
                       </a>
                     ) : (
-                      '—'
+                      '-'
                     )}
                   </dd>
                 </div>
@@ -504,7 +504,7 @@ export function AppointmentDetailSheet({
                         </span>
                       </>
                     ) : (
-                      '—'
+                      '-'
                     )}
                   </dd>
                 </div>
@@ -512,14 +512,14 @@ export function AppointmentDetailSheet({
                   <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">Service</dt>
                   <dd className="mt-0.5 text-slate-900">
                     {detail.appointment_service_id
-                      ? serviceMap.get(detail.appointment_service_id)?.name ?? '—'
-                      : '—'}
+                      ? serviceMap.get(detail.appointment_service_id)?.name ?? '-'
+                      : '-'}
                   </dd>
                 </div>
                 <div>
                   <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">Staff member</dt>
                   <dd className="mt-0.5 text-slate-900">
-                    {practitioners.find((p) => p.id === detail.practitioner_id)?.name ?? '—'}
+                    {practitioners.find((p) => p.id === detail.practitioner_id)?.name ?? '-'}
                   </dd>
                 </div>
                 <div>
@@ -538,14 +538,14 @@ export function AppointmentDetailSheet({
                     {detail.appointment_service_id &&
                     serviceMap.get(detail.appointment_service_id)?.price_pence != null
                       ? `${sym}${(Number(serviceMap.get(detail.appointment_service_id)?.price_pence) / 100).toFixed(2)}`
-                      : '—'}
+                      : '-'}
                   </dd>
                 </div>
                 {detail.deposit_amount_pence != null && detail.deposit_amount_pence > 0 && (
                   <div>
                     <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">Deposit</dt>
                     <dd className="mt-0.5 text-slate-700">
-                      {formatMoneyPence(detail.deposit_amount_pence, sym)} ({detail.deposit_status ?? '—'})
+                      {formatMoneyPence(detail.deposit_amount_pence, sym)} ({detail.deposit_status ?? '-'})
                     </dd>
                   </div>
                 )}
@@ -570,7 +570,7 @@ export function AppointmentDetailSheet({
                 <div className="sm:col-span-2">
                   <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">Customer comments</dt>
                   <dd className="mt-0.5 whitespace-pre-wrap text-slate-700">
-                    {detail.special_requests?.trim() || '—'}
+                    {detail.special_requests?.trim() || '-'}
                   </dd>
                 </div>
               </dl>
@@ -594,7 +594,7 @@ export function AppointmentDetailSheet({
                   <div>
                     <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">Deposit</dt>
                     <dd className="mt-0.5 text-slate-700">
-                      {formatMoneyPence(detail.deposit_amount_pence, sym)} ({detail.deposit_status ?? '—'})
+                      {formatMoneyPence(detail.deposit_amount_pence, sym)} ({detail.deposit_status ?? '-'})
                     </dd>
                   </div>
                 )}
@@ -607,7 +607,7 @@ export function AppointmentDetailSheet({
                 <div className="sm:col-span-2">
                   <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">Customer comments</dt>
                   <dd className="mt-0.5 whitespace-pre-wrap text-slate-700">
-                    {detail.special_requests?.trim() || '—'}
+                    {detail.special_requests?.trim() || '-'}
                   </dd>
                 </div>
               </dl>

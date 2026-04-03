@@ -13,7 +13,7 @@ const templateOverrideSchema = z.object({
   ),
 });
 
-/** PATCH /api/venue/communication-templates — save per-venue template overrides. */
+/** PATCH /api/venue/communication-templates - save per-venue template overrides. */
 export async function PATCH(request: NextRequest) {
   try {
     const supabase = await createClient();

@@ -9,7 +9,7 @@ const patchSchema = z.object({
   name: z.string().max(200).optional(),
 });
 
-/** PATCH /api/venue/staff/[id] — update staff member role or name (admin only). */
+/** PATCH /api/venue/staff/[id] - update staff member role or name (admin only). */
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -67,7 +67,7 @@ export async function PATCH(
   }
 }
 
-/** DELETE /api/venue/staff/[id] — remove staff member (admin only). */
+/** DELETE /api/venue/staff/[id] - remove staff member (admin only). */
 export async function DELETE(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> },

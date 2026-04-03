@@ -49,7 +49,7 @@ interface VenueOnboarding {
   address: string | null;
   phone: string | null;
   booking_model: BookingModel;
-  /** Secondary C/D/E models; onboarding wizard stays primary-first — full setup for add-ons is on the dashboard checklist. */
+  /** Secondary C/D/E models; onboarding wizard stays primary-first - full setup for add-ons is on the dashboard checklist. */
   enabled_models?: BookingModel[] | null;
   business_type: string | null;
   terminology: { client: string; booking: string; staff: string };
@@ -1608,7 +1608,7 @@ export default function OnboardingPage() {
                   Additional booking types enabled
                 </p>
                 <p className="mb-3 text-sm text-slate-700">
-                  You have extra bookable types on this venue. Finish their catalogues from the dashboard — the setup
+                  You have extra bookable types on this venue. Finish their catalogues from the dashboard - the setup
                   checklist will link to Events, Classes, or Resources as needed.
                 </p>
                 <ul className="list-inside list-disc space-y-1.5 text-sm text-slate-600">

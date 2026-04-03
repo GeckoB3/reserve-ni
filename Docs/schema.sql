@@ -1,4 +1,4 @@
--- Reserve NI — Database schema reference
+-- Reserve NI - Database schema reference
 -- Apply via Supabase migrations in supabase/migrations/ (in order).
 
 -- =============================================================================
@@ -14,15 +14,15 @@
 -- TABLES
 -- =============================================================================
 
--- venues — core venue profile
+-- venues - core venue profile
 -- id (uuid PK), name, slug (unique), address, phone, email, cover_photo_url,
 -- opening_hours (jsonb), booking_rules (jsonb), deposit_config (jsonb),
 -- availability_config (jsonb), timezone (default 'Europe/London'), created_at, updated_at
 
--- staff — venue staff, linked to Supabase Auth by email
+-- staff - venue staff, linked to Supabase Auth by email
 -- id (uuid PK), venue_id (FK → venues), email, name, role (staff_role), created_at
 
--- guests — one per guest per venue; unique (venue_id, email); index (venue_id, phone)
+-- guests - one per guest per venue; unique (venue_id, email); index (venue_id, phone)
 -- id (uuid PK), venue_id (FK), name, email, phone (E.164), global_guest_hash, visit_count, created_at, updated_at
 
 -- bookings
@@ -30,7 +30,7 @@
 -- status (booking_status), source (booking_source), dietary_notes, occasion, special_requests,
 -- deposit_amount_pence, deposit_status, stripe_payment_intent_id, cancellation_deadline, created_at, updated_at
 
--- events — immutable append-only audit log; no UPDATE/DELETE
+-- events - immutable append-only audit log; no UPDATE/DELETE
 -- id (uuid PK), venue_id (FK), booking_id (FK nullable), event_type (text), payload (jsonb), created_at
 
 -- =============================================================================
@@ -44,46 +44,46 @@
 --   business_type (text), business_category (text), terminology (jsonb)
 
 -- bookings additions:
---   guest_attendance_confirmed_at (timestamptz, nullable) — guest tapped "I'll be there" on reminder link
+--   guest_attendance_confirmed_at (timestamptz, nullable) - guest tapped "I'll be there" on reminder link
 --   practitioner_id (FK → practitioners), appointment_service_id (FK → appointment_services)
 --   experience_event_id (FK → experience_events), class_instance_id (FK → class_instances)
 --   resource_id (FK → venue_resources), booking_end_time (time)
 
--- practitioners — staff who take appointments (Model B)
+-- practitioners - staff who take appointments (Model B)
 -- id (uuid PK), venue_id (FK), staff_id (FK nullable), name, email, phone,
 -- working_hours (jsonb), break_times (jsonb), days_off (jsonb), is_active, sort_order
 
--- appointment_services — service menu (Model B)
+-- appointment_services - service menu (Model B)
 -- id (uuid PK), venue_id (FK), name, description, duration_minutes, buffer_minutes,
 -- price_pence, deposit_pence, colour, is_active, sort_order
 
--- practitioner_services — which practitioners offer which services (Model B)
+-- practitioner_services - which practitioners offer which services (Model B)
 -- id (uuid PK), practitioner_id (FK), service_id (FK), custom_duration_minutes, custom_price_pence
 
--- experience_events — ticketed events/experiences (Model C)
+-- experience_events - ticketed events/experiences (Model C)
 -- id (uuid PK), venue_id (FK), name, description, event_date, start_time, end_time,
 -- capacity, image_url, is_recurring, recurrence_rule, parent_event_id, is_active
 
--- event_ticket_types — ticket tiers per event (Model C)
+-- event_ticket_types - ticket tiers per event (Model C)
 -- id (uuid PK), event_id (FK), name, price_pence, capacity, sort_order
 
--- class_types — recurring class definitions (Model D)
+-- class_types - recurring class definitions (Model D)
 -- id (uuid PK), venue_id (FK), name, description, duration_minutes, capacity,
 -- instructor_id (FK → practitioners), price_pence, colour, is_active
 
--- class_timetable — weekly schedule entries (Model D)
+-- class_timetable - weekly schedule entries (Model D)
 -- id (uuid PK), class_type_id (FK), day_of_week, start_time, is_active
 
--- class_instances — individual scheduled class sessions (Model D)
+-- class_instances - individual scheduled class sessions (Model D)
 -- id (uuid PK), class_type_id (FK), timetable_entry_id (FK), instance_date,
 -- start_time, capacity_override, is_cancelled, cancel_reason
 
--- venue_resources — bookable facilities/equipment (Model E)
+-- venue_resources - bookable facilities/equipment (Model E)
 -- id (uuid PK), venue_id (FK), name, resource_type, min_booking_minutes,
 -- max_booking_minutes, slot_interval_minutes, price_per_slot_pence,
 -- availability_hours (jsonb), is_active, sort_order
 
--- booking_ticket_lines — ticket breakdown per booking (Models C/D)
+-- booking_ticket_lines - ticket breakdown per booking (Models C/D)
 -- id (uuid PK), booking_id (FK), ticket_type_id (FK nullable), label, quantity, unit_price_pence
 
 -- =============================================================================

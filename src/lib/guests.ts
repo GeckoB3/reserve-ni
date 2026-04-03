@@ -41,7 +41,7 @@ export interface GuestRecord {
 
 /**
  * Find or create a guest for the venue. Match by email first, then phone, else insert.
- * visit_count is NOT incremented here — it's incremented when status changes to Seated.
+ * visit_count is NOT incremented here - it's incremented when status changes to Seated.
  */
 export async function findOrCreateGuest(
   supabase: SupabaseClient,

@@ -243,7 +243,7 @@ export default function DashboardHomePage() {
         />
         <DashboardStatCard
           label="Next up"
-          value={t.next_booking ? t.next_booking.time : '—'}
+          value={t.next_booking ? t.next_booking.time : '-'}
           color="amber"
           subValue={t.next_booking ? (isAppointment ? 'next appointment' : `party of ${t.next_booking.party_size}`) : (isAppointment ? 'no upcoming appointments' : 'no upcoming bookings')}
         />
@@ -294,7 +294,7 @@ export default function DashboardHomePage() {
               </p>
             ) : (
               <p className="mt-2 text-xs text-slate-500">
-                No bookings yet — capacity will appear as bookings come in.
+                No bookings yet - capacity will appear as bookings come in.
               </p>
             )}
 
@@ -380,7 +380,7 @@ export default function DashboardHomePage() {
                   </span>
                   <div className={`flex h-14 w-full items-center justify-center rounded-lg transition-colors ${getHeatColor(hPct)} ${isToday ? 'ring-2 ring-brand-300 ring-offset-1' : ''}`}>
                     <span className={`text-xs font-bold ${hPct >= 40 ? 'text-white' : 'text-slate-600'}`}>
-                      {hHasCap ? `${hPct}%` : (hTotal > 0 ? `${hTotal}` : '—')}
+                      {hHasCap ? `${hPct}%` : (hTotal > 0 ? `${hTotal}` : '-')}
                     </span>
                   </div>
                   <div className="text-center leading-tight">
@@ -491,7 +491,7 @@ export default function DashboardHomePage() {
                     <td className="max-w-[180px] truncate px-5 py-3 text-slate-700" title={b.guest_name}>{b.guest_name}</td>
                     {!isAppointment && <td className="whitespace-nowrap px-5 py-3 tabular-nums text-slate-600">{b.party_size}</td>}
                     {showTypeColumn && (
-                      <td className="whitespace-nowrap px-5 py-3 text-xs text-slate-600">{b.kind_label ?? '—'}</td>
+                      <td className="whitespace-nowrap px-5 py-3 text-xs text-slate-600">{b.kind_label ?? '-'}</td>
                     )}
                     <td className="whitespace-nowrap px-5 py-3">
                       <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset ${getStatusBadge(b.status)}`}>
@@ -516,7 +516,7 @@ export default function DashboardHomePage() {
               href="/dashboard/bookings"
               className="text-xs font-medium text-brand-600 hover:text-brand-700 transition-colors"
             >
-              {bookings - 10} more {isAppointment ? 'appointment' : 'booking'}{bookings - 10 !== 1 ? 's' : ''} — view all &rarr;
+              {bookings - 10} more {isAppointment ? 'appointment' : 'booking'}{bookings - 10 !== 1 ? 's' : ''} - view all &rarr;
             </Link>
           </div>
         )}

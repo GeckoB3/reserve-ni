@@ -14,7 +14,7 @@ globs:
 All guest communications are routed through a unified service in `lib/communications/`. Business logic never calls SendGrid or Twilio directly.
 
 ```typescript
-// Correct — use the abstraction
+// Correct - use the abstraction
 import { sendCommunication } from '@/lib/communications';
 await sendCommunication({
   type: 'booking_confirmation',
@@ -22,7 +22,7 @@ await sendCommunication({
   payload: { guestName, venueName, bookingDate, bookingTime, ... }
 });
 
-// WRONG — never do this from business logic
+// WRONG - never do this from business logic
 import sgMail from '@sendgrid/mail';
 await sgMail.send({ ... }); // ❌
 ```
@@ -71,7 +71,7 @@ export async function sendEmail(to: string, template: CompiledTemplate): Promise
 // lib/communications/providers/twilio.ts
 export async function sendSMS(to: string, body: string): Promise<DeliveryResult> { ... }
 
-// lib/communications/index.ts — the router
+// lib/communications/index.ts - the router
 export async function sendCommunication(message: CommunicationRequest): Promise<void> {
   const channels = getChannelsForMessageType(message.type);
   const template = compileTemplate(message.type, message.payload);

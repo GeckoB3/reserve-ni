@@ -71,7 +71,7 @@ export function UnifiedFloorPlanView({ isAdmin, venueId, currency }: { isAdmin: 
   return (
     <div className="space-y-4">
       <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-        Editing Layout — changes are saved automatically as you make them.
+        Editing Layout - changes are saved automatically as you make them.
       </div>
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div className="overflow-x-auto">

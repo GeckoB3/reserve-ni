@@ -1,9 +1,9 @@
 import { getSupabaseAdminClient } from '@/lib/supabase';
 
-/** Reserve NI Unified Scheduling Engine plan §1.1 — included SMS per paid calendar on Standard tier. */
+/** Reserve NI Unified Scheduling Engine plan §1.1 - included SMS per paid calendar on Standard tier. */
 export const SMS_INCLUDED_PER_CALENDAR_STANDARD = 200;
 
-/** Plan §1.1 — flat monthly included SMS on Business (and Founding) tier. */
+/** Plan §1.1 - flat monthly included SMS on Business (and Founding) tier. */
 export const SMS_INCLUDED_BUSINESS_TIER = 800;
 
 /**

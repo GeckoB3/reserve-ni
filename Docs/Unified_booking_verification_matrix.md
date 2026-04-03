@@ -1,4 +1,4 @@
-# Unified booking — manual verification matrix
+# Unified booking - manual verification matrix
 
 Derived from [ReserveNI_Unified_Booking_Functionality.md](ReserveNI_Unified_Booking_Functionality.md) (verification checklist and E2E matrix). Use before release or after multi-model changes.
 

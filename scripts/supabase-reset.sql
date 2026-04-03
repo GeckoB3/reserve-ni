@@ -1,4 +1,4 @@
--- Reserve NI: Nuclear reset — drops ALL app tables, functions, types, and storage.
+-- Reserve NI: Nuclear reset - drops ALL app tables, functions, types, and storage.
 -- Paste into Supabase SQL Editor and run ONCE, then run supabase-full-schema.sql to rebuild.
 --
 -- WARNING: This deletes ALL data. There is no undo.
@@ -45,4 +45,4 @@ DROP TYPE IF EXISTS deposit_status CASCADE;
 -- Supabase blocks direct DELETE on storage tables via SQL.
 -- If you need to clear the venue-covers bucket, do it from the dashboard:
 --   Storage → venue-covers → select all → delete
--- The bucket itself can stay — supabase-full-schema.sql uses ON CONFLICT DO NOTHING.
+-- The bucket itself can stay - supabase-full-schema.sql uses ON CONFLICT DO NOTHING.

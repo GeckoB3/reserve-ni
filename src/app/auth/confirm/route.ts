@@ -8,7 +8,7 @@ function getBaseUrl(requestUrl: string): string {
 }
 
 /**
- * GET /auth/confirm — handle PKCE magic link and email confirmation.
+ * GET /auth/confirm - handle PKCE magic link and email confirmation.
  *
  * Supabase's email template sends links to:
  *   {{ .SiteURL }}/auth/confirm?token_hash=xxx&type=magiclink

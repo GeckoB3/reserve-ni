@@ -90,7 +90,7 @@ export async function POST(request: NextRequest) {
         .select('id');
 
       if (!updatedRows?.length) {
-        console.log(`[Stripe webhook] No pending bookings to confirm for PI ${pi.id} — may already be processed`);
+        console.log(`[Stripe webhook] No pending bookings to confirm for PI ${pi.id} - may already be processed`);
         await recordProcessed(supabase, event.id, event.type);
         return NextResponse.json({ received: true });
       }

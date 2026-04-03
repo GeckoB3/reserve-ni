@@ -34,9 +34,9 @@ const eventSchema = z.object({
 });
 
 /**
- * GET /api/venue/experience-events/[id] — single event with ticket types.
- * PATCH /api/venue/experience-events/[id] — update event (admin).
- * DELETE /api/venue/experience-events/[id] — delete event (admin).
+ * GET /api/venue/experience-events/[id] - single event with ticket types.
+ * PATCH /api/venue/experience-events/[id] - update event (admin).
+ * DELETE /api/venue/experience-events/[id] - delete event (admin).
  *
  * Behaviour matches the collection `/api/venue/experience-events` PATCH/DELETE (shared guards in
  * `lib/experience-events/experience-event-guards.ts`). The dashboard uses the collection route.

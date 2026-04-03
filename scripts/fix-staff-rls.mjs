@@ -2,7 +2,7 @@
  * Fix the circular RLS policy on the staff table.
  *
  * Migration 20260302000002 dropped staff_select_own and replaced it with
- * staff_select_venue_staff which subqueries itself — creating a circular
+ * staff_select_venue_staff which subqueries itself - creating a circular
  * dependency that blocks ALL queries. This script restores staff_select_own
  * so staff can see their own rows by email, breaking the cycle.
  *
@@ -32,7 +32,7 @@ try {
     if (!process.env[key]) process.env[key] = val;
   }
 } catch {
-  console.error('Could not read .env.local — make sure it exists in the project root.');
+  console.error('Could not read .env.local - make sure it exists in the project root.');
   process.exit(1);
 }
 
@@ -56,7 +56,7 @@ async function run() {
 
   // If exec_sql doesn't exist, fall back to direct SQL via REST
   if (polErr) {
-    console.log('(Could not list policies via RPC — proceeding with fix anyway)\n');
+    console.log('(Could not list policies via RPC - proceeding with fix anyway)\n');
   } else {
     console.log('Current policies on staff table:');
     for (const p of policies ?? []) {
@@ -68,7 +68,7 @@ async function run() {
       await verifyAccess();
       return;
     }
-    console.log('\n✗ staff_select_own is MISSING — this causes the circular RLS issue.');
+    console.log('\n✗ staff_select_own is MISSING - this causes the circular RLS issue.');
   }
 
   console.log('\nApplying fix: CREATE POLICY staff_select_own ...');

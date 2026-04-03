@@ -13,7 +13,7 @@ export interface VenueStaff {
   venue_id: string;
   email: string;
   role: 'admin' | 'staff';
-  /** Admin client for data queries — bypasses RLS, safe to use after auth. */
+  /** Admin client for data queries - bypasses RLS, safe to use after auth. */
   db: SupabaseClient;
 }
 

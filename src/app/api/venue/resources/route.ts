@@ -28,7 +28,7 @@ const resourceSchema = z.object({
   sort_order: z.number().int().optional(),
 });
 
-/** GET /api/venue/resources — list resources for the venue. */
+/** GET /api/venue/resources - list resources for the venue. */
 export async function GET() {
   try {
     const supabase = await createClient();
@@ -54,7 +54,7 @@ export async function GET() {
   }
 }
 
-/** POST /api/venue/resources — create a resource (admin only). */
+/** POST /api/venue/resources - create a resource (admin only). */
 export async function POST(request: NextRequest) {
   try {
     const supabase = await createClient();
@@ -102,7 +102,7 @@ export async function POST(request: NextRequest) {
   }
 }
 
-/** PATCH /api/venue/resources — update a resource (admin only). */
+/** PATCH /api/venue/resources - update a resource (admin only). */
 export async function PATCH(request: NextRequest) {
   try {
     const supabase = await createClient();
@@ -143,7 +143,7 @@ export async function PATCH(request: NextRequest) {
   }
 }
 
-/** DELETE /api/venue/resources — delete a resource (admin only). */
+/** DELETE /api/venue/resources - delete a resource (admin only). */
 export async function DELETE(request: NextRequest) {
   try {
     const supabase = await createClient();

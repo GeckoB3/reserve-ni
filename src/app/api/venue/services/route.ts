@@ -25,7 +25,7 @@ async function getOverlapWarnings(venueId: string): Promise<string[]> {
   return detectOverlaps(data).map(formatOverlapWarning);
 }
 
-/** GET /api/venue/services — list services for the authenticated user's venue. */
+/** GET /api/venue/services - list services for the authenticated user's venue. */
 export async function GET() {
   try {
     const supabase = await createClient();
@@ -51,7 +51,7 @@ export async function GET() {
   }
 }
 
-/** POST /api/venue/services — create a new service (admin only). */
+/** POST /api/venue/services - create a new service (admin only). */
 export async function POST(request: NextRequest) {
   try {
     const supabase = await createClient();
@@ -85,7 +85,7 @@ export async function POST(request: NextRequest) {
   }
 }
 
-/** PATCH /api/venue/services — update an existing service (admin only). Body must include `id`. */
+/** PATCH /api/venue/services - update an existing service (admin only). Body must include `id`. */
 export async function PATCH(request: NextRequest) {
   try {
     const supabase = await createClient();
@@ -119,7 +119,7 @@ export async function PATCH(request: NextRequest) {
   }
 }
 
-/** DELETE /api/venue/services — delete a service (admin only). Body must include `id`. */
+/** DELETE /api/venue/services - delete a service (admin only). Body must include `id`. */
 export async function DELETE(request: NextRequest) {
   try {
     const supabase = await createClient();

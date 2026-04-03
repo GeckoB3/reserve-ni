@@ -1,4 +1,4 @@
-# ReserveNI — Unified Scheduling Engine Implementation Plan
+# ReserveNI - Unified Scheduling Engine Implementation Plan
 
 **Complete Phase 1 + Phase 2 Build Guide for Cursor AI Agents**
 **Converting from Models B/C/D/E to a Single Unified Scheduling System**
@@ -10,9 +10,9 @@
 
 This document contains everything a Cursor AI agent needs to convert ReserveNI from separate booking models (B, C, D, E) into a single unified scheduling engine, while preserving Model A (restaurants) completely unchanged. It is designed to be followed sequentially as a series of numbered prompts. By the end, all functionality should be fully implemented and ready for human testing.
 
-**What stays the same:** Model A (table_reservation) — the restaurant system with its availability engine, table management, floor plan, day sheet, and all existing restaurant functionality. Restaurant-facing behaviour and routes are preserved; shared tables may gain nullable columns used only by unified scheduling (see §2.7).
+**What stays the same:** Model A (table_reservation) - the restaurant system with its availability engine, table management, floor plan, day sheet, and all existing restaurant functionality. Restaurant-facing behaviour and routes are preserved; shared tables may gain nullable columns used only by unified scheduling (see §2.7).
 
-**What changes:** Models B, C, D, and E are replaced by a single "Unified Scheduling Engine" (USE) that handles appointments, events, classes, and resources through configuration. The existing Model B (practitioner appointment) code is the foundation — it is extended and generalised rather than rewritten.
+**What changes:** Models B, C, D, and E are replaced by a single "Unified Scheduling Engine" (USE) that handles appointments, events, classes, and resources through configuration. The existing Model B (practitioner appointment) code is the foundation - it is extended and generalised rather than rewritten.
 
 ### Scope and product intent
 
@@ -54,14 +54,14 @@ This document contains everything a Cursor AI agent needs to convert ReserveNI f
 
 ### 1.1 The Two Tiers
 
-**Standard — £20/month per bookable calendar**
+**Standard - £20/month per bookable calendar**
 - All features included (booking, deposits, reminders, client records, reporting)
 - Email AND SMS communications
 - 200 SMS messages included per calendar per month (e.g. 3 calendars = 600 SMS/month)
 - Additional SMS charged at 5p each, billed at end of month
 - Email support
 
-**Business — £79/month flat (restaurants MUST choose this)**
+**Business - £79/month flat (restaurants MUST choose this)**
 - Unlimited bookable calendars
 - All features included
 - 800 SMS messages included per month
@@ -71,7 +71,7 @@ This document contains everything a Cursor AI agent needs to convert ReserveNI f
 
 ### 1.2 SMS Economics
 
-Twilio charges approximately £0.035-0.04 per outbound SMS to UK numbers. At 5p (£0.05) per overage SMS to the customer, the margin is approximately £0.01-0.015 per message. The included allowances (200 per calendar on Standard, 800 on Business) are generous enough that most businesses won't exceed them — the overage charge exists as a safety net, not a revenue centre.
+Twilio charges approximately £0.035-0.04 per outbound SMS to UK numbers. At 5p (£0.05) per overage SMS to the customer, the margin is approximately £0.01-0.015 per message. The included allowances (200 per calendar on Standard, 800 on Business) are generous enough that most businesses won't exceed them - the overage charge exists as a safety net, not a revenue centre.
 
 A typical solo practitioner with 20 appointments per week generates approximately:
 - 20 confirmations (SMS) = 20
@@ -124,7 +124,7 @@ STRIPE_ONBOARDING_WEBHOOK_SECRET=whsec_xxxxx
 
 ### 2.1 Changes to Existing Tables
 
-#### venues table — new/modified columns
+#### venues table - new/modified columns
 
 ```sql
 -- Run as a single migration
@@ -201,7 +201,7 @@ ALTER TABLE venues ADD COLUMN IF NOT EXISTS notification_settings JSONB DEFAULT 
 
 **Venue timezone (use existing column):** The `venues` table already includes `timezone` (IANA identifier, e.g. `Europe/London`). Do **not** introduce a second timezone field. Unified scheduling, availability, crons, and guest-facing copy must resolve “today”, reminder windows, and post-visit cutoffs in **venue local time** using `venues.timezone`. See §3.0.
 
-#### bookings table — new columns for unified scheduling
+#### bookings table - new columns for unified scheduling
 
 ```sql
 ALTER TABLE bookings ADD COLUMN IF NOT EXISTS calendar_id UUID;
@@ -225,9 +225,9 @@ ALTER TABLE bookings ADD COLUMN IF NOT EXISTS ticket_type_id UUID;
 -- if ticket types are modelled only as service_items; use a legacy ticket_types table only if it still exists in the DB.
 ```
 
-### 2.2 New Tables — Unified Scheduling
+### 2.2 New Tables - Unified Scheduling
 
-#### unified_calendars — the core entity that replaces practitioners, events, classes, and resources
+#### unified_calendars - the core entity that replaces practitioners, events, classes, and resources
 
 ```sql
 CREATE TABLE unified_calendars (
@@ -270,7 +270,7 @@ CREATE TABLE unified_calendars (
   -- For resources: the hours the resource is available
   
   break_times JSONB DEFAULT '[]',
-  -- [{"start": "13:00", "end": "14:00"}] — recurring daily breaks
+  -- [{"start": "13:00", "end": "14:00"}] - recurring daily breaks
   
   days_off JSONB DEFAULT '[]',
   -- Specific dates: ["2026-04-15", "2026-04-16"]
@@ -298,7 +298,7 @@ CREATE TABLE unified_calendars (
   -- For resources: booking constraints
   min_booking_minutes INT,         -- e.g. 60 (minimum 1 hour)
   max_booking_minutes INT,         -- e.g. 180 (maximum 3 hours)
-  price_per_slot_pence INT,        -- e.g. 2000 (£20 per slot) — for resources with flat pricing
+  price_per_slot_pence INT,        -- e.g. 2000 (£20 per slot) - for resources with flat pricing
   
   -- Metadata
   sort_order INT NOT NULL DEFAULT 0,
@@ -313,7 +313,7 @@ CREATE INDEX idx_unified_calendars_venue ON unified_calendars(venue_id) WHERE is
 CREATE INDEX idx_unified_calendars_venue_slug ON unified_calendars(venue_id, slug) WHERE slug IS NOT NULL;
 ```
 
-#### service_items — services, treatments, ticket types, class types, resource slots
+#### service_items - services, treatments, ticket types, class types, resource slots
 
 ```sql
 CREATE TABLE service_items (
@@ -366,7 +366,7 @@ CREATE TABLE service_items (
 CREATE INDEX idx_service_items_venue ON service_items(venue_id) WHERE is_active = true;
 ```
 
-#### calendar_service_assignments — which calendars offer which services
+#### calendar_service_assignments - which calendars offer which services
 
 ```sql
 CREATE TABLE calendar_service_assignments (
@@ -385,7 +385,7 @@ CREATE INDEX idx_cal_service_calendar ON calendar_service_assignments(calendar_i
 CREATE INDEX idx_cal_service_service ON calendar_service_assignments(service_item_id);
 ```
 
-#### calendar_blocks — blocked time (breaks, holidays, personal time)
+#### calendar_blocks - blocked time (breaks, holidays, personal time)
 
 ```sql
 CREATE TABLE calendar_blocks (
@@ -409,7 +409,7 @@ CREATE TABLE calendar_blocks (
 CREATE INDEX idx_calendar_blocks_lookup ON calendar_blocks(calendar_id, block_date);
 ```
 
-#### event_sessions — individual instances of events/classes (generated from recurrence_rule or manually created)
+#### event_sessions - individual instances of events/classes (generated from recurrence_rule or manually created)
 
 ```sql
 CREATE TABLE event_sessions (
@@ -438,7 +438,7 @@ CREATE INDEX idx_event_sessions_lookup ON event_sessions(calendar_id, session_da
 CREATE INDEX idx_event_sessions_venue_date ON event_sessions(venue_id, session_date);
 ```
 
-#### sms_usage — tracks SMS messages sent per venue per month
+#### sms_usage - tracks SMS messages sent per venue per month
 
 ```sql
 CREATE TABLE sms_usage (
@@ -461,7 +461,7 @@ CREATE TABLE sms_usage (
 CREATE INDEX idx_sms_usage_venue_month ON sms_usage(venue_id, billing_month);
 ```
 
-#### sms_log — individual SMS message log for tracking and debugging
+#### sms_log - individual SMS message log for tracking and debugging
 
 ```sql
 CREATE TABLE sms_log (
@@ -615,8 +615,8 @@ Enable Supabase Realtime on:
 
 **Optional schema additions (if not already present) for safer ops:**
 
-- `event_sessions.recurrence_key TEXT UNIQUE` — idempotency key for upserts.
-- `event_sessions.source TEXT` — `'recurring' | 'manual' | 'import'` to protect manual rows from deletion by the generator.
+- `event_sessions.recurrence_key TEXT UNIQUE` - idempotency key for upserts.
+- `event_sessions.source TEXT` - `'recurring' | 'manual' | 'import'` to protect manual rows from deletion by the generator.
 
 **Booking linkage:** Bookings for events/classes reference `event_sessions.id` (add `event_session_id UUID REFERENCES event_sessions(id)` on `bookings` if not already implied by existing design) in addition to `calendar_id` / `service_item_id`. If the plan ships without this FK in the first migration, document it as a follow-up migration once API shapes stabilise.
 
@@ -793,7 +793,7 @@ Return structured data:
 - `getAvailableSlots`: < 100ms for a single calendar + date query
 - `getCalendarGrid`: < 300ms for 5 calendars over 1 day, < 1s for 5 calendars over 7 days
 - Batch all database queries: fetch working hours, bookings, blocks, and sessions in parallel (Promise.all), not sequentially
-- Cache calendar configuration (working hours, break times) in memory per request — it doesn't change between slot calculations
+- Cache calendar configuration (working hours, break times) in memory per request - it doesn't change between slot calculations
 
 ### 3.5 Variable-length resource bookings
 
@@ -897,7 +897,7 @@ requires a £{{deposit_amount}} deposit. Pay here: {{payment_link}}"
 at {{appointment_time}}. Manage: {{manage_link}}"
 ```
 
-#### Message 4: Reminder #1 (Primary — 24 hours before)
+#### Message 4: Reminder #1 (Primary - 24 hours before)
 
 **Trigger:** Cron job (runs every 15 minutes)
 
@@ -929,7 +929,7 @@ For each booking:
 tomorrow at {{appointment_time}}. Confirm or cancel: {{confirm_link}}"
 ```
 
-#### Message 5: Reminder #2 (Final nudge — 2 hours before)
+#### Message 5: Reminder #2 (Final nudge - 2 hours before)
 
 **Trigger:** Cron job (runs every 15 minutes)
 
@@ -970,7 +970,7 @@ See you at {{business_name}}!"
 **Channels:**
 - Standard tier: Email only
 - Business tier: Email only
-(Cancellation messages should not be sent via SMS — too aggressive)
+(Cancellation messages should not be sent via SMS - too aggressive)
 
 **Email includes:** Service, date, time, refund status, rebooking link.
 
@@ -983,7 +983,7 @@ See you at {{business_name}}!"
 **Channels:**
 - Standard tier: Email only
 - Business tier: Email only
-(Same reasoning as cancellations — email is appropriate, SMS is not)
+(Same reasoning as cancellations - email is appropriate, SMS is not)
 
 **Email includes:** Missed appointment details, deposit forfeited info, cancellation policy reminder, rebooking link.
 
@@ -1006,7 +1006,7 @@ Find bookings WHERE:
 
 For each candidate booking:
   Compute appointment_end_local (venue wall-clock) using venues.timezone (§3.0).
-  Let "17:00" and "09:00 next day" refer to that same timezone — not server local.
+  Let "17:00" and "09:00 next day" refer to that same timezone - not server local.
 
   Eligible when:
     (appointment_end_local <= 17:00 on that local day AND now_utc >= appointment_end_utc + 4 hours)
@@ -1152,7 +1152,7 @@ All scheduled jobs (reminder #1, reminder #2, post-visit, optional auto-cancel) 
 
 1. Load `venues.timezone` for each booking’s venue.
 2. Compare **instants** (UTC) derived from `booking_date` + `booking_time` in that zone against `now()`.
-3. Use a consistent definition of **billing month** for `sms_usage` (recommended: **UTC calendar month** starting `YYYY-MM-01`, or venue-local month — pick one, document it in code, and use it in `increment_sms_usage` and dashboard queries).
+3. Use a consistent definition of **billing month** for `sms_usage` (recommended: **UTC calendar month** starting `YYYY-MM-01`, or venue-local month - pick one, document it in code, and use it in `increment_sms_usage` and dashboard queries).
 
 Reminder windows described as “24 hours before” / “2 hours before” are wall-clock deltas in real time; implementing them as “UTC offset from stored local time converted to instant” avoids DST mistakes.
 
@@ -1217,7 +1217,7 @@ Create a cron job at `/api/cron/sms-overage-billing` that runs on the 1st of eac
 1. The base plan (`STRIPE_STANDARD_PRICE_ID` with quantity, or `STRIPE_BUSINESS_PRICE_ID`).
 2. The metered SMS price (`STRIPE_SMS_OVERAGE_PRICE_ID`) on its own **subscription item** with `usage_type = metered`.
 
-Store **both** `stripe_subscription_id` and the **metered line’s** `stripe_subscription_item_id` on `venues` (the plan already references a subscription item for quantity updates — ensure the **metered** item id is distinct and stored separately, e.g. `stripe_sms_subscription_item_id`, if the quantity item and metered item cannot share one field).
+Store **both** `stripe_subscription_id` and the **metered line’s** `stripe_subscription_item_id` on `venues` (the plan already references a subscription item for quantity updates - ensure the **metered** item id is distinct and stored separately, e.g. `stripe_sms_subscription_item_id`, if the quantity item and metered item cannot share one field).
 
 **Usage records:** `createUsageRecord` must target the **metered** subscription item id, not the base price item. Timestamp should fall within the billing period Stripe expects (typically current period).
 
@@ -1233,11 +1233,11 @@ Store **both** `stripe_subscription_id` and the **metered line’s** `stripe_sub
 
 The dashboard shell (sidebar, header) checks `venue.booking_model`:
 
-**If 'table_reservation':** Show existing restaurant dashboard — Bookings, Day Sheet, Table Grid, Floor Plan, Reports, Guests, Settings. NO CHANGES.
+**If 'table_reservation':** Show existing restaurant dashboard - Bookings, Day Sheet, Table Grid, Floor Plan, Reports, Guests, Settings. NO CHANGES.
 
 **If 'unified_scheduling':** Show the unified scheduling dashboard:
-- **Calendar** (primary view — the practitioner/resource/event calendar)
-- **Appointments** (list view — searchable, filterable booking list)
+- **Calendar** (primary view - the practitioner/resource/event calendar)
+- **Appointments** (list view - searchable, filterable booking list)
 - **Clients** (client management with tags and history)
 - **Reports** (booking stats, no-show rate, revenue, SMS usage)
 - **Settings** (business profile, calendars, services, notifications, plan, billing)
@@ -1250,7 +1250,7 @@ This is the existing Model B practitioner calendar, generalised for all calendar
 
 **For event/class calendars:** Show sessions as blocks on a timeline. Each session shows: name, time, capacity (booked/total). Click to see attendee list. Colour-coded by capacity fill: green (<50%), amber (50-80%), red (>80%).
 
-**For resource calendars:** Show resource bookings as blocks on a timeline. One column per resource. Similar to practitioner view but without service assignment — just time blocks.
+**For resource calendars:** Show resource bookings as blocks on a timeline. One column per resource. Similar to practitioner view but without service assignment - just time blocks.
 
 ### 6.3 Appointments List View
 
@@ -1333,9 +1333,9 @@ The `bookings.group_booking_id` column reserves support for **multiple services 
 **Phase 2 specification (when prioritised):**
 
 - Generate one `group_booking_id` (UUID) per checkout; create **one `bookings` row per service line**, all sharing that id.
-- Payments: one Stripe PaymentIntent covering total deposit, or separate intents per line — document in payment module.
-- Communications: send **one** confirmation summarising all lines, or one per line — product decision; avoid duplicate SMS charges where possible.
-- Cancellation: cancel group or per-line — policy stored on venue.
+- Payments: one Stripe PaymentIntent covering total deposit, or separate intents per line - document in payment module.
+- Communications: send **one** confirmation summarising all lines, or one per line - product decision; avoid duplicate SMS charges where possible.
+- Cancellation: cancel group or per-line - policy stored on venue.
 
 Until Phase 2 is built, APIs and UI should not expose group booking; keep column nullable and unused.
 
@@ -1416,13 +1416,13 @@ The settings page at `/dashboard/settings` for unified scheduling venues should 
 >
 > Create the following new tables exactly as specified:
 >
-> 1. `unified_calendars` — [paste the full CREATE TABLE from Section 2.2 above]
-> 2. `service_items` — [paste the full CREATE TABLE from Section 2.2 above]
-> 3. `calendar_service_assignments` — [paste the full CREATE TABLE from Section 2.2 above]
-> 4. `calendar_blocks` — [paste the full CREATE TABLE from Section 2.2 above]
-> 5. `event_sessions` — [paste the full CREATE TABLE from Section 2.2 above]
-> 6. `sms_usage` — [paste the full CREATE TABLE from Section 2.2 above]
-> 7. `sms_log` — [paste the full CREATE TABLE from Section 2.2 above]
+> 1. `unified_calendars` - [paste the full CREATE TABLE from Section 2.2 above]
+> 2. `service_items` - [paste the full CREATE TABLE from Section 2.2 above]
+> 3. `calendar_service_assignments` - [paste the full CREATE TABLE from Section 2.2 above]
+> 4. `calendar_blocks` - [paste the full CREATE TABLE from Section 2.2 above]
+> 5. `event_sessions` - [paste the full CREATE TABLE from Section 2.2 above]
+> 6. `sms_usage` - [paste the full CREATE TABLE from Section 2.2 above]
+> 7. `sms_log` - [paste the full CREATE TABLE from Section 2.2 above]
 >
 > Add all columns to the `venues` table as specified in Section 2.1 (use ALTER TABLE ADD COLUMN IF NOT EXISTS for safety).
 >
@@ -1430,7 +1430,7 @@ The settings page at `/dashboard/settings` for unified scheduling venues should 
 >
 > Create the `increment_sms_usage` database function as specified in Section 4.4.
 >
-> Add all RLS policies as specified in Section 2.4 — policies MUST use the Reserve NI pattern (staff matched by JWT email), not auth.uid() on staff.id, unless you have verified a different auth mapping.
+> Add all RLS policies as specified in Section 2.4 - policies MUST use the Reserve NI pattern (staff matched by JWT email), not auth.uid() on staff.id, unless you have verified a different auth mapping.
 >
 > Add optional columns if implementing §2.6: e.g. bookings.event_session_id REFERENCES event_sessions(id); event_sessions.recurrence_key / source for idempotent generation.
 >
@@ -1473,8 +1473,8 @@ The settings page at `/dashboard/settings` for unified scheduling venues should 
 > **Performance:** Batch all database queries using Promise.all. Target: getAvailableSlots < 100ms, getCalendarGrid < 300ms for 5 calendars over 1 day.
 >
 > **API endpoints:**
-> Create `GET /api/booking/unified-availability?calendar_id=X&date=YYYY-MM-DD&service_item_id=Y` — public endpoint for booking page, returns available slots.
-> Create `GET /api/venue/calendar-grid?calendar_ids=X,Y,Z&start_date=YYYY-MM-DD&end_date=YYYY-MM-DD` — authenticated venue staff endpoint for dashboard calendar.
+> Create `GET /api/booking/unified-availability?calendar_id=X&date=YYYY-MM-DD&service_item_id=Y` - public endpoint for booking page, returns available slots.
+> Create `GET /api/venue/calendar-grid?calendar_ids=X,Y,Z&start_date=YYYY-MM-DD&end_date=YYYY-MM-DD` - authenticated venue staff endpoint for dashboard calendar.
 >
 > **Event session materialisation:** Implement `/api/cron/materialize-event-sessions` (CRON_SECRET) that expands recurrence_rule into event_sessions per Section 2.6 (rolling horizon, idempotent upserts). Schedule daily in vercel.json.
 >
@@ -1491,7 +1491,7 @@ The settings page at `/dashboard/settings` for unified scheduling venues should 
 > 10. Two services with different durations: 30min and 60min → different slots unavailable.
 > 11. Processing time: service with 30min duration + 30min processing → next slot cannot start until 60min after prior start (plus buffer).
 > 12. Resource variable length: min 60, max 180, valid durations produce distinct slot grids per §3.5.
-> 13. Timezone: venue in Europe/London — \"today\" and DST boundaries behave correctly."
+> 13. Timezone: venue in Europe/London - \"today\" and DST boundaries behave correctly."
 
 ### Prompt 3: Communication Engine Update
 
@@ -1509,17 +1509,17 @@ The settings page at `/dashboard/settings` for unified scheduling venues should 
 >
 > **Update `lib/communications/channels/sms.ts`:**
 >
-> After every SMS send, log to sms_log table and increment sms_usage counter using the increment_sms_usage database function. Track the Twilio message SID and segment count — prefer Twilio’s numSegments from the API response (see Section 4.6). The SMS must be sent regardless of whether the venue is over their allowance — never block a business-critical message.
+> After every SMS send, log to sms_log table and increment sms_usage counter using the increment_sms_usage database function. Track the Twilio message SID and segment count - prefer Twilio’s numSegments from the API response (see Section 4.6). The SMS must be sent regardless of whether the venue is over their allowance - never block a business-critical message.
 >
 > **Create/update email templates** in `lib/communications/templates/` for all 8 message types as specified in Section 4.2:
-> 1. booking_confirmation — service, practitioner/calendar, date, time, duration, address, deposit, cancellation policy, manage link, pre-appointment instructions
-> 2. deposit_payment_request — amount, service, date, time, payment link, 24h expiry
-> 3. booking_rescheduled — new date, new time, service, calendar, manage link
-> 4. reminder_1 — date, time, service, calendar, address, deposit info, confirm-or-cancel link
-> 5. reminder_2 — short SMS template only: service, calendar, time, business name
-> 6. cancellation_confirmation — service, date, time, refund status, rebooking link
-> 7. no_show_notification — missed details, deposit forfeited info, policy reminder, rebooking link
-> 8. post_visit_followup — thank you, feedback buttons (thumbs up/down linking to /feedback/[id]), rebooking link
+> 1. booking_confirmation - service, practitioner/calendar, date, time, duration, address, deposit, cancellation policy, manage link, pre-appointment instructions
+> 2. deposit_payment_request - amount, service, date, time, payment link, 24h expiry
+> 3. booking_rescheduled - new date, new time, service, calendar, manage link
+> 4. reminder_1 - date, time, service, calendar, address, deposit info, confirm-or-cancel link
+> 5. reminder_2 - short SMS template only: service, calendar, time, business name
+> 6. cancellation_confirmation - service, date, time, refund status, rebooking link
+> 7. no_show_notification - missed details, deposit forfeited info, policy reminder, rebooking link
+> 8. post_visit_followup - thank you, feedback buttons (thumbs up/down linking to /feedback/[id]), rebooking link
 >
 > **Create/update SMS templates** for messages 1-5 as specified in Section 4.2. Keep SMS under 160 characters where possible to avoid multi-segment billing.
 >
@@ -1577,10 +1577,10 @@ The settings page at `/dashboard/settings` for unified scheduling venues should 
 > Update this on the venue record whenever the subscription quantity changes.
 >
 > **Overage billing cron job** at `/api/cron/sms-overage-billing`:
-> Runs on the 1st of each month (add to vercel.json: schedule '0 2 1 * *' — 2am on the 1st).
+> Runs on the 1st of each month (add to vercel.json: schedule '0 2 1 * *' - 2am on the 1st).
 > 1. Find all sms_usage records for the previous month where overage_count > 0 AND overage_billed = false
 > 2. For each venue with overage:
->    a. Load venues.stripe_sms_subscription_item_id (metered line item — see Section 5.4). Do not use the Standard quantity subscription item id.
+>    a. Load venues.stripe_sms_subscription_item_id (metered line item - see Section 5.4). Do not use the Standard quantity subscription item id.
 >    b. Report usage using stripe.subscriptionItems.createUsageRecord() against that item only; handle failures per Section 5.4 (retry, do not mark billed on error).
 >    c. Set overage_billed = true on the sms_usage record only after Stripe confirms success
 > 3. Stripe automatically adds the charge to the venue's next invoice
@@ -1639,17 +1639,17 @@ The settings page at `/dashboard/settings` for unified scheduling venues should 
 >
 > **Unified booking flow** (implemented as a multi-step React component):
 >
-> Step 1 — Select Service: fetch all active, bookable service_items for this venue. Show as cards: name, duration, price (formatted by price_type), description. Group by category if multiple calendar types exist. If only one service, auto-select and skip.
+> Step 1 - Select Service: fetch all active, bookable service_items for this venue. Show as cards: name, duration, price (formatted by price_type), description. Group by category if multiple calendar types exist. If only one service, auto-select and skip.
 >
-> Step 2 — Select Calendar: fetch calendars that offer the selected service (via calendar_service_assignments). Show as cards: name, photo, next available slot. If only one calendar, auto-select and skip. For events/classes: show available sessions instead (date, time, remaining spots).
+> Step 2 - Select Calendar: fetch calendars that offer the selected service (via calendar_service_assignments). Show as cards: name, photo, next available slot. If only one calendar, auto-select and skip. For events/classes: show available sessions instead (date, time, remaining spots).
 >
-> Step 3 — Select Date & Time: date picker showing available dates (greyed out dates with no availability). On date select, call GET /api/booking/unified-availability to get available slots. Display slots as selectable time pills. For events/classes: show session times with 'X spots remaining'.
+> Step 3 - Select Date & Time: date picker showing available dates (greyed out dates with no availability). On date select, call GET /api/booking/unified-availability to get available slots. Display slots as selectable time pills. For events/classes: show session times with 'X spots remaining'.
 >
-> Step 4 — Your Details: name (required), email (required), phone (required), special requests (optional). Show pre_appointment_instructions from the selected service.
+> Step 4 - Your Details: name (required), email (required), phone (required), special requests (optional). Show pre_appointment_instructions from the selected service.
 >
-> Step 5 — Payment (if deposit required): deposit amount displayed, Stripe Elements card form (direct charge on venue's connected Stripe account). Cancellation policy clearly shown.
+> Step 5 - Payment (if deposit required): deposit amount displayed, Stripe Elements card form (direct charge on venue's connected Stripe account). Cancellation policy clearly shown.
 >
-> Step 6 — Confirmed: booking details summary, 'Add to Calendar' button (.ics download), manage booking link, QR code to share.
+> Step 6 - Confirmed: booking details summary, 'Add to Calendar' button (.ics download), manage booking link, QR code to share.
 >
 > **Practitioner-specific URLs:** Support `/book/[venue-slug]/[calendar-slug]` for direct links. Fetch the calendar by slug, pass lockedCalendarId to the booking flow, skip Step 2, filter Step 1 to this calendar's services.
 >
@@ -1673,8 +1673,8 @@ The settings page at `/dashboard/settings` for unified scheduling venues should 
 >
 > **Landing page** at `/`:
 > Update the landing page pricing section to show two cards:
-> Card 1 — Standard: £20/month per team member. All features. 200 SMS per calendar. 'Best for: solo practitioners and small teams.'
-> Card 2 — Business: £79/month flat. Unlimited calendars. 800 SMS. Table management. Priority support. 'Best for: restaurants and large teams.'
+> Card 1 - Standard: £20/month per team member. All features. 200 SMS per calendar. 'Best for: solo practitioners and small teams.'
+> Card 2 - Business: £79/month flat. Unlimited calendars. 800 SMS. Table management. Priority support. 'Best for: restaurants and large teams.'
 > Include interactive calculator on Standard card. Founding Partner banner for restaurants.
 >
 > **Signup** at `/signup`:
@@ -1808,11 +1808,11 @@ NEXT_PUBLIC_SUPABASE_URL=https://xxx.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=xxx
 SUPABASE_SERVICE_ROLE_KEY=xxx
 
-# Stripe (deposits — existing)
+# Stripe (deposits - existing)
 STRIPE_SECRET_KEY=sk_xxx
 STRIPE_WEBHOOK_SECRET=whsec_xxx
 
-# Stripe (subscriptions — new)
+# Stripe (subscriptions - new)
 STRIPE_STANDARD_PRICE_ID=price_xxx
 STRIPE_BUSINESS_PRICE_ID=price_xxx
 STRIPE_SMS_OVERAGE_PRICE_ID=price_xxx

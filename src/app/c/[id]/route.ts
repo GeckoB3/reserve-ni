@@ -34,7 +34,7 @@ function parseShortConfirmCode(code: string): string | null {
 }
 
 /**
- * GET /c/:signedCode — Short confirm/cancel link; redirects to /confirm/:id?hmac=…
+ * GET /c/:signedCode - Short confirm/cancel link; redirects to /confirm/:id?hmac=…
  */
 export async function GET(
   _request: NextRequest,

@@ -770,7 +770,7 @@ export function EventManagerView({
                         min={1}
                         value={tt.capacity}
                         onChange={(e) => updateTicketType(i, { capacity: e.target.value })}
-                        placeholder="—"
+                        placeholder="-"
                         className="w-full rounded border border-slate-200 bg-white px-2 py-1.5 text-xs focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
                       />
                     </div>
@@ -968,26 +968,26 @@ export function EventManagerView({
                     <tbody>
                       {attendees.map((a) => (
                         <tr key={a.booking_id} className="border-b border-slate-100">
-                          <td className="py-2 pr-3 text-slate-800">{a.guest_name ?? '—'}</td>
+                          <td className="py-2 pr-3 text-slate-800">{a.guest_name ?? '-'}</td>
                           <td className="py-2 pr-3 text-slate-600">
-                            <div className="max-w-[200px] truncate">{a.guest_email ?? '—'}</div>
+                            <div className="max-w-[200px] truncate">{a.guest_email ?? '-'}</div>
                             <div className="text-xs text-slate-500">{a.guest_phone ?? ''}</div>
                           </td>
                           <td className="py-2 pr-3 text-xs text-slate-600">
                             {(a.ticket_lines ?? []).length > 0
                               ? (a.ticket_lines ?? []).map((l) => `${l.label} ×${l.quantity}`).join(', ')
-                              : '—'}
+                              : '-'}
                           </td>
                           <td className="py-2 pr-3">{a.party_size}</td>
                           <td className="py-2 pr-3">{a.status}</td>
                           <td className="py-2 pr-3">
-                            {a.deposit_amount_pence != null ? formatPrice(a.deposit_amount_pence) : '—'}
+                            {a.deposit_amount_pence != null ? formatPrice(a.deposit_amount_pence) : '-'}
                             {a.deposit_status ? (
                               <span className="ml-1 text-xs text-slate-500">({a.deposit_status})</span>
                             ) : null}
                           </td>
                           <td className="py-2 pr-3 text-slate-600">
-                            {a.checked_in_at ? new Date(a.checked_in_at).toLocaleString('en-GB') : '—'}
+                            {a.checked_in_at ? new Date(a.checked_in_at).toLocaleString('en-GB') : '-'}
                           </td>
                           <td className="py-2">
                             {a.status !== 'Cancelled' && (

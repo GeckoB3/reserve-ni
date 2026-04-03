@@ -647,7 +647,7 @@ function generateServiceSlots(
 
 /**
  * Main entry point: compute available slots for all active services on a date.
- * Pure function — all data must be pre-fetched and passed via EngineInput.
+ * Pure function - all data must be pre-fetched and passed via EngineInput.
  */
 export function computeAvailability(input: EngineInput): EngineServiceResult[] {
   const results: EngineServiceResult[] = [];

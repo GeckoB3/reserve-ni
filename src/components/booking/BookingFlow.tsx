@@ -166,12 +166,12 @@ export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, 
           if (data.confirmed) { confirmed = true; break; }
         }
       } catch {
-        // Network error — retry
+        // Network error - retry
       }
       if (attempt < 3) await new Promise((r) => setTimeout(r, 1500 * attempt));
     }
     if (!confirmed) {
-      console.warn('confirm-payment: all attempts failed — webhook will handle confirmation');
+      console.warn('confirm-payment: all attempts failed - webhook will handle confirmation');
     }
     setPaymentComplete(true);
     goNext();

@@ -30,7 +30,7 @@ async function verifyRuleOwnership(admin: ReturnType<typeof getSupabaseAdminClie
   return verifyServiceOwnership(admin, rule.service_id, venueId);
 }
 
-/** GET /api/venue/capacity-rules — list all capacity rules for the venue's services. */
+/** GET /api/venue/capacity-rules - list all capacity rules for the venue's services. */
 export async function GET() {
   try {
     const supabase = await createClient();
@@ -60,7 +60,7 @@ export async function GET() {
   }
 }
 
-/** POST /api/venue/capacity-rules — create a capacity rule (admin only). */
+/** POST /api/venue/capacity-rules - create a capacity rule (admin only). */
 export async function POST(request: NextRequest) {
   try {
     const supabase = await createClient();
@@ -97,7 +97,7 @@ export async function POST(request: NextRequest) {
   }
 }
 
-/** PATCH /api/venue/capacity-rules — update a rule (admin only). Body must include `id`. */
+/** PATCH /api/venue/capacity-rules - update a rule (admin only). Body must include `id`. */
 export async function PATCH(request: NextRequest) {
   try {
     const supabase = await createClient();
@@ -132,7 +132,7 @@ export async function PATCH(request: NextRequest) {
   }
 }
 
-/** DELETE /api/venue/capacity-rules — delete a rule (admin only). Body must include `id`. */
+/** DELETE /api/venue/capacity-rules - delete a rule (admin only). Body must include `id`. */
 export async function DELETE(request: NextRequest) {
   try {
     const supabase = await createClient();

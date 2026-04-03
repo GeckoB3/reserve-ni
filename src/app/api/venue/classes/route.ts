@@ -2,19 +2,61 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
-import { checkCalendarLimit } from '@/lib/tier-enforcement';
 import { requireVenueExposesSecondaryModel } from '@/lib/booking/require-venue-secondary-model';
+import { syncCalendarBlockForClassInstance } from '@/lib/class-instances/instructor-calendar-block';
 import { z } from 'zod';
 
-const classTypeSchema = z.object({
-  name: z.string().min(1).max(200),
+const classPaymentRequirementSchema = z.enum(['none', 'deposit', 'full_payment']);
+
+const classTypeSchema = z
+  .object({
+    name: z.string().min(1).max(200),
+    description: z.string().max(2000).optional().nullable(),
+    duration_minutes: z.number().int().min(5).max(480),
+    capacity: z.number().int().min(1),
+    instructor_id: z.string().uuid().optional().nullable(),
+    instructor_name: z.string().max(200).optional().nullable(),
+    price_pence: z.number().int().min(0).optional().nullable(),
+    payment_requirement: classPaymentRequirementSchema.optional(),
+    deposit_amount_pence: z.number().int().min(0).optional().nullable(),
+    colour: z.string().max(20).optional(),
+    is_active: z.boolean().optional(),
+  })
+  .superRefine((data, ctx) => {
+    const price = data.price_pence ?? 0;
+    const req = data.payment_requirement ?? 'none';
+    if (price <= 0 && (req === 'deposit' || req === 'full_payment')) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'Set a price per person before choosing deposit or full payment',
+        path: ['payment_requirement'],
+      });
+    }
+    if (req === 'deposit') {
+      const d = data.deposit_amount_pence;
+      if (d == null || d <= 0) {
+        ctx.addIssue({ code: 'custom', message: 'Deposit amount is required', path: ['deposit_amount_pence'] });
+      } else if (price > 0 && d > price) {
+        ctx.addIssue({
+          code: 'custom',
+          message: 'Deposit cannot exceed price per person',
+          path: ['deposit_amount_pence'],
+        });
+      }
+    }
+  });
+
+/** Partial updates: cannot use .partial() on classTypeSchema (Zod forbids .partial() when superRefine is used). */
+const classTypePatchSchema = z.object({
+  name: z.string().min(1).max(200).optional(),
   description: z.string().max(2000).optional().nullable(),
-  duration_minutes: z.number().int().min(5).max(480),
-  capacity: z.number().int().min(1),
+  duration_minutes: z.number().int().min(5).max(480).optional(),
+  capacity: z.number().int().min(1).optional(),
   instructor_id: z.string().uuid().optional().nullable(),
   instructor_name: z.string().max(200).optional().nullable(),
   price_pence: z.number().int().min(0).optional().nullable(),
-  requires_online_payment: z.boolean().optional(),
+  payment_requirement: classPaymentRequirementSchema.optional(),
+  deposit_amount_pence: z.number().int().min(0).optional().nullable(),
   colour: z.string().max(20).optional(),
   is_active: z.boolean().optional(),
 });
@@ -25,9 +67,12 @@ const timetableEntrySchema = z.object({
   start_time: z.string().regex(/^\d{2}:\d{2}$/),
   is_active: z.boolean().optional(),
   interval_weeks: z.number().int().min(1).max(8).optional(),
+  recurrence_type: z.string().max(32).optional(),
+  recurrence_end_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
+  total_occurrences: z.number().int().min(1).optional().nullable(),
 });
 
-/** GET /api/venue/classes — list class types, timetable, and upcoming instances. */
+/** GET /api/venue/classes - list class types, timetable, and upcoming instances. */
 export async function GET() {
   try {
     const supabase = await createClient();
@@ -49,20 +94,29 @@ export async function GET() {
 
     const ids = (classTypes ?? []).map((ct) => ct.id as string);
     if (ids.length === 0) {
-      const { data: practitioners } = await admin
-        .from('practitioners')
-        .select('id, name, sort_order')
-        .eq('venue_id', staff.venue_id)
-        .order('sort_order', { ascending: true });
+      const [{ data: practitioners }, { data: unifiedCalendars }] = await Promise.all([
+        admin
+          .from('practitioners')
+          .select('id, name, sort_order')
+          .eq('venue_id', staff.venue_id)
+          .order('sort_order', { ascending: true }),
+        admin
+          .from('unified_calendars')
+          .select('id, name, sort_order')
+          .eq('venue_id', staff.venue_id)
+          .eq('is_active', true)
+          .order('sort_order', { ascending: true }),
+      ]);
       return NextResponse.json({
         class_types: [],
         timetable: [],
         instances: [],
         practitioners: practitioners ?? [],
+        unified_calendars: unifiedCalendars ?? [],
       });
     }
 
-    const [timetableRes, instancesRes, practitionersRes] = await Promise.all([
+    const [timetableRes, instancesRes, practitionersRes, unifiedCalRes] = await Promise.all([
       admin.from('class_timetable').select('*').in('class_type_id', ids),
       admin
         .from('class_instances')
@@ -72,6 +126,12 @@ export async function GET() {
         .order('instance_date')
         .limit(200),
       admin.from('practitioners').select('id, name, sort_order').eq('venue_id', staff.venue_id).order('sort_order', { ascending: true }),
+      admin
+        .from('unified_calendars')
+        .select('id, name, sort_order')
+        .eq('venue_id', staff.venue_id)
+        .eq('is_active', true)
+        .order('sort_order', { ascending: true }),
     ]);
 
     if (timetableRes.error) {
@@ -85,6 +145,10 @@ export async function GET() {
     if (practitionersRes.error) {
       console.error('GET /api/venue/classes failed (practitioners):', practitionersRes.error);
       return NextResponse.json({ error: 'Failed to fetch practitioners' }, { status: 500 });
+    }
+    if (unifiedCalRes.error) {
+      console.error('GET /api/venue/classes failed (unified_calendars):', unifiedCalRes.error);
+      return NextResponse.json({ error: 'Failed to fetch calendars' }, { status: 500 });
     }
 
     const rawInstances = instancesRes.data ?? [];
@@ -119,6 +183,7 @@ export async function GET() {
       timetable: timetableRes.data ?? [],
       instances,
       practitioners: practitionersRes.data ?? [],
+      unified_calendars: unifiedCalRes.data ?? [],
     });
   } catch (err) {
     console.error('GET /api/venue/classes failed:', err);
@@ -126,7 +191,7 @@ export async function GET() {
   }
 }
 
-/** POST /api/venue/classes — create a class type or timetable entry (admin only). */
+/** POST /api/venue/classes - create a class type or timetable entry (admin only). */
 export async function POST(request: NextRequest) {
   try {
     const supabase = await createClient();
@@ -161,14 +226,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid request', details: parsed.error.flatten() }, { status: 400 });
     }
 
-    const limitCheck = await checkCalendarLimit(staff.venue_id, 'class_types');
-    if (!limitCheck.allowed) {
-      return NextResponse.json(
-        { error: 'Calendar limit reached', current: limitCheck.current, limit: limitCheck.limit, upgrade_required: true },
-        { status: 403 }
-      );
-    }
-
     const { data, error } = await admin
       .from('class_types')
       .insert({ venue_id: staff.venue_id, ...parsed.data })
@@ -187,7 +244,7 @@ export async function POST(request: NextRequest) {
   }
 }
 
-/** PATCH /api/venue/classes — update class type, timetable entry, or instance. */
+/** PATCH /api/venue/classes - update class type, timetable entry, or instance. */
 export async function PATCH(request: NextRequest) {
   try {
     const supabase = await createClient();
@@ -212,18 +269,61 @@ export async function PATCH(request: NextRequest) {
     if (entity_type === 'instance') {
       const { data, error } = await admin.from('class_instances').update(rest).eq('id', id).select().single();
       if (error) return NextResponse.json({ error: 'Failed to update instance' }, { status: 500 });
+      const row = data as {
+        instance_date: string;
+        start_time: string;
+        class_type_id: string;
+        is_cancelled?: boolean | null;
+      };
+      await syncCalendarBlockForClassInstance(admin, {
+        venueId: staff.venue_id,
+        classInstanceId: id as string,
+        instanceDate: String(row.instance_date),
+        startTime: String(row.start_time),
+        classTypeId: String(row.class_type_id),
+        skipBlock: Boolean(row.is_cancelled),
+        createdByStaffId: staff.id,
+      });
       return NextResponse.json(data);
     }
 
-    // class_type
-    const parsed = classTypeSchema.partial().safeParse(rest);
-    if (!parsed.success) {
-      return NextResponse.json({ error: 'Invalid request', details: parsed.error.flatten() }, { status: 400 });
+    // class_type - validate patch shape, merge with row, then run full classTypeSchema (payment rules).
+    const patchParsed = classTypePatchSchema.safeParse(rest);
+    if (!patchParsed.success) {
+      return NextResponse.json({ error: 'Invalid request', details: patchParsed.error.flatten() }, { status: 400 });
+    }
+
+    const { data: existing, error: fetchErr } = await admin
+      .from('class_types')
+      .select(
+        'name, description, duration_minutes, capacity, instructor_id, instructor_name, price_pence, payment_requirement, deposit_amount_pence, colour, is_active',
+      )
+      .eq('id', id)
+      .eq('venue_id', staff.venue_id)
+      .maybeSingle();
+
+    if (fetchErr) {
+      console.error('PATCH /api/venue/classes (class_type) fetch failed:', fetchErr);
+      return NextResponse.json({ error: 'Failed to update class type' }, { status: 500 });
+    }
+    if (!existing) {
+      return NextResponse.json({ error: 'Class type not found' }, { status: 404 });
+    }
+
+    const patch = patchParsed.data;
+    const merged = {
+      ...existing,
+      ...patch,
+    } as z.infer<typeof classTypeSchema>;
+
+    const fullParsed = classTypeSchema.safeParse(merged);
+    if (!fullParsed.success) {
+      return NextResponse.json({ error: 'Invalid request', details: fullParsed.error.flatten() }, { status: 400 });
     }
 
     const { data, error } = await admin
       .from('class_types')
-      .update(parsed.data)
+      .update(patch)
       .eq('id', id)
       .eq('venue_id', staff.venue_id)
       .select()
@@ -241,7 +341,7 @@ export async function PATCH(request: NextRequest) {
   }
 }
 
-/** DELETE /api/venue/classes — delete class type, timetable entry, or instance. */
+/** DELETE /api/venue/classes - delete class type, timetable entry, or instance. */
 export async function DELETE(request: NextRequest) {
   try {
     const supabase = await createClient();
@@ -256,8 +356,37 @@ export async function DELETE(request: NextRequest) {
     const modelGate = await requireVenueExposesSecondaryModel(admin, staff.venue_id, 'class_session');
     if (!modelGate.ok) return modelGate.response;
 
-    const table = entity_type === 'timetable' ? 'class_timetable' :
-                  entity_type === 'instance' ? 'class_instances' : 'class_types';
+    if (entity_type === 'instance') {
+      const { data: inst, error: instErr } = await admin
+        .from('class_instances')
+        .select('id, class_type_id')
+        .eq('id', id)
+        .maybeSingle();
+      if (instErr) {
+        console.error('DELETE /api/venue/classes (instance) lookup failed:', instErr);
+        return NextResponse.json({ error: 'Failed to delete' }, { status: 500 });
+      }
+      if (!inst) {
+        return NextResponse.json({ error: 'Session not found' }, { status: 404 });
+      }
+      const { data: ct, error: ctErr } = await admin
+        .from('class_types')
+        .select('id')
+        .eq('id', (inst as { class_type_id: string }).class_type_id)
+        .eq('venue_id', staff.venue_id)
+        .maybeSingle();
+      if (ctErr || !ct) {
+        return NextResponse.json({ error: 'Forbidden or not found' }, { status: 404 });
+      }
+      const { error } = await admin.from('class_instances').delete().eq('id', id);
+      if (error) {
+        console.error('DELETE /api/venue/classes (instance) failed:', error);
+        return NextResponse.json({ error: 'Failed to delete' }, { status: 500 });
+      }
+      return NextResponse.json({ success: true });
+    }
+
+    const table = entity_type === 'timetable' ? 'class_timetable' : 'class_types';
 
     const { error } = await admin.from(table).delete().eq('id', id);
     if (error) {

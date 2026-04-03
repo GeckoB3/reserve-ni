@@ -39,7 +39,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Booking not found' }, { status: 404 });
     }
 
-    // Already confirmed (e.g. by webhook) — return success without re-processing.
+    // Already confirmed (e.g. by webhook) - return success without re-processing.
     if (booking.status === 'Confirmed' && booking.deposit_status === 'Paid') {
       return NextResponse.json({ confirmed: true, already_confirmed: true });
     }
@@ -80,7 +80,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: transitionCheck.error }, { status: 400 });
     }
 
-    // Payment verified — confirm every booking row that shares this PaymentIntent
+    // Payment verified - confirm every booking row that shares this PaymentIntent
     // (group / multi-service deposits store the same PI on each segment).
     const { data: statusRows } = await supabase
       .from('bookings')

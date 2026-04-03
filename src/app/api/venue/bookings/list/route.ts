@@ -107,7 +107,7 @@ export async function GET(request: NextRequest) {
         booking_end_time: r.booking_end_time,
         created_at: r.created_at,
         guest_id: r.guest_id,
-        guest_name: guest?.name ?? '—',
+        guest_name: guest?.name ?? '-',
         guest_email: guest?.email ?? null,
         guest_phone: guest?.phone ?? null,
         guest_visit_count: guest?.visit_count ?? null,

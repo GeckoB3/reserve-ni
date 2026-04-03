@@ -336,7 +336,7 @@ async function handleClassAvailability(
   venueId: string,
   date: string,
 ) {
-  const input = await fetchClassInput({ supabase, venueId, date });
+  const input = await fetchClassInput({ supabase, venueId, date, forPublicBooking: true });
   const result = computeClassAvailability(input);
 
   return NextResponse.json({ date, venue_id: venueId, classes: result });

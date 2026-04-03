@@ -92,7 +92,7 @@ export async function POST(request: NextRequest) {
         to: SUPPORT_TO,
         from: FROM,
         replyTo: staff.email,
-        subject: `[${categoryLabel}] ${subject} — ${venueName}`,
+        subject: `[${categoryLabel}] ${subject} - ${venueName}`,
         html,
       });
     } catch (err: unknown) {

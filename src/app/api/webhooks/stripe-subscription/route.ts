@@ -92,7 +92,7 @@ export async function POST(request: NextRequest) {
         if (invoice.customer) {
           const customerId =
             typeof invoice.customer === 'string' ? invoice.customer : invoice.customer.id;
-          // Only clear past_due — do not overwrite plan_status 'cancelling' (cancel_at_period_end).
+          // Only clear past_due - do not overwrite plan_status 'cancelling' (cancel_at_period_end).
           await supabase
             .from('venues')
             .update({ plan_status: 'active' })
@@ -190,11 +190,11 @@ async function handleCheckoutCompleted(
   }
 
   if (!businessType || !plan || !supabaseUserId) {
-    console.log('[Subscription webhook] checkout.session.completed missing metadata — skipping venue creation');
+    console.log('[Subscription webhook] checkout.session.completed missing metadata - skipping venue creation');
     return;
   }
 
-  // Check if venue already provisioned (idempotency — the success page may have already created it)
+  // Check if venue already provisioned (idempotency - the success page may have already created it)
   const customerId =
     typeof session.customer === 'string' ? session.customer : (session.customer as Stripe.Customer)?.id;
   if (customerId) {

@@ -187,7 +187,7 @@ function PayForm({
           body: JSON.stringify({ booking_id: bookingId, guest_email: email.trim() }),
         });
       } catch {
-        // Non-critical — webhook will handle if this fails.
+        // Non-critical - webhook will handle if this fails.
       }
       onSuccess();
     } catch (err) {

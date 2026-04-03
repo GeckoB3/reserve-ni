@@ -44,7 +44,7 @@ function cancellationDeadline(bookingDate: string, bookingTime: string): string 
   return dt.toISOString();
 }
 
-/** GET /api/venue/bookings/[id] — full booking detail with guest and events timeline. */
+/** GET /api/venue/bookings/[id] - full booking detail with guest and events timeline. */
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -131,7 +131,7 @@ export async function GET(
   }
 }
 
-/** PATCH /api/venue/bookings/[id] — status change or modify booking fields. */
+/** PATCH /api/venue/bookings/[id] - status change or modify booking fields. */
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }

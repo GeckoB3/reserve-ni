@@ -3,7 +3,7 @@ import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff } from '@/lib/venue-auth';
 
 /**
- * GET /api/venue/guests/tags — distinct tags used at this venue (autocomplete).
+ * GET /api/venue/guests/tags - distinct tags used at this venue (autocomplete).
  */
 export async function GET() {
   try {

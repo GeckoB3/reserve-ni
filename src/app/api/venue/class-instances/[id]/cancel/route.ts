@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { requireVenueExposesSecondaryModel } from '@/lib/booking/require-venue-secondary-model';
+import { removeCalendarBlockForClassInstance } from '@/lib/class-instances/instructor-calendar-block';
 import { cancelStaffBookingWithNotify } from '@/lib/booking/staff-cancel-booking';
 import { z } from 'zod';
 
@@ -12,7 +13,7 @@ const bodySchema = z.object({
 });
 
 /**
- * POST /api/venue/class-instances/[id]/cancel — admin only.
+ * POST /api/venue/class-instances/[id]/cancel - admin only.
  * Marks the instance cancelled and cancels active bookings with refunds + comms per policy.
  */
 export async function POST(
@@ -71,6 +72,8 @@ export async function POST(
       console.error('POST class-instances/[id]/cancel: patch failed:', patchErr);
       return NextResponse.json({ error: 'Failed to cancel instance' }, { status: 500 });
     }
+
+    await removeCalendarBlockForClassInstance(admin, instanceId);
 
     const { data: bookingRows, error: bookErr } = await admin
       .from('bookings')

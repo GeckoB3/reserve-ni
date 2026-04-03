@@ -25,7 +25,7 @@ export interface DayBooking {
 }
 
 /**
- * Model B day sheet — one semantic colour per lifecycle stage (badges + rows + buttons).
+ * Model B day sheet - one semantic colour per lifecycle stage (badges + rows + buttons).
  * Blue = scheduled (Confirmed), Amber = on-site waiting, Violet = in session, Emerald = done.
  * Orange Pending = payment/action still needed (distinct from amber “waiting”).
  */
@@ -47,7 +47,7 @@ const STATUS_LABELS: Record<string, string> = {
   Cancelled: 'Cancelled',
 };
 
-/** Row bar tint — matches STATUS_STYLES; Pending vs Confirmed vs Waiting stay visually distinct. */
+/** Row bar tint - matches STATUS_STYLES; Pending vs Confirmed vs Waiting stay visually distinct. */
 function rowSurfaceClass(status: string, arrived: boolean, isCancelled: boolean): string {
   if (isCancelled) {
     return 'bg-slate-100/80 border-slate-200/90';
@@ -254,7 +254,7 @@ export function AppointmentDayBookingRow({
         )}
       </div>
 
-      {/* Concertina detail — CSS grid height transition */}
+      {/* Concertina detail - CSS grid height transition */}
       <div
         className="grid transition-[grid-template-rows] duration-200 ease-out motion-reduce:transition-none"
         style={{ gridTemplateRows: expanded ? '1fr' : '0fr' }}
@@ -268,11 +268,11 @@ export function AppointmentDayBookingRow({
               </div>
               <div>
                 <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">Email</dt>
-                <dd className="mt-0.5 break-all text-slate-700">{b.guest_email ?? '—'}</dd>
+                <dd className="mt-0.5 break-all text-slate-700">{b.guest_email ?? '-'}</dd>
               </div>
               <div>
                 <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">Phone</dt>
-                <dd className="mt-0.5 text-slate-700">{b.guest_phone ?? '—'}</dd>
+                <dd className="mt-0.5 text-slate-700">{b.guest_phone ?? '-'}</dd>
               </div>
               <div>
                 <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">Visits recorded</dt>
@@ -283,17 +283,17 @@ export function AppointmentDayBookingRow({
                       <span className="ml-1 text-xs text-slate-500">(from guest profile when phone/email matches)</span>
                     </>
                   ) : (
-                    '—'
+                    '-'
                   )}
                 </dd>
               </div>
               <div>
                 <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">Service</dt>
-                <dd className="mt-0.5 text-slate-900">{serviceName ?? '—'}</dd>
+                <dd className="mt-0.5 text-slate-900">{serviceName ?? '-'}</dd>
               </div>
               <div>
                 <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">Staff member</dt>
-                <dd className="mt-0.5 text-slate-900">{practitionerName ?? '—'}</dd>
+                <dd className="mt-0.5 text-slate-900">{practitionerName ?? '-'}</dd>
               </div>
               <div>
                 <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">Duration</dt>
@@ -302,7 +302,7 @@ export function AppointmentDayBookingRow({
               <div>
                 <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">Price</dt>
                 <dd className="mt-0.5 text-slate-700">
-                  {servicePricePence != null ? `${sym}${(servicePricePence / 100).toFixed(2)}` : '—'}
+                  {servicePricePence != null ? `${sym}${(servicePricePence / 100).toFixed(2)}` : '-'}
                 </dd>
               </div>
               {b.deposit_amount_pence != null && b.deposit_amount_pence > 0 && (
@@ -316,7 +316,7 @@ export function AppointmentDayBookingRow({
               )}
               <div className="sm:col-span-2">
                 <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">Customer comments</dt>
-                <dd className="mt-0.5 whitespace-pre-wrap text-slate-700">{b.special_requests?.trim() || '—'}</dd>
+                <dd className="mt-0.5 whitespace-pre-wrap text-slate-700">{b.special_requests?.trim() || '-'}</dd>
               </div>
               <div className="sm:col-span-2">
                 <dt className="mb-1 text-xs font-medium uppercase tracking-wide text-slate-400">Staff comments</dt>
