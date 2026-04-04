@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff } from '@/lib/venue-auth';
+import { getSupabaseAdminClient } from '@/lib/supabase';
+import { resolveInstructorCalendarIdForClass } from '@/lib/class-instances/instructor-calendar-block';
 import { normalizeEnabledModels, venueExposesBookingModel } from '@/lib/booking/enabled-models';
 import { inferBookingRowModel } from '@/lib/booking/infer-booking-row-model';
 import { timeToMinutes, minutesToTime } from '@/lib/availability';
@@ -41,6 +43,8 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
     }
 
+    const venueId = staff.venue_id;
+
     const date = request.nextUrl.searchParams.get('date');
     const from = request.nextUrl.searchParams.get('from');
     const to = request.nextUrl.searchParams.get('to');
@@ -61,7 +65,7 @@ export async function GET(request: NextRequest) {
     const { data: venueRow, error: venueErr } = await staff.db
       .from('venues')
       .select('booking_model, enabled_models')
-      .eq('id', staff.venue_id)
+      .eq('id', venueId)
       .single();
 
     if (venueErr || !venueRow) {
@@ -96,7 +100,7 @@ export async function GET(request: NextRequest) {
       .select(
         'id, booking_date, booking_time, booking_end_time, estimated_end_time, status, party_size, guest_id, experience_event_id, class_instance_id, resource_id, calendar_id',
       )
-      .eq('venue_id', staff.venue_id)
+      .eq('venue_id', venueId)
       .or('experience_event_id.not.is.null,class_instance_id.not.is.null,resource_id.not.is.null')
       .gte('booking_date', fromStr)
       .lte('booking_date', toStr)
@@ -137,7 +141,7 @@ export async function GET(request: NextRequest) {
       ? await staff.db
           .from('class_instances')
           .select(
-            'id, instance_date, start_time, capacity_override, class_types(id, name, colour, duration_minutes, capacity)',
+            'id, class_type_id, instance_date, start_time, capacity_override, class_types(id, name, colour, duration_minutes, capacity, instructor_id)',
           )
           .in('id', classInstIds)
       : { data: [] };
@@ -146,6 +150,35 @@ export async function GET(request: NextRequest) {
       const r = row as { id: string; class_types?: unknown };
       classInstMap.set(r.id, row as Record<string, unknown>);
     }
+
+    const admin = getSupabaseAdminClient();
+    const calendarIdByClassTypeId = new Map<string, string | null>();
+
+    async function ensureCalendarIdsForClassTypes(typeIds: string[]) {
+      const uniq = [...new Set(typeIds)].filter(Boolean);
+      for (const tid of uniq) {
+        if (calendarIdByClassTypeId.has(tid)) continue;
+        const { data: ct } = await admin
+          .from('class_types')
+          .select('instructor_id')
+          .eq('id', tid)
+          .eq('venue_id', venueId)
+          .maybeSingle();
+        const cal = await resolveInstructorCalendarIdForClass(
+          admin,
+          venueId,
+          (ct as { instructor_id?: string | null } | null)?.instructor_id ?? null,
+        );
+        calendarIdByClassTypeId.set(tid, cal);
+      }
+    }
+
+    const classTypeIdsFromBookingInstances: string[] = [];
+    for (const row of classInstRows ?? []) {
+      const ctid = (row as { class_type_id?: string }).class_type_id;
+      if (typeof ctid === 'string') classTypeIdsFromBookingInstances.push(ctid);
+    }
+    await ensureCalendarIdsForClassTypes(classTypeIdsFromBookingInstances);
 
     const resourceIds = [...new Set(rows.map((r) => r.resource_id).filter(Boolean))] as string[];
     const { data: resourceRows } = resourceIds.length
@@ -178,6 +211,15 @@ export async function GET(request: NextRequest) {
       const ct = Array.isArray(ctRaw) ? ctRaw[0] : ctRaw;
       const cap = (ct as { capacity?: number } | undefined)?.capacity;
       return cap != null ? cap : null;
+    }
+
+    function calendarIdForClassInstance(instanceId: string | null | undefined): string | null {
+      if (!instanceId) return null;
+      const ci = classInstMap.get(instanceId);
+      if (!ci) return null;
+      const ctid = (ci as { class_type_id?: string }).class_type_id;
+      if (!ctid) return null;
+      return calendarIdByClassTypeId.get(ctid) ?? null;
     }
 
     function endForBooking(row: (typeof rows)[0], bm: ScheduleBlockKind): string {
@@ -262,6 +304,7 @@ export async function GET(request: NextRequest) {
         accent_colour: accent,
         class_capacity: classCap,
         class_booked_spots: classBooked,
+        calendar_id: bm === 'class_session' ? calendarIdForClassInstance(r.class_instance_id as string) : null,
       });
     }
 
@@ -269,7 +312,7 @@ export async function GET(request: NextRequest) {
       const { data: evRows, error: evErr } = await staff.db
         .from('experience_events')
         .select('id, name, event_date, start_time, end_time')
-        .eq('venue_id', staff.venue_id)
+        .eq('venue_id', venueId)
         .eq('is_active', true)
         .gte('event_date', fromStr)
         .lte('event_date', toStr);
@@ -305,7 +348,7 @@ export async function GET(request: NextRequest) {
       const { data: ctRows } = await staff.db
         .from('class_types')
         .select('id')
-        .eq('venue_id', staff.venue_id)
+        .eq('venue_id', venueId)
         .eq('is_active', true);
       const ctIds = (ctRows ?? []).map((x: { id: string }) => x.id);
       if (ctIds.length > 0) {
@@ -323,7 +366,7 @@ export async function GET(request: NextRequest) {
           const needTypeIds = [...new Set((ciRows ?? []).map((r: { class_type_id: string }) => r.class_type_id))];
           const { data: types } = await staff.db
             .from('class_types')
-            .select('id, name, colour, duration_minutes, capacity')
+            .select('id, name, colour, duration_minutes, capacity, instructor_id')
             .in('id', needTypeIds)
             .eq('is_active', true);
           const typeMap = new Map(
@@ -332,6 +375,8 @@ export async function GET(request: NextRequest) {
               t,
             ]),
           );
+
+          await ensureCalendarIdsForClassTypes(needTypeIds);
 
           for (const raw of ciRows ?? []) {
             const row = raw as {
@@ -360,6 +405,7 @@ export async function GET(request: NextRequest) {
               class_instance_id: row.id,
               class_capacity: cap,
               class_booked_spots: 0,
+              calendar_id: calendarIdByClassTypeId.get(row.class_type_id) ?? null,
             });
           }
         }

@@ -20,9 +20,9 @@ interface Props {
 }
 
 /**
- * Merged Events / Classes / Resources day columns for non–unified-scheduling venues
- * (e.g. table + secondaries, or C/D/E primary). Uses GET /api/venue/schedule - same
- * feed as PractitionerCalendarView merged lanes; does not include Model A tables.
+ * Merged Events / Resources day columns for non–unified-scheduling venues without class sessions
+ * (e.g. table + events). Class sessions use team columns in `PractitionerCalendarView`. Uses
+ * GET /api/venue/schedule; does not include Model A tables.
  */
 export function StaffScheduleMergedDayGrid({ date, bookingModel, enabledModels }: Props) {
   const router = useRouter();
@@ -71,9 +71,9 @@ export function StaffScheduleMergedDayGrid({ date, bookingModel, enabledModels }
   );
 
   const showEvents = venueExposesBookingModel(bookingModel, enabledModels, 'event_ticket');
-  const showClasses = venueExposesBookingModel(bookingModel, enabledModels, 'class_session');
   const showResources = venueExposesBookingModel(bookingModel, enabledModels, 'resource_booking');
-  const showMerged = showEvents || showClasses || showResources;
+  /** Class sessions use team calendar columns in `PractitionerCalendarView`; this feed is events + resources only. */
+  const showMerged = showEvents || showResources;
 
   const onBookingClick = useCallback(
     (bookingId: string) => {
@@ -94,23 +94,17 @@ export function StaffScheduleMergedDayGrid({ date, bookingModel, enabledModels }
 
   if (!showMerged) return null;
 
-  const dayBlocks = blocks.filter((b) => b.date === date);
+  const dayBlocks = blocks.filter((b) => b.date === date && b.kind !== 'class_session');
   const hasAnyBlock = dayBlocks.length > 0;
 
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-600">
-        <span className="font-semibold text-slate-800">Events, classes & resources</span>
+        <span className="font-semibold text-slate-800">Events & resources</span>
         {showEvents && (
           <span className="inline-flex items-center gap-1.5">
             <span className="h-2 w-4 rounded bg-violet-500" aria-hidden />
             Events
-          </span>
-        )}
-        {showClasses && (
-          <span className="inline-flex items-center gap-1.5">
-            <span className="h-2 w-4 rounded bg-emerald-500" aria-hidden />
-            Classes
           </span>
         )}
         {showResources && (
@@ -159,16 +153,6 @@ export function StaffScheduleMergedDayGrid({ date, bookingModel, enabledModels }
                 onBookingClick={onBookingClick}
               />
             ) : null}
-            {showClasses ? (
-              <ScheduleFeedColumn
-                label="Classes"
-                date={date}
-                blocks={blocks.filter((b) => b.kind === 'class_session')}
-                startHour={startHour}
-                endHour={endHour}
-                onBookingClick={onBookingClick}
-              />
-            ) : null}
             {showResources ? (
               <ScheduleFeedColumn
                 label="Resources"
@@ -185,8 +169,8 @@ export function StaffScheduleMergedDayGrid({ date, bookingModel, enabledModels }
 
       {!loading && !error && !hasAnyBlock && (
         <p className="text-sm text-slate-500">
-          No ticketed events, class instances, or resource bookings on this day. Use the shortcuts above to manage
-          catalogue.
+          No ticketed events or resource bookings on this day. Class sessions appear on the team calendar when
+          unified scheduling is enabled. Use the shortcuts above to manage catalogue.
         </p>
       )}
     </div>

@@ -717,24 +717,26 @@ export async function fetchCalendarAppointmentInput(params: {
 
   const assignList = assignments ?? [];
   const serviceIds = assignList.map((a) => (a as { service_item_id: string }).service_item_id);
-  if (serviceIds.length === 0) {
-    return {
-      date,
-      practitioners: [practitioner],
-      services: [],
-      practitionerServices: [],
-      existingBookings: [],
-      practitionerBlockedRanges: [],
-      venueOpeningHours: null,
-    };
-  }
 
-  const { data: svcRows } = await supabase
-    .from('service_items')
-    .select('*')
-    .eq('venue_id', venueId)
-    .eq('is_active', true)
-    .in('id', serviceIds);
+  /** No calendar_service_assignments rows = “offer every active service” (same as legacy practitioner_services). */
+  let svcRows: Record<string, unknown>[] | null;
+  if (serviceIds.length > 0) {
+    const { data } = await supabase
+      .from('service_items')
+      .select('*')
+      .eq('venue_id', venueId)
+      .eq('is_active', true)
+      .in('id', serviceIds);
+    svcRows = data ?? [];
+  } else {
+    const { data } = await supabase
+      .from('service_items')
+      .select('*')
+      .eq('venue_id', venueId)
+      .eq('is_active', true)
+      .order('sort_order');
+    svcRows = data ?? [];
+  }
 
   const assignMap = new Map(
     assignList.map((a) => [(a as { service_item_id: string }).service_item_id, a]),

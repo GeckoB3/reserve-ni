@@ -277,35 +277,31 @@ export function ClassTimetableView({
     return { id, label: ct.instructor_name?.trim() || 'Saved instructor' };
   }, [editingClassTypeId, showClassTypeForm, classTypes, unifiedCalendars, practitioners]);
 
+  /** Legacy rows stored the calendar display name in `instructor_name`; treat that as “no custom label”. */
+  const customClassInstructorFromStored = useCallback(
+    (ct: ClassType): string => {
+      const stored = (ct.instructor_name ?? '').trim();
+      if (!stored) return '';
+      const cal = unifiedCalendars.find((c) => c.id === ct.instructor_id);
+      if (cal && stored === cal.name.trim()) return '';
+      const prac = practitioners.find((p) => p.id === ct.instructor_id);
+      if (prac && stored === prac.name.trim()) return '';
+      return stored;
+    },
+    [unifiedCalendars, practitioners],
+  );
+
   const buildClassTypePayload = () => {
     const priceRaw = classTypeForm.price_pence.trim();
     const pricePence =
       priceRaw === '' ? null : Math.max(0, Math.round(parseFloat(priceRaw) * 100));
-    const staffId = classTypeForm.instructor_staff_id.trim();
+    const calendarId = classTypeForm.instructor_staff_id.trim();
     const custom = classTypeForm.instructor_custom_name.trim();
     const depositRaw = classTypeForm.deposit_pounds.trim();
     const depositPence =
       classTypeForm.payment_requirement === 'deposit' && depositRaw !== ''
         ? Math.max(0, Math.round(parseFloat(depositRaw) * 100))
         : null;
-
-    let instructor_id: string | null = null;
-    let instructor_name: string | null = null;
-    if (!staffId) {
-      instructor_name = custom || null;
-    } else {
-      const cal = unifiedCalendars.find((c) => c.id === staffId);
-      if (cal) {
-        instructor_id = staffId;
-        instructor_name = cal.name;
-      } else if (practitioners.some((p) => p.id === staffId)) {
-        instructor_id = staffId;
-        instructor_name = null;
-      } else {
-        instructor_id = staffId;
-        instructor_name = custom || null;
-      }
-    }
 
     return {
       name: classTypeForm.name.trim(),
@@ -317,8 +313,8 @@ export function ClassTimetableView({
       payment_requirement: classTypeForm.payment_requirement,
       deposit_amount_pence: depositPence,
       price_pence: pricePence,
-      instructor_id,
-      instructor_name,
+      instructor_id: calendarId,
+      instructor_name: custom || null,
     };
   };
 
@@ -345,6 +341,10 @@ export function ClassTimetableView({
   const handleSaveClassType = async () => {
     if (!classTypeForm.name.trim()) {
       setClassTypeError('Class name is required.');
+      return;
+    }
+    if (!classTypeForm.instructor_staff_id.trim()) {
+      setClassTypeError('Select a calendar for this class.');
       return;
     }
     setClassTypeSaving(true);
@@ -395,7 +395,7 @@ export function ClassTimetableView({
       colour: ct.colour ?? '#6366f1',
       is_active: ct.is_active,
       instructor_staff_id: staffId,
-      instructor_custom_name: !staffId ? (ct.instructor_name ?? '') : '',
+      instructor_custom_name: customClassInstructorFromStored(ct),
       payment_requirement: payReq,
       deposit_pounds: depositPounds,
     });
@@ -923,16 +923,19 @@ export function ClassTimetableView({
                   </p>
                 </div>
                 <div className="sm:col-span-2">
-                  <label className="mb-1 block text-xs font-medium text-slate-600">Instructor</label>
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                  <label className="mb-1 block text-xs font-medium text-slate-600">Select Calendar *</label>
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-start">
                     <select
                       value={classTypeForm.instructor_staff_id}
                       onChange={(e) =>
-                        setClassTypeForm((f) => ({ ...f, instructor_staff_id: e.target.value, instructor_custom_name: '' }))
+                        setClassTypeForm((f) => ({ ...f, instructor_staff_id: e.target.value }))
                       }
                       className="w-full max-w-md rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                      required
                     >
-                      <option value="">- No team member</option>
+                      <option value="" disabled>
+                        Choose a calendar…
+                      </option>
                       {unifiedCalendars.length > 0 && (
                         <optgroup label="Calendars (staff)">
                           {unifiedCalendars.map((c) => (
@@ -955,21 +958,22 @@ export function ClassTimetableView({
                         <option value={orphanInstructorOption.id}>{orphanInstructorOption.label}</option>
                       )}
                     </select>
-                    <span className="text-xs text-slate-500">or custom label</span>
-                    <input
-                      type="text"
-                      value={classTypeForm.instructor_custom_name}
-                      onChange={(e) =>
-                        setClassTypeForm((f) => ({ ...f, instructor_custom_name: e.target.value, instructor_staff_id: '' }))
-                      }
-                      placeholder="e.g. Guest teacher"
-                      disabled={Boolean(classTypeForm.instructor_staff_id)}
-                      className="w-full flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm disabled:bg-slate-100"
-                    />
+                    <div className="min-w-0 flex-1">
+                      <label className="mb-1 block text-xs font-medium text-slate-600">Class Instructor</label>
+                      <input
+                        type="text"
+                        value={classTypeForm.instructor_custom_name}
+                        onChange={(e) =>
+                          setClassTypeForm((f) => ({ ...f, instructor_custom_name: e.target.value }))
+                        }
+                        placeholder="Optional — e.g. guest teacher (shown to guests instead of calendar name)"
+                        className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                      />
+                    </div>
                   </div>
                   <p className="mt-1 text-xs text-slate-500">
-                    Pick a bookable calendar to match this class to a team member (same names as on your appointment
-                    calendars), or enter a custom label. Leave both empty if unknown.
+                    The class appears on this team calendar in the schedule. If you add a class instructor name, guests
+                    see that name instead of the calendar name when booking.
                   </p>
                 </div>
                 <div>

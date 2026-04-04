@@ -976,126 +976,78 @@ export default function OnboardingPage() {
           </div>
         )}
 
-        {/* Model B: Team */}
+        {/* Model B: Team / calendars (all appointment-style plans: unlimited calendars — same add/remove UI) */}
         {currentStepKey === 'team' && venue && (
           <div>
+            <h2 className="mb-1 text-lg font-bold text-slate-900">{unifiedTeamStepLabel(terms)}</h2>
             {venue.pricing_tier === 'business' || venue.pricing_tier === 'founding' ? (
-              <>
-                <h2 className="mb-1 text-lg font-bold text-slate-900">
-                  Your {terms.staff.toLowerCase()}
-                </h2>
-                <p className="mb-4 text-sm text-slate-500">
-                  Your Business plan includes <strong>unlimited bookable calendars</strong> and{' '}
-                  <strong>unlimited team members</strong>: add everyone you need. Each person below gets their own
-                  calendar and staff settings. Set{' '}
-                  <strong>working hours, breaks, and days off</strong> under{' '}
-                  <Link
-                    href="/dashboard/availability"
-                    className="font-medium text-brand-600 underline hover:text-brand-700"
-                  >
-                    Availability
-                  </Link>{' '}
-                  after onboarding. You can also manage {terms.staff.toLowerCase()} under{' '}
-                  <Link
-                    href="/dashboard/settings?tab=staff"
-                    className="font-medium text-brand-600 underline hover:text-brand-700"
-                  >
-                    Settings → Staff
-                  </Link>
-                  .
-                </p>
-                <div className="mb-6 space-y-3">
-                  {practitioners.map((p, i) => (
-                    <div
-                      key={i}
-                      className="rounded-xl border border-slate-200 p-4 transition-shadow hover:shadow-sm"
-                    >
-                      <div className="mb-3 flex items-start justify-between gap-2">
-                        <span className="text-xs font-medium uppercase tracking-wide text-slate-400">
-                          {terms.staff} {i + 1}
-                        </span>
-                        {practitioners.length > 1 && (
-                          <button
-                            type="button"
-                            onClick={() => setPractitioners(practitioners.filter((_, j) => j !== i))}
-                            className="shrink-0 text-xs font-medium text-slate-400 hover:text-red-600"
-                          >
-                            Remove
-                          </button>
-                        )}
-                      </div>
-                      <div className="flex flex-col gap-3 sm:flex-row sm:gap-3">
-                        <div className="flex-1">
-                          <label className="mb-1 block text-xs font-medium text-slate-600">
-                            Name <span className="text-red-500">*</span>
-                          </label>
-                          <input
-                            type="text"
-                            value={p.name}
-                            onChange={(e) => {
-                              const updated = [...practitioners];
-                              updated[i] = { ...p, name: e.target.value };
-                              setPractitioners(updated);
-                            }}
-                            placeholder={`${terms.staff} name`}
-                            className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
-                          />
-                        </div>
-                        <div className="flex-1">
-                          <label className="mb-1 block text-xs font-medium text-slate-600">
-                            Email <span className="font-normal text-slate-400">(optional)</span>
-                          </label>
-                          <input
-                            type="email"
-                            value={p.email}
-                            onChange={(e) => {
-                              const updated = [...practitioners];
-                              updated[i] = { ...p, email: e.target.value };
-                              setPractitioners(updated);
-                            }}
-                            placeholder="name@example.com"
-                            className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                  <button
-                    type="button"
-                    onClick={() => setPractitioners([...practitioners, { name: '', email: '' }])}
-                    className="w-full rounded-xl border-2 border-dashed border-slate-200 py-3 text-sm font-medium text-slate-500 transition-colors hover:border-brand-300 hover:text-brand-600"
-                  >
-                    + Add {terms.staff.toLowerCase()}
-                  </button>
-                </div>
-              </>
+              <p className="mb-4 text-sm text-slate-500">
+                Your Business plan includes <strong>unlimited bookable calendars</strong> and{' '}
+                <strong>unlimited team members</strong>: add everyone you need. Each person below gets their own
+                calendar and staff settings. Set{' '}
+                <strong>working hours, breaks, and days off</strong> under{' '}
+                <Link
+                  href="/dashboard/availability"
+                  className="font-medium text-brand-600 underline hover:text-brand-700"
+                >
+                  Availability
+                </Link>{' '}
+                after onboarding. You can also manage {terms.staff.toLowerCase()} under{' '}
+                <Link
+                  href="/dashboard/settings?tab=staff"
+                  className="font-medium text-brand-600 underline hover:text-brand-700"
+                >
+                  Settings → Staff
+                </Link>
+                .
+              </p>
             ) : (
-              <>
-                <h2 className="mb-1 text-lg font-bold text-slate-900">
-                  Your {terms.staff.toLowerCase()}
-                </h2>
-                <p className="mb-6 text-sm text-slate-500">
-                  Each person gets their own bookable calendar. Add as many as you need - your plan includes
-                  unlimited calendars. Manage {terms.staff.toLowerCase()} under{' '}
-                  <Link
-                    href="/dashboard/settings?tab=staff"
-                    className="font-medium text-brand-600 underline hover:text-brand-700"
-                  >
-                    Settings → Staff
-                  </Link>
-                  . Set{' '}
-                  <strong>working hours, breaks, and days off</strong> under{' '}
-                  <Link
-                    href="/dashboard/availability"
-                    className="font-medium text-brand-600 underline hover:text-brand-700"
-                  >
-                    Availability
-                  </Link>{' '}
-                  in the dashboard.
-                </p>
-                <div className="space-y-3">
-                  {practitioners.map((p, i) => (
-                    <div key={i} className="flex flex-col gap-2 sm:flex-row sm:gap-2">
+              <p className="mb-4 text-sm text-slate-500">
+                Your plan includes <strong>unlimited bookable calendars</strong>. Add a row for each calendar you need
+                (each can represent a person or a room). Use <strong>Add</strong> to add more and{' '}
+                <strong>Remove</strong> to delete a row you don&apos;t need—you need at least one. Set{' '}
+                <strong>working hours, breaks, and days off</strong> under{' '}
+                <Link
+                  href="/dashboard/availability"
+                  className="font-medium text-brand-600 underline hover:text-brand-700"
+                >
+                  Availability
+                </Link>{' '}
+                after onboarding. Manage {terms.staff.toLowerCase()} under{' '}
+                <Link
+                  href="/dashboard/settings?tab=staff"
+                  className="font-medium text-brand-600 underline hover:text-brand-700"
+                >
+                  Settings → Staff
+                </Link>
+                .
+              </p>
+            )}
+            <div className="mb-6 space-y-3">
+              {practitioners.map((p, i) => (
+                <div
+                  key={i}
+                  className="rounded-xl border border-slate-200 p-4 transition-shadow hover:shadow-sm"
+                >
+                  <div className="mb-3 flex items-start justify-between gap-2">
+                    <span className="text-xs font-medium uppercase tracking-wide text-slate-400">
+                      Calendar {i + 1}
+                    </span>
+                    {practitioners.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => setPractitioners(practitioners.filter((_, j) => j !== i))}
+                        className="shrink-0 text-xs font-medium text-slate-400 hover:text-red-600"
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </div>
+                  <div className="flex flex-col gap-3 sm:flex-row sm:gap-3">
+                    <div className="flex-1">
+                      <label className="mb-1 block text-xs font-medium text-slate-600">
+                        Name <span className="text-red-500">*</span>
+                      </label>
                       <input
                         type="text"
                         value={p.name}
@@ -1104,9 +1056,14 @@ export default function OnboardingPage() {
                           updated[i] = { ...p, name: e.target.value };
                           setPractitioners(updated);
                         }}
-                        placeholder={`${terms.staff} name (required)`}
-                        className="flex-1 rounded-xl border border-slate-200 px-4 py-2.5 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
+                        placeholder="e.g. Sarah, or Room 1"
+                        className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
                       />
+                    </div>
+                    <div className="flex-1">
+                      <label className="mb-1 block text-xs font-medium text-slate-600">
+                        Email <span className="font-normal text-slate-400">(optional)</span>
+                      </label>
                       <input
                         type="email"
                         value={p.email}
@@ -1115,14 +1072,21 @@ export default function OnboardingPage() {
                           updated[i] = { ...p, email: e.target.value };
                           setPractitioners(updated);
                         }}
-                        placeholder="Email (optional)"
-                        className="flex-1 rounded-xl border border-slate-200 px-4 py-2.5 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
+                        placeholder="name@example.com"
+                        className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
                       />
                     </div>
-                  ))}
+                  </div>
                 </div>
-              </>
-            )}
+              ))}
+              <button
+                type="button"
+                onClick={() => setPractitioners([...practitioners, { name: '', email: '' }])}
+                className="w-full rounded-xl border-2 border-dashed border-slate-200 py-3 text-sm font-medium text-slate-500 transition-colors hover:border-brand-300 hover:text-brand-600"
+              >
+                + Add calendar
+              </button>
+            </div>
           </div>
         )}
 

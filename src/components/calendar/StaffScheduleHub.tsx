@@ -23,8 +23,6 @@ export function StaffScheduleHub({ bookingModel, enabledModels }: Props) {
   const showEvents = active.has('event_ticket');
   const showClasses = active.has('class_session');
   const showResources = active.has('resource_booking');
-  const showCdeMerged = showEvents || showClasses || showResources;
-
   return (
     <div className="flex min-h-0 flex-col space-y-6">
       <div>
@@ -90,7 +88,7 @@ export function StaffScheduleHub({ bookingModel, enabledModels }: Props) {
         )}
       </div>
 
-      {showCdeMerged && (
+      {(showEvents || showResources) && (
         <div className="space-y-3">
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-sm font-medium text-slate-700">Day</span>

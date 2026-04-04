@@ -14,7 +14,9 @@ const classTypeSchema = z
     description: z.string().max(2000).optional().nullable(),
     duration_minutes: z.number().int().min(5).max(480),
     capacity: z.number().int().min(1),
-    instructor_id: z.string().uuid().optional().nullable(),
+    /** Unified calendar or legacy practitioner — required so sessions can be placed on a team column. */
+    instructor_id: z.string().uuid(),
+    /** Optional guest-facing label; when empty, the calendar/practitioner name is shown. */
     instructor_name: z.string().max(200).optional().nullable(),
     price_pence: z.number().int().min(0).optional().nullable(),
     payment_requirement: classPaymentRequirementSchema.optional(),

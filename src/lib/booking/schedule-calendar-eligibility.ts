@@ -1,5 +1,6 @@
 import type { BookingModel } from '@/types/booking-models';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
+import { venueExposesBookingModel } from '@/lib/booking/enabled-models';
 
 /** Models that contribute to the staff Schedule calendar (excludes Model A table rows). */
 const SCHEDULE_CALENDAR_MODELS: BookingModel[] = ['unified_scheduling', 'event_ticket', 'class_session', 'resource_booking'];
@@ -18,10 +19,15 @@ export function isVenueScheduleCalendarEligible(
 }
 
 /**
- * Full practitioner/appointment grid (`PractitionerCalendarView`) - **unified / practitioner primaries only**.
- * Table reservations (`table_reservation`) never use this view; they use **Day sheet / Floor plan** for Model A and
- * {@link StaffScheduleHub} (merged C/D/E from `/api/venue/schedule`) when secondaries are enabled.
+ * Full practitioner/appointment grid (`PractitionerCalendarView`) - unified / practitioner primaries, **or** any venue
+ * that exposes class sessions (classes render on assigned calendar columns). Table-only venues without classes keep
+ * {@link StaffScheduleHub} for ticketed events / resources only.
  */
-export function isPractitionerScheduleCalendar(bookingModel: BookingModel): boolean {
-  return isUnifiedSchedulingVenue(bookingModel);
+export function isPractitionerScheduleCalendar(
+  bookingModel: BookingModel,
+  enabledModels: BookingModel[],
+): boolean {
+  if (isUnifiedSchedulingVenue(bookingModel)) return true;
+  if (bookingModel === 'class_session') return true;
+  return venueExposesBookingModel(bookingModel, enabledModels, 'class_session');
 }

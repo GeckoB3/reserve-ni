@@ -68,8 +68,8 @@ export interface SyncClassInstanceCalendarBlockParams {
 }
 
 /**
- * Ensures a single `calendar_blocks` row for this class instance when the class type has an instructor
- * mapped to a unified calendar. Deletes any previous block for this instance first.
+ * Class sessions render on the instructor’s calendar column from the schedule feed (GET /api/venue/schedule),
+ * not as `calendar_blocks` overlays. This only removes any legacy teaching block for the instance.
  */
 export async function syncCalendarBlockForClassInstance(
   admin: SupabaseClient,
@@ -79,41 +79,7 @@ export async function syncCalendarBlockForClassInstance(
   if (delErr) {
     console.error('[syncCalendarBlockForClassInstance] delete existing:', delErr.message);
   }
-
-  if (params.skipBlock) return;
-
-  const { data: ct, error: ctErr } = await admin
-    .from('class_types')
-    .select('id, name, instructor_id, duration_minutes')
-    .eq('id', params.classTypeId)
-    .eq('venue_id', params.venueId)
-    .maybeSingle();
-
-  if (ctErr || !ct) return;
-
-  const instructorId = (ct as { instructor_id?: string | null }).instructor_id ?? null;
-  const calendarId = await resolveInstructorCalendarIdForClass(admin, params.venueId, instructorId);
-  if (!calendarId) return;
-
-  const durationMinutes = (ct as { duration_minutes?: number }).duration_minutes ?? 60;
-  const className = (ct as { name?: string }).name ?? 'Class';
-  const endTime = classBlockEndTime(params.startTime, durationMinutes);
-
-  const { error: insErr } = await admin.from('calendar_blocks').insert({
-    calendar_id: calendarId,
-    venue_id: params.venueId,
-    block_date: params.instanceDate,
-    start_time: normalizeTimeForDb(params.startTime),
-    end_time: endTime,
-    reason: `Teaching: ${className}`,
-    block_type: 'class_session',
-    class_instance_id: params.classInstanceId,
-    created_by: params.createdByStaffId ?? null,
-  });
-
-  if (insErr) {
-    console.error('[syncCalendarBlockForClassInstance] insert failed:', insErr.message, params);
-  }
+  void params.skipBlock;
 }
 
 /** Remove teaching block when a class instance is cancelled or rescheduled away. */

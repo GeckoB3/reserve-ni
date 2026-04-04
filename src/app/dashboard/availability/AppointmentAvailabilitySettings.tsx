@@ -269,10 +269,12 @@ export function AppointmentAvailabilitySettings({
       const pracId = editingId ?? practitionerData?.id;
 
       if (pracId) {
+        const effectiveServiceIds =
+          formServiceIds.length > 0 ? formServiceIds : services.map((s) => s.id);
         const linkRes = await fetch('/api/venue/practitioner-services', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ practitioner_id: pracId, service_ids: formServiceIds }),
+          body: JSON.stringify({ practitioner_id: pracId, service_ids: effectiveServiceIds }),
         });
         if (!linkRes.ok) {
           console.error('Failed to sync practitioner service links');
@@ -457,13 +459,20 @@ export function AppointmentAvailabilitySettings({
                                 {[p.email, p.phone].filter(Boolean).join(' | ')}
                               </div>
                             )}
-                            {linkedSvcs.length > 0 && (
+                            {linkedSvcs.length > 0 ? (
                               <div className="mt-1 flex flex-wrap gap-1">
                                 {linkedSvcs.map((ls) => (
                                   <span key={ls.linkId} className="rounded-full bg-blue-50 px-2 py-0.5 text-xs text-blue-700">{ls.name}</span>
                                 ))}
                               </div>
-                            )}
+                            ) : services.length > 0 ? (
+                              <p className="mt-1 text-xs text-slate-500">
+                                <span className="rounded-full bg-slate-100 px-2 py-0.5 font-medium text-slate-700">
+                                  All services
+                                </span>{' '}
+                                — can perform every bookable service until you limit this below.
+                              </p>
+                            ) : null}
                           </div>
                           {isAdmin && (
                             <div className="flex items-center gap-1">
@@ -540,7 +549,10 @@ export function AppointmentAvailabilitySettings({
                       {services.length > 0 && (
                         <div>
                           <label className="mb-1.5 block text-sm font-medium text-slate-700">Services offered</label>
-                          <p className="mb-2 text-xs text-slate-500">Select which services this team member can perform. Leave all unchecked to offer all services.</p>
+                          <p className="mb-2 text-xs text-slate-500">
+                            Select which services this team member can perform. Leave all unchecked to assign them to{' '}
+                            <strong>every</strong> service (recommended for most new team members).
+                          </p>
                           <div className="space-y-2 max-h-40 overflow-y-auto rounded-lg border border-slate-200 p-3">
                             {services.map((svc) => (
                               <label key={svc.id} className="flex items-center gap-2.5 cursor-pointer">
@@ -1069,7 +1081,7 @@ function BreaksScheduleEditor({
   );
 }
 
-/** Build per-practitioner service id lists from API links (empty = implicit “all services”). */
+/** Build per-practitioner service id lists from API links (empty row = offer every service; PUT expands to all IDs). */
 function buildDraftFromLinks(
   practitioners: Practitioner[],
   links: PractitionerServiceLink[],

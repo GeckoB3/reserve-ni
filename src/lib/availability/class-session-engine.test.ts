@@ -6,6 +6,8 @@ import {
 } from './class-session-engine';
 import type { ClassInstance, ClassType } from '@/types/booking-models';
 
+const SAMPLE_INSTRUCTOR_ID = '11111111-1111-4111-8111-111111111111';
+
 const baseType = (overrides: Partial<ClassType> = {}): ClassType => ({
   id: 'ct-1',
   venue_id: 'v-1',
@@ -16,7 +18,7 @@ const baseType = (overrides: Partial<ClassType> = {}): ClassType => ({
   colour: '#22C55E',
   is_active: true,
   price_pence: 500,
-  instructor_id: null,
+  instructor_id: SAMPLE_INSTRUCTOR_ID,
   instructor_name: null,
   payment_requirement: 'full_payment',
   deposit_amount_pence: null,
@@ -122,5 +124,28 @@ describe('computeClassAvailability', () => {
       guestBookingWindow: window,
     });
     expect(slots).toHaveLength(1);
+  });
+
+  it('uses custom instructor_name for guest display when set', () => {
+    const t = baseType({ instructor_name: 'Guest teacher' });
+    const slots = computeClassAvailability({
+      date: '2026-04-10',
+      classTypes: [t],
+      instances: [baseInstance()],
+      bookedByInstance: {},
+    });
+    expect(slots[0]?.instructor_name).toBe('Guest teacher');
+  });
+
+  it('falls back to instructorDisplayNamesById when instructor_name is empty', () => {
+    const t = baseType({ instructor_name: null });
+    const slots = computeClassAvailability({
+      date: '2026-04-10',
+      classTypes: [t],
+      instances: [baseInstance()],
+      bookedByInstance: {},
+      instructorDisplayNamesById: { [SAMPLE_INSTRUCTOR_ID]: 'Studio calendar' },
+    });
+    expect(slots[0]?.instructor_name).toBe('Studio calendar');
   });
 });

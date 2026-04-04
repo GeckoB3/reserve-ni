@@ -33,6 +33,26 @@ export async function PUT(request: NextRequest) {
     const { data: venue } = await admin.from('venues').select('booking_model').eq('id', staff.venue_id).maybeSingle();
     const bookingModel = (venue as { booking_model?: string } | null)?.booking_model ?? '';
 
+    /** Empty array = “all active services” (matches legacy practitioner_services + dashboard copy). */
+    let effectiveServiceIds = [...service_ids];
+    if (effectiveServiceIds.length === 0) {
+      if (bookingModel === 'unified_scheduling') {
+        const { data: allSvc } = await admin
+          .from('service_items')
+          .select('id')
+          .eq('venue_id', staff.venue_id)
+          .eq('is_active', true);
+        effectiveServiceIds = (allSvc ?? []).map((r) => (r as { id: string }).id);
+      } else {
+        const { data: allSvc } = await admin
+          .from('appointment_services')
+          .select('id')
+          .eq('venue_id', staff.venue_id)
+          .eq('is_active', true);
+        effectiveServiceIds = (allSvc ?? []).map((r) => (r as { id: string }).id);
+      }
+    }
+
     if (bookingModel === 'unified_scheduling') {
       const { data: cal, error: calErr } = await admin
         .from('unified_calendars')
@@ -68,8 +88,8 @@ export async function PUT(request: NextRequest) {
 
       await admin.from('calendar_service_assignments').delete().eq('calendar_id', practitioner_id);
 
-      if (service_ids.length > 0) {
-        const links = service_ids.map((sid) => {
+      if (effectiveServiceIds.length > 0) {
+        const links = effectiveServiceIds.map((sid) => {
           const prev = preserve.get(sid) as
             | { custom_price_pence: number | null; custom_duration_minutes: number | null }
             | undefined;
@@ -121,8 +141,8 @@ export async function PUT(request: NextRequest) {
 
     await admin.from('practitioner_services').delete().eq('practitioner_id', practitioner_id);
 
-    if (service_ids.length > 0) {
-      const links = service_ids.map((sid) => {
+    if (effectiveServiceIds.length > 0) {
+      const links = effectiveServiceIds.map((sid) => {
         const prev = preserve.get(sid);
         return {
           practitioner_id,

@@ -22,7 +22,6 @@ import {
   type DragStartEvent,
 } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
-import Link from 'next/link';
 import { createClient } from '@/lib/supabase/browser';
 // ResourceCalendarGrid removed — resources are now calendar columns
 import { AppointmentBookingForm } from '@/components/booking/AppointmentBookingForm';
@@ -415,6 +414,7 @@ function slotOccupied(
   pracId: string,
   dateStr: string,
   serviceMap: Map<string, AppointmentService>,
+  classScheduleBlocks: ScheduleBlockDTO[] = [],
 ): boolean {
   for (const b of bookings) {
     if (columnIdForBooking(b) !== pracId || b.booking_date !== dateStr) continue;
@@ -434,6 +434,12 @@ function slotOccupied(
     if (columnIdForBlock(bl) !== pracId || bl.block_date !== dateStr) continue;
     const b0 = timeToMinutes(bl.start_time);
     const b1 = timeToMinutes(bl.end_time);
+    if (overlapsRange(slotStart, slotStart + SLOT_MINUTES, b0, b1)) return true;
+  }
+  for (const cb of classScheduleBlocks) {
+    if (cb.kind !== 'class_session') continue;
+    const b0 = timeToMinutes(cb.start_time);
+    const b1 = timeToMinutes(cb.end_time);
     if (overlapsRange(slotStart, slotStart + SLOT_MINUTES, b0, b1)) return true;
   }
   return false;
@@ -609,8 +615,10 @@ export function PractitionerCalendarView({
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 10 } }));
 
   const showEventsColumn = venueExposesBookingModel(bookingModel, enabledModels, 'event_ticket');
-  const showClassesColumn = venueExposesBookingModel(bookingModel, enabledModels, 'class_session');
-  const showMergedFeeds = showEventsColumn || showClassesColumn;
+  const showClassSessions = venueExposesBookingModel(bookingModel, enabledModels, 'class_session');
+  const showResourcesStrip = venueExposesBookingModel(bookingModel, enabledModels, 'resource_booking');
+  /** Fetch schedule feed for events/resources strips and class sessions (classes render on team columns via `calendar_id`). */
+  const showMergedFeeds = showEventsColumn || showClassSessions || showResourcesStrip;
 
   const activeDayDate = viewMode === 'day' ? date : viewMode === 'week' ? weekStart : monthAnchor;
   const { startHour, endHour } = useMemo(
@@ -1090,6 +1098,26 @@ export function PractitionerCalendarView({
     [filteredScheduleBlocks],
   );
 
+  /** Week strip: class sessions use instructor columns; exclude them from the events/resources row. */
+  const stripScheduleBlocksByDate = useMemo(
+    () =>
+      groupScheduleBlocksByDate(
+        filteredScheduleBlocks.filter((b) => b.kind !== 'class_session'),
+      ),
+    [filteredScheduleBlocks],
+  );
+
+  const classBlocksForGrid = useMemo(
+    () =>
+      filteredScheduleBlocks.filter(
+        (b) => b.kind === 'class_session' && b.status !== 'Cancelled' && b.calendar_id,
+      ),
+    [filteredScheduleBlocks],
+  );
+
+  const showWeekStripRow =
+    (showEventsColumn || showResourcesStrip) && scheduleModelFilter !== 'appointments';
+
   const monthDayScheduleCounts = useMemo(
     () =>
       buildMonthDayScheduleCounts(
@@ -1143,7 +1171,6 @@ export function PractitionerCalendarView({
           <ScheduleCalendarLegend
             showMergedFeeds={showMergedFeeds}
             showEventsColumn={showEventsColumn}
-            showClassesColumn={showClassesColumn}
             scheduleModelFilter={scheduleModelFilter}
             onScheduleModelFilterChange={setScheduleModelFilter}
             viewMode={viewMode}
@@ -1299,6 +1326,9 @@ export function PractitionerCalendarView({
                     </td>
                     {weekDays.map((d) => {
                       const dayBookings = bookingsForPractitioner(prac.id, d);
+                      const dayClassBlocks = classBlocksForGrid.filter(
+                        (b) => b.calendar_id === prac.id && b.date === d,
+                      );
                       return (
                         <td key={d} className="align-top px-1 py-2">
                           <div className="flex min-h-[80px] flex-col gap-1">
@@ -1320,16 +1350,40 @@ export function PractitionerCalendarView({
                                 </button>
                               );
                             })}
+                            {dayClassBlocks.map((cb) => {
+                              const booked =
+                                cb.class_booked_spots != null && cb.class_capacity != null
+                                  ? `${cb.class_booked_spots}/${cb.class_capacity} booked`
+                                  : cb.class_booked_spots != null
+                                    ? `${cb.class_booked_spots} booked`
+                                    : null;
+                              const accent = cb.accent_colour ?? '#6366f1';
+                              return (
+                                <button
+                                  key={cb.id}
+                                  type="button"
+                                  onClick={() => openClassInstanceDetail(cb)}
+                                  className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-left text-xs shadow-sm hover:bg-slate-100"
+                                  style={{ borderLeftWidth: 3, borderLeftColor: accent }}
+                                >
+                                  <div className="font-semibold text-slate-900">{cb.title}</div>
+                                  {booked ? <div className="text-[10px] text-slate-600">{booked}</div> : null}
+                                  <div className="text-[10px] text-slate-500">
+                                    {cb.start_time.slice(0, 5)}–{cb.end_time.slice(0, 5)}
+                                  </div>
+                                </button>
+                              );
+                            })}
                           </div>
                         </td>
                       );
                     })}
                   </tr>
                 ))}
-                {showMergedFeeds && scheduleModelFilter !== 'appointments' ? (
+                {showWeekStripRow ? (
                   <WeekScheduleCdeStrip
                     weekDays={weekDays}
-                    blocksByDate={scheduleBlocksByDate}
+                    blocksByDate={stripScheduleBlocksByDate}
                     onBookingClick={openBookingDetail}
                     onClassInstanceClick={openClassInstanceDetail}
                   />
@@ -1395,8 +1449,14 @@ export function PractitionerCalendarView({
 
               {filteredPractitioners.map((prac) => {
                 const pracBookings = bookingsForPractitioner(prac.id, date);
+                const pracClassBlocks = classBlocksForGrid.filter(
+                  (b) => b.calendar_id === prac.id && b.date === date,
+                );
                 const pracBlocks = blocks.filter(
-                  (bl) => columnIdForBlock(bl) === prac.id && bl.block_date === date,
+                  (bl) =>
+                    columnIdForBlock(bl) === prac.id &&
+                    bl.block_date === date &&
+                    bl.block_type !== 'class_session',
                 );
                 return (
                   <div key={prac.id} className="min-w-[180px] flex-1 border-r border-slate-100 last:border-r-0">
@@ -1419,7 +1479,15 @@ export function PractitionerCalendarView({
 
                       {Array.from({ length: TOTAL_SLOTS }, (_, i) => {
                         const slotStartMins = startHour * 60 + i * SLOT_MINUTES;
-                        const occ = slotOccupied(slotStartMins, bookings, blocks, prac.id, date, serviceMap);
+                        const occ = slotOccupied(
+                          slotStartMins,
+                          bookings,
+                          blocks,
+                          prac.id,
+                          date,
+                          serviceMap,
+                          pracClassBlocks,
+                        );
                         const dropId = `drop-${prac.id}-${date}-${slotStartMins}`;
                         return (
                           <DroppableSlotButton
@@ -1449,18 +1517,14 @@ export function PractitionerCalendarView({
                           ((timeToMinutes(bl.end_time) - timeToMinutes(bl.start_time)) / SLOT_MINUTES) * SLOT_HEIGHT,
                           SLOT_HEIGHT * 0.5,
                         );
-                        const isClassTeaching = bl.block_type === 'class_session';
-                        const label = isClassTeaching ? (bl.reason?.trim() || 'Class') : `Blocked${bl.reason ? `: ${bl.reason}` : ''}`;
-                        const shellClass = `absolute left-1 right-1 z-[15] block overflow-hidden rounded-lg border px-1.5 py-1 text-left text-[10px] font-semibold shadow-sm ${
-                          isClassTeaching
-                            ? 'border-violet-200 bg-violet-50 text-violet-900 ring-1 ring-violet-100'
-                            : 'cursor-pointer border-slate-300 bg-slate-200/90 font-medium text-slate-700 hover:bg-slate-300/90'
-                        }`;
+                        const label = `Blocked${bl.reason ? `: ${bl.reason}` : ''}`;
+                        const shellClass =
+                          'absolute left-1 right-1 z-[15] block cursor-pointer overflow-hidden rounded-lg border border-slate-300 bg-slate-200/90 px-1.5 py-1 text-left text-[10px] font-semibold text-slate-700 shadow-sm hover:bg-slate-300/90';
                         const shellStyle = {
                           top,
                           height: h,
                           borderLeftWidth: 3,
-                          borderLeftColor: isClassTeaching ? '#7C3AED' : '#94a3b8',
+                          borderLeftColor: '#94a3b8',
                         } as const;
                         const body = (
                           <>
@@ -1470,17 +1534,7 @@ export function PractitionerCalendarView({
                             </span>
                           </>
                         );
-                        return isClassTeaching ? (
-                          <Link
-                            key={bl.id}
-                            href="/dashboard/class-timetable"
-                            className={shellClass}
-                            style={shellStyle}
-                            title="Open class timetable"
-                          >
-                            {body}
-                          </Link>
-                        ) : (
+                        return (
                           <button
                             key={bl.id}
                             type="button"
@@ -1491,6 +1545,45 @@ export function PractitionerCalendarView({
                           >
                             {body}
                           </button>
+                        );
+                      })}
+
+                      {pracClassBlocks.map((cb) => {
+                        const top = slotTop(cb.start_time);
+                        const durMins = Math.max(
+                          timeToMinutes(cb.end_time) - timeToMinutes(cb.start_time),
+                          SLOT_MINUTES,
+                        );
+                        const height = Math.max(slotHeightFromDuration(durMins), SLOT_HEIGHT * 0.75);
+                        const accent = cb.accent_colour ?? '#6366f1';
+                        const uptake =
+                          cb.class_booked_spots != null && cb.class_capacity != null
+                            ? `${cb.class_booked_spots}/${cb.class_capacity} booked`
+                            : cb.class_booked_spots != null
+                              ? `${cb.class_booked_spots} booked`
+                              : null;
+                        return (
+                          <div
+                            key={cb.id}
+                            className="absolute left-1 right-1 z-[20]"
+                            style={{ top, height }}
+                          >
+                            <button
+                              type="button"
+                              onClick={() => openClassInstanceDetail(cb)}
+                              className="flex h-full min-h-0 w-full flex-col overflow-hidden rounded-lg border border-slate-200 bg-white px-1.5 py-1 text-left shadow-sm transition-shadow hover:shadow-md"
+                              style={{ borderLeftWidth: 3, borderLeftColor: accent }}
+                              title={cb.title}
+                            >
+                              <span className="truncate text-xs font-semibold text-slate-900">{cb.title}</span>
+                              {uptake ? (
+                                <span className="truncate text-[10px] font-medium text-slate-600">{uptake}</span>
+                              ) : null}
+                              <span className="mt-auto text-[10px] text-slate-400">
+                                {cb.start_time.slice(0, 5)} – {cb.end_time.slice(0, 5)}
+                              </span>
+                            </button>
+                          </div>
                         );
                       })}
 
@@ -1683,17 +1776,6 @@ export function PractitionerCalendarView({
                       startHour={startHour}
                       endHour={endHour}
                       onBookingClick={openBookingDetail}
-                    />
-                  ) : null}
-                  {showClassesColumn ? (
-                    <ScheduleFeedColumn
-                      label="Classes"
-                      date={date}
-                      blocks={filteredScheduleBlocks.filter((b) => b.kind === 'class_session')}
-                      startHour={startHour}
-                      endHour={endHour}
-                      onBookingClick={openBookingDetail}
-                      onClassInstanceClick={openClassInstanceDetail}
                     />
                   ) : null}
                 </>

@@ -31,6 +31,8 @@ export interface ClassEngineInput {
    * venue’s minimum booking notice window (`venues.booking_rules.min_notice_hours`).
    */
   guestBookingWindow?: GuestClassBookingWindow;
+  /** Resolved names for `class_types.instructor_id` (calendar or legacy practitioner) when `instructor_name` is empty. */
+  instructorDisplayNamesById?: Record<string, string>;
 }
 
 export interface ClassAvailabilitySlot {
@@ -70,6 +72,17 @@ export function resolveClassPaymentRequirement(ct: ClassType): ClassPaymentRequi
   return 'none';
 }
 
+function resolveGuestFacingInstructorName(
+  classType: ClassType,
+  nameById: Record<string, string> | undefined,
+): string | null {
+  const custom = classType.instructor_name?.trim();
+  if (custom) return custom;
+  const id = classType.instructor_id;
+  if (!id || !nameById) return null;
+  return nameById[id] ?? null;
+}
+
 function stripeCheckoutNeeded(
   req: ClassPaymentRequirement,
   pricePence: number | null,
@@ -103,7 +116,7 @@ export function isClassInstanceBookableForGuest(
 // ---------------------------------------------------------------------------
 
 export function computeClassAvailability(input: ClassEngineInput): ClassAvailabilitySlot[] {
-  const { classTypes, instances, bookedByInstance, guestBookingWindow } = input;
+  const { classTypes, instances, bookedByInstance, guestBookingWindow, instructorDisplayNamesById } = input;
   const typeMap = new Map(classTypes.map((ct) => [ct.id, ct]));
 
   const results: ClassAvailabilitySlot[] = [];
@@ -142,7 +155,7 @@ export function computeClassAvailability(input: ClassEngineInput): ClassAvailabi
       capacity,
       remaining,
       instructor_id: classType.instructor_id,
-      instructor_name: classType.instructor_name ?? null,
+      instructor_name: resolveGuestFacingInstructorName(classType, instructorDisplayNamesById),
       price_pence: classType.price_pence,
       payment_requirement: paymentRequirement,
       deposit_amount_pence: depositPerPerson,
@@ -181,6 +194,29 @@ export async function fetchClassInput(params: {
 
   const classTypes = (typesRes.data ?? []) as ClassType[];
   const classTypeIds = classTypes.map((ct) => ct.id);
+
+  const instructorIds = [...new Set(classTypes.map((ct) => ct.instructor_id).filter(Boolean))] as string[];
+  let instructorDisplayNamesById: Record<string, string> = {};
+  if (instructorIds.length > 0) {
+    const [calsRes, pracsRes] = await Promise.all([
+      supabase.from('unified_calendars').select('id, name').eq('venue_id', venueId).in('id', instructorIds),
+      supabase.from('practitioners').select('id, name').eq('venue_id', venueId).in('id', instructorIds),
+    ]);
+    if (calsRes.error) {
+      console.error('[fetchClassInput] unified_calendars:', calsRes.error);
+    }
+    if (pracsRes.error) {
+      console.error('[fetchClassInput] practitioners:', pracsRes.error);
+    }
+    for (const row of pracsRes.data ?? []) {
+      const p = row as { id: string; name: string };
+      instructorDisplayNamesById[p.id] = p.name;
+    }
+    for (const row of calsRes.data ?? []) {
+      const c = row as { id: string; name: string };
+      instructorDisplayNamesById[c.id] = c.name;
+    }
+  }
 
   const instancesPromise =
     classTypeIds.length === 0
@@ -228,5 +264,5 @@ export async function fetchClassInput(params: {
     guestBookingWindow = { minNoticeHours, venueTimezone: tz };
   }
 
-  return { date, classTypes, instances, bookedByInstance, guestBookingWindow };
+  return { date, classTypes, instances, bookedByInstance, guestBookingWindow, instructorDisplayNamesById };
 }

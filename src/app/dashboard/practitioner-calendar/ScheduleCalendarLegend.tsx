@@ -7,7 +7,6 @@ type ViewMode = 'day' | 'week' | 'month';
 interface Props {
   showMergedFeeds: boolean;
   showEventsColumn: boolean;
-  showClassesColumn: boolean;
   scheduleModelFilter: ScheduleModelFilter;
   onScheduleModelFilterChange: (v: ScheduleModelFilter) => void;
   viewMode: ViewMode;
@@ -20,7 +19,6 @@ interface Props {
 export function ScheduleCalendarLegend({
   showMergedFeeds,
   showEventsColumn,
-  showClassesColumn,
   scheduleModelFilter,
   onScheduleModelFilterChange,
   viewMode,
@@ -38,10 +36,9 @@ export function ScheduleCalendarLegend({
       >
         <option value="all">All types</option>
         <option value="appointments">
-          Practitioner appointments only (hide events / classes lanes)
+          Practitioner appointments only (hide events lane; class sessions stay on team columns)
         </option>
         {showEventsColumn ? <option value="event_ticket">Events only</option> : null}
-        {showClassesColumn ? <option value="class_session">Classes only</option> : null}
       </select>
     </label>
   );

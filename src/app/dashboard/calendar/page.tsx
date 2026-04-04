@@ -53,7 +53,7 @@ export default async function CalendarPage() {
       : null;
   const defaultPractitionerFilter: 'all' | string = linkedPractitionerId ?? 'all';
 
-  const showPractitionerCalendar = isPractitionerScheduleCalendar(bookingModel);
+  const showPractitionerCalendar = isPractitionerScheduleCalendar(bookingModel, enabledModels);
 
   /**
    * Unified / practitioner primaries: full `PractitionerCalendarView` (appointments + merged C/D/E lanes).
