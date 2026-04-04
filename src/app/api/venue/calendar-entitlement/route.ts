@@ -22,7 +22,7 @@ export async function GET() {
 
     if (!venue) return NextResponse.json({ error: 'Venue not found' }, { status: 404 });
 
-    const tier = (venue.pricing_tier as string) ?? 'standard';
+    const tier = (venue.pricing_tier as string) ?? 'appointments';
     const { count, error: countErr } = await admin
       .from('practitioners')
       .select('id', { count: 'exact', head: true })
@@ -35,19 +35,16 @@ export async function GET() {
     }
 
     const activePractitioners = count ?? 0;
-    const unlimited = tier === 'business' || tier === 'founding';
-    const calendarLimit = unlimited ? null : (venue.calendar_count ?? 1);
-    const atCalendarLimit = !unlimited && calendarLimit !== null && activePractitioners >= calendarLimit;
-    const canAddPractitioner = unlimited || (calendarLimit !== null && activePractitioners < calendarLimit);
 
+    // All plans now have unlimited calendars
     return NextResponse.json({
       pricing_tier: tier,
-      calendar_count: venue.calendar_count ?? null,
+      calendar_count: null,
       active_practitioners: activePractitioners,
-      calendar_limit: calendarLimit,
-      unlimited,
-      at_calendar_limit: atCalendarLimit,
-      can_add_practitioner: canAddPractitioner,
+      calendar_limit: null,
+      unlimited: true,
+      at_calendar_limit: false,
+      can_add_practitioner: true,
       booking_model: venue.booking_model,
     });
   } catch (err) {

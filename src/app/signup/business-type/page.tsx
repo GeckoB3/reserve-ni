@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useMemo } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, useMemo, useEffect } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { getBusinessTypesByCategory, BOOKING_MODEL_SIGNUP_CARDS, BOOKING_MODEL_CHIP_LABEL } from '@/lib/business-config';
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -22,8 +22,8 @@ const CATEGORY_LABELS: Record<string, string> = {
   accommodation: 'Accommodation',
 };
 
-const CATEGORY_ORDER = [
-  'hospitality',
+/** Categories to show for Appointments plan (exclude hospitality). */
+const APPOINTMENTS_CATEGORY_ORDER = [
   'beauty_grooming',
   'health_wellness',
   'fitness',
@@ -40,50 +40,114 @@ const CATEGORY_ORDER = [
   'accommodation',
 ];
 
+/** Categories for Restaurant plan. */
+const RESTAURANT_CATEGORY_ORDER = ['hospitality'];
+
+/** All categories for fallback. */
+const ALL_CATEGORY_ORDER = [
+  'hospitality',
+  ...APPOINTMENTS_CATEGORY_ORDER,
+];
+
+type PlanType = 'appointments' | 'restaurant' | 'founding';
+
 export default function BusinessTypePage() {
   const [selected, setSelected] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const router = useRouter();
+  const searchParams = useSearchParams();
+
+  const plan = (searchParams.get('plan') ?? 'appointments') as PlanType;
+  const isRestaurantPlan = plan === 'restaurant' || plan === 'founding';
+
+  useEffect(() => {
+    sessionStorage.setItem('signup_plan', plan);
+  }, [plan]);
 
   const grouped = useMemo(() => getBusinessTypesByCategory(), []);
 
+  const categoryOrder = useMemo(() => {
+    if (isRestaurantPlan) return RESTAURANT_CATEGORY_ORDER;
+    return APPOINTMENTS_CATEGORY_ORDER;
+  }, [isRestaurantPlan]);
+
   const filteredCategories = useMemo(() => {
     const q = search.toLowerCase().trim();
-    if (!q) return CATEGORY_ORDER.filter((cat) => grouped[cat]?.length);
-    return CATEGORY_ORDER.filter((cat) =>
+    if (!q) return categoryOrder.filter((cat) => grouped[cat]?.length);
+    return categoryOrder.filter((cat) =>
       grouped[cat]?.some((bt) => bt.label.toLowerCase().includes(q)),
     );
-  }, [search, grouped]);
+  }, [search, grouped, categoryOrder]);
 
   function handleContinue() {
     if (!selected) return;
     sessionStorage.setItem('signup_business_type', selected);
+    sessionStorage.setItem('signup_plan', plan);
     router.push('/signup/plan');
   }
 
+  // For restaurant plan, show a simplified picker
+  if (isRestaurantPlan) {
+    return (
+      <div className="w-full max-w-2xl">
+        <div className="mb-8 text-center">
+          <h1 className="text-2xl font-bold text-slate-900">
+            {plan === 'founding' ? 'Founding Partner' : 'Restaurant Plan'}
+          </h1>
+          <p className="mt-2 text-sm text-slate-500">
+            What type of venue are you?
+          </p>
+        </div>
+
+        <div className="mb-8 grid gap-3 sm:grid-cols-2">
+          {[
+            { key: 'restaurant', label: 'Restaurant', desc: 'Full-service dining' },
+            { key: 'cafe', label: 'Cafe', desc: 'Casual food and drinks' },
+            { key: 'pub', label: 'Pub / Bar', desc: 'Food and/or drinks service' },
+            { key: 'hotel_restaurant', label: 'Hotel dining', desc: 'Hotel restaurant or room dining' },
+          ].map((item) => (
+            <button
+              key={item.key}
+              type="button"
+              onClick={() => setSelected(item.key)}
+              className={`rounded-2xl border px-4 py-4 text-left transition-all ${
+                selected === item.key
+                  ? 'border-brand-500 bg-brand-50 ring-1 ring-brand-500'
+                  : 'border-slate-200 bg-white hover:border-slate-300'
+              }`}
+            >
+              <p className="text-sm font-semibold text-slate-900">{item.label}</p>
+              <p className="mt-1 text-xs text-slate-600">{item.desc}</p>
+            </button>
+          ))}
+        </div>
+
+        <div className="mt-8 flex justify-center">
+          <button
+            type="button"
+            disabled={!selected}
+            onClick={handleContinue}
+            className="rounded-xl bg-brand-600 px-8 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 disabled:opacity-50 transition-colors"
+          >
+            Continue
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Appointments plan: show full directory minus hospitality
   return (
     <div className="w-full max-w-2xl">
       <div className="mb-8 text-center">
         <h1 className="text-2xl font-bold text-slate-900">What kind of business are you?</h1>
         <p className="mt-2 text-sm text-slate-500">
-          Pick the booking model that fits your business. We&apos;ll tailor wording,
+          Pick the booking type that fits your business. We&apos;ll tailor wording,
           dashboard views, and defaults to your trade.
         </p>
       </div>
 
       <div className="mb-8 grid gap-3 sm:grid-cols-2">
-        <button
-          type="button"
-          onClick={() => setSelected('restaurant')}
-          className={`rounded-2xl border px-4 py-4 text-left transition-all ${
-            selected === 'restaurant'
-              ? 'border-brand-500 bg-brand-50 ring-1 ring-brand-500'
-              : 'border-slate-200 bg-white hover:border-slate-300'
-          }`}
-        >
-          <p className="text-sm font-semibold text-slate-900">Restaurant, café, pub, hotel</p>
-          <p className="mt-1 text-xs text-slate-600">Guests book tables or covers per sitting.</p>
-        </button>
         <button
           type="button"
           onClick={() => setSelected('model_unified_scheduling')}
@@ -135,9 +199,9 @@ export default function BusinessTypePage() {
       </div>
 
       <details className="mb-6 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm shadow-sm open:pb-4">
-        <summary className="cursor-pointer font-semibold text-slate-800">Our booking models</summary>
+        <summary className="cursor-pointer font-semibold text-slate-800">Our booking types</summary>
         <ul className="mt-3 space-y-3 border-t border-slate-100 pt-3">
-          {BOOKING_MODEL_SIGNUP_CARDS.map((card) => (
+          {BOOKING_MODEL_SIGNUP_CARDS.filter((c) => c.model !== 'table_reservation').map((card) => (
             <li key={card.model}>
               <p className="font-medium text-slate-900">{card.title}</p>
               <p className="text-slate-600">{card.summary}</p>

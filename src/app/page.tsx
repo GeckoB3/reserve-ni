@@ -1,7 +1,7 @@
 import Link from "next/link";
 import ContactForm from "@/components/ContactForm";
-import { PricingCalculator } from "@/components/landing/PricingCalculator";
-import { BUSINESS_PRICE, FOUNDING_PARTNER_CAP, STANDARD_PRICE_PER_CALENDAR } from "@/lib/pricing-constants";
+import { APPOINTMENTS_PRICE, RESTAURANT_PRICE, FOUNDING_PARTNER_CAP, SMS_OVERAGE_GBP_PER_MESSAGE } from "@/lib/pricing-constants";
+import { SMS_INCLUDED_APPOINTMENTS, SMS_INCLUDED_RESTAURANT } from "@/lib/billing/sms-allowance";
 
 /** Feature blurbs aligned with ReserveNI Unified Scheduling Engine Plan (v1.1): deposits, comms lifecycle, dashboard. */
 const features = [
@@ -14,13 +14,13 @@ const features = [
   {
     title: "Smart Communications",
     description:
-      "Automated confirmations, deposit requests, reminders, and post-visit messages across email and SMS - channels and allowances follow your tier and notification settings.",
+      "Automated confirmations, deposit requests, reminders, and post-visit messages across email and SMS with generous included allowances.",
     icon: ChatIcon,
   },
   {
     title: "Real-time Dashboard",
     description:
-      "Bookings, calendars, guest records, and reporting. Restaurants on Business also get visual timeline and live floor plan for seating.",
+      "Bookings, calendars, guest records, and reporting. Restaurants also get visual timeline and live floor plan for seating.",
     icon: DashboardIcon,
   },
   {
@@ -49,9 +49,9 @@ const businessTypes = [
 const steps = [
   {
     number: "1",
-    title: "Sign up and choose your plan",
+    title: "Pick your plan",
     description:
-      "Create your account, pick your business type, and choose Standard, Business, or Founding Partner where offered.",
+      "Choose Appointments or Restaurant, then tell us about your business. Founding Partner spots available for restaurants.",
   },
   { number: "2", title: "Set up in minutes", description: "Our model-aware wizard walks you through the setup for your specific business type." },
   { number: "3", title: "Start taking bookings", description: "Share your booking page link, embed the widget, or print a QR code so your clients can book instantly." },
@@ -154,55 +154,53 @@ export default function Home() {
           <p className="mx-auto mt-4 max-w-xl text-center text-slate-500">No commission, no hidden fees. Pick the plan that fits your business.</p>
 
           <div className="mx-auto mt-14 grid max-w-4xl items-stretch gap-8 lg:grid-cols-2">
-            {/* Standard */}
-            <div className="flex flex-col rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
-              <h3 className="text-lg font-bold text-slate-900">Standard</h3>
+            {/* Appointments */}
+            <div className="flex flex-col rounded-2xl border-2 border-brand-500 bg-white p-8 shadow-sm ring-1 ring-brand-500/20">
+              <div className="flex items-center gap-2">
+                <h3 className="text-lg font-bold text-slate-900">Appointments</h3>
+                <span className="rounded-full bg-brand-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-brand-700">Most popular</span>
+              </div>
               <div className="mt-3 flex items-baseline gap-1">
-                <span className="text-4xl font-extrabold text-slate-900">&pound;{STANDARD_PRICE_PER_CALENDAR}</span>
-                <span className="text-sm text-slate-500">/month per team member</span>
+                <span className="text-4xl font-extrabold text-slate-900">&pound;{APPOINTMENTS_PRICE}</span>
+                <span className="text-sm text-slate-500">/month</span>
               </div>
               <p className="mt-2 text-sm font-medium leading-snug text-slate-700">
-                All features. Best for solo practitioners and small teams.
+                For salons, clinics, studios, instructors, and any bookable business.
               </p>
-              <p className="mt-1 text-xs text-slate-500">200 SMS per bookable calendar per month.</p>
-              <PricingCalculator />
               <ul className="mt-6 flex-1 space-y-3 text-sm text-slate-600">
+                <PricingFeature text="All booking types: appointments, classes, events, resources" />
+                <PricingFeature text="Unlimited calendars and team members" />
+                <PricingFeature text={`${SMS_INCLUDED_APPOINTMENTS} SMS messages included per month`} />
+                <PricingFeature text={`Additional SMS at ${Math.round(SMS_OVERAGE_GBP_PER_MESSAGE * 100)}p each`} />
                 <PricingFeature text="Bookings, deposits, reminders, client records, reporting" />
                 <PricingFeature text="Email and SMS communications" />
-                <PricingFeature text="Additional SMS at 5p each if you exceed the allowance" />
                 <PricingFeature text="Email support" />
               </ul>
-              <Link href="/signup" className="mt-8 inline-flex h-11 w-full items-center justify-center rounded-xl bg-brand-600 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700">
+              <Link href="/signup/business-type?plan=appointments" className="mt-8 inline-flex h-11 w-full items-center justify-center rounded-xl bg-brand-600 text-sm font-semibold text-white shadow-lg shadow-brand-600/20 transition-colors hover:bg-brand-700">
                 Get started
               </Link>
             </div>
 
-            {/* Business */}
+            {/* Restaurant */}
             <div className="flex flex-col rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
-              <h3 className="text-lg font-bold text-slate-900">Business</h3>
+              <h3 className="text-lg font-bold text-slate-900">Restaurant</h3>
               <div className="mt-3 flex items-baseline gap-1">
-                <span className="text-4xl font-extrabold text-slate-900">&pound;{BUSINESS_PRICE}</span>
-                <span className="text-sm text-slate-500">/month flat</span>
+                <span className="text-4xl font-extrabold text-slate-900">&pound;{RESTAURANT_PRICE}</span>
+                <span className="text-sm text-slate-500">/month</span>
               </div>
               <p className="mt-2 text-sm font-medium leading-snug text-slate-700">
-                Unlimited calendars. 800 SMS. Table management. Priority support.
+                For restaurants, cafes, pubs, and hotel dining.
               </p>
-              <p className="mt-2 text-sm font-medium leading-snug text-slate-700">
-                Best for restaurants and large teams.
-              </p>
-              <p className="mt-2 text-xs text-slate-600">
-                Restaurants use Business. Appointment-based businesses can choose Standard or Business.
-              </p>
-              <p className="mt-4 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                Everything in Standard, plus
-              </p>
-              <ul className="mt-3 flex-1 space-y-3 text-sm text-slate-600">
-                <PricingFeature text="Unlimited bookable calendars" />
-                <PricingFeature text="800 SMS messages included per month" />
-                <PricingFeature text="Table management with timeline grid and floor plan (restaurants)" />
+              <ul className="mt-6 flex-1 space-y-3 text-sm text-slate-600">
+                <PricingFeature text="Table management with timeline grid and floor plan" />
+                <PricingFeature text="Plus all appointment booking types if needed" />
+                <PricingFeature text={`${SMS_INCLUDED_RESTAURANT} SMS messages included per month`} />
+                <PricingFeature text={`Additional SMS at ${Math.round(SMS_OVERAGE_GBP_PER_MESSAGE * 100)}p each`} />
+                <PricingFeature text="Bookings, deposits, reminders, guest records, reporting" />
+                <PricingFeature text="Email and SMS communications" />
                 <PricingFeature text="Priority support" />
               </ul>
-              <Link href="/signup" className="mt-8 inline-flex h-11 w-full items-center justify-center rounded-xl bg-brand-600 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700">
+              <Link href="/signup/business-type?plan=restaurant" className="mt-8 inline-flex h-11 w-full items-center justify-center rounded-xl bg-brand-600 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700">
                 Get started
               </Link>
             </div>
@@ -222,7 +220,7 @@ export default function Home() {
                   </span>
                 </div>
                 <p className="mt-2 text-sm font-medium text-emerald-900">
-                  Free for six months - full Business plan, no card to start. We onboard you personally.
+                  Free for six months - full Restaurant plan, no card to start. We onboard you personally.
                 </p>
                 <p className="mt-1 text-xs text-emerald-700">Only {FOUNDING_PARTNER_CAP} spots available.</p>
               </div>

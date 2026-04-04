@@ -54,8 +54,7 @@ export async function POST(request: Request) {
 
     const metadata = session.metadata ?? {};
     const businessType = metadata.business_type ?? 'other';
-    const plan = metadata.plan ?? 'business';
-    const calendarCount = parseInt(metadata.calendar_count ?? '1', 10);
+    const plan = metadata.plan ?? 'appointments';
     const config = getBusinessConfig(businessType);
 
     const subscriptionId =
@@ -95,7 +94,7 @@ export async function POST(request: Request) {
         stripe_subscription_id: subscriptionId,
         stripe_subscription_item_id: mainSubscriptionItemId,
         stripe_sms_subscription_item_id: smsSubscriptionItemId,
-        calendar_count: plan === 'standard' ? calendarCount : null,
+        calendar_count: null,
         onboarding_step: 0,
         onboarding_completed: false,
       })

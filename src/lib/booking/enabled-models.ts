@@ -12,8 +12,8 @@ export const BOOKING_MODEL_ORDER: BookingModel[] = [
 
 const ALL_BOOKING_MODELS = new Set<string>(BOOKING_MODEL_ORDER);
 
-/** v1: only C/D/E may appear as secondaries (see ReserveNI_Unified_Booking_Functionality.md). */
-const SECONDARY_ALLOWLIST = new Set<BookingModel>(['event_ticket', 'class_session', 'resource_booking']);
+/** Allowed secondary booking models. unified_scheduling lets restaurants add appointments. */
+const SECONDARY_ALLOWLIST = new Set<BookingModel>(['unified_scheduling', 'event_ticket', 'class_session', 'resource_booking']);
 
 function isBookingModelString(s: string): s is BookingModel {
   return ALL_BOOKING_MODELS.has(s);
@@ -83,7 +83,7 @@ export function hasNonTableBookingPayload(data: {
 }
 
 /**
- * When primary is `table_reservation`, infer C/D/E secondary from request body.
+ * When primary is `table_reservation`, infer secondary model from request body.
  * Returns null if ambiguous, invalid, or not enabled.
  */
 export function inferSecondaryBookingModelFromPayload(
@@ -93,17 +93,24 @@ export function inferSecondaryBookingModelFromPayload(
     class_instance_id?: string;
     resource_id?: string;
     booking_end_time?: string;
+    event_session_id?: string;
+    practitioner_id?: string;
+    appointment_service_id?: string;
+    calendar_id?: string;
+    service_item_id?: string;
   },
   enabledModels: BookingModel[]
-): (typeof SECONDARY_ONLY)[number] | null {
+): BookingModel | null {
   const hasEvent = Boolean(data.experience_event_id) || (data.ticket_lines != null && data.ticket_lines.length > 0);
   const hasClass = Boolean(data.class_instance_id);
   const hasResource = Boolean(data.resource_id && data.booking_end_time);
-  const n = [hasEvent, hasClass, hasResource].filter(Boolean).length;
+  const hasAppointment = Boolean(data.event_session_id) || Boolean(data.practitioner_id && data.appointment_service_id) || Boolean(data.calendar_id && data.service_item_id);
+  const n = [hasEvent, hasClass, hasResource, hasAppointment].filter(Boolean).length;
   if (n > 1) return null;
   if (hasEvent && enabledModels.includes('event_ticket')) return 'event_ticket';
   if (hasClass && enabledModels.includes('class_session')) return 'class_session';
   if (hasResource && enabledModels.includes('resource_booking')) return 'resource_booking';
+  if (hasAppointment && enabledModels.includes('unified_scheduling')) return 'unified_scheduling';
   return null;
 }
 

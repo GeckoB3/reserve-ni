@@ -7,11 +7,17 @@ import type { BookingModel } from '@/types/booking-models';
 import { normalizeEnabledModels } from '@/lib/booking/enabled-models';
 
 const OPTIONAL_SECONDARIES: Array<{
-  model: Extract<BookingModel, 'event_ticket' | 'class_session' | 'resource_booking'>;
+  model: Extract<BookingModel, 'unified_scheduling' | 'event_ticket' | 'class_session' | 'resource_booking'>;
   title: string;
   description: string;
   href: string;
 }> = [
+  {
+    model: 'unified_scheduling',
+    title: 'Appointments & services',
+    description: 'Offer appointment-based bookings alongside table reservations.',
+    href: '/dashboard/calendar',
+  },
   {
     model: 'event_ticket',
     title: 'Ticketed events',

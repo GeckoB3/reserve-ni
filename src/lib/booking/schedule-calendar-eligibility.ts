@@ -1,8 +1,8 @@
 import type { BookingModel } from '@/types/booking-models';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 
-/** Models that contribute to the staff Schedule calendar (excludes Model A table rows per plan §4.2). */
-const SCHEDULE_CALENDAR_MODELS: BookingModel[] = ['event_ticket', 'class_session', 'resource_booking'];
+/** Models that contribute to the staff Schedule calendar (excludes Model A table rows). */
+const SCHEDULE_CALENDAR_MODELS: BookingModel[] = ['unified_scheduling', 'event_ticket', 'class_session', 'resource_booking'];
 
 /**
  * Whether `/dashboard/calendar` should be available - Docs/ReserveNI_Unified_Booking_Functionality.md §4.2 entry rule.

@@ -18,10 +18,9 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json();
-    const { business_type, plan, calendar_count } = body as {
+    const { business_type, plan } = body as {
       business_type: string;
-      plan: 'standard' | 'business' | 'founding';
-      calendar_count?: number;
+      plan: 'appointments' | 'restaurant' | 'founding' | 'standard' | 'business';
     };
 
     if (!business_type || !plan) {
@@ -29,25 +28,6 @@ export async function POST(request: Request) {
     }
 
     const config = getBusinessConfig(business_type);
-
-    if (config.model === 'table_reservation' && plan === 'standard') {
-      return NextResponse.json(
-        { error: 'Restaurant businesses must subscribe to the Business plan.' },
-        { status: 400 },
-      );
-    }
-
-    if (
-      (config.model === 'event_ticket' ||
-        config.model === 'class_session' ||
-        config.model === 'resource_booking') &&
-      plan === 'standard'
-    ) {
-      return NextResponse.json(
-        { error: 'Events, class, and resource businesses require the Business plan.' },
-        { status: 400 },
-      );
-    }
 
     // Founding Partner: skip Stripe, create venue directly
     if (plan === 'founding') {
@@ -130,11 +110,14 @@ export async function POST(request: Request) {
       return NextResponse.json({ redirect_url: '/onboarding' });
     }
 
-    // Standard or Business: create Stripe Checkout Session
-    const priceId =
-      plan === 'standard'
-        ? process.env.STRIPE_STANDARD_PRICE_ID
-        : process.env.STRIPE_BUSINESS_PRICE_ID;
+    // Create Stripe Checkout Session for paid plans
+    const priceIdMap: Record<string, string | undefined> = {
+      appointments: process.env.STRIPE_APPOINTMENTS_PRICE_ID,
+      restaurant: process.env.STRIPE_RESTAURANT_PRICE_ID,
+      standard: process.env.STRIPE_STANDARD_PRICE_ID ?? process.env.STRIPE_APPOINTMENTS_PRICE_ID,
+      business: process.env.STRIPE_BUSINESS_PRICE_ID ?? process.env.STRIPE_RESTAURANT_PRICE_ID,
+    };
+    const priceId = priceIdMap[plan];
 
     if (!priceId) {
       return NextResponse.json(
@@ -156,7 +139,7 @@ export async function POST(request: Request) {
       },
     });
 
-    const quantity = plan === 'standard' ? (calendar_count ?? 1) : 1;
+    const quantity = 1;
 
     const origin =
       process.env.NEXT_PUBLIC_BASE_URL ||

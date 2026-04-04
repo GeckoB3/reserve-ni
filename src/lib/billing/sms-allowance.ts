@@ -1,23 +1,27 @@
 import { getSupabaseAdminClient } from '@/lib/supabase';
 
-/** Reserve NI Unified Scheduling Engine plan §1.1 - included SMS per paid calendar on Standard tier. */
-export const SMS_INCLUDED_PER_CALENDAR_STANDARD = 200;
+/** Included SMS per month on the Appointments plan (and legacy Standard). */
+export const SMS_INCLUDED_APPOINTMENTS = 300;
 
-/** Plan §1.1 - flat monthly included SMS on Business (and Founding) tier. */
-export const SMS_INCLUDED_BUSINESS_TIER = 800;
+/** Included SMS per month on the Restaurant plan (and legacy Business / Founding). */
+export const SMS_INCLUDED_RESTAURANT = 800;
+
+/** @deprecated Use SMS_INCLUDED_APPOINTMENTS. */
+export const SMS_INCLUDED_PER_CALENDAR_STANDARD = SMS_INCLUDED_APPOINTMENTS;
+/** @deprecated Use SMS_INCLUDED_RESTAURANT. */
+export const SMS_INCLUDED_BUSINESS_TIER = SMS_INCLUDED_RESTAURANT;
 
 /**
- * Standard: 200 SMS × calendar_count (paid seats); Business / Founding: 800 flat.
+ * Appointments / Standard: 300 SMS flat; Restaurant / Business / Founding: 800 flat.
  * Must match `venues.sms_monthly_allowance` persisted by `updateVenueSmsMonthlyAllowance`.
- * Call after subscription tier / calendar_count changes.
+ * Call after subscription tier changes.
  */
-export function computeSmsMonthlyAllowance(pricingTier: string, calendarCount: number | null): number {
-  const tier = (pricingTier ?? 'standard').toLowerCase();
-  if (tier === 'business' || tier === 'founding') {
-    return SMS_INCLUDED_BUSINESS_TIER;
+export function computeSmsMonthlyAllowance(pricingTier: string, _calendarCount: number | null): number {
+  const tier = (pricingTier ?? 'appointments').toLowerCase();
+  if (tier === 'restaurant' || tier === 'business' || tier === 'founding') {
+    return SMS_INCLUDED_RESTAURANT;
   }
-  const n = Math.max(1, calendarCount ?? 1);
-  return SMS_INCLUDED_PER_CALENDAR_STANDARD * n;
+  return SMS_INCLUDED_APPOINTMENTS;
 }
 
 export async function updateVenueSmsMonthlyAllowance(venueId: string): Promise<void> {

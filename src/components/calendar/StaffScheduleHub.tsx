@@ -19,6 +19,7 @@ interface Props {
 export function StaffScheduleHub({ bookingModel, enabledModels }: Props) {
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
   const active = useMemo(() => new Set<BookingModel>([bookingModel, ...enabledModels]), [bookingModel, enabledModels]);
+  const showAppointments = active.has('unified_scheduling') && bookingModel !== 'unified_scheduling';
   const showEvents = active.has('event_ticket');
   const showClasses = active.has('class_session');
   const showResources = active.has('resource_booking');
@@ -39,7 +40,7 @@ export function StaffScheduleHub({ bookingModel, enabledModels }: Props) {
               <Link href="/dashboard/floor-plan" className="font-medium text-brand-700 underline underline-offset-2">
                 Floor plan
               </Link>
-              . This page focuses on events, classes, and resources when enabled.
+              . This page focuses on appointments, events, classes, and resources when enabled.
             </>
           ) : (
             <>
@@ -51,6 +52,15 @@ export function StaffScheduleHub({ bookingModel, enabledModels }: Props) {
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {showAppointments && (
+          <Link
+            href="/dashboard/appointment-services"
+            className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-brand-200 hover:shadow"
+          >
+            <p className="text-sm font-semibold text-slate-900">Appointments &amp; services</p>
+            <p className="mt-1 text-xs text-slate-500">Manage calendars, services, and appointment bookings</p>
+          </Link>
+        )}
         {showEvents && (
           <Link
             href="/dashboard/event-manager"

@@ -168,15 +168,10 @@ async function handleCheckoutCompleted(
       subscription_current_period_end: periodEndIso,
       plan_status: cancelAtPeriodEnd ? 'cancelling' : 'active',
     };
-    if (newPlan === 'standard' || newPlan === 'business') {
+    if (newPlan) {
       changePlanUpdates.pricing_tier = newPlan;
     }
-    if (newPlan === 'standard') {
-      const qty = parseInt(metadata.calendar_count ?? '1', 10);
-      changePlanUpdates.calendar_count = qty;
-    } else {
-      changePlanUpdates.calendar_count = null;
-    }
+    changePlanUpdates.calendar_count = null;
 
     await supabase
       .from('venues')
@@ -227,7 +222,6 @@ async function handleCheckoutCompleted(
   }
 
   const config = getBusinessConfig(businessType);
-  const calendarCount = parseInt(metadata.calendar_count ?? '1', 10);
 
   const subscriptionId =
     typeof session.subscription === 'string' ? session.subscription : null;
@@ -267,7 +261,7 @@ async function handleCheckoutCompleted(
       stripe_subscription_item_id: mainSubscriptionItemId,
       stripe_sms_subscription_item_id: smsSubscriptionItemId,
       subscription_current_period_end: periodEndIso,
-      calendar_count: plan === 'standard' ? calendarCount : null,
+      calendar_count: null,
       onboarding_step: 0,
       onboarding_completed: false,
     })
@@ -322,13 +316,17 @@ async function handleSubscriptionUpdated(
     : typeof mainItem?.price === 'string'
       ? mainItem.price
       : undefined;
-  const std = process.env.STRIPE_STANDARD_PRICE_ID?.trim();
-  const bus = process.env.STRIPE_BUSINESS_PRICE_ID?.trim();
-  if (priceId && std && priceId === std) {
-    updates.pricing_tier = 'standard';
-    updates.calendar_count = mainItem?.quantity ?? 1;
-  } else if (priceId && bus && priceId === bus) {
-    updates.pricing_tier = 'business';
+  const priceToTier: Record<string, string> = {};
+  const addMapping = (envKey: string, tier: string) => {
+    const id = process.env[envKey]?.trim();
+    if (id) priceToTier[id] = tier;
+  };
+  addMapping('STRIPE_APPOINTMENTS_PRICE_ID', 'appointments');
+  addMapping('STRIPE_RESTAURANT_PRICE_ID', 'restaurant');
+  addMapping('STRIPE_STANDARD_PRICE_ID', 'appointments');
+  addMapping('STRIPE_BUSINESS_PRICE_ID', 'restaurant');
+  if (priceId && priceToTier[priceId]) {
+    updates.pricing_tier = priceToTier[priceId];
     updates.calendar_count = null;
   }
 

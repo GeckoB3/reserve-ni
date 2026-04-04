@@ -2,37 +2,29 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { getBusinessConfig, formatSignupBusinessTypeLabel, isDirectModelBusinessType, isSignupSupportedBookingModel } from '@/lib/business-config';
-import { SMS_OVERAGE_GBP_PER_MESSAGE, STANDARD_PRICE_PER_CALENDAR, BUSINESS_PRICE } from '@/lib/pricing-constants';
-import { SMS_INCLUDED_BUSINESS_TIER, SMS_INCLUDED_PER_CALENDAR_STANDARD } from '@/lib/billing/sms-allowance';
+import { getBusinessConfig, formatSignupBusinessTypeLabel, isDirectModelBusinessType } from '@/lib/business-config';
+import { APPOINTMENTS_PRICE, RESTAURANT_PRICE, SMS_OVERAGE_GBP_PER_MESSAGE } from '@/lib/pricing-constants';
+import { SMS_INCLUDED_APPOINTMENTS, SMS_INCLUDED_RESTAURANT } from '@/lib/billing/sms-allowance';
+
+type PlanType = 'appointments' | 'restaurant' | 'founding';
 
 export default function PaymentPage() {
   const router = useRouter();
   const [businessType, setBusinessType] = useState<string | null>(null);
-  const [plan, setPlan] = useState<string | null>(null);
-  const [calendarCount, setCalendarCount] = useState(1);
+  const [plan, setPlan] = useState<PlanType | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const id = requestAnimationFrame(() => {
       const bt = sessionStorage.getItem('signup_business_type');
-      const p = sessionStorage.getItem('signup_plan');
-      const cc = sessionStorage.getItem('signup_calendar_count');
+      const p = sessionStorage.getItem('signup_plan') as PlanType | null;
       if (!bt || !p) {
         router.push('/signup/business-type');
         return;
       }
-      const cfg = getBusinessConfig(bt);
-      if (cfg.model === 'table_reservation' && p === 'standard') {
-        sessionStorage.removeItem('signup_plan');
-        router.replace('/signup/plan');
-        return;
-      }
       setBusinessType(bt);
       setPlan(p);
-      const parsed = cc ? parseInt(cc, 10) : 1;
-      setCalendarCount(Number.isNaN(parsed) || parsed < 1 ? 1 : parsed);
     });
     return () => cancelAnimationFrame(id);
   }, [router]);
@@ -42,21 +34,11 @@ export default function PaymentPage() {
     [businessType]
   );
 
-  useEffect(() => {
-    if (!config) return;
-    if (!isSignupSupportedBookingModel(config.model)) {
-      sessionStorage.removeItem('signup_business_type');
-      sessionStorage.removeItem('signup_plan');
-      sessionStorage.removeItem('signup_calendar_count');
-      router.replace('/signup/business-type');
-    }
-  }, [config, router]);
-
   const totalPrice = useMemo(() => {
-    if (plan === 'standard') return calendarCount * STANDARD_PRICE_PER_CALENDAR;
-    if (plan === 'business') return BUSINESS_PRICE;
-    return 0;
-  }, [plan, calendarCount]);
+    if (plan === 'appointments') return APPOINTMENTS_PRICE;
+    if (plan === 'restaurant') return RESTAURANT_PRICE;
+    return 0; // founding is free
+  }, [plan]);
 
   async function handleCheckout() {
     setLoading(true);
@@ -69,7 +51,6 @@ export default function PaymentPage() {
         body: JSON.stringify({
           business_type: businessType,
           plan,
-          calendar_count: calendarCount,
         }),
       });
 
@@ -101,15 +82,18 @@ export default function PaymentPage() {
     );
   }
 
-  const planLabel = plan === 'founding' ? 'Founding Partner' : plan === 'business' ? 'Business' : 'Standard';
-  const isRestaurant = config.model === 'table_reservation';
+  const overagePence = Math.round(SMS_OVERAGE_GBP_PER_MESSAGE * 100);
+  const isRestaurant = plan === 'restaurant';
+  const isFounding = plan === 'founding';
+  const smsIncluded = isRestaurant || isFounding ? SMS_INCLUDED_RESTAURANT : SMS_INCLUDED_APPOINTMENTS;
+  const planLabel = isFounding ? 'Founding Partner' : isRestaurant ? 'Restaurant' : 'Appointments';
 
   return (
     <div className="w-full max-w-md">
       <div className="mb-8 text-center">
         <h1 className="text-2xl font-bold text-slate-900">Order summary</h1>
         <p className="mt-2 text-sm text-slate-500">
-          Review your selection before {plan === 'founding' ? 'completing setup' : 'proceeding to payment'}.
+          Review your selection before {isFounding ? 'completing setup' : 'proceeding to payment'}.
         </p>
       </div>
 
@@ -133,61 +117,40 @@ export default function PaymentPage() {
             <span className="text-slate-500">Plan</span>
             <span className="font-medium text-slate-900">{planLabel}</span>
           </div>
-          {plan === 'business' && (
-            <div className="rounded-lg border border-slate-100 bg-slate-50/80 px-3 py-2 text-xs text-slate-600">
-              <p className="font-medium text-slate-800">Reserve NI Business: &pound;{BUSINESS_PRICE}/month</p>
-              <p className="mt-1 leading-relaxed">
-                Includes everything in Standard, plus unlimited bookable calendars, {SMS_INCLUDED_BUSINESS_TIER} SMS
-                messages per month, table management with timeline grid and floor plan (for restaurants), and priority
-                support. One flat price, no per-seat costs. Additional SMS at {Math.round(SMS_OVERAGE_GBP_PER_MESSAGE * 100)}
-                p each if you exceed the allowance.
-              </p>
-            </div>
-          )}
-          {plan === 'standard' && (
-            <>
-              <div className="rounded-lg border border-slate-100 bg-slate-50/80 px-3 py-2 text-xs text-slate-600">
-                <p className="font-medium text-slate-800">
-                  Reserve NI Standard: {calendarCount} &times; &pound;{STANDARD_PRICE_PER_CALENDAR}/month = &pound;
-                  {calendarCount * STANDARD_PRICE_PER_CALENDAR}/month
-                </p>
-                <p className="mt-1 leading-relaxed">
-                  {calendarCount} bookable calendar{calendarCount === 1 ? '' : 's'}: all booking features, email and SMS
-                  communications, and email support. {SMS_INCLUDED_PER_CALENDAR_STANDARD} SMS per calendar per month
-                  included; additional SMS at {Math.round(SMS_OVERAGE_GBP_PER_MESSAGE * 100)}p each if you exceed the
-                  allowance.
-                </p>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-slate-500">
-                  {calendarCount === 1 ? config.terms.staff : `${config.terms.staff}s`}
-                </span>
-                <span className="font-medium text-slate-900">{calendarCount}</span>
-              </div>
-            </>
-          )}
-          {plan === 'founding' && isRestaurant && (
+
+          {isFounding ? (
             <div className="rounded-lg border border-emerald-100 bg-emerald-50/60 px-3 py-2 text-xs text-emerald-900">
               <p className="font-medium">
-                Founding Partner: Business plan free for 6 months, then &pound;{BUSINESS_PRICE}/month.
+                Founding Partner: Restaurant plan free for 6 months, then &pound;{RESTAURANT_PRICE}/month.
               </p>
               <p className="mt-1 leading-relaxed">
-                Full Business access: unlimited bookable calendars, {SMS_INCLUDED_BUSINESS_TIER} SMS per month, deposit
-                collection and guest messaging, table management with timeline grid and floor plan, and priority support.
-                Additional SMS at {Math.round(SMS_OVERAGE_GBP_PER_MESSAGE * 100)}p each if you exceed the allowance.
+                Full access: table management, {smsIncluded} SMS per month, deposit collection, guest messaging,
+                and priority support. Additional SMS at {overagePence}p each.
+              </p>
+            </div>
+          ) : (
+            <div className="rounded-lg border border-slate-100 bg-slate-50/80 px-3 py-2 text-xs text-slate-600">
+              <p className="font-medium text-slate-800">
+                Reserve NI {planLabel}: &pound;{totalPrice}/month
+              </p>
+              <p className="mt-1 leading-relaxed">
+                {isRestaurant
+                  ? `Table management, floor plan, all booking types. ${smsIncluded} SMS per month included. Priority support.`
+                  : `All booking types: appointments, classes, events, resources. Unlimited calendars and team members. ${smsIncluded} SMS per month included.`
+                }
+                {' '}Additional SMS at {overagePence}p each.
               </p>
             </div>
           )}
+
           <div className="border-t border-slate-100 pt-4">
             <div className="flex justify-between">
               <span className="text-base font-semibold text-slate-900">
-                {plan === 'founding' ? 'Total' : 'Monthly total'}
+                {isFounding ? 'Total' : 'Monthly total'}
               </span>
               <span className="text-base font-bold text-slate-900">
-                {plan === 'founding' ? (
-                  <>
-                    <span className="text-emerald-600">Free for 6 months</span>
-                  </>
+                {isFounding ? (
+                  <span className="text-emerald-600">Free for 6 months</span>
                 ) : (
                   <>&pound;{totalPrice}/mo</>
                 )}
@@ -208,13 +171,13 @@ export default function PaymentPage() {
         >
           {loading
             ? 'Processing...'
-            : plan === 'founding'
+            : isFounding
               ? 'Complete setup'
               : 'Proceed to payment'}
         </button>
 
         <p className="mt-3 text-center text-xs text-slate-500">Cancel anytime with 30 days notice.</p>
-        {plan !== 'founding' && (
+        {!isFounding && (
           <p className="mt-1 text-center text-xs text-slate-400">
             You&apos;ll be redirected to Stripe for secure payment.
           </p>

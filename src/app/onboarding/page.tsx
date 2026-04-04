@@ -198,12 +198,8 @@ export default function OnboardingPage() {
         }
 
         // Model B: merge existing practitioners (retry / refresh after partial save).
-        // Business / Founding: unlimited calendars; start from one row, add as many as needed.
-        // Standard: one row per paid calendar slot (fixed count).
+        // All plans now have unlimited calendars; start from one row, add as many as needed.
         if (isUnifiedSchedulingVenue(v.booking_model)) {
-          const unlimitedCalendars =
-            v.pricing_tier === 'business' || v.pricing_tier === 'founding';
-          const slots = Math.max(1, v.calendar_count ?? 1);
           try {
             const prRes = await fetch('/api/venue/practitioners');
             if (prRes.ok) {
@@ -212,48 +208,27 @@ export default function OnboardingPage() {
               };
               const list = body.practitioners ?? [];
               const sorted = [...list].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
-              if (unlimitedCalendars) {
-                if (sorted.length === 0) {
-                  setPractitioners([{ name: '', email: '' }]);
-                } else {
-                  setPractitioners(
-                    sorted.map((row) => ({
-                      name: row.name ?? '',
-                      email: row.email?.trim() ? row.email : '',
-                    })),
-                  );
-                }
+              if (sorted.length === 0) {
+                setPractitioners([{ name: '', email: '' }]);
               } else {
                 setPractitioners(
-                  Array.from({ length: slots }, (_, i) =>
-                    sorted[i]
-                      ? {
-                          name: sorted[i].name ?? '',
-                          email: sorted[i].email?.trim() ? sorted[i].email : '',
-                        }
-                      : { name: '', email: '' },
-                  ),
+                  sorted.map((row) => ({
+                    name: row.name ?? '',
+                    email: row.email?.trim() ? row.email : '',
+                  })),
                 );
               }
-            } else if (unlimitedCalendars) {
-              setPractitioners([{ name: '', email: '' }]);
             } else {
-              setPractitioners(Array.from({ length: slots }, () => ({ name: '', email: '' })));
+              setPractitioners([{ name: '', email: '' }]);
             }
           } catch {
-            if (unlimitedCalendars) {
-              setPractitioners([{ name: '', email: '' }]);
-            } else {
-              setPractitioners(Array.from({ length: slots }, () => ({ name: '', email: '' })));
-            }
+            setPractitioners([{ name: '', email: '' }]);
           }
         }
 
-        // Model E: pre-fill resources when plan includes more than one slot
-        if (v.calendar_count && v.calendar_count > 1 && v.booking_model === 'resource_booking') {
-          setResources(
-            Array.from({ length: v.calendar_count }, () => ({ name: '', pricePerSlot: '0.00' }))
-          );
+        // Model E: start with one empty resource row
+        if (v.booking_model === 'resource_booking') {
+          setResources([{ name: '', pricePerSlot: '0.00' }]);
         }
       } catch {
         setError('Failed to load venue data.');
@@ -465,22 +440,9 @@ export default function OnboardingPage() {
         setStep((s) => s + 1);
         return;
       }
-      const slots = Math.max(1, venue?.calendar_count ?? 1);
-      const unlimitedCalendars =
-        venue?.pricing_tier === 'business' || venue?.pricing_tier === 'founding';
-      if (!unlimitedCalendars && practitioners.length !== slots) {
-        setError(
-          'Team size does not match your plan. Refresh the page or continue from Settings if you changed your subscription.',
-        );
-        return;
-      }
       const unnamed = practitioners.find((p) => !p.name.trim());
       if (unnamed) {
-        setError(
-          unlimitedCalendars
-            ? `Enter a name for each ${terms.staff.toLowerCase()}.`
-            : `Enter a name for each ${terms.staff.toLowerCase()}. Your plan includes ${slots} calendar slot${slots === 1 ? '' : 's'}.`,
-        );
+        setError(`Enter a name for each ${terms.staff.toLowerCase()}.`);
         return;
       }
       setSaving(true);
@@ -537,7 +499,7 @@ export default function OnboardingPage() {
               };
               if (errBody.upgrade_required) {
                 throw new Error(
-                  `Your plan includes ${errBody.limit ?? slots} calendar slot${(errBody.limit ?? slots) === 1 ? '' : 's'}. You already have that many team members saved. Edit the rows above, or change your plan under Settings → Plan.`,
+                  'Could not add team member. Please check your plan under Settings \u2192 Plan.',
                 );
               }
               throw new Error(
@@ -549,7 +511,7 @@ export default function OnboardingPage() {
           }
         }
 
-        if (unlimitedCalendars && sortedExisting.length > practitioners.length) {
+        if (sortedExisting.length > practitioners.length) {
           const toRemove = sortedExisting.slice(practitioners.length);
           for (const row of toRemove) {
             if (!row?.id) continue;
@@ -1110,19 +1072,11 @@ export default function OnboardingPage() {
             ) : (
               <>
                 <h2 className="mb-1 text-lg font-bold text-slate-900">
-                  Your {terms.staff.toLowerCase()} ({Math.max(1, venue.calendar_count ?? 1)} calendar slot
-                  {Math.max(1, venue.calendar_count ?? 1) === 1 ? '' : 's'})
+                  Your {terms.staff.toLowerCase()}
                 </h2>
                 <p className="mb-6 text-sm text-slate-500">
-                  Each person below gets their own bookable calendar. This matches the number of slots on your
-                  current plan. After onboarding, change calendar count under{' '}
-                  <Link
-                    href="/dashboard/settings?tab=plan"
-                    className="font-medium text-brand-600 underline hover:text-brand-700"
-                  >
-                    Settings → Plan
-                  </Link>{' '}
-                  and manage {terms.staff.toLowerCase()} under{' '}
+                  Each person gets their own bookable calendar. Add as many as you need - your plan includes
+                  unlimited calendars. Manage {terms.staff.toLowerCase()} under{' '}
                   <Link
                     href="/dashboard/settings?tab=staff"
                     className="font-medium text-brand-600 underline hover:text-brand-700"

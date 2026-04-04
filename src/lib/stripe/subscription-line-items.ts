@@ -15,13 +15,17 @@ function priceIdOf(item: Stripe.SubscriptionItem): string | undefined {
   return typeof p === 'string' ? p : p.id;
 }
 
-/** Subscription line item for the main Standard/Business recurring price (quantity updates). */
+/** Subscription line item for the main plan recurring price (quantity updates). */
 export function findMainPlanSubscriptionItem(sub: Stripe.Subscription): Stripe.SubscriptionItem | undefined {
-  const standard = process.env.STRIPE_STANDARD_PRICE_ID?.trim();
-  const business = process.env.STRIPE_BUSINESS_PRICE_ID?.trim();
+  const knownPriceIds = [
+    process.env.STRIPE_STANDARD_PRICE_ID?.trim(),
+    process.env.STRIPE_BUSINESS_PRICE_ID?.trim(),
+    process.env.STRIPE_APPOINTMENTS_PRICE_ID?.trim(),
+    process.env.STRIPE_RESTAURANT_PRICE_ID?.trim(),
+  ].filter(Boolean) as string[];
   for (const item of sub.items.data) {
     const pid = priceIdOf(item);
-    if (pid && (pid === standard || pid === business)) {
+    if (pid && knownPriceIds.includes(pid)) {
       return item;
     }
   }
