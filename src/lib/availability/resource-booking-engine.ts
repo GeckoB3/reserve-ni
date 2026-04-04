@@ -2,6 +2,8 @@
  * Model E: Resource / facility booking availability engine.
  * Given resources + their availability hours + existing bookings,
  * returns available start times per resource for a requested duration.
+ *
+ * Resources are stored in `unified_calendars` with `calendar_type = 'resource'`.
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -155,8 +157,27 @@ export function computeResourceAvailability(
 }
 
 // ---------------------------------------------------------------------------
-// Fetcher
+// Fetcher — reads from unified_calendars (calendar_type='resource')
 // ---------------------------------------------------------------------------
+
+/** Map a unified_calendars row to the VenueResource shape the engine expects. */
+function mapCalendarToResource(row: Record<string, unknown>): VenueResource {
+  return {
+    id: row.id as string,
+    venue_id: row.venue_id as string,
+    name: row.name as string,
+    resource_type: (row.resource_type as string | null) ?? null,
+    min_booking_minutes: (row.min_booking_minutes as number | null) ?? 60,
+    max_booking_minutes: (row.max_booking_minutes as number | null) ?? 120,
+    slot_interval_minutes: (row.slot_interval_minutes as number | null) ?? 30,
+    price_per_slot_pence: (row.price_per_slot_pence as number | null) ?? null,
+    availability_hours: (row.working_hours as WorkingHours) ?? {},
+    availability_exceptions: (row.availability_exceptions as VenueResource['availability_exceptions']) ?? undefined,
+    is_active: (row.is_active as boolean | null) ?? true,
+    sort_order: (row.sort_order as number | null) ?? 0,
+    created_at: (row.created_at as string) ?? '',
+  };
+}
 
 export async function fetchResourceInput(params: {
   supabase: SupabaseClient;
@@ -167,9 +188,10 @@ export async function fetchResourceInput(params: {
   const { supabase, venueId, date, resourceId } = params;
 
   let resourcesQuery = supabase
-    .from('venue_resources')
+    .from('unified_calendars')
     .select('*')
     .eq('venue_id', venueId)
+    .eq('calendar_type', 'resource')
     .eq('is_active', true)
     .order('sort_order');
   if (resourceId) {
@@ -180,22 +202,33 @@ export async function fetchResourceInput(params: {
     resourcesQuery,
     supabase
       .from('bookings')
-      .select('id, resource_id, booking_time, booking_end_time, status')
+      .select('id, resource_id, calendar_id, booking_time, booking_end_time, status')
       .eq('venue_id', venueId)
       .eq('booking_date', date)
-      .not('resource_id', 'is', null)
+      .or('resource_id.not.is.null,calendar_id.not.is.null')
       .in('status', CAPACITY_CONSUMING_STATUSES),
   ]);
 
-  const resources = (resourcesRes.data ?? []) as VenueResource[];
+  const resources = (resourcesRes.data ?? []).map((r) => mapCalendarToResource(r as Record<string, unknown>));
+  const resourceIdSet = new Set(resources.map((r) => r.id));
 
-  const existingBookings: ResourceBooking[] = (bookingsRes.data ?? []).map((b) => ({
-    id: b.id,
-    resource_id: b.resource_id!,
-    booking_time: (b.booking_time as string).slice(0, 5),
-    booking_end_time: (b.booking_end_time as string)?.slice(0, 5) ?? '00:00',
-    status: b.status,
-  }));
+  const existingBookings: ResourceBooking[] = (bookingsRes.data ?? [])
+    .filter((b) => {
+      const rid = (b as Record<string, unknown>).resource_id as string | null;
+      const cid = (b as Record<string, unknown>).calendar_id as string | null;
+      return (rid && resourceIdSet.has(rid)) || (cid && resourceIdSet.has(cid));
+    })
+    .map((b) => {
+      const row = b as Record<string, unknown>;
+      const rid = (row.resource_id as string | null) ?? (row.calendar_id as string | null) ?? '';
+      return {
+        id: row.id as string,
+        resource_id: rid,
+        booking_time: ((row.booking_time as string) ?? '00:00').slice(0, 5),
+        booking_end_time: ((row.booking_end_time as string) ?? '00:00').slice(0, 5),
+        status: row.status as string,
+      };
+    });
 
   return { date, resources, existingBookings };
 }

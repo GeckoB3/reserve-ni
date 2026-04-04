@@ -94,7 +94,7 @@ export async function GET(request: NextRequest) {
     const { data: bookingRows, error: bookErr } = await staff.db
       .from('bookings')
       .select(
-        'id, booking_date, booking_time, booking_end_time, estimated_end_time, status, party_size, guest_id, experience_event_id, class_instance_id, resource_id',
+        'id, booking_date, booking_time, booking_end_time, estimated_end_time, status, party_size, guest_id, experience_event_id, class_instance_id, resource_id, calendar_id',
       )
       .eq('venue_id', staff.venue_id)
       .or('experience_event_id.not.is.null,class_instance_id.not.is.null,resource_id.not.is.null')
@@ -111,6 +111,10 @@ export async function GET(request: NextRequest) {
     const rows = (bookingRows ?? []).filter((r) => {
       const inferred = inferBookingRowModel(r as Parameters<typeof inferBookingRowModel>[0]);
       if (inferred === 'table_reservation' || inferred === 'practitioner_appointment' || inferred === 'unified_scheduling') {
+        return false;
+      }
+      // Resource bookings with calendar_id render in calendar columns, not the schedule feed lane
+      if (inferred === 'resource_booking' && (r as Record<string, unknown>).calendar_id) {
         return false;
       }
       const kind = inferred as ScheduleBlockKind;
@@ -145,7 +149,7 @@ export async function GET(request: NextRequest) {
 
     const resourceIds = [...new Set(rows.map((r) => r.resource_id).filter(Boolean))] as string[];
     const { data: resourceRows } = resourceIds.length
-      ? await staff.db.from('venue_resources').select('id, name').in('id', resourceIds)
+      ? await staff.db.from('unified_calendars').select('id, name').eq('calendar_type', 'resource').in('id', resourceIds)
       : { data: [] };
     const resourceMap = new Map((resourceRows ?? []).map((r: { id: string; name: string }) => [r.id, r.name]));
 

@@ -1,47 +1,110 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
-import { ResourceCalendarGrid } from '@/components/calendar/ResourceCalendarGrid';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
 
 interface Resource {
   id: string;
   name: string;
   resource_type: string | null;
-  slot_interval_minutes: number | null;
-  min_booking_minutes: number | null;
-  max_booking_minutes: number | null;
+  slot_interval_minutes: number;
+  min_booking_minutes: number;
+  max_booking_minutes: number;
   price_per_slot_pence: number | null;
   is_active: boolean;
   availability_hours: Record<string, Array<{ start: string; end: string }>> | null;
   availability_exceptions?: Record<string, { closed: true } | { periods: Array<{ start: string; end: string }> }> | null;
+  sort_order: number;
 }
 
-interface ResourceFormState {
-  name: string;
-  resource_type: string;
-  slot_interval_minutes: number;
-  min_booking_minutes: number;
-  max_booking_minutes: number;
-  price_per_slot_pence: string;
-  is_active: boolean;
-  availability_hours_json: string;
-  availability_exceptions_json: string;
+interface ResourceBooking {
+  id: string;
+  booking_date: string;
+  booking_time: string;
+  booking_end_time: string | null;
+  status: string;
+  guest_name: string;
+  party_size: number;
 }
 
-const DEFAULT_AVAILABILITY_HOURS_JSON =
-  '{"1":[{"start":"09:00","end":"17:00"}],"2":[{"start":"09:00","end":"17:00"}],"3":[{"start":"09:00","end":"17:00"}],"4":[{"start":"09:00","end":"17:00"}],"5":[{"start":"09:00","end":"17:00"}]}';
+type DayHours = { enabled: boolean; start: string; end: string };
+type WeekHours = Record<string, DayHours>;
 
-const BLANK_RESOURCE: ResourceFormState = {
-  name: '',
-  resource_type: '',
-  slot_interval_minutes: 60,
-  min_booking_minutes: 60,
-  max_booking_minutes: 480,
-  price_per_slot_pence: '',
-  is_active: true,
-  availability_hours_json: DEFAULT_AVAILABILITY_HOURS_JSON,
-  availability_exceptions_json: '{}',
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+const DAY_LABELS: Array<{ key: string; label: string }> = [
+  { key: '1', label: 'Monday' },
+  { key: '2', label: 'Tuesday' },
+  { key: '3', label: 'Wednesday' },
+  { key: '4', label: 'Thursday' },
+  { key: '5', label: 'Friday' },
+  { key: '6', label: 'Saturday' },
+  { key: '0', label: 'Sunday' },
+];
+
+const SLOT_OPTIONS = [15, 30, 45, 60, 90, 120];
+const DURATION_OPTIONS = [15, 30, 45, 60, 90, 120, 180, 240, 360, 480, 720, 1440];
+const RESOURCE_TYPE_SUGGESTIONS = ['Tennis Court', 'Meeting Room', 'Studio', 'Pitch', 'Equipment', 'Desk', 'Bay', 'Lane', 'Pod'];
+
+const STATUS_COLOURS: Record<string, string> = {
+  Confirmed: 'bg-blue-50 text-blue-800 border-blue-200',
+  Pending: 'bg-orange-50 text-orange-900 border-orange-200',
+  Seated: 'bg-violet-50 text-violet-900 border-violet-200',
+  Completed: 'bg-emerald-50 text-emerald-900 border-emerald-200',
+  'No-Show': 'bg-red-50 text-red-800 border-red-200',
+  Cancelled: 'bg-slate-50 text-slate-500 border-slate-200',
 };
+
+function defaultWeekHours(): WeekHours {
+  const h: WeekHours = {};
+  for (const d of DAY_LABELS) {
+    h[d.key] = d.key === '0' || d.key === '6'
+      ? { enabled: false, start: '09:00', end: '17:00' }
+      : { enabled: true, start: '09:00', end: '17:00' };
+  }
+  return h;
+}
+
+function weekHoursFromJSON(hours: Record<string, Array<{ start: string; end: string }>> | null | undefined): WeekHours {
+  const result = defaultWeekHours();
+  if (!hours) return result;
+  for (const d of DAY_LABELS) {
+    const ranges = hours[d.key];
+    if (ranges && ranges.length > 0) {
+      result[d.key] = { enabled: true, start: ranges[0].start, end: ranges[0].end };
+    } else {
+      result[d.key] = { ...result[d.key]!, enabled: false };
+    }
+  }
+  return result;
+}
+
+function weekHoursToJSON(wh: WeekHours): Record<string, Array<{ start: string; end: string }>> {
+  const result: Record<string, Array<{ start: string; end: string }>> = {};
+  for (const d of DAY_LABELS) {
+    const day = wh[d.key]!;
+    if (day.enabled) {
+      result[d.key] = [{ start: day.start, end: day.end }];
+    }
+  }
+  return result;
+}
+
+function formatDuration(mins: number): string {
+  if (mins < 60) return `${mins} min`;
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  return m > 0 ? `${h}h ${m}m` : `${h}h`;
+}
+
+// ---------------------------------------------------------------------------
+// Main Component
+// ---------------------------------------------------------------------------
 
 export function ResourceTimelineView({
   venueId,
@@ -52,84 +115,171 @@ export function ResourceTimelineView({
   isAdmin?: boolean;
   currency?: string;
 }) {
-  const sym = currency === 'EUR' ? '€' : '£';
+  const sym = currency === 'EUR' ? '\u20ac' : '\u00a3';
   function formatPrice(pence: number): string {
     return `${sym}${(pence / 100).toFixed(2)}`;
   }
 
-  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
-
   const [resources, setResources] = useState<Resource[]>([]);
-  const [resourcesLoading, setResourcesLoading] = useState(true);
-  const [showResourceForm, setShowResourceForm] = useState(false);
-  const [editingResourceId, setEditingResourceId] = useState<string | null>(null);
-  const [resourceForm, setResourceForm] = useState<ResourceFormState>({ ...BLANK_RESOURCE });
-  const [resourceSaving, setResourceSaving] = useState(false);
-  const [resourceError, setResourceError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
 
+  // Form state
+  const [formName, setFormName] = useState('');
+  const [formType, setFormType] = useState('');
+  const [formSlot, setFormSlot] = useState(60);
+  const [formMin, setFormMin] = useState(60);
+  const [formMax, setFormMax] = useState(480);
+  const [formPrice, setFormPrice] = useState('');
+  const [formActive, setFormActive] = useState(true);
+  const [formHours, setFormHours] = useState<WeekHours>(defaultWeekHours);
+  const [formExceptions, setFormExceptions] = useState<Record<string, { closed: true } | { periods: Array<{ start: string; end: string }> }>>({});
+  const [formExceptionDate, setFormExceptionDate] = useState('');
+  const [formExceptionType, setFormExceptionType] = useState<'closed' | 'custom'>('closed');
+  const [formExceptionStart, setFormExceptionStart] = useState('09:00');
+  const [formExceptionEnd, setFormExceptionEnd] = useState('17:00');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Bookings for selected resource
+  const [bookingsDate, setBookingsDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [bookings, setBookings] = useState<ResourceBooking[]>([]);
+  const [bookingsLoading, setBookingsLoading] = useState(false);
+
+  const selected = useMemo(() => resources.find((r) => r.id === selectedId) ?? null, [resources, selectedId]);
+
+  // Fetch resources
   const fetchResources = useCallback(async () => {
-    setResourcesLoading(true);
+    setLoading(true);
     try {
       const res = await fetch('/api/venue/resources');
       const data = await res.json();
       setResources(data.resources ?? []);
     } catch {
-      console.error('Failed to load resources');
+      // ignore
     } finally {
-      setResourcesLoading(false);
+      setLoading(false);
     }
   }, []);
 
-  useEffect(() => {
-    void fetchResources();
-  }, [fetchResources]);
+  useEffect(() => { void fetchResources(); }, [fetchResources]);
 
-  const handleSaveResource = async () => {
-    if (!resourceForm.name.trim()) {
-      setResourceError('Resource name is required.');
-      return;
-    }
-    let availability_hours: Record<string, Array<{ start: string; end: string }>> | undefined;
-    try {
-      availability_hours = JSON.parse(resourceForm.availability_hours_json) as Record<string, Array<{ start: string; end: string }>>;
-    } catch {
-      setResourceError('Availability hours is not valid JSON. Check the format and try again.');
-      return;
-    }
-    let availability_exceptions: Record<string, { closed: true } | { periods: Array<{ start: string; end: string }> }>;
-    try {
-      availability_exceptions = JSON.parse(
-        resourceForm.availability_exceptions_json.trim() || '{}',
-      ) as Record<string, { closed: true } | { periods: Array<{ start: string; end: string }> }>;
-      if (typeof availability_exceptions !== 'object' || availability_exceptions === null || Array.isArray(availability_exceptions)) {
-        setResourceError('Availability exceptions must be a JSON object keyed by YYYY-MM-DD.');
-        return;
+  // Fetch bookings for selected resource
+  useEffect(() => {
+    if (!selectedId || showForm) { setBookings([]); return; }
+    let cancelled = false;
+    setBookingsLoading(true);
+    (async () => {
+      try {
+        const res = await fetch(`/api/venue/bookings/list?date=${bookingsDate}&resource_id=${selectedId}`);
+        if (!res.ok) { setBookings([]); return; }
+        const data = await res.json();
+        if (cancelled) return;
+        const rows = (data.bookings ?? []) as Array<Record<string, unknown>>;
+        setBookings(
+          rows
+            .filter((b) => (b.resource_id === selectedId || b.calendar_id === selectedId))
+            .map((b) => ({
+              id: b.id as string,
+              booking_date: b.booking_date as string,
+              booking_time: ((b.booking_time as string) ?? '').slice(0, 5),
+              booking_end_time: b.booking_end_time ? (b.booking_end_time as string).slice(0, 5) : null,
+              status: b.status as string,
+              guest_name: (b.guest_name as string) ?? 'Guest',
+              party_size: (b.party_size as number) ?? 1,
+            }))
+            .sort((a, b) => a.booking_time.localeCompare(b.booking_time)),
+        );
+      } catch {
+        if (!cancelled) setBookings([]);
+      } finally {
+        if (!cancelled) setBookingsLoading(false);
       }
-    } catch {
-      setResourceError('Availability exceptions is not valid JSON.');
-      return;
-    }
-    setResourceSaving(true);
-    setResourceError(null);
+    })();
+    return () => { cancelled = true; };
+  }, [selectedId, bookingsDate, showForm]);
+
+  // Select first resource on load
+  useEffect(() => {
+    if (!selectedId && resources.length > 0) setSelectedId(resources[0].id);
+  }, [resources, selectedId]);
+
+  // Form helpers
+  function openCreate() {
+    setEditingId(null);
+    setFormName('');
+    setFormType('');
+    setFormSlot(60);
+    setFormMin(60);
+    setFormMax(480);
+    setFormPrice('');
+    setFormActive(true);
+    setFormHours(defaultWeekHours());
+    setFormExceptions({});
+    setFormExceptionDate('');
+    setError(null);
+    setShowForm(true);
+  }
+
+  function openEdit(r: Resource) {
+    setEditingId(r.id);
+    setFormName(r.name);
+    setFormType(r.resource_type ?? '');
+    setFormSlot(r.slot_interval_minutes);
+    setFormMin(r.min_booking_minutes);
+    setFormMax(r.max_booking_minutes);
+    setFormPrice(r.price_per_slot_pence != null ? (r.price_per_slot_pence / 100).toFixed(2) : '');
+    setFormActive(r.is_active);
+    setFormHours(weekHoursFromJSON(r.availability_hours));
+    setFormExceptions(r.availability_exceptions ? { ...r.availability_exceptions } : {});
+    setFormExceptionDate('');
+    setError(null);
+    setShowForm(true);
+  }
+
+  function addException() {
+    if (!formExceptionDate) return;
+    setFormExceptions((prev) => ({
+      ...prev,
+      [formExceptionDate]: formExceptionType === 'closed'
+        ? { closed: true as const }
+        : { periods: [{ start: formExceptionStart, end: formExceptionEnd }] },
+    }));
+    setFormExceptionDate('');
+  }
+
+  function removeException(dateKey: string) {
+    setFormExceptions((prev) => {
+      const next = { ...prev };
+      delete next[dateKey];
+      return next;
+    });
+  }
+
+  async function handleSave() {
+    if (!formName.trim()) { setError('Resource name is required.'); return; }
+    if (formMin > formMax) { setError('Min booking duration cannot exceed max.'); return; }
+    setSaving(true);
+    setError(null);
     try {
       const payload = {
-        name: resourceForm.name.trim(),
-        ...(resourceForm.resource_type.trim() && { resource_type: resourceForm.resource_type.trim() }),
-        slot_interval_minutes: resourceForm.slot_interval_minutes,
-        min_booking_minutes: resourceForm.min_booking_minutes,
-        max_booking_minutes: resourceForm.max_booking_minutes,
-        ...(resourceForm.price_per_slot_pence !== '' && {
-          price_per_slot_pence: Math.round(parseFloat(resourceForm.price_per_slot_pence) * 100),
-        }),
-        is_active: resourceForm.is_active,
-        availability_hours,
-        availability_exceptions,
+        name: formName.trim(),
+        ...(formType.trim() && { resource_type: formType.trim() }),
+        slot_interval_minutes: formSlot,
+        min_booking_minutes: formMin,
+        max_booking_minutes: formMax,
+        ...(formPrice !== '' && { price_per_slot_pence: Math.round(parseFloat(formPrice) * 100) }),
+        is_active: formActive,
+        availability_hours: weekHoursToJSON(formHours),
+        availability_exceptions: formExceptions,
       };
-      const res = editingResourceId
+      const res = editingId
         ? await fetch('/api/venue/resources', {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ id: editingResourceId, ...payload }),
+            body: JSON.stringify({ id: editingId, ...payload }),
           })
         : await fetch('/api/venue/resources', {
             method: 'POST',
@@ -137,311 +287,362 @@ export function ResourceTimelineView({
             body: JSON.stringify(payload),
           });
       const json = await res.json();
-      if (!res.ok) {
-        setResourceError((json as { error?: string }).error ?? 'Save failed');
-        return;
-      }
-      setShowResourceForm(false);
-      setEditingResourceId(null);
-      setResourceForm({ ...BLANK_RESOURCE });
+      if (!res.ok) { setError((json as { error?: string }).error ?? 'Save failed'); return; }
+      const savedId = (json as { id?: string }).id ?? editingId;
+      setShowForm(false);
       await fetchResources();
+      if (savedId) setSelectedId(savedId);
     } catch {
-      setResourceError('Save failed');
+      setError('Save failed');
     } finally {
-      setResourceSaving(false);
+      setSaving(false);
     }
-  };
+  }
 
-  const handleEditResource = (r: Resource) => {
-    setResourceForm({
-      name: r.name,
-      resource_type: r.resource_type ?? '',
-      slot_interval_minutes: r.slot_interval_minutes ?? 60,
-      min_booking_minutes: r.min_booking_minutes ?? 60,
-      max_booking_minutes: r.max_booking_minutes ?? 480,
-      price_per_slot_pence: r.price_per_slot_pence != null ? (r.price_per_slot_pence / 100).toFixed(2) : '',
-      is_active: r.is_active,
-      availability_hours_json: r.availability_hours
-        ? JSON.stringify(r.availability_hours, null, 2)
-        : DEFAULT_AVAILABILITY_HOURS_JSON,
-      availability_exceptions_json: r.availability_exceptions
-        ? JSON.stringify(r.availability_exceptions, null, 2)
-        : '{}',
-    });
-    setEditingResourceId(r.id);
-    setResourceError(null);
-    setShowResourceForm(true);
-  };
-
-  const handleDeleteResource = async (id: string) => {
-    if (!window.confirm('Delete this resource? Existing bookings are not affected.')) return;
+  async function handleDelete(id: string) {
+    const r = resources.find((x) => x.id === id);
+    if (!window.confirm(`Delete "${r?.name ?? 'this resource'}"? Existing bookings are not affected.`)) return;
     try {
       const res = await fetch('/api/venue/resources', {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id }),
       });
-      if (!res.ok) {
-        const json = await res.json();
-        window.alert((json as { error?: string }).error ?? 'Delete failed');
-        return;
-      }
+      if (!res.ok) { const j = await res.json(); window.alert((j as { error?: string }).error ?? 'Delete failed'); return; }
+      if (selectedId === id) setSelectedId(null);
       await fetchResources();
     } catch {
       window.alert('Delete failed');
     }
-  };
+  }
+
+  // -------------------------------------------------------------------------
+  // Render
+  // -------------------------------------------------------------------------
+
+  if (loading) {
+    return (
+      <div className="flex min-h-[40vh] items-center justify-center">
+        <div className="h-8 w-8 animate-spin rounded-full border-4 border-brand-200 border-t-brand-600" />
+      </div>
+    );
+  }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-
-      {/* Resource management panel - admin only */}
-      {isAdmin && (
-        <div className="mb-6 rounded-xl border border-slate-200 bg-white shadow-sm">
-          <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
-            <h2 className="text-sm font-semibold text-slate-700">Resources</h2>
-            <button
-              type="button"
-              onClick={() => {
-                setEditingResourceId(null);
-                setResourceForm({ ...BLANK_RESOURCE });
-                setResourceError(null);
-                setShowResourceForm(true);
-              }}
-              className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-700"
-            >
-              + Add resource
-            </button>
-          </div>
-
-          {resourcesLoading ? (
-            <div className="m-4 h-12 animate-pulse rounded bg-slate-100" />
-          ) : resources.length === 0 && !showResourceForm ? (
-            <p className="px-5 py-4 text-sm text-slate-500">
-              No resources yet.{' '}
-              <button
-                type="button"
-                className="text-brand-600 underline hover:text-brand-700"
-                onClick={() => {
-                  setResourceForm({ ...BLANK_RESOURCE });
-                  setResourceError(null);
-                  setShowResourceForm(true);
-                }}
-              >
-                Add one to appear on the booking widget.
+    <div className="flex min-h-0 flex-col gap-6 lg:flex-row lg:items-start">
+      {/* ─── Sidebar: resource list ─── */}
+      <div className="w-full shrink-0 lg:w-72 xl:w-80">
+        <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
+          <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+            <h2 className="text-sm font-semibold text-slate-900">Resources</h2>
+            {isAdmin && (
+              <button type="button" onClick={openCreate} className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-brand-700 transition-colors">
+                + Add
               </button>
-            </p>
-          ) : (
-            resources.length > 0 && (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-slate-100 text-xs font-medium text-slate-500">
-                      <th className="px-5 py-2 text-left">Name</th>
-                      <th className="px-3 py-2 text-left">Type</th>
-                      <th className="px-3 py-2 text-left">Slot</th>
-                      <th className="px-3 py-2 text-left">Price/slot</th>
-                      <th className="px-3 py-2 text-left">Status</th>
-                      <th className="px-3 py-2" />
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-50">
-                    {resources.map((r) => (
-                      <tr key={r.id}>
-                        <td className="px-5 py-3 font-medium text-slate-900">{r.name}</td>
-                        <td className="px-3 py-3 text-slate-500">{r.resource_type ?? '-'}</td>
-                        <td className="px-3 py-3 text-slate-500">
-                          {r.slot_interval_minutes ? `${r.slot_interval_minutes} min` : '-'}
-                        </td>
-                        <td className="px-3 py-3 text-slate-500">
-                          {r.price_per_slot_pence != null ? `${formatPrice(r.price_per_slot_pence)}/slot` : '-'}
-                        </td>
-                        <td className="px-3 py-3">
-                          {r.is_active ? (
-                            <span className="text-emerald-600">Active</span>
-                          ) : (
-                            <span className="text-slate-400">Inactive</span>
-                          )}
-                        </td>
-                        <td className="px-3 py-3">
-                          <div className="flex gap-3">
-                            <button
-                              type="button"
-                              onClick={() => handleEditResource(r)}
-                              className="text-xs font-medium text-slate-600 hover:text-slate-900"
-                            >
-                              Edit
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => void handleDeleteResource(r.id)}
-                              className="text-xs font-medium text-red-500 hover:text-red-700"
-                            >
-                              Delete
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )
-          )}
-
-          {/* Add / edit resource form */}
-          {showResourceForm && (
-            <div className="border-t border-slate-100 px-5 py-4">
-              <h3 className="mb-3 text-sm font-semibold text-slate-800">
-                {editingResourceId ? 'Edit resource' : 'New resource'}
-              </h3>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-slate-600">Name *</label>
-                  <input
-                    type="text"
-                    value={resourceForm.name}
-                    onChange={(e) => setResourceForm((f) => ({ ...f, name: e.target.value }))}
-                    placeholder="e.g. Court 1"
-                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-slate-600">
-                    Type <span className="font-normal text-slate-400">optional</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={resourceForm.resource_type}
-                    onChange={(e) => setResourceForm((f) => ({ ...f, resource_type: e.target.value }))}
-                    placeholder="e.g. Tennis Court"
-                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-slate-600">Slot interval (minutes)</label>
-                  <input
-                    type="number"
-                    min={5}
-                    max={120}
-                    value={resourceForm.slot_interval_minutes}
-                    onChange={(e) => setResourceForm((f) => ({ ...f, slot_interval_minutes: parseInt(e.target.value) || 60 }))}
-                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-slate-600">
-                    Price per slot ({sym}) <span className="font-normal text-slate-400">optional</span>
-                  </label>
-                  <input
-                    type="number"
-                    min={0}
-                    step={0.01}
-                    value={resourceForm.price_per_slot_pence}
-                    onChange={(e) => setResourceForm((f) => ({ ...f, price_per_slot_pence: e.target.value }))}
-                    placeholder="0.00"
-                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-slate-600">Min booking (minutes)</label>
-                  <input
-                    type="number"
-                    min={15}
-                    value={resourceForm.min_booking_minutes}
-                    onChange={(e) => setResourceForm((f) => ({ ...f, min_booking_minutes: parseInt(e.target.value) || 60 }))}
-                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-slate-600">Max booking (minutes)</label>
-                  <input
-                    type="number"
-                    min={15}
-                    value={resourceForm.max_booking_minutes}
-                    onChange={(e) => setResourceForm((f) => ({ ...f, max_booking_minutes: parseInt(e.target.value) || 480 }))}
-                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
-                  />
-                </div>
-                <div className="flex items-center gap-2 pt-4">
-                  <input
-                    id="res-active"
-                    type="checkbox"
-                    checked={resourceForm.is_active}
-                    onChange={(e) => setResourceForm((f) => ({ ...f, is_active: e.target.checked }))}
-                    className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
-                  />
-                  <label htmlFor="res-active" className="text-sm text-slate-700">Active (bookable by guests)</label>
-                </div>
-              </div>
-
-              <div className="mt-3">
-                <label className="mb-1 block text-xs font-medium text-slate-600">
-                  Availability hours (JSON)
-                </label>
-                <textarea
-                  value={resourceForm.availability_hours_json}
-                  onChange={(e) => setResourceForm((f) => ({ ...f, availability_hours_json: e.target.value }))}
-                  rows={6}
-                  className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 font-mono text-xs focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
-                />
-                <p className="mt-1 text-xs text-slate-400">
-                  Keys 0–6 = Sun–Sat. Each entry: {'{'}&#34;start&#34;:&#34;09:00&#34;,&#34;end&#34;:&#34;17:00&#34;{'}'}
-                </p>
-              </div>
-
-              <div className="mt-3">
-                <label className="mb-1 block text-xs font-medium text-slate-600">
-                  Date overrides (JSON)
-                </label>
-                <textarea
-                  value={resourceForm.availability_exceptions_json}
-                  onChange={(e) => setResourceForm((f) => ({ ...f, availability_exceptions_json: e.target.value }))}
-                  rows={5}
-                  placeholder={'{\n  "2026-12-25": { "closed": true },\n  "2026-12-31": { "periods": [{ "start": "18:00", "end": "23:00" }] }\n}'}
-                  className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 font-mono text-xs focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
-                />
-                <p className="mt-1 text-xs text-slate-400">
-                  Per-date overrides on top of weekly hours. Use{' '}
-                  <code className="rounded bg-slate-100 px-0.5">{`{ "closed": true }`}</code> or{' '}
-                  <code className="rounded bg-slate-100 px-0.5">{`{ "periods": [...] }`}</code> for custom hours.
-                </p>
-              </div>
-
-              {resourceError && <p className="mt-2 text-sm text-red-600">{resourceError}</p>}
-              <div className="mt-3 flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => void handleSaveResource()}
-                  disabled={resourceSaving}
-                  className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
-                >
-                  {resourceSaving ? 'Saving…' : 'Save resource'}
+            )}
+          </div>
+          {resources.length === 0 ? (
+            <div className="px-4 py-8 text-center">
+              <svg className="mx-auto h-10 w-10 text-slate-300" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5M10 11.25h4M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z" />
+              </svg>
+              <p className="mt-2 text-sm text-slate-500">No resources yet.</p>
+              {isAdmin && (
+                <button type="button" onClick={openCreate} className="mt-3 text-sm font-medium text-brand-600 hover:text-brand-800">
+                  Create your first resource
                 </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowResourceForm(false);
-                    setEditingResourceId(null);
-                    setResourceError(null);
-                  }}
-                  className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-                >
-                  Cancel
-                </button>
-              </div>
+              )}
             </div>
+          ) : (
+            <ul className="divide-y divide-slate-50">
+              {resources.map((r) => (
+                <li key={r.id}>
+                  <button
+                    type="button"
+                    onClick={() => { setSelectedId(r.id); setShowForm(false); }}
+                    className={`flex w-full items-center gap-3 px-4 py-3 text-left transition-colors ${
+                      selectedId === r.id && !showForm ? 'bg-brand-50' : 'hover:bg-slate-50'
+                    }`}
+                  >
+                    <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${r.is_active ? 'bg-emerald-500' : 'bg-slate-300'}`} />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-medium text-slate-900">{r.name}</span>
+                      <span className="block truncate text-xs text-slate-500">
+                        {r.resource_type ?? 'Resource'}
+                        {r.price_per_slot_pence != null && ` \u00b7 ${formatPrice(r.price_per_slot_pence)}/slot`}
+                      </span>
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
           )}
         </div>
-      )}
-
-      <div className="mb-4">
-        <h1 className="text-2xl font-semibold text-slate-900">Resource timeline</h1>
-        <p className="mt-1 text-sm text-slate-500">
-          Day view by resource: bookings and optional free slot starts for staff.
-        </p>
       </div>
-      <ResourceCalendarGrid venueId={venueId} date={date} currency={currency} onDateChange={setDate} />
+
+      {/* ─── Main panel ─── */}
+      <div className="min-w-0 flex-1">
+        {showForm ? (
+          /* ── Create / Edit form ── */
+          <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+            <h2 className="text-lg font-semibold text-slate-900">{editingId ? 'Edit resource' : 'New resource'}</h2>
+
+            {/* Basic info */}
+            <div className="mt-4 grid gap-4 sm:grid-cols-2">
+              <div>
+                <label className="mb-1 block text-xs font-medium text-slate-600">Name *</label>
+                <input type="text" value={formName} onChange={(e) => setFormName(e.target.value)} placeholder="e.g. Court 1" className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-slate-600">Type</label>
+                <input type="text" list="resource-type-suggestions" value={formType} onChange={(e) => setFormType(e.target.value)} placeholder="e.g. Tennis Court" className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
+                <datalist id="resource-type-suggestions">
+                  {RESOURCE_TYPE_SUGGESTIONS.map((s) => <option key={s} value={s} />)}
+                </datalist>
+              </div>
+            </div>
+
+            {/* Booking rules */}
+            <h3 className="mt-6 text-sm font-semibold text-slate-800">Booking rules</h3>
+            <div className="mt-2 grid gap-4 sm:grid-cols-3">
+              <div>
+                <label className="mb-1 block text-xs font-medium text-slate-600">Slot interval</label>
+                <select value={formSlot} onChange={(e) => setFormSlot(Number(e.target.value))} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500">
+                  {SLOT_OPTIONS.map((m) => <option key={m} value={m}>{formatDuration(m)}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-slate-600">Min booking</label>
+                <select value={formMin} onChange={(e) => setFormMin(Number(e.target.value))} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500">
+                  {DURATION_OPTIONS.map((m) => <option key={m} value={m}>{formatDuration(m)}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-slate-600">Max booking</label>
+                <select value={formMax} onChange={(e) => setFormMax(Number(e.target.value))} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500">
+                  {DURATION_OPTIONS.map((m) => <option key={m} value={m}>{formatDuration(m)}</option>)}
+                </select>
+              </div>
+            </div>
+            <div className="mt-3 grid gap-4 sm:grid-cols-2">
+              <div>
+                <label className="mb-1 block text-xs font-medium text-slate-600">Price per slot ({sym})</label>
+                <input type="number" min={0} step={0.01} value={formPrice} onChange={(e) => setFormPrice(e.target.value)} placeholder="Leave blank for free" className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
+              </div>
+              <div className="flex items-end pb-1">
+                <label className="flex items-center gap-2 text-sm text-slate-700">
+                  <input type="checkbox" checked={formActive} onChange={(e) => setFormActive(e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500" />
+                  Active (bookable by guests)
+                </label>
+              </div>
+            </div>
+
+            {/* Weekly availability */}
+            <h3 className="mt-6 text-sm font-semibold text-slate-800">Weekly availability</h3>
+            <div className="mt-2 space-y-2">
+              {DAY_LABELS.map((d) => {
+                const day = formHours[d.key]!;
+                return (
+                  <div key={d.key} className="flex items-center gap-3 rounded-lg border border-slate-100 bg-slate-50/60 px-3 py-2">
+                    <label className="flex w-24 shrink-0 items-center gap-2 text-sm">
+                      <input type="checkbox" checked={day.enabled} onChange={(e) => setFormHours((h) => ({ ...h, [d.key]: { ...h[d.key]!, enabled: e.target.checked } }))} className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500" />
+                      {d.label.slice(0, 3)}
+                    </label>
+                    {day.enabled && (
+                      <div className="flex items-center gap-1.5 text-sm">
+                        <input type="time" value={day.start} onChange={(e) => setFormHours((h) => ({ ...h, [d.key]: { ...h[d.key]!, start: e.target.value } }))} className="rounded border border-slate-200 px-2 py-1 text-xs" />
+                        <span className="text-slate-400">&ndash;</span>
+                        <input type="time" value={day.end} onChange={(e) => setFormHours((h) => ({ ...h, [d.key]: { ...h[d.key]!, end: e.target.value } }))} className="rounded border border-slate-200 px-2 py-1 text-xs" />
+                      </div>
+                    )}
+                    {!day.enabled && <span className="text-xs text-slate-400">Closed</span>}
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Date exceptions */}
+            <h3 className="mt-6 text-sm font-semibold text-slate-800">Date exceptions</h3>
+            <p className="mt-1 text-xs text-slate-500">Override specific dates (holidays, special hours).</p>
+            <div className="mt-2 flex flex-wrap items-end gap-2">
+              <div>
+                <label className="mb-1 block text-xs text-slate-600">Date</label>
+                <input type="date" value={formExceptionDate} onChange={(e) => setFormExceptionDate(e.target.value)} className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm" />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs text-slate-600">Type</label>
+                <select value={formExceptionType} onChange={(e) => setFormExceptionType(e.target.value as 'closed' | 'custom')} className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm">
+                  <option value="closed">Closed</option>
+                  <option value="custom">Custom hours</option>
+                </select>
+              </div>
+              {formExceptionType === 'custom' && (
+                <>
+                  <div>
+                    <label className="mb-1 block text-xs text-slate-600">From</label>
+                    <input type="time" value={formExceptionStart} onChange={(e) => setFormExceptionStart(e.target.value)} className="rounded border border-slate-200 px-2 py-1.5 text-sm" />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs text-slate-600">To</label>
+                    <input type="time" value={formExceptionEnd} onChange={(e) => setFormExceptionEnd(e.target.value)} className="rounded border border-slate-200 px-2 py-1.5 text-sm" />
+                  </div>
+                </>
+              )}
+              <button type="button" onClick={addException} disabled={!formExceptionDate} className="rounded-lg bg-slate-800 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-900 disabled:opacity-50">
+                Add
+              </button>
+            </div>
+            {Object.keys(formExceptions).length > 0 && (
+              <ul className="mt-2 space-y-1">
+                {Object.entries(formExceptions)
+                  .sort(([a], [b]) => a.localeCompare(b))
+                  .map(([dateKey, val]) => (
+                    <li key={dateKey} className="flex items-center justify-between rounded-lg border border-slate-100 bg-slate-50/60 px-3 py-1.5 text-sm">
+                      <span>
+                        <span className="font-medium text-slate-800">{dateKey}</span>
+                        <span className="ml-2 text-slate-500">
+                          {'closed' in val ? 'Closed' : `${val.periods[0].start} \u2013 ${val.periods[0].end}`}
+                        </span>
+                      </span>
+                      <button type="button" onClick={() => removeException(dateKey)} className="text-xs text-red-500 hover:text-red-700">Remove</button>
+                    </li>
+                  ))}
+              </ul>
+            )}
+
+            {error && <p className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+
+            <div className="mt-6 flex gap-2">
+              <button type="button" onClick={() => void handleSave()} disabled={saving} className="rounded-lg bg-brand-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 disabled:opacity-50 transition-colors">
+                {saving ? 'Saving\u2026' : editingId ? 'Save changes' : 'Create resource'}
+              </button>
+              <button type="button" onClick={() => setShowForm(false)} className="rounded-lg border border-slate-200 px-5 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors">
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : selected ? (
+          /* ── Selected resource detail ── */
+          <div className="space-y-4">
+            {/* Header */}
+            <div className="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+              <div>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-lg font-semibold text-slate-900">{selected.name}</h2>
+                  <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${selected.is_active ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+                    {selected.is_active ? 'Active' : 'Inactive'}
+                  </span>
+                </div>
+                {selected.resource_type && <p className="mt-0.5 text-sm text-slate-500">{selected.resource_type}</p>}
+              </div>
+              {isAdmin && (
+                <div className="flex gap-2">
+                  <button type="button" onClick={() => openEdit(selected)} className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 transition-colors">
+                    Edit
+                  </button>
+                  <button type="button" onClick={() => void handleDelete(selected.id)} className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 transition-colors">
+                    Delete
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Info cards */}
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              <InfoCard label="Slot interval" value={formatDuration(selected.slot_interval_minutes)} />
+              <InfoCard label="Min booking" value={formatDuration(selected.min_booking_minutes)} />
+              <InfoCard label="Max booking" value={formatDuration(selected.max_booking_minutes)} />
+              <InfoCard label="Price / slot" value={selected.price_per_slot_pence != null ? formatPrice(selected.price_per_slot_pence) : 'Free'} />
+            </div>
+
+            {/* Availability */}
+            <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+              <h3 className="text-sm font-semibold text-slate-900">Weekly availability</h3>
+              <div className="mt-3 space-y-1.5">
+                {DAY_LABELS.map((d) => {
+                  const ranges = selected.availability_hours?.[d.key];
+                  const open = ranges && ranges.length > 0;
+                  return (
+                    <div key={d.key} className="flex items-center gap-3 text-sm">
+                      <span className="w-20 text-slate-600">{d.label.slice(0, 3)}</span>
+                      {open ? (
+                        <span className="text-slate-900">{ranges![0].start} &ndash; {ranges![0].end}</span>
+                      ) : (
+                        <span className="text-slate-400">Closed</span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+              {selected.availability_exceptions && Object.keys(selected.availability_exceptions).length > 0 && (
+                <>
+                  <h4 className="mt-4 text-xs font-semibold text-slate-700">Date exceptions</h4>
+                  <ul className="mt-1.5 space-y-1 text-sm">
+                    {Object.entries(selected.availability_exceptions)
+                      .sort(([a], [b]) => a.localeCompare(b))
+                      .map(([dateKey, val]) => (
+                        <li key={dateKey} className="text-slate-600">
+                          <span className="font-medium">{dateKey}:</span>{' '}
+                          {'closed' in val ? 'Closed' : `${val.periods[0].start} \u2013 ${val.periods[0].end}`}
+                        </li>
+                      ))}
+                  </ul>
+                </>
+              )}
+            </div>
+
+            {/* Bookings list */}
+            <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h3 className="text-sm font-semibold text-slate-900">Bookings</h3>
+                <div className="flex items-center gap-1.5">
+                  <button type="button" onClick={() => setBookingsDate((d) => { const t = new Date(`${d}T12:00:00`); t.setDate(t.getDate() - 1); return t.toISOString().slice(0, 10); })} className="rounded border border-slate-200 px-2 py-1 text-xs hover:bg-slate-50">&larr;</button>
+                  <input type="date" value={bookingsDate} onChange={(e) => setBookingsDate(e.target.value)} className="rounded border border-slate-200 px-2 py-1 text-xs" />
+                  <button type="button" onClick={() => setBookingsDate((d) => { const t = new Date(`${d}T12:00:00`); t.setDate(t.getDate() + 1); return t.toISOString().slice(0, 10); })} className="rounded border border-slate-200 px-2 py-1 text-xs hover:bg-slate-50">&rarr;</button>
+                  <button type="button" onClick={() => setBookingsDate(new Date().toISOString().slice(0, 10))} className="rounded border border-slate-200 px-2 py-1 text-xs font-medium hover:bg-slate-50">Today</button>
+                </div>
+              </div>
+              {bookingsLoading ? (
+                <div className="mt-4 h-8 animate-pulse rounded bg-slate-100" />
+              ) : bookings.length === 0 ? (
+                <p className="mt-4 text-center text-sm text-slate-400">No bookings on this date.</p>
+              ) : (
+                <ul className="mt-3 space-y-2">
+                  {bookings.map((b) => (
+                    <li key={b.id} className={`flex items-center justify-between rounded-lg border px-3 py-2 ${STATUS_COLOURS[b.status] ?? 'bg-white text-slate-900 border-slate-200'}`}>
+                      <div className="min-w-0">
+                        <span className="text-sm font-medium">{b.guest_name}</span>
+                        <span className="ml-2 text-xs opacity-75">
+                          {b.booking_time}{b.booking_end_time ? ` \u2013 ${b.booking_end_time}` : ''}
+                        </span>
+                      </div>
+                      <span className="shrink-0 text-xs font-medium">{b.status}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+        ) : (
+          /* ── Empty state ── */
+          <div className="flex min-h-[30vh] items-center justify-center rounded-xl border border-dashed border-slate-200 bg-white">
+            <div className="text-center">
+              <p className="text-sm text-slate-500">
+                {resources.length > 0 ? 'Select a resource from the list.' : 'Create a resource to get started.'}
+              </p>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function InfoCard({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+      <p className="text-xs font-medium text-slate-500">{label}</p>
+      <p className="mt-0.5 text-sm font-semibold text-slate-900">{value}</p>
     </div>
   );
 }

@@ -3,9 +3,6 @@
 export type CalendarToolbarViewMode = 'day' | 'week' | 'month';
 
 export interface PractitionerCalendarToolbarProps {
-  resourceScheduleEnabled: boolean;
-  scheduleKind: 'appointments' | 'resources';
-  onScheduleKindChange: (k: 'appointments' | 'resources') => void;
   viewMode: CalendarToolbarViewMode;
   onViewModeChange: (m: CalendarToolbarViewMode) => void;
   onNavigateDay: (delta: 1 | -1) => void;
@@ -15,13 +12,9 @@ export interface PractitionerCalendarToolbarProps {
 }
 
 /**
- * Top row: title, appointments/resources toggle, day/week/month, prev/today/next, date picker.
- * Extracted from PractitionerCalendarView to keep the main component smaller.
+ * Top row: title, day/week/month, prev/today/next, date picker.
  */
 export function PractitionerCalendarToolbar({
-  resourceScheduleEnabled,
-  scheduleKind,
-  onScheduleKindChange,
   viewMode,
   onViewModeChange,
   onNavigateDay,
@@ -29,56 +22,30 @@ export function PractitionerCalendarToolbar({
   date,
   onDateChange,
 }: PractitionerCalendarToolbarProps) {
-  const showDateInput = scheduleKind === 'resources' || viewMode === 'day';
+  const showDateInput = viewMode === 'day';
 
   return (
     <div className="flex flex-wrap items-center justify-between gap-2">
       <div className="flex flex-wrap items-center gap-2">
         <h1 className="text-xl font-semibold text-slate-900 sm:text-2xl">Calendar</h1>
-        {resourceScheduleEnabled && (
-          <div className="flex rounded-lg border border-slate-200 p-0.5 text-xs font-medium">
-            <button
-              type="button"
-              onClick={() => onScheduleKindChange('appointments')}
-              className={`rounded-md px-2.5 py-1 ${
-                scheduleKind === 'appointments'
-                  ? 'bg-slate-900 text-white'
-                  : 'text-slate-600 hover:bg-slate-50'
-              }`}
-            >
-              Appointments
-            </button>
-            <button
-              type="button"
-              onClick={() => onScheduleKindChange('resources')}
-              className={`rounded-md px-2.5 py-1 ${
-                scheduleKind === 'resources' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-50'
-              }`}
-            >
-              Resources
-            </button>
-          </div>
-        )}
       </div>
       <div className="flex flex-wrap items-center gap-2">
-        {scheduleKind === 'appointments' && (
-          <div className="flex rounded-lg border border-slate-200 p-0.5 text-xs font-medium">
-            {(['day', 'week', 'month'] as const).map((m) => (
-              <button
-                key={m}
-                type="button"
-                aria-label={`${m} schedule view`}
-                aria-pressed={viewMode === m}
-                onClick={() => onViewModeChange(m)}
-                className={`rounded-md px-2.5 py-1 capitalize ${
-                  viewMode === m ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-50'
-                }`}
-              >
-                {m}
-              </button>
-            ))}
-          </div>
-        )}
+        <div className="flex rounded-lg border border-slate-200 p-0.5 text-xs font-medium">
+          {(['day', 'week', 'month'] as const).map((m) => (
+            <button
+              key={m}
+              type="button"
+              aria-label={`${m} schedule view`}
+              aria-pressed={viewMode === m}
+              onClick={() => onViewModeChange(m)}
+              className={`rounded-md px-2.5 py-1 capitalize ${
+                viewMode === m ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-50'
+              }`}
+            >
+              {m}
+            </button>
+          ))}
+        </div>
         <button
           type="button"
           onClick={() => onNavigateDay(-1)}

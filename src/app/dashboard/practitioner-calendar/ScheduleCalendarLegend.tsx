@@ -8,7 +8,6 @@ interface Props {
   showMergedFeeds: boolean;
   showEventsColumn: boolean;
   showClassesColumn: boolean;
-  showResourcesLane: boolean;
   scheduleModelFilter: ScheduleModelFilter;
   onScheduleModelFilterChange: (v: ScheduleModelFilter) => void;
   viewMode: ViewMode;
@@ -16,12 +15,12 @@ interface Props {
 
 /**
  * Shared legend (appointments vs C/D/E) + schedule feed filter for day / week / month.
+ * Resources are now calendar columns and are not part of the schedule feed.
  */
 export function ScheduleCalendarLegend({
   showMergedFeeds,
   showEventsColumn,
   showClassesColumn,
-  showResourcesLane,
   scheduleModelFilter,
   onScheduleModelFilterChange,
   viewMode,
@@ -39,11 +38,10 @@ export function ScheduleCalendarLegend({
       >
         <option value="all">All types</option>
         <option value="appointments">
-          Practitioner appointments only (hide events, classes, resources lanes)
+          Practitioner appointments only (hide events / classes lanes)
         </option>
         {showEventsColumn ? <option value="event_ticket">Events only</option> : null}
         {showClassesColumn ? <option value="class_session">Classes only</option> : null}
-        {showResourcesLane ? <option value="resource_booking">Resources only</option> : null}
       </select>
     </label>
   );

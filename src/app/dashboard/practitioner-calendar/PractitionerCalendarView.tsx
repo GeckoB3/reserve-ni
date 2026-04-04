@@ -24,8 +24,9 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/browser';
-import { ResourceCalendarGrid } from '@/components/calendar/ResourceCalendarGrid';
+// ResourceCalendarGrid removed — resources are now calendar columns
 import { AppointmentBookingForm } from '@/components/booking/AppointmentBookingForm';
+import { ResourceSlotBookingForm } from '@/components/booking/ResourceSlotBookingForm';
 import { AppointmentWalkInModal } from '@/components/booking/AppointmentWalkInModal';
 import {
   AppointmentDetailSheet,
@@ -58,6 +59,7 @@ interface Practitioner {
   name: string;
   is_active: boolean;
   colour?: string;
+  calendar_type?: string;
 }
 
 interface AppointmentService {
@@ -529,7 +531,6 @@ export function PractitionerCalendarView({
   currency = 'GBP',
   defaultPractitionerFilter = 'all',
   linkedPractitionerId = null,
-  resourceScheduleEnabled = false,
   bookingModel = 'unified_scheduling',
   enabledModels = [],
 }: {
@@ -537,11 +538,9 @@ export function PractitionerCalendarView({
   currency?: string;
   defaultPractitionerFilter?: 'all' | string;
   linkedPractitionerId?: string | null;
-  /** When the venue offers resource bookings (primary or secondary), show Resources tab with day grid. */
-  resourceScheduleEnabled?: boolean;
   /** Primary bookable model (for merged schedule feeds §4.2). */
   bookingModel?: BookingModel;
-  /** Secondary models; used to show Events / Classes / Resources lanes on the day grid. */
+  /** Secondary models; used to show Events / Classes lanes on the day grid. */
   enabledModels?: BookingModel[];
 }) {
   const { addToast } = useToast();
@@ -574,6 +573,8 @@ export function PractitionerCalendarView({
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [showNewAppointment, setShowNewAppointment] = useState(false);
+  const [showResourceBooking, setShowResourceBooking] = useState(false);
+  const [resourceBookingCalendarId, setResourceBookingCalendarId] = useState<string | undefined>();
   const [showWalkIn, setShowWalkIn] = useState(false);
   const [prefillPractitionerId, setPrefillPractitionerId] = useState<string | undefined>();
   const [prefillTime, setPrefillTime] = useState<string | undefined>();
@@ -598,7 +599,6 @@ export function PractitionerCalendarView({
   const [flashIds, setFlashIds] = useState<Set<string>>(() => new Set());
   const [quickActionId, setQuickActionId] = useState<string | null>(null);
   const [noShowGraceMinutes, setNoShowGraceMinutes] = useState(15);
-  const [scheduleKind, setScheduleKind] = useState<'appointments' | 'resources'>('appointments');
   const [scheduleBlocks, setScheduleBlocks] = useState<ScheduleBlockDTO[]>([]);
   const [scheduleModelFilter, setScheduleModelFilter] = useState<ScheduleModelFilter>('all');
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -610,8 +610,7 @@ export function PractitionerCalendarView({
 
   const showEventsColumn = venueExposesBookingModel(bookingModel, enabledModels, 'event_ticket');
   const showClassesColumn = venueExposesBookingModel(bookingModel, enabledModels, 'class_session');
-  const showResourcesLane = venueExposesBookingModel(bookingModel, enabledModels, 'resource_booking');
-  const showMergedFeeds = showEventsColumn || showClassesColumn || showResourcesLane;
+  const showMergedFeeds = showEventsColumn || showClassesColumn;
 
   const activeDayDate = viewMode === 'day' ? date : viewMode === 'week' ? weekStart : monthAnchor;
   const { startHour, endHour } = useMemo(
@@ -692,14 +691,6 @@ export function PractitionerCalendarView({
   useEffect(() => {
     void fetchData();
   }, [fetchData]);
-
-  useEffect(() => {
-    if (scheduleKind === 'resources') setViewMode('day');
-  }, [scheduleKind]);
-
-  useEffect(() => {
-    if (!resourceScheduleEnabled && scheduleKind === 'resources') setScheduleKind('appointments');
-  }, [resourceScheduleEnabled, scheduleKind]);
 
   useEffect(() => {
     void fetch('/api/venue')
@@ -851,6 +842,15 @@ export function PractitionerCalendarView({
   }
 
   function openNewAtSlot(pracId: string, dateStr: string, time: string) {
+    const col = practitioners.find((p) => p.id === pracId);
+    if (col?.calendar_type === 'resource') {
+      setResourceBookingCalendarId(pracId);
+      setPrefillDate(dateStr);
+      setPrefillTime(time);
+      setShowResourceBooking(true);
+      setSlotMenu(null);
+      return;
+    }
     setPrefillPractitionerId(pracId);
     setPrefillDate(dateStr);
     setPrefillTime(time);
@@ -1129,9 +1129,6 @@ export function PractitionerCalendarView({
     <div className="flex min-h-0 flex-col h-[calc(100dvh-72px)] md:h-[calc(100dvh-100px)] lg:h-[calc(100dvh-120px)]">
       <div className="flex-shrink-0 space-y-3 pb-3">
         <PractitionerCalendarToolbar
-          resourceScheduleEnabled={resourceScheduleEnabled}
-          scheduleKind={scheduleKind}
-          onScheduleKindChange={setScheduleKind}
           viewMode={viewMode}
           onViewModeChange={setViewMode}
           onNavigateDay={navigateDay}
@@ -1142,44 +1139,51 @@ export function PractitionerCalendarView({
 
         <div className="text-sm text-slate-500">{headerTitle}</div>
 
-        {scheduleKind === 'appointments' && showMergedFeeds ? (
+        {showMergedFeeds ? (
           <ScheduleCalendarLegend
             showMergedFeeds={showMergedFeeds}
             showEventsColumn={showEventsColumn}
             showClassesColumn={showClassesColumn}
-            showResourcesLane={showResourcesLane}
             scheduleModelFilter={scheduleModelFilter}
             onScheduleModelFilterChange={setScheduleModelFilter}
             viewMode={viewMode}
           />
         ) : null}
 
-        {scheduleKind === 'appointments' ? (
-          <div className="flex flex-wrap items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
             <select
               value={filterPractitioner}
               onChange={(e) => setFilterPractitioner(e.target.value)}
               className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
             >
-              <option value="all">All appointments</option>
-              {linkedPractitionerId === null ? (
-                activePractitioners.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))
-              ) : (
-                <>
-                  <option value={linkedPractitionerId}>My appointments</option>
-                  {activePractitioners
-                    .filter((p) => p.id !== linkedPractitionerId)
-                    .map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name}
-                      </option>
-                    ))}
-                </>
-              )}
+              <option value="all">All calendars</option>
+              {(() => {
+                const team = activePractitioners.filter((p) => p.calendar_type !== 'resource');
+                const resources = activePractitioners.filter((p) => p.calendar_type === 'resource');
+                return (
+                  <>
+                    {team.length > 0 && (
+                      <optgroup label="Team">
+                        {linkedPractitionerId && (
+                          <option value={linkedPractitionerId}>My appointments</option>
+                        )}
+                        {team
+                          .filter((p) => p.id !== linkedPractitionerId)
+                          .map((p) => (
+                            <option key={p.id} value={p.id}>{p.name}</option>
+                          ))}
+                      </optgroup>
+                    )}
+                    {resources.length > 0 && (
+                      <optgroup label="Resources">
+                        {resources.map((p) => (
+                          <option key={p.id} value={p.id}>{p.name}</option>
+                        ))}
+                      </optgroup>
+                    )}
+                  </>
+                );
+              })()}
             </select>
             <select
               value={filterStatus}
@@ -1235,20 +1239,9 @@ export function PractitionerCalendarView({
               </span>
             </div>
           </div>
-        ) : (
-          <div className="flex flex-wrap items-center gap-3 text-sm text-slate-600">
-            <Link
-              href="/dashboard/bookings/new"
-              className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 font-medium text-slate-800 shadow-sm hover:bg-slate-50"
-            >
-              New resource booking
-            </Link>
-            <span className="text-slate-500">Day view · resource columns · bookings and optional free starts</span>
-          </div>
-        )}
       </div>
 
-      {fetchError && !(scheduleKind === 'resources' && resourceScheduleEnabled) && (
+      {fetchError && (
         <div className="mb-3 flex items-center justify-between rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           <span>{fetchError}</span>
           <button type="button" onClick={() => setFetchError(null)} className="ml-2 text-red-400 hover:text-red-600">
@@ -1257,17 +1250,7 @@ export function PractitionerCalendarView({
         </div>
       )}
 
-      {scheduleKind === 'resources' && resourceScheduleEnabled ? (
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <ResourceCalendarGrid
-            venueId={venueId}
-            date={date}
-            currency={currency}
-            onDateChange={setDate}
-            compactToolbar
-          />
-        </div>
-      ) : loading ? (
+      {loading ? (
         <div className="flex min-h-0 flex-1 items-center justify-center">
           <div className="h-8 w-8 animate-spin rounded-full border-4 border-blue-600 border-t-transparent" />
         </div>
@@ -1310,7 +1293,10 @@ export function PractitionerCalendarView({
               <tbody>
                 {filteredPractitioners.map((prac) => (
                   <tr key={prac.id} className="border-b border-slate-100">
-                    <td className="sticky left-0 bg-white px-3 py-2 font-medium text-slate-900">{prac.name}</td>
+                    <td className={`sticky left-0 px-3 py-2 font-medium text-slate-900 ${prac.calendar_type === 'resource' ? 'bg-teal-50' : 'bg-white'}`}>
+                      {prac.calendar_type === 'resource' && <span className="mr-1 text-teal-600" title="Resource">&#9632;</span>}
+                      {prac.name}
+                    </td>
                     {weekDays.map((d) => {
                       const dayBookings = bookingsForPractitioner(prac.id, d);
                       return (
@@ -1340,7 +1326,7 @@ export function PractitionerCalendarView({
                     })}
                   </tr>
                 ))}
-                {scheduleKind === 'appointments' && showMergedFeeds && scheduleModelFilter !== 'appointments' ? (
+                {showMergedFeeds && scheduleModelFilter !== 'appointments' ? (
                   <WeekScheduleCdeStrip
                     weekDays={weekDays}
                     blocksByDate={scheduleBlocksByDate}
@@ -1414,7 +1400,12 @@ export function PractitionerCalendarView({
                 );
                 return (
                   <div key={prac.id} className="min-w-[180px] flex-1 border-r border-slate-100 last:border-r-0">
-                    <div className="sticky top-0 z-10 flex h-10 items-center justify-center border-b border-slate-100 bg-white px-3 py-2">
+                    <div className={`sticky top-0 z-10 flex h-10 items-center justify-center gap-1.5 border-b border-slate-100 px-3 py-2 ${prac.calendar_type === 'resource' ? 'bg-teal-50' : 'bg-white'}`}>
+                      {prac.calendar_type === 'resource' && (
+                        <span className="flex-shrink-0 text-teal-600" title="Resource">
+                          <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M3 9h18M9 21V9" /></svg>
+                        </span>
+                      )}
                       <span className="truncate text-center text-sm font-semibold text-slate-900">{prac.name}</span>
                     </div>
                     <div className="relative" style={{ height: TOTAL_SLOTS * SLOT_HEIGHT }}>
@@ -1682,7 +1673,7 @@ export function PractitionerCalendarView({
                   </div>
                 );
               })}
-              {viewMode === 'day' && scheduleKind === 'appointments' && showMergedFeeds && scheduleModelFilter !== 'appointments' ? (
+              {viewMode === 'day' && showMergedFeeds && scheduleModelFilter !== 'appointments' ? (
                 <>
                   {showEventsColumn ? (
                     <ScheduleFeedColumn
@@ -1705,16 +1696,6 @@ export function PractitionerCalendarView({
                       onClassInstanceClick={openClassInstanceDetail}
                     />
                   ) : null}
-                  {showResourcesLane ? (
-                    <ScheduleFeedColumn
-                      label="Resources"
-                      date={date}
-                      blocks={filteredScheduleBlocks.filter((b) => b.kind === 'resource_booking')}
-                      startHour={startHour}
-                      endHour={endHour}
-                      onBookingClick={openBookingDetail}
-                    />
-                  ) : null}
                 </>
               ) : null}
             </div>
@@ -1728,7 +1709,10 @@ export function PractitionerCalendarView({
         </div>
       )}
 
-      {slotMenu && (
+      {slotMenu && (() => {
+        const slotCol = practitioners.find((p) => p.id === slotMenu.pracId);
+        const isResource = slotCol?.calendar_type === 'resource';
+        return (
         <>
           <button
             type="button"
@@ -1745,7 +1729,7 @@ export function PractitionerCalendarView({
               className="block w-full px-3 py-2 text-left text-sm hover:bg-slate-50"
               onClick={() => openNewAtSlot(slotMenu.pracId, slotMenu.dateStr, slotMenu.time)}
             >
-              New appointment
+              {isResource ? 'New resource booking' : 'New appointment'}
             </button>
             <button
               type="button"
@@ -1756,7 +1740,8 @@ export function PractitionerCalendarView({
             </button>
           </div>
         </>
-      )}
+        );
+      })()}
 
       {blockModal && (
         <div
@@ -1832,7 +1817,7 @@ export function PractitionerCalendarView({
         </div>
       )}
 
-      {scheduleKind === 'appointments' && (
+      {(
         <button
           type="button"
           onClick={() => {
@@ -1900,6 +1885,27 @@ export function PractitionerCalendarView({
         }}
         currency={currency}
       />
+      {resourceBookingCalendarId && (
+        <ResourceSlotBookingForm
+          open={showResourceBooking}
+          onClose={() => {
+            setShowResourceBooking(false);
+            setResourceBookingCalendarId(undefined);
+            setPrefillTime(undefined);
+          }}
+          onCreated={() => {
+            setShowResourceBooking(false);
+            setResourceBookingCalendarId(undefined);
+            setPrefillTime(undefined);
+            void fetchData({ silent: true });
+          }}
+          venueId={venueId}
+          currency={currency}
+          resourceId={resourceBookingCalendarId}
+          preselectedDate={prefillDate ?? (viewMode === 'day' ? date : undefined)}
+          preselectedTime={prefillTime}
+        />
+      )}
     </div>
   );
 }

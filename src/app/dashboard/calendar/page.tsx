@@ -47,9 +47,6 @@ export default async function CalendarPage() {
     redirect('/dashboard');
   }
 
-  const resourceScheduleEnabled =
-    bookingModel === 'resource_booking' || enabledModels.includes('resource_booking');
-
   const linkedPractitionerId =
     staff.role === 'staff' && staff.id
       ? await getLinkedPractitionerId(admin, staff.venue_id, staff.id)
@@ -73,7 +70,6 @@ export default async function CalendarPage() {
               currency={currency}
               defaultPractitionerFilter={defaultPractitionerFilter}
               linkedPractitionerId={linkedPractitionerId}
-              resourceScheduleEnabled={resourceScheduleEnabled}
               bookingModel={bookingModel}
               enabledModels={enabledModels}
             />

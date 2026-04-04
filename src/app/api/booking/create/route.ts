@@ -736,6 +736,7 @@ async function handleNonTableBooking(
     experience_event_id: experience_event_id ?? null,
     class_instance_id: class_instance_id ?? null,
     resource_id: resource_id ?? null,
+    calendar_id: resource_id ? resource_id : null,
     booking_end_time: booking_end_time ? (booking_end_time.length === 5 ? booking_end_time + ':00' : booking_end_time) : null,
     event_session_id: event_session_id ?? null,
     capacity_used: capacity_used ?? party_size,
