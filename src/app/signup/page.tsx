@@ -1,8 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { useEffect, useState } from 'react';
 import { createClient } from '@/lib/supabase/browser';
+import { getSignupResumePath } from '@/lib/signup-resume';
 
 export default function SignupPage() {
   const [email, setEmail] = useState('');
@@ -11,8 +13,28 @@ export default function SignupPage() {
   const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** Set when sign-up succeeded but Supabase did not return a session (email confirmation required). */
+  const [awaitingEmailVerification, setAwaitingEmailVerification] = useState(false);
   const router = useRouter();
   const supabase = createClient();
+
+  // Already signed in (e.g. second tab) with plan chosen: skip straight to payment.
+  useEffect(() => {
+    let cancelled = false;
+    const client = createClient();
+    void (async () => {
+      const {
+        data: { session },
+      } = await client.auth.getSession();
+      if (cancelled || !session) return;
+      if (getSignupResumePath() === '/signup/payment') {
+        router.replace('/signup/payment');
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [router]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -31,10 +53,17 @@ export default function SignupPage() {
       return;
     }
 
+    const origin =
+      process.env.NEXT_PUBLIC_BASE_URL?.replace(/\/$/, '') ||
+      (typeof window !== 'undefined' ? window.location.origin : '');
+    const resumePath = getSignupResumePath();
+    const emailRedirectTo = `${origin}/auth/callback?next=${encodeURIComponent(resumePath)}`;
+
     setLoading(true);
-    const { error: signUpError } = await supabase.auth.signUp({
+    const { data, error: signUpError } = await supabase.auth.signUp({
       email: email.trim(),
       password,
+      options: { emailRedirectTo },
     });
     setLoading(false);
 
@@ -43,13 +72,57 @@ export default function SignupPage() {
       return;
     }
 
-    router.push('/signup/business-type');
+    // With "Confirm email" enabled, Supabase returns user but no session until the link is opened.
+    if (!data.session) {
+      setAwaitingEmailVerification(true);
+      return;
+    }
+
+    router.push(getSignupResumePath());
   }
 
   const inputClass =
     'w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm placeholder:text-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none';
   const primaryBtn =
     'w-full rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 disabled:opacity-50 transition-colors';
+
+  if (awaitingEmailVerification) {
+    const resumePath = getSignupResumePath();
+    const toPayment = resumePath === '/signup/payment';
+    return (
+      <div className="w-full max-w-sm">
+        <div className="mb-8 text-center">
+          <h1 className="text-2xl font-bold text-slate-900">Check your email</h1>
+          <p className="mt-2 text-sm text-slate-500">
+            We sent a confirmation link to <span className="font-medium text-slate-700">{email}</span>. Open it to
+            verify your account and continue signup.
+          </p>
+        </div>
+        <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm space-y-4">
+          <p className="text-sm text-slate-600">
+            After you confirm, you&apos;ll be signed in
+            {toPayment
+              ? ' and can continue to your order summary and payment.'
+              : ' and can choose your business type and plan.'}{' '}
+            If you already confirmed,{' '}
+            <Link
+              href={`/login?redirectTo=${encodeURIComponent(resumePath)}`}
+              className="font-medium text-brand-600 hover:text-brand-700"
+            >
+              sign in
+            </Link>{' '}
+            to continue.
+          </p>
+          <Link
+            href={`/login?redirectTo=${encodeURIComponent(resumePath)}`}
+            className="block w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-center text-sm font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
+          >
+            Go to sign in
+          </Link>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="w-full max-w-sm">

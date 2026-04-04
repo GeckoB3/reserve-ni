@@ -1,7 +1,9 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { createClient } from '@/lib/supabase/browser';
 import { getBusinessConfig, formatSignupBusinessTypeLabel, isDirectModelBusinessType } from '@/lib/business-config';
 import { APPOINTMENTS_PRICE, RESTAURANT_PRICE, SMS_OVERAGE_GBP_PER_MESSAGE } from '@/lib/pricing-constants';
 import { SMS_INCLUDED_APPOINTMENTS, SMS_INCLUDED_RESTAURANT } from '@/lib/billing/sms-allowance';
@@ -14,6 +16,9 @@ export default function PaymentPage() {
   const [plan, setPlan] = useState<PlanType | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** Until checked, we do not know if the browser has a Supabase session (required for checkout). */
+  const [sessionChecked, setSessionChecked] = useState(false);
+  const [hasSession, setHasSession] = useState(false);
 
   useEffect(() => {
     const id = requestAnimationFrame(() => {
@@ -28,6 +33,14 @@ export default function PaymentPage() {
     });
     return () => cancelAnimationFrame(id);
   }, [router]);
+
+  useEffect(() => {
+    const supabase = createClient();
+    void supabase.auth.getSession().then(({ data: { session } }) => {
+      setHasSession(!!session);
+      setSessionChecked(true);
+    });
+  }, []);
 
   const config = useMemo(
     () => (businessType ? getBusinessConfig(businessType) : null),
@@ -44,20 +57,37 @@ export default function PaymentPage() {
     setLoading(true);
     setError(null);
 
+    const supabase = createClient();
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    if (!session) {
+      setError(
+        'You must be signed in to pay. If you just registered, open the confirmation link in your email first, or sign in below.',
+      );
+      setLoading(false);
+      return;
+    }
+
     try {
       const res = await fetch('/api/signup/create-checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
         body: JSON.stringify({
           business_type: businessType,
           plan,
         }),
       });
 
-      const data = await res.json();
+      const data = (await res.json()) as { error?: string; redirect_url?: string };
 
       if (!res.ok) {
-        setError(data.error || 'Failed to start checkout.');
+        const msg =
+          data.error === 'Not authenticated'
+            ? 'You must be signed in to continue. Confirm your email from the signup message, or sign in.'
+            : data.error || 'Failed to start checkout.';
+        setError(msg);
         setLoading(false);
         return;
       }
@@ -74,7 +104,7 @@ export default function PaymentPage() {
     setLoading(false);
   }
 
-  if (!businessType || !plan || !config) {
+  if (!businessType || !plan || !config || !sessionChecked) {
     return (
       <div className="flex min-h-[40vh] items-center justify-center">
         <div className="h-8 w-8 animate-spin rounded-full border-4 border-brand-200 border-t-brand-600" />
@@ -163,10 +193,27 @@ export default function PaymentPage() {
           <p className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</p>
         )}
 
+        {!hasSession && (
+          <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-900">
+            <p className="font-medium">Sign in required</p>
+            <p className="mt-1 text-amber-800/90">
+              {isFounding
+                ? 'Complete setup needs an active session.'
+                : 'Payment needs an active session.'}{' '}
+              If you haven&apos;t confirmed your email yet, use the link we sent you, then return here. Already
+              confirmed?{' '}
+              <Link href="/login?redirectTo=/signup/payment" className="font-medium text-brand-700 underline">
+                Sign in
+              </Link>{' '}
+              to continue.
+            </p>
+          </div>
+        )}
+
         <button
           type="button"
           onClick={handleCheckout}
-          disabled={loading}
+          disabled={loading || !hasSession}
           className="mt-6 w-full rounded-xl bg-brand-600 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 disabled:opacity-50 transition-colors"
         >
           {loading

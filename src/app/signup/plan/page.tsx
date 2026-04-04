@@ -59,12 +59,8 @@ export default function PlanPage() {
   function handleContinue() {
     if (!plan) return;
     sessionStorage.setItem('signup_plan', plan);
-    if (plan === 'founding') {
-      // Founding partner skips payment - goes direct through create-checkout founding path
-      router.push('/signup/payment');
-    } else {
-      router.push('/signup/payment');
-    }
+    // Account must exist before checkout (Stripe + Supabase). Create account, then order summary / payment.
+    router.push('/signup');
   }
 
   if (!businessType || !config || !plan) {
