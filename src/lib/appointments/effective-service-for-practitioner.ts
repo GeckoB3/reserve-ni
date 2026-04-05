@@ -2,8 +2,8 @@ import type { AppointmentService, PractitionerService } from '@/types/booking-mo
 import { mergeAppointmentServiceWithPractitionerLink } from './merge-service-with-overrides';
 
 /**
- * Resolves the practitioner_services row for a given offering, if any.
- * When the practitioner has no explicit links, all venue services apply and there is no row.
+ * Resolves the practitioner_services / calendar_service_assignments row for a given offering, if any.
+ * When the calendar has no service links at all, returns null (no appointment services on that column).
  */
 export function resolvePractitionerServiceLink(
   allLinks: PractitionerService[],

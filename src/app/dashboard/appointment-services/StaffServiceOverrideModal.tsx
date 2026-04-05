@@ -40,6 +40,11 @@ interface ServiceLike {
   staff_may_customize_colour?: boolean;
 }
 
+interface CalendarChoice {
+  id: string;
+  name: string;
+}
+
 interface Props {
   open: boolean;
   onClose: () => void;
@@ -47,6 +52,10 @@ interface Props {
   service: ServiceLike;
   link: PractitionerService | null;
   currency?: string;
+  /** When the staff member manages more than one calendar, they pick which to customise. */
+  calendarChoices?: CalendarChoice[];
+  selectedCalendarId?: string;
+  onSelectedCalendarChange?: (calendarId: string) => void;
 }
 
 export function StaffServiceOverrideModal({
@@ -56,6 +65,9 @@ export function StaffServiceOverrideModal({
   service,
   link,
   currency = 'GBP',
+  calendarChoices = [],
+  selectedCalendarId,
+  onSelectedCalendarChange,
 }: Props) {
   const sym = currency === 'EUR' ? '€' : '£';
 
@@ -144,6 +156,9 @@ export function StaffServiceOverrideModal({
       const raw = buildPatch();
       const { service_id, ...rest } = raw;
       const body: Record<string, unknown> = { service_id };
+      if (calendarChoices.length > 1 && selectedCalendarId) {
+        body.calendar_id = selectedCalendarId;
+      }
       for (const [k, v] of Object.entries(rest)) {
         if (v !== undefined) body[k] = v;
       }
@@ -194,8 +209,26 @@ export function StaffServiceOverrideModal({
             </svg>
           </button>
         </div>
+        {calendarChoices.length > 1 && selectedCalendarId && onSelectedCalendarChange ? (
+          <div className="mb-4">
+            <label className="mb-1 block text-sm font-medium text-slate-700">Calendar</label>
+            <select
+              value={selectedCalendarId}
+              onChange={(e) => onSelectedCalendarChange(e.target.value)}
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+            >
+              {calendarChoices.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        ) : null}
         <p className="mb-4 text-sm text-slate-600">
-          Changes apply only to your calendar. Match the venue default to clear your override for a field.
+          {calendarChoices.length > 1
+            ? 'Changes apply only to the calendar you select above. Match the venue default to clear your override for a field.'
+            : 'Changes apply only to your calendar. Match the venue default to clear your override for a field.'}
         </p>
         {error && <div className="mb-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
 

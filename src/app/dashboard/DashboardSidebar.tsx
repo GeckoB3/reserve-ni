@@ -17,9 +17,9 @@ const BASE_NAV_ITEMS: NavItem[] = [
   { href: '/dashboard/bookings', label: 'Reservations', icon: CalendarIcon },
   { href: '/dashboard/bookings/new', label: 'New Booking', icon: PlusIcon },
   { href: '/dashboard/waitlist', label: 'Waitlist', icon: QueueIcon },
+  { href: '/dashboard/availability', label: 'Calendar Availability', icon: ClockIcon },
   { href: '/dashboard/reports', label: 'Reports', icon: ChartIcon },
   { href: '/dashboard/settings', label: 'Settings', icon: CogIcon },
-  { href: '/dashboard/availability', label: 'Availability', icon: ClockIcon },
 ];
 
 const MODEL_NAV_ITEMS: Partial<Record<BookingModel, NavItem[]>> = {
@@ -29,7 +29,7 @@ const MODEL_NAV_ITEMS: Partial<Record<BookingModel, NavItem[]>> = {
     { href: '/dashboard/event-manager', label: 'Events', icon: CalendarIcon },
   ],
   class_session: [
-    { href: '/dashboard/class-timetable', label: 'Timetable', icon: CalendarIcon },
+    { href: '/dashboard/class-timetable', label: 'Classes', icon: CalendarIcon },
   ],
   resource_booking: [
     { href: '/dashboard/resource-timeline', label: 'Resources', icon: CalendarIcon },
@@ -49,7 +49,7 @@ interface Props {
   bookingModel?: BookingModel;
   /** Secondary bookable models (C/D/E); merged into model-specific nav. */
   enabledModels?: BookingModel[];
-  /** Reports and Availability nav items are admin-only. */
+  /** Reports and Calendar Availability nav items are admin-only. */
   isAdmin?: boolean;
   /** Venue `terminology` JSONB - drives booking list / new-booking labels (plan §6.4). */
   venueTerminology?: Record<string, unknown> | null;
@@ -118,21 +118,6 @@ export function DashboardSidebar({
         items = [...items.slice(0, insertIdx + 1), ...modelItems, ...items.slice(insertIdx + 1)];
       } else {
         items = [...items, ...modelItems];
-      }
-    }
-
-    // Model B: Availability directly under Services, before Reports (not at the bottom with Settings).
-    if (isAppointment) {
-      const availIdx = items.findIndex((i) => i.href === '/dashboard/availability');
-      const avail = availIdx >= 0 ? items[availIdx] : undefined;
-      if (avail) {
-        items = items.filter((i) => i.href !== '/dashboard/availability');
-        const svcIdx = items.findIndex((i) => i.href === '/dashboard/appointment-services');
-        if (svcIdx >= 0) {
-          items.splice(svcIdx + 1, 0, avail);
-        } else {
-          items.push(avail);
-        }
       }
     }
 

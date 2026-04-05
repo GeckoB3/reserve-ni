@@ -4,7 +4,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { AppointmentService, Practitioner, PractitionerService } from '@/types/booking-models';
+import type { AppointmentService, ClassPaymentRequirement, Practitioner, PractitionerService } from '@/types/booking-models';
 import { getOfferedAppointmentServicesForPractitioner } from '@/lib/availability/appointment-engine';
 import { unifiedCalendarRowToPractitioner } from '@/lib/availability/unified-calendar-mapper';
 
@@ -18,6 +18,7 @@ export interface AppointmentCatalogPractitioner {
     buffer_minutes: number;
     price_pence: number | null;
     deposit_pence: number | null;
+    payment_requirement?: ClassPaymentRequirement;
   }>;
 }
 
@@ -31,6 +32,7 @@ function serviceItemRowToAppointmentService(row: Record<string, unknown>): Appoi
     buffer_minutes: (row.buffer_minutes as number) ?? 0,
     processing_time_minutes: (row.processing_time_minutes as number) ?? 0,
     price_pence: (row.price_pence as number | null) ?? null,
+    payment_requirement: (row.payment_requirement as ClassPaymentRequirement | undefined) ?? undefined,
     deposit_pence: (row.deposit_pence as number | null) ?? null,
     colour: (row.colour as string) ?? '#3B82F6',
     is_active: row.is_active !== false,
@@ -116,6 +118,7 @@ async function fetchUnifiedAppointmentCatalog(
         buffer_minutes: svc.buffer_minutes ?? 0,
         price_pence: svc.price_pence,
         deposit_pence: svc.deposit_pence,
+        payment_requirement: svc.payment_requirement,
       })),
     });
   }
@@ -182,6 +185,7 @@ export async function fetchAppointmentCatalog(
         buffer_minutes: svc.buffer_minutes ?? 0,
         price_pence: svc.price_pence,
         deposit_pence: svc.deposit_pence,
+        payment_requirement: svc.payment_requirement,
       })),
     });
   }

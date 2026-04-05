@@ -132,7 +132,7 @@ export async function GET(request: NextRequest) {
 
     const eventIds = [...new Set(rows.map((r) => r.experience_event_id).filter(Boolean))] as string[];
     const { data: expEvents } = eventIds.length
-      ? await staff.db.from('experience_events').select('id, name, end_time, start_time').in('id', eventIds)
+      ? await staff.db.from('experience_events').select('id, name, end_time, start_time, calendar_id').in('id', eventIds)
       : { data: [] };
     const eventMap = new Map((expEvents ?? []).map((e: Record<string, unknown>) => [e.id as string, e]));
 
@@ -288,6 +288,11 @@ export async function GET(request: NextRequest) {
             ? `${r.party_size} guests`
             : null;
 
+      const eventCal =
+        bm === 'event_ticket' && r.experience_event_id
+          ? (eventMap.get(r.experience_event_id) as { calendar_id?: string | null } | undefined)?.calendar_id ?? null
+          : null;
+
       blocks.push({
         id: `bk-${r.id}`,
         kind: bm,
@@ -304,14 +309,19 @@ export async function GET(request: NextRequest) {
         accent_colour: accent,
         class_capacity: classCap,
         class_booked_spots: classBooked,
-        calendar_id: bm === 'class_session' ? calendarIdForClassInstance(r.class_instance_id as string) : null,
+        calendar_id:
+          bm === 'class_session'
+            ? calendarIdForClassInstance(r.class_instance_id as string)
+            : bm === 'event_ticket'
+              ? eventCal
+              : null,
       });
     }
 
     if (wantEvents) {
       const { data: evRows, error: evErr } = await staff.db
         .from('experience_events')
-        .select('id, name, event_date, start_time, end_time')
+        .select('id, name, event_date, start_time, end_time, calendar_id')
         .eq('venue_id', venueId)
         .eq('is_active', true)
         .gte('event_date', fromStr)
@@ -327,6 +337,7 @@ export async function GET(request: NextRequest) {
             event_date: string;
             start_time: string;
             end_time: string;
+            calendar_id: string | null;
           };
           if (bookedEventIds.has(e.id)) continue;
           blocks.push({
@@ -339,6 +350,7 @@ export async function GET(request: NextRequest) {
             subtitle: 'No bookings yet',
             accent_colour: '#F59E0B',
             experience_event_id: e.id,
+            calendar_id: e.calendar_id ?? null,
           });
         }
       }

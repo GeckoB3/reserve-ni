@@ -11,13 +11,13 @@ interface Props {
 }
 
 /**
- * Shared row under the practitioner week grid: compact chips for events / classes / resources (ScheduleBlock feed).
+ * Shared row under the practitioner week grid: compact chips for events (ScheduleBlock feed).
  */
 export function WeekScheduleCdeStrip({ weekDays, blocksByDate, onBookingClick, onClassInstanceClick }: Props) {
   return (
     <tr className="border-t border-slate-200 bg-slate-50/80">
       <td className="sticky left-0 z-10 bg-slate-50 px-3 py-2 align-top text-xs font-semibold text-slate-600">
-        Events / resources
+        Events
       </td>
       {weekDays.map((d) => {
         const dayBlocks = (blocksByDate.get(d) ?? []).filter((b) => b.status !== 'Cancelled');

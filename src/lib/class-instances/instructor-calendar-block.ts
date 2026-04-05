@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { getStaffManagedCalendarIds } from '@/lib/staff-calendar-access';
 
 /** Normalise DB time to HH:MM:SS for Postgres `time`. */
 function normalizeTimeForDb(t: string): string {
@@ -46,14 +47,19 @@ export async function resolveInstructorCalendarIdForClass(
   const staffId = pr ? (pr as { staff_id?: string | null }).staff_id : null;
   if (!staffId) return null;
 
-  const { data: ucByStaff } = await admin
+  const managed = await getStaffManagedCalendarIds(admin, venueId, staffId);
+  if (managed.length === 0) return null;
+
+  const { data: ucRows } = await admin
     .from('unified_calendars')
     .select('id')
     .eq('venue_id', venueId)
-    .eq('staff_id', staffId)
+    .in('id', managed)
     .eq('is_active', true)
-    .maybeSingle();
-  return ucByStaff ? (ucByStaff as { id: string }).id : null;
+    .order('sort_order', { ascending: true })
+    .limit(1);
+  const first = ucRows?.[0] as { id: string } | undefined;
+  return first?.id ?? null;
 }
 
 export interface SyncClassInstanceCalendarBlockParams {

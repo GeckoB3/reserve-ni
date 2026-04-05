@@ -5,7 +5,7 @@ import { getSupabaseAdminClient } from '@/lib/supabase';
 import { sendEmail } from '@/lib/emails/send-email';
 import { renderStaffWelcomeEmail } from '@/lib/emails/templates/staff-welcome-email';
 import { z } from 'zod';
-import { setStaffPractitionerLink } from '@/lib/staff-practitioner-link';
+import { setStaffPractitionerLink, setStaffUnifiedCalendarAssignments } from '@/lib/staff-practitioner-link';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 
 const createSchema = z
@@ -15,8 +15,10 @@ const createSchema = z
     password_confirm: z.string().min(1, 'Please confirm the password'),
     name: z.string().max(200).optional(),
     role: z.enum(['admin', 'staff']),
-    /** Optional: link this login to a practitioner calendar (Model B). */
+    /** Optional: link to one calendar (legacy single-select). */
     practitioner_id: z.string().uuid().nullable().optional(),
+    /** Optional: unified scheduling — assign any combination of bookable calendars. Overrides practitioner_id when set. */
+    calendar_ids: z.array(z.string().uuid()).optional(),
   })
   .refine((d) => d.password === d.password_confirm, {
     message: 'Passwords do not match',
@@ -40,7 +42,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { email, password, name, role, practitioner_id: practitionerIdOpt } = parsed.data;
+    const { email, password, name, role, practitioner_id: practitionerIdOpt, calendar_ids: calendarIdsOpt } =
+      parsed.data;
     const normalisedEmail = email.trim().toLowerCase();
 
     const admin = getSupabaseAdminClient();
@@ -53,21 +56,55 @@ export async function POST(request: NextRequest) {
     const venueName = venueRow?.name?.trim() || 'Your venue';
     const bookingModel = (venueRow?.booking_model as string) ?? 'table_reservation';
 
-    if (practitionerIdOpt && !isUnifiedSchedulingVenue(bookingModel)) {
+    const unifiedCalendarIdsToValidate =
+      isUnifiedSchedulingVenue(bookingModel) && calendarIdsOpt && calendarIdsOpt.length > 0
+        ? calendarIdsOpt
+        : isUnifiedSchedulingVenue(bookingModel) && practitionerIdOpt
+          ? [practitionerIdOpt]
+          : [];
+
+    if ((practitionerIdOpt || (calendarIdsOpt && calendarIdsOpt.length > 0)) && !isUnifiedSchedulingVenue(bookingModel)) {
       return NextResponse.json(
         { error: 'Calendar linking is only available for appointment businesses' },
         { status: 400 },
       );
     }
-    if (practitionerIdOpt) {
+    if (unifiedCalendarIdsToValidate.length > 0) {
+      const { data: ucs } = await admin
+        .from('unified_calendars')
+        .select('id, is_active')
+        .eq('venue_id', staff.venue_id)
+        .in('id', unifiedCalendarIdsToValidate);
+      if (!ucs || ucs.length !== unifiedCalendarIdsToValidate.length) {
+        return NextResponse.json({ error: 'One or more calendars were not found' }, { status: 400 });
+      }
+      if (ucs.some((uc) => uc.is_active === false)) {
+        return NextResponse.json(
+          {
+            error:
+              'Inactive calendars cannot be assigned to staff. Activate the calendar first or choose another.',
+          },
+          { status: 400 },
+        );
+      }
+    } else if (practitionerIdOpt && !isUnifiedSchedulingVenue(bookingModel)) {
       const { data: prCheck } = await admin
         .from('practitioners')
-        .select('id')
+        .select('id, is_active')
         .eq('id', practitionerIdOpt)
         .eq('venue_id', staff.venue_id)
         .maybeSingle();
       if (!prCheck) {
         return NextResponse.json({ error: 'Calendar not found' }, { status: 400 });
+      }
+      if (prCheck.is_active === false) {
+        return NextResponse.json(
+          {
+            error:
+              'Inactive calendars cannot be assigned to staff. Activate the calendar first or choose another.',
+          },
+          { status: 400 },
+        );
       }
     }
 
@@ -148,12 +185,49 @@ export async function POST(request: NextRequest) {
 
     let linkedPractitionerId: string | null = null;
     let linkedPractitionerName: string | null = null;
-    if (practitionerIdOpt && isUnifiedSchedulingVenue(bookingModel)) {
+    let linked_calendar_ids: string[] = [];
+
+    const unifiedIdsToAssign =
+      isUnifiedSchedulingVenue(bookingModel) && calendarIdsOpt && calendarIdsOpt.length > 0
+        ? calendarIdsOpt
+        : isUnifiedSchedulingVenue(bookingModel) && practitionerIdOpt
+          ? [practitionerIdOpt]
+          : [];
+
+    if (isUnifiedSchedulingVenue(bookingModel) && unifiedIdsToAssign.length > 0) {
+      const linkResult = await setStaffUnifiedCalendarAssignments(
+        admin,
+        staff.venue_id,
+        newStaff.id,
+        unifiedIdsToAssign,
+      );
+      if (!linkResult.ok) {
+        console.error('[staff/create] calendar link failed:', linkResult.error);
+        return NextResponse.json(
+          {
+            error:
+              'User was created but linking to calendars failed. You can assign calendars from Settings → Staff.',
+          },
+          { status: 500 },
+        );
+      }
+      linked_calendar_ids = unifiedIdsToAssign;
+      linkedPractitionerId = unifiedIdsToAssign[0] ?? null;
+      const { data: nameRows } = await admin
+        .from('unified_calendars')
+        .select('id, name')
+        .eq('venue_id', staff.venue_id)
+        .in('id', unifiedIdsToAssign);
+      const nameById = new Map((nameRows ?? []).map((r) => [r.id as string, ((r.name as string) ?? '').trim()]));
+      linkedPractitionerName =
+        unifiedIdsToAssign.map((id) => nameById.get(id) ?? '').filter(Boolean).join(', ') || null;
+    } else if (!isUnifiedSchedulingVenue(bookingModel) && practitionerIdOpt) {
       const linkResult = await setStaffPractitionerLink(
         admin,
         staff.venue_id,
         newStaff.id,
         practitionerIdOpt,
+        { bookingModel },
       );
       if (!linkResult.ok) {
         console.error('[staff/create] calendar link failed:', linkResult.error);
@@ -209,6 +283,7 @@ export async function POST(request: NextRequest) {
       {
         staff: {
           ...newStaff,
+          linked_calendar_ids,
           linked_practitioner_id: linkedPractitionerId,
           linked_practitioner_name: linkedPractitionerName,
         },

@@ -24,6 +24,8 @@ interface ExperienceEvent {
   capacity: number;
   image_url: string | null;
   is_active: boolean;
+  /** Unified calendar column for staff grid (unified scheduling). */
+  calendar_id: string | null;
   ticket_types: TicketType[];
 }
 
@@ -62,6 +64,8 @@ interface EventFormState {
   scheduleMode: ScheduleMode;
   recurrenceUntil: string;
   customDatesText: string;
+  /** Unified calendar id, or empty for unassigned. */
+  calendar_id: string;
 }
 
 function parseCustomDatesFromText(text: string): string[] {
@@ -88,6 +92,7 @@ const BLANK_EVENT: EventFormState = {
   scheduleMode: 'single',
   recurrenceUntil: '',
   customDatesText: '',
+  calendar_id: '',
 };
 
 export function EventManagerView({
@@ -95,11 +100,13 @@ export function EventManagerView({
   isAdmin,
   currency = 'GBP',
   publicBookingUrl,
+  bookingModel = 'table_reservation',
 }: {
   venueId: string;
   isAdmin: boolean;
   currency?: string;
   publicBookingUrl: string;
+  bookingModel?: string;
 }) {
   const { addToast } = useToast();
   const sym = currency === 'EUR' ? '€' : '£';
@@ -126,6 +133,69 @@ export function EventManagerView({
   const [eventForm, setEventForm] = useState<EventFormState>({ ...BLANK_EVENT });
   const [eventSaving, setEventSaving] = useState(false);
   const [eventError, setEventError] = useState<string | null>(null);
+  const [teamCalendars, setTeamCalendars] = useState<Array<{ id: string; name: string; calendar_type?: string }>>(
+    [],
+  );
+  const [showNewColumnUi, setShowNewColumnUi] = useState(false);
+  const [newColumnName, setNewColumnName] = useState('');
+  const [creatingColumn, setCreatingColumn] = useState(false);
+
+  useEffect(() => {
+    if (!showEventForm || bookingModel !== 'unified_scheduling') return;
+    let cancelled = false;
+    void fetch('/api/venue/practitioners?roster=1')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (cancelled || !d?.practitioners) return;
+        setTeamCalendars(
+          (d.practitioners as Array<{ id: string; name: string; calendar_type?: string }>).filter(
+            (p) => p.calendar_type !== 'resource',
+          ),
+        );
+      })
+      .catch(() => setTeamCalendars([]));
+    return () => {
+      cancelled = true;
+    };
+  }, [showEventForm, bookingModel]);
+
+  async function createCalendarColumn() {
+    const name = newColumnName.trim();
+    if (!name) {
+      setEventError('Enter a name for the new calendar column.');
+      return;
+    }
+    setCreatingColumn(true);
+    setEventError(null);
+    try {
+      const res = await fetch('/api/venue/calendar-columns', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      });
+      const json = (await res.json()) as { error?: string; id?: string; name?: string };
+      if (!res.ok) {
+        setEventError(json.error ?? 'Could not create calendar column');
+        return;
+      }
+      const newId = json.id;
+      const newName = json.name;
+      if (newId && newName) {
+        setEventForm((f) => ({ ...f, calendar_id: newId }));
+        setTeamCalendars((prev) => {
+          if (prev.some((c) => c.id === newId)) return prev;
+          return [...prev, { id: newId, name: newName }].sort((a, b) => a.name.localeCompare(b.name));
+        });
+      }
+      setNewColumnName('');
+      setShowNewColumnUi(false);
+      addToast('Calendar column created. It appears on the staff calendar like your other columns.', 'success');
+    } catch {
+      setEventError('Could not create calendar column');
+    } finally {
+      setCreatingColumn(false);
+    }
+  }
 
   const fetchEvents = useCallback(async () => {
     setLoading(true);
@@ -242,6 +312,15 @@ export function EventManagerView({
     setEventSaving(true);
     setEventError(null);
     try {
+      const calendarPayload: Record<string, unknown> = {};
+      if (bookingModel === 'unified_scheduling') {
+        if (eventForm.calendar_id) {
+          calendarPayload.calendar_id = eventForm.calendar_id;
+        } else {
+          calendarPayload.calendar_id = null;
+        }
+      }
+
       const basePayload = {
         name: eventForm.name.trim(),
         description: eventForm.description.trim() || null,
@@ -255,6 +334,7 @@ export function EventManagerView({
           price_pence: Math.round(parseFloat(tt.price_pence || '0') * 100),
           ...(tt.capacity !== '' && { capacity: parseInt(tt.capacity) }),
         })),
+        ...calendarPayload,
       };
 
       let postBody: Record<string, unknown> = { ...basePayload };
@@ -300,6 +380,10 @@ export function EventManagerView({
           );
           return;
         }
+        if (res.status === 409) {
+          setEventError(json.error ?? 'This time conflicts with another booking or block on that calendar.');
+          return;
+        }
         setEventError(json.error ?? 'Save failed');
         return;
       }
@@ -311,6 +395,8 @@ export function EventManagerView({
       setShowEventForm(false);
       setEditingEventId(null);
       setEventForm({ ...BLANK_EVENT });
+      setShowNewColumnUi(false);
+      setNewColumnName('');
       await fetchEvents();
     } catch {
       setEventError('Save failed');
@@ -339,9 +425,12 @@ export function EventManagerView({
       scheduleMode: 'single',
       recurrenceUntil: '',
       customDatesText: '',
+      calendar_id: event.calendar_id ?? '',
     });
     setEditingEventId(event.id);
     setEventError(null);
+    setShowNewColumnUi(false);
+    setNewColumnName('');
     setShowEventForm(true);
     setSelectedId(null);
   };
@@ -528,6 +617,8 @@ export function EventManagerView({
                 setEditingEventId(null);
                 setEventForm({ ...BLANK_EVENT });
                 setEventError(null);
+                setShowNewColumnUi(false);
+                setNewColumnName('');
                 setShowEventForm(true);
               }}
               className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700"
@@ -694,6 +785,90 @@ export function EventManagerView({
                   className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
                 />
               </div>
+              {bookingModel === 'unified_scheduling' && (
+                <div className="sm:col-span-2 space-y-3 rounded-lg border border-slate-100 bg-slate-50/80 p-3">
+                  <p className="text-xs font-medium text-slate-700">Staff calendar column</p>
+                  <p className="text-xs text-slate-500">
+                    Show this event on a team calendar column in the practitioner calendar. The time must not overlap
+                    other appointments, classes, resources on that column, or blocked time.
+                  </p>
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-slate-600">Calendar</label>
+                    <select
+                      value={eventForm.calendar_id}
+                      onChange={(e) => setEventForm((f) => ({ ...f, calendar_id: e.target.value }))}
+                      className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
+                    >
+                      <option value="">Not on a column (events strip only)</option>
+                      {teamCalendars.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="rounded-lg border border-slate-100 bg-slate-50/90 p-3">
+                    {!showNewColumnUi ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowNewColumnUi(true);
+                          setEventError(null);
+                        }}
+                        className="inline-flex w-full items-center justify-center rounded-lg border border-brand-200/90 bg-white px-3.5 py-2.5 text-sm font-semibold text-brand-700 shadow-sm transition-[color,background-color,border-color,box-shadow,transform] duration-150 ease-out hover:border-brand-400 hover:bg-brand-50 hover:text-brand-800 hover:shadow-md active:scale-[0.98] active:border-brand-500 active:bg-brand-100 active:shadow-inner motion-reduce:transition-colors motion-reduce:active:scale-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2"
+                      >
+                        New calendar column
+                      </button>
+                    ) : (
+                      <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-end">
+                        <div className="min-w-0 flex-1 sm:max-w-xs">
+                          <label
+                            htmlFor="event-form-new-calendar-column-name"
+                            className="mb-1 block text-[11px] font-medium text-slate-600"
+                          >
+                            Column name
+                          </label>
+                          <input
+                            id="event-form-new-calendar-column-name"
+                            type="text"
+                            value={newColumnName}
+                            onChange={(e) => setNewColumnName(e.target.value)}
+                            placeholder="e.g. Events host"
+                            disabled={creatingColumn}
+                            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 disabled:opacity-60"
+                          />
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={() => void createCalendarColumn()}
+                            disabled={creatingColumn}
+                            className="rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-brand-700 disabled:opacity-50"
+                          >
+                            {creatingColumn ? 'Creating…' : 'Create'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowNewColumnUi(false);
+                              setNewColumnName('');
+                              setEventError(null);
+                            }}
+                            disabled={creatingColumn}
+                            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  <p className="text-xs text-slate-500">
+                    New columns use the same setup as elsewhere: they appear on the staff calendar and can be managed in
+                    Calendar Availability.
+                  </p>
+                </div>
+              )}
               <div className="sm:col-span-2">
                 <label className="mb-1 block text-xs font-medium text-slate-600">
                   Description <span className="font-normal text-slate-400">optional</span>
@@ -811,6 +986,8 @@ export function EventManagerView({
                   setShowEventForm(false);
                   setEditingEventId(null);
                   setEventError(null);
+                  setShowNewColumnUi(false);
+                  setNewColumnName('');
                 }}
                 className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
               >

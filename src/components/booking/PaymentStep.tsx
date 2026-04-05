@@ -15,9 +15,21 @@ interface PaymentStepProps {
   cancellationPolicy?: string;
   /** Show total only (e.g. Model B fixed service deposit), not per-person split */
   summaryMode?: 'per_person' | 'total';
+  /** Guest booking: distinguishes deposit vs pay-in-full wording */
+  chargeKind?: 'deposit' | 'full_payment';
 }
 
-function PaymentForm({ clientSecret, onComplete, onBack }: { clientSecret: string; onComplete: () => void; onBack: () => void }) {
+function PaymentForm({
+  clientSecret,
+  onComplete,
+  onBack,
+  payButtonLabel,
+}: {
+  clientSecret: string;
+  onComplete: () => void;
+  onBack: () => void;
+  payButtonLabel: string;
+}) {
   const stripe = useStripe();
   const elements = useElements();
   const [loading, setLoading] = useState(false);
@@ -85,7 +97,7 @@ function PaymentForm({ clientSecret, onComplete, onBack }: { clientSecret: strin
             <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25Z" />
             </svg>
-            {loading ? 'Processing...' : 'Pay Deposit'}
+            {loading ? 'Processing...' : payButtonLabel}
           </span>
         </button>
       </div>
@@ -117,11 +129,14 @@ export function PaymentStep({
   onBack,
   cancellationPolicy,
   summaryMode = 'per_person',
+  chargeKind = 'deposit',
 }: PaymentStepProps) {
   const amount = (amountPence / 100).toFixed(2);
   const perPerson = partySize > 0 ? (amountPence / 100 / partySize).toFixed(2) : amount;
   const stripePromise = useMemo(() => getStripeForAccount(stripeAccountId), [stripeAccountId]);
   const showSplit = summaryMode === 'per_person' && partySize > 1;
+  const amountTitle = chargeKind === 'full_payment' ? 'Total due now' : 'Deposit required';
+  const payButtonLabel = chargeKind === 'full_payment' ? 'Pay now' : 'Pay deposit';
 
   return (
     <div className="space-y-5">
@@ -129,7 +144,7 @@ export function PaymentStep({
       <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
         <div className={`flex items-center ${showSplit ? 'justify-between' : ''}`}>
           <div>
-            <p className="text-xs font-medium text-slate-500">Deposit required</p>
+            <p className="text-xs font-medium text-slate-500">{amountTitle}</p>
             <p className="text-2xl font-bold text-slate-900">&pound;{amount}</p>
             {summaryMode === 'total' && partySize > 1 && (
               <p className="mt-1 text-xs text-slate-500">Total for {partySize} appointments</p>
@@ -165,7 +180,12 @@ export function PaymentStep({
       </div>
 
       <Elements stripe={stripePromise} options={{ clientSecret, appearance: { theme: 'stripe', variables: { colorPrimary: '#4E6B78', borderRadius: '12px' } } }}>
-        <PaymentForm clientSecret={clientSecret} onComplete={onComplete} onBack={onBack} />
+        <PaymentForm
+          clientSecret={clientSecret}
+          onComplete={onComplete}
+          onBack={onBack}
+          payButtonLabel={payButtonLabel}
+        />
       </Elements>
     </div>
   );

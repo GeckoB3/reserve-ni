@@ -1,6 +1,6 @@
 import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
-import { getDashboardStaff, getLinkedPractitionerId } from '@/lib/venue-auth';
+import { getDashboardStaff, getStaffManagedCalendarIds } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { ToastProvider } from '@/components/ui/Toast';
 import { PractitionerCalendarView } from '../practitioner-calendar/PractitionerCalendarView';
@@ -47,11 +47,12 @@ export default async function CalendarPage() {
     redirect('/dashboard');
   }
 
-  const linkedPractitionerId =
+  const linkedPractitionerIds =
     staff.role === 'staff' && staff.id
-      ? await getLinkedPractitionerId(admin, staff.venue_id, staff.id)
-      : null;
-  const defaultPractitionerFilter: 'all' | string = linkedPractitionerId ?? 'all';
+      ? await getStaffManagedCalendarIds(admin, staff.venue_id, staff.id)
+      : [];
+  const defaultPractitionerFilter: 'all' | string =
+    linkedPractitionerIds.length === 1 ? linkedPractitionerIds[0] : 'all';
 
   const showPractitionerCalendar = isPractitionerScheduleCalendar(bookingModel, enabledModels);
 
@@ -69,7 +70,7 @@ export default async function CalendarPage() {
               venueId={staff.venue_id}
               currency={currency}
               defaultPractitionerFilter={defaultPractitionerFilter}
-              linkedPractitionerId={linkedPractitionerId}
+              linkedPractitionerIds={linkedPractitionerIds}
               bookingModel={bookingModel}
               enabledModels={enabledModels}
             />

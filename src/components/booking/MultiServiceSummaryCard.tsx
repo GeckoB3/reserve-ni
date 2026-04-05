@@ -7,6 +7,8 @@ export interface MultiServiceLine {
   durationMinutes: number;
   pricePence: number | null;
   depositPence: number;
+  /** When set, refines the total line label (deposit vs full payment). */
+  chargeKind?: 'deposit' | 'full_payment';
 }
 
 interface MultiServiceSummaryCardProps {
@@ -30,6 +32,9 @@ export function MultiServiceSummaryCard({
   const totalPrice = lines.reduce((sum, l) => sum + (l.pricePence ?? 0), 0);
   const totalDeposit = lines.reduce((sum, l) => sum + (l.depositPence ?? 0), 0);
   const hasPrice = lines.some((l) => l.pricePence != null);
+  const allFull =
+    totalDeposit > 0 && lines.every((l) => l.depositPence <= 0 || l.chargeKind === 'full_payment');
+  const depositLineLabel = totalDeposit > 0 ? (allFull ? 'Full payment due' : 'Deposit due') : '';
 
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -77,7 +82,7 @@ export function MultiServiceSummaryCard({
         )}
         {totalDeposit > 0 && (
           <div className="flex justify-between text-amber-900/90">
-            <span className="font-medium">Deposit due</span>
+            <span className="font-medium">{depositLineLabel}</span>
             <span className="font-semibold">
               {currencySymbol}
               {(totalDeposit / 100).toFixed(2)}

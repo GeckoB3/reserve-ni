@@ -165,8 +165,59 @@ export function computeClassAvailability(input: ClassEngineInput): ClassAvailabi
     });
   }
 
-  results.sort((a, b) => a.start_time.localeCompare(b.start_time));
+  results.sort(
+    (a, b) =>
+      a.instance_date.localeCompare(b.instance_date) || a.start_time.localeCompare(b.start_time),
+  );
   return results;
+}
+
+// ---------------------------------------------------------------------------
+// Offerings (multi-day): group bookable slots by class type for class-first UIs
+// ---------------------------------------------------------------------------
+
+export interface ClassOfferingSummary {
+  class_type_id: string;
+  class_name: string;
+  description: string | null;
+  colour: string;
+  price_pence: number | null;
+  payment_requirement: ClassPaymentRequirement;
+  deposit_amount_pence: number | null;
+  instructor_name: string | null;
+  /** Distinct instance dates with at least one bookable spot. */
+  dates: string[];
+  /** Bookable instances in range for this type (remaining > 0). */
+  session_count: number;
+}
+
+export function buildClassOfferingSummaries(slots: ClassAvailabilitySlot[]): ClassOfferingSummary[] {
+  const byType = new Map<string, ClassAvailabilitySlot[]>();
+  for (const s of slots) {
+    if (s.remaining <= 0) continue;
+    const arr = byType.get(s.class_type_id) ?? [];
+    arr.push(s);
+    byType.set(s.class_type_id, arr);
+  }
+  const out: ClassOfferingSummary[] = [];
+  for (const [, arr] of byType) {
+    const first = arr[0]!;
+    const dates = [...new Set(arr.map((x) => x.instance_date))].sort();
+    out.push({
+      class_type_id: first.class_type_id,
+      class_name: first.class_name,
+      description: first.description,
+      colour: first.colour,
+      price_pence: first.price_pence,
+      payment_requirement: first.payment_requirement,
+      deposit_amount_pence: first.deposit_amount_pence,
+      instructor_name: first.instructor_name,
+      dates,
+      session_count: arr.length,
+    });
+  }
+  out.sort((a, b) => a.class_name.localeCompare(b.class_name));
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -196,7 +247,7 @@ export async function fetchClassInput(params: {
   const classTypeIds = classTypes.map((ct) => ct.id);
 
   const instructorIds = [...new Set(classTypes.map((ct) => ct.instructor_id).filter(Boolean))] as string[];
-  let instructorDisplayNamesById: Record<string, string> = {};
+  const instructorDisplayNamesById: Record<string, string> = {};
   if (instructorIds.length > 0) {
     const [calsRes, pracsRes] = await Promise.all([
       supabase.from('unified_calendars').select('id, name').eq('venue_id', venueId).in('id', instructorIds),
@@ -265,4 +316,109 @@ export async function fetchClassInput(params: {
   }
 
   return { date, classTypes, instances, bookedByInstance, guestBookingWindow, instructorDisplayNamesById };
+}
+
+/**
+ * Load class instances and bookings across a date range (inclusive).
+ * Use with {@link computeClassAvailability} for class-first booking flows (e.g. next 3 months).
+ */
+export async function fetchClassInputForRange(params: {
+  supabase: SupabaseClient;
+  venueId: string;
+  fromDate: string;
+  toDate: string;
+  forPublicBooking?: boolean;
+}): Promise<ClassEngineInput> {
+  const { supabase, venueId, fromDate, toDate, forPublicBooking } = params;
+
+  const [typesRes, venueRes] = await Promise.all([
+    supabase.from('class_types').select('*').eq('venue_id', venueId).eq('is_active', true),
+    forPublicBooking === true
+      ? supabase.from('venues').select('timezone, booking_rules').eq('id', venueId).maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
+  ]);
+
+  const classTypes = (typesRes.data ?? []) as ClassType[];
+  const classTypeIds = classTypes.map((ct) => ct.id);
+
+  const instructorIds = [...new Set(classTypes.map((ct) => ct.instructor_id).filter(Boolean))] as string[];
+  const instructorDisplayNamesById: Record<string, string> = {};
+  if (instructorIds.length > 0) {
+    const [calsRes, pracsRes] = await Promise.all([
+      supabase.from('unified_calendars').select('id, name').eq('venue_id', venueId).in('id', instructorIds),
+      supabase.from('practitioners').select('id, name').eq('venue_id', venueId).in('id', instructorIds),
+    ]);
+    if (calsRes.error) {
+      console.error('[fetchClassInputForRange] unified_calendars:', calsRes.error);
+    }
+    if (pracsRes.error) {
+      console.error('[fetchClassInputForRange] practitioners:', pracsRes.error);
+    }
+    for (const row of pracsRes.data ?? []) {
+      const p = row as { id: string; name: string };
+      instructorDisplayNamesById[p.id] = p.name;
+    }
+    for (const row of calsRes.data ?? []) {
+      const c = row as { id: string; name: string };
+      instructorDisplayNamesById[c.id] = c.name;
+    }
+  }
+
+  const instancesPromise =
+    classTypeIds.length === 0
+      ? Promise.resolve({ data: [] as ClassInstance[] })
+      : supabase
+          .from('class_instances')
+          .select('*')
+          .gte('instance_date', fromDate)
+          .lte('instance_date', toDate)
+          .eq('is_cancelled', false)
+          .in('class_type_id', classTypeIds)
+          .order('instance_date', { ascending: true })
+          .order('start_time', { ascending: true });
+
+  const [instancesRes, bookingsRes] = await Promise.all([
+    instancesPromise,
+    supabase
+      .from('bookings')
+      .select('id, class_instance_id, party_size, status')
+      .eq('venue_id', venueId)
+      .gte('booking_date', fromDate)
+      .lte('booking_date', toDate)
+      .not('class_instance_id', 'is', null)
+      .in('status', CAPACITY_CONSUMING_STATUSES),
+  ]);
+
+  const instances = (instancesRes.data ?? []) as ClassInstance[];
+
+  const bookedByInstance: Record<string, number> = {};
+  for (const b of bookingsRes.data ?? []) {
+    const instId = b.class_instance_id!;
+    bookedByInstance[instId] = (bookedByInstance[instId] ?? 0) + (b.party_size ?? 1);
+  }
+
+  let guestBookingWindow: GuestClassBookingWindow | undefined;
+  if (forPublicBooking === true) {
+    if ('error' in venueRes && venueRes.error) {
+      console.error('[fetchClassInputForRange] venue row for public booking:', venueRes.error);
+    }
+    const v = venueRes.data as { timezone?: string | null; booking_rules?: unknown } | null;
+    const tz =
+      v && typeof v.timezone === 'string' && v.timezone.trim() !== '' ? v.timezone.trim() : 'Europe/London';
+    const rules = v?.booking_rules as { min_notice_hours?: number } | null | undefined;
+    const minNoticeHours =
+      typeof rules?.min_notice_hours === 'number' && Number.isFinite(rules.min_notice_hours)
+        ? rules.min_notice_hours
+        : 1;
+    guestBookingWindow = { minNoticeHours, venueTimezone: tz };
+  }
+
+  return {
+    date: fromDate,
+    classTypes,
+    instances,
+    bookedByInstance,
+    guestBookingWindow,
+    instructorDisplayNamesById,
+  };
 }

@@ -1,9 +1,15 @@
 import { randomUUID } from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { getVenueStaff, requireAdmin, getLinkedPractitionerId } from '@/lib/venue-auth';
+import {
+  getVenueStaff,
+  requireAdmin,
+  getStaffManagedCalendarIds,
+  staffManagesCalendar,
+} from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { checkCalendarLimit } from '@/lib/tier-enforcement';
+import { defaultNewUnifiedCalendarWorkingHours } from '@/lib/availability/practitioner-defaults';
 import { z } from 'zod';
 
 /** Map unified_calendars rows to the practitioner shape expected by dashboard + booking UI. */
@@ -105,6 +111,10 @@ const practitionerSchema = z.object({
  * Non-admin staff normally receive only their linked practitioner row (settings / availability).
  * Pass `?roster=1` for the full venue roster (read-only) - used by appointments list and calendar
  * so staff can filter by colleague while other flows stay scoped.
+ * Pass `?active_only=1` to return only active calendars/practitioners (staff new-booking pickers).
+ * Pass `?staff_assignable=1` for Settings → Staff: active practitioner/class columns only (excludes
+ * resource calendars e.g. courts/rooms — those are not staff-managed bookable columns).
+ * Omit it for admin flows that must list inactive rows (e.g. availability settings).
  */
 export async function GET(request: NextRequest) {
   try {
@@ -113,6 +123,8 @@ export async function GET(request: NextRequest) {
     if (!staff) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
 
     const roster = request.nextUrl.searchParams.get('roster') === '1';
+    const activeOnly = request.nextUrl.searchParams.get('active_only') === '1';
+    const staffAssignable = request.nextUrl.searchParams.get('staff_assignable') === '1';
 
     const admin = getSupabaseAdminClient();
     const { data: venueMeta } = await admin
@@ -134,10 +146,55 @@ export async function GET(request: NextRequest) {
         return NextResponse.json({ error: 'Failed to fetch practitioners' }, { status: 500 });
       }
 
-      let list = (data ?? []).map((r) => unifiedCalendarToPractitionerRow(r as Record<string, unknown>));
+      const { data: assignRows, error: assignErr } = await admin
+        .from('staff_calendar_assignments')
+        .select('calendar_id, staff_id')
+        .eq('venue_id', staff.venue_id);
+
+      if (assignErr) {
+        console.error(
+          'GET /api/venue/practitioners: staff_calendar_assignments query failed (run migration 20260507120000 if missing):',
+          assignErr.message,
+        );
+      }
+
+      const staffIdsByCalendar = new Map<string, string[]>();
+      for (const ar of assignRows ?? []) {
+        const cid = ar.calendar_id as string;
+        const sid = ar.staff_id as string;
+        const cur = staffIdsByCalendar.get(cid);
+        if (cur) cur.push(sid);
+        else staffIdsByCalendar.set(cid, [sid]);
+      }
+
+      let list = (data ?? []).map((r) => {
+        const row = r as { id: string; staff_id?: string | null };
+        const fromJunction = staffIdsByCalendar.get(row.id) ?? [];
+        const legacy = row.staff_id ? [row.staff_id] : [];
+        const mergedStaffIds = [...new Set([...fromJunction, ...legacy])];
+        const base = unifiedCalendarToPractitionerRow(r as Record<string, unknown>) as Record<string, unknown>;
+        return {
+          ...base,
+          staff_ids: mergedStaffIds,
+          staff_id: (mergedStaffIds[0] ?? base.staff_id ?? null) as string | null,
+        };
+      });
       if (staff.role !== 'admin' && !roster) {
-        const linkedId = await getLinkedPractitionerId(admin, staff.venue_id, staff.id);
-        list = linkedId ? list.filter((p) => (p as { id: string }).id === linkedId) : [];
+        const linkedIds = await getStaffManagedCalendarIds(admin, staff.venue_id, staff.id);
+        list =
+          linkedIds.length > 0
+            ? list.filter((p) => linkedIds.includes(String((p as Record<string, unknown>).id)))
+            : [];
+      }
+      if (staffAssignable) {
+        list = list.filter((p) => {
+          const row = p as { is_active?: boolean; calendar_type?: string | null };
+          return (
+            row.is_active === true && (row.calendar_type ?? 'practitioner') !== 'resource'
+          );
+        });
+      } else if (activeOnly) {
+        list = list.filter((p) => (p as { is_active?: boolean }).is_active === true);
       }
       return NextResponse.json({ practitioners: list });
     }
@@ -156,6 +213,11 @@ export async function GET(request: NextRequest) {
     let list = data ?? [];
     if (staff.role !== 'admin' && !roster) {
       list = list.filter((p) => p.staff_id === staff.id);
+    }
+    if (staffAssignable) {
+      list = list.filter((p) => p.is_active === true);
+    } else if (activeOnly) {
+      list = list.filter((p) => p.is_active === true);
     }
 
     return NextResponse.json({ practitioners: list });
@@ -230,15 +292,22 @@ export async function POST(request: NextRequest) {
 
     if (bookingModel === 'unified_scheduling') {
       const calendarId = randomUUID();
+      const initialWorkingHours =
+        parsed.data.working_hours !== undefined &&
+        parsed.data.working_hours !== null &&
+        typeof parsed.data.working_hours === 'object' &&
+        Object.keys(parsed.data.working_hours).length > 0
+          ? parsed.data.working_hours
+          : defaultNewUnifiedCalendarWorkingHours();
       const { data: ucRow, error: ucErr } = await admin
         .from('unified_calendars')
         .insert({
           id: calendarId,
           venue_id: staff.venue_id,
           name: parsed.data.name,
-          staff_id: parsed.data.staff_id ?? null,
+          staff_id: null,
           slug: slugNorm.value ?? null,
-          working_hours: parsed.data.working_hours ?? {},
+          working_hours: initialWorkingHours,
           break_times: parsed.data.break_times ?? [],
           break_times_by_day: parsed.data.break_times_by_day ?? null,
           days_off: parsed.data.days_off ?? [],
@@ -258,6 +327,17 @@ export async function POST(request: NextRequest) {
           );
         }
         return NextResponse.json({ error: 'Failed to create calendar' }, { status: 500 });
+      }
+
+      if (parsed.data.staff_id) {
+        const { error: assignErr } = await admin.from('staff_calendar_assignments').insert({
+          venue_id: staff.venue_id,
+          staff_id: parsed.data.staff_id,
+          calendar_id: calendarId,
+        });
+        if (assignErr) {
+          console.error('POST /api/venue/practitioners staff_calendar_assignments failed:', assignErr);
+        }
       }
 
       return NextResponse.json(unifiedCalendarToPractitionerRow(ucRow as Record<string, unknown>), { status: 201 });
@@ -326,7 +406,7 @@ export async function PATCH(request: NextRequest) {
       if (bookingModelStaff === 'unified_scheduling') {
         const { data: cal, error: calErr } = await admin
           .from('unified_calendars')
-          .select('id, staff_id')
+          .select('id')
           .eq('id', id)
           .eq('venue_id', staff.venue_id)
           .maybeSingle();
@@ -334,9 +414,10 @@ export async function PATCH(request: NextRequest) {
         if (calErr || !cal) {
           return NextResponse.json({ error: 'Team member not found' }, { status: 404 });
         }
-        if (cal.staff_id !== staff.id) {
+        const mayEdit = await staffManagesCalendar(admin, staff.venue_id, staff.id, id);
+        if (!mayEdit) {
           return NextResponse.json(
-            { error: 'You can only edit the calendar linked to your account.' },
+            { error: 'You can only edit calendars assigned to your account.' },
             { status: 403 },
           );
         }
@@ -432,7 +513,6 @@ export async function PATCH(request: NextRequest) {
         'days_off',
         'sort_order',
         'is_active',
-        'staff_id',
       ] as const;
       for (const k of ucKeys) {
         if (Object.prototype.hasOwnProperty.call(updatePayload, k)) {

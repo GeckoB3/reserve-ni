@@ -97,7 +97,10 @@ export interface StaffMember {
   phone?: string | null;
   role: string;
   created_at: string;
-  /** Model B: practitioner calendar linked to this login, if any. */
+  /** Unified scheduling: bookable calendars this login may manage. */
+  linked_calendar_ids?: string[];
+  /** First linked calendar id (compat for single-select consumers). */
   linked_practitioner_id?: string | null;
+  /** Comma-separated calendar names for display. */
   linked_practitioner_name?: string | null;
 }

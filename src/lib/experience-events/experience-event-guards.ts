@@ -57,6 +57,8 @@ export interface ExperienceEventPatchInput {
   recurrence_rule?: string | null;
   parent_event_id?: string | null;
   is_active?: boolean;
+  /** Unified calendar column; null clears assignment. */
+  calendar_id?: string | null;
 }
 
 /**

@@ -37,19 +37,24 @@ export async function GET(
 
     const row = data as Record<string, unknown>;
     return NextResponse.json({
-      id: row.id,
-      venue_id: row.venue_id,
-      name: row.name,
-      resource_type: row.resource_type ?? null,
-      slot_interval_minutes: row.slot_interval_minutes ?? 30,
-      min_booking_minutes: row.min_booking_minutes ?? 60,
-      max_booking_minutes: row.max_booking_minutes ?? 120,
-      price_per_slot_pence: row.price_per_slot_pence ?? null,
-      is_active: row.is_active ?? true,
-      availability_hours: row.working_hours ?? {},
-      availability_exceptions: row.availability_exceptions ?? {},
-      sort_order: row.sort_order ?? 0,
-      created_at: row.created_at,
+      resource: {
+        id: row.id,
+        venue_id: row.venue_id,
+        name: row.name,
+        resource_type: row.resource_type ?? null,
+        slot_interval_minutes: row.slot_interval_minutes ?? 30,
+        min_booking_minutes: row.min_booking_minutes ?? 60,
+        max_booking_minutes: row.max_booking_minutes ?? 120,
+        price_per_slot_pence: row.price_per_slot_pence ?? null,
+        payment_requirement: (row.payment_requirement as string) ?? 'none',
+        deposit_amount_pence: row.deposit_amount_pence ?? null,
+        is_active: row.is_active ?? true,
+        availability_hours: row.working_hours ?? {},
+        availability_exceptions: row.availability_exceptions ?? {},
+        sort_order: row.sort_order ?? 0,
+        created_at: row.created_at,
+        display_on_calendar_id: (row.display_on_calendar_id as string | null | undefined) ?? null,
+      },
     });
   } catch (err) {
     console.error('GET /api/venue/resources/[id] failed:', err);

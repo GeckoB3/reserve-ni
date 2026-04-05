@@ -25,6 +25,8 @@ interface Props {
   onClose: () => void;
   onCreated: () => void;
   currency?: string;
+  /** When true, render only the inner card (no backdrop); parent supplies title and close. */
+  embedded?: boolean;
 }
 
 type WalkStep = 'mode' | 'group_hint' | 'service' | 'staff' | 'confirm';
@@ -33,7 +35,13 @@ type WalkStep = 'mode' | 'group_hint' | 'service' | 'staff' | 'confirm';
  * Walk-in: booking type → service (from price) → staff (their price) → confirm with optional contact.
  * Time is set server-side when the user confirms.
  */
-export function AppointmentWalkInModal({ open, onClose, onCreated, currency = 'GBP' }: Props) {
+export function AppointmentWalkInModal({
+  open,
+  onClose,
+  onCreated,
+  currency = 'GBP',
+  embedded = false,
+}: Props) {
   const sym = currency === 'EUR' ? '€' : '£';
 
   const [walkStep, setWalkStep] = useState<WalkStep>('mode');
@@ -62,7 +70,10 @@ export function AppointmentWalkInModal({ open, onClose, onCreated, currency = 'G
       setError(null);
 
       setDataLoading(true);
-      Promise.all([fetch('/api/venue/practitioners?roster=1'), fetch('/api/venue/appointment-services')])
+      Promise.all([
+        fetch('/api/venue/practitioners?roster=1&active_only=1'),
+        fetch('/api/venue/appointment-services'),
+      ])
         .then(async ([pracRes, svcRes]) => {
           if (!pracRes.ok || !svcRes.ok) {
             setError('Failed to load data. Please close and try again.');
@@ -87,7 +98,7 @@ export function AppointmentWalkInModal({ open, onClose, onCreated, currency = 'G
     () => (pracId: string) => {
       if (!pracId) return services.filter((s) => s.is_active);
       const pracLinks = links.filter((l) => l.practitioner_id === pracId);
-      if (pracLinks.length === 0) return services.filter((s) => s.is_active);
+      if (pracLinks.length === 0) return [];
       const linkedIds = new Set(pracLinks.map((l) => l.service_id));
       return services.filter((s) => s.is_active && linkedIds.has(s.id));
     },
@@ -181,18 +192,15 @@ export function AppointmentWalkInModal({ open, onClose, onCreated, currency = 'G
 
   if (!open) return null;
 
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-4 sm:items-center"
-      onClick={onClose}
-    >
+  const inner = (
       <div
         role="dialog"
         aria-modal="true"
-        aria-labelledby="walkin-modal-title"
+        aria-labelledby={embedded ? undefined : 'walkin-modal-title'}
         className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-t-2xl bg-white p-6 shadow-xl sm:rounded-2xl"
         onClick={(e) => e.stopPropagation()}
       >
+        {!embedded && (
         <div className="mb-4 flex items-center justify-between">
           <h2 id="walkin-modal-title" className="text-lg font-semibold text-slate-900">
             Walk-in Appointment
@@ -203,6 +211,7 @@ export function AppointmentWalkInModal({ open, onClose, onCreated, currency = 'G
             </svg>
           </button>
         </div>
+        )}
 
         {error && (
           <div className="mb-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
@@ -416,6 +425,16 @@ export function AppointmentWalkInModal({ open, onClose, onCreated, currency = 'G
           </>
         )}
       </div>
+  );
+
+  if (embedded) return inner;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-4 sm:items-center"
+      onClick={onClose}
+    >
+      {inner}
     </div>
   );
 }

@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { z } from 'zod';
+import type { ClassPaymentRequirement } from '@/types/booking-models';
 
 const staffMaySchema = {
   staff_may_customize_name: z.boolean().optional(),
@@ -14,18 +15,59 @@ const staffMaySchema = {
   staff_may_customize_colour: z.boolean().optional(),
 };
 
-const serviceSchema = z.object({
-  name: z.string().min(1).max(200),
-  description: z.string().max(1000).optional(),
-  duration_minutes: z.number().int().min(5).max(480),
-  buffer_minutes: z.number().int().min(0).max(120).optional(),
-  price_pence: z.number().int().min(0).optional(),
-  deposit_pence: z.number().int().min(0).optional(),
-  colour: z.string().max(20).optional(),
-  is_active: z.boolean().optional(),
-  sort_order: z.number().int().optional(),
-  ...staffMaySchema,
-});
+const paymentRequirementSchema = z.enum(['none', 'deposit', 'full_payment']);
+
+const serviceSchema = z
+  .object({
+    name: z.string().min(1).max(200),
+    description: z.string().max(1000).optional(),
+    duration_minutes: z.number().int().min(5).max(480),
+    buffer_minutes: z.number().int().min(0).max(120).optional(),
+    price_pence: z.number().int().min(0).optional(),
+    deposit_pence: z.number().int().min(0).optional().nullable(),
+    payment_requirement: paymentRequirementSchema.optional(),
+    colour: z.string().max(20).optional(),
+    is_active: z.boolean().optional(),
+    sort_order: z.number().int().optional(),
+    ...staffMaySchema,
+  })
+  .superRefine((data, ctx) => {
+    const req =
+      data.payment_requirement ??
+      (data.deposit_pence != null && data.deposit_pence > 0 ? 'deposit' : 'none');
+    if (req === 'deposit') {
+      const d = data.deposit_pence;
+      if (d == null || d <= 0) {
+        ctx.addIssue({
+          code: 'custom',
+          message: 'Enter a deposit amount greater than zero',
+          path: ['deposit_pence'],
+        });
+      }
+    }
+    if (req === 'full_payment') {
+      const p = data.price_pence;
+      if (p == null || p <= 0) {
+        ctx.addIssue({
+          code: 'custom',
+          message: 'Set a price when charging full payment online',
+          path: ['price_pence'],
+        });
+      }
+    }
+  });
+
+function normalizeServicePaymentFields(data: {
+  payment_requirement?: ClassPaymentRequirement;
+  deposit_pence?: number | null;
+}): { payment_requirement: ClassPaymentRequirement; deposit_pence: number | null } {
+  const req =
+    data.payment_requirement ??
+    (data.deposit_pence != null && data.deposit_pence > 0 ? 'deposit' : 'none');
+  if (req === 'none') return { payment_requirement: 'none', deposit_pence: null };
+  if (req === 'deposit') return { payment_requirement: 'deposit', deposit_pence: data.deposit_pence ?? 0 };
+  return { payment_requirement: 'full_payment', deposit_pence: null };
+}
 
 function mapServiceItemRowForDashboard(row: Record<string, unknown>): Record<string, unknown> {
   return {
@@ -166,6 +208,10 @@ export async function POST(request: NextRequest) {
     const bookingModel = await getVenueBookingModel(admin, staff.venue_id);
 
     if (bookingModel === 'unified_scheduling') {
+      const pay = normalizeServicePaymentFields({
+        payment_requirement: parsed.data.payment_requirement,
+        deposit_pence: parsed.data.deposit_pence,
+      });
       const insertRow = {
         venue_id: staff.venue_id,
         name: parsed.data.name,
@@ -175,7 +221,8 @@ export async function POST(request: NextRequest) {
         buffer_minutes: parsed.data.buffer_minutes ?? 0,
         processing_time_minutes: 0,
         price_pence: parsed.data.price_pence ?? null,
-        deposit_pence: parsed.data.deposit_pence ?? null,
+        payment_requirement: pay.payment_requirement,
+        deposit_pence: pay.deposit_pence,
         price_type: 'fixed' as const,
         colour: parsed.data.colour ?? '#3B82F6',
         is_active: parsed.data.is_active ?? true,
@@ -212,10 +259,17 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(mapServiceItemRowForDashboard(data as Record<string, unknown>), { status: 201 });
     }
 
+    const pay = normalizeServicePaymentFields({
+      payment_requirement: parsed.data.payment_requirement,
+      deposit_pence: parsed.data.deposit_pence,
+    });
+    const { payment_requirement: _pr0, deposit_pence: _dp0, ...restCreate } = parsed.data;
     const insertRow = {
       venue_id: staff.venue_id,
-      ...parsed.data,
+      ...restCreate,
       buffer_minutes: parsed.data.buffer_minutes ?? 0,
+      payment_requirement: pay.payment_requirement,
+      deposit_pence: pay.deposit_pence,
     };
     const { data, error } = await admin.from('appointment_services').insert(insertRow).select().single();
 
@@ -262,6 +316,18 @@ export async function PATCH(request: NextRequest) {
 
     if (bookingModel === 'unified_scheduling') {
       const updatePayload: Record<string, unknown> = { ...parsed.data };
+      if (parsed.data.payment_requirement !== undefined) {
+        const norm = normalizeServicePaymentFields({
+          payment_requirement: parsed.data.payment_requirement,
+          deposit_pence: parsed.data.deposit_pence,
+        });
+        updatePayload.payment_requirement = norm.payment_requirement;
+        updatePayload.deposit_pence = norm.deposit_pence;
+      } else if (parsed.data.deposit_pence !== undefined) {
+        const dp = parsed.data.deposit_pence ?? 0;
+        updatePayload.payment_requirement = dp > 0 ? 'deposit' : 'none';
+        updatePayload.deposit_pence = dp > 0 ? dp : null;
+      }
 
       const { data, error } = await admin
         .from('service_items')
@@ -294,9 +360,23 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json(mapServiceItemRowForDashboard(data as Record<string, unknown>));
     }
 
+    const patchPayload: Record<string, unknown> = { ...parsed.data };
+    if (parsed.data.payment_requirement !== undefined) {
+      const norm = normalizeServicePaymentFields({
+        payment_requirement: parsed.data.payment_requirement,
+        deposit_pence: parsed.data.deposit_pence,
+      });
+      patchPayload.payment_requirement = norm.payment_requirement;
+      patchPayload.deposit_pence = norm.deposit_pence;
+    } else if (parsed.data.deposit_pence !== undefined) {
+      const dp = parsed.data.deposit_pence ?? 0;
+      patchPayload.payment_requirement = dp > 0 ? 'deposit' : 'none';
+      patchPayload.deposit_pence = dp > 0 ? dp : null;
+    }
+
     const { data, error } = await admin
       .from('appointment_services')
-      .update(parsed.data)
+      .update(patchPayload)
       .eq('id', id)
       .eq('venue_id', staff.venue_id)
       .select()

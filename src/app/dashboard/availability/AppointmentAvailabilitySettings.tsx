@@ -2,9 +2,11 @@
 
 import { useCallback, useEffect, useState, useMemo } from 'react';
 import Link from 'next/link';
-import { defaultPractitionerWorkingHours } from '@/lib/availability/practitioner-defaults';
+import { useSearchParams } from 'next/navigation';
+import { defaultNewUnifiedCalendarWorkingHours } from '@/lib/availability/practitioner-defaults';
 import type { TimeRange, WorkingHours } from '@/types/booking-models';
 import { StaffLeaveCalendarPanel } from '@/app/dashboard/availability/StaffLeaveCalendarPanel';
+import { BookableCalendarsPanel } from '@/app/dashboard/availability/BookableCalendarsPanel';
 
 interface CalendarEntitlement {
   pricing_tier: string;
@@ -23,12 +25,34 @@ interface Practitioner {
   email: string | null;
   phone: string | null;
   staff_id: string | null;
+  /** Unified scheduling: staff accounts assigned to manage this calendar (junction). */
+  staff_ids?: string[];
+  slug?: string | null;
+  /** unified_calendars.calendar_type — resource rows are excluded from appointment calendar UI */
+  calendar_type?: string | null;
   working_hours: Record<string, Array<{ start: string; end: string }>>;
   break_times: Array<{ start: string; end: string }>;
   break_times_by_day?: WorkingHours | null;
   days_off: string[];
   is_active: boolean;
   sort_order: number;
+}
+
+interface ClassTypeRow {
+  id: string;
+  name: string;
+  instructor_id: string | null;
+}
+
+interface ResourceRow {
+  id: string;
+  name: string;
+  display_on_calendar_id: string | null;
+}
+
+interface ExperienceEventRow {
+  id: string;
+  name: string;
 }
 
 interface Service {
@@ -41,12 +65,22 @@ interface PractitionerServiceLink {
   service_id: string;
 }
 
-type Tab = 'team' | 'services' | 'hours' | 'breaks' | 'daysoff';
+type Tab = 'team' | 'hours' | 'breaks' | 'daysoff';
+
+/** `?tab=` on /dashboard/availability — "availability" maps to the Hours tab (weekly calendar hours). */
+function parseTabQueryParam(raw: string | null): Tab | null {
+  if (!raw) return null;
+  const r = raw.trim().toLowerCase();
+  if (r === 'hours' || r === 'availability') return 'hours';
+  if (r === 'team' || r === 'calendars') return 'team';
+  if (r === 'breaks') return 'breaks';
+  if (r === 'daysoff' || r === 'time-off' || r === 'timeoff') return 'daysoff';
+  return null;
+}
 
 const ALL_TABS: Array<{ key: Tab; label: string }> = [
-  { key: 'team', label: 'Team' },
-  { key: 'services', label: 'Services' },
-  { key: 'hours', label: 'Working Hours' },
+  { key: 'team', label: 'Calendars' },
+  { key: 'hours', label: 'Availability' },
   { key: 'breaks', label: 'Breaks' },
   { key: 'daysoff', label: 'Time off' },
 ];
@@ -55,13 +89,18 @@ const DAY_LABELS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Sat
 const DAY_KEYS = ['1', '2', '3', '4', '5', '6', '0'];
 
 function defaultWorkingHours(): Record<string, Array<{ start: string; end: string }>> {
-  return defaultPractitionerWorkingHours();
+  return defaultNewUnifiedCalendarWorkingHours();
+}
+
+function staffIdsForPractitioner(p: Practitioner): string[] {
+  if (p.staff_ids && p.staff_ids.length > 0) return p.staff_ids;
+  return p.staff_id ? [p.staff_id] : [];
 }
 
 function canEditBreaksFor(p: Practitioner | null, isAdmin: boolean, staffId: string | null): boolean {
   if (!p) return false;
   if (isAdmin) return true;
-  return staffId != null && p.staff_id === staffId;
+  return staffId != null && staffIdsForPractitioner(p).includes(staffId);
 }
 
 function canEditWorkingHoursFor(p: Practitioner | null, isAdmin: boolean, staffId: string | null): boolean {
@@ -76,7 +115,25 @@ export function AppointmentAvailabilitySettings({
   isAdmin: boolean;
   currentStaffId: string | null;
 }) {
-  const [tab, setTab] = useState<Tab>(() => (isAdmin ? 'team' : 'services'));
+  const searchParams = useSearchParams();
+  const [tab, setTab] = useState<Tab>(() => {
+    const fromUrl = parseTabQueryParam(searchParams.get('tab'));
+    if (fromUrl) {
+      if (fromUrl === 'team' && !isAdmin) return 'hours';
+      return fromUrl;
+    }
+    return isAdmin ? 'team' : 'hours';
+  });
+
+  useEffect(() => {
+    const fromUrl = parseTabQueryParam(searchParams.get('tab'));
+    if (!fromUrl) return;
+    if (fromUrl === 'team' && !isAdmin) {
+      setTab('hours');
+      return;
+    }
+    setTab(fromUrl);
+  }, [searchParams, isAdmin]);
   const [practitioners, setPractitioners] = useState<Practitioner[]>([]);
   const [services, setServices] = useState<Service[]>([]);
   const [pLinks, setPLinks] = useState<PractitionerServiceLink[]>([]);
@@ -89,10 +146,13 @@ export function AppointmentAvailabilitySettings({
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [formName, setFormName] = useState('');
-  const [formEmail, setFormEmail] = useState('');
-  const [formPhone, setFormPhone] = useState('');
   const [formActive, setFormActive] = useState(true);
   const [formServiceIds, setFormServiceIds] = useState<string[]>([]);
+  const [formClassIds, setFormClassIds] = useState<string[]>([]);
+  const [formResourceIds, setFormResourceIds] = useState<string[]>([]);
+  const [classTypes, setClassTypes] = useState<ClassTypeRow[]>([]);
+  const [resourceRows, setResourceRows] = useState<ResourceRow[]>([]);
+  const [experienceEvents, setExperienceEvents] = useState<ExperienceEventRow[]>([]);
   const [entitlement, setEntitlement] = useState<CalendarEntitlement | null>(null);
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
 
@@ -105,8 +165,58 @@ export function AppointmentAvailabilitySettings({
   }, [isAdmin]);
 
   useEffect(() => {
-    if (!isAdmin && tab === 'team') setTab('services');
+    if (!isAdmin && tab === 'team') setTab('hours');
   }, [isAdmin, tab]);
+
+  /** Host appointment columns only (excludes resource-type unified rows). */
+  const appointmentCalendars = useMemo(
+    () => practitioners.filter((p) => (p.calendar_type ?? 'practitioner') !== 'resource'),
+    [practitioners],
+  );
+
+  const fetchAssociationData = useCallback(async () => {
+    try {
+      const [cRes, rRes, eRes] = await Promise.all([
+        fetch('/api/venue/classes'),
+        fetch('/api/venue/resources'),
+        fetch('/api/venue/experience-events'),
+      ]);
+      if (cRes.ok) {
+        const d = (await cRes.json()) as { class_types?: Array<{ id: string; name: string; instructor_id?: string | null }> };
+        setClassTypes(
+          (d.class_types ?? []).map((x) => ({
+            id: x.id,
+            name: x.name,
+            instructor_id: x.instructor_id ?? null,
+          })),
+        );
+      } else {
+        setClassTypes([]);
+      }
+      if (rRes.ok) {
+        const d = (await rRes.json()) as {
+          resources?: Array<{ id: string; name: string; display_on_calendar_id?: string | null }>;
+        };
+        setResourceRows(
+          (d.resources ?? []).map((x) => ({
+            id: x.id,
+            name: x.name,
+            display_on_calendar_id: x.display_on_calendar_id ?? null,
+          })),
+        );
+      } else {
+        setResourceRows([]);
+      }
+      if (eRes.ok) {
+        const d = (await eRes.json()) as { events?: Array<{ id: string; name: string }> };
+        setExperienceEvents((d.events ?? []).map((x) => ({ id: x.id, name: x.name })));
+      } else {
+        setExperienceEvents([]);
+      }
+    } catch {
+      /* non-blocking */
+    }
+  }, []);
 
   const fetchData = useCallback(async (options?: { silent?: boolean }) => {
     const silent = options?.silent === true;
@@ -124,6 +234,7 @@ export function AppointmentAvailabilitySettings({
         const svcData = await svcRes.json();
         setServices(svcData.services ?? []);
         setPLinks(svcData.practitioner_services ?? []);
+        if (isAdmin) await fetchAssociationData();
         return;
       }
 
@@ -140,12 +251,15 @@ export function AppointmentAvailabilitySettings({
       setPractitioners(pracs);
       setServices(svcData.services ?? []);
       setPLinks(svcData.practitioner_services ?? []);
+      if (isAdmin) await fetchAssociationData();
       setSelectedPractitionerId((prev) => {
-        const pool = pracs;
+        const pool = (pracs as Practitioner[]).filter(
+          (p) => (p.calendar_type ?? 'practitioner') !== 'resource',
+        );
         const own = currentStaffId
-          ? pracs.find((p: Practitioner) => p.staff_id === currentStaffId)
+          ? pool.find((p) => staffIdsForPractitioner(p).includes(currentStaffId))
           : undefined;
-        if (prev && pool.some((p: Practitioner) => p.id === prev)) return prev;
+        if (prev && pool.some((p) => p.id === prev)) return prev;
         return own?.id ?? pool[0]?.id ?? '';
       });
     } catch {
@@ -158,7 +272,7 @@ export function AppointmentAvailabilitySettings({
       }
     }
    
-  }, [isAdmin, currentStaffId]);
+  }, [isAdmin, currentStaffId, fetchAssociationData]);
 
   useEffect(() => {
     fetchData();
@@ -181,12 +295,12 @@ export function AppointmentAvailabilitySettings({
   }, [fetchEntitlement]);
 
   const selectedPrac = useMemo(
-    () => practitioners.find((p) => p.id === selectedPractitionerId) ?? null,
-    [practitioners, selectedPractitionerId],
+    () => appointmentCalendars.find((p) => p.id === selectedPractitionerId) ?? null,
+    [appointmentCalendars, selectedPractitionerId],
   );
 
-  /** All calendars for viewing; saves still use canEdit* for own calendar only (unless admin). */
-  const practitionersForScheduleTabs = useMemo(() => practitioners, [practitioners]);
+  /** Host appointment columns (excludes resource-type rows) for availability / breaks / leave. */
+  const practitionersForScheduleTabs = appointmentCalendars;
 
   function flash(msg: string) {
     setSuccess(msg);
@@ -202,22 +316,22 @@ export function AppointmentAvailabilitySettings({
     }
     setEditingId(null);
     setFormName('');
-    setFormEmail('');
-    setFormPhone('');
     setFormActive(true);
     setFormServiceIds([]);
+    setFormClassIds([]);
+    setFormResourceIds([]);
     setError(null);
     setShowForm(true);
   }
 
-  function openEdit(p: Practitioner) {
+  function openEdit(p: { id: string; name: string; is_active: boolean }) {
     if (!isAdmin) return;
     setEditingId(p.id);
     setFormName(p.name);
-    setFormEmail(p.email ?? '');
-    setFormPhone(p.phone ?? '');
     setFormActive(p.is_active);
     setFormServiceIds(pLinks.filter((l) => l.practitioner_id === p.id).map((l) => l.service_id));
+    setFormClassIds(classTypes.filter((ct) => ct.instructor_id === p.id).map((ct) => ct.id));
+    setFormResourceIds(resourceRows.filter((r) => r.display_on_calendar_id === p.id).map((r) => r.id));
     setError(null);
     setShowForm(true);
   }
@@ -231,8 +345,6 @@ export function AppointmentAvailabilitySettings({
       const payload: Record<string, unknown> = {
         name: formName.trim(),
         is_active: formActive,
-        ...(formEmail.trim() ? { email: formEmail.trim() } : {}),
-        ...(formPhone.trim() ? { phone: formPhone.trim() } : {}),
       };
       if (editingId) {
         payload.id = editingId;
@@ -269,50 +381,103 @@ export function AppointmentAvailabilitySettings({
       const pracId = editingId ?? practitionerData?.id;
 
       if (pracId) {
-        const effectiveServiceIds =
-          formServiceIds.length > 0 ? formServiceIds : services.map((s) => s.id);
         const linkRes = await fetch('/api/venue/practitioner-services', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ practitioner_id: pracId, service_ids: effectiveServiceIds }),
+          body: JSON.stringify({ practitioner_id: pracId, service_ids: formServiceIds }),
         });
         if (!linkRes.ok) {
           console.error('Failed to sync practitioner service links');
         }
       }
 
+      if (!pracId) {
+        throw new Error('Save did not return a calendar id.');
+      }
+
+      const editingPracId = pracId as string;
+      const fallbackOther = appointmentCalendars.find((p) => p.id !== editingPracId)?.id ?? null;
+
+      for (const ct of classTypes) {
+        const should = formClassIds.includes(ct.id);
+        const was = ct.instructor_id === editingPracId;
+        if (should === was) continue;
+        if (should) {
+          const cRes = await fetch('/api/venue/classes', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              id: ct.id,
+              entity_type: 'class_type',
+              instructor_id: editingPracId,
+            }),
+          });
+          if (!cRes.ok) {
+            const j = (await cRes.json().catch(() => ({}))) as { error?: string };
+            throw new Error(j.error ?? 'Could not update a class type for this calendar.');
+          }
+        } else {
+          if (!fallbackOther) {
+            throw new Error(
+              'Add another calendar column before moving a class off this calendar, or assign the class elsewhere in Class timetable.',
+            );
+          }
+          const cRes = await fetch('/api/venue/classes', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              id: ct.id,
+              entity_type: 'class_type',
+              instructor_id: fallbackOther,
+            }),
+          });
+          if (!cRes.ok) {
+            const j = (await cRes.json().catch(() => ({}))) as { error?: string };
+            throw new Error(j.error ?? 'Could not reassign a class type.');
+          }
+        }
+      }
+
+      for (const r of resourceRows) {
+        const should = formResourceIds.includes(r.id);
+        const was = r.display_on_calendar_id === editingPracId;
+        if (should === was) continue;
+        if (should) {
+          const rRes = await fetch('/api/venue/resources', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: r.id, display_on_calendar_id: editingPracId }),
+          });
+          if (!rRes.ok) {
+            const j = (await rRes.json().catch(() => ({}))) as { error?: string };
+            throw new Error(j.error ?? 'Could not assign a resource to this calendar.');
+          }
+        } else {
+          if (!fallbackOther) {
+            throw new Error(
+              'Add another calendar column before moving a resource off this calendar.',
+            );
+          }
+          const rRes = await fetch('/api/venue/resources', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: r.id, display_on_calendar_id: fallbackOther }),
+          });
+          if (!rRes.ok) {
+            const j = (await rRes.json().catch(() => ({}))) as { error?: string };
+            throw new Error(j.error ?? 'Could not move a resource to another calendar.');
+          }
+        }
+      }
+
       setShowForm(false);
-      flash(editingId ? 'Team member updated' : 'Team member added');
+      flash(editingId ? 'Calendar updated' : 'Calendar added');
       await fetchData();
       await fetchEntitlement();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save');
     } finally {
       setSaving(false);
-    }
-  }
-
-  async function deletePractitioner(id: string) {
-    if (!isAdmin) return;
-    if (!confirm('Delete this team member? This cannot be undone.')) return;
-    try {
-      const res = await fetch('/api/venue/practitioners', {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id }),
-      });
-      if (!res.ok) {
-        setError('Failed to delete team member. Please try again.');
-        return;
-      }
-      flash('Team member removed');
-      if (id === selectedPractitionerId) {
-        setSelectedPractitionerId('');
-      }
-      await fetchData();
-      await fetchEntitlement();
-    } catch {
-      setError('Failed to delete team member. Please try again.');
     }
   }
 
@@ -400,139 +565,46 @@ export function AppointmentAvailabilitySettings({
         </div>
       ) : (
         <>
-          {/* ─── Team Tab ─── */}
+          {/* ─── Team Tab (Calendars) ─── */}
           {tab === 'team' && (
             <div>
-              <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div className="text-sm text-slate-500">
-                  <p>Manage your team members who take appointments.</p>
-                  {!isAdmin && (
-                    <p className="mt-1 text-slate-600">Only admins can add, edit, or remove team members.</p>
-                  )}
-                  {isAdmin && entitlement && !entitlement.unlimited && entitlement.calendar_limit != null && (
-                    <p className="mt-1 text-slate-600">
-                      Calendars in use:{' '}
-                      <span className="font-medium text-slate-800">
-                        {entitlement.active_practitioners} of {entitlement.calendar_limit}
-                      </span>
-                      {entitlement.at_calendar_limit ? ' (at plan limit)' : ''}
-                    </p>
-                  )}
-                </div>
-                {isAdmin && (
-                  <button
-                    type="button"
-                    onClick={openAdd}
-                    className="shrink-0 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
-                  >
-                    Add Team Member
-                  </button>
-                )}
-              </div>
-
-              {practitioners.length === 0 ? (
-                <div className="rounded-xl border border-slate-200 bg-white p-12 text-center">
-                  <p className="text-slate-500">No team members yet.</p>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {practitioners.map((p) => {
-                    const linkedSvcs = pLinks
-                      .filter((l) => l.practitioner_id === p.id)
-                      .map((l) => ({ linkId: `${l.practitioner_id}_${l.service_id}`, name: services.find((s) => s.id === l.service_id)?.name }))
-                      .filter((x): x is { linkId: string; name: string } => Boolean(x.name));
-                    return (
-                      <div
-                        key={p.id}
-                        className={`rounded-xl border bg-white px-5 py-4 shadow-sm ${p.is_active ? 'border-slate-200' : 'border-slate-200 opacity-60'}`}
-                      >
-                        <div className="flex items-start justify-between">
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <span className="font-medium text-slate-900">{p.name}</span>
-                              {!p.is_active && (
-                                <span className="rounded-full bg-slate-200 px-2 py-0.5 text-xs text-slate-500">Inactive</span>
-                              )}
-                            </div>
-                            {(p.email || p.phone) && (
-                              <div className="mt-0.5 text-sm text-slate-500">
-                                {[p.email, p.phone].filter(Boolean).join(' | ')}
-                              </div>
-                            )}
-                            {linkedSvcs.length > 0 ? (
-                              <div className="mt-1 flex flex-wrap gap-1">
-                                {linkedSvcs.map((ls) => (
-                                  <span key={ls.linkId} className="rounded-full bg-blue-50 px-2 py-0.5 text-xs text-blue-700">{ls.name}</span>
-                                ))}
-                              </div>
-                            ) : services.length > 0 ? (
-                              <p className="mt-1 text-xs text-slate-500">
-                                <span className="rounded-full bg-slate-100 px-2 py-0.5 font-medium text-slate-700">
-                                  All services
-                                </span>{' '}
-                                — can perform every bookable service until you limit this below.
-                              </p>
-                            ) : null}
-                          </div>
-                          {isAdmin && (
-                            <div className="flex items-center gap-1">
-                              <button
-                                type="button"
-                                onClick={() => openEdit(p)}
-                                className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
-                              >
-                                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => deletePractitioner(p.id)}
-                                className="rounded-lg p-2 text-slate-400 hover:bg-red-50 hover:text-red-600"
-                              >
-                                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14"/></svg>
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
+              <BookableCalendarsPanel
+                practitioners={appointmentCalendars}
+                services={services}
+                pLinks={pLinks}
+                classTypes={classTypes}
+                resources={resourceRows}
+                events={experienceEvents}
+                entitlement={entitlement}
+                onCalendarsChanged={() => {
+                  void fetchData();
+                  void fetchEntitlement();
+                }}
+                onEditCalendar={openEdit}
+                onAddCalendar={openAdd}
+              />
 
               {/* Add/Edit modal */}
               {showForm && isAdmin && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-                  <div role="dialog" aria-modal="true" aria-labelledby="team-modal-title" className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
+                  <div
+                    role="dialog"
+                    aria-modal="true"
+                    aria-labelledby="team-modal-title"
+                    className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-6 shadow-xl"
+                  >
                     <h2 id="team-modal-title" className="mb-4 text-lg font-semibold text-slate-900">
-                      {editingId ? 'Edit Team Member' : 'Add Team Member'}
+                      {editingId ? 'Edit calendar' : 'Add calendar'}
                     </h2>
-                    <div className="space-y-3">
+                    <div className="space-y-4">
                       <div>
-                        <label className="mb-1 block text-sm font-medium text-slate-700">Name *</label>
+                        <label className="mb-1 block text-sm font-medium text-slate-700">Display name *</label>
                         <input
                           type="text"
                           value={formName}
                           onChange={(e) => setFormName(e.target.value)}
                           className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                          placeholder="Full name"
-                        />
-                      </div>
-                      <div>
-                        <label className="mb-1 block text-sm font-medium text-slate-700">Email</label>
-                        <input
-                          type="email"
-                          value={formEmail}
-                          onChange={(e) => setFormEmail(e.target.value)}
-                          className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                        />
-                      </div>
-                      <div>
-                        <label className="mb-1 block text-sm font-medium text-slate-700">Phone</label>
-                        <input
-                          type="tel"
-                          value={formPhone}
-                          onChange={(e) => setFormPhone(e.target.value)}
-                          className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                          placeholder="e.g. Sarah or Court 1"
                         />
                       </div>
                       <div className="flex items-center gap-3">
@@ -543,27 +615,25 @@ export function AppointmentAvailabilitySettings({
                         >
                           <span className={`absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${formActive ? 'translate-x-5' : 'translate-x-0'}`} />
                         </button>
-                        <span className="text-sm text-slate-700">Active</span>
+                        <span className="text-sm text-slate-700">Active (bookable)</span>
                       </div>
 
                       {services.length > 0 && (
                         <div>
-                          <label className="mb-1.5 block text-sm font-medium text-slate-700">Services offered</label>
+                          <label className="mb-1.5 block text-sm font-medium text-slate-700">Appointment services</label>
                           <p className="mb-2 text-xs text-slate-500">
-                            Select which services this team member can perform. Leave all unchecked to assign them to{' '}
-                            <strong>every</strong> service (recommended for most new team members).
+                            Tick each service guests may book on this calendar. Leave all unchecked if this column is only
+                            for classes or resources.
                           </p>
-                          <div className="space-y-2 max-h-40 overflow-y-auto rounded-lg border border-slate-200 p-3">
+                          <div className="max-h-36 space-y-2 overflow-y-auto rounded-lg border border-slate-200 p-3">
                             {services.map((svc) => (
-                              <label key={svc.id} className="flex items-center gap-2.5 cursor-pointer">
+                              <label key={svc.id} className="flex cursor-pointer items-center gap-2.5">
                                 <input
                                   type="checkbox"
                                   checked={formServiceIds.includes(svc.id)}
                                   onChange={(e) => {
                                     setFormServiceIds((prev) =>
-                                      e.target.checked
-                                        ? [...prev, svc.id]
-                                        : prev.filter((id) => id !== svc.id)
+                                      e.target.checked ? [...prev, svc.id] : prev.filter((id) => id !== svc.id),
                                     );
                                   }}
                                   className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
@@ -574,10 +644,91 @@ export function AppointmentAvailabilitySettings({
                           </div>
                         </div>
                       )}
+
+                      {classTypes.length > 0 && (
+                        <div>
+                          <label className="mb-1.5 block text-sm font-medium text-slate-700">Class types (instructor column)</label>
+                          <p className="mb-2 text-xs text-slate-500">
+                            Sessions for a class type appear on the calendar column you assign here. Moving a class off this
+                            calendar requires at least one other column.
+                          </p>
+                          <div className="max-h-36 space-y-2 overflow-y-auto rounded-lg border border-slate-200 p-3">
+                            {classTypes.map((ct) => (
+                              <label key={ct.id} className="flex cursor-pointer items-center gap-2.5">
+                                <input
+                                  type="checkbox"
+                                  checked={formClassIds.includes(ct.id)}
+                                  onChange={(e) => {
+                                    setFormClassIds((prev) =>
+                                      e.target.checked ? [...prev, ct.id] : prev.filter((id) => id !== ct.id),
+                                    );
+                                  }}
+                                  className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                                />
+                                <span className="text-sm text-slate-700">{ct.name}</span>
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {resourceRows.length > 0 && (
+                        <div>
+                          <label className="mb-1.5 block text-sm font-medium text-slate-700">Resources on this column</label>
+                          <p className="mb-2 text-xs text-slate-500">
+                            Resource bookings show on the host calendar you select. Unchecking moves a resource to another
+                            column (you need at least two columns).
+                          </p>
+                          <div className="max-h-36 space-y-2 overflow-y-auto rounded-lg border border-slate-200 p-3">
+                            {resourceRows.map((r) => (
+                              <label key={r.id} className="flex cursor-pointer items-center gap-2.5">
+                                <input
+                                  type="checkbox"
+                                  checked={formResourceIds.includes(r.id)}
+                                  onChange={(e) => {
+                                    setFormResourceIds((prev) =>
+                                      e.target.checked ? [...prev, r.id] : prev.filter((id) => id !== r.id),
+                                    );
+                                  }}
+                                  className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                                />
+                                <span className="text-sm text-slate-700">{r.name}</span>
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="rounded-lg border border-slate-100 bg-slate-50/90 p-3">
+                        <p className="text-sm font-medium text-slate-800">Experience events</p>
+                        <p className="mt-1 text-xs text-slate-600">
+                          Events are venue-wide and are not tied to a single calendar column. Manage them under{' '}
+                          <Link href="/dashboard/event-manager" className="font-medium text-brand-600 hover:underline">
+                            Event manager
+                          </Link>
+                          .
+                        </p>
+                        {experienceEvents.length > 0 && (
+                          <p className="mt-2 text-xs text-slate-500">
+                            Active events: {experienceEvents.map((e) => e.name).join(', ')}
+                          </p>
+                        )}
+                      </div>
                     </div>
                     <div className="mt-6 flex justify-end gap-3">
-                      <button onClick={() => setShowForm(false)} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Cancel</button>
-                      <button onClick={savePractitioner} disabled={saving} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">
+                      <button
+                        type="button"
+                        onClick={() => setShowForm(false)}
+                        className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void savePractitioner()}
+                        disabled={saving}
+                        className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+                      >
                         {saving ? 'Saving...' : 'Save'}
                       </button>
                     </div>
@@ -587,28 +738,16 @@ export function AppointmentAvailabilitySettings({
             </div>
           )}
 
-          {/* ─── Services Tab ─── */}
-          {tab === 'services' && (
-            <ServiceLinkingGrid
-              practitioners={practitioners}
-              services={services}
-              links={pLinks}
-              isAdmin={isAdmin}
-              currentStaffId={currentStaffId}
-              onLinksChanged={() => fetchData({ silent: true })}
-            />
-          )}
-
           {/* ─── Working Hours / Breaks / Time off ─── */}
           {tab === 'daysoff' && (
             <div>
-              {practitioners.length === 0 ? (
+              {appointmentCalendars.length === 0 ? (
                 <div className="rounded-xl border border-slate-200 bg-white p-12 text-center">
                   <p className="text-slate-500">Add team members first to plan time off.</p>
                 </div>
               ) : (
                 <>
-                  {practitioners.some((p) =>
+                  {appointmentCalendars.some((p) =>
                     (p.days_off ?? []).some((d) => /^\d{4}-\d{2}-\d{2}$/.test(d)),
                   ) && (
                     <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
@@ -621,11 +760,13 @@ export function AppointmentAvailabilitySettings({
                     </div>
                   )}
                   <StaffLeaveCalendarPanel
-                    practitioners={practitioners.map((p) => ({ id: p.id, name: p.name }))}
+                    practitioners={appointmentCalendars.map((p) => ({ id: p.id, name: p.name }))}
                     isAdmin={isAdmin}
                     selfPractitionerId={
                       !isAdmin && currentStaffId
-                        ? practitioners.find((p) => p.staff_id === currentStaffId)?.id ?? null
+                        ? appointmentCalendars.find((p) =>
+                            staffIdsForPractitioner(p).includes(currentStaffId),
+                          )?.id ?? null
                         : null
                     }
                     onError={setError}
@@ -637,7 +778,7 @@ export function AppointmentAvailabilitySettings({
 
           {(tab === 'hours' || tab === 'breaks') && (
             <div>
-              {practitioners.length === 0 ? (
+              {appointmentCalendars.length === 0 ? (
                 <div className="rounded-xl border border-slate-200 bg-white p-12 text-center">
                   <p className="text-slate-500">Add team members first to configure their schedule.</p>
                 </div>
@@ -653,7 +794,7 @@ export function AppointmentAvailabilitySettings({
                       {practitionersForScheduleTabs.map((p) => (
                         <option key={p.id} value={p.id}>
                           {p.name}
-                          {currentStaffId && p.staff_id === currentStaffId ? ' (you)' : ''}
+                          {currentStaffId && staffIdsForPractitioner(p).includes(currentStaffId) ? ' (you)' : ''}
                         </option>
                       ))}
                     </select>
@@ -1077,263 +1218,6 @@ function BreaksScheduleEditor({
             'You can only edit breaks for the calendar linked to your account. Ask an admin if you need a different profile selected.'}
         </p>
       )}
-    </div>
-  );
-}
-
-/** Build per-practitioner service id lists from API links (empty row = offer every service; PUT expands to all IDs). */
-function buildDraftFromLinks(
-  practitioners: Practitioner[],
-  links: PractitionerServiceLink[],
-): Record<string, string[]> {
-  const draft: Record<string, string[]> = {};
-  for (const p of practitioners) {
-    draft[p.id] = links.filter((l) => l.practitioner_id === p.id).map((l) => l.service_id);
-  }
-  return draft;
-}
-
-function areServiceDraftsEqual(a: Record<string, string[]>, b: Record<string, string[]>): boolean {
-  const ids = new Set([...Object.keys(a), ...Object.keys(b)]);
-  for (const id of ids) {
-    const sa = [...(a[id] ?? [])].sort().join(',');
-    const sb = [...(b[id] ?? [])].sort().join(',');
-    if (sa !== sb) return false;
-  }
-  return true;
-}
-
-// ─── Service Linking Grid ─────────────────────────────────────────────────
-function ServiceLinkingGrid({
-  practitioners,
-  services,
-  links,
-  isAdmin,
-  currentStaffId,
-  onLinksChanged,
-}: {
-  practitioners: Practitioner[];
-  services: Service[];
-  links: PractitionerServiceLink[];
-  isAdmin: boolean;
-  currentStaffId: string | null;
-  onLinksChanged: () => void | Promise<void>;
-}) {
-  const baseline = useMemo(() => buildDraftFromLinks(practitioners, links), [practitioners, links]);
-  const [draft, setDraft] = useState<Record<string, string[]>>(baseline);
-  const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
-
-  useEffect(() => {
-    setDraft(baseline);
-    setSaveError(null);
-  }, [baseline]);
-
-  const dirty = useMemo(() => !areServiceDraftsEqual(draft, baseline), [draft, baseline]);
-
-  function canEditPractitionerRow(practitionerId: string): boolean {
-    if (isAdmin) return true;
-    const row = practitioners.find((p) => p.id === practitionerId);
-    return Boolean(currentStaffId && row?.staff_id === currentStaffId);
-  }
-
-  function toggleCell(practitionerId: string, serviceId: string) {
-    if (!canEditPractitionerRow(practitionerId)) return;
-    setDraft((prev) => {
-      const cur = [...(prev[practitionerId] ?? [])];
-      const idx = cur.indexOf(serviceId);
-      if (idx >= 0) {
-        cur.splice(idx, 1);
-      } else {
-        cur.push(serviceId);
-      }
-      return { ...prev, [practitionerId]: cur };
-    });
-    setSaveError(null);
-  }
-
-  function discard() {
-    setDraft(baseline);
-    setSaveError(null);
-  }
-
-  async function save() {
-    setSaving(true);
-    setSaveError(null);
-    try {
-      const rowsToSave = isAdmin
-        ? practitioners
-        : practitioners.filter((p) => canEditPractitionerRow(p.id));
-      if (rowsToSave.length === 0) {
-        setSaveError('No calendar linked to your account to update.');
-        setSaving(false);
-        return;
-      }
-      const results = await Promise.all(
-        rowsToSave.map((p) =>
-          fetch('/api/venue/practitioner-services', {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              practitioner_id: p.id,
-              service_ids: draft[p.id] ?? [],
-            }),
-          }),
-        ),
-      );
-      if (results.some((r) => !r.ok)) {
-        const firstBad = results.find((r) => !r.ok);
-        const body = firstBad ? await firstBad.json().catch(() => ({})) : {};
-        throw new Error(typeof body.error === 'string' ? body.error : 'Save failed');
-      }
-      await onLinksChanged();
-    } catch (e) {
-      setSaveError(e instanceof Error ? e.message : 'Could not save changes');
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  if (services.length === 0) {
-    return (
-      <div className="rounded-xl border border-slate-200 bg-white p-12 text-center">
-        <p className="text-slate-500">No services configured yet. Add services first from the Services page.</p>
-      </div>
-    );
-  }
-
-  if (practitioners.length === 0) {
-    return (
-      <div className="rounded-xl border border-slate-200 bg-white p-12 text-center">
-        <p className="text-slate-500">No team members configured yet. Add team members from the Team tab.</p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <p className="max-w-2xl text-sm text-slate-600">
-          {isAdmin ? (
-            <>
-              Tick the services each team member offers (including any admin-linked calendars). Leave a row with{' '}
-              <strong>no</strong> boxes ticked to offer <strong>all</strong> services for that person. Changes apply when
-              you click Save.
-            </>
-          ) : (
-            <>
-              See which services each person offers. Tick boxes only on <strong>your</strong> row; other team members
-              are <strong>view only</strong>. Leave <strong>no</strong> boxes ticked on your row to offer{' '}
-              <strong>all</strong> services. Changes apply when you click Save.
-            </>
-          )}
-        </p>
-        {(isAdmin || practitioners.some((p) => canEditPractitionerRow(p.id))) && (
-          <div className="flex flex-shrink-0 flex-wrap items-center gap-2">
-            {dirty && (
-              <span className="rounded-full bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-800 ring-1 ring-amber-200/80">
-                Unsaved changes
-              </span>
-            )}
-            <button
-              type="button"
-              onClick={discard}
-              disabled={!dirty || saving}
-              className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40"
-            >
-              Discard
-            </button>
-            <button
-              type="button"
-              onClick={() => void save()}
-              disabled={!dirty || saving}
-              className="rounded-lg bg-blue-600 px-4 py-1.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 disabled:opacity-40"
-            >
-              {saving ? 'Saving…' : 'Save changes'}
-            </button>
-          </div>
-        )}
-      </div>
-
-      {saveError && (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{saveError}</div>
-      )}
-
-      <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
-        <table className="min-w-full text-sm">
-          <thead>
-            <tr className="border-b border-slate-100 bg-slate-50/90">
-              <th className="sticky left-0 z-10 min-w-[10rem] border-r border-slate-100 bg-slate-50/95 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 backdrop-blur-sm">
-                Team member
-              </th>
-              {services.map((svc) => (
-                <th
-                  key={svc.id}
-                  className="min-w-[7rem] px-3 py-3 text-center text-xs font-semibold text-slate-700"
-                  title={svc.name}
-                >
-                  <span className="line-clamp-2">{svc.name}</span>
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {practitioners.map((prac) => {
-              const ids = draft[prac.id] ?? [];
-              const offersAllImplicit = ids.length === 0;
-              return (
-                <tr
-                  key={prac.id}
-                  className="group border-b border-slate-50 bg-white transition-colors hover:bg-slate-50/90"
-                >
-                  <td className="sticky left-0 z-10 border-r border-slate-100 bg-white px-4 py-3 font-medium text-slate-900 shadow-[2px_0_8px_-2px_rgba(0,0,0,0.06)] group-hover:bg-slate-50/90">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span>{prac.name}</span>
-                      {!isAdmin && currentStaffId && (
-                        <span
-                          className={`w-fit rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
-                            prac.staff_id === currentStaffId
-                              ? 'bg-emerald-100 text-emerald-800'
-                              : 'bg-slate-100 text-slate-500'
-                          }`}
-                        >
-                          {prac.staff_id === currentStaffId ? 'You' : 'View only'}
-                        </span>
-                      )}
-                      {offersAllImplicit && (
-                        <span className="w-fit rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-slate-500">
-                          All services
-                        </span>
-                      )}
-                    </div>
-                  </td>
-                  {services.map((svc) => {
-                    const checked = ids.includes(svc.id);
-                    return (
-                      <td key={svc.id} className="px-2 py-2 text-center align-middle">
-                        <label
-                          className={`inline-flex items-center justify-center p-2 ${
-                            canEditPractitionerRow(prac.id) ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'
-                          }`}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            onChange={() => toggleCell(prac.id, svc.id)}
-                            disabled={!canEditPractitionerRow(prac.id)}
-                            className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-2 focus:ring-blue-500 focus:ring-offset-0 disabled:opacity-50"
-                            aria-label={`${prac.name} - ${svc.name}`}
-                          />
-                        </label>
-                      </td>
-                    );
-                  })}
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
     </div>
   );
 }

@@ -22,6 +22,7 @@ import {
   computeAppointmentAvailability,
 } from '@/lib/availability/appointment-engine';
 import { mergeAppointmentServiceWithPractitionerLink } from '@/lib/appointments/merge-service-with-overrides';
+import { resolveAppointmentServiceOnlineCharge } from '@/lib/appointments/appointment-service-payment';
 import { fetchEventInput, computeEventAvailability } from '@/lib/availability/event-ticket-engine';
 import { fetchClassInput, computeClassAvailability } from '@/lib/availability/class-session-engine';
 import { fetchResourceInput, computeResourceAvailability } from '@/lib/availability/resource-booking-engine';
@@ -33,7 +34,7 @@ import {
   inferSecondaryBookingModelFromPayload,
   venueExposesBookingModel,
 } from '@/lib/booking/enabled-models';
-import type { BookingModel } from '@/types/booking-models';
+import type { BookingModel, ClassPaymentRequirement } from '@/types/booking-models';
 import { createShortManageLink } from '@/lib/short-manage-link';
 import type { BookingEmailData } from '@/lib/emails/types';
 import { logBookingOp } from '@/lib/observability/booking-ops-log';
@@ -450,6 +451,7 @@ async function handleNonTableBooking(
   let estimatedEndTime: string | null = null;
   let depositAmountPence: number | null = null;
   let requiresDeposit = false;
+  let resourcePaymentRequirement: ClassPaymentRequirement | null = null;
   let appointmentEmailExtras: Partial<BookingEmailData> = {};
   let unifiedSessionAnchor: { calendar_id: string; service_item_id: string | null } | null = null;
 
@@ -591,10 +593,11 @@ async function handleNonTableBooking(
       endDate.setMinutes(endDate.getMinutes() + svc.duration_minutes);
       estimatedEndTime = endDate.toISOString();
 
-      // Model B: only charge deposit when the service has a positive deposit (set in Appointment Services).
-      if (svc.deposit_pence != null && svc.deposit_pence > 0) {
+      // Model B: online charge from service payment mode (none / deposit / full payment).
+      const online = resolveAppointmentServiceOnlineCharge(svc);
+      if (online != null && online.amountPence > 0) {
         requiresDeposit = true;
-        depositAmountPence = svc.deposit_pence;
+        depositAmountPence = online.amountPence;
       }
     }
   } else if (effectiveModel === 'event_ticket') {
@@ -673,16 +676,25 @@ async function handleNonTableBooking(
     if (!slotAvailable) {
       return NextResponse.json({ error: 'This resource slot is no longer available' }, { status: 409 });
     }
-    if (res?.price_per_slot_pence != null) {
-      const numSlots = Math.ceil(durationMinutes / res.slot_interval_minutes);
-      depositAmountPence = res.price_per_slot_pence * numSlots;
-      if (depositAmountPence > 0) requiresDeposit = true;
+    const numSlots = Math.ceil(durationMinutes / (res?.slot_interval_minutes ?? 30));
+    const totalPricePence = (res?.price_per_slot_pence ?? 0) * numSlots;
+    const payReq = res?.payment_requirement ?? 'none';
+    resourcePaymentRequirement = payReq;
+    const depConfigured = res?.deposit_amount_pence ?? 0;
+    if (payReq === 'full_payment' && totalPricePence > 0) {
+      requiresDeposit = true;
+      depositAmountPence = totalPricePence;
+    } else if (payReq === 'deposit' && depConfigured > 0) {
+      requiresDeposit = true;
+      depositAmountPence = depConfigured;
     }
     const endHm = booking_end_time ? (booking_end_time.length === 5 ? booking_end_time + ':00' : booking_end_time) : '';
     const resourcePriceDisplay =
       depositAmountPence != null && depositAmountPence > 0
         ? `£${(depositAmountPence / 100).toFixed(2)}`
-        : null;
+        : totalPricePence > 0 && payReq === 'none'
+          ? `£${(totalPricePence / 100).toFixed(2)} (pay at venue)`
+          : null;
     appointmentEmailExtras = {
       email_variant: 'appointment',
       booking_model: 'resource_booking',
@@ -755,6 +767,10 @@ async function handleNonTableBooking(
       bookingInsert.practitioner_id = null;
       bookingInsert.appointment_service_id = null;
     }
+  }
+
+  if (effectiveModel === 'resource_booking') {
+    bookingInsert.resource_payment_requirement = resourcePaymentRequirement;
   }
 
   const { data: booking, error: bookErr } = await supabase

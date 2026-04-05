@@ -7,7 +7,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { VenueResource, WorkingHours } from '@/types/booking-models';
+import type { ClassPaymentRequirement, VenueResource, WorkingHours } from '@/types/booking-models';
 import { timeToMinutes, minutesToTime } from '@/lib/availability';
 
 // ---------------------------------------------------------------------------
@@ -43,6 +43,8 @@ export interface ResourceAvailabilityResult {
   max_booking_minutes: number;
   slot_interval_minutes: number;
   price_per_slot_pence: number | null;
+  payment_requirement: ClassPaymentRequirement;
+  deposit_amount_pence: number | null;
   slots: ResourceSlot[];
 }
 
@@ -51,7 +53,10 @@ export interface ResourceAvailabilityResult {
 // ---------------------------------------------------------------------------
 
 const DAY_NAMES = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const;
-const CAPACITY_CONSUMING_STATUSES = ['Confirmed', 'Pending', 'Seated'];
+
+/** Statuses that consume resource capacity (must match bookings query in fetchResourceInput). */
+export const RESOURCE_BOOKING_CAPACITY_STATUSES = ['Confirmed', 'Pending', 'Seated'] as const;
+const CAPACITY_CONSUMING_STATUSES = RESOURCE_BOOKING_CAPACITY_STATUSES as unknown as string[];
 
 function dayKeyForDate(dateStr: string): string {
   const [y, m, d] = dateStr.split('-').map(Number);
@@ -73,7 +78,93 @@ function getAvailabilityRanges(hours: WorkingHours, dateStr: string): Array<{ st
   return ranges.map((r) => ({ start: timeToMinutes(r.start), end: timeToMinutes(r.end) }));
 }
 
-function getEffectiveAvailabilityRanges(
+/** Working hours + days_off for the host calendar column (same key rules as resource availability). */
+function getHostCalendarRanges(
+  host: { working_hours: WorkingHours; days_off: string[] },
+  dateStr: string,
+): Array<{ start: number; end: number }> {
+  const dayKey = dayKeyForDate(dateStr);
+  const dayName = dayNameForDate(dateStr);
+  if (Array.isArray(host.days_off)) {
+    for (const d of host.days_off) {
+      if (d === dateStr || d === dayName) return [];
+    }
+  }
+  return getAvailabilityRanges(host.working_hours, dateStr);
+}
+
+function intersectRanges(
+  a: Array<{ start: number; end: number }>,
+  b: Array<{ start: number; end: number }>,
+): Array<{ start: number; end: number }> {
+  const out: Array<{ start: number; end: number }> = [];
+  for (const x of a) {
+    for (const y of b) {
+      const s = Math.max(x.start, y.start);
+      const e = Math.min(x.end, y.end);
+      if (s < e) out.push({ start: s, end: e });
+    }
+  }
+  return out;
+}
+
+/** Same rules as appointment `getBreakRanges` for a host calendar row. */
+function getHostBreakRanges(
+  host: {
+    break_times: Array<{ start: string; end: string }>;
+    break_times_by_day: WorkingHours | null | undefined;
+  },
+  dateStr: string,
+): Array<{ start: number; end: number }> {
+  const byDay = host.break_times_by_day;
+  if (byDay && typeof byDay === 'object' && !Array.isArray(byDay) && Object.keys(byDay).length > 0) {
+    const dayKey = dayKeyForDate(dateStr);
+    const dayName = dayNameForDate(dateStr);
+    const ranges = byDay[dayKey] ?? byDay[dayName];
+    if (!ranges || !Array.isArray(ranges) || ranges.length === 0) return [];
+    return ranges.map((b) => ({ start: timeToMinutes(b.start), end: timeToMinutes(b.end) }));
+  }
+
+  const breaks = host.break_times;
+  if (!Array.isArray(breaks)) return [];
+  return breaks.map((b) => ({ start: timeToMinutes(b.start), end: timeToMinutes(b.end) }));
+}
+
+function subtractOneRange(
+  r: { start: number; end: number },
+  cut: { start: number; end: number },
+): Array<{ start: number; end: number }> {
+  if (cut.end <= r.start || cut.start >= r.end) return [r];
+  const out: Array<{ start: number; end: number }> = [];
+  if (cut.start > r.start) {
+    const segEnd = Math.min(cut.start, r.end);
+    if (segEnd > r.start) out.push({ start: r.start, end: segEnd });
+  }
+  if (cut.end < r.end) {
+    const segStart = Math.max(cut.end, r.start);
+    if (r.end > segStart) out.push({ start: segStart, end: r.end });
+  }
+  return out;
+}
+
+function subtractRangesFromRanges(
+  ranges: Array<{ start: number; end: number }>,
+  toRemove: Array<{ start: number; end: number }>,
+): Array<{ start: number; end: number }> {
+  let result = ranges.filter((r) => r.end > r.start);
+  for (const cut of toRemove) {
+    if (cut.end <= cut.start) continue;
+    const next: Array<{ start: number; end: number }> = [];
+    for (const r of result) {
+      next.push(...subtractOneRange(r, cut));
+    }
+    result = next;
+  }
+  return result;
+}
+
+/** Resource row only: exceptions and `availability_hours` (unified `working_hours` on resource). */
+function getBaseResourceAvailabilityRanges(
   resource: VenueResource,
   dateStr: string,
 ): Array<{ start: number; end: number }> {
@@ -86,6 +177,28 @@ function getEffectiveAvailabilityRanges(
     return ex.periods.map((r) => ({ start: timeToMinutes(r.start), end: timeToMinutes(r.end) }));
   }
   return getAvailabilityRanges(resource.availability_hours, dateStr);
+}
+
+/**
+ * Bookable windows for the resource on this date: resource row hours, intersected with the host
+ * calendar column when `display_on_calendar_id` is set; host breaks are then carved out.
+ */
+function getEffectiveAvailabilityRanges(
+  resource: VenueResource,
+  dateStr: string,
+): Array<{ start: number; end: number }> {
+  const base = getBaseResourceAvailabilityRanges(resource, dateStr);
+  if (!resource.display_on_calendar_id) return base;
+  if (!resource.host_calendar) {
+    return [];
+  }
+  const hostRanges = getHostCalendarRanges(resource.host_calendar, dateStr);
+  let intersected = intersectRanges(base, hostRanges);
+  const hostBreaks = getHostBreakRanges(resource.host_calendar, dateStr);
+  if (hostBreaks.length > 0) {
+    intersected = subtractRangesFromRanges(intersected, hostBreaks);
+  }
+  return intersected;
 }
 
 function overlaps(startA: number, endA: number, startB: number, endB: number): boolean {
@@ -149,6 +262,8 @@ export function computeResourceAvailability(
       max_booking_minutes: resource.max_booking_minutes,
       slot_interval_minutes: resource.slot_interval_minutes,
       price_per_slot_pence: resource.price_per_slot_pence,
+      payment_requirement: resource.payment_requirement,
+      deposit_amount_pence: resource.deposit_amount_pence,
       slots,
     });
   }
@@ -156,12 +271,85 @@ export function computeResourceAvailability(
   return results;
 }
 
+/**
+ * Dates in the given month (YYYY-MM-DD) where the resource has at least one bookable slot
+ * for the requested duration (after min/max clamping inside the engine).
+ */
+export function computeResourceAvailableDatesInMonth(
+  resource: VenueResource,
+  year: number,
+  month: number,
+  durationMinutes: number,
+  bookingsByDate: Map<string, ResourceBooking[]>,
+): string[] {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const out: string[] = [];
+  const lastDay = new Date(year, month, 0).getDate();
+  for (let d = 1; d <= lastDay; d++) {
+    const dateStr = `${year}-${pad(month)}-${pad(d)}`;
+    const bookings = bookingsByDate.get(dateStr) ?? [];
+    const input: ResourceEngineInput = {
+      date: dateStr,
+      resources: [resource],
+      existingBookings: bookings,
+    };
+    const results = computeResourceAvailability(input, durationMinutes);
+    const row = results.find((r) => r.id === resource.id);
+    if (row && row.slots.length > 0) out.push(dateStr);
+  }
+  return out;
+}
+
+/**
+ * Load bookings for one resource across a calendar month, grouped by booking_date.
+ */
+export async function fetchBookingsGroupedByDateForResourceMonth(
+  supabase: SupabaseClient,
+  venueId: string,
+  resourceId: string,
+  year: number,
+  month: number,
+): Promise<Map<string, ResourceBooking[]>> {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const monthStart = `${year}-${pad(month)}-01`;
+  const lastDay = new Date(year, month, 0).getDate();
+  const monthEnd = `${year}-${pad(month)}-${pad(lastDay)}`;
+
+  const { data } = await supabase
+    .from('bookings')
+    .select('id, resource_id, calendar_id, booking_time, booking_end_time, status, booking_date')
+    .eq('venue_id', venueId)
+    .gte('booking_date', monthStart)
+    .lte('booking_date', monthEnd)
+    .or(`resource_id.eq.${resourceId},calendar_id.eq.${resourceId}`)
+    .in('status', [...RESOURCE_BOOKING_CAPACITY_STATUSES]);
+
+  const map = new Map<string, ResourceBooking[]>();
+  for (const raw of data ?? []) {
+    const b = raw as Record<string, unknown>;
+    const bd = b.booking_date as string;
+    const rid = (b.resource_id as string | null) ?? (b.calendar_id as string | null) ?? '';
+    const rb: ResourceBooking = {
+      id: b.id as string,
+      resource_id: rid,
+      booking_time: ((b.booking_time as string) ?? '00:00').slice(0, 5),
+      booking_end_time: ((b.booking_end_time as string) ?? '00:00').slice(0, 5),
+      status: b.status as string,
+    };
+    const list = map.get(bd) ?? [];
+    list.push(rb);
+    map.set(bd, list);
+  }
+  return map;
+}
+
 // ---------------------------------------------------------------------------
 // Fetcher — reads from unified_calendars (calendar_type='resource')
 // ---------------------------------------------------------------------------
 
 /** Map a unified_calendars row to the VenueResource shape the engine expects. */
-function mapCalendarToResource(row: Record<string, unknown>): VenueResource {
+export function mapCalendarToResource(row: Record<string, unknown>): VenueResource {
+  const payReq = row.payment_requirement as ClassPaymentRequirement | null | undefined;
   return {
     id: row.id as string,
     venue_id: row.venue_id as string,
@@ -171,12 +359,71 @@ function mapCalendarToResource(row: Record<string, unknown>): VenueResource {
     max_booking_minutes: (row.max_booking_minutes as number | null) ?? 120,
     slot_interval_minutes: (row.slot_interval_minutes as number | null) ?? 30,
     price_per_slot_pence: (row.price_per_slot_pence as number | null) ?? null,
+    payment_requirement: payReq ?? 'none',
+    deposit_amount_pence: (row.deposit_amount_pence as number | null) ?? null,
     availability_hours: (row.working_hours as WorkingHours) ?? {},
     availability_exceptions: (row.availability_exceptions as VenueResource['availability_exceptions']) ?? undefined,
     is_active: (row.is_active as boolean | null) ?? true,
     sort_order: (row.sort_order as number | null) ?? 0,
     created_at: (row.created_at as string) ?? '',
+    display_on_calendar_id: (row.display_on_calendar_id as string | null | undefined) ?? null,
+    host_calendar: undefined,
   };
+}
+
+/**
+ * Loads host `unified_calendars` rows and attaches `host_calendar` for resource availability intersection.
+ */
+export async function attachHostCalendarsToResources(
+  supabase: SupabaseClient,
+  venueId: string,
+  resources: VenueResource[],
+): Promise<VenueResource[]> {
+  const ids = [...new Set(resources.map((r) => r.display_on_calendar_id).filter(Boolean))] as string[];
+  if (ids.length === 0) {
+    return resources.map((r) => ({ ...r, host_calendar: null }));
+  }
+
+  const { data, error } = await supabase
+    .from('unified_calendars')
+    .select('id, working_hours, days_off, break_times, break_times_by_day')
+    .eq('venue_id', venueId)
+    .in('id', ids);
+
+  if (error) {
+    console.warn('[attachHostCalendarsToResources] unified_calendars:', error.message);
+  }
+
+  const map = new Map(
+    (data ?? []).map((row) => {
+      const id = row.id as string;
+      const breakTimes = row.break_times;
+      const byDay = row.break_times_by_day;
+      return [
+        id,
+        {
+          id,
+          working_hours: (row.working_hours as WorkingHours) ?? {},
+          days_off: Array.isArray(row.days_off) ? (row.days_off as string[]) : [],
+          break_times: Array.isArray(breakTimes)
+            ? (breakTimes as Array<{ start: string; end: string }>)
+            : [],
+          break_times_by_day:
+            byDay && typeof byDay === 'object' && !Array.isArray(byDay)
+              ? (byDay as WorkingHours)
+              : null,
+        },
+      ] as const;
+    }),
+  );
+
+  return resources.map((r) => {
+    if (!r.display_on_calendar_id) {
+      return { ...r, host_calendar: null };
+    }
+    const host = map.get(r.display_on_calendar_id);
+    return { ...r, host_calendar: host ?? null };
+  });
 }
 
 export async function fetchResourceInput(params: {
@@ -209,7 +456,8 @@ export async function fetchResourceInput(params: {
       .in('status', CAPACITY_CONSUMING_STATUSES),
   ]);
 
-  const resources = (resourcesRes.data ?? []).map((r) => mapCalendarToResource(r as Record<string, unknown>));
+  let resources = (resourcesRes.data ?? []).map((r) => mapCalendarToResource(r as Record<string, unknown>));
+  resources = await attachHostCalendarsToResources(supabase, venueId, resources);
   const resourceIdSet = new Set(resources.map((r) => r.id));
 
   const existingBookings: ResourceBooking[] = (bookingsRes.data ?? [])

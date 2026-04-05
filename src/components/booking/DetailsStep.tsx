@@ -14,6 +14,7 @@ import {
   formatRefundDeadlineDisplay,
   isDepositRefundAvailableAt,
 } from '@/lib/booking/cancellation-deadline';
+import type { ClassPaymentRequirement } from '@/types/booking-models';
 
 const SHORT_WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const SHORT_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -62,6 +63,12 @@ interface DetailsStepProps {
   multiAppointmentSlots?: Array<{ date: string; time: string }>;
   /** Defaults country code (+44 for GB) from venue currency; falls back to GB. */
   phoneDefaultCountry?: CountryCode;
+  /** Resource / class: wording for the amount collected online before the appointment. */
+  appointmentChargeLabel?: 'deposit' | 'full_payment';
+  /** Priced booking with pay-at-venue mode: show expected balance due on site. */
+  payAtVenueBalancePence?: number | null;
+  /** When set with payAtVenueBalancePence, explains why no online charge (e.g. resource pay at venue). */
+  payAtVenuePaymentRequirement?: ClassPaymentRequirement;
 }
 
 export function DetailsStep({
@@ -78,6 +85,9 @@ export function DetailsStep({
   refundNoticeHours = 48,
   multiAppointmentSlots,
   phoneDefaultCountry = 'GB',
+  appointmentChargeLabel = 'deposit',
+  payAtVenueBalancePence,
+  payAtVenuePaymentRequirement,
 }: DetailsStepProps) {
   const detailsSchemaWithTerms = useMemo(
     () => buildDetailsSchemaWithTerms(phoneDefaultCountry),
@@ -102,6 +112,12 @@ export function DetailsStep({
   const useAppointmentFields = isAppointment || isClass;
   const depositPence = appointmentDepositPence ?? 0;
   const hasDeposit = useAppointmentFields && depositPence > 0;
+  const payAtVenuePence = payAtVenueBalancePence ?? 0;
+  const showPayAtVenue =
+    useAppointmentFields &&
+    payAtVenuePaymentRequirement === 'none' &&
+    payAtVenuePence > 0 &&
+    !hasDeposit;
 
   const refundClassification = (() => {
     if (!hasDeposit || !slot.start_time) return null;
@@ -142,12 +158,18 @@ export function DetailsStep({
             hasDeposit ? 'border-amber-200 bg-amber-50' : 'border-slate-200 bg-slate-50'
           }`}
         >
-          <p className="text-sm font-semibold text-slate-900">Cancellation policy</p>
-          {!hasDeposit && <p className="mt-1 text-sm text-slate-600">Cancel for free anytime</p>}
+              <p className="text-sm font-semibold text-slate-900">Cancellation policy</p>
+          {!hasDeposit && !showPayAtVenue && <p className="mt-1 text-sm text-slate-600">Cancel for free anytime</p>}
+          {showPayAtVenue && (
+            <p className="mt-1 text-sm text-slate-600">
+              Payment of {currencySymbol}
+              {(payAtVenuePence / 100).toFixed(2)} is due at the venue (no online payment for this booking).
+            </p>
+          )}
           {hasDeposit && (
             <div className="mt-2 space-y-2">
               <p className="text-sm font-medium text-amber-900">
-                Deposit: {currencySymbol}
+                {appointmentChargeLabel === 'full_payment' ? 'Full payment' : 'Deposit'}: {currencySymbol}
                 {(depositPence / 100).toFixed(2)}
                 {partySize > 1
                   ? ` (total for ${partySize} ${isClass ? 'spots' : 'appointments'})`
@@ -162,7 +184,7 @@ export function DetailsStep({
                   ) : (
                     <p className="text-sm text-amber-900">
                       Refund cut-off was <span className="font-semibold">{refundDeadlineLabel}</span> ({refundNoticeHours}h before start). That time has passed -
-                      this deposit is not refundable if you cancel.
+                      this {appointmentChargeLabel === 'full_payment' ? 'payment' : 'deposit'} is not refundable if you cancel.
                     </p>
                   )}
                 </>

@@ -9,9 +9,14 @@ import { StaffEventBookingForm } from '@/components/booking/StaffEventBookingFor
 import { StaffClassBookingForm } from '@/components/booking/StaffClassBookingForm';
 import { StaffResourceBookingForm } from '@/components/booking/StaffResourceBookingForm';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
+import {
+  primaryStaffBookingLabel,
+  staffSecondaryBookingOptions,
+  type StaffBookingExtraTab,
+} from '@/lib/booking/staff-booking-modal-options';
 import type { BookingModel } from '@/types/booking-models';
 
-type StaffExtra = 'none' | 'event' | 'class' | 'resource';
+type StaffExtra = StaffBookingExtraTab;
 
 export function NewBookingPageClient({
   venueId,
@@ -29,35 +34,14 @@ export function NewBookingPageClient({
   const router = useRouter();
   const isAppointment = isUnifiedSchedulingVenue(bookingModel);
 
-  const canStaffEventBooking =
-    bookingModel === 'event_ticket' || enabledModels.includes('event_ticket');
-  const canStaffClassBooking =
-    bookingModel === 'class_session' || enabledModels.includes('class_session');
-  const canStaffResourceBooking =
-    bookingModel === 'resource_booking' || enabledModels.includes('resource_booking');
-
-  const secondaryOptions = useMemo(() => {
-    const opts: { value: Exclude<StaffExtra, 'none'>; label: string }[] = [];
-    if (canStaffEventBooking && bookingModel !== 'event_ticket') {
-      opts.push({ value: 'event', label: 'Event tickets' });
-    }
-    if (canStaffClassBooking && bookingModel !== 'class_session') {
-      opts.push({ value: 'class', label: 'Classes' });
-    }
-    if (canStaffResourceBooking && bookingModel !== 'resource_booking') {
-      opts.push({ value: 'resource', label: 'Resources' });
-    }
-    return opts;
-  }, [
-    bookingModel,
-    canStaffClassBooking,
-    canStaffEventBooking,
-    canStaffResourceBooking,
-  ]);
+  const secondaryOptions = useMemo(
+    () => staffSecondaryBookingOptions(bookingModel, enabledModels),
+    [bookingModel, enabledModels],
+  );
 
   const [staffExtra, setStaffExtra] = useState<StaffExtra>('none');
 
-  const primaryLabel = isAppointment ? 'Appointment' : 'Table reservation';
+  const primaryLabel = primaryStaffBookingLabel(bookingModel);
 
   const wrapToast = (node: ReactNode) => (
     <div className="p-4 md:p-6 lg:p-8">

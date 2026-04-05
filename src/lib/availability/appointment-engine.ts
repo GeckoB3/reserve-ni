@@ -5,7 +5,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { Practitioner, AppointmentService, PractitionerService } from '@/types/booking-models';
+import type { ClassPaymentRequirement, Practitioner, AppointmentService, PractitionerService } from '@/types/booking-models';
 import { mergeAppointmentServiceWithPractitionerLink } from '@/lib/appointments/merge-service-with-overrides';
 import type { OpeningHours } from '@/types/availability';
 import { getOpeningPeriodsForDay, timeToMinutes, minutesToTime } from '@/lib/availability';
@@ -250,8 +250,8 @@ function effectiveWorkingRangesForAppointments(
 const CAPACITY_CONSUMING_STATUSES = ['Confirmed', 'Pending', 'Seated'];
 
 /**
- * Services a practitioner offers for appointment booking (venue defaults merged with practitioner_services).
- * Used by the availability engine and by the guest-facing catalog (service/staff pickers) without a date.
+ * Services a practitioner/calendar offers for appointment booking (only rows explicitly linked in
+ * practitioner_services or calendar_service_assignments). No links means no appointment services on that column.
  */
 export function getOfferedAppointmentServicesForPractitioner(
   practitioner: Practitioner,
@@ -260,15 +260,13 @@ export function getOfferedAppointmentServicesForPractitioner(
 ): AppointmentService[] {
   const serviceMap = new Map(services.map((s) => [s.id, s]));
   const allLinksForPractitioner = practitionerServices.filter((ps) => ps.practitioner_id === practitioner.id);
-  const linkedServices = allLinksForPractitioner
+  return allLinksForPractitioner
     .map((ps) => {
       const svc = serviceMap.get(ps.service_id);
       if (!svc || !svc.is_active) return null;
       return mergeAppointmentServiceWithPractitionerLink(svc, ps);
     })
     .filter(Boolean) as AppointmentService[];
-
-  return allLinksForPractitioner.length > 0 ? linkedServices : services.filter((s) => s.is_active);
 }
 
 // ---------------------------------------------------------------------------
@@ -338,6 +336,7 @@ export function computeAppointmentAvailability(input: AppointmentEngineInput, no
       duration_minutes: number;
       price_pence: number | null;
       deposit_pence: number | null;
+      payment_requirement?: ClassPaymentRequirement;
     }> = [];
 
     for (const svc of offeredServices) {
@@ -351,6 +350,7 @@ export function computeAppointmentAvailability(input: AppointmentEngineInput, no
         duration_minutes: svc.duration_minutes,
         price_pence: svc.price_pence,
         deposit_pence: svc.deposit_pence,
+        payment_requirement: svc.payment_requirement,
       });
 
       for (const range of effectiveWorkingRanges) {
@@ -718,7 +718,6 @@ export async function fetchCalendarAppointmentInput(params: {
   const assignList = assignments ?? [];
   const serviceIds = assignList.map((a) => (a as { service_item_id: string }).service_item_id);
 
-  /** No calendar_service_assignments rows = “offer every active service” (same as legacy practitioner_services). */
   let svcRows: Record<string, unknown>[] | null;
   if (serviceIds.length > 0) {
     const { data } = await supabase
@@ -729,13 +728,7 @@ export async function fetchCalendarAppointmentInput(params: {
       .in('id', serviceIds);
     svcRows = data ?? [];
   } else {
-    const { data } = await supabase
-      .from('service_items')
-      .select('*')
-      .eq('venue_id', venueId)
-      .eq('is_active', true)
-      .order('sort_order');
-    svcRows = data ?? [];
+    svcRows = [];
   }
 
   const assignMap = new Map(
@@ -758,6 +751,7 @@ export async function fetchCalendarAppointmentInput(params: {
       buffer_minutes: (s.buffer_minutes as number) ?? 0,
       processing_time_minutes: (s.processing_time_minutes as number) ?? 0,
       price_pence: (customPrice ?? s.price_pence) as number | null,
+      payment_requirement: (s.payment_requirement as ClassPaymentRequirement | undefined) ?? undefined,
       deposit_pence: (s.deposit_pence as number | null) ?? null,
       colour: (s.colour as string) ?? '#3B82F6',
       is_active: true,

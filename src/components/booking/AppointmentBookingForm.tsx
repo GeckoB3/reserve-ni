@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useState, useMemo } from 'react';
 import type { AppointmentService, PractitionerService } from '@/types/booking-models';
 import { effectiveAppointmentServiceForPractitioner } from '@/lib/appointments/effective-service-for-practitioner';
+import { resolveAppointmentServiceOnlineCharge } from '@/lib/appointments/appointment-service-payment';
+import type { ClassPaymentRequirement } from '@/types/booking-models';
 
 interface Practitioner {
   id: string;
@@ -17,6 +19,7 @@ interface Service {
   buffer_minutes: number;
   price_pence: number | null;
   deposit_pence: number | null;
+  payment_requirement?: ClassPaymentRequirement;
   colour: string;
   is_active: boolean;
 }
@@ -51,6 +54,8 @@ interface Props {
   preselectedPractitionerId?: string;
   preselectedDate?: string;
   preselectedTime?: string;
+  /** When true, render only the dialog panel (no backdrop); parent supplies title and close. */
+  embedded?: boolean;
 }
 
 export function AppointmentBookingForm({
@@ -62,6 +67,7 @@ export function AppointmentBookingForm({
   preselectedPractitionerId,
   preselectedDate,
   preselectedTime,
+  embedded = false,
 }: Props) {
   const sym = currency === 'EUR' ? '€' : '£';
 
@@ -135,7 +141,10 @@ export function AppointmentBookingForm({
   useEffect(() => {
     if (!open) return;
     setDataLoading(true);
-    Promise.all([fetch('/api/venue/practitioners?roster=1'), fetch('/api/venue/appointment-services')])
+    Promise.all([
+      fetch('/api/venue/practitioners?roster=1&active_only=1'),
+      fetch('/api/venue/appointment-services'),
+    ])
       .then(async ([pracRes, svcRes]) => {
         if (!pracRes.ok || !svcRes.ok) { setError('Failed to load form data.'); return; }
         const [pracData, svcData] = await Promise.all([pracRes.json(), svcRes.json()]);
@@ -153,7 +162,7 @@ export function AppointmentBookingForm({
     (pracId: string) => {
       if (!pracId) return services.filter((s) => s.is_active);
       const pracLinks = links.filter((l) => l.practitioner_id === pracId);
-      if (pracLinks.length === 0) return services.filter((s) => s.is_active);
+      if (pracLinks.length === 0) return [];
       const linkedIds = new Set(pracLinks.map((l) => l.service_id));
       return services.filter((s) => s.is_active && linkedIds.has(s.id));
     },
@@ -272,6 +281,11 @@ export function AppointmentBookingForm({
     return effectiveAppointmentServiceForPractitioner(base as AppointmentService, selectedPractitioner, links);
   }, [selectedService, selectedPractitioner, services, links]);
 
+  const staffOnlineCharge = useMemo(
+    () => (selectedSvcMerged ? resolveAppointmentServiceOnlineCharge(selectedSvcMerged) : null),
+    [selectedSvcMerged],
+  );
+
   // ── Single: submit ──
   async function handleSubmit() {
     if (!clientName.trim()) { setError('Client name is required'); return; }
@@ -289,7 +303,12 @@ export function AppointmentBookingForm({
           phone: clientPhone.trim() || undefined,
           email: clientEmail.trim() || undefined,
           special_requests: notes.trim() || undefined,
-          require_deposit: requireDeposit,
+          require_deposit:
+            staffOnlineCharge?.chargeLabel === 'full_payment'
+              ? true
+              : staffOnlineCharge?.chargeLabel === 'deposit'
+                ? requireDeposit
+                : false,
           practitioner_id: selectedPractitioner,
           appointment_service_id: selectedService,
         }),
@@ -375,13 +394,15 @@ export function AppointmentBookingForm({
 
   const totalGroupPrice = groupPeople.reduce((sum, p) => sum + (p.pricePence ?? 0), 0);
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 p-4" onClick={onClose}>
+  const inner = (
       <div
-        role="dialog" aria-modal="true" aria-labelledby="appointment-form-title"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={embedded ? undefined : 'appointment-form-title'}
         className="w-full max-w-lg rounded-t-2xl sm:rounded-2xl bg-white p-6 shadow-xl max-h-[90vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
+        {!embedded && (
         <div className="mb-4 flex items-center justify-between">
           <h2 id="appointment-form-title" className="text-lg font-semibold text-slate-900">
             {isGroupMode ? 'Group Appointment' : 'New Appointment'}
@@ -390,6 +411,7 @@ export function AppointmentBookingForm({
             <svg className="h-5 w-5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path d="M6 18L18 6M6 6l12 12"/></svg>
           </button>
         </div>
+        )}
 
         {error && (
           <div className="mb-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
@@ -629,18 +651,27 @@ export function AppointmentBookingForm({
                     placeholder="Special requests or notes"
                   />
                 </div>
-                {selectedSvcMerged?.deposit_pence != null && selectedSvcMerged.deposit_pence > 0 && (
-                  <label className="flex cursor-pointer items-center gap-3 rounded-lg border border-slate-200 px-3 py-2 hover:bg-slate-50">
-                    <input
-                      type="checkbox"
-                      checked={requireDeposit}
-                      onChange={(e) => setRequireDeposit(e.target.checked)}
-                      className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                    />
-                    <span className="text-sm text-slate-700">
-                      Require deposit ({sym}{(selectedSvcMerged.deposit_pence / 100).toFixed(2)})
-                    </span>
-                  </label>
+                {staffOnlineCharge != null && staffOnlineCharge.amountPence > 0 && (
+                  <>
+                    {staffOnlineCharge.chargeLabel === 'full_payment' ? (
+                      <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                        Full payment online ({sym}{(staffOnlineCharge.amountPence / 100).toFixed(2)}) — a payment link will
+                        be sent to the client.
+                      </p>
+                    ) : (
+                      <label className="flex cursor-pointer items-center gap-3 rounded-lg border border-slate-200 px-3 py-2 hover:bg-slate-50">
+                        <input
+                          type="checkbox"
+                          checked={requireDeposit}
+                          onChange={(e) => setRequireDeposit(e.target.checked)}
+                          className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                        />
+                        <span className="text-sm text-slate-700">
+                          Require deposit ({sym}{(staffOnlineCharge.amountPence / 100).toFixed(2)})
+                        </span>
+                      </label>
+                    )}
+                  </>
                 )}
                 <div className="flex justify-between">
                   <button type="button" onClick={() => setStep(4)} className="text-sm text-blue-600 hover:underline">&larr; Back</button>
@@ -884,6 +915,13 @@ export function AppointmentBookingForm({
           </>
         )}
       </div>
+  );
+
+  if (embedded) return inner;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 p-4" onClick={onClose}>
+      {inner}
     </div>
   );
 }

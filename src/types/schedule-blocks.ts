@@ -29,6 +29,9 @@ export interface ScheduleBlockDTO {
   class_capacity?: number | null;
   /** Model D: total spots booked (all guests) for this instance. */
   class_booked_spots?: number | null;
-  /** Unified calendar column where this class session is shown (from class_types.instructor_id). */
+  /**
+   * Unified calendar column: class sessions (from `class_types.instructor_id`) or ticketed events
+   * (`experience_events.calendar_id`).
+   */
   calendar_id?: string | null;
 }

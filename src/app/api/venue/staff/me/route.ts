@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { getVenueStaff, getLinkedPractitionerId } from '@/lib/venue-auth';
+import { getVenueStaff, getLinkedPractitionerId, getStaffManagedCalendarIds } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { z } from 'zod';
 import { normalizeToE164 } from '@/lib/phone/e164';
@@ -35,13 +35,11 @@ export async function GET() {
       return NextResponse.json({ error: 'Failed to load profile' }, { status: 500 });
     }
 
-    const linked_practitioner_id = await getLinkedPractitionerId(
-      getSupabaseAdminClient(),
-      staff.venue_id,
-      staff.id,
-    );
+    const admin = getSupabaseAdminClient();
+    const linked_practitioner_id = await getLinkedPractitionerId(admin, staff.venue_id, staff.id);
+    const linked_calendar_ids = await getStaffManagedCalendarIds(admin, staff.venue_id, staff.id);
 
-    return NextResponse.json({ staff: { ...row, linked_practitioner_id } });
+    return NextResponse.json({ staff: { ...row, linked_practitioner_id, linked_calendar_ids } });
   } catch (err) {
     console.error('GET /api/venue/staff/me failed:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

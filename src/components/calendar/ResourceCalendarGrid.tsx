@@ -8,6 +8,7 @@ import {
   AppointmentDetailSheet,
   type AppointmentDetailPrefetch,
 } from '@/components/booking/AppointmentDetailSheet';
+import type { ClassPaymentRequirement } from '@/types/booking-models';
 
 const SLOT_HEIGHT = 48;
 const SLOT_MINUTES = 15;
@@ -64,6 +65,7 @@ interface ResourceBookingRow {
   guest_attendance_confirmed_at?: string | null;
   deposit_amount_pence: number | null;
   deposit_status: string;
+  resource_payment_requirement?: string | null;
 }
 
 interface AvailSlot {
@@ -85,6 +87,7 @@ function resourceBookingToPrefetch(b: ResourceBookingRow): AppointmentDetailPref
     guest_attendance_confirmed_at: b.guest_attendance_confirmed_at ?? null,
     deposit_amount_pence: b.deposit_amount_pence,
     deposit_status: b.deposit_status,
+    resource_payment_requirement: (b.resource_payment_requirement as ClassPaymentRequirement | null) ?? null,
     party_size: b.party_size,
     guest_name: b.guest_name,
     guest_email: b.guest_email,

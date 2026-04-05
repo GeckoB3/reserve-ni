@@ -93,7 +93,7 @@ function PlanSection({
       const msg = sessionStorage.getItem('planSuccess');
       if (msg) {
         sessionStorage.removeItem('planSuccess');
-        setPlanSuccess(msg);
+        queueMicrotask(() => setPlanSuccess(msg));
       }
     } catch {
       /* ignore */

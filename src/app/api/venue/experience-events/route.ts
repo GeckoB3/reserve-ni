@@ -11,6 +11,8 @@ import {
   resolveExperienceEventPatch,
   validateStartEndTimes,
 } from '@/lib/experience-events/experience-event-guards';
+import { assertExperienceEventWindowFreeOnCalendar } from '@/lib/experience-events/calendar-event-window-conflicts';
+import { createTeamCalendarForEvent } from '@/lib/experience-events/create-team-calendar';
 import { z } from 'zod';
 
 const eventSchema = z.object({
@@ -25,6 +27,8 @@ const eventSchema = z.object({
   recurrence_rule: z.string().optional(),
   parent_event_id: z.string().uuid().optional(),
   is_active: z.boolean().optional(),
+  /** Unified calendar column for staff calendar placement; null clears. */
+  calendar_id: z.union([z.string().uuid(), z.null()]).optional(),
   ticket_types: z.array(z.object({
     name: z.string().min(1),
     price_pence: z.number().int().min(0),
@@ -47,7 +51,23 @@ const scheduleSchema = z.discriminatedUnion('type', [
 
 const createEventBodySchema = eventSchema.extend({
   schedule: scheduleSchema.optional(),
+  /** Creates a new team calendar row and assigns this event to it (unified scheduling only). */
+  new_calendar_name: z.string().min(1).max(200).optional(),
 });
+
+const patchEventBodySchema = eventSchema.partial().extend({
+  new_calendar_name: z.string().min(1).max(200).optional(),
+});
+
+async function getVenueBookingModel(admin: ReturnType<typeof getSupabaseAdminClient>, venueId: string): Promise<string> {
+  const { data } = await admin.from('venues').select('booking_model').eq('id', venueId).maybeSingle();
+  return ((data as { booking_model?: string } | null)?.booking_model as string) ?? '';
+}
+
+function timeHhMm(t: string): string {
+  const s = String(t).trim();
+  return s.length >= 5 ? s.slice(0, 5) : s;
+}
 
 /** GET /api/venue/experience-events - list events with ticket types. */
 export async function GET(request: NextRequest) {
@@ -100,7 +120,36 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid request', details: parsed.error.flatten() }, { status: 400 });
     }
 
-    const { ticket_types, schedule, ...eventFields } = parsed.data;
+    const { ticket_types, schedule, new_calendar_name, calendar_id: requestedCalendarId, ...eventFields } =
+      parsed.data;
+
+    if (new_calendar_name && requestedCalendarId !== undefined) {
+      return NextResponse.json(
+        { error: 'Use either calendar_id or new_calendar_name, not both.' },
+        { status: 400 },
+      );
+    }
+
+    const bookingModel = await getVenueBookingModel(admin, staff.venue_id);
+    if ((new_calendar_name || requestedCalendarId !== undefined) && bookingModel !== 'unified_scheduling') {
+      return NextResponse.json(
+        { error: 'Assigning an event to a calendar column requires unified scheduling.' },
+        { status: 400 },
+      );
+    }
+
+    let resolvedCalendarId: string | null | undefined;
+    if (new_calendar_name) {
+      const created = await createTeamCalendarForEvent(admin, staff.venue_id, new_calendar_name);
+      if (!created.ok) {
+        return NextResponse.json({ error: created.error }, { status: created.status });
+      }
+      resolvedCalendarId = created.id;
+    } else if (requestedCalendarId !== undefined) {
+      resolvedCalendarId = requestedCalendarId;
+    } else {
+      resolvedCalendarId = undefined;
+    }
 
     const timeErr = validateStartEndTimes(eventFields.start_time, eventFields.end_time);
     if (timeErr) {
@@ -150,11 +199,29 @@ export async function POST(request: NextRequest) {
       recurrence_rule: null as string | null,
       parent_event_id: null as string | null,
       is_active: eventFields.is_active ?? true,
+      calendar_id: resolvedCalendarId ?? null,
     };
+
+    const startHm = timeHhMm(baseInsert.start_time);
+    const endHm = timeHhMm(baseInsert.end_time);
 
     const createdIds: string[] = [];
 
     for (const eventDate of datesToCreate) {
+      if (resolvedCalendarId) {
+        const conflict = await assertExperienceEventWindowFreeOnCalendar(
+          admin,
+          staff.venue_id,
+          resolvedCalendarId,
+          eventDate,
+          startHm,
+          endHm,
+        );
+        if (conflict) {
+          return NextResponse.json({ error: conflict }, { status: 409 });
+        }
+      }
+
       const { data: event, error } = await admin
         .from('experience_events')
         .insert({
@@ -216,14 +283,83 @@ export async function PATCH(request: NextRequest) {
     const { id, ticket_types, ...rest } = body;
     if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 });
 
-    const parsed = eventSchema.partial().safeParse(rest);
+    const parsed = patchEventBodySchema.safeParse(rest);
     if (!parsed.success) {
       return NextResponse.json({ error: 'Invalid request', details: parsed.error.flatten() }, { status: 400 });
     }
 
-    const resolved = await resolveExperienceEventPatch(admin, staff.venue_id, id, parsed.data);
+    const { new_calendar_name: newCalendarName, ...fieldsForResolve } = parsed.data;
+
+    if (newCalendarName && fieldsForResolve.calendar_id !== undefined) {
+      return NextResponse.json(
+        { error: 'Use either calendar_id or new_calendar_name, not both.' },
+        { status: 400 },
+      );
+    }
+
+    const bookingModel = await getVenueBookingModel(admin, staff.venue_id);
+    if (
+      bookingModel !== 'unified_scheduling' &&
+      (newCalendarName || (fieldsForResolve.calendar_id !== undefined && fieldsForResolve.calendar_id !== null))
+    ) {
+      return NextResponse.json(
+        { error: 'Assigning an event to a calendar column requires unified scheduling.' },
+        { status: 400 },
+      );
+    }
+
+    let patchInput = { ...fieldsForResolve };
+    if (newCalendarName) {
+      const created = await createTeamCalendarForEvent(admin, staff.venue_id, newCalendarName);
+      if (!created.ok) {
+        return NextResponse.json({ error: created.error }, { status: created.status });
+      }
+      patchInput = { ...fieldsForResolve, calendar_id: created.id };
+    }
+
+    const resolved = await resolveExperienceEventPatch(admin, staff.venue_id, id, patchInput);
     if (!resolved.ok) {
       return NextResponse.json({ error: resolved.error }, { status: resolved.error === 'Event not found' ? 404 : 400 });
+    }
+
+    const { data: existingRow } = await admin
+      .from('experience_events')
+      .select('event_date, start_time, end_time, calendar_id')
+      .eq('id', id)
+      .eq('venue_id', staff.venue_id)
+      .maybeSingle();
+
+    if (!existingRow) {
+      return NextResponse.json({ error: 'Event not found' }, { status: 404 });
+    }
+
+    const ex = existingRow as {
+      event_date: string;
+      start_time: string;
+      end_time: string;
+      calendar_id: string | null;
+    };
+    const mergedDate = (resolved.payload.event_date as string | undefined) ?? ex.event_date;
+    const mergedStart = (resolved.payload.start_time as string | undefined) ?? ex.start_time;
+    const mergedEnd = (resolved.payload.end_time as string | undefined) ?? ex.end_time;
+    const mergedCalendarId =
+      resolved.payload.calendar_id !== undefined
+        ? (resolved.payload.calendar_id as string | null)
+        : ex.calendar_id;
+
+    if (mergedCalendarId) {
+      const conflict = await assertExperienceEventWindowFreeOnCalendar(
+        admin,
+        staff.venue_id,
+        mergedCalendarId,
+        mergedDate,
+        timeHhMm(mergedStart),
+        timeHhMm(mergedEnd),
+        { excludeExperienceEventId: id },
+      );
+      if (conflict) {
+        return NextResponse.json({ error: conflict }, { status: 409 });
+      }
     }
 
     if (Object.keys(resolved.payload).length > 0) {

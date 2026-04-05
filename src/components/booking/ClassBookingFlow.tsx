@@ -6,9 +6,24 @@ import type { ClassPaymentRequirement } from '@/types/booking-models';
 import { defaultPhoneCountryForVenueCurrency } from '@/lib/phone/default-country';
 import { DetailsStep } from './DetailsStep';
 import { PaymentStep } from './PaymentStep';
+import { ClassOfferingsCalendar } from './ClassOfferingsCalendar';
+
+interface ClassOfferingSummary {
+  class_type_id: string;
+  class_name: string;
+  description: string | null;
+  colour: string;
+  price_pence: number | null;
+  payment_requirement: ClassPaymentRequirement;
+  deposit_amount_pence: number | null;
+  instructor_name: string | null;
+  dates: string[];
+  session_count: number;
+}
 
 interface ClassSlot {
   instance_id: string;
+  class_type_id: string;
   class_name: string;
   description: string | null;
   instance_date: string;
@@ -24,7 +39,15 @@ interface ClassSlot {
   colour: string;
 }
 
-type Step = 'classes' | 'summary' | 'details' | 'payment' | 'confirmation';
+type Step = 'pick-class' | 'pick-date' | 'summary' | 'details' | 'payment' | 'confirmation';
+
+function localTodayISO(): string {
+  const n = new Date();
+  const y = n.getFullYear();
+  const m = String(n.getMonth() + 1).padStart(2, '0');
+  const d = String(n.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
 
 function symForCurrency(currency: string): string {
   return currency === 'EUR' ? '€' : '£';
@@ -79,15 +102,39 @@ function paymentSummaryLines(
   return { lines: [`${sym}${(price / 100).toFixed(2)} per person`], chargePence: 0 };
 }
 
+function mapInstanceToSlot(row: Record<string, unknown>): ClassSlot {
+  return {
+    instance_id: row.instance_id as string,
+    class_type_id: row.class_type_id as string,
+    class_name: row.class_name as string,
+    description: (row.description as string | null) ?? null,
+    instance_date: row.instance_date as string,
+    start_time: row.start_time as string,
+    duration_minutes: row.duration_minutes as number,
+    capacity: row.capacity as number,
+    remaining: row.remaining as number,
+    price_pence: (row.price_pence as number | null) ?? null,
+    payment_requirement: row.payment_requirement as ClassPaymentRequirement,
+    deposit_amount_pence: (row.deposit_amount_pence as number | null) ?? null,
+    requires_stripe_checkout: Boolean(row.requires_stripe_checkout),
+    instructor_name: (row.instructor_name as string | null) ?? null,
+    colour: (row.colour as string) ?? '#6366f1',
+  };
+}
+
 export function ClassBookingFlow({ venue, cancellationPolicy }: { venue: VenuePublic; cancellationPolicy?: string }) {
   const currency = venue.currency ?? 'GBP';
   const phoneDefaultCountry = defaultPhoneCountryForVenueCurrency(currency);
   const terms = venue.terminology ?? { client: 'Member', booking: 'Booking', staff: 'Instructor' };
   const sym = symForCurrency(currency);
 
-  const [step, setStep] = useState<Step>('classes');
-  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
-  const [classes, setClasses] = useState<ClassSlot[]>([]);
+  const [step, setStep] = useState<Step>('pick-class');
+  const [rangeFrom, setRangeFrom] = useState('');
+  const [rangeTo, setRangeTo] = useState('');
+  const [classSummaries, setClassSummaries] = useState<ClassOfferingSummary[]>([]);
+  const [instances, setInstances] = useState<ClassSlot[]>([]);
+  const [selectedClassTypeId, setSelectedClassTypeId] = useState<string | null>(null);
+  const [selectedCalendarDate, setSelectedCalendarDate] = useState<string | null>(null);
   const [selectedClass, setSelectedClass] = useState<ClassSlot | null>(null);
   const [spots, setSpots] = useState(1);
   const [createResult, setCreateResult] = useState<{
@@ -99,24 +146,60 @@ export function ClassBookingFlow({ venue, cancellationPolicy }: { venue: VenuePu
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchClasses = useCallback(async () => {
+  const fetchOfferings = useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
+      const from = localTodayISO();
       const res = await fetch(
-        `/api/booking/availability?venue_id=${venue.id}&date=${date}&booking_model=class_session`,
+        `/api/booking/class-offerings?venue_id=${encodeURIComponent(venue.id)}&from=${from}&days=90`,
       );
       const data = await res.json();
-      setClasses(data.classes ?? []);
-    } catch {
-      setError('Failed to load classes');
+      if (!res.ok) throw new Error(data.error ?? 'Failed to load classes');
+      setRangeFrom(data.from ?? from);
+      setRangeTo(data.to ?? '');
+      setClassSummaries((data.classes ?? []) as ClassOfferingSummary[]);
+      const raw = (data.instances ?? []) as Record<string, unknown>[];
+      setInstances(raw.map(mapInstanceToSlot));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to load classes');
+      setClassSummaries([]);
+      setInstances([]);
     } finally {
       setLoading(false);
     }
-  }, [venue.id, date]);
+  }, [venue.id]);
 
   useEffect(() => {
-    void fetchClasses();
-  }, [fetchClasses]);
+    void fetchOfferings();
+  }, [fetchOfferings]);
+
+  const selectedSummary = useMemo(
+    () => classSummaries.find((c) => c.class_type_id === selectedClassTypeId) ?? null,
+    [classSummaries, selectedClassTypeId],
+  );
+
+  const instancesForType = useMemo(
+    () => instances.filter((i) => i.class_type_id === selectedClassTypeId && i.remaining > 0),
+    [instances, selectedClassTypeId],
+  );
+
+  const candidatesForCalendarDate = useMemo(() => {
+    if (!selectedCalendarDate) return [];
+    return instancesForType.filter((i) => i.instance_date === selectedCalendarDate);
+  }, [instancesForType, selectedCalendarDate]);
+
+  function handleCalendarSelectDate(iso: string) {
+    const candidates = instancesForType.filter((i) => i.instance_date === iso && i.remaining > 0);
+    if (candidates.length === 1) {
+      setSelectedClass(candidates[0]!);
+      setSpots(1);
+      setStep('summary');
+      setSelectedCalendarDate(null);
+      return;
+    }
+    setSelectedCalendarDate(iso);
+  }
 
   const summary = useMemo(() => {
     if (!selectedClass) return null;
@@ -178,36 +261,38 @@ export function ClassBookingFlow({ venue, cancellationPolicy }: { venue: VenuePu
 
   const depositPenceForDetails = summary?.chargePence ?? 0;
 
+  function pickTimeSlot(slot: ClassSlot) {
+    setSelectedClass(slot);
+    setSpots(1);
+    setStep('summary');
+    setSelectedCalendarDate(null);
+  }
+
   return (
     <div className="mx-auto max-w-lg">
       {error && (
         <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
       )}
 
-      {step === 'classes' && (
+      {step === 'pick-class' && (
         <div>
-          <h2 className="mb-2 text-lg font-semibold text-slate-900">Classes</h2>
-          <div className="mb-4">
-            <input
-              type="date"
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-            />
-          </div>
+          <h2 className="mb-1 text-lg font-semibold text-slate-900">Choose a class</h2>
+          <p className="mb-4 text-sm text-slate-500">
+            Classes with sessions scheduled in the next 3 months. Pick one, then choose a date on the next step.
+          </p>
           {loading ? (
             <div className="space-y-3">
               {[1, 2].map((i) => (
                 <div key={i} className="h-20 animate-pulse rounded-xl bg-slate-100" />
               ))}
             </div>
-          ) : classes.length === 0 ? (
+          ) : classSummaries.length === 0 ? (
             <p className="text-sm text-slate-500">
-              No classes on this date. Try another date or contact the venue.
+              No upcoming classes in the next few months. Please check back later or contact the venue.
             </p>
           ) : (
             <div className="space-y-3">
-              {classes.map((cls) => {
+              {classSummaries.map((cls) => {
                 const priceLabel =
                   cls.price_pence == null || cls.price_pence <= 0
                     ? 'Free'
@@ -218,22 +303,21 @@ export function ClassBookingFlow({ venue, cancellationPolicy }: { venue: VenuePu
                         : `${sym}${(cls.price_pence / 100).toFixed(2)} per person`;
                 return (
                   <button
-                    key={cls.instance_id}
+                    key={cls.class_type_id}
                     type="button"
                     onClick={() => {
-                      setSelectedClass(cls);
-                      setSpots(1);
-                      setStep('summary');
+                      setSelectedClassTypeId(cls.class_type_id);
+                      setSelectedCalendarDate(null);
+                      setStep('pick-date');
                     }}
-                    disabled={cls.remaining <= 0}
-                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-4 text-left shadow-sm transition hover:border-brand-300 disabled:opacity-50"
+                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-4 text-left shadow-sm transition hover:border-brand-300"
                   >
                     <div className="flex items-start gap-3">
                       <div className="mt-1 h-3 w-3 shrink-0 rounded-full" style={{ backgroundColor: cls.colour }} />
                       <div className="min-w-0 flex-1">
                         <div className="font-semibold text-slate-900">{cls.class_name}</div>
                         <div className="text-sm text-slate-500">
-                          {cls.start_time.slice(0, 5)} · {cls.duration_minutes} min
+                          {cls.session_count} session{cls.session_count !== 1 ? 's' : ''} available
                           {cls.instructor_name ? ` · ${cls.instructor_name}` : ''}
                         </div>
                         {cls.description ? (
@@ -241,13 +325,6 @@ export function ClassBookingFlow({ venue, cancellationPolicy }: { venue: VenuePu
                         ) : null}
                         <div className="mt-2 text-sm font-medium text-slate-700">{priceLabel}</div>
                       </div>
-                      <span
-                        className={`shrink-0 text-xs font-medium ${
-                          cls.remaining > 3 ? 'text-green-600' : cls.remaining > 0 ? 'text-amber-600' : 'text-red-500'
-                        }`}
-                      >
-                        {cls.remaining > 0 ? `${cls.remaining} left` : 'Full'}
-                      </span>
                     </div>
                   </button>
                 );
@@ -257,11 +334,58 @@ export function ClassBookingFlow({ venue, cancellationPolicy }: { venue: VenuePu
         </div>
       )}
 
+      {step === 'pick-date' && selectedSummary && rangeFrom && rangeTo && (
+        <div>
+          <button
+            type="button"
+            onClick={() => {
+              setStep('pick-class');
+              setSelectedClassTypeId(null);
+              setSelectedCalendarDate(null);
+            }}
+            className="mb-4 text-sm text-brand-600 hover:underline"
+          >
+            &larr; Back to classes
+          </button>
+          <h2 className="mb-1 text-lg font-semibold text-slate-900">{selectedSummary.class_name}</h2>
+          <p className="mb-4 text-sm text-slate-500">Select a date when this class is running.</p>
+
+          <ClassOfferingsCalendar
+            rangeFrom={rangeFrom}
+            rangeTo={rangeTo}
+            highlightedDates={selectedSummary.dates}
+            selectedDate={selectedCalendarDate}
+            onSelectDate={handleCalendarSelectDate}
+          />
+
+          {selectedCalendarDate && candidatesForCalendarDate.length > 1 && (
+            <div className="mt-4">
+              <p className="mb-2 text-sm font-medium text-slate-800">Choose a time</p>
+              <div className="flex flex-wrap gap-2">
+                {candidatesForCalendarDate.map((slot) => (
+                  <button
+                    key={slot.instance_id}
+                    type="button"
+                    onClick={() => pickTimeSlot(slot)}
+                    className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-900 shadow-sm hover:border-brand-400 hover:bg-brand-50"
+                  >
+                    {slot.start_time.slice(0, 5)}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {step === 'summary' && selectedClass && (
         <div>
           <button
             type="button"
-            onClick={() => setStep('classes')}
+            onClick={() => {
+              setSelectedClass(null);
+              setStep('pick-date');
+            }}
             className="mb-4 text-sm text-brand-600 hover:underline"
           >
             &larr; Back
@@ -271,8 +395,12 @@ export function ClassBookingFlow({ venue, cancellationPolicy }: { venue: VenuePu
             <div className="text-slate-500">
               {selectedClass.instance_date} at {selectedClass.start_time.slice(0, 5)}
             </div>
-            {selectedClass.instructor_name ? (
-              <div className="mt-1 text-slate-600">{terms.staff}: {selectedClass.instructor_name}</div>
+            <div className="mt-2 text-slate-600">
+              {selectedClass.duration_minutes} min
+              {selectedClass.instructor_name ? ` · ${terms.staff}: ${selectedClass.instructor_name}` : ''}
+            </div>
+            {selectedClass.description ? (
+              <p className="mt-2 text-xs text-slate-600">{selectedClass.description}</p>
             ) : null}
           </div>
 

@@ -1,9 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
-import { normalizePublicBaseUrl, publicBaseUrlHost } from '@/lib/public-base-url';
-import { BUSINESS_PRICE, STANDARD_PRICE_PER_CALENDAR } from '@/lib/pricing-constants';
 import type { StaffMember } from '../types';
 
 interface StaffSectionProps {
@@ -16,26 +14,10 @@ interface PractitionerOption {
   id: string;
   name: string;
   slug?: string | null;
-}
-
-const PUBLIC_BOOK_ORIGIN = normalizePublicBaseUrl(process.env.NEXT_PUBLIC_BASE_URL);
-const PUBLIC_BOOK_HOST = publicBaseUrlHost(PUBLIC_BOOK_ORIGIN);
-
-function bookingSlugDraftError(raw: string): string | null {
-  const t = raw.trim().toLowerCase();
-  if (t === '') return null;
-  if (t.length > 64) return 'Booking link must be 64 characters or fewer.';
-  if (!/^[a-z0-9-]+$/.test(t)) {
-    return 'Use lowercase letters, numbers, and hyphens only.';
-  }
-  return null;
-}
-
-interface CalendarEntitlementState {
-  can_add_practitioner: boolean;
-  unlimited: boolean;
-  calendar_limit: number | null;
-  pricing_tier: string;
+  /** Bookable calendars can be deactivated; only active ones are assignable. */
+  is_active?: boolean;
+  /** unified_calendars.calendar_type — resource columns are not staff-assignable here. */
+  calendar_type?: string | null;
 }
 
 export function StaffSection({ venueId: _venueId, isAdmin, bookingModel }: StaffSectionProps) {
@@ -51,32 +33,10 @@ export function StaffSection({ venueId: _venueId, isAdmin, bookingModel }: Staff
   const [createPasswordConfirm, setCreatePasswordConfirm] = useState('');
   const [createName, setCreateName] = useState('');
   const [createRole, setCreateRole] = useState<'admin' | 'staff'>('staff');
-  const [createPractitionerId, setCreatePractitionerId] = useState('');
+  const [createCalendarIds, setCreateCalendarIds] = useState<string[]>([]);
   const [practitioners, setPractitioners] = useState<PractitionerOption[]>([]);
-  const [calendarNameDrafts, setCalendarNameDrafts] = useState<Record<string, string>>({});
-  const [savingPractitionerNameId, setSavingPractitionerNameId] = useState<string | null>(null);
-  const [calendarRenameError, setCalendarRenameError] = useState<string | null>(null);
-  const [calendarRenameSuccess, setCalendarRenameSuccess] = useState<string | null>(null);
   const [calendarSavingId, setCalendarSavingId] = useState<string | null>(null);
   const [calendarError, setCalendarError] = useState<string | null>(null);
-  const [calendarEntitlement, setCalendarEntitlement] = useState<CalendarEntitlementState | null>(null);
-  const [venueSlug, setVenueSlug] = useState<string | null>(null);
-  const [calendarSlugDrafts, setCalendarSlugDrafts] = useState<Record<string, string>>({});
-  const [calendarSlugFieldError, setCalendarSlugFieldError] = useState<Record<string, string | null>>({});
-  const [savingSlugId, setSavingSlugId] = useState<string | null>(null);
-  const [slugCopySuccessId, setSlugCopySuccessId] = useState<string | null>(null);
-  const [showAddCalendarForm, setShowAddCalendarForm] = useState(false);
-  const [newCalendarName, setNewCalendarName] = useState('');
-  const [addCalendarSaving, setAddCalendarSaving] = useState(false);
-  const [addCalendarError, setAddCalendarError] = useState<string | null>(null);
-  const [calendarBillingModal, setCalendarBillingModal] = useState<{
-    limit: number;
-    current: number;
-    pendingName: string;
-  } | null>(null);
-  const [deleteCalendarTarget, setDeleteCalendarTarget] = useState<PractitionerOption | null>(null);
-  const [deletingCalendar, setDeletingCalendar] = useState(false);
-  const [deleteCalendarError, setDeleteCalendarError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [createSuccess, setCreateSuccess] = useState<string | null>(null);
@@ -131,7 +91,7 @@ export function StaffSection({ venueId: _venueId, isAdmin, bookingModel }: Staff
   const loadPractitioners = useCallback(async () => {
     if (!isAppointmentVenue || !isAdmin) return;
     try {
-      const res = await fetch('/api/venue/practitioners');
+      const res = await fetch('/api/venue/practitioners?staff_assignable=1', { cache: 'no-store' });
       if (!res.ok) return;
       const data = (await res.json()) as {
         practitioners?: Array<{ id: string; name: string; slug?: string | null }>;
@@ -142,6 +102,8 @@ export function StaffSection({ venueId: _venueId, isAdmin, bookingModel }: Staff
           id: p.id,
           name: p.name,
           slug: p.slug ?? null,
+          is_active: (p as { is_active?: boolean }).is_active,
+          calendar_type: (p as { calendar_type?: string | null }).calendar_type ?? null,
         })),
       );
     } catch {
@@ -149,262 +111,50 @@ export function StaffSection({ venueId: _venueId, isAdmin, bookingModel }: Staff
     }
   }, [isAppointmentVenue, isAdmin]);
 
-  const loadCalendarEntitlement = useCallback(async () => {
-    if (!isAppointmentVenue || !isAdmin) return;
-    try {
-      const res = await fetch('/api/venue/calendar-entitlement');
-      if (!res.ok) return;
-      const data = (await res.json()) as {
-        can_add_practitioner?: boolean;
-        unlimited?: boolean;
-        calendar_limit?: number | null;
-        pricing_tier?: string;
-      };
-      setCalendarEntitlement({
-        can_add_practitioner: data.can_add_practitioner ?? false,
-        unlimited: data.unlimited ?? false,
-        calendar_limit: data.calendar_limit ?? null,
-        pricing_tier: data.pricing_tier ?? 'standard',
-      });
-    } catch {
-      /* ignore */
-    }
-  }, [isAppointmentVenue, isAdmin]);
+  /** Active practitioner/class columns only (API staff_assignable=1); resource calendars excluded server-side. */
+  const allocatablePractitioners = useMemo(
+    () =>
+      practitioners.filter(
+        (p) => p.is_active === true && (p.calendar_type ?? 'practitioner') !== 'resource',
+      ),
+    [practitioners],
+  );
 
-  const loadVenueSlug = useCallback(async () => {
-    if (!isAppointmentVenue || !isAdmin) return;
-    try {
-      const res = await fetch('/api/venue');
-      if (!res.ok) return;
-      const data = (await res.json()) as { slug?: string | null };
-      setVenueSlug(typeof data.slug === 'string' && data.slug ? data.slug : null);
-    } catch {
-      /* ignore */
+  const inactiveLinkedCalendarsForMember = useCallback(
+    (member: StaffMember): PractitionerOption[] => {
+      const assigned = member.linked_calendar_ids ?? [];
+      const extras: PractitionerOption[] = [];
+      for (const id of assigned) {
+        if (allocatablePractitioners.some((p) => p.id === id)) continue;
+        const row = practitioners.find((p) => p.id === id);
+        if (row) {
+          extras.push({
+            ...row,
+            name: `${row.name} (inactive — reassign or activate in Calendar Availability)`,
+          });
+        }
+      }
+      return extras;
+    },
+    [allocatablePractitioners, practitioners],
+  );
+
+  const assignedIdsForMember = useCallback((member: StaffMember): string[] => {
+    if (member.linked_calendar_ids && member.linked_calendar_ids.length > 0) {
+      return member.linked_calendar_ids;
     }
-  }, [isAppointmentVenue, isAdmin]);
+    if (member.linked_practitioner_id) return [member.linked_practitioner_id];
+    return [];
+  }, []);
+
+  useEffect(() => {
+    setCreateCalendarIds((prev) => prev.filter((id) => allocatablePractitioners.some((p) => p.id === id)));
+  }, [allocatablePractitioners]);
 
   useEffect(() => {
     setLoading(true);
-    Promise.all([
-      load(),
-      loadSessionSettings(),
-      loadPractitioners(),
-      loadCalendarEntitlement(),
-      loadVenueSlug(),
-    ]).finally(() => setLoading(false));
-  }, [load, loadSessionSettings, loadPractitioners, loadCalendarEntitlement, loadVenueSlug]);
-
-  useEffect(() => {
-    setCalendarNameDrafts(Object.fromEntries(practitioners.map((p) => [p.id, p.name])));
-  }, [practitioners]);
-
-  useEffect(() => {
-    setCalendarSlugDrafts(Object.fromEntries(practitioners.map((p) => [p.id, (p.slug ?? '').trim()])));
-  }, [practitioners]);
-
-  const onSaveCalendarName = useCallback(
-    async (practitionerId: string) => {
-      const name = calendarNameDrafts[practitionerId]?.trim() ?? '';
-      if (!name) {
-        setCalendarRenameError('Enter a name for this calendar.');
-        return;
-      }
-      setCalendarRenameError(null);
-      setCalendarRenameSuccess(null);
-      setSavingPractitionerNameId(practitionerId);
-      try {
-        const res = await fetch('/api/venue/practitioners', {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id: practitionerId, name }),
-        });
-        if (!res.ok) {
-          const j = await res.json().catch(() => ({}));
-          throw new Error(typeof j.error === 'string' ? j.error : 'Could not update calendar name');
-        }
-        await loadPractitioners();
-        await load();
-        setCalendarRenameSuccess('Calendar name saved.');
-        setTimeout(() => setCalendarRenameSuccess(null), 4000);
-      } catch (e) {
-        setCalendarRenameError(e instanceof Error ? e.message : 'Save failed');
-      } finally {
-        setSavingPractitionerNameId(null);
-      }
-    },
-    [calendarNameDrafts, load, loadPractitioners],
-  );
-
-  const onSaveBookingSlug = useCallback(
-    async (practitionerId: string) => {
-      const raw = calendarSlugDrafts[practitionerId] ?? '';
-      const fieldErr = bookingSlugDraftError(raw);
-      setCalendarSlugFieldError((prev) => ({ ...prev, [practitionerId]: fieldErr }));
-      if (fieldErr) return;
-      const normalized = raw.trim().toLowerCase();
-      setSavingSlugId(practitionerId);
-      try {
-        const res = await fetch('/api/venue/practitioners', {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            id: practitionerId,
-            slug: normalized === '' ? null : normalized,
-          }),
-        });
-        if (!res.ok) {
-          const j = await res.json().catch(() => ({}));
-          throw new Error(typeof j.error === 'string' ? j.error : 'Could not update booking link');
-        }
-        await loadPractitioners();
-        setCalendarSlugFieldError((prev) => ({ ...prev, [practitionerId]: null }));
-        setCalendarRenameSuccess('Booking link saved.');
-        setTimeout(() => setCalendarRenameSuccess(null), 4000);
-      } catch (e) {
-        setCalendarSlugFieldError((prev) => ({
-          ...prev,
-          [practitionerId]: e instanceof Error ? e.message : 'Save failed',
-        }));
-      } finally {
-        setSavingSlugId(null);
-      }
-    },
-    [calendarSlugDrafts, loadPractitioners],
-  );
-
-  const copyPractitionerBookUrl = useCallback(
-    async (practitionerId: string) => {
-      if (!venueSlug) return;
-      const raw = calendarSlugDrafts[practitionerId] ?? '';
-      if (bookingSlugDraftError(raw)) return;
-      const seg = raw.trim().toLowerCase();
-      if (!seg) return;
-      const url = `${PUBLIC_BOOK_ORIGIN}/book/${encodeURIComponent(venueSlug)}/${encodeURIComponent(seg)}`;
-      try {
-        await navigator.clipboard.writeText(url);
-        setSlugCopySuccessId(practitionerId);
-        setTimeout(() => {
-          setSlugCopySuccessId((id) => (id === practitionerId ? null : id));
-        }, 2500);
-      } catch {
-        setCalendarSlugFieldError((prev) => ({
-          ...prev,
-          [practitionerId]: 'Could not copy to clipboard.',
-        }));
-      }
-    },
-    [venueSlug, calendarSlugDrafts],
-  );
-
-  const onAddCalendar = useCallback(
-    async (e: React.FormEvent) => {
-      e.preventDefault();
-      const name = newCalendarName.trim();
-      if (!name) {
-        setAddCalendarError('Enter a name for the new calendar.');
-        return;
-      }
-      setAddCalendarError(null);
-      setAddCalendarSaving(true);
-      try {
-        const res = await fetch('/api/venue/practitioners', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name }),
-        });
-        const j = (await res.json().catch(() => ({}))) as {
-          error?: string;
-          upgrade_required?: boolean;
-          current?: number;
-          limit?: number;
-        };
-        if (!res.ok) {
-          if (res.status === 403 && j.upgrade_required && typeof j.limit === 'number' && typeof j.current === 'number') {
-            setCalendarBillingModal({ limit: j.limit, current: j.current, pendingName: name });
-            return;
-          }
-          throw new Error(typeof j.error === 'string' ? j.error : 'Could not add calendar');
-        }
-        setNewCalendarName('');
-        setShowAddCalendarForm(false);
-        await loadPractitioners();
-        await loadCalendarEntitlement();
-        setCalendarRenameSuccess('Calendar added.');
-        setTimeout(() => setCalendarRenameSuccess(null), 4000);
-      } catch (err) {
-        setAddCalendarError(err instanceof Error ? err.message : 'Could not add calendar');
-      } finally {
-        setAddCalendarSaving(false);
-      }
-    },
-    [newCalendarName, loadPractitioners, loadCalendarEntitlement],
-  );
-
-  const confirmCalendarBillingIncrease = useCallback(async () => {
-    if (!calendarBillingModal) return;
-    const { limit, pendingName } = calendarBillingModal;
-    const newCount = limit + 1;
-    setAddCalendarSaving(true);
-    setAddCalendarError(null);
-    try {
-      const up = await fetch('/api/venue/update-subscription', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ calendar_count: newCount }),
-      });
-      const upJson = (await up.json().catch(() => ({}))) as { error?: string };
-      if (!up.ok) {
-        throw new Error(typeof upJson.error === 'string' ? upJson.error : 'Could not update your subscription.');
-      }
-      const res = await fetch('/api/venue/practitioners', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: pendingName }),
-      });
-      const j = (await res.json().catch(() => ({}))) as { error?: string };
-      if (!res.ok) {
-        throw new Error(typeof j.error === 'string' ? j.error : 'Could not add calendar after billing update.');
-      }
-      setCalendarBillingModal(null);
-      setNewCalendarName('');
-      setShowAddCalendarForm(false);
-      await loadPractitioners();
-      await loadCalendarEntitlement();
-      setCalendarRenameSuccess('Plan updated and calendar added.');
-      setTimeout(() => setCalendarRenameSuccess(null), 4000);
-    } catch (err) {
-      setAddCalendarError(err instanceof Error ? err.message : 'Something went wrong.');
-    } finally {
-      setAddCalendarSaving(false);
-    }
-  }, [calendarBillingModal, loadPractitioners, loadCalendarEntitlement]);
-
-  const onDeleteCalendar = useCallback(async () => {
-    if (!deleteCalendarTarget) return;
-    setDeleteCalendarError(null);
-    setDeletingCalendar(true);
-    try {
-      const res = await fetch('/api/venue/practitioners', {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: deleteCalendarTarget.id }),
-      });
-      const j = (await res.json().catch(() => ({}))) as { error?: string };
-      if (!res.ok) {
-        throw new Error(typeof j.error === 'string' ? j.error : 'Could not remove calendar');
-      }
-      setDeleteCalendarTarget(null);
-      await loadPractitioners();
-      await load();
-      await loadCalendarEntitlement();
-      setCalendarRenameSuccess('Calendar removed.');
-      setTimeout(() => setCalendarRenameSuccess(null), 4000);
-    } catch (err) {
-      setDeleteCalendarError(err instanceof Error ? err.message : 'Could not remove calendar');
-    } finally {
-      setDeletingCalendar(false);
-    }
-  }, [deleteCalendarTarget, loadPractitioners, load, loadCalendarEntitlement]);
+    Promise.all([load(), loadSessionSettings(), loadPractitioners()]).finally(() => setLoading(false));
+  }, [load, loadSessionSettings, loadPractitioners]);
 
   // Create user handler
   const onCreateUser = useCallback(async (e: React.FormEvent) => {
@@ -432,9 +182,7 @@ export function StaffSection({ venueId: _venueId, isAdmin, bookingModel }: Staff
           password_confirm: createPasswordConfirm,
           name: createName.trim() || undefined,
           role: createRole,
-          ...(isAppointmentVenue && createPractitionerId
-            ? { practitioner_id: createPractitionerId }
-            : {}),
+          ...(isAppointmentVenue && createCalendarIds.length > 0 ? { calendar_ids: createCalendarIds } : {}),
         }),
       });
       if (!res.ok) {
@@ -451,7 +199,7 @@ export function StaffSection({ venueId: _venueId, isAdmin, bookingModel }: Staff
       setCreatePasswordConfirm('');
       setCreateName('');
       setCreateRole('staff');
-      setCreatePractitionerId('');
+      setCreateCalendarIds([]);
       setCreateSuccess(
         welcomeSent
           ? `User ${email} created. They have been emailed their login details.`
@@ -464,22 +212,23 @@ export function StaffSection({ venueId: _venueId, isAdmin, bookingModel }: Staff
     } finally {
       setCreating(false);
     }
-  }, [createEmail, createPassword, createPasswordConfirm, createName, createRole, createPractitionerId, isAppointmentVenue]);
+  }, [createEmail, createPassword, createPasswordConfirm, createName, createRole, createCalendarIds, isAppointmentVenue]);
 
-  const onCalendarLinkChange = useCallback(async (member: StaffMember, practitionerId: string) => {
+  const onCalendarAssignmentsChange = useCallback(async (member: StaffMember, calendarIds: string[]) => {
     setCalendarError(null);
     setCalendarSavingId(member.id);
     try {
       const res = await fetch(`/api/venue/staff/${member.id}/calendar`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ practitioner_id: practitionerId || null }),
+        body: JSON.stringify({ calendar_ids: calendarIds }),
       });
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
-        throw new Error(typeof j.error === 'string' ? j.error : 'Failed to update calendar link');
+        throw new Error(typeof j.error === 'string' ? j.error : 'Failed to update calendar assignments');
       }
       const data = (await res.json()) as {
+        linked_calendar_ids?: string[];
         linked_practitioner_id: string | null;
         linked_practitioner_name: string | null;
       };
@@ -488,6 +237,7 @@ export function StaffSection({ venueId: _venueId, isAdmin, bookingModel }: Staff
           s.id === member.id
             ? {
                 ...s,
+                linked_calendar_ids: data.linked_calendar_ids ?? calendarIds,
                 linked_practitioner_id: data.linked_practitioner_id,
                 linked_practitioner_name: data.linked_practitioner_name,
               }
@@ -496,13 +246,36 @@ export function StaffSection({ venueId: _venueId, isAdmin, bookingModel }: Staff
       );
       setCalendarError(null);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Failed to update calendar link';
+      const msg = err instanceof Error ? err.message : 'Failed to update calendar assignments';
       setCalendarError(msg);
-      console.error('Calendar link update failed:', err);
+      console.error('Calendar assignments update failed:', err);
     } finally {
       setCalendarSavingId(null);
     }
   }, []);
+
+  const toggleStaffCalendar = useCallback(
+    (member: StaffMember, calendarId: string, checked: boolean) => {
+      const base = allocatablePractitioners
+        .filter((p) => assignedIdsForMember(member).includes(p.id))
+        .map((p) => p.id);
+      const set = new Set(base);
+      if (checked) set.add(calendarId);
+      else set.delete(calendarId);
+      void onCalendarAssignmentsChange(member, [...set]);
+    },
+    [assignedIdsForMember, allocatablePractitioners, onCalendarAssignmentsChange],
+  );
+
+  const setAllStaffCalendars = useCallback(
+    (member: StaffMember, selectAll: boolean) => {
+      void onCalendarAssignmentsChange(
+        member,
+        selectAll ? allocatablePractitioners.map((p) => p.id) : [],
+      );
+    },
+    [allocatablePractitioners, onCalendarAssignmentsChange],
+  );
 
   // Own password change handler
   const onChangePassword = useCallback(async (e: React.FormEvent) => {
@@ -709,308 +482,6 @@ export function StaffSection({ venueId: _venueId, isAdmin, bookingModel }: Staff
         </div>
       </section>
 
-      {/* Bookable calendars (Model B, admin): add/remove/rename practitioner rows */}
-      {isAppointmentVenue && isAdmin && (
-        <section className="rounded-xl border border-slate-200 bg-white shadow-sm">
-          <div className="border-b border-slate-100 px-6 py-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-            <div>
-              <h2 className="text-base font-semibold text-slate-900">Bookable calendars</h2>
-              <p className="mt-0.5 text-sm text-slate-500">
-                Each calendar appears on your booking page and in the dashboard. Add or remove calendars here (Business and
-                Founding plans have no limit). Rename without changing staff logins.
-              </p>
-            </div>
-            {calendarEntitlement && (
-              <button
-                type="button"
-                onClick={() => {
-                  setShowAddCalendarForm((v) => !v);
-                  setAddCalendarError(null);
-                  setNewCalendarName('');
-                }}
-                className="inline-flex shrink-0 items-center gap-1.5 self-start rounded-lg bg-brand-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-brand-700"
-              >
-                <PlusIcon className="h-4 w-4" />
-                Add calendar
-              </button>
-            )}
-          </div>
-          <div className="px-6 py-4 space-y-4">
-            {calendarEntitlement && !calendarEntitlement.can_add_practitioner && !calendarEntitlement.unlimited && (
-              <p className="text-sm text-amber-800 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
-                You have reached your plan&apos;s calendar limit
-                {calendarEntitlement.calendar_limit != null ? ` (${calendarEntitlement.calendar_limit})` : ''}. Increase
-                your calendar count on the Standard plan or upgrade to Business for unlimited calendars. See the{' '}
-                <a href="/dashboard/settings?tab=plan" className="font-medium text-brand-700 underline underline-offset-2">
-                  Plan
-                </a>{' '}
-                tab.
-              </p>
-            )}
-            {calendarRenameSuccess && (
-              <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm text-emerald-700">
-                {calendarRenameSuccess}
-              </div>
-            )}
-            {calendarRenameError && (
-              <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-700">
-                {calendarRenameError}
-              </div>
-            )}
-            {showAddCalendarForm && calendarEntitlement && (
-              <form onSubmit={onAddCalendar} className="rounded-lg border border-slate-200 bg-slate-50/50 p-4 space-y-3">
-                <h3 className="text-sm font-semibold text-slate-800">New calendar</h3>
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
-                  <div className="min-w-0 flex-1">
-                    <label htmlFor="new-calendar-name" className="mb-1 block text-sm font-medium text-slate-700">
-                      Display name
-                    </label>
-                    <input
-                      id="new-calendar-name"
-                      type="text"
-                      value={newCalendarName}
-                      onChange={(e) => setNewCalendarName(e.target.value)}
-                      maxLength={200}
-                      placeholder="e.g. Sarah (Senior stylist)"
-                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
-                    />
-                  </div>
-                  <div className="flex gap-2">
-                    <button
-                      type="submit"
-                      disabled={addCalendarSaving || !newCalendarName.trim()}
-                      className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
-                    >
-                      {addCalendarSaving ? 'Adding…' : 'Create calendar'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShowAddCalendarForm(false);
-                        setAddCalendarError(null);
-                        setNewCalendarName('');
-                      }}
-                      className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </div>
-                {addCalendarError && <p className="text-sm text-red-600">{addCalendarError}</p>}
-              </form>
-            )}
-            {calendarBillingModal && (
-              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" role="dialog" aria-modal="true" aria-labelledby="calendar-billing-title">
-                <div className="max-w-md rounded-xl border border-slate-200 bg-white p-6 shadow-lg">
-                  <h3 id="calendar-billing-title" className="text-base font-semibold text-slate-900">
-                    Increase your plan?
-                  </h3>
-                  <p className="mt-2 text-sm text-slate-600">
-                    You currently pay for {calendarBillingModal.limit} calendar
-                    {calendarBillingModal.limit === 1 ? '' : 's'}. Adding another team member will increase your plan to
-                    &pound;{(calendarBillingModal.limit + 1) * STANDARD_PRICE_PER_CALENDAR}/month.
-                  </p>
-                  {(calendarBillingModal.limit + 1) * STANDARD_PRICE_PER_CALENDAR > BUSINESS_PRICE && (
-                    <p className="mt-3 rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 text-xs text-brand-900">
-                      Or upgrade to Business at &pound;{BUSINESS_PRICE}/month for unlimited calendars, SMS reminders, and priority
-                      support. See the{' '}
-                      <a href="/dashboard/settings?tab=plan" className="font-semibold underline">
-                        Plan
-                      </a>{' '}
-                      tab.
-                    </p>
-                  )}
-                  <div className="mt-5 flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      disabled={addCalendarSaving}
-                      onClick={() => void confirmCalendarBillingIncrease()}
-                      className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
-                    >
-                      {addCalendarSaving ? 'Updating…' : 'Confirm and update my plan'}
-                    </button>
-                    <button
-                      type="button"
-                      disabled={addCalendarSaving}
-                      onClick={() => {
-                        setCalendarBillingModal(null);
-                        setAddCalendarError(null);
-                      }}
-                      className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
-            {practitioners.length === 0 ? (
-              <p className="text-sm text-slate-600">
-                No calendars yet. {calendarEntitlement?.can_add_practitioner ? (
-                  <>Use <span className="font-medium text-slate-800">Add calendar</span> above, or add them during{' '}
-                  <span className="font-medium text-slate-800">onboarding</span> or from{' '}
-                  <a href="/dashboard/availability" className="font-medium text-brand-600 hover:text-brand-700">
-                    Availability
-                  </a>
-                  .</>
-                ) : (
-                  <>
-                    Add calendars from <span className="font-medium text-slate-800">onboarding</span> or{' '}
-                    <a href="/dashboard/availability" className="font-medium text-brand-600 hover:text-brand-700">
-                      Availability
-                    </a>
-                    , or adjust your plan on the Plan tab.
-                  </>
-                )}
-              </p>
-            ) : (
-              <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
-                {practitioners.map((p) => {
-                  const slugDraft = calendarSlugDrafts[p.id] ?? '';
-                  const slugFieldErr = calendarSlugFieldError[p.id] ?? null;
-                  const savedSlug = (p.slug ?? '').trim().toLowerCase();
-                  const draftNorm = slugDraft.trim().toLowerCase();
-                  const slugDirty = draftNorm !== savedSlug;
-                  const slugLiveErr = bookingSlugDraftError(slugDraft);
-                  const canCopyBookUrl =
-                    Boolean(venueSlug && savedSlug && draftNorm === savedSlug && !slugLiveErr);
-                  const previewUrl =
-                    venueSlug && draftNorm && !slugLiveErr
-                      ? `${PUBLIC_BOOK_ORIGIN}/book/${encodeURIComponent(venueSlug)}/${encodeURIComponent(draftNorm)}`
-                      : null;
-                  return (
-                    <li key={p.id} className="flex flex-col gap-4 px-4 py-3">
-                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                        <label htmlFor={`calendar-name-${p.id}`} className="sr-only">
-                          Calendar name for {p.name}
-                        </label>
-                        <input
-                          id={`calendar-name-${p.id}`}
-                          type="text"
-                          value={calendarNameDrafts[p.id] ?? ''}
-                          onChange={(e) =>
-                            setCalendarNameDrafts((prev) => ({
-                              ...prev,
-                              [p.id]: e.target.value,
-                            }))
-                          }
-                          maxLength={200}
-                          className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
-                          placeholder="Calendar display name"
-                        />
-                        <div className="flex shrink-0 items-center gap-2 self-end sm:self-center">
-                          <button
-                            type="button"
-                            disabled={
-                              savingPractitionerNameId === p.id ||
-                              !(calendarNameDrafts[p.id]?.trim()) ||
-                              (calendarNameDrafts[p.id]?.trim() ?? '') === p.name
-                            }
-                            onClick={() => void onSaveCalendarName(p.id)}
-                            className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
-                          >
-                            {savingPractitionerNameId === p.id ? 'Saving…' : 'Save'}
-                          </button>
-                          {practitioners.length > 1 && (
-                            <button
-                              type="button"
-                              title="Remove calendar"
-                              onClick={() => {
-                                setDeleteCalendarTarget(p);
-                                setDeleteCalendarError(null);
-                              }}
-                              className="rounded-lg border border-slate-200 p-2 text-slate-400 hover:bg-red-50 hover:text-red-600"
-                            >
-                              <TrashIcon className="h-4 w-4" />
-                            </button>
-                          )}
-                        </div>
-                      </div>
-
-                      {venueSlug ? (
-                        <div className="rounded-lg border border-slate-100 bg-slate-50/80 p-3 space-y-2">
-                          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Booking link</p>
-                          {!savedSlug ? (
-                            <p className="text-xs text-slate-600">
-                              Add a link segment to give {p.name} their own booking page.
-                            </p>
-                          ) : (
-                            <p className="text-xs text-slate-600">
-                              Guests can use this link to book only with {p.name}.
-                            </p>
-                          )}
-                          <div className="flex min-w-0 flex-wrap items-center gap-x-0.5 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm text-slate-700">
-                            <span className="shrink-0 text-slate-500">
-                              {PUBLIC_BOOK_HOST}/book/{venueSlug}/
-                            </span>
-                            <input
-                              id={`calendar-slug-${p.id}`}
-                              type="text"
-                              value={slugDraft}
-                              onChange={(e) => {
-                                const v = e.target.value;
-                                setCalendarSlugDrafts((prev) => ({ ...prev, [p.id]: v }));
-                                setCalendarSlugFieldError((prev) => ({
-                                  ...prev,
-                                  [p.id]: bookingSlugDraftError(v),
-                                }));
-                              }}
-                              maxLength={64}
-                              autoComplete="off"
-                              spellCheck={false}
-                              className="min-w-[6rem] flex-1 border-0 bg-transparent p-0.5 text-slate-900 outline-none focus:ring-0"
-                              placeholder="e.g. sarah"
-                              aria-invalid={Boolean(slugLiveErr || slugFieldErr)}
-                            />
-                          </div>
-                          {(slugLiveErr || slugFieldErr) && (
-                            <p className="text-xs text-red-600">{slugLiveErr ?? slugFieldErr}</p>
-                          )}
-                          {previewUrl && (
-                            <p className="text-xs">
-                              <a
-                                href={previewUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="font-medium text-brand-600 hover:text-brand-700 break-all"
-                              >
-                                {previewUrl}
-                              </a>
-                            </p>
-                          )}
-                          <div className="flex flex-wrap items-center gap-2 pt-1">
-                            <button
-                              type="button"
-                              disabled={!slugDirty || Boolean(slugLiveErr) || savingSlugId === p.id}
-                              onClick={() => void onSaveBookingSlug(p.id)}
-                              className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-                            >
-                              {savingSlugId === p.id ? 'Saving…' : 'Save link'}
-                            </button>
-                            <button
-                              type="button"
-                              disabled={!canCopyBookUrl}
-                              onClick={() => void copyPractitionerBookUrl(p.id)}
-                              className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-                            >
-                              {slugCopySuccessId === p.id ? 'Copied!' : 'Copy link'}
-                            </button>
-                          </div>
-                        </div>
-                      ) : (
-                        <p className="text-xs text-amber-700">
-                          Set your venue booking slug under Venue details to preview personal booking links.
-                        </p>
-                      )}
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </div>
-        </section>
-      )}
-
       {/* Staff Members */}
       <section className="rounded-xl border border-slate-200 bg-white shadow-sm">
         <div className="border-b border-slate-100 px-6 py-4 flex items-center justify-between">
@@ -1113,24 +584,58 @@ export function StaffSection({ venueId: _venueId, isAdmin, bookingModel }: Staff
                 </div>
                 {isAppointmentVenue && (
                   <div className="sm:col-span-2">
-                    <label className="mb-1 block text-sm font-medium text-slate-700">
-                      Link to calendar <span className="font-normal text-slate-400">(optional)</span>
-                    </label>
-                    <select
-                      value={createPractitionerId}
-                      onChange={(e) => setCreatePractitionerId(e.target.value)}
-                      className="w-full max-w-md rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
-                    >
-                      <option value="">No calendar (assign later from this list)</option>
-                      {practitioners.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.name}
-                        </option>
-                      ))}
-                    </select>
-                    <p className="mt-1 text-xs text-slate-500">
-                      Admins and staff can be linked to a bookable calendar so they can manage their own availability and
-                      services in the dashboard.
+                    <span className="mb-2 block text-sm font-medium text-slate-700">
+                      Calendars they can manage{' '}
+                      <span className="font-normal text-slate-400">(optional)</span>
+                    </span>
+                    {allocatablePractitioners.length === 0 ? (
+                      <p className="text-sm text-slate-500">Add an active bookable calendar under Calendar Availability first.</p>
+                    ) : (
+                      <div className="max-h-52 space-y-0 overflow-y-auto rounded-lg border border-slate-200 bg-white p-2">
+                        <div className="mb-2 flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2">
+                          <span className="text-xs text-slate-500">Select one or more</span>
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              className="text-xs font-medium text-brand-600 hover:text-brand-700"
+                              onClick={() =>
+                                setCreateCalendarIds(allocatablePractitioners.map((p) => p.id))
+                              }
+                            >
+                              All
+                            </button>
+                            <button
+                              type="button"
+                              className="text-xs font-medium text-slate-500 hover:text-slate-700"
+                              onClick={() => setCreateCalendarIds([])}
+                            >
+                              Clear
+                            </button>
+                          </div>
+                        </div>
+                        {allocatablePractitioners.map((p) => (
+                          <label
+                            key={p.id}
+                            className="flex cursor-pointer items-center gap-3 rounded-md px-2 py-2 hover:bg-slate-50"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={createCalendarIds.includes(p.id)}
+                              onChange={() =>
+                                setCreateCalendarIds((prev) =>
+                                  prev.includes(p.id) ? prev.filter((x) => x !== p.id) : [...prev, p.id],
+                                )
+                              }
+                              className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                            />
+                            <span className="text-sm text-slate-800">{p.name}</span>
+                          </label>
+                        ))}
+                      </div>
+                    )}
+                    <p className="mt-2 text-xs text-slate-500">
+                      Choose which bookable calendars this person can manage (availability, services, and bookings). You
+                      can change this anytime below.
                     </p>
                   </div>
                 )}
@@ -1172,24 +677,61 @@ export function StaffSection({ venueId: _venueId, isAdmin, bookingModel }: Staff
                     </div>
                   </div>
                   {isAppointmentVenue && isAdmin && (
-                    <div className="flex flex-col gap-1 sm:ml-2 sm:min-w-[14rem]">
-                      <label htmlFor={`calendar-${s.id}`} className="text-xs font-medium text-slate-600">
-                        Appointment calendar
-                      </label>
-                      <select
-                        id={`calendar-${s.id}`}
-                        value={s.linked_practitioner_id ?? ''}
-                        onChange={(e) => void onCalendarLinkChange(s, e.target.value)}
-                        disabled={calendarSavingId === s.id}
-                        className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 disabled:opacity-50"
-                      >
-                        <option value="">No calendar</option>
-                        {practitioners.map((p) => (
-                          <option key={p.id} value={p.id}>
-                            {p.name}
-                          </option>
-                        ))}
-                      </select>
+                    <div className="flex min-w-0 flex-col gap-2 sm:ml-2 sm:max-w-md sm:flex-1">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="text-xs font-medium text-slate-600">Calendars they manage</span>
+                        {allocatablePractitioners.length > 0 && (
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              disabled={calendarSavingId === s.id}
+                              className="text-xs font-medium text-brand-600 hover:text-brand-700 disabled:opacity-50"
+                              onClick={() => setAllStaffCalendars(s, true)}
+                            >
+                              All
+                            </button>
+                            <button
+                              type="button"
+                              disabled={calendarSavingId === s.id}
+                              className="text-xs font-medium text-slate-500 hover:text-slate-700 disabled:opacity-50"
+                              onClick={() => setAllStaffCalendars(s, false)}
+                            >
+                              None
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                      {allocatablePractitioners.length === 0 ? (
+                        <p className="text-xs text-slate-500">No active bookable calendars yet.</p>
+                      ) : (
+                        <div className="max-h-52 space-y-0 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50/80 p-2">
+                          {allocatablePractitioners.map((p) => {
+                            const checked = assignedIdsForMember(s).includes(p.id);
+                            return (
+                              <label
+                                key={p.id}
+                                className="flex cursor-pointer items-center gap-3 rounded-md px-2 py-2 hover:bg-white"
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  disabled={calendarSavingId === s.id}
+                                  onChange={(e) => toggleStaffCalendar(s, p.id, e.target.checked)}
+                                  className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500 disabled:opacity-50"
+                                />
+                                <span className="text-sm text-slate-800">{p.name}</span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      )}
+                      {inactiveLinkedCalendarsForMember(s).length > 0 && (
+                        <p className="text-xs text-amber-800">
+                          Inactive calendars still listed for this account:{' '}
+                          {inactiveLinkedCalendarsForMember(s).map((p) => p.name).join(', ')}. Activate them or update
+                          assignments in Calendar Availability.
+                        </p>
+                      )}
                     </div>
                   )}
                 </div>
@@ -1253,13 +795,19 @@ export function StaffSection({ venueId: _venueId, isAdmin, bookingModel }: Staff
             <h4 className="text-xs font-semibold text-slate-600 uppercase tracking-wide mb-2">Role Permissions</h4>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1 text-xs text-slate-500">
               <div><span className="font-medium text-purple-700">Admin:</span> Full access to all settings, staff management, reports, and bookings</div>
-              <div><span className="font-medium text-slate-700">Staff:</span> View dashboard, manage bookings and walk-ins, view day sheet</div>
+              <div>
+                <span className="font-medium text-slate-700">Staff:</span> Work in the dashboard for day-to-day
+                operations — schedule, bookings, and guest details for the calendars you assign below
+              </div>
             </div>
             {isAppointmentVenue && (
               <p className="mt-3 text-xs text-slate-600 border-t border-slate-200 pt-3">
-                <span className="font-medium text-slate-700">Appointments:</span> Link a user to a calendar so they can
-                edit their own availability, services, and time off. Admins can be linked too if they take appointments.
-                Reassigning a calendar moves it from the previous user.
+                <span className="font-medium text-slate-700">Calendars:</span> Add or rename bookable calendars under{' '}
+                <a href="/dashboard/availability" className="font-medium text-brand-600 hover:text-brand-700">
+                  Calendar Availability
+                </a>
+                . Then tick the calendars each team member should manage — you can assign one, several, or all. Admins
+                can be given calendar access too when they run a bookable column.
               </p>
             )}
           </div>
@@ -1296,41 +844,6 @@ export function StaffSection({ venueId: _venueId, isAdmin, bookingModel }: Staff
                 </button>
               </div>
             </form>
-          </div>
-        </div>
-      )}
-
-      {/* Remove calendar (Model B, admin) */}
-      {deleteCalendarTarget && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm"
-          onClick={() => setDeleteCalendarTarget(null)}
-        >
-          <div className="w-full max-w-sm rounded-xl bg-white p-6 shadow-lg" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-base font-semibold text-slate-900 mb-1">Remove calendar</h3>
-            <p className="text-sm text-slate-500 mb-4">
-              Remove <span className="font-medium text-slate-700">{deleteCalendarTarget.name}</span>? Staff linked to this
-              calendar will no longer be assigned to it. Existing bookings stay on your diary; the practitioner on each
-              booking may be cleared.
-            </p>
-            {deleteCalendarError && <p className="mb-3 text-sm text-red-600">{deleteCalendarError}</p>}
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => void onDeleteCalendar()}
-                disabled={deletingCalendar}
-                className="flex-1 rounded-lg bg-red-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
-              >
-                {deletingCalendar ? 'Removing…' : 'Remove calendar'}
-              </button>
-              <button
-                type="button"
-                onClick={() => setDeleteCalendarTarget(null)}
-                className="flex-1 rounded-lg border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-50"
-              >
-                Cancel
-              </button>
-            </div>
           </div>
         </div>
       )}

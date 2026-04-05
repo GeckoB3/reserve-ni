@@ -9,7 +9,7 @@ import {
   isBookingStatus,
   type BookingStatus,
 } from '@/lib/table-management/booking-status';
-import type { BookingModel } from '@/types/booking-models';
+import type { BookingModel, ClassPaymentRequirement } from '@/types/booking-models';
 import { inferBookingRowModel, bookingModelShortLabel } from '@/lib/booking/infer-booking-row-model';
 
 export interface DetailPractitionerOption {
@@ -41,6 +41,7 @@ export interface AppointmentDetailPrefetch {
   guest_attendance_confirmed_at?: string | null;
   deposit_amount_pence: number | null;
   deposit_status: string | null;
+  resource_payment_requirement?: ClassPaymentRequirement | null;
   party_size: number;
   guest_name: string;
   guest_email: string | null;
@@ -70,6 +71,7 @@ export interface BookingDetailRecord {
   guest_attendance_confirmed_at?: string | null;
   deposit_amount_pence: number | null;
   deposit_status: string | null;
+  resource_payment_requirement?: ClassPaymentRequirement | null;
   party_size: number;
   source?: string | null;
   dietary_notes?: string | null;
@@ -104,6 +106,7 @@ function prefetchToDetailRecord(p: AppointmentDetailPrefetch): BookingDetailReco
     guest_attendance_confirmed_at: p.guest_attendance_confirmed_at ?? null,
     deposit_amount_pence: p.deposit_amount_pence,
     deposit_status: p.deposit_status,
+    resource_payment_requirement: p.resource_payment_requirement ?? null,
     party_size: p.party_size,
     guest: {
       id: '__prefetch__',
@@ -159,6 +162,13 @@ function minutesToTime(m: number): string {
 function formatMoneyPence(pence: number | null | undefined, sym: string): string {
   if (pence == null) return '-';
   return `${sym}${(pence / 100).toFixed(2)}`;
+}
+
+function resourcePaymentModeLabel(m: ClassPaymentRequirement | null | undefined): string {
+  if (m === 'none') return 'Pay at venue';
+  if (m === 'deposit') return 'Deposit (online)';
+  if (m === 'full_payment') return 'Full payment (online)';
+  return '—';
 }
 
 interface Props {
@@ -590,14 +600,40 @@ export function AppointmentDetailSheet({
                   <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">Party size</dt>
                   <dd className="mt-0.5 text-slate-900">{detail.party_size}</dd>
                 </div>
-                {detail.deposit_amount_pence != null && detail.deposit_amount_pence > 0 && (
+                {inferredModel === 'resource_booking' ? (
+                  <>
+                    <div>
+                      <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">Payment</dt>
+                      <dd className="mt-0.5 text-slate-700">
+                        {resourcePaymentModeLabel(detail.resource_payment_requirement)}
+                      </dd>
+                    </div>
+                    {detail.deposit_amount_pence != null && detail.deposit_amount_pence > 0 && (
+                      <div>
+                        <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">
+                          {detail.resource_payment_requirement === 'full_payment' ? 'Amount paid online' : 'Deposit'}
+                        </dt>
+                        <dd className="mt-0.5 text-slate-700">
+                          {formatMoneyPence(detail.deposit_amount_pence, sym)} ({detail.deposit_status ?? '-'})
+                        </dd>
+                      </div>
+                    )}
+                    {(!detail.deposit_amount_pence || detail.deposit_amount_pence <= 0) &&
+                      detail.resource_payment_requirement === 'none' && (
+                        <div>
+                          <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">Online payment</dt>
+                          <dd className="mt-0.5 text-slate-700">Not taken (pay at venue)</dd>
+                        </div>
+                      )}
+                  </>
+                ) : detail.deposit_amount_pence != null && detail.deposit_amount_pence > 0 ? (
                   <div>
                     <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">Deposit</dt>
                     <dd className="mt-0.5 text-slate-700">
                       {formatMoneyPence(detail.deposit_amount_pence, sym)} ({detail.deposit_status ?? '-'})
                     </dd>
                   </div>
-                )}
+                ) : null}
                 {detail.source ? (
                   <div>
                     <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">Source</dt>

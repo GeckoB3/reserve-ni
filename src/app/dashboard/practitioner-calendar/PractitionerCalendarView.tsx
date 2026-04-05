@@ -10,6 +10,7 @@ import {
   type MouseEvent,
   type ReactNode,
 } from 'react';
+import Link from 'next/link';
 import {
   DndContext,
   DragOverlay,
@@ -24,9 +25,8 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import { createClient } from '@/lib/supabase/browser';
 // ResourceCalendarGrid removed — resources are now calendar columns
-import { AppointmentBookingForm } from '@/components/booking/AppointmentBookingForm';
 import { ResourceSlotBookingForm } from '@/components/booking/ResourceSlotBookingForm';
-import { AppointmentWalkInModal } from '@/components/booking/AppointmentWalkInModal';
+import { CalendarStaffBookingModal } from '@/app/dashboard/practitioner-calendar/CalendarStaffBookingModal';
 import {
   AppointmentDetailSheet,
   type AppointmentDetailPrefetch,
@@ -38,6 +38,13 @@ import { canMarkNoShowForSlot, type BookingStatus } from '@/lib/table-management
 import type { OpeningHours } from '@/types/availability';
 import type { BookingModel } from '@/types/booking-models';
 import { venueExposesBookingModel } from '@/lib/booking/enabled-models';
+import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
+import { staffSecondaryBookingOptions } from '@/lib/booking/staff-booking-modal-options';
+import {
+  computeResourceAvailability,
+  type ResourceBooking as EngineResourceBooking,
+} from '@/lib/availability/resource-booking-engine';
+import type { ClassPaymentRequirement, VenueResource, WorkingHours } from '@/types/booking-models';
 import type { ScheduleBlockDTO } from '@/types/schedule-blocks';
 import {
   addCalendarDays,
@@ -113,8 +120,47 @@ interface CalendarBlock {
   class_instance_id?: string | null;
 }
 
-/** Staff column: legacy practitioner row or unified calendar row (same id used in roster). */
-function columnIdForBooking(b: Booking): string | null {
+interface VenueResourceRow {
+  id: string;
+  name: string;
+  resource_type: string | null;
+  display_on_calendar_id: string | null;
+  slot_interval_minutes: number;
+  min_booking_minutes: number;
+  max_booking_minutes: number;
+  price_per_slot_pence: number | null;
+  payment_requirement: string;
+  deposit_amount_pence: number | null;
+  is_active: boolean;
+  availability_hours: WorkingHours;
+  availability_exceptions?: VenueResource['availability_exceptions'];
+}
+
+function apiResourceRowToVenueResource(r: VenueResourceRow, venueIdForRow: string): VenueResource {
+  return {
+    id: r.id,
+    venue_id: venueIdForRow,
+    name: r.name,
+    resource_type: r.resource_type,
+    min_booking_minutes: r.min_booking_minutes,
+    max_booking_minutes: r.max_booking_minutes,
+    slot_interval_minutes: r.slot_interval_minutes,
+    price_per_slot_pence: r.price_per_slot_pence,
+    payment_requirement: (r.payment_requirement as ClassPaymentRequirement) ?? 'none',
+    deposit_amount_pence: r.deposit_amount_pence,
+    availability_hours: r.availability_hours ?? {},
+    availability_exceptions: r.availability_exceptions,
+    is_active: r.is_active,
+    sort_order: 0,
+    created_at: '',
+  };
+}
+
+/** Staff column: appointment anchor, or resource booking mapped onto its host calendar column. */
+function resolveBookingColumnId(b: Booking, resourceParentById: Map<string, string>): string | null {
+  const rid = b.resource_id ?? null;
+  if (rid && resourceParentById.has(rid)) return resourceParentById.get(rid)!;
+  if (b.calendar_id && resourceParentById.has(b.calendar_id)) return resourceParentById.get(b.calendar_id)!;
   return b.practitioner_id ?? b.calendar_id ?? null;
 }
 
@@ -415,9 +461,11 @@ function slotOccupied(
   dateStr: string,
   serviceMap: Map<string, AppointmentService>,
   classScheduleBlocks: ScheduleBlockDTO[] = [],
+  eventColumnBlocks: ScheduleBlockDTO[] = [],
+  resourceParentById: Map<string, string>,
 ): boolean {
   for (const b of bookings) {
-    if (columnIdForBooking(b) !== pracId || b.booking_date !== dateStr) continue;
+    if (resolveBookingColumnId(b, resourceParentById) !== pracId || b.booking_date !== dateStr) continue;
     if (['Cancelled', 'No-Show'].includes(b.status)) continue; // Completed still occupies the slot for scheduling
     const sid = serviceIdForBooking(b);
     const dur =
@@ -440,6 +488,12 @@ function slotOccupied(
     if (cb.kind !== 'class_session') continue;
     const b0 = timeToMinutes(cb.start_time);
     const b1 = timeToMinutes(cb.end_time);
+    if (overlapsRange(slotStart, slotStart + SLOT_MINUTES, b0, b1)) return true;
+  }
+  for (const eb of eventColumnBlocks) {
+    if (eb.kind !== 'event_ticket') continue;
+    const b0 = timeToMinutes(eb.start_time);
+    const b1 = timeToMinutes(eb.end_time);
     if (overlapsRange(slotStart, slotStart + SLOT_MINUTES, b0, b1)) return true;
   }
   return false;
@@ -537,19 +591,28 @@ export function PractitionerCalendarView({
   currency = 'GBP',
   defaultPractitionerFilter = 'all',
   linkedPractitionerId = null,
+  linkedPractitionerIds,
   bookingModel = 'unified_scheduling',
   enabledModels = [],
 }: {
   venueId: string;
   currency?: string;
   defaultPractitionerFilter?: 'all' | string;
+  /** @deprecated Prefer linkedPractitionerIds — kept for compatibility */
   linkedPractitionerId?: string | null;
+  /** Bookable calendars this staff user manages (unified scheduling). */
+  linkedPractitionerIds?: string[];
   /** Primary bookable model (for merged schedule feeds §4.2). */
   bookingModel?: BookingModel;
   /** Secondary models; used to show Events / Classes lanes on the day grid. */
   enabledModels?: BookingModel[];
 }) {
   const { addToast } = useToast();
+  const myCalendarIds = useMemo(() => {
+    if (linkedPractitionerIds && linkedPractitionerIds.length > 0) return linkedPractitionerIds;
+    if (linkedPractitionerId) return [linkedPractitionerId];
+    return [];
+  }, [linkedPractitionerIds, linkedPractitionerId]);
   const [viewMode, setViewMode] = useState<ViewMode>('day');
   const [date, setDate] = useState(() => {
     const now = new Date();
@@ -569,6 +632,7 @@ export function PractitionerCalendarView({
   const [services, setServices] = useState<AppointmentService[]>([]);
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [blocks, setBlocks] = useState<CalendarBlock[]>([]);
+  const [venueResources, setVenueResources] = useState<VenueResourceRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [detailBookingId, setDetailBookingId] = useState<string | null>(null);
   const [classInstanceSheet, setClassInstanceSheet] = useState<{
@@ -578,10 +642,9 @@ export function PractitionerCalendarView({
   const [filterPractitioner, setFilterPractitioner] = useState<string>(defaultPractitionerFilter);
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [fetchError, setFetchError] = useState<string | null>(null);
-  const [showNewAppointment, setShowNewAppointment] = useState(false);
+  const [staffBookingModal, setStaffBookingModal] = useState<null | 'new' | 'walk-in'>(null);
   const [showResourceBooking, setShowResourceBooking] = useState(false);
-  const [resourceBookingCalendarId, setResourceBookingCalendarId] = useState<string | undefined>();
-  const [showWalkIn, setShowWalkIn] = useState(false);
+  const [resourceBookingResourceId, setResourceBookingResourceId] = useState<string | undefined>();
   const [prefillPractitionerId, setPrefillPractitionerId] = useState<string | undefined>();
   const [prefillTime, setPrefillTime] = useState<string | undefined>();
   const [prefillDate, setPrefillDate] = useState<string | undefined>();
@@ -616,9 +679,18 @@ export function PractitionerCalendarView({
 
   const showEventsColumn = venueExposesBookingModel(bookingModel, enabledModels, 'event_ticket');
   const showClassSessions = venueExposesBookingModel(bookingModel, enabledModels, 'class_session');
-  const showResourcesStrip = venueExposesBookingModel(bookingModel, enabledModels, 'resource_booking');
-  /** Fetch schedule feed for events/resources strips and class sessions (classes render on team columns via `calendar_id`). */
-  const showMergedFeeds = showEventsColumn || showClassSessions || showResourcesStrip;
+  const loadVenueResources = venueExposesBookingModel(bookingModel, enabledModels, 'resource_booking');
+
+  const calendarSecondaryBookingOptions = useMemo(
+    () => staffSecondaryBookingOptions(bookingModel, enabledModels),
+    [bookingModel, enabledModels],
+  );
+  const newBookingToolbarLabel =
+    isUnifiedSchedulingVenue(bookingModel) && calendarSecondaryBookingOptions.length === 0
+      ? 'New appointment'
+      : 'New booking';
+  /** Fetch schedule feed for events strip (classes render on team columns via `calendar_id`). */
+  const showMergedFeeds = showEventsColumn || showClassSessions;
 
   const activeDayDate = viewMode === 'day' ? date : viewMode === 'week' ? weekStart : monthAnchor;
   const { startHour, endHour } = useMemo(
@@ -665,6 +737,17 @@ export function PractitionerCalendarView({
         setPractitioners(pracData.practitioners ?? []);
         setBookings((bookData.bookings ?? []) as Booking[]);
         setServices(svcData.services ?? []);
+        if (loadVenueResources) {
+          const resRes = await fetch('/api/venue/resources');
+          if (resRes.ok) {
+            const rj = await resRes.json();
+            setVenueResources((rj.resources ?? []) as VenueResourceRow[]);
+          } else {
+            setVenueResources([]);
+          }
+        } else {
+          setVenueResources([]);
+        }
         if (blockRes.ok) {
           const bjson = await blockRes.json();
           setBlocks(bjson.blocks ?? []);
@@ -693,7 +776,7 @@ export function PractitionerCalendarView({
         if (!silent) setLoading(false);
       }
     },
-    [listFromTo, showMergedFeeds],
+    [listFromTo, showMergedFeeds, loadVenueResources],
   );
 
   useEffect(() => {
@@ -778,12 +861,80 @@ export function PractitionerCalendarView({
     [practitioners],
   );
 
+  /** Grid columns only: resources are merged into their host calendar column. */
+  const columnPractitioners = useMemo(
+    () => activePractitioners.filter((p) => p.calendar_type !== 'resource'),
+    [activePractitioners],
+  );
+
+  const resourceParentById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const r of venueResources) {
+      if (r.display_on_calendar_id) m.set(r.id, r.display_on_calendar_id);
+    }
+    return m;
+  }, [venueResources]);
+
+  const resourceNameById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const r of venueResources) m.set(r.id, r.name);
+    return m;
+  }, [venueResources]);
+
+  /** Free resource slots (day grid): mint blocks under host calendar column. */
+  const resourceAvailabilityByPractitioner = useMemo(() => {
+    if (viewMode !== 'day') {
+      return new Map<string, Array<{ top: number; height: number; resourceName: string }>>();
+    }
+    const out = new Map<string, Array<{ top: number; height: number; resourceName: string }>>();
+    for (const prac of columnPractitioners) {
+      const onColumn = venueResources.filter((r) => r.display_on_calendar_id === prac.id && r.is_active);
+      if (onColumn.length === 0) continue;
+      const mint: Array<{ top: number; height: number; resourceName: string }> = [];
+      for (const r of onColumn) {
+        const vr = apiResourceRowToVenueResource(r, venueId);
+        const existingBookings: EngineResourceBooking[] = bookings
+          .filter(
+            (b) =>
+              b.booking_date === date &&
+              (b.resource_id === r.id || b.calendar_id === r.id) &&
+              !['Cancelled', 'No-Show'].includes(b.status),
+          )
+          .map((b) => ({
+            id: b.id,
+            resource_id: r.id,
+            booking_time: b.booking_time.slice(0, 5),
+            booking_end_time: (b.booking_end_time ?? b.booking_time).slice(0, 5),
+            status: b.status,
+          }));
+        const results = computeResourceAvailability(
+          { date, resources: [vr], existingBookings },
+          vr.min_booking_minutes,
+        );
+        const res0 = results[0];
+        if (!res0) continue;
+        const dur = Math.max(
+          vr.min_booking_minutes,
+          Math.min(vr.min_booking_minutes, vr.max_booking_minutes),
+        );
+        for (const slot of res0.slots) {
+          const startM = timeToMinutes(slot.start_time);
+          const top = ((startM - startHour * 60) / SLOT_MINUTES) * SLOT_HEIGHT;
+          const height = Math.max((dur / SLOT_MINUTES) * SLOT_HEIGHT, SLOT_HEIGHT * 0.75);
+          mint.push({ top, height, resourceName: r.name });
+        }
+      }
+      if (mint.length > 0) out.set(prac.id, mint);
+    }
+    return out;
+  }, [viewMode, date, columnPractitioners, venueResources, bookings, startHour, venueId]);
+
   const filteredPractitioners = useMemo(
     () =>
       filterPractitioner === 'all'
-        ? activePractitioners
-        : activePractitioners.filter((p) => p.id === filterPractitioner),
-    [activePractitioners, filterPractitioner],
+        ? columnPractitioners
+        : columnPractitioners.filter((p) => p.id === filterPractitioner),
+    [columnPractitioners, filterPractitioner],
   );
 
   const serviceMap = useMemo(() => new Map(services.map((s) => [s.id, s])), [services]);
@@ -791,7 +942,7 @@ export function PractitionerCalendarView({
   function bookingsForPractitioner(pracId: string, dayDate: string): Booking[] {
     return bookings.filter((b) => {
       if (b.booking_date !== dayDate) return false;
-      if (columnIdForBooking(b) !== pracId) return false;
+      if (resolveBookingColumnId(b, resourceParentById) !== pracId) return false;
       if (filterStatus !== 'all' && b.status !== filterStatus) return false;
       return true;
     });
@@ -850,19 +1001,10 @@ export function PractitionerCalendarView({
   }
 
   function openNewAtSlot(pracId: string, dateStr: string, time: string) {
-    const col = practitioners.find((p) => p.id === pracId);
-    if (col?.calendar_type === 'resource') {
-      setResourceBookingCalendarId(pracId);
-      setPrefillDate(dateStr);
-      setPrefillTime(time);
-      setShowResourceBooking(true);
-      setSlotMenu(null);
-      return;
-    }
     setPrefillPractitionerId(pracId);
     setPrefillDate(dateStr);
     setPrefillTime(time);
-    setShowNewAppointment(true);
+    setStaffBookingModal('new');
     setSlotMenu(null);
   }
 
@@ -1038,12 +1180,13 @@ export function PractitionerCalendarView({
     const newTime = minutesToTime(slotStartMins);
     if (
       b.booking_date === dateStr &&
-      columnIdForBooking(b) === pracId &&
+      resolveBookingColumnId(b, resourceParentById) === pracId &&
       b.booking_time.slice(0, 5) === newTime
     ) {
       return;
     }
     if (!['Pending', 'Confirmed', 'Seated'].includes(b.status)) return;
+    if (b.resource_id) return;
     void patchBookingMove(b, dateStr, newTime, pracId);
   }
 
@@ -1054,16 +1197,17 @@ export function PractitionerCalendarView({
 
   const bookingsMatchingFilters = useMemo(() => {
     return bookings.filter((b) => {
-      if (filterPractitioner !== 'all' && columnIdForBooking(b) !== filterPractitioner) return false;
+      if (filterPractitioner !== 'all' && resolveBookingColumnId(b, resourceParentById) !== filterPractitioner)
+        return false;
       if (filterStatus !== 'all' && b.status !== filterStatus) return false;
       return true;
     });
-  }, [bookings, filterPractitioner, filterStatus]);
+  }, [bookings, filterPractitioner, filterStatus, resourceParentById]);
 
   /** Toolbar + status counts: team-column bookings only (matches day/week grid), scoped to the visible period - not the 6-week fetch padding in month view. */
   const bookingsForToolbarStats = useMemo(() => {
     return bookingsMatchingFilters.filter((b) => {
-      if (!columnIdForBooking(b)) return false;
+      if (!resolveBookingColumnId(b, resourceParentById)) return false;
       if (viewMode === 'day') return b.booking_date === date;
       if (viewMode === 'week') {
         const weekEnd = addCalendarDays(weekStart, 6);
@@ -1071,7 +1215,7 @@ export function PractitionerCalendarView({
       }
       return b.booking_date.slice(0, 7) === monthAnchor.slice(0, 7);
     });
-  }, [bookingsMatchingFilters, viewMode, date, weekStart, monthAnchor]);
+  }, [bookingsMatchingFilters, viewMode, date, weekStart, monthAnchor, resourceParentById]);
 
   const activeToolbarBookings = bookingsForToolbarStats.filter(
     (b) => !['Cancelled', 'No-Show'].includes(b.status),
@@ -1093,16 +1237,16 @@ export function PractitionerCalendarView({
     [scheduleBlocks, scheduleModelFilter],
   );
 
-  const scheduleBlocksByDate = useMemo(
-    () => groupScheduleBlocksByDate(filteredScheduleBlocks),
-    [filteredScheduleBlocks],
-  );
-
-  /** Week strip: class sessions use instructor columns; exclude them from the events/resources row. */
+  /** Week strip: class sessions use instructor columns; events with a calendar column are on the grid. */
   const stripScheduleBlocksByDate = useMemo(
     () =>
       groupScheduleBlocksByDate(
-        filteredScheduleBlocks.filter((b) => b.kind !== 'class_session'),
+        filteredScheduleBlocks.filter(
+          (b) =>
+            b.kind !== 'class_session' &&
+            b.kind !== 'resource_booking' &&
+            !(b.kind === 'event_ticket' && b.calendar_id),
+        ),
       ),
     [filteredScheduleBlocks],
   );
@@ -1115,8 +1259,22 @@ export function PractitionerCalendarView({
     [filteredScheduleBlocks],
   );
 
-  const showWeekStripRow =
-    (showEventsColumn || showResourcesStrip) && scheduleModelFilter !== 'appointments';
+  const eventBlocksForGrid = useMemo(
+    () =>
+      filteredScheduleBlocks.filter(
+        (b) => b.kind === 'event_ticket' && b.status !== 'Cancelled' && b.calendar_id,
+      ),
+    [filteredScheduleBlocks],
+  );
+
+  const stripHasBlocks = useMemo(() => {
+    for (const [, arr] of stripScheduleBlocksByDate) {
+      if (arr.some((b) => b.status !== 'Cancelled')) return true;
+    }
+    return false;
+  }, [stripScheduleBlocksByDate]);
+
+  const showWeekStripRow = showEventsColumn && scheduleModelFilter !== 'appointments' && stripHasBlocks;
 
   const monthDayScheduleCounts = useMemo(
     () =>
@@ -1184,33 +1342,29 @@ export function PractitionerCalendarView({
               className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
             >
               <option value="all">All calendars</option>
-              {(() => {
-                const team = activePractitioners.filter((p) => p.calendar_type !== 'resource');
-                const resources = activePractitioners.filter((p) => p.calendar_type === 'resource');
-                return (
-                  <>
-                    {team.length > 0 && (
-                      <optgroup label="Team">
-                        {linkedPractitionerId && (
-                          <option value={linkedPractitionerId}>My appointments</option>
-                        )}
-                        {team
-                          .filter((p) => p.id !== linkedPractitionerId)
-                          .map((p) => (
-                            <option key={p.id} value={p.id}>{p.name}</option>
-                          ))}
-                      </optgroup>
-                    )}
-                    {resources.length > 0 && (
-                      <optgroup label="Resources">
-                        {resources.map((p) => (
-                          <option key={p.id} value={p.id}>{p.name}</option>
-                        ))}
-                      </optgroup>
-                    )}
-                  </>
-                );
-              })()}
+              {columnPractitioners.length > 0 && (
+                <optgroup label="Team">
+                  {myCalendarIds.map((cid) => {
+                    const p = columnPractitioners.find((x) => x.id === cid);
+                    const label =
+                      myCalendarIds.length === 1
+                        ? 'My appointments'
+                        : `Mine — ${p?.name ?? 'Calendar'}`;
+                    return (
+                      <option key={cid} value={cid}>
+                        {label}
+                      </option>
+                    );
+                  })}
+                  {columnPractitioners
+                    .filter((p) => !myCalendarIds.includes(p.id))
+                    .map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                </optgroup>
+              )}
             </select>
             <select
               value={filterStatus}
@@ -1233,18 +1387,18 @@ export function PractitionerCalendarView({
                   setPrefillDate(viewMode === 'day' ? date : undefined);
                   setPrefillTime(undefined);
                   setPrefillPractitionerId(filterPractitioner === 'all' ? undefined : filterPractitioner);
-                  setShowNewAppointment(true);
+                  setStaffBookingModal('new');
                 }}
                 className="flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-brand-700"
               >
                 <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
                 </svg>
-                New Appointment
+                {newBookingToolbarLabel}
               </button>
               <button
                 type="button"
-                onClick={() => setShowWalkIn(true)}
+                onClick={() => setStaffBookingModal('walk-in')}
                 className="flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-emerald-700"
               >
                 Walk-in
@@ -1284,7 +1438,7 @@ export function PractitionerCalendarView({
       ) : filteredPractitioners.length === 0 ? (
         <div className="flex flex-1 items-center justify-center">
           <div className="rounded-xl border border-slate-200 bg-white p-12 text-center">
-            <p className="text-slate-500">No team members configured yet. Add them in Availability settings.</p>
+            <p className="text-slate-500">No calendars configured yet. Add them in the Calendar Availability page.</p>
           </div>
         </div>
       ) : viewMode === 'month' ? (
@@ -1320,13 +1474,15 @@ export function PractitionerCalendarView({
               <tbody>
                 {filteredPractitioners.map((prac) => (
                   <tr key={prac.id} className="border-b border-slate-100">
-                    <td className={`sticky left-0 px-3 py-2 font-medium text-slate-900 ${prac.calendar_type === 'resource' ? 'bg-teal-50' : 'bg-white'}`}>
-                      {prac.calendar_type === 'resource' && <span className="mr-1 text-teal-600" title="Resource">&#9632;</span>}
+                    <td className="sticky left-0 bg-white px-3 py-2 font-medium text-slate-900">
                       {prac.name}
                     </td>
                     {weekDays.map((d) => {
                       const dayBookings = bookingsForPractitioner(prac.id, d);
                       const dayClassBlocks = classBlocksForGrid.filter(
+                        (b) => b.calendar_id === prac.id && b.date === d,
+                      );
+                      const dayEventBlocks = eventBlocksForGrid.filter(
                         (b) => b.calendar_id === prac.id && b.date === d,
                       );
                       return (
@@ -1372,6 +1528,43 @@ export function PractitionerCalendarView({
                                     {cb.start_time.slice(0, 5)}–{cb.end_time.slice(0, 5)}
                                   </div>
                                 </button>
+                              );
+                            })}
+                            {dayEventBlocks.map((eb) => {
+                              const accent = eb.accent_colour ?? '#F59E0B';
+                              const shell = !eb.booking_id;
+                              const inner = (
+                                <div
+                                  className={`rounded-md border px-2 py-1 text-left text-xs ${
+                                    shell ? 'border-dashed border-amber-200 bg-amber-50/80' : 'border-slate-200 bg-white'
+                                  }`}
+                                  style={{ borderLeftWidth: 3, borderLeftColor: accent }}
+                                >
+                                  <div className="font-semibold text-slate-900">{eb.title}</div>
+                                  {eb.subtitle ? (
+                                    <div className="text-[10px] text-slate-600">{eb.subtitle}</div>
+                                  ) : null}
+                                  <div className="text-[10px] text-slate-500">
+                                    {eb.start_time.slice(0, 5)}–{eb.end_time.slice(0, 5)}
+                                  </div>
+                                </div>
+                              );
+                              if (eb.booking_id) {
+                                return (
+                                  <button
+                                    key={eb.id}
+                                    type="button"
+                                    onClick={() => openBookingDetail(eb.booking_id!)}
+                                    className="block w-full text-left"
+                                  >
+                                    {inner}
+                                  </button>
+                                );
+                              }
+                              return (
+                                <Link key={eb.id} href="/dashboard/event-manager" className="block">
+                                  {inner}
+                                </Link>
                               );
                             })}
                           </div>
@@ -1452,6 +1645,9 @@ export function PractitionerCalendarView({
                 const pracClassBlocks = classBlocksForGrid.filter(
                   (b) => b.calendar_id === prac.id && b.date === date,
                 );
+                const pracEventBlocks = eventBlocksForGrid.filter(
+                  (b) => b.calendar_id === prac.id && b.date === date,
+                );
                 const pracBlocks = blocks.filter(
                   (bl) =>
                     columnIdForBlock(bl) === prac.id &&
@@ -1460,12 +1656,7 @@ export function PractitionerCalendarView({
                 );
                 return (
                   <div key={prac.id} className="min-w-[180px] flex-1 border-r border-slate-100 last:border-r-0">
-                    <div className={`sticky top-0 z-10 flex h-10 items-center justify-center gap-1.5 border-b border-slate-100 px-3 py-2 ${prac.calendar_type === 'resource' ? 'bg-teal-50' : 'bg-white'}`}>
-                      {prac.calendar_type === 'resource' && (
-                        <span className="flex-shrink-0 text-teal-600" title="Resource">
-                          <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M3 9h18M9 21V9" /></svg>
-                        </span>
-                      )}
+                    <div className="sticky top-0 z-10 flex h-10 items-center justify-center gap-1.5 border-b border-slate-100 bg-white px-3 py-2">
                       <span className="truncate text-center text-sm font-semibold text-slate-900">{prac.name}</span>
                     </div>
                     <div className="relative" style={{ height: TOTAL_SLOTS * SLOT_HEIGHT }}>
@@ -1487,6 +1678,8 @@ export function PractitionerCalendarView({
                           date,
                           serviceMap,
                           pracClassBlocks,
+                          pracEventBlocks,
+                          resourceParentById,
                         );
                         const dropId = `drop-${prac.id}-${date}-${slotStartMins}`;
                         return (
@@ -1510,6 +1703,16 @@ export function PractitionerCalendarView({
                           />
                         );
                       })}
+
+                      {resourceAvailabilityByPractitioner.get(prac.id)?.map((m, i) => (
+                        <div
+                          key={`mint-${prac.id}-${i}-${m.resourceName}`}
+                          className="pointer-events-none absolute left-1 right-1 z-[5] rounded-md border border-emerald-200/90 bg-emerald-50/90"
+                          style={{ top: m.top, height: m.height }}
+                          title={`${m.resourceName} — available to book`}
+                          aria-hidden
+                        />
+                      ))}
 
                       {pracBlocks.map((bl) => {
                         const top = slotTop(bl.start_time);
@@ -1587,6 +1790,58 @@ export function PractitionerCalendarView({
                         );
                       })}
 
+                      {pracEventBlocks.map((eb) => {
+                        const top = slotTop(eb.start_time);
+                        const durMins = Math.max(
+                          timeToMinutes(eb.end_time) - timeToMinutes(eb.start_time),
+                          SLOT_MINUTES,
+                        );
+                        const height = Math.max(slotHeightFromDuration(durMins), SLOT_HEIGHT * 0.75);
+                        const accent = eb.accent_colour ?? '#F59E0B';
+                        const shell = !eb.booking_id;
+                        const body = (
+                          <>
+                            <span className="truncate text-xs font-semibold text-slate-900">{eb.title}</span>
+                            {eb.subtitle ? (
+                              <span className="truncate text-[10px] text-slate-600">{eb.subtitle}</span>
+                            ) : null}
+                            <span className="mt-auto text-[10px] text-slate-400">
+                              {eb.start_time.slice(0, 5)} – {eb.end_time.slice(0, 5)}
+                            </span>
+                          </>
+                        );
+                        return (
+                          <div
+                            key={eb.id}
+                            className="absolute left-1 right-1 z-[20]"
+                            style={{ top, height }}
+                          >
+                            {eb.booking_id ? (
+                              <button
+                                type="button"
+                                onClick={() => openBookingDetail(eb.booking_id!)}
+                                className={`flex h-full min-h-0 w-full flex-col overflow-hidden rounded-lg border px-1.5 py-1 text-left shadow-sm transition-shadow hover:shadow-md ${
+                                  shell ? 'border-dashed border-amber-200 bg-amber-50/90' : 'border-slate-200 bg-white'
+                                }`}
+                                style={{ borderLeftWidth: 3, borderLeftColor: accent }}
+                                title={eb.title}
+                              >
+                                {body}
+                              </button>
+                            ) : (
+                              <Link
+                                href="/dashboard/event-manager"
+                                className={`flex h-full min-h-0 w-full flex-col overflow-hidden rounded-lg border border-dashed border-amber-200 bg-amber-50/90 px-1.5 py-1 text-left shadow-sm transition-shadow hover:shadow-md`}
+                                style={{ borderLeftWidth: 3, borderLeftColor: accent }}
+                                title={eb.title}
+                              >
+                                {body}
+                              </Link>
+                            )}
+                          </div>
+                        );
+                      })}
+
                       {clusterMultiServiceBookings(pracBookings).map((cluster) => {
                         if (cluster.kind === 'single') {
                           const b = cluster.booking;
@@ -1597,10 +1852,12 @@ export function PractitionerCalendarView({
                           const svc = sid ? serviceMap.get(sid) : null;
                           const top = slotTop(b.booking_time);
                           const height = slotHeightFromDuration(duration);
-                          const canDrag = ['Pending', 'Confirmed', 'Seated'].includes(b.status);
+                          const canDrag =
+                            !b.resource_id && ['Pending', 'Confirmed', 'Seated'].includes(b.status);
                           const flash = flashIds.has(b.id);
                           const qBusy = quickActionId === b.id;
                           const arrived = Boolean(b.client_arrived_at);
+                          const resName = b.resource_id ? resourceNameById.get(b.resource_id) : null;
                           return (
                             <DraggableBookingShell key={b.id} booking={b} top={top} height={height} canDrag={canDrag}>
                               {(handle) => (
@@ -1643,6 +1900,9 @@ export function PractitionerCalendarView({
                                             />
                                           )}
                                       </div>
+                                      {resName ? (
+                                        <div className="truncate text-[10px] font-medium text-teal-800">{resName}</div>
+                                      ) : null}
                                       {svc && height > 36 && (
                                         <div className="truncate text-[10px] text-slate-500">{svc.name}</div>
                                       )}
@@ -1768,11 +2028,16 @@ export function PractitionerCalendarView({
               })}
               {viewMode === 'day' && showMergedFeeds && scheduleModelFilter !== 'appointments' ? (
                 <>
-                  {showEventsColumn ? (
+                  {showEventsColumn &&
+                  filteredScheduleBlocks.some(
+                    (b) => b.kind === 'event_ticket' && !b.calendar_id && b.status !== 'Cancelled',
+                  ) ? (
                     <ScheduleFeedColumn
-                      label="Events"
+                      label="Events (unassigned)"
                       date={date}
-                      blocks={filteredScheduleBlocks.filter((b) => b.kind === 'event_ticket')}
+                      blocks={filteredScheduleBlocks.filter(
+                        (b) => b.kind === 'event_ticket' && !b.calendar_id,
+                      )}
                       startHour={startHour}
                       endHour={endHour}
                       onBookingClick={openBookingDetail}
@@ -1792,36 +2057,51 @@ export function PractitionerCalendarView({
       )}
 
       {slotMenu && (() => {
-        const slotCol = practitioners.find((p) => p.id === slotMenu.pracId);
-        const isResource = slotCol?.calendar_type === 'resource';
+        const resourcesHere = venueResources.filter((r) => r.display_on_calendar_id === slotMenu.pracId);
         return (
-        <>
-          <button
-            type="button"
-            className="fixed inset-0 z-[55] cursor-default bg-transparent"
-            aria-label="Close menu"
-            onClick={() => setSlotMenu(null)}
-          />
-          <div
-            className="fixed z-[60] w-44 rounded-xl border border-slate-200 bg-white py-1 shadow-xl"
-            style={{ left: slotMenu.x, top: slotMenu.y }}
-          >
+          <>
             <button
               type="button"
-              className="block w-full px-3 py-2 text-left text-sm hover:bg-slate-50"
-              onClick={() => openNewAtSlot(slotMenu.pracId, slotMenu.dateStr, slotMenu.time)}
+              className="fixed inset-0 z-[55] cursor-default bg-transparent"
+              aria-label="Close menu"
+              onClick={() => setSlotMenu(null)}
+            />
+            <div
+              className="fixed z-[60] min-w-[11rem] max-w-[min(18rem,calc(100vw-1rem))] rounded-xl border border-slate-200 bg-white py-1 shadow-xl"
+              style={{ left: slotMenu.x, top: slotMenu.y }}
             >
-              {isResource ? 'New resource booking' : 'New appointment'}
-            </button>
-            <button
-              type="button"
-              className="block w-full px-3 py-2 text-left text-sm hover:bg-slate-50"
-              onClick={() => openBlockModal(slotMenu.pracId, slotMenu.dateStr, slotMenu.time)}
-            >
-              Block time
-            </button>
-          </div>
-        </>
+              <button
+                type="button"
+                className="block w-full px-3 py-2 text-left text-sm hover:bg-slate-50"
+                onClick={() => openNewAtSlot(slotMenu.pracId, slotMenu.dateStr, slotMenu.time)}
+              >
+                New appointment
+              </button>
+              {resourcesHere.map((r) => (
+                <button
+                  key={r.id}
+                  type="button"
+                  className="block w-full px-3 py-2 text-left text-sm hover:bg-slate-50"
+                  onClick={() => {
+                    setResourceBookingResourceId(r.id);
+                    setPrefillDate(slotMenu.dateStr);
+                    setPrefillTime(slotMenu.time);
+                    setShowResourceBooking(true);
+                    setSlotMenu(null);
+                  }}
+                >
+                  Book {r.name}
+                </button>
+              ))}
+              <button
+                type="button"
+                className="block w-full px-3 py-2 text-left text-sm hover:bg-slate-50"
+                onClick={() => openBlockModal(slotMenu.pracId, slotMenu.dateStr, slotMenu.time)}
+              >
+                Block time
+              </button>
+            </div>
+          </>
         );
       })()}
 
@@ -1906,10 +2186,10 @@ export function PractitionerCalendarView({
             setPrefillDate(date);
             setPrefillTime(undefined);
             setPrefillPractitionerId(filterPractitioner === 'all' ? undefined : filterPractitioner);
-            setShowNewAppointment(true);
+            setStaffBookingModal('new');
           }}
           className="fixed bottom-6 right-6 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-brand-600 text-white shadow-lg hover:bg-brand-700 md:hidden"
-          aria-label="New appointment"
+          aria-label={newBookingToolbarLabel}
         >
           <svg className="h-7 w-7" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
@@ -1941,49 +2221,45 @@ export function PractitionerCalendarView({
         }))}
       />
 
-      <AppointmentBookingForm
-        open={showNewAppointment}
-        onClose={() => {
-          setShowNewAppointment(false);
-          setPrefillTime(undefined);
-        }}
-        onCreated={() => {
-          setShowNewAppointment(false);
-          setPrefillTime(undefined);
-          void fetchData({ silent: true });
-        }}
-        venueId={venueId}
-        currency={currency}
-        preselectedDate={prefillDate ?? (viewMode === 'day' ? date : undefined)}
-        preselectedPractitionerId={prefillPractitionerId}
-        preselectedTime={prefillTime}
-      />
-      <AppointmentWalkInModal
-        open={showWalkIn}
-        onClose={() => setShowWalkIn(false)}
-        onCreated={() => {
-          setShowWalkIn(false);
-          void fetchData({ silent: true });
-        }}
-        currency={currency}
-      />
-      {resourceBookingCalendarId && (
-        <ResourceSlotBookingForm
-          open={showResourceBooking}
+      {staffBookingModal ? (
+        <CalendarStaffBookingModal
+          open
+          intent={staffBookingModal}
           onClose={() => {
-            setShowResourceBooking(false);
-            setResourceBookingCalendarId(undefined);
+            setStaffBookingModal(null);
             setPrefillTime(undefined);
           }}
           onCreated={() => {
-            setShowResourceBooking(false);
-            setResourceBookingCalendarId(undefined);
+            setStaffBookingModal(null);
             setPrefillTime(undefined);
             void fetchData({ silent: true });
           }}
           venueId={venueId}
           currency={currency}
-          resourceId={resourceBookingCalendarId}
+          bookingModel={bookingModel}
+          enabledModels={enabledModels}
+          preselectedDate={prefillDate ?? (viewMode === 'day' ? date : undefined)}
+          preselectedPractitionerId={prefillPractitionerId}
+          preselectedTime={prefillTime}
+        />
+      ) : null}
+      {resourceBookingResourceId && (
+        <ResourceSlotBookingForm
+          open={showResourceBooking}
+          onClose={() => {
+            setShowResourceBooking(false);
+            setResourceBookingResourceId(undefined);
+            setPrefillTime(undefined);
+          }}
+          onCreated={() => {
+            setShowResourceBooking(false);
+            setResourceBookingResourceId(undefined);
+            setPrefillTime(undefined);
+            void fetchData({ silent: true });
+          }}
+          venueId={venueId}
+          currency={currency}
+          resourceId={resourceBookingResourceId}
           preselectedDate={prefillDate ?? (viewMode === 'day' ? date : undefined)}
           preselectedTime={prefillTime}
         />

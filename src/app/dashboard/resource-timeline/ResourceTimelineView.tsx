@@ -1,19 +1,27 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
+import { ResourceExceptionsCalendar } from './ResourceExceptionsCalendar';
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
+type ResourcePaymentRequirement = 'none' | 'deposit' | 'full_payment';
+
 interface Resource {
   id: string;
   name: string;
   resource_type: string | null;
+  /** Host unified calendar column (non-resource) where this resource appears on the staff calendar. */
+  display_on_calendar_id: string | null;
   slot_interval_minutes: number;
   min_booking_minutes: number;
   max_booking_minutes: number;
   price_per_slot_pence: number | null;
+  payment_requirement: ResourcePaymentRequirement;
+  deposit_amount_pence: number | null;
   is_active: boolean;
   availability_hours: Record<string, Array<{ start: string; end: string }>> | null;
   availability_exceptions?: Record<string, { closed: true } | { periods: Array<{ start: string; end: string }> }> | null;
@@ -28,6 +36,9 @@ interface ResourceBooking {
   status: string;
   guest_name: string;
   party_size: number;
+  deposit_amount_pence: number | null;
+  deposit_status: string | null;
+  resource_payment_requirement: ResourcePaymentRequirement | null;
 }
 
 type DayHours = { enabled: boolean; start: string; end: string };
@@ -47,9 +58,15 @@ const DAY_LABELS: Array<{ key: string; label: string }> = [
   { key: '0', label: 'Sunday' },
 ];
 
-const SLOT_OPTIONS = [15, 30, 45, 60, 90, 120];
-const DURATION_OPTIONS = [15, 30, 45, 60, 90, 120, 180, 240, 360, 480, 720, 1440];
 const RESOURCE_TYPE_SUGGESTIONS = ['Tennis Court', 'Meeting Room', 'Studio', 'Pitch', 'Equipment', 'Desk', 'Bay', 'Lane', 'Pod'];
+
+/** Aligned with GET/POST/PATCH /api/venue/resources zod schema */
+const SLOT_INTERVAL_MIN = 5;
+const SLOT_INTERVAL_MAX = 480;
+const MIN_BOOKING_MIN = 15;
+const MIN_BOOKING_MAX = 480;
+const MAX_BOOKING_MIN = 15;
+const MAX_BOOKING_MAX = 1440;
 
 const STATUS_COLOURS: Record<string, string> = {
   Confirmed: 'bg-blue-50 text-blue-800 border-blue-200',
@@ -102,12 +119,60 @@ function formatDuration(mins: number): string {
   return m > 0 ? `${h}h ${m}m` : `${h}h`;
 }
 
+/** Local calendar YYYY-MM-DD (avoids UTC shift from toISOString). */
+function formatYmdLocal(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+/** Inclusive list of dates from start to end (YYYY-MM-DD). Empty if invalid or end before start. */
+function eachDateInRangeInclusive(start: string, end: string): string[] {
+  const p = (s: string) => {
+    const [y, mo, da] = s.split('-').map(Number);
+    return { y, mo, da, d: new Date(y, mo - 1, da) };
+  };
+  const a = p(start);
+  const b = p(end);
+  if (!a.y || !b.y || Number.isNaN(a.d.getTime()) || Number.isNaN(b.d.getTime())) return [];
+  if (b.d < a.d) return [];
+  const out: string[] = [];
+  for (let cur = new Date(a.d); cur <= b.d; cur.setDate(cur.getDate() + 1)) {
+    out.push(formatYmdLocal(cur));
+  }
+  return out;
+}
+
+const MAX_EXCEPTION_RANGE_DAYS = 366;
+
+function resourcePaymentSummary(r: Resource, formatPrice: (pence: number) => string): string {
+  if (r.payment_requirement === 'none') return 'Pay at venue';
+  if (r.payment_requirement === 'full_payment') return 'Full payment online';
+  const dep = r.deposit_amount_pence != null ? formatPrice(r.deposit_amount_pence) : '—';
+  return `Deposit ${dep} online`;
+}
+
+function resourceBookingPaymentLine(b: ResourceBooking, formatPrice: (pence: number) => string): string | null {
+  const mode = b.resource_payment_requirement;
+  const pence = b.deposit_amount_pence;
+  const st = b.deposit_status ?? '-';
+  if (mode === 'none') return 'Pay at venue';
+  if (pence != null && pence > 0) {
+    if (mode === 'full_payment') return `Paid ${formatPrice(pence)} online (${st})`;
+    if (mode === 'deposit') return `Deposit ${formatPrice(pence)} (${st})`;
+    return `Payment ${formatPrice(pence)} (${st})`;
+  }
+  if (mode === 'full_payment' || mode === 'deposit') return `Online payment ${st}`;
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // Main Component
 // ---------------------------------------------------------------------------
 
 export function ResourceTimelineView({
-  venueId,
+  venueId: _venueId,
   isAdmin = false,
   currency = 'GBP',
 }: {
@@ -125,21 +190,36 @@ export function ResourceTimelineView({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  /** Shown after save when API reports host calendar hours narrower than resource weekly hours. */
+  const [availabilityWarning, setAvailabilityWarning] = useState<string | null>(null);
 
   // Form state
   const [formName, setFormName] = useState('');
   const [formType, setFormType] = useState('');
-  const [formSlot, setFormSlot] = useState(60);
-  const [formMin, setFormMin] = useState(60);
-  const [formMax, setFormMax] = useState(480);
+  const [formSlotStr, setFormSlotStr] = useState('60');
+  const [formMinStr, setFormMinStr] = useState('60');
+  const [formMaxStr, setFormMaxStr] = useState('480');
   const [formPrice, setFormPrice] = useState('');
+  const [formPaymentReq, setFormPaymentReq] = useState<ResourcePaymentRequirement>('none');
+  const [formDeposit, setFormDeposit] = useState('');
   const [formActive, setFormActive] = useState(true);
   const [formHours, setFormHours] = useState<WeekHours>(defaultWeekHours);
   const [formExceptions, setFormExceptions] = useState<Record<string, { closed: true } | { periods: Array<{ start: string; end: string }> }>>({});
-  const [formExceptionDate, setFormExceptionDate] = useState('');
+  const [exceptionMonth, setExceptionMonth] = useState(() => {
+    const n = new Date();
+    return { year: n.getFullYear(), month: n.getMonth() + 1 };
+  });
+  const [exceptionRangeStart, setExceptionRangeStart] = useState<string | null>(null);
+  const [exceptionRangeEnd, setExceptionRangeEnd] = useState<string | null>(null);
+  const [exceptionEditingDay, setExceptionEditingDay] = useState<string | null>(null);
   const [formExceptionType, setFormExceptionType] = useState<'closed' | 'custom'>('closed');
   const [formExceptionStart, setFormExceptionStart] = useState('09:00');
   const [formExceptionEnd, setFormExceptionEnd] = useState('17:00');
+  const [formDisplayCalendarId, setFormDisplayCalendarId] = useState('');
+  const [hostCalendars, setHostCalendars] = useState<Array<{ id: string; name: string }>>([]);
+  const [showNewColumnUi, setShowNewColumnUi] = useState(false);
+  const [newColumnName, setNewColumnName] = useState('');
+  const [creatingColumn, setCreatingColumn] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -166,6 +246,24 @@ export function ResourceTimelineView({
 
   useEffect(() => { void fetchResources(); }, [fetchResources]);
 
+  const fetchHostCalendars = useCallback(async () => {
+    try {
+      const res = await fetch('/api/venue/practitioners?roster=1');
+      if (!res.ok) return;
+      const data = await res.json();
+      const list = (data.practitioners ?? []).filter(
+        (p: { calendar_type?: string }) => p.calendar_type !== 'resource',
+      ) as Array<{ id: string; name: string }>;
+      setHostCalendars(list.map((p) => ({ id: p.id, name: p.name })));
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  useEffect(() => {
+    void fetchHostCalendars();
+  }, [fetchHostCalendars]);
+
   // Fetch bookings for selected resource
   useEffect(() => {
     if (!selectedId || showForm) { setBookings([]); return; }
@@ -189,6 +287,9 @@ export function ResourceTimelineView({
               status: b.status as string,
               guest_name: (b.guest_name as string) ?? 'Guest',
               party_size: (b.party_size as number) ?? 1,
+              deposit_amount_pence: (b.deposit_amount_pence as number | null) ?? null,
+              deposit_status: (b.deposit_status as string | null) ?? null,
+              resource_payment_requirement: (b.resource_payment_requirement as ResourcePaymentRequirement | null) ?? null,
             }))
             .sort((a, b) => a.booking_time.localeCompare(b.booking_time)),
         );
@@ -211,14 +312,23 @@ export function ResourceTimelineView({
     setEditingId(null);
     setFormName('');
     setFormType('');
-    setFormSlot(60);
-    setFormMin(60);
-    setFormMax(480);
+    setFormSlotStr('60');
+    setFormMinStr('60');
+    setFormMaxStr('480');
     setFormPrice('');
+    setFormPaymentReq('none');
+    setFormDeposit('');
     setFormActive(true);
     setFormHours(defaultWeekHours());
     setFormExceptions({});
-    setFormExceptionDate('');
+    const n = new Date();
+    setExceptionMonth({ year: n.getFullYear(), month: n.getMonth() + 1 });
+    setExceptionRangeStart(null);
+    setExceptionRangeEnd(null);
+    setExceptionEditingDay(null);
+    setFormDisplayCalendarId('');
+    setShowNewColumnUi(false);
+    setNewColumnName('');
     setError(null);
     setShowForm(true);
   }
@@ -227,27 +337,160 @@ export function ResourceTimelineView({
     setEditingId(r.id);
     setFormName(r.name);
     setFormType(r.resource_type ?? '');
-    setFormSlot(r.slot_interval_minutes);
-    setFormMin(r.min_booking_minutes);
-    setFormMax(r.max_booking_minutes);
+    setFormSlotStr(String(r.slot_interval_minutes));
+    setFormMinStr(String(r.min_booking_minutes));
+    setFormMaxStr(String(r.max_booking_minutes));
     setFormPrice(r.price_per_slot_pence != null ? (r.price_per_slot_pence / 100).toFixed(2) : '');
+    setFormPaymentReq(r.payment_requirement ?? 'none');
+    setFormDeposit(r.deposit_amount_pence != null ? (r.deposit_amount_pence / 100).toFixed(2) : '');
     setFormActive(r.is_active);
     setFormHours(weekHoursFromJSON(r.availability_hours));
     setFormExceptions(r.availability_exceptions ? { ...r.availability_exceptions } : {});
-    setFormExceptionDate('');
+    const n = new Date();
+    setExceptionMonth({ year: n.getFullYear(), month: n.getMonth() + 1 });
+    setExceptionRangeStart(null);
+    setExceptionRangeEnd(null);
+    setExceptionEditingDay(null);
+    setFormDisplayCalendarId(r.display_on_calendar_id ?? '');
+    setShowNewColumnUi(false);
+    setNewColumnName('');
     setError(null);
     setShowForm(true);
   }
 
-  function addException() {
-    if (!formExceptionDate) return;
-    setFormExceptions((prev) => ({
-      ...prev,
-      [formExceptionDate]: formExceptionType === 'closed'
+  async function createCalendarColumn() {
+    const name = newColumnName.trim();
+    if (!name) {
+      setError('Enter a name for the new calendar column.');
+      return;
+    }
+    setCreatingColumn(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/venue/calendar-columns', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      });
+      const json = (await res.json()) as { error?: string; id?: string; name?: string };
+      if (!res.ok) {
+        setError(json.error ?? 'Could not create calendar column');
+        return;
+      }
+      const newId = json.id;
+      const newName = json.name;
+      if (newId && newName) {
+        setFormDisplayCalendarId(newId);
+      }
+      setNewColumnName('');
+      setShowNewColumnUi(false);
+      await fetchHostCalendars();
+      if (newId && newName) {
+        setHostCalendars((prev) => {
+          if (prev.some((c) => c.id === newId)) return prev;
+          return [...prev, { id: newId, name: newName }].sort((a, b) => a.name.localeCompare(b.name));
+        });
+      }
+    } catch {
+      setError('Could not create calendar column');
+    } finally {
+      setCreatingColumn(false);
+    }
+  }
+
+  function applyExceptionRange() {
+    if (!exceptionRangeStart) {
+      setError('Tap a day on the calendar to start a range, then tap another day (or use Apply for a single day).');
+      return;
+    }
+    const end = exceptionRangeEnd ?? exceptionRangeStart;
+    if (end < exceptionRangeStart) {
+      setError('End date must be on or after the start date.');
+      return;
+    }
+    const dates = eachDateInRangeInclusive(exceptionRangeStart, end);
+    if (dates.length === 0) {
+      setError('Invalid date range.');
+      return;
+    }
+    if (dates.length > MAX_EXCEPTION_RANGE_DAYS) {
+      setError(`Date range cannot exceed ${MAX_EXCEPTION_RANGE_DAYS} days.`);
+      return;
+    }
+    const value =
+      formExceptionType === 'closed'
         ? { closed: true as const }
-        : { periods: [{ start: formExceptionStart, end: formExceptionEnd }] },
-    }));
-    setFormExceptionDate('');
+        : { periods: [{ start: formExceptionStart, end: formExceptionEnd }] };
+    setFormExceptions((prev) => {
+      const next = { ...prev };
+      for (const dateKey of dates) {
+        next[dateKey] = value;
+      }
+      return next;
+    });
+    setExceptionRangeStart(null);
+    setExceptionRangeEnd(null);
+    setError(null);
+  }
+
+  function handleExceptionDayClick(ymd: string) {
+    setError(null);
+    const ex = formExceptions[ymd];
+    if (ex) {
+      setExceptionEditingDay(ymd);
+      setExceptionRangeStart(null);
+      setExceptionRangeEnd(null);
+      if ('closed' in ex) {
+        setFormExceptionType('closed');
+      } else {
+        setFormExceptionType('custom');
+        setFormExceptionStart(ex.periods[0]?.start ?? '09:00');
+        setFormExceptionEnd(ex.periods[0]?.end ?? '17:00');
+      }
+      return;
+    }
+    setExceptionEditingDay(null);
+    if (!exceptionRangeStart) {
+      setExceptionRangeStart(ymd);
+      setExceptionRangeEnd(null);
+      return;
+    }
+    if (!exceptionRangeEnd) {
+      const [a, b] = ymd < exceptionRangeStart ? [ymd, exceptionRangeStart] : [exceptionRangeStart, ymd];
+      setExceptionRangeStart(a);
+      setExceptionRangeEnd(b);
+      return;
+    }
+    setExceptionRangeStart(ymd);
+    setExceptionRangeEnd(null);
+  }
+
+  function clearExceptionRangeSelection() {
+    setExceptionRangeStart(null);
+    setExceptionRangeEnd(null);
+  }
+
+  function saveExceptionEdit() {
+    if (!exceptionEditingDay) return;
+    const value =
+      formExceptionType === 'closed'
+        ? { closed: true as const }
+        : { periods: [{ start: formExceptionStart, end: formExceptionEnd }] };
+    setFormExceptions((prev) => ({ ...prev, [exceptionEditingDay]: value }));
+    setExceptionEditingDay(null);
+    setError(null);
+  }
+
+  function cancelExceptionEdit() {
+    setExceptionEditingDay(null);
+  }
+
+  function exceptionPrevMonth() {
+    setExceptionMonth((m) => (m.month <= 1 ? { year: m.year - 1, month: 12 } : { year: m.year, month: m.month - 1 }));
+  }
+
+  function exceptionNextMonth() {
+    setExceptionMonth((m) => (m.month >= 12 ? { year: m.year + 1, month: 1 } : { year: m.year, month: m.month + 1 }));
   }
 
   function removeException(dateKey: string) {
@@ -256,21 +499,65 @@ export function ResourceTimelineView({
       delete next[dateKey];
       return next;
     });
+    if (exceptionEditingDay === dateKey) setExceptionEditingDay(null);
   }
 
   async function handleSave() {
     if (!formName.trim()) { setError('Resource name is required.'); return; }
+
+    const formSlot = parseInt(formSlotStr.trim(), 10);
+    const formMin = parseInt(formMinStr.trim(), 10);
+    const formMax = parseInt(formMaxStr.trim(), 10);
+    if (!Number.isFinite(formSlot) || formSlot < SLOT_INTERVAL_MIN || formSlot > SLOT_INTERVAL_MAX) {
+      setError(`Slot interval must be a whole number from ${SLOT_INTERVAL_MIN} to ${SLOT_INTERVAL_MAX} minutes.`);
+      return;
+    }
+    if (!Number.isFinite(formMin) || formMin < MIN_BOOKING_MIN || formMin > MIN_BOOKING_MAX) {
+      setError(`Min booking must be a whole number from ${MIN_BOOKING_MIN} to ${MIN_BOOKING_MAX} minutes.`);
+      return;
+    }
+    if (!Number.isFinite(formMax) || formMax < MAX_BOOKING_MIN || formMax > MAX_BOOKING_MAX) {
+      setError(`Max booking must be a whole number from ${MAX_BOOKING_MIN} to ${MAX_BOOKING_MAX} minutes.`);
+      return;
+    }
     if (formMin > formMax) { setError('Min booking duration cannot exceed max.'); return; }
+
+    const pricePence = formPrice !== '' ? Math.round(parseFloat(formPrice) * 100) : 0;
+    if ((formPaymentReq === 'deposit' || formPaymentReq === 'full_payment') && pricePence <= 0) {
+      setError('Set a price per slot before choosing deposit or full payment online.');
+      return;
+    }
+    if (formPaymentReq === 'deposit') {
+      const d = parseFloat(formDeposit);
+      if (!Number.isFinite(d) || d <= 0) { setError('Enter a deposit amount greater than zero.'); return; }
+      const depPence = Math.round(d * 100);
+      const maxSlots = Math.max(1, Math.ceil(formMax / formSlot));
+      const maxTotal = pricePence * maxSlots;
+      if (pricePence > 0 && depPence > maxTotal) {
+        setError('Deposit cannot exceed the maximum possible booking total for this resource.');
+        return;
+      }
+    }
+    if (!formDisplayCalendarId) {
+      setError('Choose a calendar column to show this resource on.');
+      return;
+    }
     setSaving(true);
     setError(null);
+    setAvailabilityWarning(null);
     try {
       const payload = {
         name: formName.trim(),
         ...(formType.trim() && { resource_type: formType.trim() }),
+        display_on_calendar_id: formDisplayCalendarId,
         slot_interval_minutes: formSlot,
         min_booking_minutes: formMin,
         max_booking_minutes: formMax,
-        ...(formPrice !== '' && { price_per_slot_pence: Math.round(parseFloat(formPrice) * 100) }),
+        ...(formPrice !== '' && { price_per_slot_pence: pricePence }),
+        payment_requirement: formPaymentReq,
+        ...(formPaymentReq === 'deposit'
+          ? { deposit_amount_pence: Math.round(parseFloat(formDeposit) * 100) }
+          : { deposit_amount_pence: null }),
         is_active: formActive,
         availability_hours: weekHoursToJSON(formHours),
         availability_exceptions: formExceptions,
@@ -287,8 +574,17 @@ export function ResourceTimelineView({
             body: JSON.stringify(payload),
           });
       const json = await res.json();
-      if (!res.ok) { setError((json as { error?: string }).error ?? 'Save failed'); return; }
-      const savedId = (json as { id?: string }).id ?? editingId;
+      if (!res.ok) {
+        const j = json as { error?: string; details?: string };
+        const msg = [j.error, j.details].filter(Boolean).join(' — ');
+        setError(msg || 'Save failed');
+        return;
+      }
+      const j = json as { id?: string; availability_warning?: string };
+      if (j.availability_warning) {
+        setAvailabilityWarning(j.availability_warning);
+      }
+      const savedId = j.id ?? editingId;
       setShowForm(false);
       await fetchResources();
       if (savedId) setSelectedId(savedId);
@@ -368,8 +664,10 @@ export function ResourceTimelineView({
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-sm font-medium text-slate-900">{r.name}</span>
                       <span className="block truncate text-xs text-slate-500">
-                        {r.resource_type ?? 'Resource'}
-                        {r.price_per_slot_pence != null && ` \u00b7 ${formatPrice(r.price_per_slot_pence)}/slot`}
+                        {hostCalendars.find((c) => c.id === r.display_on_calendar_id)?.name ?? 'Calendar'}
+                        {r.resource_type ? ` · ${r.resource_type}` : ''}
+                        {r.price_per_slot_pence != null && ` · ${formatPrice(r.price_per_slot_pence)}/slot`}
+                        {` · ${resourcePaymentSummary(r, formatPrice)}`}
                       </span>
                     </span>
                   </button>
@@ -382,6 +680,30 @@ export function ResourceTimelineView({
 
       {/* ─── Main panel ─── */}
       <div className="min-w-0 flex-1">
+        {availabilityWarning && (
+          <div
+            className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950 shadow-sm"
+            role="status"
+          >
+            <p className="font-medium text-amber-900">Calendar availability notice</p>
+            <p className="mt-1 text-amber-900/95">{availabilityWarning}</p>
+            <div className="mt-3 flex flex-wrap items-center gap-3">
+              <Link
+                href="/dashboard/availability?tab=availability"
+                className="inline-flex items-center rounded-lg bg-amber-800 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-900"
+              >
+                Open Calendar availability
+              </Link>
+              <button
+                type="button"
+                onClick={() => setAvailabilityWarning(null)}
+                className="text-xs font-medium text-amber-800 underline underline-offset-2 hover:text-amber-950"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        )}
         {showForm ? (
           /* ── Create / Edit form ── */
           <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -395,33 +717,155 @@ export function ResourceTimelineView({
               </div>
               <div>
                 <label className="mb-1 block text-xs font-medium text-slate-600">Type</label>
-                <input type="text" list="resource-type-suggestions" value={formType} onChange={(e) => setFormType(e.target.value)} placeholder="e.g. Tennis Court" className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
-                <datalist id="resource-type-suggestions">
-                  {RESOURCE_TYPE_SUGGESTIONS.map((s) => <option key={s} value={s} />)}
-                </datalist>
+                <input
+                  type="text"
+                  value={formType}
+                  onChange={(e) => setFormType(e.target.value)}
+                  placeholder="Type any label (e.g. Squash court, VR booth)"
+                  autoComplete="off"
+                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+                />
+                <p className="mt-1 text-[11px] text-slate-500">Optional. Quick picks (tap to fill — you can still edit the text):</p>
+                <div className="mt-1.5 flex flex-wrap gap-1.5">
+                  {RESOURCE_TYPE_SUGGESTIONS.map((s) => (
+                    <button
+                      key={s}
+                      type="button"
+                      onClick={() => setFormType(s)}
+                      className="rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-100"
+                    >
+                      {s}
+                    </button>
+                  ))}
+                </div>
               </div>
+            </div>
+
+            <div className="mt-4 max-w-xl">
+              <label className="mb-1 block text-xs font-medium text-slate-600">Show on calendar *</label>
+              <select
+                value={formDisplayCalendarId}
+                onChange={(e) => setFormDisplayCalendarId(e.target.value)}
+                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+              >
+                <option value="">Select a calendar column</option>
+                {hostCalendars.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+              {isAdmin && (
+                <div className="mt-3 rounded-lg border border-slate-100 bg-slate-50/90 p-3">
+                  {!showNewColumnUi ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowNewColumnUi(true);
+                        setError(null);
+                      }}
+                      className="inline-flex w-full items-center justify-center rounded-lg border border-brand-200/90 bg-white px-3.5 py-2.5 text-sm font-semibold text-brand-700 shadow-sm transition-[color,background-color,border-color,box-shadow,transform] duration-150 ease-out hover:border-brand-400 hover:bg-brand-50 hover:text-brand-800 hover:shadow-md active:scale-[0.98] active:border-brand-500 active:bg-brand-100 active:shadow-inner motion-reduce:transition-colors motion-reduce:active:scale-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2"
+                    >
+                      New calendar column
+                    </button>
+                  ) : (
+                    <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-end">
+                      <div className="min-w-0 flex-1 sm:max-w-xs">
+                        <label htmlFor="new-calendar-column-name" className="mb-1 block text-[11px] font-medium text-slate-600">
+                          Column name
+                        </label>
+                        <input
+                          id="new-calendar-column-name"
+                          type="text"
+                          value={newColumnName}
+                          onChange={(e) => setNewColumnName(e.target.value)}
+                          placeholder="e.g. Court bookings"
+                          disabled={creatingColumn}
+                          className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 disabled:opacity-60"
+                        />
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => void createCalendarColumn()}
+                          disabled={creatingColumn}
+                          className="rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-brand-700 disabled:opacity-50"
+                        >
+                          {creatingColumn ? 'Creating\u2026' : 'Create'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowNewColumnUi(false);
+                            setNewColumnName('');
+                            setError(null);
+                          }}
+                          disabled={creatingColumn}
+                          className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+              <p className="mt-1 text-xs text-slate-500">
+                Resource bookings and free slots appear on that calendar. Two resources can use the same calendar only if
+                their weekly hours do not overlap (e.g. 9–1 vs 3–6).
+              </p>
             </div>
 
             {/* Booking rules */}
             <h3 className="mt-6 text-sm font-semibold text-slate-800">Booking rules</h3>
             <div className="mt-2 grid gap-4 sm:grid-cols-3">
               <div>
-                <label className="mb-1 block text-xs font-medium text-slate-600">Slot interval</label>
-                <select value={formSlot} onChange={(e) => setFormSlot(Number(e.target.value))} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500">
-                  {SLOT_OPTIONS.map((m) => <option key={m} value={m}>{formatDuration(m)}</option>)}
-                </select>
+                <label className="mb-1 block text-xs font-medium text-slate-600">Slot interval (minutes)</label>
+                <input
+                  type="number"
+                  min={SLOT_INTERVAL_MIN}
+                  max={SLOT_INTERVAL_MAX}
+                  step={1}
+                  inputMode="numeric"
+                  value={formSlotStr}
+                  onChange={(e) => setFormSlotStr(e.target.value)}
+                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+                />
+                <p className="mt-1 text-[11px] text-slate-500">
+                  Grid step for start times ({SLOT_INTERVAL_MIN}–{SLOT_INTERVAL_MAX} min).
+                </p>
               </div>
               <div>
-                <label className="mb-1 block text-xs font-medium text-slate-600">Min booking</label>
-                <select value={formMin} onChange={(e) => setFormMin(Number(e.target.value))} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500">
-                  {DURATION_OPTIONS.map((m) => <option key={m} value={m}>{formatDuration(m)}</option>)}
-                </select>
+                <label className="mb-1 block text-xs font-medium text-slate-600">Min booking (minutes)</label>
+                <input
+                  type="number"
+                  min={MIN_BOOKING_MIN}
+                  max={MIN_BOOKING_MAX}
+                  step={1}
+                  inputMode="numeric"
+                  value={formMinStr}
+                  onChange={(e) => setFormMinStr(e.target.value)}
+                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+                />
+                <p className="mt-1 text-[11px] text-slate-500">
+                  Shortest bookable length ({MIN_BOOKING_MIN}–{MIN_BOOKING_MAX} min).
+                </p>
               </div>
               <div>
-                <label className="mb-1 block text-xs font-medium text-slate-600">Max booking</label>
-                <select value={formMax} onChange={(e) => setFormMax(Number(e.target.value))} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500">
-                  {DURATION_OPTIONS.map((m) => <option key={m} value={m}>{formatDuration(m)}</option>)}
-                </select>
+                <label className="mb-1 block text-xs font-medium text-slate-600">Max booking (minutes)</label>
+                <input
+                  type="number"
+                  min={MAX_BOOKING_MIN}
+                  max={MAX_BOOKING_MAX}
+                  step={1}
+                  inputMode="numeric"
+                  value={formMaxStr}
+                  onChange={(e) => setFormMaxStr(e.target.value)}
+                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+                />
+                <p className="mt-1 text-[11px] text-slate-500">
+                  Longest bookable length ({MAX_BOOKING_MIN}–{MAX_BOOKING_MAX} min).
+                </p>
               </div>
             </div>
             <div className="mt-3 grid gap-4 sm:grid-cols-2">
@@ -435,6 +879,49 @@ export function ResourceTimelineView({
                   Active (bookable by guests)
                 </label>
               </div>
+            </div>
+            <div className="mt-4">
+              <p className="mb-2 text-xs font-medium text-slate-600">Guest payment</p>
+              <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+                {(
+                  [
+                    { v: 'none' as const, label: 'Pay at venue' },
+                    { v: 'deposit' as const, label: 'Deposit online' },
+                    { v: 'full_payment' as const, label: 'Pay in full online' },
+                  ] as const
+                ).map((opt) => (
+                  <label
+                    key={opt.v}
+                    className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm ${
+                      formPaymentReq === opt.v ? 'border-brand-500 bg-brand-50 text-slate-900' : 'border-slate-200 text-slate-700'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="resource-payment-req"
+                      checked={formPaymentReq === opt.v}
+                      onChange={() => setFormPaymentReq(opt.v)}
+                      className="h-4 w-4 border-slate-300 text-brand-600 focus:ring-brand-500"
+                    />
+                    {opt.label}
+                  </label>
+                ))}
+              </div>
+              {formPaymentReq === 'deposit' && (
+                <div className="mt-3 max-w-xs">
+                  <label className="mb-1 block text-xs font-medium text-slate-600">Deposit amount ({sym})</label>
+                  <input
+                    type="number"
+                    min={0}
+                    step={0.01}
+                    value={formDeposit}
+                    onChange={(e) => setFormDeposit(e.target.value)}
+                    placeholder="e.g. 10.00"
+                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+                  />
+                  <p className="mt-1 text-xs text-slate-500">Charged when the guest books (Stripe). Balance due at venue if applicable.</p>
+                </div>
+              )}
             </div>
 
             {/* Weekly availability */}
@@ -463,52 +950,155 @@ export function ResourceTimelineView({
 
             {/* Date exceptions */}
             <h3 className="mt-6 text-sm font-semibold text-slate-800">Date exceptions</h3>
-            <p className="mt-1 text-xs text-slate-500">Override specific dates (holidays, special hours).</p>
-            <div className="mt-2 flex flex-wrap items-end gap-2">
-              <div>
-                <label className="mb-1 block text-xs text-slate-600">Date</label>
-                <input type="date" value={formExceptionDate} onChange={(e) => setFormExceptionDate(e.target.value)} className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm" />
-              </div>
-              <div>
-                <label className="mb-1 block text-xs text-slate-600">Type</label>
-                <select value={formExceptionType} onChange={(e) => setFormExceptionType(e.target.value as 'closed' | 'custom')} className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm">
-                  <option value="closed">Closed</option>
-                  <option value="custom">Custom hours</option>
-                </select>
-              </div>
-              {formExceptionType === 'custom' && (
-                <>
+            <p className="mt-1 text-xs text-slate-500">
+              Override holidays or special hours. Choose closed or custom hours below, then tap the calendar: first day starts a range, second day completes it (or tap &quot;Apply&quot; after one day for a single date). Tap a day that already has an exception to edit or remove it.
+            </p>
+
+            {exceptionEditingDay ? (
+              <div className="mt-4 rounded-xl border border-slate-300 bg-slate-50 p-4">
+                <div className="flex flex-wrap items-start justify-between gap-2">
                   <div>
-                    <label className="mb-1 block text-xs text-slate-600">From</label>
-                    <input type="time" value={formExceptionStart} onChange={(e) => setFormExceptionStart(e.target.value)} className="rounded border border-slate-200 px-2 py-1.5 text-sm" />
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Editing</p>
+                    <p className="text-sm font-medium text-slate-900">{exceptionEditingDay}</p>
                   </div>
+                  <button
+                    type="button"
+                    onClick={cancelExceptionEdit}
+                    className="text-xs font-medium text-slate-600 hover:text-slate-900"
+                  >
+                    Close
+                  </button>
+                </div>
+                <div className="mt-3 flex flex-wrap items-end gap-2">
                   <div>
-                    <label className="mb-1 block text-xs text-slate-600">To</label>
-                    <input type="time" value={formExceptionEnd} onChange={(e) => setFormExceptionEnd(e.target.value)} className="rounded border border-slate-200 px-2 py-1.5 text-sm" />
+                    <label className="mb-1 block text-xs text-slate-600">Type</label>
+                    <select
+                      value={formExceptionType}
+                      onChange={(e) => setFormExceptionType(e.target.value as 'closed' | 'custom')}
+                      className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm"
+                    >
+                      <option value="closed">Closed</option>
+                      <option value="custom">Custom hours</option>
+                    </select>
                   </div>
-                </>
-              )}
-              <button type="button" onClick={addException} disabled={!formExceptionDate} className="rounded-lg bg-slate-800 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-900 disabled:opacity-50">
-                Add
-              </button>
-            </div>
-            {Object.keys(formExceptions).length > 0 && (
-              <ul className="mt-2 space-y-1">
-                {Object.entries(formExceptions)
-                  .sort(([a], [b]) => a.localeCompare(b))
-                  .map(([dateKey, val]) => (
-                    <li key={dateKey} className="flex items-center justify-between rounded-lg border border-slate-100 bg-slate-50/60 px-3 py-1.5 text-sm">
-                      <span>
-                        <span className="font-medium text-slate-800">{dateKey}</span>
-                        <span className="ml-2 text-slate-500">
-                          {'closed' in val ? 'Closed' : `${val.periods[0].start} \u2013 ${val.periods[0].end}`}
-                        </span>
-                      </span>
-                      <button type="button" onClick={() => removeException(dateKey)} className="text-xs text-red-500 hover:text-red-700">Remove</button>
-                    </li>
-                  ))}
-              </ul>
+                  {formExceptionType === 'custom' && (
+                    <>
+                      <div>
+                        <label className="mb-1 block text-xs text-slate-600">From</label>
+                        <input
+                          type="time"
+                          value={formExceptionStart}
+                          onChange={(e) => setFormExceptionStart(e.target.value)}
+                          className="rounded border border-slate-200 bg-white px-2 py-1.5 text-sm"
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-xs text-slate-600">To</label>
+                        <input
+                          type="time"
+                          value={formExceptionEnd}
+                          onChange={(e) => setFormExceptionEnd(e.target.value)}
+                          className="rounded border border-slate-200 bg-white px-2 py-1.5 text-sm"
+                        />
+                      </div>
+                    </>
+                  )}
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={saveExceptionEdit}
+                    className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-700"
+                  >
+                    Save changes
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => removeException(exceptionEditingDay)}
+                    className="rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50"
+                  >
+                    Remove this day
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50/80 p-4">
+                <p className="text-xs font-semibold text-slate-700">Add exception</p>
+                <div className="mt-2 flex flex-wrap items-end gap-2">
+                  <div>
+                    <label className="mb-1 block text-xs text-slate-600">Type</label>
+                    <select
+                      value={formExceptionType}
+                      onChange={(e) => setFormExceptionType(e.target.value as 'closed' | 'custom')}
+                      className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm"
+                    >
+                      <option value="closed">Closed</option>
+                      <option value="custom">Custom hours</option>
+                    </select>
+                  </div>
+                  {formExceptionType === 'custom' && (
+                    <>
+                      <div>
+                        <label className="mb-1 block text-xs text-slate-600">From</label>
+                        <input
+                          type="time"
+                          value={formExceptionStart}
+                          onChange={(e) => setFormExceptionStart(e.target.value)}
+                          className="rounded border border-slate-200 bg-white px-2 py-1.5 text-sm"
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-xs text-slate-600">To</label>
+                        <input
+                          type="time"
+                          value={formExceptionEnd}
+                          onChange={(e) => setFormExceptionEnd(e.target.value)}
+                          className="rounded border border-slate-200 bg-white px-2 py-1.5 text-sm"
+                        />
+                      </div>
+                    </>
+                  )}
+                </div>
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={applyExceptionRange}
+                    disabled={!exceptionRangeStart}
+                    className="rounded-lg bg-slate-800 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-900 disabled:opacity-50"
+                  >
+                    Apply to calendar selection
+                  </button>
+                  <button
+                    type="button"
+                    onClick={clearExceptionRangeSelection}
+                    className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                  >
+                    Clear selection
+                  </button>
+                  {exceptionRangeStart && (
+                    <span className="text-xs text-slate-500">
+                      {exceptionRangeEnd
+                        ? `${exceptionRangeStart} → ${exceptionRangeEnd}`
+                        : `${exceptionRangeStart} (single day — tap Apply)`}
+                    </span>
+                  )}
+                </div>
+              </div>
             )}
+
+            <div className="mt-4 max-w-2xl">
+              <ResourceExceptionsCalendar
+                year={exceptionMonth.year}
+                month={exceptionMonth.month}
+                onPrevMonth={exceptionPrevMonth}
+                onNextMonth={exceptionNextMonth}
+                exceptions={formExceptions}
+                rangeStart={exceptionRangeStart}
+                rangeEnd={exceptionRangeEnd}
+                editingDay={exceptionEditingDay}
+                onDayClick={handleExceptionDayClick}
+              />
+            </div>
 
             {error && <p className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
 
@@ -553,6 +1143,7 @@ export function ResourceTimelineView({
               <InfoCard label="Min booking" value={formatDuration(selected.min_booking_minutes)} />
               <InfoCard label="Max booking" value={formatDuration(selected.max_booking_minutes)} />
               <InfoCard label="Price / slot" value={selected.price_per_slot_pence != null ? formatPrice(selected.price_per_slot_pence) : 'Free'} />
+              <InfoCard label="Guest payment" value={resourcePaymentSummary(selected, formatPrice)} />
             </div>
 
             {/* Availability */}
@@ -608,17 +1199,21 @@ export function ResourceTimelineView({
                 <p className="mt-4 text-center text-sm text-slate-400">No bookings on this date.</p>
               ) : (
                 <ul className="mt-3 space-y-2">
-                  {bookings.map((b) => (
-                    <li key={b.id} className={`flex items-center justify-between rounded-lg border px-3 py-2 ${STATUS_COLOURS[b.status] ?? 'bg-white text-slate-900 border-slate-200'}`}>
+                  {bookings.map((b) => {
+                    const payLine = resourceBookingPaymentLine(b, formatPrice);
+                    return (
+                    <li key={b.id} className={`flex flex-col gap-1 rounded-lg border px-3 py-2 sm:flex-row sm:items-center sm:justify-between ${STATUS_COLOURS[b.status] ?? 'bg-white text-slate-900 border-slate-200'}`}>
                       <div className="min-w-0">
                         <span className="text-sm font-medium">{b.guest_name}</span>
                         <span className="ml-2 text-xs opacity-75">
                           {b.booking_time}{b.booking_end_time ? ` \u2013 ${b.booking_end_time}` : ''}
                         </span>
+                        {payLine ? <div className="mt-0.5 text-[11px] opacity-90">{payLine}</div> : null}
                       </div>
                       <span className="shrink-0 text-xs font-medium">{b.status}</span>
                     </li>
-                  ))}
+                    );
+                  })}
                 </ul>
               )}
             </div>

@@ -225,6 +225,7 @@ export function AppointmentBookingsDashboard({
   primaryBookingModel = 'unified_scheduling',
   enabledModels = [],
   defaultPractitionerFilter = 'all',
+  linkedPractitionerIds = [],
   linkedPractitionerId = null,
 }: {
   venueId: string;
@@ -233,9 +234,17 @@ export function AppointmentBookingsDashboard({
   enabledModels?: BookingModel[];
   /** Server-resolved: staff linked to a calendar default to their practitioner id; admins use `all`. */
   defaultPractitionerFilter?: 'all' | string;
+  /** Bookable calendars this staff user manages. */
+  linkedPractitionerIds?: string[];
+  /** @deprecated Prefer linkedPractitionerIds */
   linkedPractitionerId?: string | null;
 }) {
   const { addToast } = useToast();
+  const myCalendarIds = useMemo(() => {
+    if (linkedPractitionerIds.length > 0) return linkedPractitionerIds;
+    if (linkedPractitionerId) return [linkedPractitionerId];
+    return [];
+  }, [linkedPractitionerIds, linkedPractitionerId]);
   const sym = currency === 'EUR' ? '€' : '£';
   const [viewMode, setViewMode] = useState<ViewMode>('day');
   const [anchorDate, setAnchorDate] = useState(todayISO);
@@ -1090,7 +1099,7 @@ export function AppointmentBookingsDashboard({
               className="min-h-[48px] w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-base text-slate-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30 sm:min-h-[44px] sm:text-sm"
             >
               <option value="all">All appointments</option>
-              {linkedPractitionerId === null ? (
+              {myCalendarIds.length === 0 ? (
                 activePractitioners.map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.name}
@@ -1098,9 +1107,20 @@ export function AppointmentBookingsDashboard({
                 ))
               ) : (
                 <>
-                  <option value={linkedPractitionerId}>My appointments</option>
+                  {myCalendarIds.map((cid) => {
+                    const p = activePractitioners.find((x) => x.id === cid);
+                    const label =
+                      myCalendarIds.length === 1
+                        ? 'My appointments'
+                        : `Mine — ${p?.name ?? 'Calendar'}`;
+                    return (
+                      <option key={cid} value={cid}>
+                        {label}
+                      </option>
+                    );
+                  })}
                   {activePractitioners
-                    .filter((p) => p.id !== linkedPractitionerId)
+                    .filter((p) => !myCalendarIds.includes(p.id))
                     .map((p) => (
                       <option key={p.id} value={p.id}>
                         {p.name}

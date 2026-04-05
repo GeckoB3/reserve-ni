@@ -5,7 +5,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { Practitioner, AppointmentService, PractitionerService } from '@/types/booking-models';
+import type { ClassPaymentRequirement, Practitioner, AppointmentService, PractitionerService } from '@/types/booking-models';
 import { mergeAppointmentServiceWithPractitionerLink } from '@/lib/appointments/merge-service-with-overrides';
 import type { OpeningHours } from '@/types/availability';
 import { timeToMinutes } from '@/lib/availability';
@@ -28,6 +28,7 @@ function serviceItemToAppointmentService(row: Record<string, unknown>): Appointm
     buffer_minutes: (row.buffer_minutes as number) ?? 0,
     processing_time_minutes: (row.processing_time_minutes as number) ?? 0,
     price_pence: (row.price_pence as number | null) ?? null,
+    payment_requirement: (row.payment_requirement as ClassPaymentRequirement | undefined) ?? undefined,
     deposit_pence: (row.deposit_pence as number | null) ?? null,
     colour: (row.colour as string) ?? '#3B82F6',
     is_active: row.is_active !== false,

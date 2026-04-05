@@ -28,21 +28,27 @@ export function StaffEventBookingForm({
   venueId,
   currency = 'GBP',
   onCreated,
+  embedded = false,
+  defaultSource,
+  initialDate,
 }: {
   venueId: string;
   currency?: string;
   onCreated?: () => void;
+  embedded?: boolean;
+  defaultSource?: Source;
+  initialDate?: string;
 }) {
   const phoneDefaultCountry = defaultPhoneCountryForVenueCurrency(currency);
   const sym = currency === 'EUR' ? '€' : '£';
-  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [date, setDate] = useState(() => initialDate ?? new Date().toISOString().slice(0, 10));
   const [events, setEvents] = useState<EventAvail[]>([]);
   const [selectedEvent, setSelectedEvent] = useState<EventAvail | null>(null);
   const [ticketSelections, setTicketSelections] = useState<Record<string, number>>({});
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
-  const [source, setSource] = useState<Source>('phone');
+  const [source, setSource] = useState<Source>(defaultSource ?? 'phone');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -67,6 +73,14 @@ export function StaffEventBookingForm({
   useEffect(() => {
     void fetchEvents();
   }, [fetchEvents]);
+
+  useEffect(() => {
+    if (initialDate) setDate(initialDate);
+  }, [initialDate]);
+
+  useEffect(() => {
+    if (defaultSource) setSource(defaultSource);
+  }, [defaultSource]);
 
   const totalTickets = Object.values(ticketSelections).reduce((a, b) => a + b, 0);
   const totalPricePence = selectedEvent
@@ -132,8 +146,10 @@ export function StaffEventBookingForm({
   };
 
   return (
-    <div className="mx-auto max-w-lg">
-      <h1 className="mb-6 text-2xl font-semibold text-slate-900">New event booking</h1>
+    <div className={embedded ? 'max-w-full' : 'mx-auto max-w-lg'}>
+      {!embedded && (
+        <h1 className="mb-6 text-2xl font-semibold text-slate-900">New event booking</h1>
+      )}
 
       {error && (
         <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>

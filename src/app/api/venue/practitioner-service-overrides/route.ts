@@ -1,12 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff } from '@/lib/venue-auth';
+import { getStaffManagedCalendarIds } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { z } from 'zod';
 import type { AppointmentService } from '@/types/booking-models';
 
 const patchSchema = z.object({
   service_id: z.string().uuid(),
+  /** Required when the staff member manages more than one bookable calendar (unified scheduling). */
+  calendar_id: z.string().uuid().optional(),
   custom_name: z.union([z.string().min(1).max(200), z.null()]).optional(),
   custom_description: z.union([z.string().max(2000), z.null()]).optional(),
   custom_duration_minutes: z.union([z.number().int().min(5).max(480), z.null()]).optional(),
@@ -96,25 +99,35 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid request', details: parsed.error.flatten() }, { status: 400 });
     }
 
-    const { service_id, ...rawPatch } = parsed.data;
+    const { service_id, calendar_id: calendarIdOpt, ...rawPatch } = parsed.data;
     const admin = getSupabaseAdminClient();
 
     const { data: venue } = await admin.from('venues').select('booking_model').eq('id', staff.venue_id).maybeSingle();
     const bookingModel = (venue as { booking_model?: string } | null)?.booking_model ?? '';
 
     if (bookingModel === 'unified_scheduling') {
-      const { data: mine, error: mineErr } = await admin
-        .from('unified_calendars')
-        .select('id')
-        .eq('venue_id', staff.venue_id)
-        .eq('staff_id', staff.id)
-        .maybeSingle();
-
-      if (mineErr || !mine?.id) {
+      const managed = await getStaffManagedCalendarIds(admin, staff.venue_id, staff.id);
+      if (managed.length === 0) {
         return NextResponse.json({ error: 'No calendar linked to your account' }, { status: 403 });
       }
 
-      const calendarId = mine.id;
+      let calendarId: string;
+      if (calendarIdOpt) {
+        if (!managed.includes(calendarIdOpt)) {
+          return NextResponse.json({ error: 'That calendar is not assigned to your account' }, { status: 403 });
+        }
+        calendarId = calendarIdOpt;
+      } else if (managed.length === 1) {
+        calendarId = managed[0];
+      } else {
+        return NextResponse.json(
+          {
+            error:
+              'You manage more than one calendar — choose which calendar to update (calendar_id in the request body).',
+          },
+          { status: 400 },
+        );
+      }
 
       const offers = await calendarOffersServiceItem(admin, calendarId, service_id);
       if (!offers) {

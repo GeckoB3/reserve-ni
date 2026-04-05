@@ -3,6 +3,11 @@ import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { requireVenueExposesSecondaryModel } from '@/lib/booking/require-venue-secondary-model';
+import {
+  weeklyResourceAvailabilityOverlaps,
+  weeklyResourceRestrictedByHostCalendar,
+} from '@/lib/booking/resource-weekly-overlap';
+import type { WorkingHours } from '@/types/booking-models';
 import { z } from 'zod';
 
 const availabilityExceptionDaySchema = z.union([
@@ -12,20 +17,157 @@ const availabilityExceptionDaySchema = z.union([
   }),
 ]);
 
-const resourceSchema = z.object({
+const paymentRequirementSchema = z.enum(['none', 'deposit', 'full_payment']);
+
+const resourceFieldSchema = z.object({
   name: z.string().min(1).max(200),
   resource_type: z.string().max(100).optional(),
   min_booking_minutes: z.number().int().min(15).max(480).optional(),
   max_booking_minutes: z.number().int().min(15).max(1440).optional(),
-  slot_interval_minutes: z.number().int().min(5).max(120).optional(),
+  slot_interval_minutes: z.number().int().min(5).max(480).optional(),
   price_per_slot_pence: z.number().int().min(0).optional(),
+  payment_requirement: paymentRequirementSchema.optional(),
+  deposit_amount_pence: z.number().int().min(0).optional().nullable(),
   availability_hours: z.record(z.string(), z.array(z.object({ start: z.string(), end: z.string() }))).optional(),
   availability_exceptions: z
     .record(z.string().regex(/^\d{4}-\d{2}-\d{2}$/), availabilityExceptionDaySchema)
     .optional(),
   is_active: z.boolean().optional(),
   sort_order: z.number().int().optional(),
+  /** Host calendar column (unified_calendars id, non-resource). Required on create. */
+  display_on_calendar_id: z.string().uuid().optional().nullable(),
 });
+
+function validateResourcePaymentFields(input: {
+  payment_requirement: string;
+  deposit_amount_pence: number | null | undefined;
+  price_per_slot_pence: number | null | undefined;
+  slot_interval_minutes: number;
+  max_booking_minutes: number;
+}): string | null {
+  const price = input.price_per_slot_pence ?? 0;
+  const req = input.payment_requirement ?? 'none';
+  if (price <= 0 && (req === 'deposit' || req === 'full_payment')) {
+    return 'Set a price per slot before choosing deposit or full payment online';
+  }
+  if (req === 'deposit') {
+    const d = input.deposit_amount_pence;
+    if (d == null || d <= 0) {
+      return 'Deposit amount is required';
+    }
+    const slotInt = input.slot_interval_minutes;
+    const maxSlots = Math.max(1, Math.ceil(input.max_booking_minutes / slotInt));
+    const maxTotal = price * maxSlots;
+    if (price > 0 && d > maxTotal) {
+      return 'Deposit cannot exceed the maximum possible booking total for this resource';
+    }
+  }
+  return null;
+}
+
+/** Columns added in 20260503120000 (payment) and 20260504120000 (display); safe to omit if DB is behind migrations. */
+const OPTIONAL_UNIFIED_CALENDAR_MIGRATION_COLUMNS = new Set([
+  'display_on_calendar_id',
+  'payment_requirement',
+  'deposit_amount_pence',
+]);
+
+function parseMissingUnifiedCalendarsColumn(message: string): string | null {
+  const m1 = message.match(/Could not find the '([^']+)' column of 'unified_calendars'/i);
+  if (m1) return m1[1];
+  const m2 = message.match(/column "([^"]+)" of relation "unified_calendars" does not exist/i);
+  return m2?.[1] ?? null;
+}
+
+/** Remove one optional column from insert/update payload; payment fields are stripped together. */
+function stripOptionalMigrationColumn(payload: Record<string, unknown>, col: string): void {
+  if (!OPTIONAL_UNIFIED_CALENDAR_MIGRATION_COLUMNS.has(col)) return;
+  if (col === 'display_on_calendar_id') {
+    delete payload.display_on_calendar_id;
+    return;
+  }
+  delete payload.payment_requirement;
+  delete payload.deposit_amount_pence;
+}
+
+const resourceSchema = resourceFieldSchema.superRefine((data, ctx) => {
+  const err = validateResourcePaymentFields({
+    payment_requirement: data.payment_requirement ?? 'none',
+    deposit_amount_pence: data.deposit_amount_pence,
+    price_per_slot_pence: data.price_per_slot_pence,
+    slot_interval_minutes: data.slot_interval_minutes ?? 30,
+    max_booking_minutes: data.max_booking_minutes ?? 120,
+  });
+  if (err) {
+    ctx.addIssue({ code: 'custom', message: err, path: ['payment_requirement'] });
+  }
+});
+
+const resourcePatchSchema = resourceFieldSchema.partial();
+
+const AVAILABILITY_CALENDAR_RESTRICTS_RESOURCE_WARNING =
+  'The team calendar’s weekly hours are narrower than this resource’s availability in at least one period. Bookable slots will only appear where both overlap. Go to Dashboard → Availability (calendar weekly hours) to widen the calendar if you need more bookable time.';
+
+async function fetchHostCalendarWorkingHours(
+  admin: ReturnType<typeof getSupabaseAdminClient>,
+  venueId: string,
+  hostCalendarId: string,
+): Promise<WorkingHours> {
+  const { data } = await admin
+    .from('unified_calendars')
+    .select('working_hours')
+    .eq('id', hostCalendarId)
+    .eq('venue_id', venueId)
+    .maybeSingle();
+  return ((data?.working_hours as WorkingHours) ?? {}) as WorkingHours;
+}
+
+function availabilityWarningIfHostRestrictsResource(
+  resourceHours: WorkingHours,
+  hostHours: WorkingHours,
+): string | undefined {
+  if (!weeklyResourceRestrictedByHostCalendar(resourceHours, hostHours)) return undefined;
+  return AVAILABILITY_CALENDAR_RESTRICTS_RESOURCE_WARNING;
+}
+
+async function assertResourceDisplayOnCalendarValid(
+  admin: ReturnType<typeof getSupabaseAdminClient>,
+  venueId: string,
+  displayOnCalendarId: string,
+  workingHours: WorkingHours,
+  excludeResourceId?: string,
+): Promise<{ ok: true } | { ok: false; message: string }> {
+  const { data: host } = await admin
+    .from('unified_calendars')
+    .select('id, calendar_type')
+    .eq('id', displayOnCalendarId)
+    .eq('venue_id', venueId)
+    .maybeSingle();
+  if (!host) {
+    return { ok: false, message: 'Calendar not found' };
+  }
+  if ((host as { calendar_type: string }).calendar_type === 'resource') {
+    return { ok: false, message: 'Assign the resource to a team calendar (not another resource)' };
+  }
+  const { data: siblings } = await admin
+    .from('unified_calendars')
+    .select('id, working_hours')
+    .eq('venue_id', venueId)
+    .eq('calendar_type', 'resource')
+    .eq('display_on_calendar_id', displayOnCalendarId);
+  for (const row of siblings ?? []) {
+    if (excludeResourceId && row.id === excludeResourceId) continue;
+    const wh = (row.working_hours as WorkingHours) ?? {};
+    if (weeklyResourceAvailabilityOverlaps(workingHours, wh)) {
+      return {
+        ok: false,
+        message:
+          'Another resource on this calendar already has overlapping weekly hours. Choose a different calendar or adjust hours so they do not overlap.',
+      };
+    }
+  }
+  return { ok: true };
+}
 
 /** Map a unified_calendars row (calendar_type='resource') to the Resource shape expected by the UI. */
 function mapUnifiedCalendarToResource(row: Record<string, unknown>) {
@@ -38,12 +180,29 @@ function mapUnifiedCalendarToResource(row: Record<string, unknown>) {
     min_booking_minutes: row.min_booking_minutes ?? 60,
     max_booking_minutes: row.max_booking_minutes ?? 120,
     price_per_slot_pence: row.price_per_slot_pence ?? null,
+    payment_requirement: (row.payment_requirement as string) ?? 'none',
+    deposit_amount_pence: row.deposit_amount_pence ?? null,
     is_active: row.is_active ?? true,
     availability_hours: row.working_hours ?? {},
     availability_exceptions: row.availability_exceptions ?? {},
     sort_order: row.sort_order ?? 0,
     created_at: row.created_at,
+    display_on_calendar_id: (row.display_on_calendar_id as string | null | undefined) ?? null,
   };
+}
+
+async function mapUnifiedCalendarToResourceWithAvailabilityWarning(
+  admin: ReturnType<typeof getSupabaseAdminClient>,
+  venueId: string,
+  row: Record<string, unknown>,
+  resourceWeeklyHours: WorkingHours,
+  hostCalendarId: string | null,
+): Promise<Record<string, unknown>> {
+  const base = mapUnifiedCalendarToResource(row);
+  if (!hostCalendarId) return base;
+  const hostWh = await fetchHostCalendarWorkingHours(admin, venueId, hostCalendarId);
+  const w = availabilityWarningIfHostRestrictsResource(resourceWeeklyHours, hostWh);
+  return w ? { ...base, availability_warning: w } : base;
 }
 
 /** GET /api/venue/resources - list resources for the venue. */
@@ -93,31 +252,76 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid request', details: parsed.error.flatten() }, { status: 400 });
     }
 
-    const { data, error } = await admin
-      .from('unified_calendars')
-      .insert({
-        venue_id: staff.venue_id,
-        calendar_type: 'resource',
-        name: parsed.data.name,
-        resource_type: parsed.data.resource_type ?? null,
-        working_hours: parsed.data.availability_hours ?? {},
-        availability_exceptions: parsed.data.availability_exceptions ?? {},
-        slot_interval_minutes: parsed.data.slot_interval_minutes ?? 30,
-        min_booking_minutes: parsed.data.min_booking_minutes ?? 60,
-        max_booking_minutes: parsed.data.max_booking_minutes ?? 120,
-        price_per_slot_pence: parsed.data.price_per_slot_pence ?? null,
-        is_active: parsed.data.is_active ?? true,
-        sort_order: parsed.data.sort_order ?? 0,
-      })
-      .select()
-      .single();
+    const payReq = parsed.data.payment_requirement ?? 'none';
+    const dep = parsed.data.deposit_amount_pence ?? null;
+
+    if (!parsed.data.display_on_calendar_id) {
+      return NextResponse.json(
+        { error: 'Choose a calendar column to show this resource on' },
+        { status: 400 },
+      );
+    }
+    const workingHours = (parsed.data.availability_hours ?? {}) as WorkingHours;
+    const displayCheck = await assertResourceDisplayOnCalendarValid(
+      admin,
+      staff.venue_id,
+      parsed.data.display_on_calendar_id,
+      workingHours,
+    );
+    if (!displayCheck.ok) {
+      return NextResponse.json({ error: displayCheck.message }, { status: 409 });
+    }
+
+    const insertPayload: Record<string, unknown> = {
+      venue_id: staff.venue_id,
+      calendar_type: 'resource',
+      name: parsed.data.name,
+      resource_type: parsed.data.resource_type ?? null,
+      working_hours: parsed.data.availability_hours ?? {},
+      availability_exceptions: parsed.data.availability_exceptions ?? {},
+      slot_interval_minutes: parsed.data.slot_interval_minutes ?? 30,
+      min_booking_minutes: parsed.data.min_booking_minutes ?? 60,
+      max_booking_minutes: parsed.data.max_booking_minutes ?? 120,
+      price_per_slot_pence: parsed.data.price_per_slot_pence ?? null,
+      payment_requirement: payReq,
+      deposit_amount_pence: payReq === 'deposit' ? dep : null,
+      is_active: parsed.data.is_active ?? true,
+      sort_order: parsed.data.sort_order ?? 0,
+      display_on_calendar_id: parsed.data.display_on_calendar_id,
+    };
+
+    const MAX_SCHEMA_RETRY = 6;
+    let data: Record<string, unknown> | null = null;
+    let error: { message: string } | null = null;
+    for (let attempt = 0; attempt < MAX_SCHEMA_RETRY; attempt++) {
+      const res = await admin.from('unified_calendars').insert(insertPayload).select().single();
+      data = (res.data as Record<string, unknown> | null) ?? null;
+      error = res.error;
+      if (!error) break;
+      const col = parseMissingUnifiedCalendarsColumn(error.message ?? '');
+      if (!col || !OPTIONAL_UNIFIED_CALENDAR_MIGRATION_COLUMNS.has(col)) break;
+      console.warn(
+        `POST /api/venue/resources: omitting migration column(s) after "${col}" not in schema. Apply 20260503120000_unified_calendars_resource_payment.sql and 20260504120000_resource_display_on_calendar.sql`,
+      );
+      stripOptionalMigrationColumn(insertPayload, col);
+    }
 
     if (error) {
       console.error('POST /api/venue/resources failed:', error);
-      return NextResponse.json({ error: 'Failed to create resource' }, { status: 500 });
+      return NextResponse.json(
+        { error: 'Failed to create resource', details: error.message },
+        { status: 500 },
+      );
     }
 
-    return NextResponse.json(mapUnifiedCalendarToResource(data as Record<string, unknown>), { status: 201 });
+    const payload = await mapUnifiedCalendarToResourceWithAvailabilityWarning(
+      admin,
+      staff.venue_id,
+      data as Record<string, unknown>,
+      workingHours,
+      parsed.data.display_on_calendar_id,
+    );
+    return NextResponse.json(payload, { status: 201 });
   } catch (err) {
     console.error('POST /api/venue/resources failed:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
@@ -140,9 +344,41 @@ export async function PATCH(request: NextRequest) {
     const { id, ...rest } = body;
     if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 });
 
-    const parsed = resourceSchema.partial().safeParse(rest);
+    const parsed = resourcePatchSchema.safeParse(rest);
     if (!parsed.success) {
       return NextResponse.json({ error: 'Invalid request', details: parsed.error.flatten() }, { status: 400 });
+    }
+
+    const { data: existing, error: exErr } = await admin
+      .from('unified_calendars')
+      .select('*')
+      .eq('id', id)
+      .eq('venue_id', staff.venue_id)
+      .eq('calendar_type', 'resource')
+      .maybeSingle();
+
+    if (exErr || !existing) {
+      return NextResponse.json({ error: 'Resource not found' }, { status: 404 });
+    }
+
+    const ex = existing as Record<string, unknown>;
+    const mergedPaymentRequirement = (parsed.data.payment_requirement ?? ex.payment_requirement) as string;
+    const mergedDeposit =
+      parsed.data.deposit_amount_pence !== undefined ? parsed.data.deposit_amount_pence : (ex.deposit_amount_pence as number | null);
+    const mergedPrice =
+      parsed.data.price_per_slot_pence !== undefined ? parsed.data.price_per_slot_pence : (ex.price_per_slot_pence as number | null);
+    const mergedSlot = parsed.data.slot_interval_minutes ?? (ex.slot_interval_minutes as number) ?? 30;
+    const mergedMax = parsed.data.max_booking_minutes ?? (ex.max_booking_minutes as number) ?? 120;
+
+    const paymentErr = validateResourcePaymentFields({
+      payment_requirement: mergedPaymentRequirement,
+      deposit_amount_pence: mergedDeposit,
+      price_per_slot_pence: mergedPrice,
+      slot_interval_minutes: mergedSlot,
+      max_booking_minutes: mergedMax,
+    });
+    if (paymentErr) {
+      return NextResponse.json({ error: paymentErr }, { status: 400 });
     }
 
     const updatePayload: Record<string, unknown> = {};
@@ -154,24 +390,90 @@ export async function PATCH(request: NextRequest) {
     if (parsed.data.min_booking_minutes !== undefined) updatePayload.min_booking_minutes = parsed.data.min_booking_minutes;
     if (parsed.data.max_booking_minutes !== undefined) updatePayload.max_booking_minutes = parsed.data.max_booking_minutes;
     if (parsed.data.price_per_slot_pence !== undefined) updatePayload.price_per_slot_pence = parsed.data.price_per_slot_pence;
+    if (parsed.data.payment_requirement !== undefined) updatePayload.payment_requirement = parsed.data.payment_requirement;
+    if (parsed.data.deposit_amount_pence !== undefined) updatePayload.deposit_amount_pence = parsed.data.deposit_amount_pence;
     if (parsed.data.is_active !== undefined) updatePayload.is_active = parsed.data.is_active;
     if (parsed.data.sort_order !== undefined) updatePayload.sort_order = parsed.data.sort_order;
 
-    const { data, error } = await admin
-      .from('unified_calendars')
-      .update(updatePayload)
-      .eq('id', id)
-      .eq('venue_id', staff.venue_id)
-      .eq('calendar_type', 'resource')
-      .select()
-      .single();
+    if (parsed.data.payment_requirement === 'full_payment' || parsed.data.payment_requirement === 'none') {
+      updatePayload.deposit_amount_pence = null;
+    }
+
+    const mergedDisplayOn =
+      parsed.data.display_on_calendar_id !== undefined
+        ? parsed.data.display_on_calendar_id
+        : (ex.display_on_calendar_id as string | null);
+    const mergedHours = (parsed.data.availability_hours ?? ex.working_hours ?? {}) as WorkingHours;
+    if (mergedDisplayOn) {
+      const displayCheck = await assertResourceDisplayOnCalendarValid(
+        admin,
+        staff.venue_id,
+        mergedDisplayOn,
+        mergedHours,
+        id as string,
+      );
+      if (!displayCheck.ok) {
+        return NextResponse.json({ error: displayCheck.message }, { status: 409 });
+      }
+    }
+    if (parsed.data.display_on_calendar_id !== undefined) {
+      updatePayload.display_on_calendar_id = parsed.data.display_on_calendar_id;
+    }
+
+    const patchPayload: Record<string, unknown> = { ...updatePayload };
+    const MAX_PATCH_RETRY = 6;
+    let data: Record<string, unknown> | null = null;
+    let error: { message: string } | null = null;
+    for (let attempt = 0; attempt < MAX_PATCH_RETRY; attempt++) {
+      if (Object.keys(patchPayload).length === 0) {
+        const payload = await mapUnifiedCalendarToResourceWithAvailabilityWarning(
+          admin,
+          staff.venue_id,
+          existing as Record<string, unknown>,
+          mergedHours,
+          mergedDisplayOn,
+        );
+        return NextResponse.json(payload);
+      }
+      const res = await admin
+        .from('unified_calendars')
+        .update(patchPayload)
+        .eq('id', id)
+        .eq('venue_id', staff.venue_id)
+        .eq('calendar_type', 'resource')
+        .select()
+        .single();
+      data = (res.data as Record<string, unknown> | null) ?? null;
+      error = res.error;
+      if (!error) break;
+      const col = parseMissingUnifiedCalendarsColumn(error.message ?? '');
+      if (!col || !OPTIONAL_UNIFIED_CALENDAR_MIGRATION_COLUMNS.has(col)) break;
+      console.warn(
+        `PATCH /api/venue/resources: omitting migration column(s) after "${col}" not in schema. Apply 20260503120000_unified_calendars_resource_payment.sql and 20260504120000_resource_display_on_calendar.sql`,
+      );
+      stripOptionalMigrationColumn(patchPayload, col);
+    }
 
     if (error) {
       console.error('PATCH /api/venue/resources failed:', error);
+      return NextResponse.json(
+        { error: 'Failed to update resource', details: error.message },
+        { status: 500 },
+      );
+    }
+
+    if (!data) {
       return NextResponse.json({ error: 'Failed to update resource' }, { status: 500 });
     }
 
-    return NextResponse.json(mapUnifiedCalendarToResource(data as Record<string, unknown>));
+    const payload = await mapUnifiedCalendarToResourceWithAvailabilityWarning(
+      admin,
+      staff.venue_id,
+      data as Record<string, unknown>,
+      (data.working_hours ?? {}) as WorkingHours,
+      (data.display_on_calendar_id as string | null | undefined) ?? null,
+    );
+    return NextResponse.json(payload);
   } catch (err) {
     console.error('PATCH /api/venue/resources failed:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
@@ -204,7 +506,7 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to delete resource' }, { status: 500 });
     }
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ ok: true });
   } catch (err) {
     console.error('DELETE /api/venue/resources failed:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

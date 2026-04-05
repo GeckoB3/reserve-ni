@@ -1,7 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import type { OpeningHours } from '@/types/availability';
+import type { PractitionerService } from '@/types/booking-models';
 import { getDayOfWeek } from '@/lib/availability/engine';
 import { computeAppointmentAvailability, type AppointmentEngineInput } from './appointment-engine';
+
+/** Explicit link required for p1 to offer s1 (no “implicit all services”). */
+const PS_P1_S1: PractitionerService[] = [
+  { id: 'ps1', practitioner_id: 'p1', service_id: 's1', custom_duration_minutes: null, custom_price_pence: null },
+];
 
 function todayYmd(): string {
   const n = new Date();
@@ -42,7 +48,7 @@ describe('computeAppointmentAvailability', () => {
           is_active: true,
         } as import('@/types/booking-models').AppointmentService,
       ],
-      practitionerServices: [],
+      practitionerServices: PS_P1_S1,
       existingBookings: [],
     };
     const r = computeAppointmentAvailability(input);
@@ -77,7 +83,7 @@ describe('computeAppointmentAvailability', () => {
           is_active: true,
         } as import('@/types/booking-models').AppointmentService,
       ],
-      practitionerServices: [],
+      practitionerServices: PS_P1_S1,
       existingBookings: [],
       minNoticeHours: 2,
     };
@@ -111,7 +117,7 @@ describe('computeAppointmentAvailability', () => {
           is_active: true,
         } as import('@/types/booking-models').AppointmentService,
       ],
-      practitionerServices: [],
+      practitionerServices: PS_P1_S1,
       existingBookings: [],
       allowSameDayBooking: false,
     };
@@ -144,7 +150,7 @@ describe('computeAppointmentAvailability', () => {
           is_active: true,
         } as import('@/types/booking-models').AppointmentService,
       ],
-      practitionerServices: [],
+      practitionerServices: PS_P1_S1,
       existingBookings: [],
     };
     // Simulate 6pm local: 16:30 is "past"
@@ -178,7 +184,7 @@ describe('computeAppointmentAvailability', () => {
           is_active: true,
         } as import('@/types/booking-models').AppointmentService,
       ],
-      practitionerServices: [],
+      practitionerServices: PS_P1_S1,
       existingBookings: [],
       skipPastSlotFilter: true,
     };
@@ -212,7 +218,7 @@ describe('computeAppointmentAvailability', () => {
           is_active: true,
         } as import('@/types/booking-models').AppointmentService,
       ],
-      practitionerServices: [],
+      practitionerServices: PS_P1_S1,
       existingBookings: [],
       practitionerBlockedRanges: [{ practitioner_id: 'p1', start: 15 * 60, end: 17 * 60 }],
     };
@@ -294,7 +300,7 @@ describe('computeAppointmentAvailability', () => {
           is_active: true,
         } as import('@/types/booking-models').AppointmentService,
       ],
-      practitionerServices: [],
+      practitionerServices: PS_P1_S1,
       existingBookings: [],
     };
     const r = computeAppointmentAvailability(input);

@@ -13,6 +13,8 @@ import {
 import { defaultPhoneCountryForVenueCurrency } from '@/lib/phone/default-country';
 import { minutesToTime, timeToMinutes } from '@/lib/availability';
 import { MultiServiceSummaryCard } from './MultiServiceSummaryCard';
+import { resolveAppointmentServiceOnlineCharge } from '@/lib/appointments/appointment-service-payment';
+import type { ClassPaymentRequirement } from '@/types/booking-models';
 
 /** Services + staff from catalog (no date / slots). */
 interface CatalogPractitioner {
@@ -25,6 +27,7 @@ interface CatalogPractitioner {
     buffer_minutes?: number;
     price_pence: number | null;
     deposit_pence?: number | null;
+    payment_requirement?: ClassPaymentRequirement;
   }>;
 }
 
@@ -45,6 +48,7 @@ interface PersonSelection {
   bufferMinutes: number;
   pricePence: number | null;
   depositPence: number;
+  onlineChargeLabel?: 'deposit' | 'full_payment';
 }
 
 /** Consecutive services for one practitioner (multi-service booking). */
@@ -58,6 +62,7 @@ export interface MultiServiceSegment {
   bufferMinutes: number;
   pricePence: number | null;
   depositPence: number;
+  onlineChargeLabel?: 'deposit' | 'full_payment';
 }
 
 function recomputeMultiServiceChain(segments: MultiServiceSegment[], firstStart: string): MultiServiceSegment[] {
@@ -332,6 +337,19 @@ export function AppointmentBookingFlow({
   }, [catalogStaff, groupServiceId]);
 
   const sym = venue.currency === 'EUR' ? '€' : '£';
+
+  function onlineChargeFromCatalogOffer(offer: {
+    price_pence: number | null;
+    deposit_pence?: number | null;
+    payment_requirement?: ClassPaymentRequirement;
+  }) {
+    return resolveAppointmentServiceOnlineCharge({
+      price_pence: offer.price_pence,
+      deposit_pence: offer.deposit_pence ?? null,
+      payment_requirement: offer.payment_requirement,
+    });
+  }
+
   function formatPrice(pence: number | null): string {
     if (pence == null) return 'POA';
     return `${sym}${(pence / 100).toFixed(2)}`;
@@ -413,6 +431,7 @@ export function AppointmentBookingFlow({
         return;
       }
       const firstStart = multiServiceSegments[0]!.startTime;
+      const nextOnline = onlineChargeFromCatalogOffer(offer);
       const nextSeg: MultiServiceSegment = {
         serviceId: offer.id,
         serviceName: offer.name,
@@ -422,7 +441,8 @@ export function AppointmentBookingFlow({
         durationMinutes: offer.duration_minutes,
         bufferMinutes: offer.buffer_minutes ?? 0,
         pricePence: offer.price_pence,
-        depositPence: offer.deposit_pence ?? 0,
+        depositPence: nextOnline?.amountPence ?? 0,
+        onlineChargeLabel: nextOnline?.chargeLabel,
       };
       const chain = recomputeMultiServiceChain([...multiServiceSegments, nextSeg], firstStart);
       const err = await validateMultiServiceChain(chain);
@@ -575,6 +595,12 @@ export function AppointmentBookingFlow({
     if (!svc || !prac) return;
 
     const svcOffer = prac.services.find((s) => s.id === groupServiceId);
+    const offerForCharge = svcOffer ?? {
+      price_pence: svc.price_pence,
+      deposit_pence: svc.deposit_pence,
+      payment_requirement: svc.payment_requirement,
+    };
+    const gOnline = onlineChargeFromCatalogOffer(offerForCharge);
     setGroupPeople((prev) => [
       ...prev,
       {
@@ -588,7 +614,8 @@ export function AppointmentBookingFlow({
         durationMinutes: svcOffer?.duration_minutes ?? svc.duration_minutes,
         bufferMinutes: 0,
         pricePence: svcOffer?.price_pence ?? svc.price_pence,
-        depositPence: svcOffer?.deposit_pence ?? svc.deposit_pence ?? 0,
+        depositPence: gOnline?.amountPence ?? 0,
+        onlineChargeLabel: gOnline?.chargeLabel,
       },
     ]);
     setGroupServiceId(null);
@@ -964,6 +991,7 @@ export function AppointmentBookingFlow({
           ) : (
             renderTimeSlots(groupedSlots, (time) => {
               const offer = selectedPrac?.services.find((s) => s.id === selectedServiceId);
+              const firstOnline = offer ? onlineChargeFromCatalogOffer(offer) : null;
               setSelectedTime(time);
               setMultiServiceSegments([
                 {
@@ -975,7 +1003,8 @@ export function AppointmentBookingFlow({
                   durationMinutes: offer?.duration_minutes ?? 30,
                   bufferMinutes: offer?.buffer_minutes ?? 0,
                   pricePence: offer?.price_pence ?? null,
-                  depositPence: offer?.deposit_pence ?? 0,
+                  depositPence: firstOnline?.amountPence ?? 0,
+                  onlineChargeLabel: firstOnline?.chargeLabel,
                 },
               ]);
               setAddingExtraService(false);
@@ -1084,6 +1113,7 @@ export function AppointmentBookingFlow({
                   durationMinutes: s.durationMinutes,
                   pricePence: s.pricePence,
                   depositPence: s.depositPence,
+                  chargeKind: s.onlineChargeLabel,
                 }))}
                 formatDateHuman={formatDateHuman}
                 bookingDate={date}
@@ -1111,12 +1141,20 @@ export function AppointmentBookingFlow({
                     <span className="font-semibold text-brand-600">{formatPrice(selectedServiceForPractitioner.price_pence)}</span>
                   </div>
                 )}
-                {(selectedServiceForPractitioner?.deposit_pence ?? 0) > 0 && (
-                  <div className="mt-1.5 flex justify-between border-t border-slate-100 pt-1.5">
-                    <span className="font-medium text-slate-700">Deposit</span>
-                    <span className="font-semibold text-amber-700">{formatPrice(selectedServiceForPractitioner?.deposit_pence ?? null)}</span>
-                  </div>
-                )}
+                {(() => {
+                  const o = selectedServiceForPractitioner
+                    ? onlineChargeFromCatalogOffer(selectedServiceForPractitioner)
+                    : null;
+                  if (!o || o.amountPence <= 0) return null;
+                  return (
+                    <div className="mt-1.5 flex justify-between border-t border-slate-100 pt-1.5">
+                      <span className="font-medium text-slate-700">
+                        {o.chargeLabel === 'full_payment' ? 'Pay now' : 'Deposit'}
+                      </span>
+                      <span className="font-semibold text-amber-700">{formatPrice(o.amountPence)}</span>
+                    </div>
+                  );
+                })()}
               </div>
             </div>
           )}
@@ -1132,7 +1170,19 @@ export function AppointmentBookingFlow({
             appointmentDepositPence={
               multiServiceSegments && multiServiceSegments.length > 1
                 ? multiServiceSegments.reduce((sum, s) => sum + (s.depositPence ?? 0), 0)
-                : selectedServiceForPractitioner?.deposit_pence ?? 0
+                : selectedServiceForPractitioner
+                  ? onlineChargeFromCatalogOffer(selectedServiceForPractitioner)?.amountPence ?? 0
+                  : 0
+            }
+            appointmentChargeLabel={
+              multiServiceSegments && multiServiceSegments.length > 1
+                ? multiServiceSegments.every((s) => s.onlineChargeLabel === 'full_payment')
+                  ? 'full_payment'
+                  : 'deposit'
+                : onlineChargeFromCatalogOffer(selectedServiceForPractitioner ?? { price_pence: null, deposit_pence: null })
+                      ?.chargeLabel === 'full_payment'
+                  ? 'full_payment'
+                  : 'deposit'
             }
             currencySymbol={sym}
             refundNoticeHours={refundNoticeHours}
@@ -1151,6 +1201,16 @@ export function AppointmentBookingFlow({
           onBack={() => setStep('details')}
           cancellationPolicy={singleAppointmentPaymentPolicy}
           summaryMode="total"
+          chargeKind={
+            multiServiceSegments && multiServiceSegments.length > 1
+              ? multiServiceSegments.every((s) => s.onlineChargeLabel === 'full_payment')
+                ? 'full_payment'
+                : 'deposit'
+              : onlineChargeFromCatalogOffer(selectedServiceForPractitioner ?? { price_pence: null, deposit_pence: null })
+                    ?.chargeLabel === 'full_payment'
+                ? 'full_payment'
+                : 'deposit'
+          }
         />
       )}
 
@@ -1474,6 +1534,11 @@ export function AppointmentBookingFlow({
             onBack={() => setStep('group_review')}
             variant="appointment"
             appointmentDepositPence={totalGroupDepositPence}
+            appointmentChargeLabel={
+              groupPeople.length > 0 && groupPeople.every((p) => p.onlineChargeLabel === 'full_payment')
+                ? 'full_payment'
+                : 'deposit'
+            }
             currencySymbol={sym}
             refundNoticeHours={refundNoticeHours}
             multiAppointmentSlots={groupPeople.map((p) => ({ date: p.date, time: p.time }))}
@@ -1493,6 +1558,11 @@ export function AppointmentBookingFlow({
           onBack={() => setStep('group_details')}
           cancellationPolicy={groupAppointmentPaymentPolicy}
           summaryMode="total"
+          chargeKind={
+            groupPeople.length > 0 && groupPeople.every((p) => p.onlineChargeLabel === 'full_payment')
+              ? 'full_payment'
+              : 'deposit'
+          }
         />
       )}
 

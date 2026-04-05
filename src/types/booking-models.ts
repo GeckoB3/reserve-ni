@@ -50,6 +50,9 @@ export type WorkingHours = Record<string, TimeRange[]>;
 // Model B: Practitioner appointment
 // ---------------------------------------------------------------------------
 
+/** Stored as Postgres enum `class_payment_requirement` (shared with classes / resources). */
+export type ClassPaymentRequirement = 'none' | 'deposit' | 'full_payment';
+
 export interface Practitioner {
   id: string;
   venue_id: string;
@@ -101,6 +104,8 @@ export interface AppointmentService {
   /** Turnover after service (resource / unified); included in slot occupancy in appointment engine. */
   processing_time_minutes?: number;
   price_pence: number | null;
+  /** How much to charge online at booking (reuses class_payment_requirement enum). */
+  payment_requirement?: ClassPaymentRequirement;
   deposit_pence: number | null;
   colour: string;
   is_active: boolean;
@@ -162,9 +167,6 @@ export interface EventTicketType {
 // ---------------------------------------------------------------------------
 // Model D: Class / group session
 // ---------------------------------------------------------------------------
-
-/** Stored as Postgres enum `class_payment_requirement`. */
-export type ClassPaymentRequirement = 'none' | 'deposit' | 'full_payment';
 
 export interface ClassType {
   id: string;
@@ -232,12 +234,29 @@ export interface VenueResource {
   max_booking_minutes: number;
   slot_interval_minutes: number;
   price_per_slot_pence: number | null;
+  /** Same enum as class types; only used when this row is calendar_type = resource. */
+  payment_requirement: ClassPaymentRequirement;
+  /** Total deposit (pence) for one booking when payment_requirement = deposit. */
+  deposit_amount_pence: number | null;
   availability_hours: WorkingHours;
   /** Optional per-date closed days or replacement `periods` for that date only. */
   availability_exceptions?: ResourceAvailabilityExceptions;
   is_active: boolean;
   sort_order: number;
   created_at: string;
+  /**
+   * Host unified calendar column (non-resource) where this resource is displayed.
+   * When set, bookable slots must fall within both resource availability and this calendar's hours.
+   */
+  display_on_calendar_id?: string | null;
+  /** Loaded server-side when computing availability; mirrors the host `unified_calendars` row. */
+  host_calendar?: {
+    id: string;
+    working_hours: WorkingHours;
+    days_off: string[];
+    break_times: Array<{ start: string; end: string }>;
+    break_times_by_day: WorkingHours | null;
+  } | null;
 }
 
 // ---------------------------------------------------------------------------

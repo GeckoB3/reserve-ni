@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { mergeAppointmentServiceWithPractitionerLink } from '@/lib/appointments/merge-service-with-overrides';
-import type { AppointmentService, PractitionerService } from '@/types/booking-models';
+import type { AppointmentService, ClassPaymentRequirement, PractitionerService } from '@/types/booking-models';
 import { StaffServiceOverrideModal } from './StaffServiceOverrideModal';
 
 interface Service {
@@ -13,6 +13,7 @@ interface Service {
   buffer_minutes: number;
   price_pence: number | null;
   deposit_pence: number | null;
+  payment_requirement?: ClassPaymentRequirement;
   colour: string;
   is_active: boolean;
   sort_order: number;
@@ -28,6 +29,9 @@ interface Service {
 interface Practitioner {
   id: string;
   name: string;
+  /** When false, the calendar is hidden from allocation (still listed for resolving names on existing links). */
+  is_active?: boolean;
+  calendar_type?: string;
 }
 
 interface PractitionerServiceLink {
@@ -49,7 +53,7 @@ interface ServiceFormData {
   buffer_minutes: number;
   price: string;
   deposit: string;
-  require_deposit: boolean;
+  payment_requirement: ClassPaymentRequirement;
   colour: string;
   is_active: boolean;
   practitioner_ids: string[];
@@ -86,7 +90,7 @@ const DEFAULT_FORM: ServiceFormData = {
   buffer_minutes: 0,
   price: '',
   deposit: '',
-  require_deposit: false,
+  payment_requirement: 'none',
   colour: '#3B82F6',
   is_active: true,
   practitioner_ids: [],
@@ -115,11 +119,12 @@ function poundsToPence(pounds: string): number | null {
 
 export function AppointmentServicesView({
   isAdmin,
-  linkedPractitionerId = null,
+  linkedPractitionerIds = [],
   currency = 'GBP',
 }: {
   isAdmin: boolean;
-  linkedPractitionerId?: string | null;
+  /** Bookable calendars (`unified_calendars.id`) this staff user manages. */
+  linkedPractitionerIds?: string[];
   currency?: string;
 }) {
   const sym = currency === 'EUR' ? '€' : '£';
@@ -143,6 +148,7 @@ export function AppointmentServicesView({
   const [bulkDepositAmount, setBulkDepositAmount] = useState('');
   const [bulkSaving, setBulkSaving] = useState(false);
   const [overrideService, setOverrideService] = useState<Service | null>(null);
+  const [overrideCalendarId, setOverrideCalendarId] = useState<string | null>(null);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
@@ -172,12 +178,30 @@ export function AppointmentServicesView({
     fetchAll();
   }, [fetchAll]);
 
-  /** Admins manage definitions for everyone. Staff see the full venue list read-only; they edit what they offer under Availability. */
+  /** Team calendars that can be allocated services (active, non-resource rows). */
+  const allocatableCalendars = useMemo(
+    () =>
+      practitioners.filter(
+        (p) => p.is_active !== false && p.calendar_type !== 'resource',
+      ),
+    [practitioners],
+  );
+
+  /** IDs still on the service but not in the allocatable list (inactive calendar, etc.). */
+  const lingeringCalendarLinks = useMemo(
+    () =>
+      form.practitioner_ids.filter(
+        (id) => !allocatableCalendars.some((c) => c.id === id),
+      ),
+    [form.practitioner_ids, allocatableCalendars],
+  );
+
+  /** Admins manage definitions for everyone. Non-admins see the full venue list read-only; they edit what they offer under Availability. */
   const visibleServices = useMemo(() => {
     if (isAdmin) return services;
-    if (!linkedPractitionerId) return [];
+    if (linkedPractitionerIds.length === 0) return [];
     return services;
-  }, [isAdmin, services, linkedPractitionerId]);
+  }, [isAdmin, services, linkedPractitionerIds.length]);
 
   function staffMayCustomizeAny(svc: Service): boolean {
     return Boolean(
@@ -192,15 +216,19 @@ export function AppointmentServicesView({
   }
 
   function staffOffersService(serviceId: string): boolean {
-    if (!linkedPractitionerId) return false;
-    const mine = links.filter((l) => l.practitioner_id === linkedPractitionerId);
-    if (mine.length === 0) return true;
-    return mine.some((l) => l.service_id === serviceId);
+    if (linkedPractitionerIds.length === 0) return false;
+    for (const pid of linkedPractitionerIds) {
+      const mine = links.filter((l) => l.practitioner_id === pid);
+      if (mine.length === 0) return true;
+      if (mine.some((l) => l.service_id === serviceId)) return true;
+    }
+    return false;
   }
 
-  function myLinkForService(serviceId: string): PractitionerService | null {
-    if (!linkedPractitionerId) return null;
-    const row = links.find((l) => l.practitioner_id === linkedPractitionerId && l.service_id === serviceId);
+  function myLinkForService(serviceId: string, calendarPractitionerId?: string): PractitionerService | null {
+    const pid = calendarPractitionerId ?? linkedPractitionerIds[0];
+    if (!pid) return null;
+    const row = links.find((l) => l.practitioner_id === pid && l.service_id === serviceId);
     if (!row) return null;
     return {
       id: '',
@@ -232,7 +260,9 @@ export function AppointmentServicesView({
       buffer_minutes: svc.buffer_minutes,
       price: penceToPounds(svc.price_pence),
       deposit: penceToPounds(svc.deposit_pence),
-      require_deposit: svc.deposit_pence != null && svc.deposit_pence > 0,
+      payment_requirement:
+        svc.payment_requirement ??
+        (svc.deposit_pence != null && svc.deposit_pence > 0 ? 'deposit' : 'none'),
       colour: svc.colour || '#3B82F6',
       is_active: svc.is_active,
       practitioner_ids: svcLinks,
@@ -260,11 +290,26 @@ export function AppointmentServicesView({
       setError('Duration must be at least 5 minutes');
       return;
     }
+    if (form.payment_requirement === 'deposit') {
+      const d = poundsToPence(form.deposit);
+      if (d == null || d <= 0) {
+        setError('Enter a valid deposit amount');
+        return;
+      }
+    }
+    if (form.payment_requirement === 'full_payment') {
+      const p = poundsToPence(form.price);
+      if (p == null || p <= 0) {
+        setError('Set a price when charging full payment online');
+        return;
+      }
+    }
 
     setSaving(true);
     setError(null);
     try {
-      const depositPence = form.require_deposit ? (poundsToPence(form.deposit) ?? 0) : 0;
+      const depositPence =
+        form.payment_requirement === 'deposit' ? (poundsToPence(form.deposit) ?? 0) : 0;
       const payload = {
         ...(editingId ? { id: editingId } : {}),
         name: form.name.trim(),
@@ -272,6 +317,7 @@ export function AppointmentServicesView({
         duration_minutes: form.duration_minutes,
         buffer_minutes: form.buffer_minutes,
         price_pence: poundsToPence(form.price) ?? undefined,
+        payment_requirement: form.payment_requirement,
         deposit_pence: depositPence,
         colour: form.colour,
         is_active: form.is_active,
@@ -323,12 +369,19 @@ export function AppointmentServicesView({
     }
   }
 
-  function togglePractitioner(pid: string) {
+  function toggleCalendarLink(calendarId: string) {
     setForm((prev) => ({
       ...prev,
-      practitioner_ids: prev.practitioner_ids.includes(pid)
-        ? prev.practitioner_ids.filter((p) => p !== pid)
-        : [...prev.practitioner_ids, pid],
+      practitioner_ids: prev.practitioner_ids.includes(calendarId)
+        ? prev.practitioner_ids.filter((p) => p !== calendarId)
+        : [...prev.practitioner_ids, calendarId],
+    }));
+  }
+
+  function removeCalendarLink(calendarId: string) {
+    setForm((prev) => ({
+      ...prev,
+      practitioner_ids: prev.practitioner_ids.filter((p) => p !== calendarId),
     }));
   }
 
@@ -346,7 +399,11 @@ export function AppointmentServicesView({
         await fetch('/api/venue/appointment-services', {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id: svc.id, deposit_pence: pence }),
+          body: JSON.stringify({
+            id: svc.id,
+            payment_requirement: pence > 0 ? 'deposit' : 'none',
+            deposit_pence: pence,
+          }),
         });
       }
       setShowBulkDeposit(false);
@@ -375,9 +432,11 @@ export function AppointmentServicesView({
           <h1 className="text-2xl font-semibold text-slate-900">Services</h1>
           {!isAdmin && (
             <p className="mt-1 text-sm text-slate-500">
-              Venue-wide service details and who offers each service are shown for reference. Only an admin can add,
-              edit, or remove services. Use <span className="font-medium text-slate-700">Availability → Services</span> to
-              choose which services you offer. When your admin allows it, use <span className="font-medium text-slate-700">Edit your settings</span> on a service to customise your own price, duration, and other fields for your calendar only.
+              Venue-wide service details and which calendars offer each service are shown for reference. Only an admin can
+              add, edit, or remove services. Use <span className="font-medium text-slate-700">Availability → Services</span>{' '}
+              to choose which services your calendar offers. When your admin allows it, use{' '}
+              <span className="font-medium text-slate-700">Edit your settings</span> on a service to customise your own
+              price, duration, and other fields for your calendar only.
             </p>
           )}
         </div>
@@ -409,7 +468,8 @@ export function AppointmentServicesView({
           <div role="dialog" aria-modal="true" className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl">
             <h2 className="text-lg font-semibold text-slate-900 mb-4">Set deposit for all services</h2>
             <p className="text-sm text-slate-500 mb-4">
-              This will update the deposit amount for all active services. Set to {sym}0 to remove deposits.
+              This sets a <span className="font-medium text-slate-700">custom deposit</span> amount for every active
+              service. Use {sym}0 to switch services to no online payment.
             </p>
             {error && (
               <div className="mb-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
@@ -473,20 +533,22 @@ export function AppointmentServicesView({
             </button>
           )}
         </div>
-      ) : !isAdmin && !linkedPractitionerId ? (
+      ) : !isAdmin && linkedPractitionerIds.length === 0 ? (
         <div className="rounded-xl border border-amber-200 bg-amber-50/80 p-8 text-center">
           <p className="text-sm text-amber-950">
-            Your account is not linked to a calendar profile yet. Ask an admin to connect your staff login to your
-            practitioner row in Availability → Team, then return here.
+            Your account is not linked to a calendar yet. Ask an admin to connect your user account to a calendar in
+            Availability → Team, then return here.
           </p>
         </div>
       ) : (
         <div className="space-y-3">
           {visibleServices.map((svc) => {
-            const linkedPractitioners = practitionersForService(svc.id);
+            const linkedCalendars = practitionersForService(svc.id);
             const display = mergeAppointmentServiceWithPractitionerLink(
               svc as unknown as AppointmentService,
-              !isAdmin && linkedPractitionerId ? myLinkForService(svc.id) ?? undefined : undefined,
+              !isAdmin && linkedPractitionerIds.length > 0
+                ? myLinkForService(svc.id) ?? undefined
+                : undefined,
             );
             return (
               <div
@@ -519,25 +581,42 @@ export function AppointmentServicesView({
                           <span className="text-slate-400">+{display.buffer_minutes}min buffer</span>
                         )}
                         <span className="font-medium">{formatPrice(display.price_pence)}</span>
-                        {display.deposit_pence != null && display.deposit_pence > 0 && (
-                          <span className="text-slate-400">
-                            {formatPrice(display.deposit_pence)} deposit
-                          </span>
-                        )}
+                        {(() => {
+                          const pr =
+                            display.payment_requirement ??
+                            (display.deposit_pence != null && display.deposit_pence > 0 ? 'deposit' : 'none');
+                          if (pr === 'full_payment') {
+                            return <span className="font-medium text-emerald-700">Full payment online</span>;
+                          }
+                          if (pr === 'deposit' && display.deposit_pence != null && display.deposit_pence > 0) {
+                            return (
+                              <span className="text-slate-400">{formatPrice(display.deposit_pence)} deposit</span>
+                            );
+                          }
+                          return <span className="text-slate-400">No online payment</span>;
+                        })()}
                       </div>
-                      {!isAdmin && linkedPractitionerId && staffOffersService(svc.id) && staffMayCustomizeAny(svc) && (
+                      {!isAdmin &&
+                        linkedPractitionerIds.length > 0 &&
+                        staffOffersService(svc.id) &&
+                        staffMayCustomizeAny(svc) && (
                         <button
                           type="button"
-                          onClick={() => setOverrideService(svc)}
+                          onClick={() => {
+                            setOverrideCalendarId(linkedPractitionerIds[0] ?? null);
+                            setOverrideService(svc);
+                          }}
                           className="mt-3 rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white shadow-sm hover:bg-blue-700"
                         >
                           Edit your settings
                         </button>
                       )}
-                      {linkedPractitioners.length > 0 && (
+                      {linkedCalendars.length > 0 && (
                         <div className="mt-1.5 flex flex-wrap gap-1">
-                          {linkedPractitioners.map((lp) => {
-                            const isSelf = Boolean(!isAdmin && linkedPractitionerId && lp.id === linkedPractitionerId);
+                          {linkedCalendars.map((lp) => {
+                            const isSelf = Boolean(
+                              !isAdmin && linkedPractitionerIds.includes(lp.id),
+                            );
                             const chipClass = isAdmin
                               ? 'inline-block rounded-full bg-blue-50 px-2 py-0.5 text-xs text-blue-700'
                               : isSelf
@@ -546,9 +625,9 @@ export function AppointmentServicesView({
                             return (
                               <span key={lp.id} className={chipClass}>
                                 {lp.name}
-                                {!isAdmin && linkedPractitionerId && (
+                                {!isAdmin && linkedPractitionerIds.length > 0 && (
                                   <span className="ml-1 font-normal text-slate-500">
-                                    {lp.id === linkedPractitionerId ? '(you)' : '(view only)'}
+                                    {linkedPractitionerIds.includes(lp.id) ? '(your calendar)' : '(view only)'}
                                   </span>
                                 )}
                               </span>
@@ -687,25 +766,42 @@ export function AppointmentServicesView({
                 </div>
               </div>
 
-              {/* Deposit toggle + amount */}
+              {/* Online payment at booking */}
               <div className="rounded-lg border border-slate-200 p-4 space-y-3">
-                <div className="flex items-center gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setForm({ ...form, require_deposit: !form.require_deposit })}
-                    className={`relative h-6 w-11 rounded-full transition-colors ${
-                      form.require_deposit ? 'bg-blue-600' : 'bg-slate-300'
-                    }`}
-                  >
-                    <span
-                      className={`absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${
-                        form.require_deposit ? 'translate-x-5' : 'translate-x-0'
-                      }`}
+                <p className="text-sm font-medium text-slate-800">Online payment when booking</p>
+                <div className="space-y-2">
+                  <label className="flex cursor-pointer items-start gap-2 text-sm text-slate-700">
+                    <input
+                      type="radio"
+                      name="payment_requirement"
+                      className="mt-0.5"
+                      checked={form.payment_requirement === 'none'}
+                      onChange={() => setForm((f) => ({ ...f, payment_requirement: 'none' }))}
                     />
-                  </button>
-                  <span className="text-sm font-medium text-slate-700">Require deposit for this service</span>
+                    <span>No online payment (pay at venue or arrange separately)</span>
+                  </label>
+                  <label className="flex cursor-pointer items-start gap-2 text-sm text-slate-700">
+                    <input
+                      type="radio"
+                      name="payment_requirement"
+                      className="mt-0.5"
+                      checked={form.payment_requirement === 'deposit'}
+                      onChange={() => setForm((f) => ({ ...f, payment_requirement: 'deposit' }))}
+                    />
+                    <span>Custom deposit (fixed amount online)</span>
+                  </label>
+                  <label className="flex cursor-pointer items-start gap-2 text-sm text-slate-700">
+                    <input
+                      type="radio"
+                      name="payment_requirement"
+                      className="mt-0.5"
+                      checked={form.payment_requirement === 'full_payment'}
+                      onChange={() => setForm((f) => ({ ...f, payment_requirement: 'full_payment' }))}
+                    />
+                    <span>Pay full price online at booking</span>
+                  </label>
                 </div>
-                {form.require_deposit && (
+                {form.payment_requirement === 'deposit' && (
                   <div>
                     <label className="mb-1 block text-sm text-slate-600">Deposit amount ({sym})</label>
                     <div className="relative max-w-[200px]">
@@ -720,6 +816,11 @@ export function AppointmentServicesView({
                       />
                     </div>
                   </div>
+                )}
+                {form.payment_requirement === 'full_payment' && (
+                  <p className="text-xs text-slate-500">
+                    The full service price (above) is charged when the guest completes booking online.
+                  </p>
                 )}
               </div>
 
@@ -759,12 +860,12 @@ export function AppointmentServicesView({
                 <span className="text-sm text-slate-700">Active (visible to clients)</span>
               </div>
 
-              {/* Per-staff overrides (Model B) */}
+              {/* Per-calendar overrides (Model B) */}
               <div className="rounded-lg border border-slate-200 bg-slate-50/90 p-4 space-y-3">
-                <p className="text-sm font-medium text-slate-800">Staff can customise (their calendar only)</p>
+                <p className="text-sm font-medium text-slate-800">Optional overrides per calendar</p>
                 <p className="text-xs text-slate-500">
-                  When ticked, linked staff can set their own value for that field; it does not change the venue default
-                  or other team members.
+                  Allow staff users assigned to an individual calendar to adjust the following values for their calendar
+                  only. Leave unticked and all calendars use the value set above.
                 </p>
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                   {(
@@ -796,28 +897,72 @@ export function AppointmentServicesView({
                 </div>
               </div>
 
-              {/* Practitioner linking */}
-              {practitioners.length > 0 && (
+              {/* Calendar allocation */}
+              {(allocatableCalendars.length > 0 ||
+                lingeringCalendarLinks.length > 0 ||
+                practitioners.length === 0) && (
                 <div>
                   <label className="mb-2 block text-sm font-medium text-slate-700">
-                    Team members who offer this service
+                    Calendars that offer this service
                   </label>
-                  <div className="space-y-2">
-                    {practitioners.map((p) => (
-                      <label
-                        key={p.id}
-                        className="flex cursor-pointer items-center gap-3 rounded-lg border border-slate-200 px-3 py-2 hover:bg-slate-50"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={form.practitioner_ids.includes(p.id)}
-                          onChange={() => togglePractitioner(p.id)}
-                          className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                        />
-                        <span className="text-sm text-slate-700">{p.name}</span>
-                      </label>
-                    ))}
-                  </div>
+                  <p className="mb-2 text-xs text-slate-500">
+                    Tick the calendars that should offer this service.
+                  </p>
+                  {practitioners.length === 0 && (
+                    <p className="text-sm text-slate-500">
+                      No calendars found for this venue. Add calendars in Availability → Team.
+                    </p>
+                  )}
+                  {practitioners.length > 0 && lingeringCalendarLinks.length > 0 && (
+                    <div className="mb-3 space-y-2">
+                      {lingeringCalendarLinks.map((id) => {
+                        const row = practitioners.find((pr) => pr.id === id);
+                        return (
+                          <div
+                            key={id}
+                            className="flex min-h-[2.5rem] flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50/90 px-3 py-2"
+                          >
+                            <span className="text-sm text-slate-800">
+                              <span className="font-medium">{row?.name ?? 'Unknown'}</span>
+                              <span className="ml-1.5 text-xs font-normal text-amber-900">
+                                (not available — calendar inactive or not eligible)
+                              </span>
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => removeCalendarLink(id)}
+                              className="shrink-0 text-xs font-medium text-slate-600 underline hover:text-red-700"
+                            >
+                              Remove link
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                  {practitioners.length > 0 &&
+                    (allocatableCalendars.length > 0 ? (
+                      <div className="space-y-2">
+                        {allocatableCalendars.map((p) => (
+                          <label
+                            key={p.id}
+                            className="flex cursor-pointer items-center gap-3 rounded-lg border border-slate-200 px-3 py-2 hover:bg-slate-50"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={form.practitioner_ids.includes(p.id)}
+                              onChange={() => toggleCalendarLink(p.id)}
+                              className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                            />
+                            <span className="text-sm text-slate-700">{p.name}</span>
+                          </label>
+                        ))}
+                      </div>
+                    ) : lingeringCalendarLinks.length === 0 ? (
+                      <p className="text-sm text-slate-500">
+                        No active calendars to assign. Add or reactivate a calendar in Team first.
+                      </p>
+                    ) : null)}
                 </div>
               )}
             </div>
@@ -841,13 +986,25 @@ export function AppointmentServicesView({
         </div>
       )}
 
-      {overrideService && linkedPractitionerId && (
+      {overrideService && linkedPractitionerIds.length > 0 && (
         <StaffServiceOverrideModal
           open={Boolean(overrideService)}
-          onClose={() => setOverrideService(null)}
+          onClose={() => {
+            setOverrideService(null);
+            setOverrideCalendarId(null);
+          }}
           onSaved={() => void fetchAll()}
           service={overrideService}
-          link={myLinkForService(overrideService.id)}
+          link={myLinkForService(
+            overrideService.id,
+            overrideCalendarId ?? linkedPractitionerIds[0],
+          )}
+          calendarChoices={linkedPractitionerIds.map((id) => ({
+            id,
+            name: practitioners.find((p) => p.id === id)?.name ?? 'Calendar',
+          }))}
+          selectedCalendarId={overrideCalendarId ?? linkedPractitionerIds[0]}
+          onSelectedCalendarChange={setOverrideCalendarId}
           currency={currency}
         />
       )}

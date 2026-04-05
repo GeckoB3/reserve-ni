@@ -29,6 +29,8 @@ import { getCancellationNoticeHoursForBooking, parseExtendedBookingRules } from 
 import { applyStaffBookingPaymentAndComms } from '@/lib/booking/staff-booking-payment-comms';
 import { fetchClassInput, computeClassAvailability } from '@/lib/availability/class-session-engine';
 import { fetchResourceInput, computeResourceAvailability } from '@/lib/availability/resource-booking-engine';
+import { mergeAppointmentServiceWithPractitionerLink } from '@/lib/appointments/merge-service-with-overrides';
+import { resolveAppointmentServiceOnlineCharge } from '@/lib/appointments/appointment-service-payment';
 
 const ticketLineSchema = z.object({
   ticket_type_id: z.string().uuid(),
@@ -691,7 +693,11 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'Selected time is not available for this practitioner and service' }, { status: 409 });
       }
 
-      const svc = appointmentInput.services.find((s) => s.id === appointment_service_id);
+      const baseSvc = appointmentInput.services.find((s) => s.id === appointment_service_id);
+      const ps = appointmentInput.practitionerServices.find(
+        (row) => row.practitioner_id === practitioner_id && row.service_id === appointment_service_id,
+      );
+      const svc = baseSvc ? mergeAppointmentServiceWithPractitionerLink(baseSvc, ps) : undefined;
       const practRow = appointmentInput.practitioners.find((p) => p.id === practitioner_id);
       const apptEmailExtras = {
         email_variant: 'appointment' as const,
@@ -708,9 +714,13 @@ export async function POST(request: NextRequest) {
       const estimatedEndTime = endDate.toISOString();
       const bookingEndTime = `${String(endDate.getUTCHours()).padStart(2, '0')}:${String(endDate.getUTCMinutes()).padStart(2, '0')}:00`;
 
-      const depositPence = svc?.deposit_pence ?? null;
-      const requiresDeposit = (require_deposit ?? false) && depositPence != null && depositPence > 0;
-      const depositAmountPence = requiresDeposit ? depositPence : null;
+      const online = svc ? resolveAppointmentServiceOnlineCharge(svc) : null;
+      const staffWantsDeposit = require_deposit ?? false;
+      const requiresDeposit =
+        online != null &&
+        online.amountPence > 0 &&
+        (online.chargeLabel === 'full_payment' || (online.chargeLabel === 'deposit' && staffWantsDeposit));
+      const depositAmountPence = requiresDeposit ? online!.amountPence : null;
 
       if (requiresDeposit && !venue.stripe_connected_account_id) {
         return NextResponse.json(

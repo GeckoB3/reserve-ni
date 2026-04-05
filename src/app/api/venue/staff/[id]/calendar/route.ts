@@ -2,17 +2,18 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
-import { setStaffPractitionerLink } from '@/lib/staff-practitioner-link';
+import { setStaffUnifiedCalendarAssignments } from '@/lib/staff-practitioner-link';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 import { z } from 'zod';
 
 const bodySchema = z.object({
-  practitioner_id: z.string().uuid().nullable(),
+  /** Full list of bookable calendars this staff member may manage (replaces any previous selection). */
+  calendar_ids: z.array(z.string().uuid()),
 });
 
 /**
  * PATCH /api/venue/staff/[id]/calendar
- * Admin: assign or unassign a user account to a practitioner calendar (Model B appointments).
+ * Admin: assign staff to any combination of bookable calendars (unified scheduling).
  */
 export async function PATCH(
   request: NextRequest,
@@ -39,7 +40,9 @@ export async function PATCH(
       .eq('id', staff.venue_id)
       .single();
 
-    if (!isUnifiedSchedulingVenue(venue?.booking_model)) {
+    const bookingModel = venue?.booking_model ?? '';
+
+    if (!isUnifiedSchedulingVenue(bookingModel)) {
       return NextResponse.json(
         { error: 'Calendar linking is only available for appointment businesses' },
         { status: 400 },
@@ -57,31 +60,36 @@ export async function PATCH(
       return NextResponse.json({ error: 'Staff member not found' }, { status: 404 });
     }
 
-    const result = await setStaffPractitionerLink(
+    const result = await setStaffUnifiedCalendarAssignments(
       admin,
       staff.venue_id,
       targetStaffId,
-      parsed.data.practitioner_id,
+      parsed.data.calendar_ids,
     );
 
     if (!result.ok) {
       return NextResponse.json({ error: result.error }, { status: 400 });
     }
 
-    let linkedName: string | null = null;
-    if (parsed.data.practitioner_id) {
-      const { data: pr } = await admin
-        .from('practitioners')
-        .select('name')
-        .eq('id', parsed.data.practitioner_id)
+    let summary: string | null = null;
+    if (parsed.data.calendar_ids.length > 0) {
+      const { data: ucRows } = await admin
+        .from('unified_calendars')
+        .select('id, name')
         .eq('venue_id', staff.venue_id)
-        .maybeSingle();
-      linkedName = pr?.name ?? null;
+        .in('id', parsed.data.calendar_ids);
+
+      const idToName = new Map(
+        (ucRows ?? []).map((r) => [r.id as string, ((r.name as string) ?? '').trim() || 'Calendar']),
+      );
+      const names = parsed.data.calendar_ids.map((id) => idToName.get(id) ?? id);
+      summary = names.join(', ');
     }
 
     return NextResponse.json({
-      linked_practitioner_id: parsed.data.practitioner_id,
-      linked_practitioner_name: linkedName,
+      linked_calendar_ids: parsed.data.calendar_ids,
+      linked_practitioner_id: parsed.data.calendar_ids[0] ?? null,
+      linked_practitioner_name: summary,
     });
   } catch (err) {
     console.error('PATCH /api/venue/staff/[id]/calendar failed:', err);

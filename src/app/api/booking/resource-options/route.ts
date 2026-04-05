@@ -1,0 +1,56 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { getSupabaseAdminClient } from '@/lib/supabase';
+import { resolveVenueMode } from '@/lib/venue-mode';
+import { venueExposesBookingModel } from '@/lib/booking/enabled-models';
+
+/**
+ * GET /api/booking/resource-options?venue_id=uuid
+ * Public list of bookable resources (metadata only; no per-day slots).
+ */
+export async function GET(request: NextRequest) {
+  try {
+    const venueId = request.nextUrl.searchParams.get('venue_id');
+    if (!venueId) {
+      return NextResponse.json({ error: 'venue_id is required' }, { status: 400 });
+    }
+
+    const supabase = getSupabaseAdminClient();
+    const venueMode = await resolveVenueMode(supabase, venueId);
+    if (!venueExposesBookingModel(venueMode.bookingModel, venueMode.enabledModels, 'resource_booking')) {
+      return NextResponse.json({ error: 'Resource bookings are not available for this venue' }, { status: 403 });
+    }
+
+    const { data, error } = await supabase
+      .from('unified_calendars')
+      .select('*')
+      .eq('venue_id', venueId)
+      .eq('calendar_type', 'resource')
+      .eq('is_active', true)
+      .order('sort_order');
+
+    if (error) {
+      console.error('GET /api/booking/resource-options failed:', error);
+      return NextResponse.json({ error: 'Failed to load resources' }, { status: 500 });
+    }
+
+    const resources = (data ?? []).map((row) => {
+      const r = row as Record<string, unknown>;
+      return {
+        id: r.id as string,
+        name: r.name as string,
+        resource_type: (r.resource_type as string | null) ?? null,
+        min_booking_minutes: (r.min_booking_minutes as number | null) ?? 60,
+        max_booking_minutes: (r.max_booking_minutes as number | null) ?? 120,
+        slot_interval_minutes: (r.slot_interval_minutes as number | null) ?? 30,
+        price_per_slot_pence: (r.price_per_slot_pence as number | null) ?? null,
+        payment_requirement: (r.payment_requirement as string) ?? 'none',
+        deposit_amount_pence: (r.deposit_amount_pence as number | null) ?? null,
+      };
+    });
+
+    return NextResponse.json({ venue_id: venueId, resources });
+  } catch (err) {
+    console.error('GET /api/booking/resource-options failed:', err);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
+}

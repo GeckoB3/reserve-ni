@@ -7,6 +7,9 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { getSupabaseAdminClient } from '@/lib/supabase';
+import { getStaffManagedCalendarIds, staffManagesCalendar } from '@/lib/staff-calendar-access';
+
+export { getStaffManagedCalendarIds, staffManagesCalendar };
 
 export interface VenueStaff {
   id: string;
@@ -94,7 +97,10 @@ export function requireAdmin(staff: VenueStaff | null): staff is VenueStaff {
   return staff !== null && staff.role === 'admin';
 }
 
-/** Bookable calendar id linked to this staff (legacy `practitioners` or USE `unified_calendars`). */
+/**
+ * First bookable calendar linked to this staff (legacy `practitioners` or unified junction).
+ * Prefer `getStaffManagedCalendarIds` when multiple calendars are possible.
+ */
 export async function getLinkedPractitionerId(
   admin: SupabaseClient,
   venueId: string,
@@ -104,18 +110,8 @@ export async function getLinkedPractitionerId(
   const bookingModel = (venue as { booking_model?: string } | null)?.booking_model;
 
   if (bookingModel === 'unified_scheduling') {
-    const { data, error } = await admin
-      .from('unified_calendars')
-      .select('id')
-      .eq('venue_id', venueId)
-      .eq('staff_id', staffId)
-      .maybeSingle();
-
-    if (error) {
-      console.error('[getLinkedPractitionerId] unified_calendars lookup failed:', error.message, { venueId, staffId });
-      return null;
-    }
-    return data?.id ?? null;
+    const ids = await getStaffManagedCalendarIds(admin, venueId, staffId);
+    return ids[0] ?? null;
   }
 
   const { data, error } = await admin

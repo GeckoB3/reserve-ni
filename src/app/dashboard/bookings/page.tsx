@@ -3,7 +3,7 @@ import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
 import { BookingsDashboard } from './BookingsDashboard';
 import { AppointmentBookingsDashboard } from './AppointmentBookingsDashboard';
-import { getDashboardStaff, getLinkedPractitionerId } from '@/lib/venue-auth';
+import { getDashboardStaff, getStaffManagedCalendarIds } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { ToastProvider } from '@/components/ui/Toast';
 import type { BookingModel } from '@/types/booking-models';
@@ -48,11 +48,12 @@ export default async function BookingsPage() {
         ? 'Bookings'
         : 'Reservations';
 
-  const linkedPractitionerId =
+  const linkedPractitionerIds =
     isAppointment && staff.role === 'staff' && staff.id
-      ? await getLinkedPractitionerId(admin, venueId, staff.id)
-      : null;
-  const defaultAppointmentPractitionerFilter: 'all' | string = linkedPractitionerId ?? 'all';
+      ? await getStaffManagedCalendarIds(admin, venueId, staff.id)
+      : [];
+  const defaultAppointmentPractitionerFilter: 'all' | string =
+    linkedPractitionerIds.length === 1 ? linkedPractitionerIds[0] : 'all';
 
   return (
     <div className="min-h-0 min-w-0 px-3 pb-[max(1rem,env(safe-area-inset-bottom))] pt-[max(1rem,env(safe-area-inset-top))] sm:px-4 md:p-6 md:pb-8 md:pt-6 lg:p-8">
@@ -67,7 +68,7 @@ export default async function BookingsPage() {
                 primaryBookingModel={bookingModel}
                 enabledModels={enabledModels}
                 defaultPractitionerFilter={defaultAppointmentPractitionerFilter}
-                linkedPractitionerId={linkedPractitionerId}
+                linkedPractitionerIds={linkedPractitionerIds}
               />
             ) : (
               <BookingsDashboard

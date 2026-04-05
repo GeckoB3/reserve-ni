@@ -13,6 +13,7 @@ import {
   type PhantomBooking,
 } from '@/lib/availability/appointment-engine';
 import { mergeAppointmentServiceWithPractitionerLink } from '@/lib/appointments/merge-service-with-overrides';
+import { resolveAppointmentServiceOnlineCharge } from '@/lib/appointments/appointment-service-payment';
 import { z } from 'zod';
 import { cancellationDeadlineHoursBefore } from '@/lib/booking/cancellation-deadline';
 import { generateGroupBookingId } from '@/lib/booking/group-booking';
@@ -146,8 +147,9 @@ export async function POST(request: NextRequest) {
         endDate.setMinutes(endDate.getMinutes() + svc.duration_minutes);
         estimatedEndTime = endDate.toISOString();
 
-        if (svc.deposit_pence != null && svc.deposit_pence > 0) {
-          depositPence = svc.deposit_pence;
+        const online = svc ? resolveAppointmentServiceOnlineCharge(svc) : null;
+        if (online != null && online.amountPence > 0) {
+          depositPence = online.amountPence;
         }
       }
 

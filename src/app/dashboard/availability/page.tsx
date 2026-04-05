@@ -1,3 +1,4 @@
+import { Suspense } from 'react';
 import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
 import { getDashboardStaff } from '@/lib/venue-auth';
@@ -28,7 +29,15 @@ export default async function AvailabilitySettingsPage() {
     return (
       <div className="p-4 md:p-6 lg:p-8">
         <div className="mx-auto max-w-4xl">
-          <AppointmentAvailabilitySettings isAdmin={isAdmin} currentStaffId={staff.id} />
+          <Suspense
+            fallback={
+              <div className="flex items-center justify-center py-12">
+                <div className="h-8 w-8 animate-spin rounded-full border-4 border-blue-600 border-t-transparent" />
+              </div>
+            }
+          >
+            <AppointmentAvailabilitySettings isAdmin={isAdmin} currentStaffId={staff.id} />
+          </Suspense>
         </div>
       </div>
     );

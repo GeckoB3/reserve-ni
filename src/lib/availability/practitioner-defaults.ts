@@ -12,3 +12,15 @@ export function defaultPractitionerWorkingHours(): WorkingHours {
   }
   return hours;
 }
+
+/**
+ * Default weekly template for new unified calendar columns (staff columns / host calendars).
+ * All days 09:00–22:00 so new calendars are bookable until the venue narrows hours in Availability.
+ */
+export function defaultNewUnifiedCalendarWorkingHours(): WorkingHours {
+  const hours: WorkingHours = {};
+  for (const key of ['0', '1', '2', '3', '4', '5', '6'] as const) {
+    hours[key] = [{ start: '09:00', end: '22:00' }];
+  }
+  return hours;
+}

@@ -1,6 +1,6 @@
 import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
-import { getDashboardStaff } from '@/lib/venue-auth';
+import { getDashboardStaff, getStaffManagedCalendarIds } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { AppointmentServicesView } from './AppointmentServicesView';
 
@@ -24,15 +24,9 @@ export default async function AppointmentServicesPage() {
   const { data: venue } = await admin.from('venues').select('currency').eq('id', staff.venue_id).single();
   const currency = (venue?.currency as string) ?? 'GBP';
 
-  let linkedPractitionerId: string | null = null;
+  let linkedPractitionerIds: string[] = [];
   if (staff.role !== 'admin' && staff.id) {
-    const { data: prRow } = await admin
-      .from('practitioners')
-      .select('id')
-      .eq('venue_id', staff.venue_id)
-      .eq('staff_id', staff.id)
-      .maybeSingle();
-    linkedPractitionerId = prRow?.id ?? null;
+    linkedPractitionerIds = await getStaffManagedCalendarIds(admin, staff.venue_id, staff.id);
   }
 
   return (
@@ -40,7 +34,7 @@ export default async function AppointmentServicesPage() {
       <div className="mx-auto max-w-4xl">
         <AppointmentServicesView
           isAdmin={staff.role === 'admin'}
-          linkedPractitionerId={linkedPractitionerId}
+          linkedPractitionerIds={linkedPractitionerIds}
           currency={currency}
         />
       </div>

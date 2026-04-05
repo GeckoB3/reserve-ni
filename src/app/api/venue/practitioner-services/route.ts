@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { getVenueStaff } from '@/lib/venue-auth';
+import { getVenueStaff, staffManagesCalendar } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import type { PractitionerService } from '@/types/booking-models';
 import { z } from 'zod';
@@ -33,30 +33,13 @@ export async function PUT(request: NextRequest) {
     const { data: venue } = await admin.from('venues').select('booking_model').eq('id', staff.venue_id).maybeSingle();
     const bookingModel = (venue as { booking_model?: string } | null)?.booking_model ?? '';
 
-    /** Empty array = “all active services” (matches legacy practitioner_services + dashboard copy). */
-    let effectiveServiceIds = [...service_ids];
-    if (effectiveServiceIds.length === 0) {
-      if (bookingModel === 'unified_scheduling') {
-        const { data: allSvc } = await admin
-          .from('service_items')
-          .select('id')
-          .eq('venue_id', staff.venue_id)
-          .eq('is_active', true);
-        effectiveServiceIds = (allSvc ?? []).map((r) => (r as { id: string }).id);
-      } else {
-        const { data: allSvc } = await admin
-          .from('appointment_services')
-          .select('id')
-          .eq('venue_id', staff.venue_id)
-          .eq('is_active', true);
-        effectiveServiceIds = (allSvc ?? []).map((r) => (r as { id: string }).id);
-      }
-    }
+    /** Empty array clears all service links for that calendar (classes/resources can still use the column). */
+    const effectiveServiceIds = [...service_ids];
 
     if (bookingModel === 'unified_scheduling') {
       const { data: cal, error: calErr } = await admin
         .from('unified_calendars')
-        .select('id, staff_id')
+        .select('id')
         .eq('id', practitioner_id)
         .eq('venue_id', staff.venue_id)
         .single();
@@ -66,9 +49,10 @@ export async function PUT(request: NextRequest) {
       }
 
       if (staff.role !== 'admin') {
-        if (cal.staff_id !== staff.id) {
+        const mayEdit = await staffManagesCalendar(admin, staff.venue_id, staff.id, practitioner_id);
+        if (!mayEdit) {
           return NextResponse.json(
-            { error: 'You can only update service links for your own calendar.' },
+            { error: 'You can only update service links for calendars assigned to your account.' },
             { status: 403 },
           );
         }
