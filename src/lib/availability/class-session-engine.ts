@@ -7,6 +7,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { ClassPaymentRequirement, ClassType, ClassInstance } from '@/types/booking-models';
 import { venueLocalDateTimeToUtcMs } from '@/lib/venue/venue-local-clock';
+import { entityBookingWindowFromRow, isGuestBookingDateAllowed } from '@/lib/booking/entity-booking-window';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -27,8 +28,9 @@ export interface ClassEngineInput {
   /** Total booked spots per class_instance_id. */
   bookedByInstance: Record<string, number>;
   /**
-   * When set (public booking API), excludes instances that start in the past or inside the
-   * venue’s minimum booking notice window (`venues.booking_rules.min_notice_hours`).
+   * When set (public booking API), excludes instances outside per-class-type booking windows
+   * (`class_types` columns) and past starts. `minNoticeHours` on the window object is unused;
+   * notice comes from each class type row.
    */
   guestBookingWindow?: GuestClassBookingWindow;
   /** Resolved names for `class_types.instructor_id` (calendar or legacy practitioner) when `instructor_name` is empty. */
@@ -123,11 +125,18 @@ export function computeClassAvailability(input: ClassEngineInput): ClassAvailabi
 
   for (const instance of instances) {
     if (instance.is_cancelled) continue;
-    if (guestBookingWindow && !isClassInstanceBookableForGuest(instance, guestBookingWindow)) {
-      continue;
-    }
     const classType = typeMap.get(instance.class_type_id);
     if (!classType || !classType.is_active) continue;
+    if (guestBookingWindow) {
+      const win = entityBookingWindowFromRow(classType as unknown as Record<string, unknown>);
+      if (!isGuestBookingDateAllowed(instance.instance_date, win, guestBookingWindow.venueTimezone, guestBookingWindow.referenceNowMs)) {
+        continue;
+      }
+      const minH = win.min_booking_notice_hours;
+      if (!isClassInstanceBookableForGuest(instance, { ...guestBookingWindow, minNoticeHours: minH })) {
+        continue;
+      }
+    }
 
     const capacity = instance.capacity_override ?? classType.capacity;
     const booked = bookedByInstance[instance.id] ?? 0;
@@ -229,8 +238,7 @@ export async function fetchClassInput(params: {
   venueId: string;
   date: string;
   /**
-   * When true, loads `timezone` + `booking_rules.min_notice_hours` and applies `guestBookingWindow`
-   * so only future sessions outside the minimum notice period are bookable online.
+   * When true, loads venue `timezone` and applies guest filtering using per-class-type rules.
    */
   forPublicBooking?: boolean;
 }): Promise<ClassEngineInput> {
@@ -239,7 +247,7 @@ export async function fetchClassInput(params: {
   const [typesRes, venueRes] = await Promise.all([
     supabase.from('class_types').select('*').eq('venue_id', venueId).eq('is_active', true),
     forPublicBooking === true
-      ? supabase.from('venues').select('timezone, booking_rules').eq('id', venueId).maybeSingle()
+      ? supabase.from('venues').select('timezone').eq('id', venueId).maybeSingle()
       : Promise.resolve({ data: null, error: null }),
   ]);
 
@@ -304,15 +312,10 @@ export async function fetchClassInput(params: {
     if ('error' in venueRes && venueRes.error) {
       console.error('[fetchClassInput] venue row for public booking:', venueRes.error);
     }
-    const v = venueRes.data as { timezone?: string | null; booking_rules?: unknown } | null;
+    const v = venueRes.data as { timezone?: string | null } | null;
     const tz =
       v && typeof v.timezone === 'string' && v.timezone.trim() !== '' ? v.timezone.trim() : 'Europe/London';
-    const rules = v?.booking_rules as { min_notice_hours?: number } | null | undefined;
-    const minNoticeHours =
-      typeof rules?.min_notice_hours === 'number' && Number.isFinite(rules.min_notice_hours)
-        ? rules.min_notice_hours
-        : 1;
-    guestBookingWindow = { minNoticeHours, venueTimezone: tz };
+    guestBookingWindow = { minNoticeHours: 0, venueTimezone: tz };
   }
 
   return { date, classTypes, instances, bookedByInstance, guestBookingWindow, instructorDisplayNamesById };
@@ -334,7 +337,7 @@ export async function fetchClassInputForRange(params: {
   const [typesRes, venueRes] = await Promise.all([
     supabase.from('class_types').select('*').eq('venue_id', venueId).eq('is_active', true),
     forPublicBooking === true
-      ? supabase.from('venues').select('timezone, booking_rules').eq('id', venueId).maybeSingle()
+      ? supabase.from('venues').select('timezone').eq('id', venueId).maybeSingle()
       : Promise.resolve({ data: null, error: null }),
   ]);
 
@@ -402,15 +405,10 @@ export async function fetchClassInputForRange(params: {
     if ('error' in venueRes && venueRes.error) {
       console.error('[fetchClassInputForRange] venue row for public booking:', venueRes.error);
     }
-    const v = venueRes.data as { timezone?: string | null; booking_rules?: unknown } | null;
+    const v = venueRes.data as { timezone?: string | null } | null;
     const tz =
       v && typeof v.timezone === 'string' && v.timezone.trim() !== '' ? v.timezone.trim() : 'Europe/London';
-    const rules = v?.booking_rules as { min_notice_hours?: number } | null | undefined;
-    const minNoticeHours =
-      typeof rules?.min_notice_hours === 'number' && Number.isFinite(rules.min_notice_hours)
-        ? rules.min_notice_hours
-        : 1;
-    guestBookingWindow = { minNoticeHours, venueTimezone: tz };
+    guestBookingWindow = { minNoticeHours: 0, venueTimezone: tz };
   }
 
   return {

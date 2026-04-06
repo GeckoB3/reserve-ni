@@ -38,6 +38,23 @@ export function weeklyResourceAvailabilityOverlaps(a: WorkingHours, b: WorkingHo
   return false;
 }
 
+/**
+ * True if `[startMins, endMins)` on `dayIndex0to6` (Sun=0) overlaps any of the resource's weekly ranges that day.
+ * Used to block assigning a resource to a host calendar when classes/bookings already occupy those times.
+ */
+export function intervalOverlapsResourceWeeklyHours(
+  resourceHours: WorkingHours,
+  dayIndex0to6: number,
+  startMins: number,
+  endMins: number,
+): boolean {
+  const ranges = rangesForDow(resourceHours, dayIndex0to6);
+  for (const r of ranges) {
+    if (r.start < endMins && startMins < r.end) return true;
+  }
+  return false;
+}
+
 function mergeIntervals(ranges: Array<{ start: number; end: number }>): Array<{ start: number; end: number }> {
   if (ranges.length === 0) return [];
   const sorted = [...ranges].sort((a, b) => a.start - b.start);

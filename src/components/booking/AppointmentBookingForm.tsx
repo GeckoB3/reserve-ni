@@ -419,7 +419,7 @@ export function AppointmentBookingForm({
 
         {dataLoading ? (
           <div className="flex items-center justify-center py-12">
-            <div className="h-6 w-6 animate-spin rounded-full border-2 border-blue-600 border-t-transparent" />
+            <div className="h-6 w-6 animate-spin rounded-full border-2 border-brand-600 border-t-transparent" />
           </div>
         ) : !isGroupMode ? (
           <>
@@ -467,7 +467,7 @@ export function AppointmentBookingForm({
                       setSelectedPractitioner('');
                       setStep(3);
                     }}
-                    className={`w-full rounded-lg border px-4 py-3 text-left transition-colors ${selectedService === s.id ? 'border-blue-500 bg-blue-50' : 'border-slate-200 hover:bg-slate-50'}`}
+                    className={`w-full rounded-lg border px-4 py-3 text-left transition-colors ${selectedService === s.id ? 'border-brand-500 bg-brand-50' : 'border-slate-200 hover:bg-slate-50'}`}
                   >
                     <div className="flex items-center gap-3">
                       <div className="h-2.5 w-2.5 flex-shrink-0 rounded-full" style={{ backgroundColor: s.colour }} />
@@ -484,7 +484,7 @@ export function AppointmentBookingForm({
                   </button>
                 ))}
                 {servicePickerOptions.length === 0 && <p className="text-sm text-slate-500">No services available.</p>}
-                <button type="button" onClick={() => setStep(1)} className="text-sm text-blue-600 hover:underline">&larr; Back</button>
+                <button type="button" onClick={() => setStep(1)} className="text-sm text-brand-700 hover:underline">&larr; Back</button>
               </div>
             )}
 
@@ -503,7 +503,7 @@ export function AppointmentBookingForm({
                         setSelectedTime('');
                       }}
                       className={`w-full rounded-lg border px-4 py-3 text-left text-sm font-medium transition-colors ${
-                        selectedPractitioner === p.id ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-200 hover:bg-slate-50 text-slate-900'
+                        selectedPractitioner === p.id ? 'border-brand-500 bg-brand-50 text-brand-800' : 'border-slate-200 hover:bg-slate-50 text-slate-900'
                       }`}
                     >
                       <div className="flex items-center justify-between gap-2">
@@ -516,7 +516,7 @@ export function AppointmentBookingForm({
                   );
                 })}
                 {practitionersForSelectedService.length === 0 && <p className="text-sm text-slate-500">No team members offer this service.</p>}
-                <button type="button" onClick={() => setStep(2)} className="text-sm text-blue-600 hover:underline">&larr; Back</button>
+                <button type="button" onClick={() => setStep(2)} className="text-sm text-brand-700 hover:underline">&larr; Back</button>
               </div>
             )}
 
@@ -536,14 +536,14 @@ export function AppointmentBookingForm({
                       setSelectedDate(e.target.value);
                       setSelectedTime('');
                     }}
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
                   />
                 </div>
                 <div>
                   <p className="mb-2 text-sm font-medium text-slate-700">Available times</p>
                   {slotsLoading ? (
                     <div className="flex items-center justify-center py-6">
-                      <div className="h-5 w-5 animate-spin rounded-full border-2 border-blue-600 border-t-transparent" />
+                      <div className="h-5 w-5 animate-spin rounded-full border-2 border-brand-600 border-t-transparent" />
                     </div>
                   ) : availableSlots.length === 0 ? (
                     <p className="text-sm text-slate-500">No available times for this date.</p>
@@ -556,7 +556,7 @@ export function AppointmentBookingForm({
                           onClick={() => setSelectedTime(sl.start_time)}
                           className={`rounded-lg border px-2 py-2 text-sm font-medium transition-colors ${
                             selectedTime === sl.start_time
-                              ? 'border-blue-500 bg-blue-600 text-white'
+                              ? 'border-brand-500 bg-brand-600 text-white'
                               : 'border-slate-200 text-slate-900 hover:bg-slate-50'
                           }`}
                         >
@@ -567,14 +567,14 @@ export function AppointmentBookingForm({
                   )}
                 </div>
                 <div className="flex justify-between">
-                  <button type="button" onClick={() => setStep(3)} className="text-sm text-blue-600 hover:underline">&larr; Back</button>
+                  <button type="button" onClick={() => setStep(3)} className="text-sm text-brand-700 hover:underline">&larr; Back</button>
                   <button
                     type="button"
                     onClick={() => {
                       if (selectedTime) setStep(5);
                     }}
                     disabled={!selectedTime}
-                    className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+                    className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
                   >
                     Next
                   </button>
@@ -613,7 +613,7 @@ export function AppointmentBookingForm({
                     type="text"
                     value={clientName}
                     onChange={(e) => setClientName(e.target.value)}
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
                     placeholder="Full name"
                   />
                 </div>
@@ -625,7 +625,7 @@ export function AppointmentBookingForm({
                     type="email"
                     value={clientEmail}
                     onChange={(e) => setClientEmail(e.target.value)}
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
                     placeholder="client@example.com"
                   />
                 </div>
@@ -637,7 +637,7 @@ export function AppointmentBookingForm({
                     type="tel"
                     value={clientPhone}
                     onChange={(e) => setClientPhone(e.target.value)}
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
                     placeholder="07123 456789"
                   />
                 </div>
@@ -646,7 +646,7 @@ export function AppointmentBookingForm({
                   <textarea
                     value={notes}
                     onChange={(e) => setNotes(e.target.value)}
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
                     rows={2}
                     placeholder="Special requests or notes"
                   />
@@ -664,7 +664,7 @@ export function AppointmentBookingForm({
                           type="checkbox"
                           checked={requireDeposit}
                           onChange={(e) => setRequireDeposit(e.target.checked)}
-                          className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                          className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
                         />
                         <span className="text-sm text-slate-700">
                           Require deposit ({sym}{(staffOnlineCharge.amountPence / 100).toFixed(2)})
@@ -674,12 +674,12 @@ export function AppointmentBookingForm({
                   </>
                 )}
                 <div className="flex justify-between">
-                  <button type="button" onClick={() => setStep(4)} className="text-sm text-blue-600 hover:underline">&larr; Back</button>
+                  <button type="button" onClick={() => setStep(4)} className="text-sm text-brand-700 hover:underline">&larr; Back</button>
                   <button
                     type="button"
                     onClick={handleSubmit}
                     disabled={submitting}
-                    className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+                    className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
                   >
                     {submitting ? 'Creating...' : 'Create Appointment'}
                   </button>
@@ -704,7 +704,7 @@ export function AppointmentBookingForm({
                         <div className="font-medium text-slate-900">{p.label}</div>
                         <div className="text-slate-600">{p.serviceName} with {p.practitionerName}</div>
                         <div className="text-xs text-slate-500">{p.date} at {p.time} &middot; {p.durationMinutes}min</div>
-                        {p.pricePence != null && <div className="text-xs font-medium text-blue-600">{sym}{(p.pricePence / 100).toFixed(2)}</div>}
+                        {p.pricePence != null && <div className="text-xs font-medium text-brand-700">{sym}{(p.pricePence / 100).toFixed(2)}</div>}
                       </div>
                       <button onClick={() => setGroupPeople((prev) => prev.filter((_, i) => i !== idx))} className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600">
                         <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" /></svg>
@@ -714,9 +714,9 @@ export function AppointmentBookingForm({
                 ))}
 
                 {totalGroupPrice > 0 && groupPeople.length > 0 && (
-                  <div className="rounded-lg border border-blue-100 bg-blue-50 px-4 py-2.5 text-sm flex justify-between">
-                    <span className="font-medium text-blue-700">Total</span>
-                    <span className="font-semibold text-blue-700">{sym}{(totalGroupPrice / 100).toFixed(2)}</span>
+                  <div className="rounded-lg border border-brand-100 bg-brand-50 px-4 py-2.5 text-sm flex justify-between">
+                    <span className="font-medium text-brand-800">Total</span>
+                    <span className="font-semibold text-brand-800">{sym}{(totalGroupPrice / 100).toFixed(2)}</span>
                   </div>
                 )}
 
@@ -742,7 +742,7 @@ export function AppointmentBookingForm({
                       setGroupSvcId('');
                       setGroupStep('label');
                     }}
-                    className="w-full rounded-lg border-2 border-dashed border-slate-300 px-4 py-3 text-sm font-medium text-slate-600 hover:border-blue-300 hover:text-blue-600"
+                    className="w-full rounded-lg border-2 border-dashed border-slate-300 px-4 py-3 text-sm font-medium text-slate-600 hover:border-brand-300 hover:text-brand-700"
                   >
                     + Add a person
                   </button>
@@ -762,7 +762,7 @@ export function AppointmentBookingForm({
                       Cancel
                     </button>
                     <button onClick={() => setGroupStep('details')}
-                      className="flex-1 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">Continue</button>
+                      className="flex-1 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700">Continue</button>
                   </div>
                 )}
               </div>
@@ -772,9 +772,9 @@ export function AppointmentBookingForm({
               <div className="space-y-4">
                 <p className="text-sm font-medium text-slate-700">Who is this appointment for?</p>
                 <input type="text" value={groupPersonLabel} onChange={(e) => setGroupPersonLabel(e.target.value)} placeholder="e.g. John, My son" autoFocus
-                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500" />
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
                 <div className="flex justify-between">
-                  <button onClick={() => setGroupStep('list')} className="text-sm text-blue-600 hover:underline">&larr; Back</button>
+                  <button onClick={() => setGroupStep('list')} className="text-sm text-brand-700 hover:underline">&larr; Back</button>
                   <button
                     type="button"
                     disabled={!groupPersonLabel.trim()}
@@ -783,7 +783,7 @@ export function AppointmentBookingForm({
                       setGroupSvcId('');
                       setGroupStep('service');
                     }}
-                    className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+                    className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
                   >
                     Next
                   </button>
@@ -819,7 +819,7 @@ export function AppointmentBookingForm({
                   </button>
                 ))}
                 {servicePickerOptions.length === 0 && <p className="text-sm text-slate-500">No services available.</p>}
-                <button type="button" onClick={() => setGroupStep('label')} className="text-sm text-blue-600 hover:underline">&larr; Back</button>
+                <button type="button" onClick={() => setGroupStep('label')} className="text-sm text-brand-700 hover:underline">&larr; Back</button>
               </div>
             )}
 
@@ -852,7 +852,7 @@ export function AppointmentBookingForm({
                   );
                 })}
                 {groupPractitionersForService.length === 0 && <p className="text-sm text-slate-500">No team members offer this service.</p>}
-                <button type="button" onClick={() => setGroupStep('service')} className="text-sm text-blue-600 hover:underline">&larr; Back</button>
+                <button type="button" onClick={() => setGroupStep('service')} className="text-sm text-brand-700 hover:underline">&larr; Back</button>
               </div>
             )}
 
@@ -867,12 +867,12 @@ export function AppointmentBookingForm({
                   <input type="date" value={groupDate}
                     min={(() => { const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}-${String(n.getDate()).padStart(2,'0')}`; })()}
                     onChange={(e) => setGroupDate(e.target.value)}
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500" />
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
                 </div>
                 <div>
                   <p className="mb-2 text-sm font-medium text-slate-700">Available times</p>
                   {groupSlotsLoading ? (
-                    <div className="flex items-center justify-center py-6"><div className="h-5 w-5 animate-spin rounded-full border-2 border-blue-600 border-t-transparent" /></div>
+                    <div className="flex items-center justify-center py-6"><div className="h-5 w-5 animate-spin rounded-full border-2 border-brand-600 border-t-transparent" /></div>
                   ) : groupSlots.length === 0 ? (
                     <p className="text-sm text-slate-500">No available times for this date.</p>
                   ) : (
@@ -886,7 +886,7 @@ export function AppointmentBookingForm({
                     </div>
                   )}
                 </div>
-                <button type="button" onClick={() => setGroupStep('practitioner')} className="text-sm text-blue-600 hover:underline">&larr; Back</button>
+                <button type="button" onClick={() => setGroupStep('practitioner')} className="text-sm text-brand-700 hover:underline">&larr; Back</button>
               </div>
             )}
 
@@ -900,15 +900,15 @@ export function AppointmentBookingForm({
                     </div>
                   ))}
                   {totalGroupPrice > 0 && (
-                    <div className="flex justify-between border-t border-slate-200 pt-2"><span className="font-medium text-slate-700">Total</span><span className="font-semibold text-blue-600">{sym}{(totalGroupPrice / 100).toFixed(2)}</span></div>
+                    <div className="flex justify-between border-t border-slate-200 pt-2"><span className="font-medium text-slate-700">Total</span><span className="font-semibold text-brand-700">{sym}{(totalGroupPrice / 100).toFixed(2)}</span></div>
                   )}
                 </div>
-                <div><label className="mb-1 block text-sm font-medium text-slate-700">Contact name *</label><input type="text" value={groupClientName} onChange={(e) => setGroupClientName(e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500" placeholder="Full name" /></div>
-                <div><label className="mb-1 block text-sm font-medium text-slate-700">Email <span className="text-slate-400 font-normal">(optional)</span></label><input type="email" value={groupClientEmail} onChange={(e) => setGroupClientEmail(e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500" placeholder="client@example.com" /></div>
-                <div><label className="mb-1 block text-sm font-medium text-slate-700">Phone <span className="text-slate-400 font-normal">(optional)</span></label><input type="tel" value={groupClientPhone} onChange={(e) => setGroupClientPhone(e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500" placeholder="07123 456789" /></div>
+                <div><label className="mb-1 block text-sm font-medium text-slate-700">Contact name *</label><input type="text" value={groupClientName} onChange={(e) => setGroupClientName(e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500" placeholder="Full name" /></div>
+                <div><label className="mb-1 block text-sm font-medium text-slate-700">Email <span className="text-slate-400 font-normal">(optional)</span></label><input type="email" value={groupClientEmail} onChange={(e) => setGroupClientEmail(e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500" placeholder="client@example.com" /></div>
+                <div><label className="mb-1 block text-sm font-medium text-slate-700">Phone <span className="text-slate-400 font-normal">(optional)</span></label><input type="tel" value={groupClientPhone} onChange={(e) => setGroupClientPhone(e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500" placeholder="07123 456789" /></div>
                 <div className="flex justify-between">
-                  <button onClick={() => setGroupStep('list')} className="text-sm text-blue-600 hover:underline">&larr; Back</button>
-                  <button onClick={handleGroupSubmit} disabled={submitting} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">{submitting ? 'Creating...' : 'Create Group Booking'}</button>
+                  <button onClick={() => setGroupStep('list')} className="text-sm text-brand-700 hover:underline">&larr; Back</button>
+                  <button onClick={handleGroupSubmit} disabled={submitting} className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50">{submitting ? 'Creating...' : 'Create Group Booking'}</button>
                 </div>
               </div>
             )}

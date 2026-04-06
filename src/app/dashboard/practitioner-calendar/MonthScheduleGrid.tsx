@@ -84,7 +84,7 @@ export function MonthScheduleGrid({
                 <div className="flex min-h-[6px] flex-wrap justify-center gap-0.5" aria-hidden>
                   {daySummary.appointments > 0 ? (
                     <span
-                      className="h-1.5 w-1.5 rounded-full bg-blue-500"
+                      className="h-1.5 w-1.5 rounded-full bg-brand-500"
                       title="Team appointments (practitioner / unified)"
                     />
                   ) : null}

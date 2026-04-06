@@ -77,6 +77,7 @@ export type CommMessageType =
   | 'post_visit_email'
   | 'reminder_1_email'
   | 'reminder_1_sms'
+  | 'reminder_2_email'
   | 'reminder_2_sms'
   | 'unified_post_visit_email'
   | 'booking_modification_email'

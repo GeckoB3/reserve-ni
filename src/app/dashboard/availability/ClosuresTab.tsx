@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { NumericInput } from '@/components/ui/NumericInput';
 
 interface Block {
@@ -153,6 +154,13 @@ export function ClosuresTab({ services, showToast }: Props) {
 
   return (
     <div className="space-y-6">
+      <p className="text-xs text-slate-500">
+        You can also manage closures from{' '}
+        <Link href="/dashboard/settings?tab=profile" className="font-medium text-brand-600 hover:underline">
+          Settings → Profile → Opening hours
+        </Link>
+        .
+      </p>
       {/* Upcoming blocks */}
       {futureBlocks.length > 0 && (
         <div className="space-y-3">

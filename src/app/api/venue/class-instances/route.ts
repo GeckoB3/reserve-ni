@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { requireVenueExposesSecondaryModel } from '@/lib/booking/require-venue-secondary-model';
+import { assertClassSessionWindowFreeOnCalendar } from '@/lib/experience-events/calendar-event-window-conflicts';
 import { syncCalendarBlockForClassInstance } from '@/lib/class-instances/instructor-calendar-block';
 import { z } from 'zod';
 
@@ -37,7 +38,7 @@ export async function POST(request: NextRequest) {
 
     const { data: ct, error: ctErr } = await admin
       .from('class_types')
-      .select('id')
+      .select('id, instructor_id, duration_minutes')
       .eq('id', class_type_id)
       .eq('venue_id', staff.venue_id)
       .maybeSingle();
@@ -47,6 +48,16 @@ export async function POST(request: NextRequest) {
     }
 
     const startNorm = start_time.length === 5 ? `${start_time}:00` : start_time;
+
+    const conflict = await assertClassSessionWindowFreeOnCalendar(admin, staff.venue_id, {
+      instructorId: (ct as { instructor_id: string | null }).instructor_id,
+      durationMinutes: (ct as { duration_minutes: number }).duration_minutes,
+      instanceDate: instance_date,
+      startTime: startNorm,
+    });
+    if (conflict) {
+      return NextResponse.json({ error: conflict }, { status: 409 });
+    }
 
     const { data: row, error } = await admin
       .from('class_instances')

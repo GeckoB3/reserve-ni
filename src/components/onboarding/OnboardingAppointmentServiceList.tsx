@@ -170,7 +170,7 @@ export function OnboardingAppointmentServiceList({
                   return c;
                 });
               }}
-              placeholder="e.g. Cut & colour"
+              placeholder="e.g. Standard appointment, Follow-up"
               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
             />
           </div>
@@ -188,7 +188,7 @@ export function OnboardingAppointmentServiceList({
                 });
               }}
               rows={2}
-              placeholder="Brief description for clients"
+              placeholder="Brief description for guests"
               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
             />
           </div>
@@ -266,7 +266,7 @@ export function OnboardingAppointmentServiceList({
                   });
                 }}
                 className={`relative h-6 w-11 rounded-full transition-colors ${
-                  s.require_deposit ? 'bg-blue-600' : 'bg-slate-300'
+                  s.require_deposit ? 'bg-brand-600' : 'bg-slate-300'
                 }`}
               >
                 <span
@@ -335,7 +335,7 @@ export function OnboardingAppointmentServiceList({
                   return c;
                 });
               }}
-              className={`relative h-6 w-11 rounded-full transition-colors ${s.is_active ? 'bg-blue-600' : 'bg-slate-300'}`}
+              className={`relative h-6 w-11 rounded-full transition-colors ${s.is_active ? 'bg-brand-600' : 'bg-slate-300'}`}
             >
               <span
                 className={`absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${

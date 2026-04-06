@@ -146,7 +146,7 @@ export function ServicesTab({ services, setServices, showToast }: Props) {
             value={data.name}
             onChange={(e) => onChange({ ...data, name: e.target.value })}
             className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
-            placeholder="e.g. Lunch, Dinner, Brunch"
+            placeholder="e.g. Breakfast, Lunch, Dinner"
           />
         </div>
         <div>

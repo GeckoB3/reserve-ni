@@ -8,6 +8,8 @@ import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 import { normalizeEnabledModels } from '@/lib/booking/enabled-models';
 import type { BookingModel } from '@/types/booking-models';
 import { computeSmsMonthlyAllowance, updateVenueSmsMonthlyAllowance } from '@/lib/billing/sms-allowance';
+import { parseVenueOpeningExceptions } from '@/types/venue-opening-exceptions';
+import type { VenueSettings } from './types';
 
 export default async function SettingsPage({
   searchParams,
@@ -38,19 +40,8 @@ export default async function SettingsPage({
     );
   }
 
-  const { data: venueMetaForRole } = await staff.db
-    .from('venues')
-    .select('booking_model')
-    .eq('id', venueId)
-    .single();
-  const bookingModelForAccess =
-    ((venueMetaForRole as { booking_model?: string } | null)?.booking_model as string) ?? 'table_reservation';
-
-  /** Model B: staff users only get personal account settings (not venue-wide configuration). */
+  /** Staff users (all booking models): personal account only, not venue-wide configuration. */
   if (staff.role === 'staff') {
-    if (!isUnifiedSchedulingVenue(bookingModelForAccess)) {
-      redirect('/dashboard');
-    }
     return (
       <div className="p-4 md:p-6 lg:p-8">
         <div className="mx-auto max-w-3xl">
@@ -72,19 +63,24 @@ export default async function SettingsPage({
   let hasServiceConfig = false;
   const { data: fullVenue, error: fullErr } = await staff.db
     .from('venues')
-    .select('id, name, slug, address, phone, email, website_url, cover_photo_url, cuisine_type, price_band, no_show_grace_minutes, kitchen_email, communication_templates, opening_hours, booking_rules, deposit_config, availability_config, stripe_connected_account_id, timezone, table_management_enabled, combination_threshold, pricing_tier, plan_status, subscription_current_period_end, calendar_count, booking_model, enabled_models, sms_monthly_allowance')
+    .select('id, name, slug, address, phone, email, website_url, cover_photo_url, cuisine_type, price_band, no_show_grace_minutes, kitchen_email, communication_templates, opening_hours, venue_opening_exceptions, booking_rules, deposit_config, availability_config, stripe_connected_account_id, timezone, table_management_enabled, combination_threshold, pricing_tier, plan_status, subscription_current_period_end, calendar_count, booking_model, enabled_models, sms_monthly_allowance')
     .eq('id', venueId)
     .single();
 
   if (fullVenue) {
-    venue = fullVenue;
+    venue = {
+      ...fullVenue,
+      venue_opening_exceptions: parseVenueOpeningExceptions(
+        (fullVenue as { venue_opening_exceptions?: unknown }).venue_opening_exceptions,
+      ),
+    };
     const pt = ((fullVenue as { pricing_tier?: string | null }).pricing_tier ?? 'standard') as string;
     const cc = (fullVenue as { calendar_count?: number | null }).calendar_count ?? null;
     const expectedAllowance = computeSmsMonthlyAllowance(pt, cc);
     const stored = (fullVenue as { sms_monthly_allowance?: number | null }).sms_monthly_allowance;
     if (stored !== expectedAllowance && venueId) {
       await updateVenueSmsMonthlyAllowance(venueId);
-      venue = { ...fullVenue, sms_monthly_allowance: expectedAllowance };
+      venue = { ...venue, sms_monthly_allowance: expectedAllowance };
     }
   } else {
     console.error('Settings page full venue query failed, trying basic columns:', fullErr?.message);
@@ -105,11 +101,12 @@ export default async function SettingsPage({
         stripe_connected_account_id: null,
         table_management_enabled: basicVenue.table_management_enabled ?? false,
         combination_threshold: basicVenue.combination_threshold ?? 80,
+        venue_opening_exceptions: [],
         enabled_models: normalizeEnabledModels(
           (basicVenue as { enabled_models?: unknown }).enabled_models,
           bm,
         ),
-      };
+      } as VenueSettings;
     }
   }
 

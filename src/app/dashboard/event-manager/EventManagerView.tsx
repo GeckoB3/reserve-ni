@@ -27,6 +27,10 @@ interface ExperienceEvent {
   /** Unified calendar column for staff grid (unified scheduling). */
   calendar_id: string | null;
   ticket_types: TicketType[];
+  max_advance_booking_days?: number;
+  min_booking_notice_hours?: number;
+  cancellation_notice_hours?: number;
+  allow_same_day_booking?: boolean;
 }
 
 interface AttendeeRow {
@@ -66,6 +70,10 @@ interface EventFormState {
   customDatesText: string;
   /** Unified calendar id, or empty for unassigned. */
   calendar_id: string;
+  max_advance_booking_days: number;
+  min_booking_notice_hours: number;
+  cancellation_notice_hours: number;
+  allow_same_day_booking: boolean;
 }
 
 function parseCustomDatesFromText(text: string): string[] {
@@ -93,6 +101,10 @@ const BLANK_EVENT: EventFormState = {
   recurrenceUntil: '',
   customDatesText: '',
   calendar_id: '',
+  max_advance_booking_days: 90,
+  min_booking_notice_hours: 1,
+  cancellation_notice_hours: 48,
+  allow_same_day_booking: true,
 };
 
 export function EventManagerView({
@@ -335,6 +347,10 @@ export function EventManagerView({
           ...(tt.capacity !== '' && { capacity: parseInt(tt.capacity) }),
         })),
         ...calendarPayload,
+        max_advance_booking_days: eventForm.max_advance_booking_days,
+        min_booking_notice_hours: eventForm.min_booking_notice_hours,
+        cancellation_notice_hours: eventForm.cancellation_notice_hours,
+        allow_same_day_booking: eventForm.allow_same_day_booking,
       };
 
       let postBody: Record<string, unknown> = { ...basePayload };
@@ -426,6 +442,10 @@ export function EventManagerView({
       recurrenceUntil: '',
       customDatesText: '',
       calendar_id: event.calendar_id ?? '',
+      max_advance_booking_days: event.max_advance_booking_days ?? 90,
+      min_booking_notice_hours: event.min_booking_notice_hours ?? 1,
+      cancellation_notice_hours: event.cancellation_notice_hours ?? 48,
+      allow_same_day_booking: event.allow_same_day_booking ?? true,
     });
     setEditingEventId(event.id);
     setEventError(null);
@@ -716,7 +736,7 @@ export function EventManagerView({
                   type="text"
                   value={eventForm.name}
                   onChange={(e) => setEventForm((f) => ({ ...f, name: e.target.value }))}
-                  placeholder="e.g. Saturday Night Comedy"
+                  placeholder="e.g. Seasonal tasting, Workshop"
                   className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
                 />
               </div>
@@ -785,6 +805,72 @@ export function EventManagerView({
                   className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
                 />
               </div>
+              <div className="sm:col-span-2 rounded-lg border border-slate-200 bg-slate-50/80 p-3">
+                <p className="mb-2 text-xs font-medium text-slate-700">Guest booking rules</p>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-slate-600">Max advance (days)</label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={365}
+                      value={eventForm.max_advance_booking_days}
+                      onChange={(e) =>
+                        setEventForm((f) => ({
+                          ...f,
+                          max_advance_booking_days: parseInt(e.target.value, 10) || 1,
+                        }))
+                      }
+                      className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-slate-600">Min notice (hours)</label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={168}
+                      value={eventForm.min_booking_notice_hours}
+                      onChange={(e) =>
+                        setEventForm((f) => ({
+                          ...f,
+                          min_booking_notice_hours: parseInt(e.target.value, 10) || 0,
+                        }))
+                      }
+                      className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-slate-600">Cancellation notice (hours)</label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={168}
+                      value={eventForm.cancellation_notice_hours}
+                      onChange={(e) =>
+                        setEventForm((f) => ({
+                          ...f,
+                          cancellation_notice_hours: parseInt(e.target.value, 10) || 0,
+                        }))
+                      }
+                      className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                    />
+                  </div>
+                  <div className="flex items-end pb-1">
+                    <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
+                      <input
+                        type="checkbox"
+                        checked={eventForm.allow_same_day_booking}
+                        onChange={(e) =>
+                          setEventForm((f) => ({ ...f, allow_same_day_booking: e.target.checked }))
+                        }
+                        className="h-4 w-4 rounded border-slate-300"
+                      />
+                      Allow same-day bookings
+                    </label>
+                  </div>
+                </div>
+              </div>
               {bookingModel === 'unified_scheduling' && (
                 <div className="sm:col-span-2 space-y-3 rounded-lg border border-slate-100 bg-slate-50/80 p-3">
                   <p className="text-xs font-medium text-slate-700">Staff calendar column</p>
@@ -833,7 +919,7 @@ export function EventManagerView({
                             type="text"
                             value={newColumnName}
                             onChange={(e) => setNewColumnName(e.target.value)}
-                            placeholder="e.g. Events host"
+                            placeholder="e.g. Main hall, Host column"
                             disabled={creatingColumn}
                             className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 disabled:opacity-60"
                           />
@@ -865,7 +951,7 @@ export function EventManagerView({
                   </div>
                   <p className="text-xs text-slate-500">
                     New columns use the same setup as elsewhere: they appear on the staff calendar and can be managed in
-                    Calendar Availability.
+                    Calendar availability.
                   </p>
                 </div>
               )}

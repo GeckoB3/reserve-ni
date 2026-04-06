@@ -32,7 +32,7 @@ import { resolveDropTarget, type CombinationInfo } from '@/lib/table-management/
 const STATUS_COLORS: Record<string, string> = {
   Pending: 'bg-amber-100 border-amber-300 text-amber-800',
   Confirmed: 'bg-teal-100 border-teal-300 text-teal-800',
-  Seated: 'bg-blue-100 border-blue-300 text-blue-800',
+  Seated: 'bg-brand-100 border-brand-300 text-brand-900',
   Arrived: 'bg-teal-100 border-teal-300 text-teal-800',
   Completed: 'bg-slate-100 border-slate-300 text-slate-600',
   'No-Show': 'bg-red-100 border-red-300 text-red-800',
@@ -46,7 +46,7 @@ const CONTEXT_MENU_MAX_POINTER_MOVE_PX = 10;
 const STATUS_DOTS: Record<string, string> = {
   Pending: 'bg-amber-500',
   Confirmed: 'bg-teal-500',
-  Seated: 'bg-blue-600',
+  Seated: 'bg-brand-600',
   Arrived: 'bg-teal-500',
   Completed: 'bg-slate-500',
   'No-Show': 'bg-red-500',

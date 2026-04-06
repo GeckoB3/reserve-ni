@@ -7,6 +7,7 @@ import { getSupabaseAdminClient } from '@/lib/supabase';
 import { ToastProvider } from '@/components/ui/Toast';
 import type { BookingModel } from '@/types/booking-models';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
+import { normalizeEnabledModels } from '@/lib/booking/enabled-models';
 
 export default async function DaySheetPage() {
   const supabase = await createClient();
@@ -29,7 +30,7 @@ export default async function DaySheetPage() {
   const admin = getSupabaseAdminClient();
   const { data: venue } = await admin
     .from('venues')
-    .select('table_management_enabled, booking_model, currency')
+    .select('table_management_enabled, booking_model, currency, enabled_models')
     .eq('id', venueId)
     .single();
 
@@ -38,6 +39,10 @@ export default async function DaySheetPage() {
   }
 
   const bookingModel = (venue?.booking_model as BookingModel) ?? 'table_reservation';
+  const enabledModels = normalizeEnabledModels(
+    (venue as { enabled_models?: unknown } | null)?.enabled_models,
+    bookingModel,
+  );
 
   if (isUnifiedSchedulingVenue(bookingModel)) {
     redirect('/dashboard/calendar');
@@ -48,7 +53,12 @@ export default async function DaySheetPage() {
       <div className="mx-auto max-w-5xl">
         <SwRegister />
         <ToastProvider>
-          <DaySheetView venueId={venueId} currency={(venue?.currency as string) ?? 'GBP'} />
+          <DaySheetView
+            venueId={venueId}
+            currency={(venue?.currency as string) ?? 'GBP'}
+            bookingModel={bookingModel}
+            enabledModels={enabledModels}
+          />
         </ToastProvider>
       </div>
     </div>

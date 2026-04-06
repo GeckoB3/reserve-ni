@@ -59,6 +59,49 @@ describe('computeAppointmentAvailability', () => {
     expect(r.practitioners[0]?.slots.some((s) => s.start_time === '16:00')).toBe(false);
   });
 
+  it('treats a venue opening exception as closed for that date (no slots)', () => {
+    const date = '2030-06-02';
+    const dk = workingHoursDayKey(date);
+    const venueOpeningHours = {
+      [dk]: { periods: [{ open: '10:00', close: '16:00' }] },
+    } as OpeningHours;
+    const input: AppointmentEngineInput = {
+      date,
+      venueOpeningHours,
+      venueOpeningExceptions: [
+        {
+          id: 'ex1',
+          date_start: date,
+          date_end: date,
+          closed: true,
+        },
+      ],
+      practitioners: [
+        {
+          id: 'p1',
+          name: 'Alex',
+          is_active: true,
+          working_hours: { [dk]: [{ start: '09:00', end: '17:00' }] },
+          break_times: [],
+          days_off: [],
+        } as unknown as import('@/types/booking-models').Practitioner,
+      ],
+      services: [
+        {
+          id: 's1',
+          name: 'Cut',
+          duration_minutes: 30,
+          buffer_minutes: 0,
+          is_active: true,
+        } as import('@/types/booking-models').AppointmentService,
+      ],
+      practitionerServices: PS_P1_S1,
+      existingBookings: [],
+    };
+    const r = computeAppointmentAvailability(input);
+    expect(r.practitioners.length).toBe(0);
+  });
+
   it('applies min_notice_hours on top of current time for guest flow', () => {
     const date = todayYmd();
     const dk = workingHoursDayKey(date);

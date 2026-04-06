@@ -5,7 +5,7 @@ import { NumericInput } from '@/components/ui/NumericInput';
 
 const ALL_STATUSES = [
   { key: 'available', label: 'Available', required: true, color: 'bg-green-500' },
-  { key: 'reserved', label: 'Reserved', required: false, color: 'bg-blue-500' },
+  { key: 'reserved', label: 'Reserved', required: false, color: 'bg-brand-500' },
   { key: 'seated', label: 'Seated', required: true, color: 'bg-emerald-500' },
   { key: 'starters', label: 'Starters', required: false, color: 'bg-yellow-500' },
   { key: 'mains', label: 'Mains', required: false, color: 'bg-orange-500' },

@@ -113,7 +113,12 @@ export async function sendBookingConfirmationEmail(
         return { sent: false, reason: 'disabled' };
       }
     } else {
+      // Table restaurant: same channel gating as unified / CDE (notification_settings + comm settings).
       if (!settings.confirmation_email_enabled) return { sent: false, reason: 'disabled' };
+      const ns = await getVenueNotificationSettings(venueId);
+      if (!ns.confirmation_enabled || !ns.confirmation_channels.includes('email')) {
+        return { sent: false, reason: 'disabled' };
+      }
     }
 
     const rendered = renderBookingConfirmation(booking, venue, settings.confirmation_email_custom_message);
@@ -145,11 +150,6 @@ export async function sendBookingConfirmationSms(
   if (!phone) return { sent: false, reason: 'no_phone' };
 
   try {
-    const venuePrimaryModel = await fetchVenueBookingModel(venueId);
-    const useNotificationSettingsForConfirmation =
-      isUnifiedSchedulingVenue(venuePrimaryModel) || isCdeBookingModel(booking.booking_model);
-    if (!useNotificationSettingsForConfirmation) return { sent: false, reason: 'skipped' };
-
     const ns = await getVenueNotificationSettings(venueId);
     if (!ns.confirmation_enabled || !ns.confirmation_channels.includes('sms')) {
       return { sent: false, reason: 'disabled' };

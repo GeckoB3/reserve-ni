@@ -119,6 +119,11 @@ export interface AppointmentService {
   staff_may_customize_price?: boolean;
   staff_may_customize_deposit?: boolean;
   staff_may_customize_colour?: boolean;
+  /** Guest online booking window for this service (replaces venue-level appointment rules). */
+  max_advance_booking_days?: number;
+  min_booking_notice_hours?: number;
+  cancellation_notice_hours?: number;
+  allow_same_day_booking?: boolean;
 }
 
 export interface PractitionerService {
@@ -153,6 +158,10 @@ export interface ExperienceEvent {
   parent_event_id: string | null;
   is_active: boolean;
   created_at: string;
+  max_advance_booking_days?: number;
+  min_booking_notice_hours?: number;
+  cancellation_notice_hours?: number;
+  allow_same_day_booking?: boolean;
 }
 
 export interface EventTicketType {
@@ -188,6 +197,10 @@ export interface ClassType {
   colour: string;
   is_active: boolean;
   created_at: string;
+  max_advance_booking_days?: number;
+  min_booking_notice_hours?: number;
+  cancellation_notice_hours?: number;
+  allow_same_day_booking?: boolean;
 }
 
 export interface ClassTimetableEntry {

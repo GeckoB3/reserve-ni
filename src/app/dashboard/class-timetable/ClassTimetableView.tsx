@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { useToast } from '@/components/ui/Toast';
 import { ClassScheduleModal } from './ClassScheduleModal';
 import { ClassTimetableReadOnlyCalendar } from './ClassTimetableReadOnlyCalendar';
 
@@ -25,6 +26,10 @@ interface ClassType {
   instructor_name?: string | null;
   payment_requirement?: PaymentRequirement;
   deposit_amount_pence?: number | null;
+  max_advance_booking_days?: number;
+  min_booking_notice_hours?: number;
+  cancellation_notice_hours?: number;
+  allow_same_day_booking?: boolean;
 }
 
 interface TimetableEntry {
@@ -95,6 +100,10 @@ const BLANK_CT = {
   instructor_custom_name: '',
   payment_requirement: 'none' as PaymentRequirement,
   deposit_pounds: '',
+  max_advance_booking_days: 90,
+  min_booking_notice_hours: 1,
+  cancellation_notice_hours: 48,
+  allow_same_day_booking: true,
 };
 
 const INITIAL_TIMETABLE_FORM = {
@@ -123,6 +132,7 @@ export function ClassTimetableView({
   currency?: string;
 }) {
   const sym = currency === 'EUR' ? '€' : '£';
+  const { addToast } = useToast();
   function formatPrice(pence: number): string {
     return `${sym}${(pence / 100).toFixed(2)}`;
   }
@@ -148,6 +158,9 @@ export function ClassTimetableView({
   const [classTypeForm, setClassTypeForm] = useState({ ...BLANK_CT });
   const [classTypeSaving, setClassTypeSaving] = useState(false);
   const [classTypeError, setClassTypeError] = useState<string | null>(null);
+  const [showNewColumnUi, setShowNewColumnUi] = useState(false);
+  const [newColumnName, setNewColumnName] = useState('');
+  const [creatingColumn, setCreatingColumn] = useState(false);
 
   const [timetableForm, setTimetableForm] = useState({ ...INITIAL_TIMETABLE_FORM });
 
@@ -291,6 +304,44 @@ export function ClassTimetableView({
     [unifiedCalendars, practitioners],
   );
 
+  async function createCalendarColumn() {
+    const name = newColumnName.trim();
+    if (!name) {
+      setClassTypeError('Enter a name for the new calendar column.');
+      return;
+    }
+    setCreatingColumn(true);
+    setClassTypeError(null);
+    try {
+      const res = await fetch('/api/venue/calendar-columns', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      });
+      const json = (await res.json()) as { error?: string; id?: string; name?: string };
+      if (!res.ok) {
+        setClassTypeError(json.error ?? 'Could not create calendar column');
+        return;
+      }
+      const newId = json.id;
+      const newName = json.name;
+      if (newId && newName) {
+        setClassTypeForm((f) => ({ ...f, instructor_staff_id: newId }));
+        setUnifiedCalendars((prev) => {
+          if (prev.some((c) => c.id === newId)) return prev;
+          return [...prev, { id: newId, name: newName }].sort((a, b) => a.name.localeCompare(b.name));
+        });
+      }
+      setNewColumnName('');
+      setShowNewColumnUi(false);
+      addToast('Calendar column created. It appears on the staff calendar like your other columns.', 'success');
+    } catch {
+      setClassTypeError('Could not create calendar column');
+    } finally {
+      setCreatingColumn(false);
+    }
+  }
+
   const buildClassTypePayload = () => {
     const priceRaw = classTypeForm.price_pence.trim();
     const pricePence =
@@ -315,6 +366,10 @@ export function ClassTimetableView({
       price_pence: pricePence,
       instructor_id: calendarId,
       instructor_name: custom || null,
+      max_advance_booking_days: classTypeForm.max_advance_booking_days,
+      min_booking_notice_hours: classTypeForm.min_booking_notice_hours,
+      cancellation_notice_hours: classTypeForm.cancellation_notice_hours,
+      allow_same_day_booking: classTypeForm.allow_same_day_booking,
     };
   };
 
@@ -370,6 +425,8 @@ export function ClassTimetableView({
       setShowClassTypeForm(false);
       setEditingClassTypeId(null);
       setClassTypeForm({ ...BLANK_CT });
+      setShowNewColumnUi(false);
+      setNewColumnName('');
       setNotice({ kind: 'success', message: editingClassTypeId ? 'Class updated.' : 'Class created.' });
       await fetchData({ silent: true });
     } catch {
@@ -398,9 +455,15 @@ export function ClassTimetableView({
       instructor_custom_name: customClassInstructorFromStored(ct),
       payment_requirement: payReq,
       deposit_pounds: depositPounds,
+      max_advance_booking_days: ct.max_advance_booking_days ?? 90,
+      min_booking_notice_hours: ct.min_booking_notice_hours ?? 1,
+      cancellation_notice_hours: ct.cancellation_notice_hours ?? 48,
+      allow_same_day_booking: ct.allow_same_day_booking ?? true,
     });
     setEditingClassTypeId(ct.id);
     setClassTypeError(null);
+    setShowNewColumnUi(false);
+    setNewColumnName('');
     setShowClassTypeForm(true);
   };
 
@@ -661,6 +724,8 @@ export function ClassTimetableView({
               setEditingClassTypeId(null);
               setClassTypeForm({ ...BLANK_CT });
               setClassTypeError(null);
+              setShowNewColumnUi(false);
+              setNewColumnName('');
               setShowClassTypeForm(true);
             }}
             className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700"
@@ -708,6 +773,8 @@ export function ClassTimetableView({
                 onClick={() => {
                   setClassTypeForm({ ...BLANK_CT });
                   setClassTypeError(null);
+                  setShowNewColumnUi(false);
+                  setNewColumnName('');
                   setShowClassTypeForm(true);
                 }}
               >
@@ -817,7 +884,7 @@ export function ClassTimetableView({
                     type="text"
                     value={classTypeForm.name}
                     onChange={(e) => setClassTypeForm((f) => ({ ...f, name: e.target.value }))}
-                    placeholder="e.g. Yoga Flow"
+                    placeholder="e.g. Beginner session, Open studio"
                     className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
                   />
                 </div>
@@ -922,6 +989,72 @@ export function ClassTimetableView({
                     Deposit and full payment require a price per person and a connected Stripe account.
                   </p>
                 </div>
+                <div className="sm:col-span-2 rounded-lg border border-slate-200 bg-slate-50/80 p-3">
+                  <p className="mb-2 text-xs font-medium text-slate-700">Guest booking rules</p>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-slate-600">Max advance (days)</label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={365}
+                        value={classTypeForm.max_advance_booking_days}
+                        onChange={(e) =>
+                          setClassTypeForm((f) => ({
+                            ...f,
+                            max_advance_booking_days: parseInt(e.target.value, 10) || 1,
+                          }))
+                        }
+                        className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-slate-600">Min notice (hours)</label>
+                      <input
+                        type="number"
+                        min={0}
+                        max={168}
+                        value={classTypeForm.min_booking_notice_hours}
+                        onChange={(e) =>
+                          setClassTypeForm((f) => ({
+                            ...f,
+                            min_booking_notice_hours: parseInt(e.target.value, 10) || 0,
+                          }))
+                        }
+                        className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-slate-600">Cancellation notice (hours)</label>
+                      <input
+                        type="number"
+                        min={0}
+                        max={168}
+                        value={classTypeForm.cancellation_notice_hours}
+                        onChange={(e) =>
+                          setClassTypeForm((f) => ({
+                            ...f,
+                            cancellation_notice_hours: parseInt(e.target.value, 10) || 0,
+                          }))
+                        }
+                        className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                      />
+                    </div>
+                    <div className="flex items-end pb-1">
+                      <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
+                        <input
+                          type="checkbox"
+                          checked={classTypeForm.allow_same_day_booking}
+                          onChange={(e) =>
+                            setClassTypeForm((f) => ({ ...f, allow_same_day_booking: e.target.checked }))
+                          }
+                          className="h-4 w-4 rounded border-slate-300"
+                        />
+                        Allow same-day bookings
+                      </label>
+                    </div>
+                  </div>
+                </div>
                 <div className="sm:col-span-2">
                   <label className="mb-1 block text-xs font-medium text-slate-600">Select Calendar *</label>
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-start">
@@ -966,7 +1099,7 @@ export function ClassTimetableView({
                         onChange={(e) =>
                           setClassTypeForm((f) => ({ ...f, instructor_custom_name: e.target.value }))
                         }
-                        placeholder="Optional — e.g. guest teacher (shown to guests instead of calendar name)"
+                        placeholder="Optional — shown to guests instead of calendar name"
                         className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
                       />
                     </div>
@@ -974,6 +1107,72 @@ export function ClassTimetableView({
                   <p className="mt-1 text-xs text-slate-500">
                     The class appears on this team calendar in the schedule. If you add a class instructor name, guests
                     see that name instead of the calendar name when booking.
+                  </p>
+                  <div className="mt-3 rounded-lg border border-slate-100 bg-slate-50/90 p-3">
+                    {!showNewColumnUi ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowNewColumnUi(true);
+                          setClassTypeError(null);
+                        }}
+                        className="inline-flex w-full items-center justify-center rounded-lg border border-brand-200/90 bg-white px-3.5 py-2.5 text-sm font-semibold text-brand-700 shadow-sm transition-[color,background-color,border-color,box-shadow,transform] duration-150 ease-out hover:border-brand-400 hover:bg-brand-50 hover:text-brand-800 hover:shadow-md active:scale-[0.98] active:border-brand-500 active:bg-brand-100 active:shadow-inner motion-reduce:transition-colors motion-reduce:active:scale-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2"
+                      >
+                        New calendar column
+                      </button>
+                    ) : (
+                      <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-end">
+                        <div className="min-w-0 flex-1 sm:max-w-xs">
+                          <label
+                            htmlFor="class-type-form-new-calendar-column-name"
+                            className="mb-1 block text-[11px] font-medium text-slate-600"
+                          >
+                            Column name
+                          </label>
+                          <input
+                            id="class-type-form-new-calendar-column-name"
+                            type="text"
+                            value={newColumnName}
+                            onChange={(e) => setNewColumnName(e.target.value)}
+                            placeholder="e.g. Main hall, Host column"
+                            disabled={creatingColumn}
+                            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 disabled:opacity-60"
+                          />
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={() => void createCalendarColumn()}
+                            disabled={creatingColumn}
+                            className="rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-brand-700 disabled:opacity-50"
+                          >
+                            {creatingColumn ? 'Creating…' : 'Create'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowNewColumnUi(false);
+                              setNewColumnName('');
+                              setClassTypeError(null);
+                            }}
+                            disabled={creatingColumn}
+                            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  <p className="mt-2 text-xs text-slate-500">
+                    New columns use the same setup as elsewhere: they appear on the staff calendar and can be managed in{' '}
+                    <Link
+                      href="/dashboard/calendar-availability?tab=availability"
+                      className="font-medium text-brand-700 underline hover:text-brand-800"
+                    >
+                      Calendar availability
+                    </Link>
+                    .
                   </p>
                 </div>
                 <div>
@@ -1017,6 +1216,8 @@ export function ClassTimetableView({
                     setShowClassTypeForm(false);
                     setEditingClassTypeId(null);
                     setClassTypeError(null);
+                    setShowNewColumnUi(false);
+                    setNewColumnName('');
                   }}
                   className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
                 >

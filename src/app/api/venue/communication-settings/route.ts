@@ -67,6 +67,8 @@ const ALLOWED_FIELDS = new Set([
   'day_of_reminder_sms_enabled',
   'day_of_reminder_email_enabled',
   'day_of_reminder_custom_message',
+  'day_of_reminder_sms_custom_message',
+  'confirm_cancel_reminder_sms_custom_message',
   'post_visit_email_enabled',
   'post_visit_email_time',
   'post_visit_email_custom_message',

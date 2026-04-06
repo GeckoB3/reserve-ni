@@ -7,7 +7,7 @@ import type { OccupancyMap, TableForSelector } from '@/components/table-tracking
 import { createClient } from '@/lib/supabase/browser';
 import { BookingDetailPanel } from './BookingDetailPanel';
 import { WalkInModal } from './WalkInModal';
-import { UnifiedBookingForm } from '@/components/booking/UnifiedBookingForm';
+import { DashboardStaffBookingModal } from '@/components/booking/DashboardStaffBookingModal';
 import { ExpandedBookingContent } from './ExpandedBookingContent';
 import { UndoToast } from '@/app/dashboard/table-grid/UndoToast';
 import type { UndoAction } from '@/types/table-management';
@@ -994,13 +994,16 @@ export function BookingsDashboard({
         />
       )}
       {newBookingOpen && (
-        <UnifiedBookingForm
-          asModal
-          venueId={venueId}
-          venueCurrency={currency}
-          advancedMode={tableManagementEnabled}
+        <DashboardStaffBookingModal
+          open
+          title="New booking"
           onClose={() => setNewBookingOpen(false)}
           onCreated={handleNewBookingCreated}
+          venueId={venueId}
+          currency={currency ?? 'GBP'}
+          bookingModel={primaryBookingModel}
+          enabledModels={enabledModels}
+          advancedMode={tableManagementEnabled}
         />
       )}
       {changeTableBooking && (
@@ -1090,7 +1093,7 @@ function statusBadge(s: string) {
   const map: Record<string, { dot: string; bg: string; text: string }> = {
     Confirmed: { dot: 'bg-emerald-500', bg: 'bg-emerald-50', text: 'text-emerald-700' },
     Pending: { dot: 'bg-amber-500', bg: 'bg-amber-50', text: 'text-amber-700' },
-    Seated: { dot: 'bg-blue-500', bg: 'bg-blue-50', text: 'text-blue-700' },
+    Seated: { dot: 'bg-brand-500', bg: 'bg-brand-50', text: 'text-brand-800' },
     Completed: { dot: 'bg-slate-400', bg: 'bg-slate-50', text: 'text-slate-600' },
     Cancelled: { dot: 'bg-red-400', bg: 'bg-red-50', text: 'text-red-600' },
     'No-Show': { dot: 'bg-red-600', bg: 'bg-red-50', text: 'text-red-700' },

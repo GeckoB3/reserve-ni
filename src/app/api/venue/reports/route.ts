@@ -254,7 +254,7 @@ export async function GET(request: NextRequest) {
       console.error('report_client_summary failed:', eClient);
     }
 
-    const { data: bookingRowsForModel, error: eBm } = await supabase
+    const { data: bookingRowsForModel, error: eBm } = await staff.db
       .from('bookings')
       .select(
         `party_size, status, deposit_amount_pence, deposit_status, experience_event_id, class_instance_id, resource_id, event_session_id, calendar_id, service_item_id, practitioner_id, appointment_service_id, checked_in_at`,
@@ -285,8 +285,8 @@ export async function GET(request: NextRequest) {
 
     if (venueFlags?.table_management_enabled && !isUnifiedSchedulingVenue(bookingModel)) {
       const [{ data: tables }, { data: assignments }] = await Promise.all([
-        supabase.from('venue_tables').select('id, name').eq('venue_id', staff.venue_id).eq('is_active', true),
-        supabase
+        staff.db.from('venue_tables').select('id, name').eq('venue_id', staff.venue_id).eq('is_active', true),
+        staff.db
           .from('booking_table_assignments')
           .select('table_id, booking:bookings!inner(booking_date, booking_time, estimated_end_time, status, venue_id)')
           .eq('booking.venue_id', staff.venue_id)
@@ -329,7 +329,7 @@ export async function GET(request: NextRequest) {
 
     let report7_appointment_insights: Awaited<ReturnType<typeof buildAppointmentInsights>> | null = null;
     if (isUnifiedSchedulingVenue(bookingModel)) {
-      report7_appointment_insights = await buildAppointmentInsights(supabase, staff.venue_id, from, to);
+      report7_appointment_insights = await buildAppointmentInsights(staff.db, staff.venue_id, from, to);
     }
 
     return NextResponse.json({

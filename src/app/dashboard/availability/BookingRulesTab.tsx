@@ -16,6 +16,7 @@ interface Restriction {
   large_party_threshold: number | null;
   large_party_message: string | null;
   deposit_required_from_party_size: number | null;
+  cancellation_notice_hours?: number;
 }
 
 interface DepositConfig {
@@ -39,6 +40,7 @@ const defaultRestriction = (serviceId: string): Omit<Restriction, 'id'> => ({
   large_party_threshold: null,
   large_party_message: null,
   deposit_required_from_party_size: null,
+  cancellation_notice_hours: 48,
 });
 
 const defaultDeposit: DepositConfig = {
@@ -103,15 +105,16 @@ export function BookingRulesTab({ services, showToast }: Props) {
     }
   }
 
-  async function handleSave(serviceId: string, data: Omit<Restriction, 'id'>) {
+  async function handleSave(serviceId: string, data: Restriction) {
     setSaving(true);
     const existing = restrictions.find((r) => r.service_id === serviceId);
+    const { id: _draftId, ...payload } = data;
     try {
       if (existing) {
         const res = await fetch('/api/venue/booking-restrictions', {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id: existing.id, ...data }),
+          body: JSON.stringify({ id: existing.id, ...payload }),
         });
         if (!res.ok) throw new Error();
         const json = await res.json();
@@ -120,7 +123,7 @@ export function BookingRulesTab({ services, showToast }: Props) {
         const res = await fetch('/api/venue/booking-restrictions', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(data),
+          body: JSON.stringify(payload),
         });
         if (!res.ok) throw new Error();
         const json = await res.json();
@@ -146,7 +149,8 @@ export function BookingRulesTab({ services, showToast }: Props) {
       <div className="rounded-xl border border-slate-200 bg-white p-5">
         <h3 className="mb-4 font-semibold text-slate-900">Deposit Settings</h3>
         <div className="mb-4 rounded-lg bg-amber-50 border border-amber-200 p-3 text-xs text-amber-800">
-          <strong>Cancellation policy (MVP):</strong> Deposits are refundable if the guest cancels at least 48 hours before the booking time. Otherwise the deposit is forfeited.
+          <strong>Deposit refunds:</strong> Configure hours-before-start for each dining service below. Guests who cancel
+          after that cut-off forfeit the deposit (unless you refund manually).
         </div>
         <div className="space-y-4">
           <label className="flex cursor-pointer items-center gap-3">
@@ -224,7 +228,11 @@ export function BookingRulesTab({ services, showToast }: Props) {
                 <button
                   onClick={() => {
                     setEditingId(service.id);
-                    setEditDraft(restriction ? { ...restriction } : { id: '', ...defaultRestriction(service.id) } as Restriction);
+                    setEditDraft(
+                      restriction
+                        ? { ...restriction }
+                        : ({ id: '', ...defaultRestriction(service.id) } as Restriction),
+                    );
                   }}
                   className="text-xs font-medium text-brand-600 hover:text-brand-700"
                 >
@@ -257,6 +265,19 @@ export function BookingRulesTab({ services, showToast }: Props) {
                   <div>
                     <label className="mb-1 block text-xs font-medium text-slate-600">Max party size online</label>
                     <NumericInput min={1} value={draft.max_party_size_online} onChange={(v) => setEditDraft({ ...draft, max_party_size_online: v })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <label className="mb-1 flex items-center gap-1.5 text-xs font-medium text-slate-600">
+                      Cancellation notice (hours) — deposit refund{' '}
+                      <HelpTooltip content="Guests who cancel at least this many hours before the reservation start can receive an automatic deposit refund (when deposits apply)." />
+                    </label>
+                    <NumericInput
+                      min={0}
+                      max={168}
+                      value={draft.cancellation_notice_hours ?? 48}
+                      onChange={(v) => setEditDraft({ ...draft, cancellation_notice_hours: v })}
+                      className="w-full max-w-xs rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                    />
                   </div>
                 </div>
 
@@ -334,6 +355,7 @@ export function BookingRulesTab({ services, showToast }: Props) {
                 <div><span className="text-slate-500">Min advance:</span> <span className="font-medium text-slate-700">{restriction.min_advance_minutes} min</span></div>
                 <div><span className="text-slate-500">Max advance:</span> <span className="font-medium text-slate-700">{restriction.max_advance_days} days</span></div>
                 <div><span className="text-slate-500">Party size:</span> <span className="font-medium text-slate-700">{restriction.min_party_size_online}–{restriction.max_party_size_online}</span></div>
+                <div><span className="text-slate-500">Cancellation (refund):</span> <span className="font-medium text-slate-700">{restriction.cancellation_notice_hours ?? 48} h before start</span></div>
                 <div>
                   <span className="text-slate-500">Large party redirect:</span>{' '}
                   <span className="font-medium text-slate-700">
@@ -348,7 +370,11 @@ export function BookingRulesTab({ services, showToast }: Props) {
                 </div>
               </div>
             ) : (
-              <p className="text-sm text-slate-400">No booking rules configured. Default rules will apply.</p>
+              <p className="text-sm text-slate-400">
+                No booking rules configured. Click Configure to set advance windows, party sizes, and{' '}
+                <span className="font-medium text-slate-600">cancellation notice for deposit refunds</span> for this
+                service.
+              </p>
             )}
           </div>
         );

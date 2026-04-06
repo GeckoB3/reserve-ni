@@ -1,4 +1,5 @@
 import type { BookingModel } from '@/types/booking-models';
+import type { VenueOpeningException } from '@/types/venue-opening-exceptions';
 
 /** Venue shape used by the settings dashboard (matches API). */
 export interface VenueSettings {
@@ -17,6 +18,8 @@ export interface VenueSettings {
   kitchen_email: string | null;
   communication_templates: Record<string, { subject?: string; body?: string }> | null;
   opening_hours: OpeningHoursSettings | null;
+  /** Unified / appointment venues: date-range closures or amended opening hours (see venue-opening-exceptions API). */
+  venue_opening_exceptions?: VenueOpeningException[] | null;
   booking_rules: BookingRulesSettings | null;
   deposit_config: DepositConfigSettings | null;
   availability_config: AvailabilityConfigSettings | null;

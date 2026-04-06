@@ -588,7 +588,7 @@ export async function PATCH(
         apptInput.skipPastSlotFilter = true;
         const { data: venueClock } = await admin
           .from('venues')
-          .select('timezone, booking_rules, opening_hours')
+          .select('timezone, booking_rules, opening_hours, venue_opening_exceptions')
           .eq('id', staff.venue_id)
           .single();
         attachVenueClockToAppointmentInput(apptInput, venueClock ?? {});
@@ -821,6 +821,7 @@ export async function PATCH(
             'post_visit_email',
             'reminder_1_email',
             'reminder_1_sms',
+            'reminder_2_email',
             'reminder_2_sms',
             'unified_post_visit_email',
           ]);

@@ -3,11 +3,13 @@ import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { requireVenueExposesSecondaryModel } from '@/lib/booking/require-venue-secondary-model';
+import { assertResourceAvailabilityClearOnHostCalendar } from '@/lib/booking/resource-host-calendar-conflicts';
 import {
   weeklyResourceAvailabilityOverlaps,
   weeklyResourceRestrictedByHostCalendar,
 } from '@/lib/booking/resource-weekly-overlap';
 import type { WorkingHours } from '@/types/booking-models';
+import { DEFAULT_ENTITY_BOOKING_WINDOW } from '@/lib/booking/entity-booking-window';
 import { z } from 'zod';
 
 const availabilityExceptionDaySchema = z.union([
@@ -36,6 +38,10 @@ const resourceFieldSchema = z.object({
   sort_order: z.number().int().optional(),
   /** Host calendar column (unified_calendars id, non-resource). Required on create. */
   display_on_calendar_id: z.string().uuid().optional().nullable(),
+  max_advance_booking_days: z.number().int().min(1).max(365).optional(),
+  min_booking_notice_hours: z.number().int().min(0).max(168).optional(),
+  cancellation_notice_hours: z.number().int().min(0).max(168).optional(),
+  allow_same_day_booking: z.boolean().optional(),
 });
 
 function validateResourcePaymentFields(input: {
@@ -166,6 +172,18 @@ async function assertResourceDisplayOnCalendarValid(
       };
     }
   }
+
+  const scheduleCheck = await assertResourceAvailabilityClearOnHostCalendar(
+    admin,
+    venueId,
+    displayOnCalendarId,
+    workingHours,
+    { excludeResourceId },
+  );
+  if (!scheduleCheck.ok) {
+    return { ok: false, message: scheduleCheck.message };
+  }
+
   return { ok: true };
 }
 
@@ -188,6 +206,12 @@ function mapUnifiedCalendarToResource(row: Record<string, unknown>) {
     sort_order: row.sort_order ?? 0,
     created_at: row.created_at,
     display_on_calendar_id: (row.display_on_calendar_id as string | null | undefined) ?? null,
+    max_advance_booking_days: (row.max_advance_booking_days as number | undefined) ?? DEFAULT_ENTITY_BOOKING_WINDOW.max_advance_booking_days,
+    min_booking_notice_hours: (row.min_booking_notice_hours as number | undefined) ?? DEFAULT_ENTITY_BOOKING_WINDOW.min_booking_notice_hours,
+    cancellation_notice_hours:
+      (row.cancellation_notice_hours as number | undefined) ?? DEFAULT_ENTITY_BOOKING_WINDOW.cancellation_notice_hours,
+    allow_same_day_booking:
+      (row.allow_same_day_booking as boolean | undefined) ?? DEFAULT_ENTITY_BOOKING_WINDOW.allow_same_day_booking,
   };
 }
 
@@ -288,6 +312,11 @@ export async function POST(request: NextRequest) {
       is_active: parsed.data.is_active ?? true,
       sort_order: parsed.data.sort_order ?? 0,
       display_on_calendar_id: parsed.data.display_on_calendar_id,
+      max_advance_booking_days: parsed.data.max_advance_booking_days ?? DEFAULT_ENTITY_BOOKING_WINDOW.max_advance_booking_days,
+      min_booking_notice_hours: parsed.data.min_booking_notice_hours ?? DEFAULT_ENTITY_BOOKING_WINDOW.min_booking_notice_hours,
+      cancellation_notice_hours:
+        parsed.data.cancellation_notice_hours ?? DEFAULT_ENTITY_BOOKING_WINDOW.cancellation_notice_hours,
+      allow_same_day_booking: parsed.data.allow_same_day_booking ?? DEFAULT_ENTITY_BOOKING_WINDOW.allow_same_day_booking,
     };
 
     const MAX_SCHEMA_RETRY = 6;
@@ -394,6 +423,18 @@ export async function PATCH(request: NextRequest) {
     if (parsed.data.deposit_amount_pence !== undefined) updatePayload.deposit_amount_pence = parsed.data.deposit_amount_pence;
     if (parsed.data.is_active !== undefined) updatePayload.is_active = parsed.data.is_active;
     if (parsed.data.sort_order !== undefined) updatePayload.sort_order = parsed.data.sort_order;
+    if (parsed.data.max_advance_booking_days !== undefined) {
+      updatePayload.max_advance_booking_days = parsed.data.max_advance_booking_days;
+    }
+    if (parsed.data.min_booking_notice_hours !== undefined) {
+      updatePayload.min_booking_notice_hours = parsed.data.min_booking_notice_hours;
+    }
+    if (parsed.data.cancellation_notice_hours !== undefined) {
+      updatePayload.cancellation_notice_hours = parsed.data.cancellation_notice_hours;
+    }
+    if (parsed.data.allow_same_day_booking !== undefined) {
+      updatePayload.allow_same_day_booking = parsed.data.allow_same_day_booking;
+    }
 
     if (parsed.data.payment_requirement === 'full_payment' || parsed.data.payment_requirement === 'none') {
       updatePayload.deposit_amount_pence = null;
@@ -402,7 +443,7 @@ export async function PATCH(request: NextRequest) {
     const mergedDisplayOn =
       parsed.data.display_on_calendar_id !== undefined
         ? parsed.data.display_on_calendar_id
-        : (ex.display_on_calendar_id as string | null);
+        : ((ex.display_on_calendar_id as string | null) ?? null);
     const mergedHours = (parsed.data.availability_hours ?? ex.working_hours ?? {}) as WorkingHours;
     if (mergedDisplayOn) {
       const displayCheck = await assertResourceDisplayOnCalendarValid(

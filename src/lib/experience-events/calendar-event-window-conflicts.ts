@@ -4,7 +4,10 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { timeToMinutes } from '@/lib/availability';
-import { resolveInstructorCalendarIdForClass } from '@/lib/class-instances/instructor-calendar-block';
+import {
+  classBlockEndTime,
+  resolveInstructorCalendarIdForClass,
+} from '@/lib/class-instances/instructor-calendar-block';
 import { BOOKING_ACTIVE_STATUSES } from '@/lib/table-management/constants';
 
 function hhmmToMinutes(t: string): number {
@@ -37,7 +40,7 @@ export async function assertExperienceEventWindowFreeOnCalendar(
   eventDate: string,
   startTime: string,
   endTime: string,
-  options?: { excludeExperienceEventId?: string },
+  options?: { excludeExperienceEventId?: string; excludeClassInstanceIds?: string[] },
 ): Promise<string | null> {
   const { data: cal, error: calErr } = await admin
     .from('unified_calendars')
@@ -60,6 +63,7 @@ export async function assertExperienceEventWindowFreeOnCalendar(
   }
 
   const excludeEv = options?.excludeExperienceEventId;
+  const excludeClassIds = options?.excludeClassInstanceIds?.filter(Boolean) ?? [];
 
   const { data: otherEvents, error: evErr } = await admin
     .from('experience_events')
@@ -134,6 +138,15 @@ export async function assertExperienceEventWindowFreeOnCalendar(
     const expEvId = r.experience_event_id as string | null | undefined;
     if (excludeEv && typeof expEvId === 'string' && expEvId === excludeEv) continue;
 
+    const classInstId = r.class_instance_id as string | null | undefined;
+    if (
+      excludeClassIds.length > 0 &&
+      typeof classInstId === 'string' &&
+      excludeClassIds.includes(classInstId)
+    ) {
+      continue;
+    }
+
     const onColumn =
       r.calendar_id === calendarId ||
       r.practitioner_id === calendarId ||
@@ -189,7 +202,8 @@ export async function assertExperienceEventWindowFreeOnCalendar(
         }
       }
       for (const raw of ciRows ?? []) {
-        const row = raw as { start_time: string; class_type_id: string };
+        const row = raw as { id: string; start_time: string; class_type_id: string };
+        if (excludeClassIds.includes(row.id)) continue;
         const meta = typeMeta.get(row.class_type_id);
         if (!meta) continue;
         const calForClass = await resolveInstructorCalendarIdForClass(admin, venueId, meta.instructor_id);
@@ -204,4 +218,44 @@ export async function assertExperienceEventWindowFreeOnCalendar(
   }
 
   return null;
+}
+
+/**
+ * Ensures a class session window does not overlap other uses of the same team calendar column
+ * (events, blocks, bookings, other class sessions). Excludes one instance when re-validating
+ * that session’s own time (e.g. instructor or duration change).
+ */
+export async function assertClassSessionWindowFreeOnCalendar(
+  admin: SupabaseClient,
+  venueId: string,
+  params: {
+    instructorId: string | null;
+    durationMinutes: number;
+    instanceDate: string;
+    startTime: string;
+    excludeClassInstanceId?: string;
+  },
+): Promise<string | null> {
+  const { instructorId, durationMinutes, instanceDate, startTime, excludeClassInstanceId } = params;
+  const calendarId = await resolveInstructorCalendarIdForClass(admin, venueId, instructorId);
+  if (!calendarId) {
+    return 'No team calendar is linked to this instructor. Assign a team column before scheduling.';
+  }
+
+  const startNorm = String(startTime).trim();
+  const startHhmm = startNorm.length >= 5 ? startNorm.slice(0, 5) : startNorm;
+  const dur = durationMinutes > 0 ? durationMinutes : 60;
+  const endHhmm = classBlockEndTime(startHhmm, dur).slice(0, 5);
+
+  return assertExperienceEventWindowFreeOnCalendar(
+    admin,
+    venueId,
+    calendarId,
+    instanceDate,
+    startHhmm,
+    endHhmm,
+    excludeClassInstanceId
+      ? { excludeClassInstanceIds: [excludeClassInstanceId] }
+      : undefined,
+  );
 }

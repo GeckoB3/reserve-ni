@@ -8,7 +8,7 @@ import { isCdeBookingRow } from '@/lib/booking/cde-booking';
  * - runSecondaryModelScheduledComms: all venues; queries .or(CDE_OR_FILTER) + isCdeBookingRow.
  *
  * Dedup: communication_logs UNIQUE(booking_id, message_type) + logToCommLogs insert-on-conflict
- * prevents duplicate reminder_1_email / reminder_2_sms / post_visit for the same booking.
+ * prevents duplicate reminder_1_email / reminder_2_email / reminder_2_sms / post_visit for the same booking.
  *
  * Manual verification matrix (staging):
  * 1. table_reservation + enabled event_ticket: create event booking → expect cde_reminder_1 in cron JSON after window.

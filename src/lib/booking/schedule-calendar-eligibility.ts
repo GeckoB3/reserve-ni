@@ -19,6 +19,20 @@ export function isVenueScheduleCalendarEligible(
 }
 
 /**
+ * Venues that use the calendar availability UI at `/dashboard/calendar-availability`
+ * (team hours, calendars, booking rules for schedule-backed models).
+ * Same scope as {@link isVenueScheduleCalendarEligible}: unified/practitioner primary, or any
+ * schedule model (unified, events, classes, resources) as primary or enabled secondary — including
+ * restaurants with table primary plus one or more of those models.
+ */
+export function shouldShowAppointmentAvailabilitySettings(
+  bookingModel: BookingModel,
+  enabledModels: BookingModel[],
+): boolean {
+  return isVenueScheduleCalendarEligible(bookingModel, enabledModels);
+}
+
+/**
  * Full practitioner/appointment grid (`PractitionerCalendarView`) - unified / practitioner primaries, **or** any venue
  * that exposes class sessions (classes render on assigned calendar columns). Table-only venues without classes keep
  * {@link StaffScheduleHub} for ticketed events / resources only.

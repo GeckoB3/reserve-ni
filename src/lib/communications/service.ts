@@ -30,7 +30,12 @@ export interface CommunicationSettings {
   day_of_reminder_time: string;
   day_of_reminder_sms_enabled: boolean;
   day_of_reminder_email_enabled: boolean;
+  /** Optional line for day-of reminder email (and fallback for SMS when SMS-specific line is unset). */
   day_of_reminder_custom_message: string | null;
+  /** Optional line for day-of reminder SMS only; when null, `day_of_reminder_custom_message` is used. */
+  day_of_reminder_sms_custom_message: string | null;
+  /** Optional line for Confirm or Cancel Reminder SMS (56h / first reminder SMS), not day-of. */
+  confirm_cancel_reminder_sms_custom_message: string | null;
   post_visit_email_enabled: boolean;
   post_visit_email_time: string;
   post_visit_email_custom_message: string | null;
@@ -104,6 +109,8 @@ export async function getCommSettings(venueId: string): Promise<CommunicationSet
     day_of_reminder_sms_enabled: true,
     day_of_reminder_email_enabled: true,
     day_of_reminder_custom_message: null,
+    day_of_reminder_sms_custom_message: null,
+    confirm_cancel_reminder_sms_custom_message: null,
     post_visit_email_enabled: true,
     post_visit_email_time: '09:00:00',
     post_visit_email_custom_message: null,
@@ -131,7 +138,21 @@ export function normalizeCommunicationSettingsRow(data: Record<string, unknown>)
     deposit_request_email_enabled: data.deposit_request_email_enabled !== false,
     deposit_request_email_custom_message:
       (data.deposit_request_email_custom_message as string | null | undefined) ?? null,
+    confirm_cancel_reminder_sms_custom_message:
+      (data.confirm_cancel_reminder_sms_custom_message as string | null | undefined) ?? null,
+    day_of_reminder_sms_custom_message:
+      (data.day_of_reminder_sms_custom_message as string | null | undefined) ?? null,
   };
+}
+
+/** Line prepended to day-of reminder SMS (table restaurants). */
+export function dayOfReminderSmsCustomLine(comm: CommunicationSettings): string | null {
+  return comm.day_of_reminder_sms_custom_message ?? comm.day_of_reminder_custom_message;
+}
+
+/** SMS optional line for Confirm or Cancel / first & second reminder texts (not day-of). */
+export function confirmCancelReminderSmsCustomLine(comm: CommunicationSettings): string | null {
+  return comm.confirm_cancel_reminder_sms_custom_message ?? comm.day_of_reminder_custom_message;
 }
 
 /**

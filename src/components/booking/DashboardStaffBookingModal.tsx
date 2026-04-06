@@ -1,0 +1,58 @@
+'use client';
+
+import type { StaffSurfaceBookingStackProps } from '@/components/booking/StaffSurfaceBookingStack';
+import { StaffSurfaceBookingStack } from '@/components/booking/StaffSurfaceBookingStack';
+
+type Props = Omit<StaffSurfaceBookingStackProps, 'onCreated' | 'bookingIntent'> & {
+  open: boolean;
+  onClose: () => void;
+  onCreated: () => void;
+  title?: string;
+};
+
+/**
+ * Modal shell for staff multi-surface booking flows (same surfaces as /dashboard/bookings/new).
+ * Tabs appear only when the venue exposes more than one booking surface.
+ */
+export function DashboardStaffBookingModal({
+  open,
+  onClose,
+  onCreated,
+  title = 'New booking',
+  ...stack
+}: Props) {
+  if (!open) return null;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-4 sm:items-center"
+      onClick={onClose}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="dashboard-staff-booking-modal-title"
+        className="max-h-[min(90dvh,90vh)] w-full max-w-5xl overflow-y-auto rounded-t-2xl bg-white p-6 shadow-xl sm:rounded-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mb-4 flex items-center justify-between gap-2">
+          <h2 id="dashboard-staff-booking-modal-title" className="text-lg font-semibold text-slate-900">
+            {title}
+          </h2>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+          >
+            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        <StaffSurfaceBookingStack {...stack} bookingIntent="new" onCreated={onCreated} onClose={onClose} />
+      </div>
+    </div>
+  );
+}

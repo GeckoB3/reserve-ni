@@ -85,10 +85,15 @@ export async function POST(request: NextRequest) {
     const primarySample = useAppointmentSample ? apptBooking : tableBooking;
 
     let preview: { subject?: string; html?: string; text?: string; body?: string } = {};
+    /** Describes which synthetic booking profile was used (matches modal footnote). */
+    let previewSampleKind: 'table' | 'appointment' = useAppointmentSample
+      ? 'appointment'
+      : 'table';
 
     switch (messageType) {
       case 'booking_confirmation_email':
         preview = renderBookingConfirmation(primarySample, venueData, customMessage);
+        previewSampleKind = useAppointmentSample ? 'appointment' : 'table';
         break;
       case 'deposit_request_sms':
         preview = renderDepositRequestSms(
@@ -97,6 +102,7 @@ export async function POST(request: NextRequest) {
           'https://www.reserveni.com/pay?t=preview',
           customMessage,
         );
+        previewSampleKind = useAppointmentSample ? 'appointment' : 'table';
         break;
       case 'deposit_request_email':
         preview = renderDepositRequestEmail(
@@ -105,25 +111,40 @@ export async function POST(request: NextRequest) {
           'https://www.reserveni.com/pay?t=preview',
           customMessage,
         );
+        previewSampleKind = useAppointmentSample ? 'appointment' : 'table';
         break;
       case 'deposit_confirmation_email':
         preview = renderDepositConfirmation(primarySample, venueData, customMessage);
+        previewSampleKind = useAppointmentSample ? 'appointment' : 'table';
         break;
       case 'reminder_56h_email':
         preview = renderReminder56h(SAMPLE_BOOKING, venueData, customMessage);
+        previewSampleKind = 'table';
         break;
       case 'reminder_1_email':
         preview = renderReminder56h(apptBooking, venueData, customMessage);
+        previewSampleKind = 'appointment';
         break;
       case 'reminder_1_sms':
+        /** Same template as live sends; sample must match channel (table vs appointments). */
+        preview = renderDayOfReminderSms(primarySample, venueData, customMessage);
+        previewSampleKind = useAppointmentSample ? 'appointment' : 'table';
+        break;
+      case 'reminder_2_email':
+        preview = renderDayOfReminderEmail(apptBooking, venueData, customMessage);
+        previewSampleKind = 'appointment';
+        break;
       case 'reminder_2_sms':
         preview = renderDayOfReminderSms(apptBooking, venueData, customMessage);
+        previewSampleKind = 'appointment';
         break;
       case 'unified_post_visit_email':
         preview = renderPostVisitEmail(apptBooking, venueData, customMessage);
+        previewSampleKind = 'appointment';
         break;
       case 'booking_confirmation_sms':
-        preview = renderBookingConfirmationSms(apptBooking, venueData, customMessage);
+        preview = renderBookingConfirmationSms(primarySample, venueData, customMessage);
+        previewSampleKind = useAppointmentSample ? 'appointment' : 'table';
         break;
       case 'day_of_reminder_email':
         preview = renderDayOfReminderEmail(
@@ -131,6 +152,7 @@ export async function POST(request: NextRequest) {
           venueData,
           customMessage,
         );
+        previewSampleKind = useAppointmentSample ? 'appointment' : 'table';
         break;
       case 'day_of_reminder_sms':
         preview = renderDayOfReminderSms(
@@ -138,12 +160,15 @@ export async function POST(request: NextRequest) {
           venueData,
           customMessage,
         );
+        previewSampleKind = useAppointmentSample ? 'appointment' : 'table';
         break;
       case 'post_visit_email':
         preview = renderPostVisitEmail(SAMPLE_BOOKING, venueData, customMessage);
+        previewSampleKind = 'table';
         break;
       case 'booking_modification_email':
         preview = renderBookingModification(primarySample, venueData, customMessage);
+        previewSampleKind = useAppointmentSample ? 'appointment' : 'table';
         break;
       case 'cancellation_email':
         preview = renderBookingCancellation(
@@ -152,6 +177,7 @@ export async function POST(request: NextRequest) {
           'Your deposit of £20.00 will be refunded to your original payment method within 5–10 business days.',
           customMessage,
         );
+        previewSampleKind = useAppointmentSample ? 'appointment' : 'table';
         break;
       default:
         return NextResponse.json({ error: 'Unknown message type' }, { status: 400 });
@@ -162,6 +188,7 @@ export async function POST(request: NextRequest) {
       subject: preview.subject ?? null,
       html: preview.html ?? null,
       text: preview.text ?? preview.body ?? null,
+      previewSampleKind,
     });
   } catch (err) {
     console.error('Preview render failed:', err);

@@ -10,10 +10,12 @@ import {
   assertExperienceEventDeletable,
   resolveExperienceEventPatch,
   validateStartEndTimes,
+  assertExperienceEventCalendarClearable,
 } from '@/lib/experience-events/experience-event-guards';
 import { assertExperienceEventWindowFreeOnCalendar } from '@/lib/experience-events/calendar-event-window-conflicts';
 import { createTeamCalendarForEvent } from '@/lib/experience-events/create-team-calendar';
 import { z } from 'zod';
+import { DEFAULT_ENTITY_BOOKING_WINDOW } from '@/lib/booking/entity-booking-window';
 
 const eventSchema = z.object({
   name: z.string().min(1).max(200),
@@ -29,6 +31,10 @@ const eventSchema = z.object({
   is_active: z.boolean().optional(),
   /** Unified calendar column for staff calendar placement; null clears. */
   calendar_id: z.union([z.string().uuid(), z.null()]).optional(),
+  max_advance_booking_days: z.number().int().min(1).max(365).optional(),
+  min_booking_notice_hours: z.number().int().min(0).max(168).optional(),
+  cancellation_notice_hours: z.number().int().min(0).max(168).optional(),
+  allow_same_day_booking: z.boolean().optional(),
   ticket_types: z.array(z.object({
     name: z.string().min(1),
     price_pence: z.number().int().min(0),
@@ -200,6 +206,14 @@ export async function POST(request: NextRequest) {
       parent_event_id: null as string | null,
       is_active: eventFields.is_active ?? true,
       calendar_id: resolvedCalendarId ?? null,
+      max_advance_booking_days:
+        eventFields.max_advance_booking_days ?? DEFAULT_ENTITY_BOOKING_WINDOW.max_advance_booking_days,
+      min_booking_notice_hours:
+        eventFields.min_booking_notice_hours ?? DEFAULT_ENTITY_BOOKING_WINDOW.min_booking_notice_hours,
+      cancellation_notice_hours:
+        eventFields.cancellation_notice_hours ?? DEFAULT_ENTITY_BOOKING_WINDOW.cancellation_notice_hours,
+      allow_same_day_booking:
+        eventFields.allow_same_day_booking ?? DEFAULT_ENTITY_BOOKING_WINDOW.allow_same_day_booking,
     };
 
     const startHm = timeHhMm(baseInsert.start_time);
@@ -297,15 +311,39 @@ export async function PATCH(request: NextRequest) {
       );
     }
 
+    /** `calendar_id` references `unified_calendars.id` — validate venue ownership (works for USE primaries and mixed venues with team columns). */
+    if (fieldsForResolve.calendar_id !== undefined && fieldsForResolve.calendar_id !== null) {
+      const cid = fieldsForResolve.calendar_id;
+      const { data: ucRow } = await admin
+        .from('unified_calendars')
+        .select('id')
+        .eq('venue_id', staff.venue_id)
+        .eq('id', cid)
+        .maybeSingle();
+      if (!ucRow) {
+        return NextResponse.json(
+          { error: 'That staff calendar column was not found for this venue. Add it under Calendar availability first.' },
+          { status: 400 },
+        );
+      }
+    }
+
     const bookingModel = await getVenueBookingModel(admin, staff.venue_id);
-    if (
-      bookingModel !== 'unified_scheduling' &&
-      (newCalendarName || (fieldsForResolve.calendar_id !== undefined && fieldsForResolve.calendar_id !== null))
-    ) {
-      return NextResponse.json(
-        { error: 'Assigning an event to a calendar column requires unified scheduling.' },
-        { status: 400 },
-      );
+    if (bookingModel !== 'unified_scheduling' && newCalendarName) {
+      const { data: venueRow } = await admin
+        .from('venues')
+        .select('enabled_models')
+        .eq('id', staff.venue_id)
+        .maybeSingle();
+      const rawSecondaries = (venueRow as { enabled_models?: unknown } | null)?.enabled_models;
+      const hasUnifiedSecondary =
+        Array.isArray(rawSecondaries) && rawSecondaries.includes('unified_scheduling');
+      if (!hasUnifiedSecondary) {
+        return NextResponse.json(
+          { error: 'Creating a new team calendar from Event manager requires unified scheduling (or enable it as an add-on).' },
+          { status: 400 },
+        );
+      }
     }
 
     let patchInput = { ...fieldsForResolve };
@@ -320,6 +358,13 @@ export async function PATCH(request: NextRequest) {
     const resolved = await resolveExperienceEventPatch(admin, staff.venue_id, id, patchInput);
     if (!resolved.ok) {
       return NextResponse.json({ error: resolved.error }, { status: resolved.error === 'Event not found' ? 404 : 400 });
+    }
+
+    if (Object.prototype.hasOwnProperty.call(resolved.payload, 'calendar_id') && resolved.payload.calendar_id === null) {
+      const clear = await assertExperienceEventCalendarClearable(admin, staff.venue_id, id);
+      if (!clear.ok) {
+        return NextResponse.json({ error: clear.error }, { status: 409 });
+      }
     }
 
     const { data: existingRow } = await admin

@@ -3,6 +3,11 @@ import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff, staffManagesCalendar } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import type { PractitionerService } from '@/types/booking-models';
+import {
+  hasBlockingBookingsRemovingServicesFromCalendarLegacy,
+  hasBlockingBookingsRemovingServicesFromCalendarUnified,
+  SERVICE_REMOVAL_BLOCKED_BY_BOOKINGS,
+} from '@/lib/venue/service-calendar-removal';
 import { z } from 'zod';
 
 const syncSchema = z.object({
@@ -14,6 +19,7 @@ const syncSchema = z.object({
  * PUT /api/venue/practitioner-services
  * Replaces all service links for a practitioner calendar with the provided set.
  * For `unified_scheduling`, `practitioner_id` is a `unified_calendars.id`.
+ * Removing a service from this calendar does not assign it elsewhere; links on other calendars are unchanged.
  */
 export async function PUT(request: NextRequest) {
   try {
@@ -70,6 +76,23 @@ export async function PUT(request: NextRequest) {
         }),
       );
 
+      const previousServiceIds = new Set(preserve.keys());
+      const nextServiceIds = new Set(effectiveServiceIds);
+      const removedServiceIds = [...previousServiceIds].filter((sid) => !nextServiceIds.has(sid));
+      if (removedServiceIds.length > 0) {
+        const check = await hasBlockingBookingsRemovingServicesFromCalendarUnified(admin, {
+          venueId: staff.venue_id,
+          calendarId: practitioner_id,
+          serviceItemIds: removedServiceIds,
+        });
+        if (check.error) {
+          return NextResponse.json({ error: check.error }, { status: 500 });
+        }
+        if (check.blocked) {
+          return NextResponse.json({ error: SERVICE_REMOVAL_BLOCKED_BY_BOOKINGS }, { status: 409 });
+        }
+      }
+
       await admin.from('calendar_service_assignments').delete().eq('calendar_id', practitioner_id);
 
       if (effectiveServiceIds.length > 0) {
@@ -122,6 +145,23 @@ export async function PUT(request: NextRequest) {
     const preserve = new Map(
       (existingRows ?? []).map((r: PractitionerService) => [r.service_id, r]),
     );
+
+    const previousLegacyIds = new Set(preserve.keys());
+    const nextLegacyIds = new Set(effectiveServiceIds);
+    const removedLegacyIds = [...previousLegacyIds].filter((sid) => !nextLegacyIds.has(sid));
+    if (removedLegacyIds.length > 0) {
+      const check = await hasBlockingBookingsRemovingServicesFromCalendarLegacy(admin, {
+        venueId: staff.venue_id,
+        practitionerId: practitioner_id,
+        appointmentServiceIds: removedLegacyIds,
+      });
+      if (check.error) {
+        return NextResponse.json({ error: check.error }, { status: 500 });
+      }
+      if (check.blocked) {
+        return NextResponse.json({ error: SERVICE_REMOVAL_BLOCKED_BY_BOOKINGS }, { status: 409 });
+      }
+    }
 
     await admin.from('practitioner_services').delete().eq('practitioner_id', practitioner_id);
 

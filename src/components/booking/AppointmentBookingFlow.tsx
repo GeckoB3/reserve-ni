@@ -28,6 +28,8 @@ interface CatalogPractitioner {
     price_pence: number | null;
     deposit_pence?: number | null;
     payment_requirement?: ClassPaymentRequirement;
+    /** From service_items / appointment_services; used for deposit refund copy before booking completes. */
+    cancellation_notice_hours?: number;
   }>;
 }
 
@@ -360,7 +362,6 @@ export function AppointmentBookingFlow({
     return `From ${sym}${(pence / 100).toFixed(2)}`;
   }
 
-  const refundNoticeHours = venue.booking_rules?.cancellation_notice_hours ?? 48;
   const phoneDefaultCountry = defaultPhoneCountryForVenueCurrency(venue.currency);
 
   // Single flow helpers (names/prices from catalog; slots from availability API)
@@ -378,6 +379,27 @@ export function AppointmentBookingFlow({
   const groupAvailableSlots = groupSlotPrac?.slots.filter((s) => !groupServiceId || s.service_id === groupServiceId) ?? [];
   const groupSelectedService = uniqueServices.find((s) => s.id === groupServiceId);
   const groupGroupedSlots = groupSlotsByPeriod(groupAvailableSlots);
+
+  const refundNoticeHours = useMemo(() => {
+    const fallback = venue.booking_rules?.cancellation_notice_hours ?? 48;
+    if (multiServiceSegments && multiServiceSegments.length > 0) {
+      const first = multiServiceSegments[0]!;
+      const p = catalogStaff.find((c) => c.id === first.practitionerId);
+      const offer = p?.services.find((s) => s.id === first.serviceId);
+      return offer?.cancellation_notice_hours ?? fallback;
+    }
+    const offer = selectedPrac?.services.find((s) => s.id === selectedServiceId);
+    if (offer && typeof offer.cancellation_notice_hours === 'number') {
+      return offer.cancellation_notice_hours;
+    }
+    return fallback;
+  }, [
+    venue.booking_rules,
+    multiServiceSegments,
+    catalogStaff,
+    selectedPrac,
+    selectedServiceId,
+  ]);
 
   const currentStepIdx = singleFlowSteps.indexOf(step);
   const showSingleProgress = singleFlowSteps.includes(step);
@@ -1368,7 +1390,7 @@ export function AppointmentBookingFlow({
             type="text"
             value={currentPersonLabel}
             onChange={(e) => setCurrentPersonLabel(e.target.value)}
-            placeholder="e.g. Myself"
+            placeholder="e.g. Guest name or label"
             className="mb-4 w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm shadow-sm focus:border-brand-400 focus:ring-2 focus:ring-brand-100 focus:outline-none"
             autoFocus
           />

@@ -20,6 +20,8 @@ import { generateGroupBookingId } from '@/lib/booking/group-booking';
 import type { GroupAppointmentLine } from '@/lib/emails/types';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 import { createShortManageLink } from '@/lib/short-manage-link';
+import { loadServiceEntityBookingWindow } from '@/lib/booking/entity-booking-window';
+import { resolveCancellationNoticeHoursForCreate } from '@/lib/booking/resolve-cancellation-notice-hours';
 
 const personEntrySchema = z.object({
   person_label: z.string().min(1).max(100),
@@ -71,7 +73,7 @@ export async function POST(request: NextRequest) {
 
     const { data: venue, error: venueErr } = await supabase
       .from('venues')
-      .select('id, name, stripe_connected_account_id, address, booking_rules, timezone, opening_hours')
+      .select('id, name, stripe_connected_account_id, address, booking_rules, timezone, opening_hours, venue_opening_exceptions')
       .eq('id', venue_id)
       .single();
 
@@ -116,7 +118,17 @@ export async function POST(request: NextRequest) {
       // Inject phantom bookings from earlier people in this group (overlap checks)
       input.phantomBookings = [...phantoms];
 
-      attachVenueClockToAppointmentInput(input, venue as { timezone?: string | null; booking_rules?: unknown; opening_hours?: unknown });
+      const svcWindow = await loadServiceEntityBookingWindow(
+        supabase,
+        venue_id,
+        venueMode.bookingModel,
+        person.appointment_service_id,
+      );
+      attachVenueClockToAppointmentInput(
+        input,
+        venue as { timezone?: string | null; booking_rules?: unknown; opening_hours?: unknown },
+        svcWindow,
+      );
       const result = computeAppointmentAvailability(input);
       const prac = result.practitioners.find((p) => p.id === person.practitioner_id);
       const slotAvailable = prac?.slots.some(
@@ -212,13 +224,25 @@ export async function POST(request: NextRequest) {
     const groupBookingId = generateGroupBookingId();
     const bookingIds: string[] = [];
 
-    const bookingRulesJson = (venue.booking_rules as { cancellation_notice_hours?: number } | null) ?? {};
-    const refundWindowHours =
-      typeof bookingRulesJson.cancellation_notice_hours === 'number'
-        ? bookingRulesJson.cancellation_notice_hours
-        : 48;
+    const firstForNotice = validatedPeople[0]!;
+    const groupCancellationNoticeHours = await resolveCancellationNoticeHoursForCreate({
+      supabase,
+      venueId: venue_id,
+      effectiveModel: venueMode.bookingModel,
+      serviceItemId: venueMode.bookingModel === 'unified_scheduling' ? firstForNotice.appointment_service_id : null,
+      appointmentServiceId:
+        venueMode.bookingModel === 'practitioner_appointment' ? firstForNotice.appointment_service_id : null,
+    });
 
     for (const person of validatedPeople) {
+      const refundWindowHours = await resolveCancellationNoticeHoursForCreate({
+        supabase,
+        venueId: venue_id,
+        effectiveModel: venueMode.bookingModel,
+        serviceItemId: venueMode.bookingModel === 'unified_scheduling' ? person.appointment_service_id : null,
+        appointmentServiceId:
+          venueMode.bookingModel === 'practitioner_appointment' ? person.appointment_service_id : null,
+      });
       const timeForDb = person.booking_time + ':00';
       const deadline = cancellationDeadlineHoursBefore(person.booking_date, person.booking_time, refundWindowHours);
       const policySnapshot = {
@@ -361,7 +385,7 @@ export async function POST(request: NextRequest) {
         client_secret: client_secret ?? undefined,
         stripe_account_id: requiresDeposit ? venue.stripe_connected_account_id : undefined,
         status: requiresDeposit ? 'Pending' : 'Confirmed',
-        cancellation_notice_hours: refundWindowHours,
+        cancellation_notice_hours: groupCancellationNoticeHours,
       },
       { status: 201 }
     );

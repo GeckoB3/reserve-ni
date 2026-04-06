@@ -9,6 +9,7 @@ import {
 } from '@/lib/availability/appointment-engine';
 import { z } from 'zod';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
+import { isGuestBookingDateAllowed, loadServiceEntityBookingWindow } from '@/lib/booking/entity-booking-window';
 
 const phantomSchema = z.object({
   practitioner_id: z.string().uuid(),
@@ -47,12 +48,23 @@ export async function POST(request: NextRequest) {
 
     const { data: venue } = await supabase
       .from('venues')
-      .select('timezone, booking_rules, opening_hours')
+      .select('timezone, booking_rules, opening_hours, venue_opening_exceptions')
       .eq('id', venue_id)
       .single();
 
     if (!venue) {
       return NextResponse.json({ ok: false, error: 'Venue not found' }, { status: 404 });
+    }
+
+    const serviceWindow = await loadServiceEntityBookingWindow(supabase, venue_id, venueMode.bookingModel, service_id);
+
+    const tz =
+      typeof (venue as { timezone?: string | null }).timezone === 'string' &&
+      String((venue as { timezone?: string | null }).timezone).trim() !== ''
+        ? String((venue as { timezone?: string | null }).timezone).trim()
+        : 'Europe/London';
+    if (!isGuestBookingDateAllowed(booking_date, serviceWindow, tz)) {
+      return NextResponse.json({ ok: false, error: 'This date is not available for booking' });
     }
 
     const input = await fetchAppointmentInput({
@@ -64,7 +76,11 @@ export async function POST(request: NextRequest) {
     });
     input.phantomBookings = (phantoms ?? []) as PhantomBooking[];
 
-    attachVenueClockToAppointmentInput(input, venue as { timezone?: string | null; booking_rules?: unknown; opening_hours?: unknown });
+    attachVenueClockToAppointmentInput(
+      input,
+      venue as { timezone?: string | null; booking_rules?: unknown; opening_hours?: unknown },
+      serviceWindow,
+    );
 
     const timeStr = start_time.slice(0, 5);
     const result = validateExactAppointmentStart(input, practitioner_id, service_id, timeStr);

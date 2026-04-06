@@ -41,12 +41,15 @@ export function ClassOfferingsCalendar({
   highlightedDates,
   selectedDate,
   onSelectDate,
+  footerMessage = 'Dates with a session for this class are highlighted in green. Select a date to continue.',
 }: {
   rangeFrom: string;
   rangeTo: string;
   highlightedDates: string[];
   selectedDate: string | null;
   onSelectDate: (iso: string) => void;
+  /** Override helper text under the grid (e.g. event bookings). */
+  footerMessage?: string;
 }) {
   const highlightSet = useMemo(() => new Set(highlightedDates), [highlightedDates]);
   const [monthAnchor, setMonthAnchor] = useState(() =>
@@ -145,9 +148,7 @@ export function ClassOfferingsCalendar({
           );
         })}
       </div>
-      <p className="mt-2 text-xs text-slate-500">
-        Dates with a session for this class are highlighted in green. Select a date to continue.
-      </p>
+      <p className="mt-2 text-xs text-slate-500">{footerMessage}</p>
     </div>
   );
 }

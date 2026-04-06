@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { requireVenueExposesSecondaryModel } from '@/lib/booking/require-venue-secondary-model';
+import { assertClassSessionWindowFreeOnCalendar } from '@/lib/experience-events/calendar-event-window-conflicts';
 import { syncCalendarBlockForClassInstance } from '@/lib/class-instances/instructor-calendar-block';
 
 function normalizeTimeForDb(t: string): string {
@@ -52,7 +53,7 @@ export async function POST(request: NextRequest) {
 
     const { data: ct, error: ctErr } = await admin
       .from('class_types')
-      .select('id')
+      .select('id, instructor_id, duration_minutes')
       .eq('id', class_type_id)
       .eq('venue_id', staff.venue_id)
       .maybeSingle();
@@ -109,6 +110,19 @@ export async function POST(request: NextRequest) {
 
     if (toInsert.length === 0) {
       return NextResponse.json({ created: 0, skipped });
+    }
+
+    const ctRow = ct as { instructor_id: string | null; duration_minutes: number };
+    for (const row of toInsert) {
+      const conflict = await assertClassSessionWindowFreeOnCalendar(admin, staff.venue_id, {
+        instructorId: ctRow.instructor_id,
+        durationMinutes: ctRow.duration_minutes,
+        instanceDate: row.instance_date,
+        startTime: row.start_time,
+      });
+      if (conflict) {
+        return NextResponse.json({ error: conflict }, { status: 409 });
+      }
     }
 
     const { data: inserted, error: insertErr } = await admin

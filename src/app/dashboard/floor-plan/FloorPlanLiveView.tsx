@@ -5,7 +5,8 @@ import dynamic from 'next/dynamic';
 import type { VenueTable, TableGridData, TableBlock, UndoAction } from '@/types/table-management';
 import { useVenueLiveSync } from '@/lib/realtime/useVenueLiveSync';
 import { getTableStatus, type TableOperationalStatus } from '@/lib/table-management/table-status';
-import { UnifiedBookingForm } from '@/components/booking/UnifiedBookingForm';
+import { DashboardStaffBookingModal } from '@/components/booking/DashboardStaffBookingModal';
+import type { BookingModel } from '@/types/booking-models';
 import { UndoToast } from '@/app/dashboard/table-grid/UndoToast';
 import { BookingDetailPanel, type BookingDetailPanelSnapshot } from '@/app/dashboard/bookings/BookingDetailPanel';
 import { ViewToolbar } from '@/components/dashboard/ViewToolbar';
@@ -62,7 +63,19 @@ function formatIsoTimeUk(iso: string): string {
 const BLOCK_DURATION_PRESETS = [30, 45, 60, 90, 120, 180] as const;
 
 
-export function FloorPlanLiveView({ isAdmin = false, venueId, currency }: { isAdmin?: boolean; venueId: string; currency?: string }) {
+export function FloorPlanLiveView({
+  isAdmin = false,
+  venueId,
+  currency,
+  bookingModel = 'table_reservation',
+  enabledModels = [],
+}: {
+  isAdmin?: boolean;
+  venueId: string;
+  currency?: string;
+  bookingModel?: BookingModel;
+  enabledModels?: BookingModel[];
+}) {
   const { addToast } = useToast();
   const [tables, setTables] = useState<VenueTable[]>([]);
   const [gridData, setGridData] = useState<TableGridData | null>(null);
@@ -830,7 +843,7 @@ export function FloorPlanLiveView({ isAdmin = false, venueId, currency }: { isAd
               )}
               {selectedTable.elapsed_pct > 0 && (
                 <div className="mt-2 h-1.5 rounded-full bg-blue-200">
-                  <div className={`h-1.5 rounded-full transition-all ${selectedTable.elapsed_pct > 90 ? 'bg-red-500' : selectedTable.elapsed_pct > 75 ? 'bg-amber-500' : 'bg-blue-500'}`} style={{ width: `${selectedTable.elapsed_pct}%` }} />
+                  <div className={`h-1.5 rounded-full transition-all ${selectedTable.elapsed_pct > 90 ? 'bg-red-500' : selectedTable.elapsed_pct > 75 ? 'bg-amber-500' : 'bg-brand-500'}`} style={{ width: `${selectedTable.elapsed_pct}%` }} />
                 </div>
               )}
             </div>
@@ -890,14 +903,20 @@ export function FloorPlanLiveView({ isAdmin = false, venueId, currency }: { isAd
 
       {/* New booking form */}
       {showNewBookingForm && (
-        <UnifiedBookingForm
-          asModal
+        <DashboardStaffBookingModal
+          open
+          title="New booking"
+          onClose={() => setShowNewBookingForm(false)}
+          onCreated={() => {
+            setShowNewBookingForm(false);
+            fetchData();
+          }}
           venueId={venueId}
-          venueCurrency={currency}
+          currency={currency ?? 'GBP'}
+          bookingModel={bookingModel}
+          enabledModels={enabledModels}
           advancedMode
           initialDate={selectedDate}
-          onCreated={() => { setShowNewBookingForm(false); fetchData(); }}
-          onClose={() => setShowNewBookingForm(false)}
         />
       )}
 

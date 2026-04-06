@@ -1,13 +1,15 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
+import type { BookingModel } from '@/types/booking-models';
+import { shouldShowAppointmentAvailabilitySettings } from '@/lib/booking/schedule-calendar-eligibility';
 import type { StaffMember } from '../types';
 
 interface StaffSectionProps {
   venueId: string;
   isAdmin: boolean;
   bookingModel?: string;
+  enabledModels?: BookingModel[];
 }
 
 interface PractitionerOption {
@@ -20,8 +22,16 @@ interface PractitionerOption {
   calendar_type?: string | null;
 }
 
-export function StaffSection({ venueId: _venueId, isAdmin, bookingModel }: StaffSectionProps) {
-  const isAppointmentVenue = isUnifiedSchedulingVenue(bookingModel);
+export function StaffSection({
+  venueId: _venueId,
+  isAdmin,
+  bookingModel,
+  enabledModels = [],
+}: StaffSectionProps) {
+  const isAppointmentVenue = shouldShowAppointmentAvailabilitySettings(
+    (bookingModel as BookingModel) ?? 'table_reservation',
+    enabledModels,
+  );
 
   const [staff, setStaff] = useState<StaffMember[]>([]);
   const [loading, setLoading] = useState(true);
@@ -130,7 +140,7 @@ export function StaffSection({ venueId: _venueId, isAdmin, bookingModel }: Staff
         if (row) {
           extras.push({
             ...row,
-            name: `${row.name} (inactive — reassign or activate in Calendar Availability)`,
+            name: `${row.name} (inactive — reassign or activate in Calendar availability)`,
           });
         }
       }
@@ -589,7 +599,7 @@ export function StaffSection({ venueId: _venueId, isAdmin, bookingModel }: Staff
                       <span className="font-normal text-slate-400">(optional)</span>
                     </span>
                     {allocatablePractitioners.length === 0 ? (
-                      <p className="text-sm text-slate-500">Add an active bookable calendar under Calendar Availability first.</p>
+                      <p className="text-sm text-slate-500">Add an active bookable calendar under Calendar availability first.</p>
                     ) : (
                       <div className="max-h-52 space-y-0 overflow-y-auto rounded-lg border border-slate-200 bg-white p-2">
                         <div className="mb-2 flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2">
@@ -729,7 +739,7 @@ export function StaffSection({ venueId: _venueId, isAdmin, bookingModel }: Staff
                         <p className="text-xs text-amber-800">
                           Inactive calendars still listed for this account:{' '}
                           {inactiveLinkedCalendarsForMember(s).map((p) => p.name).join(', ')}. Activate them or update
-                          assignments in Calendar Availability.
+                          assignments in Calendar availability.
                         </p>
                       )}
                     </div>
@@ -803,8 +813,8 @@ export function StaffSection({ venueId: _venueId, isAdmin, bookingModel }: Staff
             {isAppointmentVenue && (
               <p className="mt-3 text-xs text-slate-600 border-t border-slate-200 pt-3">
                 <span className="font-medium text-slate-700">Calendars:</span> Add or rename bookable calendars under{' '}
-                <a href="/dashboard/availability" className="font-medium text-brand-600 hover:text-brand-700">
-                  Calendar Availability
+                <a href="/dashboard/calendar-availability" className="font-medium text-brand-600 hover:text-brand-700">
+                  Calendar availability
                 </a>
                 . Then tick the calendars each team member should manage — you can assign one, several, or all. Admins
                 can be given calendar access too when they run a bookable column.

@@ -205,7 +205,7 @@ export function AppointmentDayBookingRow({
                 type="button"
                 onClick={onConfirm}
                 disabled={statusUpdating}
-                className="rounded-lg bg-blue-600 px-2.5 py-1 text-xs font-medium text-white shadow-sm hover:bg-blue-700 disabled:opacity-50"
+                className="rounded-lg bg-brand-600 px-2.5 py-1 text-xs font-medium text-white shadow-sm hover:bg-brand-700 disabled:opacity-50"
               >
                 Confirm
               </button>
@@ -215,7 +215,7 @@ export function AppointmentDayBookingRow({
                 type="button"
                 onClick={onStart}
                 disabled={statusUpdating}
-                className="rounded-lg bg-blue-600 px-2.5 py-1 text-xs font-medium text-white shadow-sm hover:bg-blue-700 disabled:opacity-50"
+                className="rounded-lg bg-brand-600 px-2.5 py-1 text-xs font-medium text-white shadow-sm hover:bg-brand-700 disabled:opacity-50"
               >
                 Start
               </button>

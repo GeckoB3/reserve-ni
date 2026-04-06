@@ -6,9 +6,10 @@
  * - **Deposit request / deposit confirmation** - same shared paths as confirmation (not this cron).
  * - **Reschedule** - `booking_modification_*` in `send-templated.ts` (not this cron).
  * - **Cancellation** - `cancellation_*` in `send-templated.ts` (not this cron).
- * - **Reminder 1 / 2** - **this file** (`reminder_1_email` / `reminder_1_sms` / `reminder_2_sms`). Email uses
- *   `communication_settings.reminder_email_custom_message`; first SMS uses `day_of_reminder_custom_message`; second SMS uses
- *   the same optional line. Reminder 2 does not require reminder 1 to have been sent (short-lead bookings may skip the
+ * - **Reminder 1 / 2** - **this file** (`reminder_1_email` / `reminder_1_sms` / `reminder_2_email` / `reminder_2_sms`). Confirm or Cancel
+ *   email uses `communication_settings.reminder_email_custom_message`; reminder 1 SMS uses `confirm_cancel_reminder_sms_custom_message`
+ *   (fallback: legacy `day_of_reminder_custom_message`). Day-of Reminder (reminder 2) email uses `day_of_reminder_custom_message`;
+ *   day-of SMS uses `day_of_reminder_sms_custom_message` with fallback to `day_of_reminder_custom_message`. Reminder 2 does not require reminder 1 to have been sent (short-lead bookings may skip the
  *   first window). Both reminders include Pending and Confirmed bookings (deposit-pending stays Pending). Legacy restaurants use
  *   `send-communications/route.ts` 56h + day-of paths, which **skip** unified venues (`isUnifiedSchedulingVenue`).
  * - **No-show** - staff-driven status + optional `no_show_notification` via `CommunicationService` (not scheduled here).
@@ -19,7 +20,11 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { getVenueNotificationSettings } from '@/lib/notifications/notification-settings';
-import { getCommSettings } from '@/lib/communications/service';
+import {
+  confirmCancelReminderSmsCustomLine,
+  dayOfReminderSmsCustomLine,
+  getCommSettings,
+} from '@/lib/communications/service';
 import { venueLocalDateTimeToUtcMs, formatYmdInTimezone, addDaysToYmd } from '@/lib/venue/venue-local-clock';
 import { logToCommLogs } from '@/lib/communications/service';
 import { sendEmail } from '@/lib/emails/send-email';
@@ -30,6 +35,7 @@ import { enrichBookingEmailForAppointment, enrichBookingEmailForComms } from '@/
 import { isCdeBookingRow } from '@/lib/booking/cde-booking';
 import type { BookingEmailData, VenueEmailData } from '@/lib/emails/types';
 import { renderReminder56h } from '@/lib/emails/templates/reminder-56h';
+import { renderDayOfReminderEmail } from '@/lib/emails/templates/day-of-reminder-email';
 import { renderDayOfReminderSms } from '@/lib/emails/templates/day-of-reminder-sms';
 import { renderPostVisitEmail } from '@/lib/emails/templates/post-visit';
 import { recordOutboundSms } from '@/lib/sms-usage';
@@ -267,7 +273,7 @@ async function sendUnifiedReminder1(
           status: 'sent',
         });
         if (canSend) {
-          const sms = renderDayOfReminderSms(bookingData, venueData, comm.day_of_reminder_custom_message);
+          const sms = renderDayOfReminderSms(bookingData, venueData, confirmCancelReminderSmsCustomLine(comm));
           const { sid, segmentCount } = await sendSmsWithSegments(phone, sms.body);
           await recordOutboundSms({
             venueId: venue.id,
@@ -304,9 +310,11 @@ async function sendUnifiedReminder2(
   results: UnifiedCommsResults,
 ) {
   if (!ns.reminder_2_enabled) return;
-  if (!ns.reminder_2_channels.includes('sms')) return;
-  const smsOk = await isSmsAllowed(venue.id);
-  if (!smsOk) return;
+  const wantsEmail = ns.reminder_2_channels.includes('email');
+  const wantsSms = ns.reminder_2_channels.includes('sms');
+  if (!wantsEmail && !wantsSms) return;
+
+  const smsOk = wantsSms ? await isSmsAllowed(venue.id) : false;
 
   const { data: bookings } = await supabase
     .from('bookings')
@@ -329,39 +337,63 @@ async function sendUnifiedReminder2(
       if (delta < targetMs - TOLERANCE_MS || delta > targetMs + TOLERANCE_MS) continue;
 
       const phone = getGuestPhone(b);
-      if (!phone) continue;
+      const email = getGuestEmail(b);
 
       const manageLink = createShortManageLink(b.id);
       let bookingData = buildBookingData(b);
       bookingData.manage_booking_link = manageLink;
       bookingData = await enrichBookingEmailForAppointment(supabase, b.id, bookingData);
 
-      const canSend = await logToCommLogs({
-        venue_id: venue.id,
-        booking_id: b.id,
-        message_type: 'reminder_2_sms',
-        channel: 'sms',
-        recipient: phone,
-        status: 'sent',
-      });
-      if (!canSend) continue;
+      let sentAny = false;
 
-      const sms = renderDayOfReminderSms(
-        bookingData,
-        venueData,
-        comm.day_of_reminder_custom_message ?? null,
-      );
-      const { sid, segmentCount } = await sendSmsWithSegments(phone, sms.body);
-      await recordOutboundSms({
-        venueId: venue.id,
-        bookingId: b.id,
-        messageType: 'reminder_2_sms',
-        recipientPhone: phone,
-        twilioSid: sid ?? undefined,
-        segmentCount,
-      });
-      await supabase.from('bookings').update({ final_reminder_sent_at: new Date().toISOString() }).eq('id', b.id);
-      results.unified_reminder_2++;
+      if (wantsEmail && email) {
+        const canSend = await logToCommLogs({
+          venue_id: venue.id,
+          booking_id: b.id,
+          message_type: 'reminder_2_email',
+          channel: 'email',
+          recipient: email,
+          status: 'pending',
+        });
+        if (canSend) {
+          const rendered = renderDayOfReminderEmail(
+            bookingData,
+            venueData,
+            comm.day_of_reminder_custom_message ?? null,
+          );
+          await sendEmail({ to: email, ...rendered });
+          sentAny = true;
+        }
+      }
+
+      if (wantsSms && phone && smsOk) {
+        const canSend = await logToCommLogs({
+          venue_id: venue.id,
+          booking_id: b.id,
+          message_type: 'reminder_2_sms',
+          channel: 'sms',
+          recipient: phone,
+          status: 'sent',
+        });
+        if (canSend) {
+          const sms = renderDayOfReminderSms(bookingData, venueData, dayOfReminderSmsCustomLine(comm));
+          const { sid, segmentCount } = await sendSmsWithSegments(phone, sms.body);
+          await recordOutboundSms({
+            venueId: venue.id,
+            bookingId: b.id,
+            messageType: 'reminder_2_sms',
+            recipientPhone: phone,
+            twilioSid: sid ?? undefined,
+            segmentCount,
+          });
+          sentAny = true;
+        }
+      }
+
+      if (sentAny) {
+        await supabase.from('bookings').update({ final_reminder_sent_at: new Date().toISOString() }).eq('id', b.id);
+        results.unified_reminder_2++;
+      }
     } catch (e) {
       console.error('[unified reminder_2]', b.id, e);
       results.errors++;
@@ -537,7 +569,7 @@ async function sendCdeReminder1(
           status: 'sent',
         });
         if (canSend) {
-          const sms = renderDayOfReminderSms(bookingData, venueData, comm.day_of_reminder_custom_message);
+          const sms = renderDayOfReminderSms(bookingData, venueData, confirmCancelReminderSmsCustomLine(comm));
           const { sid, segmentCount } = await sendSmsWithSegments(phone, sms.body);
           await recordOutboundSms({
             venueId: venue.id,
@@ -574,9 +606,11 @@ async function sendCdeReminder2(
   results: SecondaryModelCommsResults,
 ) {
   if (!ns.reminder_2_enabled) return;
-  if (!ns.reminder_2_channels.includes('sms')) return;
-  const smsOk = await isSmsAllowed(venue.id);
-  if (!smsOk) return;
+  const wantsEmail = ns.reminder_2_channels.includes('email');
+  const wantsSms = ns.reminder_2_channels.includes('sms');
+  if (!wantsEmail && !wantsSms) return;
+
+  const smsOk = wantsSms ? await isSmsAllowed(venue.id) : false;
 
   const { data: bookings } = await supabase
     .from('bookings')
@@ -600,39 +634,63 @@ async function sendCdeReminder2(
       if (delta < targetMs - TOLERANCE_MS || delta > targetMs + TOLERANCE_MS) continue;
 
       const phone = getGuestPhone(b);
-      if (!phone) continue;
+      const email = getGuestEmail(b);
 
       const manageLink = createShortManageLink(b.id);
       let bookingData = buildBookingData(b);
       bookingData.manage_booking_link = manageLink;
       bookingData = await enrichBookingEmailForComms(supabase, b.id, bookingData);
 
-      const canSend = await logToCommLogs({
-        venue_id: venue.id,
-        booking_id: b.id,
-        message_type: 'reminder_2_sms',
-        channel: 'sms',
-        recipient: phone,
-        status: 'sent',
-      });
-      if (!canSend) continue;
+      let sentAny = false;
 
-      const sms = renderDayOfReminderSms(
-        bookingData,
-        venueData,
-        comm.day_of_reminder_custom_message ?? null,
-      );
-      const { sid, segmentCount } = await sendSmsWithSegments(phone, sms.body);
-      await recordOutboundSms({
-        venueId: venue.id,
-        bookingId: b.id,
-        messageType: 'reminder_2_sms',
-        recipientPhone: phone,
-        twilioSid: sid ?? undefined,
-        segmentCount,
-      });
-      await supabase.from('bookings').update({ final_reminder_sent_at: new Date().toISOString() }).eq('id', b.id);
-      results.cde_reminder_2++;
+      if (wantsEmail && email) {
+        const canSend = await logToCommLogs({
+          venue_id: venue.id,
+          booking_id: b.id,
+          message_type: 'reminder_2_email',
+          channel: 'email',
+          recipient: email,
+          status: 'pending',
+        });
+        if (canSend) {
+          const rendered = renderDayOfReminderEmail(
+            bookingData,
+            venueData,
+            comm.day_of_reminder_custom_message ?? null,
+          );
+          await sendEmail({ to: email, ...rendered });
+          sentAny = true;
+        }
+      }
+
+      if (wantsSms && phone && smsOk) {
+        const canSend = await logToCommLogs({
+          venue_id: venue.id,
+          booking_id: b.id,
+          message_type: 'reminder_2_sms',
+          channel: 'sms',
+          recipient: phone,
+          status: 'sent',
+        });
+        if (canSend) {
+          const sms = renderDayOfReminderSms(bookingData, venueData, dayOfReminderSmsCustomLine(comm));
+          const { sid, segmentCount } = await sendSmsWithSegments(phone, sms.body);
+          await recordOutboundSms({
+            venueId: venue.id,
+            bookingId: b.id,
+            messageType: 'reminder_2_sms',
+            recipientPhone: phone,
+            twilioSid: sid ?? undefined,
+            segmentCount,
+          });
+          sentAny = true;
+        }
+      }
+
+      if (sentAny) {
+        await supabase.from('bookings').update({ final_reminder_sent_at: new Date().toISOString() }).eq('id', b.id);
+        results.cde_reminder_2++;
+      }
     } catch (e) {
       console.error('[cde reminder_2]', b.id, e);
       results.errors++;

@@ -825,7 +825,7 @@ export function ClassScheduleModal({
                         <input
                           type="number"
                           min={1}
-                          placeholder={selectedClass ? `default ${selectedClass.capacity}` : 'optional'}
+                          placeholder={selectedClass ? 'Leave blank for class default' : 'optional'}
                           value={singleCapacity}
                           onChange={(e) => setSingleCapacity(e.target.value)}
                           className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"

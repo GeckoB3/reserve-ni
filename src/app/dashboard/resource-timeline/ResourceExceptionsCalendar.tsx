@@ -121,9 +121,9 @@ export function ResourceExceptionsCalendar({
           const label = ex
             ? 'closed' in ex
               ? 'Closed'
-              : `Custom ${ex.periods[0]?.start ?? ''}–${ex.periods[0]?.end ?? ''}`
+              : `Amended hours ${ex.periods[0]?.start ?? ''}–${ex.periods[0]?.end ?? ''}`
             : inRange
-              ? 'Selected for new exception'
+              ? 'Selected for new range'
               : '';
 
           return (
@@ -154,7 +154,7 @@ export function ResourceExceptionsCalendar({
         </span>
         <span className="inline-flex items-center gap-1.5">
           <span className="h-3 w-3 rounded border border-amber-200 bg-amber-50" aria-hidden />
-          Custom hours
+          Amended hours
         </span>
         <span className="inline-flex items-center gap-1.5">
           <span className="h-3 w-3 rounded border-2 border-brand-500 bg-white" aria-hidden />

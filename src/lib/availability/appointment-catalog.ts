@@ -5,6 +5,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { AppointmentService, ClassPaymentRequirement, Practitioner, PractitionerService } from '@/types/booking-models';
+import { entityBookingWindowFromRow } from '@/lib/booking/entity-booking-window';
 import { getOfferedAppointmentServicesForPractitioner } from '@/lib/availability/appointment-engine';
 import { unifiedCalendarRowToPractitioner } from '@/lib/availability/unified-calendar-mapper';
 
@@ -19,6 +20,8 @@ export interface AppointmentCatalogPractitioner {
     price_pence: number | null;
     deposit_pence: number | null;
     payment_requirement?: ClassPaymentRequirement;
+    /** Hours before start for deposit refund; from service row. */
+    cancellation_notice_hours: number;
   }>;
 }
 
@@ -38,6 +41,10 @@ function serviceItemRowToAppointmentService(row: Record<string, unknown>): Appoi
     is_active: row.is_active !== false,
     sort_order: (row.sort_order as number) ?? 0,
     created_at: (row.created_at as string) ?? new Date().toISOString(),
+    max_advance_booking_days: entityBookingWindowFromRow(row).max_advance_booking_days,
+    min_booking_notice_hours: entityBookingWindowFromRow(row).min_booking_notice_hours,
+    cancellation_notice_hours: entityBookingWindowFromRow(row).cancellation_notice_hours,
+    allow_same_day_booking: entityBookingWindowFromRow(row).allow_same_day_booking,
   };
 }
 
@@ -119,6 +126,7 @@ async function fetchUnifiedAppointmentCatalog(
         price_pence: svc.price_pence,
         deposit_pence: svc.deposit_pence,
         payment_requirement: svc.payment_requirement,
+        cancellation_notice_hours: entityBookingWindowFromRow(svc as unknown as Record<string, unknown>).cancellation_notice_hours,
       })),
     });
   }
@@ -186,6 +194,7 @@ export async function fetchAppointmentCatalog(
         price_pence: svc.price_pence,
         deposit_pence: svc.deposit_pence,
         payment_requirement: svc.payment_requirement,
+        cancellation_notice_hours: entityBookingWindowFromRow(svc as unknown as Record<string, unknown>).cancellation_notice_hours,
       })),
     });
   }

@@ -15,6 +15,8 @@ import {
 } from '@/lib/availability/appointment-engine';
 import { timeToMinutes } from '@/lib/availability';
 import { getDayOfWeek } from '@/lib/availability/engine';
+import type { EntityBookingWindow } from '@/lib/booking/entity-booking-window';
+import { entityBookingWindowFromRow, isGuestBookingDateAllowed } from '@/lib/booking/entity-booking-window';
 
 export interface UnifiedAvailableSlot {
   time: string;
@@ -105,20 +107,22 @@ async function slotsFromEngineInput(params: {
   input: AppointmentEngineInput;
   calendarId: string;
   serviceItemId: string;
-  venueRow: { timezone?: string | null; booking_rules?: unknown; opening_hours?: unknown } | null;
-  minNoticeFromCalendar: number | undefined;
+  venueRow: {
+    timezone?: string | null;
+    booking_rules?: unknown;
+    opening_hours?: unknown;
+    venue_opening_exceptions?: unknown;
+  } | null;
+  bookingWindow: EntityBookingWindow;
   extraBlocks: PractitionerCalendarBlockedRange[];
 }): Promise<UnifiedAvailableSlot[]> {
-  const { input, calendarId, serviceItemId, venueRow, minNoticeFromCalendar, extraBlocks } = params;
+  const { input, calendarId, serviceItemId, venueRow, bookingWindow, extraBlocks } = params;
   const merged: AppointmentEngineInput = {
     ...input,
     practitionerBlockedRanges: [...(input.practitionerBlockedRanges ?? []), ...extraBlocks],
   };
   if (venueRow) {
-    attachVenueClockToAppointmentInput(merged, venueRow);
-  }
-  if (typeof minNoticeFromCalendar === 'number') {
-    merged.minNoticeHours = minNoticeFromCalendar;
+    attachVenueClockToAppointmentInput(merged, venueRow, bookingWindow);
   }
   const result = computeAppointmentAvailability(merged);
   const practitioner = result.practitioners.find((p) => p.id === calendarId);
@@ -166,6 +170,9 @@ export async function getUnifiedAvailableSlots(params: {
     max_booking_minutes?: number | null;
     slot_interval_minutes?: number | null;
     min_booking_notice_hours?: number;
+    max_advance_booking_days?: number;
+    cancellation_notice_hours?: number;
+    allow_same_day_booking?: boolean;
   };
   const calendarType = cal.calendar_type ?? 'practitioner';
 
@@ -173,14 +180,38 @@ export async function getUnifiedAvailableSlots(params: {
     return await getEventClassSlots(supabase, venueId, calendarId, date, serviceItemId);
   }
 
-  const [{ data: venue }, extraBlocks] = await Promise.all([
-    supabase.from('venues').select('timezone, booking_rules, opening_hours').eq('id', venueId).maybeSingle(),
+  const [{ data: venue }, extraBlocks, serviceItemRes] = await Promise.all([
+    supabase.from('venues').select('timezone, booking_rules, opening_hours, venue_opening_exceptions').eq('id', venueId).maybeSingle(),
     fetchCalendarBlocksMerged(supabase, venueId, calendarId, date),
+    calendarType === 'resource'
+      ? Promise.resolve({ data: null })
+      : supabase
+          .from('service_items')
+          .select('max_advance_booking_days, min_booking_notice_hours, cancellation_notice_hours, allow_same_day_booking')
+          .eq('id', serviceItemId)
+          .eq('venue_id', venueId)
+          .maybeSingle(),
   ]);
 
-  const venueRow = venue as { timezone?: string | null; booking_rules?: unknown; opening_hours?: unknown } | null;
-  const minNotice =
-    typeof cal.min_booking_notice_hours === 'number' ? cal.min_booking_notice_hours : undefined;
+  const venueRow = venue as {
+    timezone?: string | null;
+    booking_rules?: unknown;
+    opening_hours?: unknown;
+    venue_opening_exceptions?: unknown;
+  } | null;
+  const tz =
+    typeof venueRow?.timezone === 'string' && venueRow.timezone.trim() !== ''
+      ? venueRow.timezone.trim()
+      : 'Europe/London';
+
+  const bookingWindow: EntityBookingWindow =
+    calendarType === 'resource'
+      ? entityBookingWindowFromRow(calRow as Record<string, unknown>)
+      : entityBookingWindowFromRow((serviceItemRes.data ?? {}) as Record<string, unknown>);
+
+  if (!isGuestBookingDateAllowed(date, bookingWindow, tz)) {
+    return [];
+  }
 
   if (calendarType === 'resource') {
     const baseInput = await fetchCalendarAppointmentInput({
@@ -210,7 +241,7 @@ export async function getUnifiedAvailableSlots(params: {
           calendarId,
           serviceItemId,
           venueRow,
-          minNoticeFromCalendar: minNotice,
+          bookingWindow,
           extraBlocks,
         });
         for (const s of slots) {
@@ -227,7 +258,7 @@ export async function getUnifiedAvailableSlots(params: {
       calendarId,
       serviceItemId,
       venueRow,
-      minNoticeFromCalendar: minNotice,
+      bookingWindow,
       extraBlocks,
     });
   }
@@ -245,7 +276,7 @@ export async function getUnifiedAvailableSlots(params: {
     calendarId,
     serviceItemId,
     venueRow,
-    minNoticeFromCalendar: minNotice,
+    bookingWindow,
     extraBlocks,
   });
 }

@@ -289,7 +289,7 @@ export function TableList({ tables, setTables, isAdmin, onRefresh, variant = 'fu
                 value={editing.name}
                 onChange={(e) => setEditing({ ...editing, name: e.target.value })}
                 className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
-                placeholder="Table 1"
+                placeholder="e.g. T1, Booth A"
               />
             </div>
             {!isCovers && (
@@ -335,7 +335,7 @@ export function TableList({ tables, setTables, isAdmin, onRefresh, variant = 'fu
                     value={editing.zone}
                     onChange={(e) => setEditing({ ...editing, zone: e.target.value })}
                     className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
-                    placeholder="Main, Patio, etc."
+                    placeholder="e.g. Main floor, Upper level"
                     list="zone-suggestions"
                   />
                   {zones.length > 0 && (

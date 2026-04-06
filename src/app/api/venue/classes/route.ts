@@ -3,7 +3,12 @@ import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { requireVenueExposesSecondaryModel } from '@/lib/booking/require-venue-secondary-model';
-import { syncCalendarBlockForClassInstance } from '@/lib/class-instances/instructor-calendar-block';
+import { assertClassSessionWindowFreeOnCalendar } from '@/lib/experience-events/calendar-event-window-conflicts';
+import {
+  resolveInstructorCalendarIdForClass,
+  syncCalendarBlockForClassInstance,
+} from '@/lib/class-instances/instructor-calendar-block';
+import { DEFAULT_ENTITY_BOOKING_WINDOW } from '@/lib/booking/entity-booking-window';
 import { z } from 'zod';
 
 const classPaymentRequirementSchema = z.enum(['none', 'deposit', 'full_payment']);
@@ -23,6 +28,56 @@ const classTypeSchema = z
     deposit_amount_pence: z.number().int().min(0).optional().nullable(),
     colour: z.string().max(20).optional(),
     is_active: z.boolean().optional(),
+    max_advance_booking_days: z.number().int().min(1).max(365).optional(),
+    min_booking_notice_hours: z.number().int().min(0).max(168).optional(),
+    cancellation_notice_hours: z.number().int().min(0).max(168).optional(),
+    allow_same_day_booking: z.boolean().optional(),
+  })
+  .superRefine((data, ctx) => {
+    const price = data.price_pence ?? 0;
+    const req = data.payment_requirement ?? 'none';
+    if (price <= 0 && (req === 'deposit' || req === 'full_payment')) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'Set a price per person before choosing deposit or full payment',
+        path: ['payment_requirement'],
+      });
+    }
+    if (req === 'deposit') {
+      const d = data.deposit_amount_pence;
+      if (d == null || d <= 0) {
+        ctx.addIssue({ code: 'custom', message: 'Deposit amount is required', path: ['deposit_amount_pence'] });
+      } else if (price > 0 && d > price) {
+        ctx.addIssue({
+          code: 'custom',
+          message: 'Deposit cannot exceed price per person',
+          path: ['deposit_amount_pence'],
+        });
+      }
+    }
+  });
+
+/**
+ * Full class type row when `instructor_id` may be null (unassigned from any team calendar).
+ * Used after PATCH merge only — POST still uses {@link classTypeSchema}.
+ */
+const classTypeMergedSchema = z
+  .object({
+    name: z.string().min(1).max(200),
+    description: z.string().max(2000).optional().nullable(),
+    duration_minutes: z.number().int().min(5).max(480),
+    capacity: z.number().int().min(1),
+    instructor_id: z.string().uuid().nullable(),
+    instructor_name: z.string().max(200).optional().nullable(),
+    price_pence: z.number().int().min(0).optional().nullable(),
+    payment_requirement: classPaymentRequirementSchema.optional(),
+    deposit_amount_pence: z.number().int().min(0).optional().nullable(),
+    colour: z.string().max(20).optional(),
+    is_active: z.boolean().optional(),
+    max_advance_booking_days: z.number().int().min(1).max(365).optional(),
+    min_booking_notice_hours: z.number().int().min(0).max(168).optional(),
+    cancellation_notice_hours: z.number().int().min(0).max(168).optional(),
+    allow_same_day_booking: z.boolean().optional(),
   })
   .superRefine((data, ctx) => {
     const price = data.price_pence ?? 0;
@@ -61,6 +116,10 @@ const classTypePatchSchema = z.object({
   deposit_amount_pence: z.number().int().min(0).optional().nullable(),
   colour: z.string().max(20).optional(),
   is_active: z.boolean().optional(),
+  max_advance_booking_days: z.number().int().min(1).max(365).optional(),
+  min_booking_notice_hours: z.number().int().min(0).max(168).optional(),
+  cancellation_notice_hours: z.number().int().min(0).max(168).optional(),
+  allow_same_day_booking: z.boolean().optional(),
 });
 
 const timetableEntrySchema = z.object({
@@ -73,6 +132,43 @@ const timetableEntrySchema = z.object({
   recurrence_end_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
   total_occurrences: z.number().int().min(1).optional().nullable(),
 });
+
+/**
+ * Clearing `instructor_id` is only allowed when there is nothing that would still imply sessions on a calendar
+ * (future instances or an active recurring timetable rule).
+ */
+async function assertCanClearClassInstructor(
+  admin: ReturnType<typeof getSupabaseAdminClient>,
+  classTypeId: string,
+): Promise<string | null> {
+  const today = new Date().toISOString().slice(0, 10);
+  const { count: instCount, error: instErr } = await admin
+    .from('class_instances')
+    .select('id', { count: 'exact', head: true })
+    .eq('class_type_id', classTypeId)
+    .eq('is_cancelled', false)
+    .gte('instance_date', today);
+  if (instErr) {
+    console.error('assertCanClearClassInstructor (instances):', instErr.message);
+    return 'Could not verify class sessions.';
+  }
+  if ((instCount ?? 0) > 0) {
+    return 'Cannot remove this class from the calendar while future sessions are scheduled. Cancel or reschedule those sessions first.';
+  }
+  const { count: ttCount, error: ttErr } = await admin
+    .from('class_timetable')
+    .select('id', { count: 'exact', head: true })
+    .eq('class_type_id', classTypeId)
+    .eq('is_active', true);
+  if (ttErr) {
+    console.error('assertCanClearClassInstructor (timetable):', ttErr.message);
+    return 'Could not verify class schedule.';
+  }
+  if ((ttCount ?? 0) > 0) {
+    return 'Remove this class’s recurring schedule in Class timetable before removing it from the calendar.';
+  }
+  return null;
+}
 
 /** GET /api/venue/classes - list class types, timetable, and upcoming instances. */
 export async function GET() {
@@ -180,8 +276,28 @@ export async function GET() {
       booked_spots: bookedByInstance[row.id] ?? 0,
     }));
 
+    const rawTypes = classTypes ?? [];
+    const instructorIds = [
+      ...new Set(
+        rawTypes
+          .map((ct) => (ct as { instructor_id?: string | null }).instructor_id)
+          .filter((x): x is string => Boolean(x)),
+      ),
+    ];
+    const resolvedByInstructor = new Map<string, string | null>();
+    for (const iid of instructorIds) {
+      resolvedByInstructor.set(iid, await resolveInstructorCalendarIdForClass(admin, staff.venue_id, iid));
+    }
+    const enrichedClassTypes = rawTypes.map((ct) => {
+      const row = ct as { instructor_id?: string | null };
+      const iid = row.instructor_id;
+      const resolved = iid ? resolvedByInstructor.get(iid) ?? null : null;
+      const instructor_calendar_id = iid ? resolved ?? iid : null;
+      return { ...(ct as Record<string, unknown>), instructor_calendar_id };
+    });
+
     return NextResponse.json({
-      class_types: classTypes ?? [],
+      class_types: enrichedClassTypes,
       timetable: timetableRes.data ?? [],
       instances,
       practitioners: practitionersRes.data ?? [],
@@ -228,11 +344,16 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid request', details: parsed.error.flatten() }, { status: 400 });
     }
 
-    const { data, error } = await admin
-      .from('class_types')
-      .insert({ venue_id: staff.venue_id, ...parsed.data })
-      .select()
-      .single();
+    const insertRow = {
+      venue_id: staff.venue_id,
+      ...parsed.data,
+      max_advance_booking_days: parsed.data.max_advance_booking_days ?? DEFAULT_ENTITY_BOOKING_WINDOW.max_advance_booking_days,
+      min_booking_notice_hours: parsed.data.min_booking_notice_hours ?? DEFAULT_ENTITY_BOOKING_WINDOW.min_booking_notice_hours,
+      cancellation_notice_hours: parsed.data.cancellation_notice_hours ?? DEFAULT_ENTITY_BOOKING_WINDOW.cancellation_notice_hours,
+      allow_same_day_booking: parsed.data.allow_same_day_booking ?? DEFAULT_ENTITY_BOOKING_WINDOW.allow_same_day_booking,
+    };
+
+    const { data, error } = await admin.from('class_types').insert(insertRow).select().single();
 
     if (error) {
       console.error('POST /api/venue/classes (class_type) failed:', error);
@@ -269,6 +390,51 @@ export async function PATCH(request: NextRequest) {
     }
 
     if (entity_type === 'instance') {
+      const { data: existingInst, error: fetchInstErr } = await admin
+        .from('class_instances')
+        .select('id, instance_date, start_time, class_type_id, is_cancelled')
+        .eq('id', id)
+        .maybeSingle();
+
+      if (fetchInstErr) {
+        console.error('PATCH /api/venue/classes (instance) fetch failed:', fetchInstErr);
+        return NextResponse.json({ error: 'Failed to update instance' }, { status: 500 });
+      }
+      if (!existingInst) {
+        return NextResponse.json({ error: 'Instance not found' }, { status: 404 });
+      }
+
+      const { data: ctRow, error: ctFetchErr } = await admin
+        .from('class_types')
+        .select('id, instructor_id, duration_minutes')
+        .eq('id', (existingInst as { class_type_id: string }).class_type_id)
+        .eq('venue_id', staff.venue_id)
+        .maybeSingle();
+
+      if (ctFetchErr || !ctRow) {
+        return NextResponse.json({ error: 'Instance not found' }, { status: 404 });
+      }
+
+      const mergedInst = { ...existingInst, ...rest } as {
+        instance_date: string;
+        start_time: string;
+        is_cancelled?: boolean | null;
+      };
+      const nextCancelled = Boolean(mergedInst.is_cancelled);
+
+      if (!nextCancelled) {
+        const conflict = await assertClassSessionWindowFreeOnCalendar(admin, staff.venue_id, {
+          instructorId: (ctRow as { instructor_id: string | null }).instructor_id,
+          durationMinutes: (ctRow as { duration_minutes: number }).duration_minutes,
+          instanceDate: String(mergedInst.instance_date),
+          startTime: String(mergedInst.start_time),
+          excludeClassInstanceId: id as string,
+        });
+        if (conflict) {
+          return NextResponse.json({ error: conflict }, { status: 409 });
+        }
+      }
+
       const { data, error } = await admin.from('class_instances').update(rest).eq('id', id).select().single();
       if (error) return NextResponse.json({ error: 'Failed to update instance' }, { status: 500 });
       const row = data as {
@@ -298,7 +464,7 @@ export async function PATCH(request: NextRequest) {
     const { data: existing, error: fetchErr } = await admin
       .from('class_types')
       .select(
-        'name, description, duration_minutes, capacity, instructor_id, instructor_name, price_pence, payment_requirement, deposit_amount_pence, colour, is_active',
+        'name, description, duration_minutes, capacity, instructor_id, instructor_name, price_pence, payment_requirement, deposit_amount_pence, colour, is_active, max_advance_booking_days, min_booking_notice_hours, cancellation_notice_hours, allow_same_day_booking',
       )
       .eq('id', id)
       .eq('venue_id', staff.venue_id)
@@ -316,11 +482,52 @@ export async function PATCH(request: NextRequest) {
     const merged = {
       ...existing,
       ...patch,
-    } as z.infer<typeof classTypeSchema>;
+    };
 
-    const fullParsed = classTypeSchema.safeParse(merged);
+    if (patch.instructor_id === null) {
+      const block = await assertCanClearClassInstructor(admin, id as string);
+      if (block) {
+        return NextResponse.json({ error: block }, { status: 409 });
+      }
+    }
+
+    const fullParsed = (merged.instructor_id === null ? classTypeMergedSchema : classTypeSchema).safeParse(merged);
     if (!fullParsed.success) {
       return NextResponse.json({ error: 'Invalid request', details: fullParsed.error.flatten() }, { status: 400 });
+    }
+
+    const oldInst = String(existing.instructor_id ?? '');
+    const newInst = fullParsed.data.instructor_id;
+    const oldDur = Number(existing.duration_minutes);
+    const newDur = fullParsed.data.duration_minutes;
+
+    if (newInst != null && (oldInst !== newInst || oldDur !== newDur)) {
+      const today = new Date().toISOString().slice(0, 10);
+      const { data: futureInstances, error: instListErr } = await admin
+        .from('class_instances')
+        .select('id, instance_date, start_time')
+        .eq('class_type_id', id)
+        .eq('is_cancelled', false)
+        .gte('instance_date', today);
+
+      if (instListErr) {
+        console.error('PATCH /api/venue/classes (class_type) future instances:', instListErr);
+        return NextResponse.json({ error: 'Could not verify calendar availability.' }, { status: 500 });
+      }
+
+      for (const raw of futureInstances ?? []) {
+        const inst = raw as { id: string; instance_date: string; start_time: string };
+        const conflict = await assertClassSessionWindowFreeOnCalendar(admin, staff.venue_id, {
+          instructorId: newInst,
+          durationMinutes: newDur,
+          instanceDate: inst.instance_date,
+          startTime: inst.start_time,
+          excludeClassInstanceId: inst.id,
+        });
+        if (conflict) {
+          return NextResponse.json({ error: conflict }, { status: 409 });
+        }
+      }
     }
 
     const { data, error } = await admin

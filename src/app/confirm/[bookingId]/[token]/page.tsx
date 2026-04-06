@@ -1,4 +1,4 @@
-import { ConfirmCancelView } from './ConfirmCancelView';
+import { ConfirmCancelView } from "./ConfirmCancelView";
 
 type PageProps = { params: Promise<{ bookingId: string; token: string }> };
 

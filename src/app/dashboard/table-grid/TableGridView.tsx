@@ -7,7 +7,8 @@ import { UndoToast } from './UndoToast';
 import { useToast } from '@/components/ui/Toast';
 import { useVenueLiveSync } from '@/lib/realtime/useVenueLiveSync';
 import { BookingDetailPanel, type BookingDetailPanelSnapshot } from '@/app/dashboard/bookings/BookingDetailPanel';
-import { UnifiedBookingForm } from '@/components/booking/UnifiedBookingForm';
+import { DashboardStaffBookingModal } from '@/components/booking/DashboardStaffBookingModal';
+import type { BookingModel } from '@/types/booking-models';
 import { detectAdjacentTables, type CombinationTable } from '@/lib/table-management/combination-engine';
 import { canMarkNoShowForSlot, canTransitionBookingStatus, type BookingStatus } from '@/lib/table-management/booking-status';
 import { computeValidMoveTargets, type BookingMoveContext } from '@/lib/table-management/move-validation';
@@ -100,7 +101,17 @@ interface FetchGridOptions {
   silent?: boolean;
 }
 
-export function TableGridView({ venueId, currency }: { venueId: string; currency?: string }) {
+export function TableGridView({
+  venueId,
+  currency,
+  bookingModel = 'table_reservation',
+  enabledModels = [],
+}: {
+  venueId: string;
+  currency?: string;
+  bookingModel?: BookingModel;
+  enabledModels?: BookingModel[];
+}) {
   const [date, setDate] = useState(formatDateInput(new Date()));
   const [serviceId, setServiceId] = useState<string | null>(null);
   const [services, setServices] = useState<Array<{ id: string; name: string; start_time: string; end_time: string }>>([]);
@@ -1162,7 +1173,7 @@ export function TableGridView({ venueId, currency }: { venueId: string; currency
             Confirmed
           </span>
           <span className="inline-flex items-center gap-1.5">
-            <span className="h-2 w-2 rounded-full bg-blue-600" />
+            <span className="h-2 w-2 rounded-full bg-brand-600" />
             Seated
           </span>
           <span className="inline-flex items-center gap-1.5">
@@ -1442,16 +1453,20 @@ export function TableGridView({ venueId, currency }: { venueId: string; currency
         </div>
       )}
       {newBookingCell && (
-        <UnifiedBookingForm
-          asModal
-          venueId={venueId}
-          advancedMode
-          initialDate={date}
+        <DashboardStaffBookingModal
+          open
+          title="New booking"
+          onClose={() => setNewBookingCell(null)}
           onCreated={() => {
             setNewBookingCell(null);
             fetchGrid();
           }}
-          onClose={() => setNewBookingCell(null)}
+          venueId={venueId}
+          currency={currency ?? 'GBP'}
+          bookingModel={bookingModel}
+          enabledModels={enabledModels}
+          advancedMode
+          initialDate={date}
         />
       )}
       {walkInCell && (

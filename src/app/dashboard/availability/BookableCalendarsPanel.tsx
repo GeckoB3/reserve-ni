@@ -1,7 +1,17 @@
 'use client';
 
 import Link from 'next/link';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
+import {
+  DndContext,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core';
+import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { normalizePublicBaseUrl, publicBaseUrlHost } from '@/lib/public-base-url';
 const PUBLIC_BOOK_ORIGIN = normalizePublicBaseUrl(process.env.NEXT_PUBLIC_BASE_URL);
 const PUBLIC_BOOK_HOST = publicBaseUrlHost(PUBLIC_BOOK_ORIGIN);
@@ -21,6 +31,8 @@ export interface BookableCalendarRow {
   name: string;
   slug?: string | null;
   is_active: boolean;
+  /** Display order on the staff calendar (left-to-right); lower first. */
+  sort_order?: number;
 }
 
 interface ServiceRow {
@@ -37,6 +49,7 @@ interface ClassTypeRow {
   id: string;
   name: string;
   instructor_id: string | null;
+  instructor_calendar_id?: string | null;
 }
 
 interface ResourceRow {
@@ -48,6 +61,10 @@ interface ResourceRow {
 interface EventRow {
   id: string;
   name: string;
+  calendar_id: string | null;
+  is_active: boolean;
+  /** One row per occurrence; recurring series may repeat the same name with different dates. */
+  event_date?: string;
 }
 
 interface CalendarEntitlementProps {
@@ -62,26 +79,103 @@ interface CalendarEntitlementProps {
 
 export interface BookableCalendarsPanelProps {
   practitioners: BookableCalendarRow[];
+  /** When true, admins can drag calendars to set column order on the staff calendar. */
+  isAdmin?: boolean;
   services: ServiceRow[];
   pLinks: PractitionerServiceLink[];
   classTypes: ClassTypeRow[];
   resources: ResourceRow[];
   events: EventRow[];
+  /** Per team calendar: two+ resources with overlapping weekly hours on the same column (configuration issue). */
+  calendarColumnAlerts?: Record<string, string[]>;
   entitlement: CalendarEntitlementProps | null;
   onCalendarsChanged?: () => void;
-  onEditCalendar: (p: BookableCalendarRow) => void;
+  /** After reorder PATCH succeeds — update parent `sort_order` without refetching (avoids full-page reload feel). */
+  onCalendarReorderSaved?: (orderedIds: string[]) => void;
+  onEditCalendar: (p: BookableCalendarRow) => void | Promise<void>;
   onAddCalendar: () => void;
+}
+
+function sortCalendarsByOrder(rows: BookableCalendarRow[]): BookableCalendarRow[] {
+  return [...rows].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+}
+
+/** Short date for event occurrence labels (YYYY-MM-DD from API). */
+function formatEventDateShort(iso: string | undefined): string {
+  if (!iso || !/^\d{4}-\d{2}-\d{2}/.test(iso)) return '';
+  const [y, m, d] = iso.split('T')[0].split('-').map(Number);
+  if (!y || !m || !d) return '';
+  const dt = new Date(y, m - 1, d);
+  return dt.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+function eventsAssignedToCalendar(events: EventRow[], calendarId: string): EventRow[] {
+  return events.filter((e) => (e.calendar_id ?? '') === calendarId);
+}
+
+function GripVerticalIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+      <path d="M8 6a1.5 1.5 0 110-3 1.5 1.5 0 010 3zm0 7.5a1.5 1.5 0 110-3 1.5 1.5 0 010 3zm0 7.5a1.5 1.5 0 110-3 1.5 1.5 0 010 3zm8-15a1.5 1.5 0 110-3 1.5 1.5 0 010 3zm0 7.5a1.5 1.5 0 110-3 1.5 1.5 0 010 3zm0 7.5a1.5 1.5 0 110-3 1.5 1.5 0 010 3z" />
+    </svg>
+  );
+}
+
+function SortableCalendarRow({
+  id,
+  label,
+  canReorder,
+  className,
+  children,
+}: {
+  id: string;
+  label: string;
+  canReorder: boolean;
+  className?: string;
+  children: (dragHandle: ReactNode) => ReactNode;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id,
+    disabled: !canReorder,
+  });
+  const style: CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.92 : undefined,
+    zIndex: isDragging ? 2 : undefined,
+    position: isDragging ? 'relative' : undefined,
+  };
+  const dragHandle = canReorder ? (
+    <button
+      type="button"
+      className="mt-0.5 inline-flex h-8 w-8 shrink-0 cursor-grab touch-manipulation items-center justify-center rounded-md border border-slate-200/90 bg-white text-slate-500 shadow-sm hover:bg-slate-50 hover:text-slate-700 active:cursor-grabbing"
+      aria-label={`Reorder ${label} on staff calendar`}
+      {...attributes}
+      {...listeners}
+    >
+      <GripVerticalIcon className="h-4 w-4" />
+    </button>
+  ) : null;
+
+  return (
+    <li ref={setNodeRef} style={style} className={className}>
+      {children(dragHandle)}
+    </li>
+  );
 }
 
 export function BookableCalendarsPanel({
   practitioners,
+  isAdmin = false,
   services,
   pLinks,
   classTypes,
   resources,
   events,
+  calendarColumnAlerts = {},
   entitlement,
   onCalendarsChanged,
+  onCalendarReorderSaved,
   onEditCalendar,
   onAddCalendar,
 }: BookableCalendarsPanelProps) {
@@ -95,6 +189,73 @@ export function BookableCalendarsPanel({
   const [deletingCalendar, setDeletingCalendar] = useState(false);
   const [deleteCalendarError, setDeleteCalendarError] = useState<string | null>(null);
   const [venueLoading, setVenueLoading] = useState(true);
+  const [orderedIds, setOrderedIds] = useState<string[]>(() =>
+    sortCalendarsByOrder(practitioners).map((p) => p.id),
+  );
+  const [reorderSaving, setReorderSaving] = useState(false);
+  const [reorderError, setReorderError] = useState<string | null>(null);
+
+  const canReorderCalendars = isAdmin && practitioners.length > 1;
+
+  useEffect(() => {
+    setOrderedIds(sortCalendarsByOrder(practitioners).map((p) => p.id));
+  }, [practitioners]);
+
+  const orderedCalendars = useMemo(() => {
+    const byId = new Map(practitioners.map((p) => [p.id, p]));
+    return orderedIds.map((id) => byId.get(id)).filter((p): p is BookableCalendarRow => Boolean(p));
+  }, [practitioners, orderedIds]);
+
+  const reorderSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+  );
+
+  const persistCalendarOrder = useCallback(
+    async (nextIds: string[], previousIds: string[]) => {
+      setReorderSaving(true);
+      setReorderError(null);
+      try {
+        const results = await Promise.all(
+          nextIds.map((id, idx) =>
+            fetch('/api/venue/practitioners', {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ id, sort_order: idx }),
+            }),
+          ),
+        );
+        for (const res of results) {
+          if (!res.ok) {
+            const j = (await res.json().catch(() => ({}))) as { error?: string };
+            throw new Error(typeof j.error === 'string' ? j.error : 'Could not save column order');
+          }
+        }
+        onCalendarReorderSaved?.(nextIds);
+      } catch (e) {
+        setOrderedIds(previousIds);
+        setReorderError(e instanceof Error ? e.message : 'Could not save column order');
+      } finally {
+        setReorderSaving(false);
+      }
+    },
+    [onCalendarReorderSaved],
+  );
+
+  const onReorderDragEnd = useCallback(
+    (event: DragEndEvent) => {
+      if (!canReorderCalendars) return;
+      const { active, over } = event;
+      if (!over || active.id === over.id) return;
+      const oldIndex = orderedIds.indexOf(active.id as string);
+      const newIndex = orderedIds.indexOf(over.id as string);
+      if (oldIndex < 0 || newIndex < 0) return;
+      const previousIds = orderedIds;
+      const nextIds = arrayMove(orderedIds, oldIndex, newIndex);
+      setOrderedIds(nextIds);
+      void persistCalendarOrder(nextIds, previousIds);
+    },
+    [canReorderCalendars, orderedIds, persistCalendarOrder],
+  );
 
   const loadVenueSlug = useCallback(async () => {
     try {
@@ -203,6 +364,326 @@ export function BookableCalendarsPanel({
     }
   }, [deleteCalendarTarget, onCalendarsChanged]);
 
+  const calendarRowClassName = (p: BookableCalendarRow) =>
+    `group overflow-hidden rounded-2xl border bg-white shadow-sm ring-1 transition-shadow hover:shadow-md ${
+      p.is_active
+        ? 'border-slate-200/90 ring-slate-900/[0.04]'
+        : 'border-slate-200/80 opacity-[0.97] ring-slate-900/[0.03]'
+    }`;
+
+  const renderCalendarCard = (p: BookableCalendarRow, dragHandle: ReactNode | null) => {
+    const columnAlerts = calendarColumnAlerts[p.id] ?? [];
+    const linkedSvcs = pLinks
+      .filter((l) => l.practitioner_id === p.id)
+      .map((l) => services.find((s) => s.id === l.service_id)?.name)
+      .filter((n): n is string => Boolean(n));
+    const classNames = classTypes
+      .filter((ct) => (ct.instructor_calendar_id ?? ct.instructor_id) === p.id)
+      .map((ct) => ct.name);
+    const resourceNames = resources.filter((r) => r.display_on_calendar_id === p.id).map((r) => r.name);
+
+    const onColumn = eventsAssignedToCalendar(events, p.id);
+    const sortByDateThenName = (a: EventRow, b: EventRow) => {
+      const da = a.event_date ?? '';
+      const db = b.event_date ?? '';
+      const c = da.localeCompare(db);
+      return c !== 0 ? c : a.name.localeCompare(b.name);
+    };
+    const activeOnColumn = onColumn.filter((e) => e.is_active).sort(sortByDateThenName);
+    const inactiveOnColumn = onColumn.filter((e) => !e.is_active).sort(sortByDateThenName);
+    const venueHasActiveEvents = events.some((e) => e.is_active);
+    const venueHasAnyEvents = events.length > 0;
+
+    const slugDraft = calendarSlugDrafts[p.id] ?? '';
+    const slugFieldErr = calendarSlugFieldError[p.id] ?? null;
+    const savedSlug = (p.slug ?? '').trim().toLowerCase();
+    const draftNorm = slugDraft.trim().toLowerCase();
+    const slugDirty = draftNorm !== savedSlug;
+    const slugLiveErr = bookingSlugDraftError(slugDraft);
+    const canCopyBookUrl = Boolean(venueSlug && savedSlug && draftNorm === savedSlug && !slugLiveErr);
+    const previewUrl =
+      venueSlug && draftNorm && !slugLiveErr
+        ? `${PUBLIC_BOOK_ORIGIN}/book/${encodeURIComponent(venueSlug)}/${encodeURIComponent(draftNorm)}`
+        : null;
+
+    const chipBase = 'rounded px-1.5 py-0.5 text-[11px] font-medium leading-snug ring-1';
+
+    return (
+      <>
+        <div
+          className={`flex flex-col gap-2 border-b border-slate-100 px-3 py-3 sm:flex-row sm:items-start sm:justify-between sm:px-4 sm:py-3 ${
+            p.is_active ? 'border-l-[3px] border-l-brand-500 pl-3' : 'border-l-[3px] border-l-slate-300 pl-3'
+          }`}
+        >
+          <div className="flex min-w-0 flex-1 gap-2">
+            {dragHandle}
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <h3 className="text-sm font-semibold tracking-tight text-slate-900">{p.name}</h3>
+                {p.is_active ? (
+                  <span className="rounded-full bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-800 ring-1 ring-emerald-200/70">
+                    Active
+                  </span>
+                ) : (
+                  <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-600 ring-1 ring-slate-200">
+                    Inactive
+                  </span>
+                )}
+                {columnAlerts.length > 0 && (
+                  <span className="rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-900 ring-1 ring-amber-200/80">
+                    Conflict
+                  </span>
+                )}
+              </div>
+              {columnAlerts.length > 0 && (
+                <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] leading-snug text-amber-950">
+                  <p className="font-semibold text-amber-950">Resource availability overlap</p>
+                  <ul className="mt-1 list-inside list-disc space-y-0.5 text-amber-900/95">
+                    {columnAlerts.map((msg, i) => (
+                      <li key={i}>{msg}</li>
+                    ))}
+                  </ul>
+                  <p className="mt-1.5 text-amber-900/85">
+                    Classes, appointments, events, and resources can share a column; adjust weekly hours or move a resource
+                    if two resources offer overlapping slots here. Specific times are checked when you book or schedule.
+                  </p>
+                </div>
+              )}
+              <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-2 sm:grid-cols-4">
+                <div>
+                  <dt className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                    <ServicesIcon className="h-3 w-3 shrink-0 text-slate-400" aria-hidden />
+                    Services
+                  </dt>
+                  <dd className="mt-1">
+                    {linkedSvcs.length > 0 ? (
+                      <ul className="flex flex-wrap gap-1">
+                        {linkedSvcs.map((name) => (
+                          <li key={name} className={`${chipBase} bg-slate-100 text-slate-800 ring-slate-200/80`}>
+                            {name}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : services.length > 0 ? (
+                      <span className="text-[11px] text-slate-500">None</span>
+                    ) : (
+                      <span className="text-[11px] text-slate-400">—</span>
+                    )}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                    <ClassIcon className="h-3 w-3 shrink-0 text-slate-400" aria-hidden />
+                    Classes
+                  </dt>
+                  <dd className="mt-1">
+                    {classNames.length > 0 ? (
+                      <ul className="flex flex-wrap gap-1">
+                        {classNames.map((name) => (
+                          <li key={name} className={`${chipBase} bg-violet-50 text-violet-900 ring-violet-200/80`}>
+                            {name}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <span className="text-[11px] text-slate-400">—</span>
+                    )}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                    <ResourceIcon className="h-3 w-3 shrink-0 text-slate-400" aria-hidden />
+                    Resources
+                  </dt>
+                  <dd className="mt-1">
+                    {resourceNames.length > 0 ? (
+                      <ul className="flex flex-wrap gap-1">
+                        {resourceNames.map((name) => (
+                          <li key={name} className={`${chipBase} bg-amber-50 text-amber-950 ring-amber-200/80`}>
+                            {name}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <span className="text-[11px] text-slate-400">—</span>
+                    )}
+                  </dd>
+                </div>
+                <div className="col-span-2 sm:col-span-1">
+                  <dt className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                    <EventsIcon className="h-3 w-3 shrink-0 text-slate-400" aria-hidden />
+                    Events
+                  </dt>
+                  <dd className="mt-1 space-y-1">
+                    {activeOnColumn.length > 0 && (
+                      <ul className="flex flex-wrap gap-1">
+                        {activeOnColumn.map((e) => (
+                          <li
+                            key={e.id}
+                            title={
+                              formatEventDateShort(e.event_date)
+                                ? `${e.name} · ${formatEventDateShort(e.event_date)}`
+                                : e.name
+                            }
+                            className={`${chipBase} max-w-full bg-rose-50 text-rose-950 ring-rose-200/80`}
+                          >
+                            <span className="break-words">{e.name}</span>
+                            {formatEventDateShort(e.event_date) ? (
+                              <span className="whitespace-nowrap text-rose-900/85">
+                                {' '}
+                                · {formatEventDateShort(e.event_date)}
+                              </span>
+                            ) : null}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    {inactiveOnColumn.length > 0 && (
+                      <ul className="flex flex-wrap gap-1">
+                        {inactiveOnColumn.map((e) => (
+                          <li
+                            key={e.id}
+                            title="Paused — not bookable"
+                            className={`${chipBase} max-w-full bg-slate-100 text-slate-600 ring-slate-200/90`}
+                          >
+                            <span className="break-words">{e.name}</span>
+                            {formatEventDateShort(e.event_date) ? (
+                              <span className="whitespace-nowrap"> · {formatEventDateShort(e.event_date)}</span>
+                            ) : null}
+                            <span className="whitespace-nowrap text-slate-500"> · paused</span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    {activeOnColumn.length === 0 && inactiveOnColumn.length === 0 && (
+                      <span className="text-[11px] leading-snug text-slate-500">
+                        {venueHasActiveEvents ? (
+                          <>
+                            None here —{' '}
+                            <Link
+                              href="/dashboard/event-manager"
+                              className="font-medium text-brand-700 underline decoration-brand-200 underline-offset-2 hover:text-brand-800"
+                            >
+                              Event manager
+                            </Link>
+                          </>
+                        ) : venueHasAnyEvents ? (
+                          'No active events'
+                        ) : (
+                          '—'
+                        )}
+                      </span>
+                    )}
+                  </dd>
+                </div>
+              </dl>
+            </div>
+          </div>
+          <div className="flex shrink-0 gap-1.5 self-end sm:self-start">
+            <button
+              type="button"
+              onClick={() => void onEditCalendar(p)}
+              className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 shadow-sm transition hover:border-slate-300 hover:bg-slate-50"
+            >
+              Edit
+            </button>
+            {practitioners.length > 1 && (
+              <button
+                type="button"
+                title="Delete calendar"
+                onClick={() => {
+                  setDeleteCalendarTarget(p);
+                  setDeleteCalendarError(null);
+                }}
+                className="rounded-lg border border-slate-200 p-1.5 text-slate-400 shadow-sm transition hover:border-red-200 hover:bg-red-50 hover:text-red-600"
+              >
+                <TrashIcon className="h-4 w-4" />
+              </button>
+            )}
+          </div>
+        </div>
+
+        <div className="border-t border-slate-100/80 bg-slate-50/50 px-3 py-2 sm:px-4">
+          {venueLoading ? (
+            <p className="text-[10px] text-slate-500">Loading booking links…</p>
+          ) : venueSlug ? (
+            <div className="flex flex-col gap-1">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[9px] font-semibold uppercase tracking-wide text-slate-400">Booking link</span>
+                {previewUrl ? (
+                  <a
+                    href={previewUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="shrink-0 text-[10px] font-medium text-brand-600 underline decoration-brand-200 underline-offset-2 hover:text-brand-700"
+                  >
+                    Open page
+                  </a>
+                ) : null}
+              </div>
+              {!savedSlug ? (
+                <p className="text-[10px] leading-tight text-slate-500">Add a URL segment (e.g. staff name) for a direct booking URL.</p>
+              ) : null}
+              <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-1.5">
+                <div className="flex min-w-0 flex-1 items-center gap-px rounded border border-slate-200 bg-white px-1.5 py-1 font-mono text-[11px] leading-none text-slate-800">
+                  <span className="shrink-0 select-none text-slate-500">
+                    {PUBLIC_BOOK_HOST}/book/{venueSlug}/
+                  </span>
+                  <input
+                    id={`calendar-slug-${p.id}`}
+                    type="text"
+                    value={slugDraft}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setCalendarSlugDrafts((prev) => ({ ...prev, [p.id]: v }));
+                      setCalendarSlugFieldError((prev) => ({
+                        ...prev,
+                        [p.id]: bookingSlugDraftError(v),
+                      }));
+                    }}
+                    maxLength={64}
+                    autoComplete="off"
+                    spellCheck={false}
+                    className="min-w-0 flex-1 border-0 bg-transparent py-0.5 text-[11px] text-slate-900 outline-none focus:ring-0"
+                    placeholder="segment"
+                    aria-label="Booking URL segment"
+                    aria-invalid={Boolean(slugLiveErr || slugFieldErr)}
+                  />
+                </div>
+                <div className="flex shrink-0 gap-1">
+                  <button
+                    type="button"
+                    disabled={!slugDirty || Boolean(slugLiveErr) || savingSlugId === p.id}
+                    onClick={() => void onSaveBookingSlug(p.id)}
+                    className="rounded border border-brand-600 bg-brand-600 px-2 py-1 text-[10px] font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
+                  >
+                    {savingSlugId === p.id ? 'Saving' : 'Save'}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!canCopyBookUrl}
+                    onClick={() => void copyPractitionerBookUrl(p.id)}
+                    className="rounded border border-slate-200 bg-white px-2 py-1 text-[10px] font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                  >
+                    {slugCopySuccessId === p.id ? 'Copied' : 'Copy'}
+                  </button>
+                </div>
+              </div>
+              {(slugLiveErr || slugFieldErr) && (
+                <p className="text-[10px] leading-tight text-red-600">{slugLiveErr ?? slugFieldErr}</p>
+              )}
+            </div>
+          ) : (
+            <div className="flex gap-1.5 rounded border border-amber-200/80 bg-amber-50/50 px-2 py-1.5 text-[10px] text-amber-950">
+              <AlertIcon className="h-3.5 w-3.5 shrink-0 text-amber-600" aria-hidden />
+              <p>Set your venue slug under Venue details first.</p>
+            </div>
+          )}
+        </div>
+      </>
+    );
+  };
+
   return (
     <>
       <section className="mb-8 overflow-hidden rounded-2xl border border-slate-200/90 bg-white shadow-sm ring-1 ring-slate-900/[0.04]">
@@ -237,12 +718,25 @@ export function BookableCalendarsPanel({
                   name, services, classes, and linked resources. Set{' '}
                   <strong className="font-medium text-slate-800">weekly hours</strong> under the{' '}
                   <Link
-                    href="/dashboard/availability?tab=availability"
+                    href="/dashboard/calendar-availability?tab=availability"
                     className="font-medium text-brand-700 underline decoration-brand-300 underline-offset-2 hover:text-brand-800"
                   >
                     Availability
                   </Link>{' '}
                   tab.
+                  {isAdmin && (
+                    <span className="mt-2 block text-sm text-slate-600">
+                      The columns on your{' '}
+                      <Link
+                        href="/dashboard/calendar"
+                        className="font-medium text-brand-700 underline decoration-brand-300 underline-offset-2 hover:text-brand-800"
+                      >
+                        staff calendar
+                      </Link>{' '}
+                      appear in the same order as the calendars below. When you have more than one, drag the grip icon on
+                      the left of a row to move it up or down.
+                    </span>
+                  )}
                 </p>
               </div>
             </div>
@@ -281,7 +775,21 @@ export function BookableCalendarsPanel({
               {calendarRenameSuccess}
             </div>
           )}
-          {practitioners.length === 0 ? (
+          {reorderSaving && (
+            <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50/90 px-4 py-3 text-sm text-slate-700 ring-1 ring-slate-100">
+              <span
+                className="h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-slate-300 border-t-brand-600"
+                aria-hidden
+              />
+              Saving column order…
+            </div>
+          )}
+          {reorderError && (
+            <div className="rounded-xl border border-red-200 bg-red-50/90 px-4 py-3 text-sm text-red-800 ring-1 ring-red-100">
+              {reorderError}
+            </div>
+          )}
+          {orderedCalendars.length === 0 ? (
             <div className="rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50/50 px-6 py-12 text-center">
               <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-white shadow-sm ring-1 ring-slate-200/80">
                 <CalendarColumnIcon className="h-7 w-7 text-slate-400" />
@@ -305,256 +813,31 @@ export function BookableCalendarsPanel({
               </p>
             </div>
           ) : (
-            <ul className="space-y-5">
-              {practitioners.map((p) => {
-                const linkedSvcs = pLinks
-                  .filter((l) => l.practitioner_id === p.id)
-                  .map((l) => services.find((s) => s.id === l.service_id)?.name)
-                  .filter((n): n is string => Boolean(n));
-                const classNames = classTypes.filter((ct) => ct.instructor_id === p.id).map((ct) => ct.name);
-                const resourceNames = resources.filter((r) => r.display_on_calendar_id === p.id).map((r) => r.name);
-                const slugDraft = calendarSlugDrafts[p.id] ?? '';
-                const slugFieldErr = calendarSlugFieldError[p.id] ?? null;
-                const savedSlug = (p.slug ?? '').trim().toLowerCase();
-                const draftNorm = slugDraft.trim().toLowerCase();
-                const slugDirty = draftNorm !== savedSlug;
-                const slugLiveErr = bookingSlugDraftError(slugDraft);
-                const canCopyBookUrl = Boolean(venueSlug && savedSlug && draftNorm === savedSlug && !slugLiveErr);
-                const previewUrl =
-                  venueSlug && draftNorm && !slugLiveErr
-                    ? `${PUBLIC_BOOK_ORIGIN}/book/${encodeURIComponent(venueSlug)}/${encodeURIComponent(draftNorm)}`
-                    : null;
-                return (
-                  <li
-                    key={p.id}
-                    className={`group overflow-hidden rounded-2xl border bg-white shadow-sm ring-1 transition-shadow hover:shadow-md ${
-                      p.is_active
-                        ? 'border-slate-200/90 ring-slate-900/[0.04]'
-                        : 'border-slate-200/80 opacity-[0.97] ring-slate-900/[0.03]'
-                    }`}
-                  >
-                    <div
-                      className={`flex flex-col gap-4 border-b border-slate-100 px-4 py-4 sm:flex-row sm:items-start sm:justify-between sm:px-5 sm:py-4 ${
-                        p.is_active ? 'border-l-4 border-l-brand-500 pl-4' : 'border-l-4 border-l-slate-300 pl-4'
-                      }`}
-                    >
-                      <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <h3 className="text-base font-semibold tracking-tight text-slate-900">{p.name}</h3>
-                          {p.is_active ? (
-                            <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-emerald-800 ring-1 ring-emerald-200/70">
-                              Active
-                            </span>
-                          ) : (
-                            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-slate-600 ring-1 ring-slate-200">
-                              Inactive
-                            </span>
-                          )}
-                        </div>
-                        <p className="mt-3 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
-                          On this calendar
-                        </p>
-                        <dl className="mt-2 grid gap-3 sm:grid-cols-2">
-                          <div>
-                            <dt className="flex items-center gap-1.5 text-xs font-medium text-slate-500">
-                              <ServicesIcon className="h-3.5 w-3.5 shrink-0 text-slate-400" aria-hidden />
-                              Services
-                            </dt>
-                            <dd className="mt-1.5">
-                              {linkedSvcs.length > 0 ? (
-                                <ul className="flex flex-wrap gap-1.5">
-                                  {linkedSvcs.map((name) => (
-                                    <li
-                                      key={name}
-                                      className="rounded-md bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-800 ring-1 ring-slate-200/80"
-                                    >
-                                      {name}
-                                    </li>
-                                  ))}
-                                </ul>
-                              ) : services.length > 0 ? (
-                                <span className="text-sm text-slate-500">None selected</span>
-                              ) : (
-                                <span className="text-sm text-slate-400">—</span>
-                              )}
-                            </dd>
-                          </div>
-                          <div>
-                            <dt className="flex items-center gap-1.5 text-xs font-medium text-slate-500">
-                              <ClassIcon className="h-3.5 w-3.5 shrink-0 text-slate-400" aria-hidden />
-                              Classes
-                            </dt>
-                            <dd className="mt-1.5">
-                              {classNames.length > 0 ? (
-                                <ul className="flex flex-wrap gap-1.5">
-                                  {classNames.map((name) => (
-                                    <li
-                                      key={name}
-                                      className="rounded-md bg-violet-50 px-2 py-0.5 text-xs font-medium text-violet-900 ring-1 ring-violet-200/80"
-                                    >
-                                      {name}
-                                    </li>
-                                  ))}
-                                </ul>
-                              ) : (
-                                <span className="text-sm text-slate-400">—</span>
-                              )}
-                            </dd>
-                          </div>
-                          <div>
-                            <dt className="flex items-center gap-1.5 text-xs font-medium text-slate-500">
-                              <ResourceIcon className="h-3.5 w-3.5 shrink-0 text-slate-400" aria-hidden />
-                              Resources
-                            </dt>
-                            <dd className="mt-1.5">
-                              {resourceNames.length > 0 ? (
-                                <ul className="flex flex-wrap gap-1.5">
-                                  {resourceNames.map((name) => (
-                                    <li
-                                      key={name}
-                                      className="rounded-md bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-950 ring-1 ring-amber-200/80"
-                                    >
-                                      {name}
-                                    </li>
-                                  ))}
-                                </ul>
-                              ) : (
-                                <span className="text-sm text-slate-400">—</span>
-                              )}
-                            </dd>
-                          </div>
-                          <div>
-                            <dt className="flex items-center gap-1.5 text-xs font-medium text-slate-500">
-                              <EventsIcon className="h-3.5 w-3.5 shrink-0 text-slate-400" aria-hidden />
-                              Events
-                            </dt>
-                            <dd className="mt-1.5 text-sm text-slate-600">
-                              {events.length > 0
-                                ? `Venue-wide (${events.length} active) — not per column`
-                                : 'None configured'}
-                            </dd>
-                          </div>
-                        </dl>
-                      </div>
-                      <div className="flex shrink-0 gap-2 self-end sm:self-start">
-                        <button
-                          type="button"
-                          onClick={() => onEditCalendar(p)}
-                          className="rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-sm font-medium text-slate-800 shadow-sm transition hover:border-slate-300 hover:bg-slate-50"
-                        >
-                          Edit
-                        </button>
-                        {practitioners.length > 1 && (
-                          <button
-                            type="button"
-                            title="Delete calendar"
-                            onClick={() => {
-                              setDeleteCalendarTarget(p);
-                              setDeleteCalendarError(null);
-                            }}
-                            className="rounded-xl border border-slate-200 p-2 text-slate-400 shadow-sm transition hover:border-red-200 hover:bg-red-50 hover:text-red-600"
-                          >
-                            <TrashIcon className="h-4 w-4" />
-                          </button>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="bg-slate-50/60 px-4 py-4 sm:px-5">
-                      {venueLoading ? (
-                        <p className="text-sm text-slate-500">Loading booking links…</p>
-                      ) : venueSlug ? (
-                        <div className="rounded-xl border border-slate-200/90 bg-white p-4 shadow-sm ring-1 ring-slate-900/[0.03]">
-                          <div className="flex items-start gap-3">
-                            <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-brand-700">
-                              <LinkIcon className="h-4 w-4" aria-hidden />
-                            </div>
-                            <div className="min-w-0 flex-1 space-y-2">
-                              <div>
-                                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                                  Guest booking link
-                                </p>
-                                {!savedSlug ? (
-                                  <p className="mt-1 text-sm text-slate-600">
-                                    Add a URL segment so guests can open a page that books only with {p.name}.
-                                  </p>
-                                ) : (
-                                  <p className="mt-1 text-sm text-slate-600">
-                                    Share this URL so guests book only on {p.name}&apos;s column.
-                                  </p>
-                                )}
-                              </div>
-                              <div className="flex min-w-0 flex-wrap items-center gap-x-0.5 rounded-lg border border-slate-200 bg-slate-50/80 px-2.5 py-2 font-mono text-sm text-slate-800">
-                                <span className="shrink-0 text-slate-500">
-                                  {PUBLIC_BOOK_HOST}/book/{venueSlug}/
-                                </span>
-                                <input
-                                  id={`calendar-slug-${p.id}`}
-                                  type="text"
-                                  value={slugDraft}
-                                  onChange={(e) => {
-                                    const v = e.target.value;
-                                    setCalendarSlugDrafts((prev) => ({ ...prev, [p.id]: v }));
-                                    setCalendarSlugFieldError((prev) => ({
-                                      ...prev,
-                                      [p.id]: bookingSlugDraftError(v),
-                                    }));
-                                  }}
-                                  maxLength={64}
-                                  autoComplete="off"
-                                  spellCheck={false}
-                                  className="min-w-[6rem] flex-1 border-0 bg-transparent p-0.5 text-slate-900 outline-none focus:ring-0"
-                                  placeholder="e.g. sarah"
-                                  aria-invalid={Boolean(slugLiveErr || slugFieldErr)}
-                                />
-                              </div>
-                              {(slugLiveErr || slugFieldErr) && (
-                                <p className="text-xs text-red-600">{slugLiveErr ?? slugFieldErr}</p>
-                              )}
-                              {previewUrl && (
-                                <p className="text-xs">
-                                  <a
-                                    href={previewUrl}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="break-all font-medium text-brand-600 underline decoration-brand-200 underline-offset-2 hover:text-brand-700"
-                                  >
-                                    {previewUrl}
-                                  </a>
-                                </p>
-                              )}
-                              <div className="flex flex-wrap items-center gap-2 pt-1">
-                                <button
-                                  type="button"
-                                  disabled={!slugDirty || Boolean(slugLiveErr) || savingSlugId === p.id}
-                                  onClick={() => void onSaveBookingSlug(p.id)}
-                                  className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-brand-700 disabled:opacity-50"
-                                >
-                                  {savingSlugId === p.id ? 'Saving…' : 'Save link'}
-                                </button>
-                                <button
-                                  type="button"
-                                  disabled={!canCopyBookUrl}
-                                  onClick={() => void copyPractitionerBookUrl(p.id)}
-                                  className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-                                >
-                                  {slugCopySuccessId === p.id ? 'Copied!' : 'Copy link'}
-                                </button>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="flex gap-2 rounded-xl border border-amber-200/80 bg-amber-50/50 px-3 py-2.5 text-sm text-amber-950">
-                          <AlertIcon className="h-5 w-5 shrink-0 text-amber-600" aria-hidden />
-                          <p>Set your venue slug under Venue details to build personal booking links.</p>
-                        </div>
-                      )}
-                    </div>
+            canReorderCalendars ? (
+              <DndContext
+                sensors={reorderSensors}
+                collisionDetection={closestCenter}
+                onDragEnd={onReorderDragEnd}
+              >
+                <SortableContext items={orderedIds} strategy={verticalListSortingStrategy}>
+                  <ul className="space-y-5">
+                    {orderedCalendars.map((p) => (
+                      <SortableCalendarRow key={p.id} id={p.id} label={p.name} canReorder className={calendarRowClassName(p)}>
+                        {(dh) => renderCalendarCard(p, dh)}
+                      </SortableCalendarRow>
+                    ))}
+                  </ul>
+                </SortableContext>
+              </DndContext>
+            ) : (
+              <ul className="space-y-5">
+                {orderedCalendars.map((p) => (
+                  <li key={p.id} className={calendarRowClassName(p)}>
+                    {renderCalendarCard(p, null)}
                   </li>
-                );
-              })}
-            </ul>
+                ))}
+              </ul>
+            )
           )}
         </div>
       </section>
@@ -683,18 +966,6 @@ function EventsIcon({ className }: { className?: string }) {
         strokeLinecap="round"
         strokeLinejoin="round"
         d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5a2.25 2.25 0 002.25-2.25m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5a2.25 2.25 0 012.25 2.25v7.5m-9-6h.008v.008H12V15zm-3 3h.008v.008H9V18zm0-3h.008v.008H9V15zm0 3h.008v.008H9V18zm3-3h.008v.008H12V15zm0 3h.008v.008H12V18zm3-6h.008v.008H15V15zm0 3h.008v.008H15V18z"
-      />
-    </svg>
-  );
-}
-
-function LinkIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" aria-hidden>
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m13.35-.622l1.757-1.757a4.5 4.5 0 00-6.364-6.364l-4.5 4.5a4.5 4.5 0 001.242 7.244"
       />
     </svg>
   );

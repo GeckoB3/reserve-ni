@@ -305,7 +305,7 @@ export function StaffServiceOverrideModal({
                   type="button"
                   onClick={() => setRequireDeposit(!requireDeposit)}
                   className={`relative h-6 w-11 rounded-full transition-colors ${
-                    requireDeposit ? 'bg-blue-600' : 'bg-slate-300'
+                    requireDeposit ? 'bg-brand-600' : 'bg-slate-300'
                   }`}
                 >
                   <span
@@ -365,7 +365,7 @@ export function StaffServiceOverrideModal({
             type="button"
             onClick={() => void handleSave()}
             disabled={saving}
-            className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+            className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
           >
             {saving ? 'Saving…' : 'Save changes'}
           </button>

@@ -2,6 +2,7 @@
 
 import { useCallback, useState } from 'react';
 import type { VenueSettings, OpeningHoursSettings, OpeningHoursDaySettings } from '../types';
+import { BusinessClosuresSection } from './BusinessClosuresSection';
 
 const DAYS: { key: string; label: string }[] = [
   { key: '0', label: 'Sunday' },
@@ -26,9 +27,10 @@ interface OpeningHoursSectionProps {
   venue: VenueSettings;
   onUpdate: (patch: Partial<VenueSettings>) => void;
   isAdmin: boolean;
+  bookingModel: string;
 }
 
-export function OpeningHoursSection({ venue, onUpdate, isAdmin }: OpeningHoursSectionProps) {
+export function OpeningHoursSection({ venue, onUpdate, isAdmin, bookingModel }: OpeningHoursSectionProps) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -69,7 +71,7 @@ export function OpeningHoursSection({ venue, onUpdate, isAdmin }: OpeningHoursSe
   return (
     <section className="rounded-lg border border-neutral-200 bg-white p-6 shadow-sm">
       <h2 className="mb-4 text-lg font-semibold text-neutral-900">Opening hours</h2>
-      <p className="mb-4 text-sm text-neutral-600">Set up to two service periods per day (e.g. lunch and dinner).</p>
+      <p className="mb-4 text-sm text-neutral-600">Set your business opening hours</p>
 
       <div className="space-y-4">
         {DAYS.map(({ key, label }) => {
@@ -168,6 +170,8 @@ export function OpeningHoursSection({ venue, onUpdate, isAdmin }: OpeningHoursSe
           {saving ? 'Saving…' : 'Save opening hours'}
         </button>
       )}
+
+      <BusinessClosuresSection bookingModel={bookingModel} venue={venue} isAdmin={isAdmin} onUpdate={onUpdate} />
     </section>
   );
 }

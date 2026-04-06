@@ -8,7 +8,10 @@ import { createClient } from '@/lib/supabase/browser';
 import { mergeModelNavEntries } from '@/lib/booking/enabled-models';
 import type { BookingModel } from '@/types/booking-models';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
-import { isVenueScheduleCalendarEligible } from '@/lib/booking/schedule-calendar-eligibility';
+import {
+  isVenueScheduleCalendarEligible,
+  shouldShowAppointmentAvailabilitySettings,
+} from '@/lib/booking/schedule-calendar-eligibility';
 
 type NavItem = { href: string; label: string; icon: React.ComponentType<{ className?: string }> };
 
@@ -17,7 +20,8 @@ const BASE_NAV_ITEMS: NavItem[] = [
   { href: '/dashboard/bookings', label: 'Reservations', icon: CalendarIcon },
   { href: '/dashboard/bookings/new', label: 'New Booking', icon: PlusIcon },
   { href: '/dashboard/waitlist', label: 'Waitlist', icon: QueueIcon },
-  { href: '/dashboard/availability', label: 'Calendar Availability', icon: ClockIcon },
+  { href: '/dashboard/availability', label: 'Dining Availability', icon: ClockIcon },
+  { href: '/dashboard/calendar-availability', label: 'Calendar Availability', icon: CalendarIcon },
   { href: '/dashboard/reports', label: 'Reports', icon: ChartIcon },
   { href: '/dashboard/settings', label: 'Settings', icon: CogIcon },
 ];
@@ -44,12 +48,12 @@ interface Props {
   venueName?: string;
   venueSlug?: string;
   tableManagementEnabled?: boolean;
-  /** Business or Founding - with table_reservation and tableManagementEnabled, shows table grid / floor plan. */
+  /** Restaurant / Business / Founding tier — with `table_reservation` and `tableManagementEnabled`, shows table grid / floor plan. */
   pricingTier?: string;
   bookingModel?: BookingModel;
   /** Secondary bookable models (C/D/E); merged into model-specific nav. */
   enabledModels?: BookingModel[];
-  /** Reports and Calendar Availability nav items are admin-only. */
+  /** Reports nav item is admin-only; dining availability is admin-only; calendar follows venue model rules. */
   isAdmin?: boolean;
   /** Venue `terminology` JSONB - drives booking list / new-booking labels (plan §6.4). */
   venueTerminology?: Record<string, unknown> | null;
@@ -72,26 +76,43 @@ export function DashboardSidebar({
   const router = useRouter();
   const [mobileOpen, setMobileOpen] = useState(false);
 
+  /** Restaurant / Founding / legacy Business — matches table-management and SMS tier checks. */
+  const isRestaurantPlanTier =
+    pricingTier === 'business' || pricingTier === 'founding' || pricingTier === 'restaurant';
+
   const showTableManagementNav =
     Boolean(tableManagementEnabled) &&
     bookingModel === 'table_reservation' &&
-    (pricingTier === 'business' || pricingTier === 'founding');
+    isRestaurantPlanTier;
 
   const calendarEligible = useMemo(
     () => isVenueScheduleCalendarEligible(bookingModel, enabledModels),
     [bookingModel, enabledModels],
   );
 
+  const isRestaurantTablePrimary = bookingModel === 'table_reservation' && isRestaurantPlanTier;
+
   const navItems = useMemo(() => {
     const isTableReservation = bookingModel === 'table_reservation';
+    const isRestaurantTablePrimaryInner = isTableReservation && isRestaurantPlanTier;
     const isAppointment = isUnifiedSchedulingVenue(bookingModel);
+    const showDiningAvailability = isTableReservation;
+    const showCalendarAvailability = shouldShowAppointmentAvailabilitySettings(bookingModel, enabledModels);
 
     let items = BASE_NAV_ITEMS.filter((item) => {
       if (!isTableReservation && TABLE_RESERVATION_ONLY.has(item.href)) return false;
-      if (!isAdmin && item.href === '/dashboard/availability' && !isAppointment) return false;
+      if (item.href === '/dashboard/availability') {
+        if (!showDiningAvailability) return false;
+        if (!isAdmin) return false;
+        return true;
+      }
+      if (item.href === '/dashboard/calendar-availability') {
+        if (!showCalendarAvailability) return false;
+        return true;
+      }
       if (!isAdmin && ADMIN_ONLY_HREFS.has(item.href)) {
-        // Model B: staff can open Settings for their own account (name, email, phone, password) only.
-        if (item.href === '/dashboard/settings' && isAppointment) return true;
+        // Staff can open Settings for personal account only (not full venue settings).
+        if (item.href === '/dashboard/settings') return true;
         return false;
       }
       return true;
@@ -113,16 +134,34 @@ export function DashboardSidebar({
 
     const modelItems = mergeModelNavEntries(MODEL_NAV_ITEMS, bookingModel, enabledModels);
     if (modelItems.length > 0) {
-      const insertIdx = items.findIndex((i) => i.href === '/dashboard/bookings/new');
-      if (insertIdx >= 0) {
-        items = [...items.slice(0, insertIdx + 1), ...modelItems, ...items.slice(insertIdx + 1)];
+      const waitIdx = items.findIndex((i) => i.href === '/dashboard/waitlist');
+      if (waitIdx >= 0) {
+        items = [...items.slice(0, waitIdx + 1), ...modelItems, ...items.slice(waitIdx + 1)];
       } else {
-        items = [...items, ...modelItems];
+        const newIdx = items.findIndex((i) => i.href === '/dashboard/bookings/new');
+        if (newIdx >= 0) {
+          items = [...items.slice(0, newIdx + 1), ...modelItems, ...items.slice(newIdx + 1)];
+        } else {
+          items = [...items, ...modelItems];
+        }
+      }
+    }
+
+    /**
+     * Restaurant plan + table primary + schedule calendar: Calendar sits after Reservations / table
+     * views and before New Booking (and merged model links), not down by Waitlist.
+     */
+    if (isRestaurantTablePrimaryInner && calendarEligible) {
+      const calItem: NavItem = { href: '/dashboard/calendar', label: 'Calendar', icon: CalendarIcon };
+      const newIdx = items.findIndex((i) => i.href === '/dashboard/bookings/new');
+      const alreadyHasCal = items.some((i) => i.href === '/dashboard/calendar');
+      if (!alreadyHasCal && newIdx >= 0) {
+        items = [...items.slice(0, newIdx), calItem, ...items.slice(newIdx)];
       }
     }
 
     return items;
-  }, [isAdmin, bookingModel, enabledModels]);
+  }, [isAdmin, bookingModel, enabledModels, isRestaurantPlanTier, calendarEligible]);
 
   async function handleSignOut() {
     const supabase = createClient();
@@ -181,11 +220,81 @@ export function DashboardSidebar({
         <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-1">
           {navItems.map((item) => {
             if (item.href === '/dashboard/bookings' && !showTableManagementNav) {
+              if (isRestaurantTablePrimary) {
+                /** When schedule calendar is on, Calendar is a separate nav item (after Reservations, before New Booking). */
+                if (calendarEligible) {
+                  return (
+                    <Link
+                      key="reservations-only"
+                      href={item.href}
+                      onClick={() => setMobileOpen(false)}
+                      className={`
+                      flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors
+                      ${isActive(item.href)
+                        ? 'bg-brand-50 text-brand-700'
+                        : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                      }
+                    `}
+                    >
+                      <item.icon className={`h-5 w-5 flex-shrink-0 ${isActive(item.href) ? 'text-brand-600' : 'text-slate-400'}`} />
+                      {item.label}
+                    </Link>
+                  );
+                }
+                const daySheetActive = pathname.startsWith('/dashboard/day-sheet');
+                return (
+                  <div key="reservations-with-day-sheet" className="space-y-1">
+                    <Link
+                      href="/dashboard/day-sheet"
+                      onClick={() => setMobileOpen(false)}
+                      className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
+                        daySheetActive
+                          ? 'bg-brand-50 text-brand-700'
+                          : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                      }`}
+                    >
+                      <ClipboardIcon
+                        className={`h-5 w-5 flex-shrink-0 ${daySheetActive ? 'text-brand-600' : 'text-slate-400'}`}
+                      />
+                      Day Sheet
+                    </Link>
+                    <Link
+                      href={item.href}
+                      onClick={() => setMobileOpen(false)}
+                      className={`
+                      flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors
+                      ${isActive(item.href)
+                        ? 'bg-brand-50 text-brand-700'
+                        : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                      }
+                    `}
+                    >
+                      <item.icon className={`h-5 w-5 flex-shrink-0 ${isActive(item.href) ? 'text-brand-600' : 'text-slate-400'}`} />
+                      {item.label}
+                    </Link>
+                  </div>
+                );
+              }
+
               const scheduleActive = calendarEligible
                 ? pathname.startsWith('/dashboard/calendar') || pathname.startsWith('/dashboard/practitioner-calendar')
                 : pathname.startsWith('/dashboard/day-sheet');
               return (
                 <div key="reservations-with-day-sheet" className="space-y-1">
+                  <Link
+                    href={item.href}
+                    onClick={() => setMobileOpen(false)}
+                    className={`
+                      flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors
+                      ${isActive(item.href)
+                        ? 'bg-brand-50 text-brand-700'
+                        : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                      }
+                    `}
+                  >
+                    <item.icon className={`h-5 w-5 flex-shrink-0 ${isActive(item.href) ? 'text-brand-600' : 'text-slate-400'}`} />
+                    {item.label}
+                  </Link>
                   <Link
                     href={calendarEligible ? '/dashboard/calendar' : '/dashboard/day-sheet'}
                     onClick={() => setMobileOpen(false)}
@@ -201,20 +310,6 @@ export function DashboardSidebar({
                       <ClipboardIcon className={`h-5 w-5 flex-shrink-0 ${scheduleActive ? 'text-brand-600' : 'text-slate-400'}`} />
                     )}
                     {calendarEligible ? 'Calendar' : 'Day Sheet'}
-                  </Link>
-                  <Link
-                    href={item.href}
-                    onClick={() => setMobileOpen(false)}
-                    className={`
-                      flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors
-                      ${isActive(item.href)
-                        ? 'bg-brand-50 text-brand-700'
-                        : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
-                      }
-                    `}
-                  >
-                    <item.icon className={`h-5 w-5 flex-shrink-0 ${isActive(item.href) ? 'text-brand-600' : 'text-slate-400'}`} />
-                    {item.label}
                   </Link>
                 </div>
               );

@@ -26,11 +26,13 @@ import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 import { fetchEventInput, computeEventAvailability } from '@/lib/availability/event-ticket-engine';
 import { cancellationDeadlineHoursBefore } from '@/lib/booking/cancellation-deadline';
 import { getCancellationNoticeHoursForBooking, parseExtendedBookingRules } from '@/lib/booking/venue-booking-rules';
+import { resolveCancellationNoticeHoursForCreate } from '@/lib/booking/resolve-cancellation-notice-hours';
 import { applyStaffBookingPaymentAndComms } from '@/lib/booking/staff-booking-payment-comms';
 import { fetchClassInput, computeClassAvailability } from '@/lib/availability/class-session-engine';
 import { fetchResourceInput, computeResourceAvailability } from '@/lib/availability/resource-booking-engine';
 import { mergeAppointmentServiceWithPractitionerLink } from '@/lib/appointments/merge-service-with-overrides';
 import { resolveAppointmentServiceOnlineCharge } from '@/lib/appointments/appointment-service-payment';
+import { isGuestBookingDateAllowed, loadServiceEntityBookingWindow } from '@/lib/booking/entity-booking-window';
 
 const ticketLineSchema = z.object({
   ticket_type_id: z.string().uuid(),
@@ -125,7 +127,7 @@ export async function POST(request: NextRequest) {
 
     const { data: venue } = await admin
       .from('venues')
-      .select('id, name, stripe_connected_account_id, booking_rules, deposit_config, table_management_enabled, show_table_in_confirmation, timezone, address, opening_hours')
+      .select('id, name, stripe_connected_account_id, booking_rules, deposit_config, table_management_enabled, show_table_in_confirmation, timezone, address, opening_hours, venue_opening_exceptions')
       .eq('id', venueId)
       .single();
 
@@ -194,8 +196,12 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'party_size must match total ticket quantity' }, { status: 400 });
       }
 
+      const tz =
+        typeof venue.timezone === 'string' && venue.timezone.trim() !== ''
+          ? venue.timezone.trim()
+          : 'Europe/London';
       const eventInput = await fetchEventInput({ supabase: admin, venueId, date: booking_date });
-      const eventSlots = computeEventAvailability(eventInput);
+      const eventSlots = computeEventAvailability(eventInput, { venueTimezone: tz });
       const evSlot = eventSlots.find((e) => e.event_id === parsed.data.experience_event_id);
       if (!evSlot || evSlot.remaining_capacity < party_size) {
         return NextResponse.json({ error: 'This event is fully booked or unavailable' }, { status: 409 });
@@ -233,8 +239,12 @@ export async function POST(request: NextRequest) {
         appointment_price_display: ticketTotalDisplay,
       };
 
-      const bookingRulesParsed = parseExtendedBookingRules(venue.booking_rules);
-      const refundWindowHours = getCancellationNoticeHoursForBooking(bookingRulesParsed, 'event_ticket', 48);
+      const refundWindowHours = await resolveCancellationNoticeHoursForCreate({
+        supabase: admin,
+        venueId,
+        effectiveModel: 'event_ticket',
+        experienceEventId: parsed.data.experience_event_id,
+      });
       const cancellation_deadline = cancellationDeadlineHoursBefore(booking_date, booking_time, refundWindowHours);
       const cancellationPolicySnapshot = {
         refund_window_hours: refundWindowHours,
@@ -674,6 +684,20 @@ export async function POST(request: NextRequest) {
         );
       }
 
+      const svcWindow = await loadServiceEntityBookingWindow(
+        admin,
+        venueId,
+        venueMode.bookingModel,
+        appointment_service_id,
+      );
+      const tzAppt =
+        typeof venue.timezone === 'string' && venue.timezone.trim() !== ''
+          ? venue.timezone.trim()
+          : 'Europe/London';
+      if (!isGuestBookingDateAllowed(booking_date, svcWindow, tzAppt)) {
+        return NextResponse.json({ error: 'This date is not available for booking' }, { status: 400 });
+      }
+
       const appointmentInput = await fetchAppointmentInput({
         supabase: admin,
         venueId,
@@ -682,7 +706,11 @@ export async function POST(request: NextRequest) {
         serviceId: appointment_service_id,
       });
 
-      attachVenueClockToAppointmentInput(appointmentInput, venue as { timezone?: string | null; booking_rules?: unknown; opening_hours?: unknown });
+      attachVenueClockToAppointmentInput(
+        appointmentInput,
+        venue as { timezone?: string | null; booking_rules?: unknown; opening_hours?: unknown },
+        svcWindow,
+      );
       const availResult = computeAppointmentAvailability(appointmentInput);
       const practitionerSlots = availResult.practitioners.find((p) => p.id === practitioner_id);
       const matchingSlot = practitionerSlots?.slots.find(
@@ -714,6 +742,20 @@ export async function POST(request: NextRequest) {
       const estimatedEndTime = endDate.toISOString();
       const bookingEndTime = `${String(endDate.getUTCHours()).padStart(2, '0')}:${String(endDate.getUTCMinutes()).padStart(2, '0')}:00`;
 
+      const refundWindowHoursAppt = await resolveCancellationNoticeHoursForCreate({
+        supabase: admin,
+        venueId,
+        effectiveModel: venueMode.bookingModel,
+        ...(venueMode.bookingModel === 'unified_scheduling'
+          ? { serviceItemId: appointment_service_id }
+          : { appointmentServiceId: appointment_service_id }),
+      });
+      const cancellationDeadlineAppt = cancellationDeadlineHoursBefore(
+        booking_date,
+        booking_time,
+        refundWindowHoursAppt,
+      );
+
       const online = svc ? resolveAppointmentServiceOnlineCharge(svc) : null;
       const staffWantsDeposit = require_deposit ?? false;
       const requiresDeposit =
@@ -741,7 +783,7 @@ export async function POST(request: NextRequest) {
         guest_email: guest.email || null,
         deposit_amount_pence: depositAmountPence,
         deposit_status: requiresDeposit ? ('Pending' as const) : ('Not Required' as const),
-        cancellation_deadline: cancellationDeadline(booking_date, booking_time),
+        cancellation_deadline: cancellationDeadlineAppt,
         dietary_notes: dietary_notes?.trim() || null,
         occasion: occasion?.trim() || null,
         special_requests: special_requests?.trim() || null,

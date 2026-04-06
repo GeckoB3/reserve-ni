@@ -47,21 +47,21 @@ export function SetPasswordBanner({ onDismiss }: SetPasswordBannerProps) {
 
   return (
     <>
-      <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+      <div className="rounded-lg border border-brand-200 bg-brand-50 px-4 py-3 text-sm text-brand-900">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <span>Set a password for faster login next time.</span>
           <div className="flex gap-2">
             <button
               type="button"
               onClick={() => setShowModal(true)}
-              className="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700"
+              className="rounded bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700"
             >
               Set password
             </button>
             <button
               type="button"
               onClick={() => { onDismiss?.(); }}
-              className="rounded border border-blue-300 bg-white px-3 py-1.5 text-sm font-medium text-blue-800 hover:bg-blue-100"
+              className="rounded border border-brand-300 bg-white px-3 py-1.5 text-sm font-medium text-brand-800 hover:bg-brand-100"
             >
               Maybe later
             </button>

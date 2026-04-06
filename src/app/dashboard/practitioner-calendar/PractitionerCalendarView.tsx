@@ -39,7 +39,7 @@ import type { OpeningHours } from '@/types/availability';
 import type { BookingModel } from '@/types/booking-models';
 import { venueExposesBookingModel } from '@/lib/booking/enabled-models';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
-import { staffSecondaryBookingOptions } from '@/lib/booking/staff-booking-modal-options';
+import { getStaffBookingSurfaceTabs } from '@/lib/booking/staff-booking-modal-options';
 import {
   computeResourceAvailability,
   type ResourceBooking as EngineResourceBooking,
@@ -66,6 +66,8 @@ interface Practitioner {
   is_active: boolean;
   colour?: string;
   calendar_type?: string;
+  /** Left-to-right column order on the staff calendar grid. */
+  sort_order?: number;
 }
 
 interface AppointmentService {
@@ -401,7 +403,7 @@ function CalendarBookingQuickActions({
               type="button"
               disabled={busy}
               onClick={() => onStatus(b.id, 'Confirmed')}
-              className="rounded bg-blue-600 px-1 py-0.5 text-[10px] font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+              className="rounded bg-brand-600 px-1 py-0.5 text-[10px] font-medium text-white hover:bg-brand-700 disabled:opacity-50"
             >
               Confirm
             </button>
@@ -411,7 +413,7 @@ function CalendarBookingQuickActions({
               type="button"
               disabled={busy}
               onClick={() => onStatus(b.id, 'Seated')}
-              className="rounded bg-blue-600 px-1 py-0.5 text-[10px] font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+              className="rounded bg-brand-600 px-1 py-0.5 text-[10px] font-medium text-white hover:bg-brand-700 disabled:opacity-50"
             >
               Start
             </button>
@@ -681,12 +683,12 @@ export function PractitionerCalendarView({
   const showClassSessions = venueExposesBookingModel(bookingModel, enabledModels, 'class_session');
   const loadVenueResources = venueExposesBookingModel(bookingModel, enabledModels, 'resource_booking');
 
-  const calendarSecondaryBookingOptions = useMemo(
-    () => staffSecondaryBookingOptions(bookingModel, enabledModels),
+  const staffBookingSurfaceTabs = useMemo(
+    () => getStaffBookingSurfaceTabs(bookingModel, enabledModels),
     [bookingModel, enabledModels],
   );
   const newBookingToolbarLabel =
-    isUnifiedSchedulingVenue(bookingModel) && calendarSecondaryBookingOptions.length === 0
+    isUnifiedSchedulingVenue(bookingModel) && staffBookingSurfaceTabs.length === 1
       ? 'New appointment'
       : 'New booking';
   /** Fetch schedule feed for events strip (classes render on team columns via `calendar_id`). */
@@ -863,7 +865,10 @@ export function PractitionerCalendarView({
 
   /** Grid columns only: resources are merged into their host calendar column. */
   const columnPractitioners = useMemo(
-    () => activePractitioners.filter((p) => p.calendar_type !== 'resource'),
+    () =>
+      activePractitioners
+        .filter((p) => p.calendar_type !== 'resource')
+        .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)),
     [activePractitioners],
   );
 
@@ -1438,7 +1443,7 @@ export function PractitionerCalendarView({
       ) : filteredPractitioners.length === 0 ? (
         <div className="flex flex-1 items-center justify-center">
           <div className="rounded-xl border border-slate-200 bg-white p-12 text-center">
-            <p className="text-slate-500">No calendars configured yet. Add them in the Calendar Availability page.</p>
+            <p className="text-slate-500">No calendars configured yet. Add them in Calendar availability.</p>
           </div>
         </div>
       ) : viewMode === 'month' ? (
@@ -2140,7 +2145,7 @@ export function PractitionerCalendarView({
                   value={blockModal.reason}
                   onChange={(e) => setBlockModal((m) => (m ? { ...m, reason: e.target.value } : m))}
                   className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                  placeholder="Lunch, training…"
+                  placeholder="e.g. Break, leave, hold"
                 />
               </div>
             </div>

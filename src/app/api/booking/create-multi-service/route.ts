@@ -21,6 +21,8 @@ import type { GroupAppointmentLine } from '@/lib/emails/types';
 import { timeToMinutes, minutesToTime } from '@/lib/availability';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 import { createShortManageLink } from '@/lib/short-manage-link';
+import { loadServiceEntityBookingWindow } from '@/lib/booking/entity-booking-window';
+import { resolveCancellationNoticeHoursForCreate } from '@/lib/booking/resolve-cancellation-notice-hours';
 
 const serviceEntrySchema = z.object({
   service_id: z.string().uuid(),
@@ -72,7 +74,7 @@ export async function POST(request: NextRequest) {
 
     const { data: venue, error: venueErr } = await supabase
       .from('venues')
-      .select('id, name, stripe_connected_account_id, address, booking_rules, timezone, opening_hours')
+      .select('id, name, stripe_connected_account_id, address, booking_rules, timezone, opening_hours, venue_opening_exceptions')
       .eq('id', venue_id)
       .single();
 
@@ -123,7 +125,12 @@ export async function POST(request: NextRequest) {
       });
       input.phantomBookings = [...phantoms];
 
-      attachVenueClockToAppointmentInput(input, venue as { timezone?: string | null; booking_rules?: unknown; opening_hours?: unknown });
+      const svcWindow = await loadServiceEntityBookingWindow(supabase, venue_id, venueMode.bookingModel, seg.service_id);
+      attachVenueClockToAppointmentInput(
+        input,
+        venue as { timezone?: string | null; booking_rules?: unknown; opening_hours?: unknown },
+        svcWindow,
+      );
       const exact = validateExactAppointmentStart(input, practitionerId, seg.service_id, timeStr);
       if (!exact.ok) {
         return NextResponse.json(
@@ -228,11 +235,14 @@ export async function POST(request: NextRequest) {
     const groupBookingId = generateGroupBookingId();
     const bookingIds: string[] = [];
 
-    const bookingRulesJson = (venue.booking_rules as { cancellation_notice_hours?: number } | null) ?? {};
-    const refundWindowHours =
-      typeof bookingRulesJson.cancellation_notice_hours === 'number'
-        ? bookingRulesJson.cancellation_notice_hours
-        : 48;
+    const refundWindowHours = await resolveCancellationNoticeHoursForCreate({
+      supabase,
+      venueId: venue_id,
+      effectiveModel: venueMode.bookingModel,
+      serviceItemId: venueMode.bookingModel === 'unified_scheduling' ? validated[0]!.appointment_service_id : null,
+      appointmentServiceId:
+        venueMode.bookingModel === 'practitioner_appointment' ? validated[0]!.appointment_service_id : null,
+    });
 
     const firstStart = validated[0]!.booking_time;
     const deadline = cancellationDeadlineHoursBefore(booking_date, firstStart, refundWindowHours);

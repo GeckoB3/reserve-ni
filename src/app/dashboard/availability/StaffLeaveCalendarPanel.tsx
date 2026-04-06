@@ -310,7 +310,7 @@ export function StaffLeaveCalendarPanel({
             <button
               type="button"
               onClick={() => openAdd()}
-              className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-700"
+              className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-700"
             >
               Add time off
             </button>
@@ -404,7 +404,7 @@ export function StaffLeaveCalendarPanel({
                       <div className="flex items-start justify-between gap-1">
                         <span
                           className={`flex h-7 w-7 items-center justify-center rounded-full text-sm font-medium ${
-                            isToday ? 'bg-blue-600 text-white' : 'text-slate-700'
+                            isToday ? 'bg-brand-600 text-white' : 'text-slate-700'
                           }`}
                         >
                           {day}
@@ -495,7 +495,7 @@ export function StaffLeaveCalendarPanel({
                     <div className="flex shrink-0 flex-col gap-1">
                       <button
                         type="button"
-                        className="rounded-lg px-2 py-1 text-xs font-medium text-blue-600 hover:bg-blue-50"
+                        className="rounded-lg px-2 py-1 text-xs font-medium text-brand-700 hover:bg-brand-50"
                         onClick={() => openEdit(p)}
                       >
                         Edit
@@ -653,7 +653,7 @@ export function StaffLeaveCalendarPanel({
               <button
                 type="button"
                 disabled={saving}
-                className="flex-1 rounded-lg bg-blue-600 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+                className="flex-1 rounded-lg bg-brand-600 py-2.5 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
                 onClick={() => void submitForm()}
               >
                 {saving ? 'Saving…' : editing ? 'Save changes' : 'Add to calendar'}

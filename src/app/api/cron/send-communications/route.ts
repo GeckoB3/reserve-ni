@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
-import { getCommSettings, logToCommLogs } from '@/lib/communications/service';
+import {
+  confirmCancelReminderSmsCustomLine,
+  dayOfReminderSmsCustomLine,
+  getCommSettings,
+  logToCommLogs,
+} from '@/lib/communications/service';
 import { renderReminder56h } from '@/lib/emails/templates/reminder-56h';
 import { renderDayOfReminderEmail } from '@/lib/emails/templates/day-of-reminder-email';
 import { renderDayOfReminderSms } from '@/lib/emails/templates/day-of-reminder-sms';
@@ -15,6 +20,7 @@ import type { BookingEmailData, VenueEmailData } from '@/lib/emails/types';
 import { requireCronAuthorisation } from '@/lib/cron-auth';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 import { isCdeBookingRow } from '@/lib/booking/cde-booking';
+import { getVenueNotificationSettings } from '@/lib/notifications/notification-settings';
 import { runUnifiedSchedulingComms, runSecondaryModelScheduledComms } from '@/lib/cron/unified-scheduling-comms';
 
 /**
@@ -204,7 +210,9 @@ async function send56hReminders(results: { reminders_56h: number; errors: number
 
       const tz = venue.timezone ?? 'Europe/London';
       const settings = await getCommSettings(venue.id);
-      if (!settings.reminder_email_enabled) continue;
+      const ns = await getVenueNotificationSettings(venue.id);
+
+      if (!settings.reminder_email_enabled || !ns.reminder_1_enabled) continue;
 
       const reminderHours = settings.reminder_hours_before ?? 56;
       const nowLocal = toVenueLocal(now, tz);
@@ -228,12 +236,11 @@ async function send56hReminders(results: { reminders_56h: number; errors: number
 
       if (!bookings?.length) continue;
 
-      const emailBookings = normalizeBookings(bookings).filter((b) => getGuestEmail(b));
-      if (!emailBookings.length) continue;
-
+      const normalized = normalizeBookings(bookings);
       const venueData = buildVenueData(venue);
+      const smsOk = await isSmsAllowed(venue.id);
 
-      for (const b of emailBookings) {
+      for (const b of normalized) {
         try {
           if (isCdeBookingRow(b)) continue;
 
@@ -244,28 +251,60 @@ async function send56hReminders(results: { reminders_56h: number; errors: number
 
           if (diffMs < targetMs - tolerance || diffMs > targetMs + tolerance) continue;
 
-          const email = getGuestEmail(b)!;
           const confirmCancelLink = createShortConfirmLink(b.id);
           const manageLink = createShortManageLink(b.id);
-
           const bookingData = buildBookingData(b);
           bookingData.confirm_cancel_link = confirmCancelLink;
           bookingData.manage_booking_link = manageLink;
 
-          const rendered = renderReminder56h(bookingData, venueData, settings.reminder_email_custom_message);
+          const email = getGuestEmail(b);
+          const phone = getGuestPhone(b);
 
-          const canSend = await logToCommLogs({
-            venue_id: b.venue_id,
-            booking_id: b.id,
-            message_type: 'reminder_56h_email',
-            channel: 'email',
-            recipient: email,
-            status: 'pending',
-          });
-          if (!canSend) continue;
+          if (ns.reminder_1_channels.includes('email') && email) {
+            const canSend = await logToCommLogs({
+              venue_id: b.venue_id,
+              booking_id: b.id,
+              message_type: 'reminder_56h_email',
+              channel: 'email',
+              recipient: email,
+              status: 'pending',
+            });
+            if (canSend) {
+              const rendered = renderReminder56h(bookingData, venueData, settings.reminder_email_custom_message);
+              await sendEmail({ to: email, ...rendered });
+              results.reminders_56h++;
+            }
+          }
 
-          await sendEmail({ to: email, ...rendered });
-          results.reminders_56h++;
+          if (ns.reminder_1_channels.includes('sms') && phone && smsOk) {
+            const canSend = await logToCommLogs({
+              venue_id: b.venue_id,
+              booking_id: b.id,
+              message_type: 'reminder_1_sms',
+              channel: 'sms',
+              recipient: phone,
+              status: 'pending',
+            });
+            if (canSend) {
+              const sms = renderDayOfReminderSms(
+                bookingData,
+                venueData,
+                confirmCancelReminderSmsCustomLine(settings),
+              );
+              const { sid, segmentCount } = await sendSmsWithSegments(phone, sms.body);
+              if (sid) {
+                await recordOutboundSms({
+                  venueId: b.venue_id,
+                  bookingId: b.id,
+                  messageType: 'reminder_1_sms',
+                  recipientPhone: phone,
+                  twilioSid: sid,
+                  segmentCount,
+                });
+              }
+              results.reminders_56h++;
+            }
+          }
         } catch (err) {
           console.error(`[confirm-cancel-reminder] booking ${b.id}:`, err);
           results.errors++;
@@ -339,7 +378,7 @@ async function sendDayOfReminders(results: { day_of_reminders: number; errors: n
 
           // SMS reminder (Business / Founding only)
           if (settings.day_of_reminder_sms_enabled && phone && dayOfSmsTierOk) {
-            const sms = renderDayOfReminderSms(bookingData, venueData, settings.day_of_reminder_custom_message);
+            const sms = renderDayOfReminderSms(bookingData, venueData, dayOfReminderSmsCustomLine(settings));
             const canSend = await logToCommLogs({
               venue_id: venue.id,
               booking_id: b.id,

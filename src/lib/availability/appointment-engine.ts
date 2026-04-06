@@ -12,6 +12,10 @@ import { getOpeningPeriodsForDay, timeToMinutes, minutesToTime } from '@/lib/ava
 import { getDayOfWeek } from '@/lib/availability/engine';
 import { getVenueLocalDateAndMinutes } from '@/lib/venue/venue-local-clock';
 import { unifiedCalendarRowToPractitioner } from '@/lib/availability/unified-calendar-mapper';
+import type { EntityBookingWindow } from '@/lib/booking/entity-booking-window';
+import { DEFAULT_ENTITY_BOOKING_WINDOW } from '@/lib/booking/entity-booking-window';
+import type { VenueOpeningException } from '@/types/venue-opening-exceptions';
+import { parseVenueOpeningExceptions } from '@/types/venue-opening-exceptions';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -58,24 +62,35 @@ export interface AppointmentEngineInput {
    * When omitted, null, or {}, only staff hours apply (tests / legacy).
    */
   venueOpeningHours?: OpeningHours | null;
+  /**
+   * Venue-wide date exceptions (venues.venue_opening_exceptions): closed days or amended opening periods.
+   * Applied together with weekly opening hours; the first matching range wins.
+   */
+  venueOpeningExceptions?: VenueOpeningException[] | null;
 }
 
-/** Apply venue timezone + booking_rules to appointment availability (guest-facing paths should always call this). */
+/** Apply venue timezone + per-service booking window to appointment availability (guest-facing paths should always call this). */
 export function attachVenueClockToAppointmentInput(
   input: AppointmentEngineInput,
-  venue: { timezone?: string | null; booking_rules?: unknown; opening_hours?: unknown },
+  venue: {
+    timezone?: string | null;
+    booking_rules?: unknown;
+    opening_hours?: unknown;
+    venue_opening_exceptions?: unknown;
+  },
+  bookingWindow?: EntityBookingWindow | null,
 ): void {
   const tz =
     typeof venue.timezone === 'string' && venue.timezone.trim() !== '' ? venue.timezone.trim() : 'Europe/London';
   input.venueTimezone = tz;
-  const rules = venue.booking_rules as {
-    min_notice_hours?: number;
-    allow_same_day_booking?: boolean;
-  } | null | undefined;
-  input.minNoticeHours = rules?.min_notice_hours ?? 1;
-  input.allowSameDayBooking = rules?.allow_same_day_booking ?? true;
+  const w = bookingWindow ?? DEFAULT_ENTITY_BOOKING_WINDOW;
+  input.minNoticeHours = w.min_booking_notice_hours;
+  input.allowSameDayBooking = w.allow_same_day_booking;
   if (venue.opening_hours !== undefined) {
     input.venueOpeningHours = venue.opening_hours as OpeningHours | null;
+  }
+  if (venue.venue_opening_exceptions !== undefined) {
+    input.venueOpeningExceptions = parseVenueOpeningExceptions(venue.venue_opening_exceptions);
   }
 }
 
@@ -226,21 +241,58 @@ function intersectMinuteRanges(
   return out.sort((x, y) => x.start - y.start);
 }
 
+function findApplicableVenueOpeningException(
+  exceptions: VenueOpeningException[] | null | undefined,
+  dateStr: string,
+): VenueOpeningException | null {
+  if (!exceptions?.length) return null;
+  for (const ex of exceptions) {
+    if (ex.date_start <= dateStr && dateStr <= ex.date_end) return ex;
+  }
+  return null;
+}
+
+/**
+ * Venue-wide minute ranges for `dateStr` after weekly hours and per-date exceptions.
+ * Returns null when no venue boundary applies (legacy: staff hours only).
+ */
+function venueMinuteRangesForAppointmentDate(
+  venueOpeningHours: OpeningHours | null | undefined,
+  dateStr: string,
+  exceptions: VenueOpeningException[] | null | undefined,
+): Array<{ start: number; end: number }> | null {
+  const ex = findApplicableVenueOpeningException(exceptions, dateStr);
+  if (ex) {
+    if (ex.closed) return [];
+    if (ex.periods?.length) {
+      return ex.periods.map((p) => ({
+        start: timeToMinutes(p.open.slice(0, 5)),
+        end: timeToMinutes(p.close.slice(0, 5)),
+      }));
+    }
+  }
+  if (isVenueOpeningHoursConfigured(venueOpeningHours)) {
+    const day = getDayOfWeek(dateStr);
+    const periods = getOpeningPeriodsForDay(venueOpeningHours, day);
+    return periods.map((p) => ({ start: timeToMinutes(p.open), end: timeToMinutes(p.close) }));
+  }
+  return null;
+}
+
 /**
  * Staff working ranges intersected with venue opening periods for that calendar date.
- * When venue hours are not configured, returns staff ranges unchanged.
+ * When venue has no opening-hours config and no applicable exception, returns staff ranges unchanged.
  */
 function effectiveWorkingRangesForAppointments(
   workingRanges: Array<{ start: number; end: number }>,
   venueOpeningHours: OpeningHours | null | undefined,
   dateStr: string,
+  venueOpeningExceptions?: VenueOpeningException[] | null,
 ): Array<{ start: number; end: number }> {
-  if (!isVenueOpeningHoursConfigured(venueOpeningHours)) {
+  const venueRanges = venueMinuteRangesForAppointmentDate(venueOpeningHours, dateStr, venueOpeningExceptions);
+  if (venueRanges === null) {
     return workingRanges;
   }
-  const day = getDayOfWeek(dateStr);
-  const periods = getOpeningPeriodsForDay(venueOpeningHours, day);
-  const venueRanges = periods.map((p) => ({ start: timeToMinutes(p.open), end: timeToMinutes(p.close) }));
   if (venueRanges.length === 0) {
     return [];
   }
@@ -286,6 +338,7 @@ export function computeAppointmentAvailability(input: AppointmentEngineInput, no
     venueTimezone,
     minNoticeHours = 0,
     venueOpeningHours,
+    venueOpeningExceptions,
   } = input;
 
   // “Today” and clock are venue-local when timezone is set (production); otherwise server-local (tests).
@@ -311,7 +364,12 @@ export function computeAppointmentAvailability(input: AppointmentEngineInput, no
     const workingRanges = getWorkingRanges(practitioner, date);
     if (workingRanges.length === 0) continue;
 
-    const effectiveWorkingRanges = effectiveWorkingRangesForAppointments(workingRanges, venueOpeningHours, date);
+    const effectiveWorkingRanges = effectiveWorkingRangesForAppointments(
+      workingRanges,
+      venueOpeningHours,
+      date,
+      venueOpeningExceptions,
+    );
     if (effectiveWorkingRanges.length === 0) continue;
 
     const breakRanges = getBreakRanges(practitioner, date);
@@ -425,6 +483,7 @@ export function validateExactAppointmentStart(
     venueTimezone,
     minNoticeHours = 0,
     venueOpeningHours,
+    venueOpeningExceptions,
   } = input;
 
   let todayStr: string;
@@ -462,7 +521,12 @@ export function validateExactAppointmentStart(
     return { ok: false, reason: 'Staff not working this day' };
   }
 
-  const effectiveWorkingRanges = effectiveWorkingRangesForAppointments(workingRanges, venueOpeningHours, date);
+  const effectiveWorkingRanges = effectiveWorkingRangesForAppointments(
+    workingRanges,
+    venueOpeningHours,
+    date,
+    venueOpeningExceptions,
+  );
   if (effectiveWorkingRanges.length === 0) {
     return { ok: false, reason: 'Outside opening hours' };
   }
@@ -573,7 +637,7 @@ export async function fetchAppointmentInput(params: {
       .eq('venue_id', venueId)
       .lte('start_date', date)
       .gte('end_date', date),
-    supabase.from('venues').select('opening_hours').eq('id', venueId).single(),
+    supabase.from('venues').select('opening_hours, venue_opening_exceptions').eq('id', venueId).single(),
   ]);
 
   let practitioners = (practitionersRes.data ?? []) as Practitioner[];
@@ -659,6 +723,12 @@ export async function fetchAppointmentInput(params: {
     ? null
     : ((venueRes.data?.opening_hours as OpeningHours | null) ?? null);
 
+  const venueOpeningExceptions = venueRes.error
+    ? null
+    : parseVenueOpeningExceptions(
+        (venueRes.data as { venue_opening_exceptions?: unknown } | null)?.venue_opening_exceptions,
+      );
+
   if (venueRes.error) {
     console.warn('[fetchAppointmentInput] venues.opening_hours:', venueRes.error.message);
   }
@@ -671,6 +741,7 @@ export async function fetchAppointmentInput(params: {
     existingBookings,
     practitionerBlockedRanges,
     venueOpeningHours,
+    venueOpeningExceptions,
   };
 }
 
@@ -695,6 +766,7 @@ export async function fetchCalendarAppointmentInput(params: {
     existingBookings: [],
     practitionerBlockedRanges: [],
     venueOpeningHours: null,
+    venueOpeningExceptions: null,
   });
 
   const { data: ucRow, error: ucErr } = await supabase
@@ -817,7 +889,7 @@ export async function fetchCalendarAppointmentInput(params: {
       .eq('venue_id', venueId)
       .eq('calendar_id', calendarId)
       .eq('block_date', date),
-    supabase.from('venues').select('opening_hours').eq('id', venueId).single(),
+    supabase.from('venues').select('opening_hours, venue_opening_exceptions').eq('id', venueId).single(),
   ]);
 
   const serviceMapForBookings = new Map(services.map((s) => [s.id, s]));
@@ -882,6 +954,12 @@ export async function fetchCalendarAppointmentInput(params: {
     ? null
     : ((venueRes.data?.opening_hours as OpeningHours | null) ?? null);
 
+  const venueOpeningExceptions = venueRes.error
+    ? null
+    : parseVenueOpeningExceptions(
+        (venueRes.data as { venue_opening_exceptions?: unknown } | null)?.venue_opening_exceptions,
+      );
+
   return {
     date,
     practitioners: [practitioner],
@@ -890,5 +968,6 @@ export async function fetchCalendarAppointmentInput(params: {
     existingBookings,
     practitionerBlockedRanges,
     venueOpeningHours,
+    venueOpeningExceptions,
   };
 }

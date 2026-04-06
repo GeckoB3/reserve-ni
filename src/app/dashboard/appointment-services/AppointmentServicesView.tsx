@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { mergeAppointmentServiceWithPractitionerLink } from '@/lib/appointments/merge-service-with-overrides';
 import type { AppointmentService, ClassPaymentRequirement, PractitionerService } from '@/types/booking-models';
+import { DEFAULT_ENTITY_BOOKING_WINDOW } from '@/lib/booking/entity-booking-window';
 import { StaffServiceOverrideModal } from './StaffServiceOverrideModal';
 
 interface Service {
@@ -17,6 +18,10 @@ interface Service {
   colour: string;
   is_active: boolean;
   sort_order: number;
+  max_advance_booking_days?: number;
+  min_booking_notice_hours?: number;
+  cancellation_notice_hours?: number;
+  allow_same_day_booking?: boolean;
   staff_may_customize_name?: boolean;
   staff_may_customize_description?: boolean;
   staff_may_customize_duration?: boolean;
@@ -66,6 +71,10 @@ interface ServiceFormData {
     deposit: boolean;
     colour: boolean;
   };
+  max_advance_booking_days: number;
+  min_booking_notice_hours: number;
+  cancellation_notice_hours: number;
+  allow_same_day_booking: boolean;
 }
 
 const COLOUR_OPTIONS = [
@@ -95,6 +104,10 @@ const DEFAULT_FORM: ServiceFormData = {
   is_active: true,
   practitioner_ids: [],
   staffMay: { ...DEFAULT_STAFF_MAY },
+  max_advance_booking_days: DEFAULT_ENTITY_BOOKING_WINDOW.max_advance_booking_days,
+  min_booking_notice_hours: DEFAULT_ENTITY_BOOKING_WINDOW.min_booking_notice_hours,
+  cancellation_notice_hours: DEFAULT_ENTITY_BOOKING_WINDOW.cancellation_notice_hours,
+  allow_same_day_booking: DEFAULT_ENTITY_BOOKING_WINDOW.allow_same_day_booking,
 };
 
 function formatDuration(mins: number): string {
@@ -275,6 +288,14 @@ export function AppointmentServicesView({
         deposit: svc.staff_may_customize_deposit ?? false,
         colour: svc.staff_may_customize_colour ?? false,
       },
+      max_advance_booking_days:
+        svc.max_advance_booking_days ?? DEFAULT_ENTITY_BOOKING_WINDOW.max_advance_booking_days,
+      min_booking_notice_hours:
+        svc.min_booking_notice_hours ?? DEFAULT_ENTITY_BOOKING_WINDOW.min_booking_notice_hours,
+      cancellation_notice_hours:
+        svc.cancellation_notice_hours ?? DEFAULT_ENTITY_BOOKING_WINDOW.cancellation_notice_hours,
+      allow_same_day_booking:
+        svc.allow_same_day_booking ?? DEFAULT_ENTITY_BOOKING_WINDOW.allow_same_day_booking,
     });
     setEditingId(svc.id);
     setError(null);
@@ -329,6 +350,10 @@ export function AppointmentServicesView({
         staff_may_customize_price: form.staffMay.price,
         staff_may_customize_deposit: form.staffMay.deposit,
         staff_may_customize_colour: form.staffMay.colour,
+        max_advance_booking_days: form.max_advance_booking_days,
+        min_booking_notice_hours: form.min_booking_notice_hours,
+        cancellation_notice_hours: form.cancellation_notice_hours,
+        allow_same_day_booking: form.allow_same_day_booking,
       };
 
       const res = await fetch('/api/venue/appointment-services', {
@@ -453,7 +478,7 @@ export function AppointmentServicesView({
             )}
             <button
               onClick={openCreate}
-              className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition-colors"
+              className="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 transition-colors"
             >
               <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path d="M12 5v14m-7-7h14"/></svg>
               Add Service
@@ -498,7 +523,7 @@ export function AppointmentServicesView({
               <button
                 onClick={handleBulkDeposit}
                 disabled={bulkSaving}
-                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+                className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
               >
                 {bulkSaving ? 'Updating...' : 'Apply to All'}
               </button>
@@ -526,7 +551,7 @@ export function AppointmentServicesView({
           {isAdmin && (
             <button
               onClick={openCreate}
-              className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+              className="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700"
             >
               <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path d="M12 5v14m-7-7h14"/></svg>
               Add your first service
@@ -606,7 +631,7 @@ export function AppointmentServicesView({
                             setOverrideCalendarId(linkedPractitionerIds[0] ?? null);
                             setOverrideService(svc);
                           }}
-                          className="mt-3 rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white shadow-sm hover:bg-blue-700"
+                          className="mt-3 rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-medium text-white shadow-sm hover:bg-brand-700"
                         >
                           Edit your settings
                         </button>
@@ -618,7 +643,7 @@ export function AppointmentServicesView({
                               !isAdmin && linkedPractitionerIds.includes(lp.id),
                             );
                             const chipClass = isAdmin
-                              ? 'inline-block rounded-full bg-blue-50 px-2 py-0.5 text-xs text-blue-700'
+                              ? 'inline-block rounded-full bg-brand-50 px-2 py-0.5 text-xs text-brand-800'
                               : isSelf
                                 ? 'inline-block rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-900 ring-1 ring-emerald-200/80'
                                 : 'inline-block rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600';
@@ -708,7 +733,7 @@ export function AppointmentServicesView({
                   value={form.name}
                   onChange={(e) => setForm({ ...form, name: e.target.value })}
                   className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-                  placeholder="e.g. Men's Haircut"
+                  placeholder="e.g. Consultation, Standard session"
                 />
               </div>
 
@@ -824,6 +849,68 @@ export function AppointmentServicesView({
                 )}
               </div>
 
+              {/* Online guest booking rules */}
+              <div className="rounded-lg border border-slate-200 p-4 space-y-3">
+                <p className="text-sm font-medium text-slate-800">Guest booking rules</p>
+                <p className="text-xs text-slate-500">
+                  Applies to online bookings for this service (advance window, notice, and deposit refund notice).
+                </p>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="mb-1 block text-sm text-slate-700">Max advance (days)</label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={365}
+                      value={form.max_advance_booking_days}
+                      onChange={(e) =>
+                        setForm({ ...form, max_advance_booking_days: parseInt(e.target.value, 10) || 1 })
+                      }
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-sm text-slate-700">Min booking notice (hours)</label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={168}
+                      value={form.min_booking_notice_hours}
+                      onChange={(e) =>
+                        setForm({ ...form, min_booking_notice_hours: parseInt(e.target.value, 10) || 0 })
+                      }
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-sm text-slate-700">Cancellation notice (hours)</label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={168}
+                      value={form.cancellation_notice_hours}
+                      onChange={(e) =>
+                        setForm({ ...form, cancellation_notice_hours: parseInt(e.target.value, 10) || 0 })
+                      }
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div className="flex flex-col justify-end">
+                    <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
+                      <input
+                        type="checkbox"
+                        checked={form.allow_same_day_booking}
+                        onChange={(e) =>
+                          setForm({ ...form, allow_same_day_booking: e.target.checked })
+                        }
+                        className="rounded border-slate-300"
+                      />
+                      Allow same-day bookings
+                    </label>
+                  </div>
+                </div>
+              </div>
+
               {/* Colour */}
               <div>
                 <label className="mb-1 block text-sm font-medium text-slate-700">Colour</label>
@@ -848,7 +935,7 @@ export function AppointmentServicesView({
                   type="button"
                   onClick={() => setForm({ ...form, is_active: !form.is_active })}
                   className={`relative h-6 w-11 rounded-full transition-colors ${
-                    form.is_active ? 'bg-blue-600' : 'bg-slate-300'
+                    form.is_active ? 'bg-brand-600' : 'bg-slate-300'
                   }`}
                 >
                   <span
@@ -977,7 +1064,7 @@ export function AppointmentServicesView({
               <button
                 onClick={handleSave}
                 disabled={saving}
-                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+                className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
               >
                 {saving ? 'Saving...' : editingId ? 'Save Changes' : 'Create Service'}
               </button>

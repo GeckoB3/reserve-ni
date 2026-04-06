@@ -1,27 +1,41 @@
-import { NextRequest, NextResponse, after } from 'next/server';
-import { getSupabaseAdminClient } from '@/lib/supabase';
-import { stripe } from '@/lib/stripe';
-import { sendCancellationNotification } from '@/lib/communications/send-templated';
-import type { BookingEmailData, VenueEmailData } from '@/lib/emails/types';
-import { enrichBookingEmailForComms } from '@/lib/emails/booking-email-enrichment';
-import { getCancellationNoticeHoursForBooking, parseExtendedBookingRules } from '@/lib/booking/venue-booking-rules';
-import { verifyConfirmToken } from '@/lib/confirm-token';
-import { verifyBookingHmac } from '@/lib/short-manage-link';
-import { validateBookingStatusTransition, applyBookingLifecycleStatusEffects } from '@/lib/table-management/lifecycle';
-import { computeAvailability, fetchEngineInput } from '@/lib/availability';
-import { AVAILABILITY_SETUP_REQUIRED_MESSAGE } from '@/lib/availability/availability-errors';
-import { resolveVenueMode } from '@/lib/venue-mode';
+import { NextRequest, NextResponse, after } from "next/server";
+import { getSupabaseAdminClient } from "@/lib/supabase";
+import { stripe } from "@/lib/stripe";
+import { sendCancellationNotification } from "@/lib/communications/send-templated";
+import type { BookingEmailData, VenueEmailData } from "@/lib/emails/types";
+import { enrichBookingEmailForComms } from "@/lib/emails/booking-email-enrichment";
+import {
+  getCancellationNoticeHoursForBooking,
+  parseExtendedBookingRules,
+} from "@/lib/booking/venue-booking-rules";
+import { verifyConfirmToken } from "@/lib/confirm-token";
+import {
+  createShortManageLink,
+  verifyBookingHmac,
+} from "@/lib/short-manage-link";
+import {
+  validateBookingStatusTransition,
+  applyBookingLifecycleStatusEffects,
+} from "@/lib/table-management/lifecycle";
+import { computeAvailability, fetchEngineInput } from "@/lib/availability";
+import { AVAILABILITY_SETUP_REQUIRED_MESSAGE } from "@/lib/availability/availability-errors";
+import { resolveVenueMode } from "@/lib/venue-mode";
 import {
   attachVenueClockToAppointmentInput,
   computeAppointmentAvailability,
   fetchAppointmentInput,
-} from '@/lib/availability/appointment-engine';
-import { mergeAppointmentServiceWithPractitionerLink } from '@/lib/appointments/merge-service-with-overrides';
-import { cancellationDeadlineHoursBefore } from '@/lib/booking/cancellation-deadline';
-import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
-import { inferBookingRowModel } from '@/lib/booking/infer-booking-row-model';
-import { logBookingOp } from '@/lib/observability/booking-ops-log';
-import type { BookingModel } from '@/types/booking-models';
+} from "@/lib/availability/appointment-engine";
+import { mergeAppointmentServiceWithPractitionerLink } from "@/lib/appointments/merge-service-with-overrides";
+import { cancellationDeadlineHoursBefore } from "@/lib/booking/cancellation-deadline";
+import { isUnifiedSchedulingVenue } from "@/lib/booking/unified-scheduling";
+import {
+  isGuestBookingDateAllowed,
+  loadServiceEntityBookingWindow,
+} from "@/lib/booking/entity-booking-window";
+import { resolveCancellationNoticeHoursForCreate } from "@/lib/booking/resolve-cancellation-notice-hours";
+import { inferBookingRowModel } from "@/lib/booking/infer-booking-row-model";
+import { logBookingOp } from "@/lib/observability/booking-ops-log";
+import type { BookingModel } from "@/types/booking-models";
 
 /**
  * GET /api/confirm?booking_id=uuid&token=xxx  (token-based)
@@ -30,46 +44,55 @@ import type { BookingModel } from '@/types/booking-models';
  */
 export async function GET(request: NextRequest) {
   try {
-    const bookingId = request.nextUrl.searchParams.get('booking_id');
-    const token = request.nextUrl.searchParams.get('token');
-    const hmac = request.nextUrl.searchParams.get('hmac');
+    const bookingId = request.nextUrl.searchParams.get("booking_id");
+    const token = request.nextUrl.searchParams.get("token");
+    const hmac = request.nextUrl.searchParams.get("hmac");
     if (!bookingId || (!token && !hmac)) {
-      return NextResponse.json({ error: 'Missing booking_id or auth' }, { status: 400 });
+      return NextResponse.json(
+        { error: "Missing booking_id or auth" },
+        { status: 400 },
+      );
     }
 
     const supabase = getSupabaseAdminClient();
     const { data: booking, error: bookErr } = await supabase
-      .from('bookings')
+      .from("bookings")
       .select(
-        'id, venue_id, guest_id, booking_date, booking_time, booking_end_time, party_size, status, deposit_status, deposit_amount_pence, stripe_payment_intent_id, cancellation_deadline, confirm_token_hash, confirm_token_used_at, practitioner_id, appointment_service_id, calendar_id, service_item_id, experience_event_id, class_instance_id, resource_id, event_session_id, updated_at, guest_attendance_confirmed_at',
+        "id, venue_id, guest_id, booking_date, booking_time, booking_end_time, party_size, status, deposit_status, deposit_amount_pence, stripe_payment_intent_id, cancellation_deadline, confirm_token_hash, confirm_token_used_at, practitioner_id, appointment_service_id, calendar_id, service_item_id, experience_event_id, class_instance_id, resource_id, event_session_id, updated_at, guest_attendance_confirmed_at",
       )
-      .eq('id', bookingId)
+      .eq("id", bookingId)
       .single();
 
     if (bookErr || !booking) {
-      return NextResponse.json({ error: 'Booking not found' }, { status: 404 });
+      return NextResponse.json({ error: "Booking not found" }, { status: 404 });
     }
 
     if (hmac) {
       if (!verifyBookingHmac(bookingId, hmac)) {
-        return NextResponse.json({ error: 'Invalid link' }, { status: 400 });
+        return NextResponse.json({ error: "Invalid link" }, { status: 400 });
       }
     } else if (token) {
       if (booking.confirm_token_used_at) {
-        return NextResponse.json({ error: 'This link has already been used' }, { status: 410 });
+        return NextResponse.json(
+          { error: "This link has already been used" },
+          { status: 410 },
+        );
       }
       if (!verifyConfirmToken(token, booking.confirm_token_hash)) {
-        return NextResponse.json({ error: 'Invalid link' }, { status: 400 });
+        return NextResponse.json({ error: "Invalid link" }, { status: 400 });
       }
     }
 
     const { data: venue } = await supabase
-      .from('venues')
-      .select('name, address, phone, booking_model, booking_rules')
-      .eq('id', booking.venue_id)
+      .from("venues")
+      .select("name, address, phone, booking_model, booking_rules")
+      .eq("id", booking.venue_id)
       .single();
-    const depositPaid = booking.deposit_status === 'Paid';
-    const timeStr = typeof booking.booking_time === 'string' ? booking.booking_time.slice(0, 5) : '';
+    const depositPaid = booking.deposit_status === "Paid";
+    const timeStr =
+      typeof booking.booking_time === "string"
+        ? booking.booking_time.slice(0, 5)
+        : "";
 
     let practitioner_name: string | null = null;
     let appointment_service_name: string | null = null;
@@ -88,8 +111,12 @@ export async function GET(request: NextRequest) {
     };
     const inferredModel: BookingModel = inferBookingRowModel(bookingRow);
     const unifiedVenue = isUnifiedSchedulingVenue(venue?.booking_model);
-    const legacyAppt = Boolean(bookingRow.practitioner_id && bookingRow.appointment_service_id);
-    const unifiedAppt = Boolean(unifiedVenue && bookingRow.calendar_id && bookingRow.service_item_id);
+    const legacyAppt = Boolean(
+      bookingRow.practitioner_id && bookingRow.appointment_service_id,
+    );
+    const unifiedAppt = Boolean(
+      unifiedVenue && bookingRow.calendar_id && bookingRow.service_item_id,
+    );
     const isAppointment = legacyAppt || unifiedAppt;
 
     let event_name: string | null = null;
@@ -99,34 +126,42 @@ export async function GET(request: NextRequest) {
 
     if (bookingRow.experience_event_id) {
       const { data: ev } = await supabase
-        .from('experience_events')
-        .select('name')
-        .eq('id', bookingRow.experience_event_id)
+        .from("experience_events")
+        .select("name")
+        .eq("id", bookingRow.experience_event_id)
         .maybeSingle();
       event_name = (ev as { name?: string } | null)?.name ?? null;
     }
     if (bookingRow.class_instance_id) {
       const { data: ci } = await supabase
-        .from('class_instances')
-        .select('instance_date, start_time, class_type_id')
-        .eq('id', bookingRow.class_instance_id)
+        .from("class_instances")
+        .select("instance_date, start_time, class_type_id")
+        .eq("id", bookingRow.class_instance_id)
         .maybeSingle();
       if (ci) {
         const ctId = (ci as { class_type_id?: string }).class_type_id;
         const { data: ct } = ctId
-          ? await supabase.from('class_types').select('name').eq('id', ctId).maybeSingle()
+          ? await supabase
+              .from("class_types")
+              .select("name")
+              .eq("id", ctId)
+              .maybeSingle()
           : { data: null };
-        const nm = (ct as { name?: string } | null)?.name ?? 'Class';
-        const d = String((ci as { instance_date?: string }).instance_date ?? '');
-        const st = String((ci as { start_time?: string }).start_time ?? '').slice(0, 5);
+        const nm = (ct as { name?: string } | null)?.name ?? "Class";
+        const d = String(
+          (ci as { instance_date?: string }).instance_date ?? "",
+        );
+        const st = String(
+          (ci as { start_time?: string }).start_time ?? "",
+        ).slice(0, 5);
         class_summary = `${nm} · ${d} ${st}`;
       }
     }
     if (bookingRow.resource_id) {
       const { data: vr } = await supabase
-        .from('venue_resources')
-        .select('name')
-        .eq('id', bookingRow.resource_id)
+        .from("venue_resources")
+        .select("name")
+        .eq("id", bookingRow.resource_id)
         .maybeSingle();
       resource_name = (vr as { name?: string } | null)?.name ?? null;
     }
@@ -136,25 +171,47 @@ export async function GET(request: NextRequest) {
 
     if (unifiedAppt) {
       const [{ data: uc }, { data: si }] = await Promise.all([
-        supabase.from('unified_calendars').select('name').eq('id', bookingRow.calendar_id as string).maybeSingle(),
-        supabase.from('service_items').select('name').eq('id', bookingRow.service_item_id as string).maybeSingle(),
+        supabase
+          .from("unified_calendars")
+          .select("name")
+          .eq("id", bookingRow.calendar_id as string)
+          .maybeSingle(),
+        supabase
+          .from("service_items")
+          .select("name")
+          .eq("id", bookingRow.service_item_id as string)
+          .maybeSingle(),
       ]);
       practitioner_name = (uc as { name?: string } | null)?.name ?? null;
       appointment_service_name = (si as { name?: string } | null)?.name ?? null;
     } else if (legacyAppt) {
       const [{ data: pr }, { data: svc }] = await Promise.all([
-        supabase.from('practitioners').select('name').eq('id', bookingRow.practitioner_id as string).maybeSingle(),
-        supabase.from('appointment_services').select('name').eq('id', bookingRow.appointment_service_id as string).maybeSingle(),
+        supabase
+          .from("practitioners")
+          .select("name")
+          .eq("id", bookingRow.practitioner_id as string)
+          .maybeSingle(),
+        supabase
+          .from("appointment_services")
+          .select("name")
+          .eq("id", bookingRow.appointment_service_id as string)
+          .maybeSingle(),
       ]);
       practitioner_name = pr?.name ?? null;
       appointment_service_name = svc?.name ?? null;
     }
 
-    const practitionerIdForUi = (bookingRow.practitioner_id ?? bookingRow.calendar_id) as string | null | undefined;
-    const serviceIdForUi = (bookingRow.appointment_service_id ?? bookingRow.service_item_id) as string | null | undefined;
+    const practitionerIdForUi = (bookingRow.practitioner_id ??
+      bookingRow.calendar_id) as string | null | undefined;
+    const serviceIdForUi = (bookingRow.appointment_service_id ??
+      bookingRow.service_item_id) as string | null | undefined;
 
     const rulesParsed = parseExtendedBookingRules(venue?.booking_rules);
-    const refundNoticeHours = getCancellationNoticeHoursForBooking(rulesParsed, inferredModel, 48);
+    const refundNoticeHours = getCancellationNoticeHoursForBooking(
+      rulesParsed,
+      inferredModel,
+      48,
+    );
 
     return NextResponse.json({
       booking_id: booking.id,
@@ -170,8 +227,10 @@ export async function GET(request: NextRequest) {
       status: booking.status,
       booking_model: inferredModel,
       is_appointment: isAppointment,
-      practitioner_id: isAppointment && practitionerIdForUi ? practitionerIdForUi : null,
-      appointment_service_id: isAppointment && serviceIdForUi ? serviceIdForUi : null,
+      practitioner_id:
+        isAppointment && practitionerIdForUi ? practitionerIdForUi : null,
+      appointment_service_id:
+        isAppointment && serviceIdForUi ? serviceIdForUi : null,
       practitioner_name,
       appointment_service_name,
       event_name,
@@ -181,11 +240,16 @@ export async function GET(request: NextRequest) {
       cancellation_deadline: bookingRow.cancellation_deadline ?? null,
       refund_notice_hours: refundNoticeHours,
       guest_attendance_confirmed_at:
-        (booking as { guest_attendance_confirmed_at?: string | null }).guest_attendance_confirmed_at ?? null,
+        (booking as { guest_attendance_confirmed_at?: string | null })
+          .guest_attendance_confirmed_at ?? null,
+      manage_booking_url: createShortManageLink(booking.id),
     });
   } catch (err) {
-    console.error('GET /api/confirm failed:', err);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    console.error("GET /api/confirm failed:", err);
+    return NextResponse.json(
+      { error: "Internal server error" },
+      { status: 500 },
+    );
   }
 }
 
@@ -220,98 +284,123 @@ export async function POST(request: NextRequest) {
       appointment_service_id?: string;
     };
 
-    if (!bookingId || (!token && !hmac) || (action !== 'confirm' && action !== 'cancel' && action !== 'modify')) {
-      return NextResponse.json({ error: 'Missing or invalid body' }, { status: 400 });
+    if (
+      !bookingId ||
+      (!token && !hmac) ||
+      (action !== "confirm" && action !== "cancel" && action !== "modify")
+    ) {
+      return NextResponse.json(
+        { error: "Missing or invalid body" },
+        { status: 400 },
+      );
     }
 
     const supabase = getSupabaseAdminClient();
     const { data: booking, error: bookErr } = await supabase
-      .from('bookings')
+      .from("bookings")
       .select(
-        'id, venue_id, guest_id, booking_date, booking_time, booking_end_time, party_size, status, deposit_status, deposit_amount_pence, stripe_payment_intent_id, cancellation_deadline, confirm_token_hash, confirm_token_used_at, service_id, practitioner_id, appointment_service_id, calendar_id, service_item_id, experience_event_id, class_instance_id, resource_id, event_session_id, updated_at, guest_attendance_confirmed_at',
+        "id, venue_id, guest_id, booking_date, booking_time, booking_end_time, party_size, status, deposit_status, deposit_amount_pence, stripe_payment_intent_id, cancellation_deadline, confirm_token_hash, confirm_token_used_at, service_id, practitioner_id, appointment_service_id, calendar_id, service_item_id, experience_event_id, class_instance_id, resource_id, event_session_id, updated_at, guest_attendance_confirmed_at",
       )
-      .eq('id', bookingId)
+      .eq("id", bookingId)
       .single();
 
     if (bookErr || !booking) {
-      return NextResponse.json({ error: 'Booking not found' }, { status: 404 });
+      return NextResponse.json({ error: "Booking not found" }, { status: 404 });
     }
 
     if (hmac) {
       if (!verifyBookingHmac(bookingId, hmac)) {
-        return NextResponse.json({ error: 'Invalid link' }, { status: 400 });
+        return NextResponse.json({ error: "Invalid link" }, { status: 400 });
       }
     } else if (token) {
       if (booking.confirm_token_used_at) {
-        return NextResponse.json({ error: 'This link has already been used' }, { status: 410 });
+        return NextResponse.json(
+          { error: "This link has already been used" },
+          { status: 410 },
+        );
       }
       if (!verifyConfirmToken(token, booking.confirm_token_hash)) {
-        return NextResponse.json({ error: 'Invalid link' }, { status: 400 });
+        return NextResponse.json({ error: "Invalid link" }, { status: 400 });
       }
     }
 
     const now = new Date().toISOString();
     const usedAt = now;
 
-    if (action === 'confirm') {
+    if (action === "confirm") {
       const currentStatus = booking.status as string;
-      const attendanceAlready = (booking as { guest_attendance_confirmed_at?: string | null })
-        .guest_attendance_confirmed_at;
+      const attendanceAlready = (
+        booking as { guest_attendance_confirmed_at?: string | null }
+      ).guest_attendance_confirmed_at;
 
       // Pre-visit reminder: booking is often already Confirmed - record guest attendance instead of
       // attempting Confirmed → Confirmed (invalid transition).
-      if (currentStatus === 'Confirmed') {
+      if (currentStatus === "Confirmed") {
         if (attendanceAlready) {
           return NextResponse.json({
             success: true,
-            message: 'Thanks - we already have your confirmation on file.',
+            message:
+              'Thanks. We already have your confirmation on file for this booking.',
             guest_attendance_confirmed_at: attendanceAlready,
           });
         }
         await supabase
-          .from('bookings')
+          .from("bookings")
           .update({
             guest_attendance_confirmed_at: now,
             updated_at: now,
           })
-          .eq('id', bookingId);
+          .eq("id", bookingId);
 
         return NextResponse.json({
           success: true,
-          message: "Thanks - we've noted that you're coming. We look forward to seeing you.",
+          message:
+            "Thanks. We've noted that you're coming. Your booking is confirmed on our side.",
           guest_attendance_confirmed_at: now,
         });
       }
 
-      const confirmCheck = validateBookingStatusTransition(currentStatus, 'Confirmed');
+      const confirmCheck = validateBookingStatusTransition(
+        currentStatus,
+        "Confirmed",
+      );
       if (!confirmCheck.ok) {
-        return NextResponse.json({ error: confirmCheck.error }, { status: 400 });
+        return NextResponse.json(
+          { error: confirmCheck.error },
+          { status: 400 },
+        );
       }
 
       const previousStatus = currentStatus;
       await supabase
-        .from('bookings')
+        .from("bookings")
         .update({
-          status: 'Confirmed',
+          status: "Confirmed",
           confirm_token_used_at: usedAt,
           guest_attendance_confirmed_at: now,
           updated_at: now,
         })
-        .eq('id', bookingId);
+        .eq("id", bookingId);
 
       await applyBookingLifecycleStatusEffects(supabase, {
         bookingId,
         guestId: booking.guest_id,
         previousStatus,
-        nextStatus: 'Confirmed',
+        nextStatus: "Confirmed",
         actorId: null,
       });
 
-      return NextResponse.json({ success: true, message: 'You\u2019re confirmed! We look forward to seeing you.' });
+      return NextResponse.json({
+        success: true,
+        message: "Your booking is confirmed. We look forward to seeing you.",
+      });
     }
 
-    if (action === 'cancel') {
-      const cancelCheck = validateBookingStatusTransition(booking.status as string, 'Cancelled');
+    if (action === "cancel") {
+      const cancelCheck = validateBookingStatusTransition(
+        booking.status as string,
+        "Cancelled",
+      );
       if (!cancelCheck.ok) {
         return NextResponse.json({ error: cancelCheck.error }, { status: 400 });
       }
@@ -330,79 +419,107 @@ export async function POST(request: NextRequest) {
       );
 
       const previousStatus = booking.status as string;
-      const deadline = booking.cancellation_deadline ? new Date(booking.cancellation_deadline) : null;
-      const canRefund = deadline && new Date() <= deadline && booking.deposit_status === 'Paid' && booking.stripe_payment_intent_id;
+      const deadline = booking.cancellation_deadline
+        ? new Date(booking.cancellation_deadline)
+        : null;
+      const canRefund =
+        deadline &&
+        new Date() <= deadline &&
+        booking.deposit_status === "Paid" &&
+        booking.stripe_payment_intent_id;
 
       let refundSucceeded = false;
       if (canRefund) {
-        const { data: venue } = await supabase.from('venues').select('stripe_connected_account_id').eq('id', booking.venue_id).single();
+        const { data: venue } = await supabase
+          .from("venues")
+          .select("stripe_connected_account_id")
+          .eq("id", booking.venue_id)
+          .single();
         if (venue?.stripe_connected_account_id) {
           try {
             await stripe.refunds.create(
               { payment_intent: booking.stripe_payment_intent_id },
-              { stripeAccount: venue.stripe_connected_account_id }
+              { stripeAccount: venue.stripe_connected_account_id },
             );
             refundSucceeded = true;
           } catch (refundErr) {
             logBookingOp({
-              operation: 'refund_failed',
+              operation: "refund_failed",
               venue_id: booking.venue_id as string,
               booking_id: bookingId,
               booking_model: cancelInferred,
-              error: refundErr instanceof Error ? refundErr.message : String(refundErr),
+              error:
+                refundErr instanceof Error
+                  ? refundErr.message
+                  : String(refundErr),
             });
           }
         }
       }
 
       await supabase
-        .from('bookings')
+        .from("bookings")
         .update({
-          status: 'Cancelled',
-          deposit_status: refundSucceeded ? 'Refunded' : booking.deposit_status,
+          status: "Cancelled",
+          deposit_status: refundSucceeded ? "Refunded" : booking.deposit_status,
           confirm_token_used_at: usedAt,
           updated_at: now,
         })
-        .eq('id', bookingId);
+        .eq("id", bookingId);
 
       await applyBookingLifecycleStatusEffects(supabase, {
         bookingId,
         guestId: booking.guest_id,
         previousStatus,
-        nextStatus: 'Cancelled',
+        nextStatus: "Cancelled",
         actorId: null,
       });
 
       const { data: venue } = await supabase
-        .from('venues')
-        .select('name, address, phone, booking_rules')
-        .eq('id', booking.venue_id)
+        .from("venues")
+        .select("name, address, phone, booking_rules")
+        .eq("id", booking.venue_id)
         .single();
-      const { data: guest } = await supabase.from('guests').select('name, email, phone').eq('id', booking.guest_id).single();
-      const timeStr = typeof booking.booking_time === 'string' ? booking.booking_time.slice(0, 5) : '';
+      const { data: guest } = await supabase
+        .from("guests")
+        .select("name, email, phone")
+        .eq("id", booking.guest_id)
+        .single();
+      const timeStr =
+        typeof booking.booking_time === "string"
+          ? booking.booking_time.slice(0, 5)
+          : "";
 
       const depositAmountStr = booking.deposit_amount_pence
         ? `\u00A3${(booking.deposit_amount_pence / 100).toFixed(2)}`
         : null;
 
       const cancelRules = parseExtendedBookingRules(venue?.booking_rules);
-      const refundWindowHoursDisplay = getCancellationNoticeHoursForBooking(cancelRules, cancelInferred, 48);
+      const refundWindowHoursDisplay = getCancellationNoticeHoursForBooking(
+        cancelRules,
+        cancelInferred,
+        48,
+      );
 
       let refund_message: string;
       if (refundSucceeded) {
         refund_message = `Your deposit of ${depositAmountStr} will be refunded to your original payment method within 5-10 business days.`;
-      } else if (booking.deposit_status === 'Paid' && !canRefund) {
+      } else if (booking.deposit_status === "Paid" && !canRefund) {
         refund_message = `Your deposit of ${depositAmountStr} is non-refundable as the cancellation was made less than ${refundWindowHoursDisplay} hours before the start of your booking.`;
-      } else if (booking.deposit_status === 'Paid' && canRefund && !refundSucceeded) {
+      } else if (
+        booking.deposit_status === "Paid" &&
+        canRefund &&
+        !refundSucceeded
+      ) {
         refund_message = `We were unable to process your refund automatically. Please contact the venue directly to arrange your refund of ${depositAmountStr}.`;
       } else {
-        refund_message = '';
+        refund_message = "";
       }
 
       if (guest && venue?.name) {
         const cancelBookingEmail: BookingEmailData = {
           id: bookingId,
-          guest_name: guest.name ?? 'Guest',
+          guest_name: guest.name ?? "Guest",
           guest_email: guest.email ?? null,
           guest_phone: guest.phone ?? null,
           booking_date: booking.booking_date,
@@ -420,16 +537,25 @@ export async function POST(request: NextRequest) {
         const refundMsg = refund_message || null;
         after(async () => {
           try {
-            const enriched = await enrichBookingEmailForComms(supabase, bookingId, cancelBookingEmail);
-            await sendCancellationNotification(enriched, cancelVenueEmail, vid, refundMsg);
+            const enriched = await enrichBookingEmailForComms(
+              supabase,
+              bookingId,
+              cancelBookingEmail,
+            );
+            await sendCancellationNotification(
+              enriched,
+              cancelVenueEmail,
+              vid,
+              refundMsg,
+            );
           } catch (commsErr) {
-            console.error('Cancellation confirmation comms failed:', commsErr);
+            console.error("Cancellation confirmation comms failed:", commsErr);
           }
         });
       }
 
       logBookingOp({
-        operation: 'cancel',
+        operation: "cancel",
         venue_id: booking.venue_id as string,
         booking_id: bookingId,
         booking_model: cancelInferred,
@@ -437,27 +563,37 @@ export async function POST(request: NextRequest) {
 
       return NextResponse.json({
         success: true,
-        message: refundSucceeded ? 'Booking cancelled. Your deposit will be refunded.' : 'Booking cancelled.',
+        message: refundSucceeded
+          ? "Booking cancelled. Your deposit will be refunded."
+          : "Booking cancelled.",
         refund_message,
         refund_eligible: refundSucceeded,
         deposit_amount_str: depositAmountStr,
       });
     }
 
-    if (action === 'modify') {
-      const modifiableStatuses = ['Confirmed', 'Pending'];
+    if (action === "modify") {
+      const modifiableStatuses = ["Confirmed", "Pending"];
       if (!modifiableStatuses.includes(booking.status as string)) {
-        return NextResponse.json({ error: 'This booking cannot be modified.' }, { status: 400 });
+        return NextResponse.json(
+          { error: "This booking cannot be modified." },
+          { status: 400 },
+        );
       }
 
       const venueMode = await resolveVenueMode(supabase, booking.venue_id);
 
       if (isUnifiedSchedulingVenue(venueMode.bookingModel)) {
-        if (!booking_date || !booking_time || !bodyPractitionerId || !bodyAppointmentServiceId) {
+        if (
+          !booking_date ||
+          !booking_time ||
+          !bodyPractitionerId ||
+          !bodyAppointmentServiceId
+        ) {
           return NextResponse.json(
             {
               error:
-                'booking_date, booking_time, practitioner_id, and appointment_service_id are required for appointment changes.',
+                "booking_date, booking_time, practitioner_id, and appointment_service_id are required for appointment changes.",
             },
             { status: 400 },
           );
@@ -465,18 +601,51 @@ export async function POST(request: NextRequest) {
 
         const newDate = booking_date;
         const newTimeRaw = booking_time;
-        const newTime = newTimeRaw.length === 5 ? newTimeRaw + ':00' : newTimeRaw;
+        const newTime =
+          newTimeRaw.length === 5 ? newTimeRaw + ":00" : newTimeRaw;
         const timeStr = newTime.slice(0, 5);
         const newPartySize = Number(party_size ?? booking.party_size);
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(newDate) || newPartySize < 1 || newPartySize > 50) {
-          return NextResponse.json({ error: 'Invalid date or party size.' }, { status: 400 });
+        if (
+          !/^\d{4}-\d{2}-\d{2}$/.test(newDate) ||
+          newPartySize < 1 ||
+          newPartySize > 50
+        ) {
+          return NextResponse.json(
+            { error: "Invalid date or party size." },
+            { status: 400 },
+          );
         }
 
         const { data: venueAppt } = await supabase
-          .from('venues')
-          .select('timezone, booking_rules, opening_hours')
-          .eq('id', booking.venue_id)
+          .from("venues")
+          .select(
+            "timezone, booking_rules, opening_hours, venue_opening_exceptions",
+          )
+          .eq("id", booking.venue_id)
           .single();
+
+        const svcWindow = await loadServiceEntityBookingWindow(
+          supabase,
+          booking.venue_id,
+          venueMode.bookingModel,
+          bodyAppointmentServiceId,
+        );
+        const tz =
+          typeof (venueAppt as { timezone?: string | null } | null)
+            ?.timezone === "string" &&
+          String(
+            (venueAppt as { timezone?: string | null }).timezone,
+          ).trim() !== ""
+            ? String(
+                (venueAppt as { timezone?: string | null }).timezone,
+              ).trim()
+            : "Europe/London";
+        if (!isGuestBookingDateAllowed(newDate, svcWindow, tz)) {
+          return NextResponse.json(
+            { error: "This date is not available for booking" },
+            { status: 400 },
+          );
+        }
 
         const input = await fetchAppointmentInput({
           supabase,
@@ -485,39 +654,65 @@ export async function POST(request: NextRequest) {
           practitionerId: bodyPractitionerId,
           serviceId: bodyAppointmentServiceId,
         });
-        input.existingBookings = input.existingBookings.filter((b) => b.id !== bookingId);
-        attachVenueClockToAppointmentInput(input, venueAppt ?? {});
+        input.existingBookings = input.existingBookings.filter(
+          (b) => b.id !== bookingId,
+        );
+        attachVenueClockToAppointmentInput(input, venueAppt ?? {}, svcWindow);
         const result = computeAppointmentAvailability(input);
-        const prac = result.practitioners.find((p) => p.id === bodyPractitionerId);
+        const prac = result.practitioners.find(
+          (p) => p.id === bodyPractitionerId,
+        );
         const slotAvailable = prac?.slots.some(
-          (s) => s.start_time === timeStr && s.service_id === bodyAppointmentServiceId,
+          (s) =>
+            s.start_time === timeStr &&
+            s.service_id === bodyAppointmentServiceId,
         );
         if (!slotAvailable) {
           return NextResponse.json(
-            { error: 'This appointment slot is no longer available. Please choose another time or service.' },
+            {
+              error:
+                "This appointment slot is no longer available. Please choose another time or service.",
+            },
             { status: 409 },
           );
         }
 
-        const baseSvc = input.services.find((s) => s.id === bodyAppointmentServiceId);
-        const ps = input.practitionerServices.find(
-          (row) => row.practitioner_id === bodyPractitionerId && row.service_id === bodyAppointmentServiceId,
+        const baseSvc = input.services.find(
+          (s) => s.id === bodyAppointmentServiceId,
         );
-        const svc = baseSvc ? mergeAppointmentServiceWithPractitionerLink(baseSvc, ps) : undefined;
+        const ps = input.practitionerServices.find(
+          (row) =>
+            row.practitioner_id === bodyPractitionerId &&
+            row.service_id === bodyAppointmentServiceId,
+        );
+        const svc = baseSvc
+          ? mergeAppointmentServiceWithPractitionerLink(baseSvc, ps)
+          : undefined;
 
         let estimatedEndTime: string | null = null;
         if (svc) {
-          const [y, mo, d] = newDate.split('-').map(Number);
-          const [hh, mm] = timeStr.split(':').map(Number);
+          const [y, mo, d] = newDate.split("-").map(Number);
+          const [hh, mm] = timeStr.split(":").map(Number);
           const endDate = new Date(Date.UTC(y!, mo! - 1, d!, hh!, mm!, 0));
           endDate.setMinutes(endDate.getMinutes() + svc.duration_minutes);
           estimatedEndTime = endDate.toISOString();
         }
 
-        const bookingRulesJson = (venueAppt?.booking_rules as { cancellation_notice_hours?: number } | null) ?? {};
-        const refundWindowHours =
-          typeof bookingRulesJson.cancellation_notice_hours === 'number' ? bookingRulesJson.cancellation_notice_hours : 48;
-        const cancellation_deadline = cancellationDeadlineHoursBefore(newDate, newTime, refundWindowHours);
+        const refundWindowHours = await resolveCancellationNoticeHoursForCreate(
+          {
+            supabase,
+            venueId: booking.venue_id,
+            effectiveModel: venueMode.bookingModel,
+            ...(venueMode.bookingModel === "unified_scheduling"
+              ? { serviceItemId: bodyAppointmentServiceId }
+              : { appointmentServiceId: bodyAppointmentServiceId }),
+          },
+        );
+        const cancellation_deadline = cancellationDeadlineHoursBefore(
+          newDate,
+          newTime,
+          refundWindowHours,
+        );
         const cancellation_policy_snapshot = {
           refund_window_hours: refundWindowHours,
           policy: `Full refund if cancelled ${refundWindowHours}+ hours before appointment start. No refund within ${refundWindowHours} hours of the appointment or for no-shows.`,
@@ -526,7 +721,7 @@ export async function POST(request: NextRequest) {
         const nowIso = new Date().toISOString();
         const prevUpdatedAt = booking.updated_at as string;
         const { data: apptUpdated, error: apptUpdErr } = await supabase
-          .from('bookings')
+          .from("bookings")
           .update({
             booking_date: newDate,
             booking_time: newTime,
@@ -541,25 +736,34 @@ export async function POST(request: NextRequest) {
             cancellation_policy_snapshot,
             updated_at: nowIso,
           })
-          .eq('id', bookingId)
-          .eq('updated_at', prevUpdatedAt)
-          .select('id')
+          .eq("id", bookingId)
+          .eq("updated_at", prevUpdatedAt)
+          .select("id")
           .maybeSingle();
 
         if (apptUpdErr) {
-          console.error('confirm modify (appointment) update failed:', apptUpdErr);
-          return NextResponse.json({ error: 'Failed to update booking.' }, { status: 500 });
+          console.error(
+            "confirm modify (appointment) update failed:",
+            apptUpdErr,
+          );
+          return NextResponse.json(
+            { error: "Failed to update booking." },
+            { status: 500 },
+          );
         }
         if (!apptUpdated) {
           return NextResponse.json(
-            { error: 'This booking was updated elsewhere. Refresh the page and try again.' },
+            {
+              error:
+                "This booking was updated elsewhere. Refresh the page and try again.",
+            },
             { status: 412 },
           );
         }
 
         return NextResponse.json({
           success: true,
-          message: 'Your appointment has been updated.',
+          message: "Your appointment has been updated.",
           booking_date: newDate,
           booking_time: timeStr,
           party_size: newPartySize,
@@ -569,22 +773,38 @@ export async function POST(request: NextRequest) {
       }
 
       if (!booking_date || !booking_time || party_size == null) {
-        return NextResponse.json({ error: 'booking_date, booking_time and party_size are required for modification.' }, { status: 400 });
+        return NextResponse.json(
+          {
+            error:
+              "booking_date, booking_time and party_size are required for modification.",
+          },
+          { status: 400 },
+        );
       }
 
       const newDate = booking_date;
       const newTimeRaw = booking_time;
-      const newTime = newTimeRaw.length === 5 ? newTimeRaw + ':00' : newTimeRaw;
+      const newTime = newTimeRaw.length === 5 ? newTimeRaw + ":00" : newTimeRaw;
       const newPartySize = Number(party_size);
 
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(newDate) || newPartySize < 1 || newPartySize > 50) {
-        return NextResponse.json({ error: 'Invalid date or party size.' }, { status: 400 });
+      if (
+        !/^\d{4}-\d{2}-\d{2}$/.test(newDate) ||
+        newPartySize < 1 ||
+        newPartySize > 50
+      ) {
+        return NextResponse.json(
+          { error: "Invalid date or party size." },
+          { status: 400 },
+        );
       }
 
       const timeStr = newTime.slice(0, 5);
 
-      if (venueMode.availabilityEngine !== 'service') {
-        return NextResponse.json({ error: AVAILABILITY_SETUP_REQUIRED_MESSAGE }, { status: 503 });
+      if (venueMode.availabilityEngine !== "service") {
+        return NextResponse.json(
+          { error: AVAILABILITY_SETUP_REQUIRED_MESSAGE },
+          { status: 503 },
+        );
       }
 
       const engineInput = await fetchEngineInput({
@@ -593,23 +813,39 @@ export async function POST(request: NextRequest) {
         date: newDate,
         partySize: newPartySize,
       });
-      engineInput.bookings = engineInput.bookings.filter((b) => b.id !== bookingId);
+      engineInput.bookings = engineInput.bookings.filter(
+        (b) => b.id !== bookingId,
+      );
 
       const results = computeAvailability(engineInput);
       const allSlots = results.flatMap((r) => r.slots);
       const largeParty = results.some((r) => r.large_party_redirect);
-      const largePartyMsg = results.find((r) => r.large_party_message)?.large_party_message;
+      const largePartyMsg = results.find(
+        (r) => r.large_party_message,
+      )?.large_party_message;
 
       if (largeParty) {
-        return NextResponse.json({
-          error: largePartyMsg ?? 'For parties of this size, please call the restaurant directly.',
-        }, { status: 400 });
+        return NextResponse.json(
+          {
+            error:
+              largePartyMsg ??
+              "For parties of this size, please call the restaurant directly.",
+          },
+          { status: 400 },
+        );
       }
 
-      const slot = allSlots.find((s) => s.start_time === timeStr && (!booking.service_id || s.service_id === booking.service_id));
+      const slot = allSlots.find(
+        (s) =>
+          s.start_time === timeStr &&
+          (!booking.service_id || s.service_id === booking.service_id),
+      );
       if (!slot || slot.available_covers < newPartySize) {
         return NextResponse.json(
-          { error: 'The selected date/time is not available for this party size.' },
+          {
+            error:
+              "The selected date/time is not available for this party size.",
+          },
           { status: 409 },
         );
       }
@@ -617,41 +853,50 @@ export async function POST(request: NextRequest) {
       const now = new Date().toISOString();
       const prevUpdatedAt = booking.updated_at as string;
       const { data: tableUpdated, error: tableUpdErr } = await supabase
-        .from('bookings')
+        .from("bookings")
         .update({
           booking_date: newDate,
           booking_time: newTime,
           party_size: newPartySize,
           updated_at: now,
         })
-        .eq('id', bookingId)
-        .eq('updated_at', prevUpdatedAt)
-        .select('id')
+        .eq("id", bookingId)
+        .eq("updated_at", prevUpdatedAt)
+        .select("id")
         .maybeSingle();
 
       if (tableUpdErr) {
-        console.error('confirm modify (table) update failed:', tableUpdErr);
-        return NextResponse.json({ error: 'Failed to update booking.' }, { status: 500 });
+        console.error("confirm modify (table) update failed:", tableUpdErr);
+        return NextResponse.json(
+          { error: "Failed to update booking." },
+          { status: 500 },
+        );
       }
       if (!tableUpdated) {
         return NextResponse.json(
-          { error: 'This booking was updated elsewhere. Refresh the page and try again.' },
+          {
+            error:
+              "This booking was updated elsewhere. Refresh the page and try again.",
+          },
           { status: 412 },
         );
       }
 
       return NextResponse.json({
         success: true,
-        message: 'Your booking has been updated.',
+        message: "Your booking has been updated.",
         booking_date: newDate,
         booking_time: timeStr,
         party_size: newPartySize,
       });
     }
 
-    return NextResponse.json({ error: 'Invalid action' }, { status: 400 });
+    return NextResponse.json({ error: "Invalid action" }, { status: 400 });
   } catch (err) {
-    console.error('POST /api/confirm failed:', err);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    console.error("POST /api/confirm failed:", err);
+    return NextResponse.json(
+      { error: "Internal server error" },
+      { status: 500 },
+    );
   }
 }

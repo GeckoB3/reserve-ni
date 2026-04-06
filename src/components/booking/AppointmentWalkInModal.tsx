@@ -274,7 +274,7 @@ export function AppointmentWalkInModal({
                         setWalkStep('staff');
                       }}
                       className={`w-full rounded-lg border px-4 py-3 text-left transition-colors ${
-                        selectedService === s.id ? 'border-blue-500 bg-blue-50' : 'border-slate-200 hover:bg-slate-50'
+                        selectedService === s.id ? 'border-brand-500 bg-brand-50' : 'border-slate-200 hover:bg-slate-50'
                       }`}
                     >
                       <div className="flex items-center gap-3">
@@ -314,7 +314,7 @@ export function AppointmentWalkInModal({
                       }}
                       className={`w-full rounded-lg border px-4 py-3 text-left text-sm font-medium transition-colors ${
                         selectedPractitioner === p.id
-                          ? 'border-blue-500 bg-blue-50 text-blue-700'
+                          ? 'border-brand-500 bg-brand-50 text-brand-800'
                           : 'border-slate-200 text-slate-900 hover:bg-slate-50'
                       }`}
                     >
@@ -415,7 +415,7 @@ export function AppointmentWalkInModal({
                     type="button"
                     onClick={handleSubmit}
                     disabled={submitting}
-                    className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+                    className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
                   >
                     {submitting ? 'Creating…' : 'Add Walk-in'}
                   </button>

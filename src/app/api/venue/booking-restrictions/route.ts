@@ -13,6 +13,12 @@ const restrictionSchema = z.object({
   large_party_threshold: z.number().int().min(1).nullable().optional(),
   large_party_message: z.string().max(500).nullable().optional(),
   deposit_required_from_party_size: z.number().int().min(1).nullable().optional(),
+  /** Table reservation: hours before start for deposit refund for this dining service. */
+  cancellation_notice_hours: z.number().int().min(0).max(168).optional(),
+});
+
+const restrictionPatchSchema = restrictionSchema.partial().extend({
+  id: z.string().uuid(),
 });
 
 /** GET /api/venue/booking-restrictions */
@@ -55,6 +61,16 @@ export async function POST(request: NextRequest) {
     }
 
     const admin = getSupabaseAdminClient();
+    const { data: svcRow } = await admin
+      .from('venue_services')
+      .select('id')
+      .eq('id', parsed.data.service_id)
+      .eq('venue_id', staff.venue_id)
+      .maybeSingle();
+    if (!svcRow) {
+      return NextResponse.json({ error: 'Service not found for this venue' }, { status: 400 });
+    }
+
     const { data, error } = await admin.from('booking_restrictions').insert(parsed.data).select('*').single();
     if (error) {
       console.error('POST /api/venue/booking-restrictions failed:', error);
@@ -77,10 +93,23 @@ export async function PATCH(request: NextRequest) {
     if (!requireAdmin(staff)) return NextResponse.json({ error: 'Forbidden: admin only' }, { status: 403 });
 
     const body = await request.json();
-    const { id, ...fields } = body;
-    if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 });
+    const parsed = restrictionPatchSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json({ error: 'Invalid request', details: parsed.error.flatten() }, { status: 400 });
+    }
+    const { id, ...fields } = parsed.data;
 
     const admin = getSupabaseAdminClient();
+    const { data: existing } = await admin.from('booking_restrictions').select('id, service_id').eq('id', id).maybeSingle();
+    if (!existing) {
+      return NextResponse.json({ error: 'Restriction not found' }, { status: 404 });
+    }
+    const svcId = (existing as { service_id: string }).service_id;
+    const { data: svc } = await admin.from('venue_services').select('id').eq('id', svcId).eq('venue_id', staff.venue_id).maybeSingle();
+    if (!svc) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
+
     const { data, error } = await admin.from('booking_restrictions').update(fields).eq('id', id).select('*').single();
     if (error) {
       console.error('PATCH /api/venue/booking-restrictions failed:', error);

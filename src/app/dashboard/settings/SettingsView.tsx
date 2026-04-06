@@ -337,34 +337,10 @@ export function SettingsView({
             )}
             <VenueProfileSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} bookingModel={bookingModel} />
             <BookingTypesSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} />
-            <OpeningHoursSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} />
+            <OpeningHoursSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} bookingModel={bookingModel ?? 'table_reservation'} />
             {!isAppointment && <TableManagementSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} />}
             {!isAppointment && !hasServiceConfig && (
               <AvailabilityConfigSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} />
-            )}
-            {isAppointment && (
-              <div className="rounded-xl border border-slate-200 bg-slate-50 p-5 text-sm text-slate-700 shadow-sm">
-                <p className="font-semibold text-slate-900">Services and Availability</p>
-                <p className="mt-2">
-                  {hasServiceConfig
-                    ? 'Manage your appointment services, team members, working hours, and booking availability.'
-                    : 'Set up your appointment services and team to start accepting bookings.'}
-                </p>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <Link
-                    href="/dashboard/appointment-services"
-                    className="inline-flex rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700"
-                  >
-                    {hasServiceConfig ? 'Manage Services' : 'Create First Service'}
-                  </Link>
-                  <Link
-                    href="/dashboard/availability"
-                    className="inline-flex rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-                  >
-                    Availability Settings
-                  </Link>
-                </div>
-              </div>
             )}
             {isAppointment && (
               <BookingRulesSection
@@ -403,7 +379,12 @@ export function SettingsView({
           />
         )}
         {activeTab === 'staff' && isAdmin && (
-          <StaffSection venueId={venue.id} isAdmin={isAdmin} bookingModel={bookingModel} />
+          <StaffSection
+            venueId={venue.id}
+            isAdmin={isAdmin}
+            bookingModel={bookingModel}
+            enabledModels={normalizeEnabledModels(venue.enabled_models, (bookingModel as BookingModel) ?? 'table_reservation')}
+          />
         )}
       </div>
     </div>

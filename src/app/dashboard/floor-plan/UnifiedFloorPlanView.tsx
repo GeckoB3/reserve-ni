@@ -6,10 +6,23 @@ import { FloorPlanEditor } from '@/app/dashboard/settings/floor-plan/FloorPlanEd
 import { TableList } from '@/app/dashboard/settings/tables/TableList';
 import { CombinationList } from '@/app/dashboard/settings/tables/CombinationList';
 import type { TableCombination, VenueTable } from '@/types/table-management';
+import type { BookingModel } from '@/types/booking-models';
 
 type EditTab = 'layout' | 'tables' | 'combinations' | 'areas';
 
-export function UnifiedFloorPlanView({ isAdmin, venueId, currency }: { isAdmin: boolean; venueId: string; currency?: string }) {
+export function UnifiedFloorPlanView({
+  isAdmin,
+  venueId,
+  currency,
+  bookingModel = 'table_reservation',
+  enabledModels = [],
+}: {
+  isAdmin: boolean;
+  venueId: string;
+  currency?: string;
+  bookingModel?: BookingModel;
+  enabledModels?: BookingModel[];
+}) {
   const [mode, setMode] = useState<'operational' | 'edit'>('operational');
   const [tab, setTab] = useState<EditTab>('layout');
   const [tables, setTables] = useState<VenueTable[]>([]);
@@ -63,7 +76,13 @@ export function UnifiedFloorPlanView({ isAdmin, venueId, currency }: { isAdmin: 
             </button>
           )}
         </div>
-        <FloorPlanLiveView isAdmin={isAdmin} venueId={venueId} currency={currency} />
+        <FloorPlanLiveView
+          isAdmin={isAdmin}
+          venueId={venueId}
+          currency={currency}
+          bookingModel={bookingModel}
+          enabledModels={enabledModels}
+        />
       </div>
     );
   }

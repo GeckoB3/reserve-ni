@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
 import { getDashboardStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
+import { ToastProvider } from '@/components/ui/Toast';
 import { ClassTimetableView } from './ClassTimetableView';
 
 export default async function ClassTimetablePage() {
@@ -25,10 +26,12 @@ export default async function ClassTimetablePage() {
   const currency = (venue?.currency as string) ?? 'GBP';
 
   return (
-    <div className="p-4 md:p-6 lg:p-8">
-      <div className="mx-auto max-w-6xl">
-        <ClassTimetableView venueId={staff.venue_id} isAdmin={staff.role === 'admin'} currency={currency} />
+    <ToastProvider>
+      <div className="p-4 md:p-6 lg:p-8">
+        <div className="mx-auto max-w-6xl">
+          <ClassTimetableView venueId={staff.venue_id} isAdmin={staff.role === 'admin'} currency={currency} />
+        </div>
       </div>
-    </div>
+    </ToastProvider>
   );
 }

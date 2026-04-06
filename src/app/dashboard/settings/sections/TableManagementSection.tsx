@@ -451,13 +451,13 @@ export function TableManagementSection({ venue, onUpdate, isAdmin }: Props) {
       )}
 
       {showEnableAssignDialog && (
-        <div className="mt-4 rounded-lg border border-indigo-200 bg-indigo-50 p-4">
-          <p className="text-sm text-indigo-900">
+        <div className="mt-4 rounded-lg border border-brand-200 bg-brand-50 p-4">
+          <p className="text-sm text-brand-900">
             <strong className="font-semibold">Advanced table management</strong> is now on. You have{' '}
             {previewUnassignedCount} upcoming booking{previewUnassignedCount !== 1 ? 's' : ''} without table assignments.
             Auto-assign them now?
           </p>
-          <p className="mt-1 text-xs text-indigo-700">
+          <p className="mt-1 text-xs text-brand-800">
             Bookings that cannot be auto-assigned stay in the Unassigned lane on Table Grid for manual drag-and-drop.
           </p>
           <div className="mt-3 flex flex-wrap gap-2">
@@ -467,7 +467,7 @@ export function TableManagementSection({ venue, onUpdate, isAdmin }: Props) {
               onClick={() => {
                 void autoAssignUnassigned();
               }}
-              className="rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-60"
+              className="rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-60"
             >
               {assigningUnassigned ? 'Assigning...' : 'Auto-Assign Now'}
             </button>

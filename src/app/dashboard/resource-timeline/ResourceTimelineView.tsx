@@ -26,6 +26,10 @@ interface Resource {
   availability_hours: Record<string, Array<{ start: string; end: string }>> | null;
   availability_exceptions?: Record<string, { closed: true } | { periods: Array<{ start: string; end: string }> }> | null;
   sort_order: number;
+  max_advance_booking_days?: number;
+  min_booking_notice_hours?: number;
+  cancellation_notice_hours?: number;
+  allow_same_day_booking?: boolean;
 }
 
 interface ResourceBooking {
@@ -216,6 +220,10 @@ export function ResourceTimelineView({
   const [formExceptionStart, setFormExceptionStart] = useState('09:00');
   const [formExceptionEnd, setFormExceptionEnd] = useState('17:00');
   const [formDisplayCalendarId, setFormDisplayCalendarId] = useState('');
+  const [formMaxAdvanceDays, setFormMaxAdvanceDays] = useState(90);
+  const [formMinNoticeHours, setFormMinNoticeHours] = useState(1);
+  const [formCancellationHours, setFormCancellationHours] = useState(48);
+  const [formAllowSameDay, setFormAllowSameDay] = useState(true);
   const [hostCalendars, setHostCalendars] = useState<Array<{ id: string; name: string }>>([]);
   const [showNewColumnUi, setShowNewColumnUi] = useState(false);
   const [newColumnName, setNewColumnName] = useState('');
@@ -327,6 +335,10 @@ export function ResourceTimelineView({
     setExceptionRangeEnd(null);
     setExceptionEditingDay(null);
     setFormDisplayCalendarId('');
+    setFormMaxAdvanceDays(90);
+    setFormMinNoticeHours(1);
+    setFormCancellationHours(48);
+    setFormAllowSameDay(true);
     setShowNewColumnUi(false);
     setNewColumnName('');
     setError(null);
@@ -352,6 +364,10 @@ export function ResourceTimelineView({
     setExceptionRangeEnd(null);
     setExceptionEditingDay(null);
     setFormDisplayCalendarId(r.display_on_calendar_id ?? '');
+    setFormMaxAdvanceDays(r.max_advance_booking_days ?? 90);
+    setFormMinNoticeHours(r.min_booking_notice_hours ?? 1);
+    setFormCancellationHours(r.cancellation_notice_hours ?? 48);
+    setFormAllowSameDay(r.allow_same_day_booking ?? true);
     setShowNewColumnUi(false);
     setNewColumnName('');
     setError(null);
@@ -561,6 +577,10 @@ export function ResourceTimelineView({
         is_active: formActive,
         availability_hours: weekHoursToJSON(formHours),
         availability_exceptions: formExceptions,
+        max_advance_booking_days: formMaxAdvanceDays,
+        min_booking_notice_hours: formMinNoticeHours,
+        cancellation_notice_hours: formCancellationHours,
+        allow_same_day_booking: formAllowSameDay,
       };
       const res = editingId
         ? await fetch('/api/venue/resources', {
@@ -689,7 +709,7 @@ export function ResourceTimelineView({
             <p className="mt-1 text-amber-900/95">{availabilityWarning}</p>
             <div className="mt-3 flex flex-wrap items-center gap-3">
               <Link
-                href="/dashboard/availability?tab=availability"
+                href="/dashboard/calendar-availability?tab=availability"
                 className="inline-flex items-center rounded-lg bg-amber-800 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-900"
               >
                 Open Calendar availability
@@ -713,7 +733,7 @@ export function ResourceTimelineView({
             <div className="mt-4 grid gap-4 sm:grid-cols-2">
               <div>
                 <label className="mb-1 block text-xs font-medium text-slate-600">Name *</label>
-                <input type="text" value={formName} onChange={(e) => setFormName(e.target.value)} placeholder="e.g. Court 1" className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
+                <input type="text" value={formName} onChange={(e) => setFormName(e.target.value)} placeholder="e.g. Room 1, Studio A" className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
               </div>
               <div>
                 <label className="mb-1 block text-xs font-medium text-slate-600">Type</label>
@@ -721,7 +741,7 @@ export function ResourceTimelineView({
                   type="text"
                   value={formType}
                   onChange={(e) => setFormType(e.target.value)}
-                  placeholder="Type any label (e.g. Squash court, VR booth)"
+                  placeholder="Short label (e.g. meeting room, equipment bay)"
                   autoComplete="off"
                   className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
                 />
@@ -779,7 +799,7 @@ export function ResourceTimelineView({
                           type="text"
                           value={newColumnName}
                           onChange={(e) => setNewColumnName(e.target.value)}
-                          placeholder="e.g. Court bookings"
+                          placeholder="e.g. Resource bookings, Front of house"
                           disabled={creatingColumn}
                           className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 disabled:opacity-60"
                         />
@@ -868,6 +888,55 @@ export function ResourceTimelineView({
                 </p>
               </div>
             </div>
+            <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50/80 p-3">
+              <p className="mb-2 text-xs font-medium text-slate-700">Guest online booking</p>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-slate-600">Max advance (days)</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={365}
+                    value={formMaxAdvanceDays}
+                    onChange={(e) => setFormMaxAdvanceDays(parseInt(e.target.value, 10) || 1)}
+                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-slate-600">Min notice (hours)</label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={168}
+                    value={formMinNoticeHours}
+                    onChange={(e) => setFormMinNoticeHours(parseInt(e.target.value, 10) || 0)}
+                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-slate-600">Cancellation notice (hours)</label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={168}
+                    value={formCancellationHours}
+                    onChange={(e) => setFormCancellationHours(parseInt(e.target.value, 10) || 0)}
+                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                  />
+                </div>
+                <div className="flex items-end pb-1">
+                  <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={formAllowSameDay}
+                      onChange={(e) => setFormAllowSameDay(e.target.checked)}
+                      className="h-4 w-4 rounded border-slate-300"
+                    />
+                    Allow same-day bookings
+                  </label>
+                </div>
+              </div>
+            </div>
             <div className="mt-3 grid gap-4 sm:grid-cols-2">
               <div>
                 <label className="mb-1 block text-xs font-medium text-slate-600">Price per slot ({sym})</label>
@@ -951,7 +1020,7 @@ export function ResourceTimelineView({
             {/* Date exceptions */}
             <h3 className="mt-6 text-sm font-semibold text-slate-800">Date exceptions</h3>
             <p className="mt-1 text-xs text-slate-500">
-              Override holidays or special hours. Choose closed or custom hours below, then tap the calendar: first day starts a range, second day completes it (or tap &quot;Apply&quot; after one day for a single date). Tap a day that already has an exception to edit or remove it.
+              Override holidays or special hours. Choose closed or amended hours below, then tap the calendar: first day starts a range, second day completes it (or tap &quot;Apply&quot; after one day for a single date). Tap a day that already has an amendment to edit or remove it.
             </p>
 
             {exceptionEditingDay ? (
@@ -971,14 +1040,14 @@ export function ResourceTimelineView({
                 </div>
                 <div className="mt-3 flex flex-wrap items-end gap-2">
                   <div>
-                    <label className="mb-1 block text-xs text-slate-600">Type</label>
+                    <label className="mb-1 block text-xs text-slate-600">Closure or amended hours</label>
                     <select
                       value={formExceptionType}
                       onChange={(e) => setFormExceptionType(e.target.value as 'closed' | 'custom')}
                       className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm"
                     >
-                      <option value="closed">Closed</option>
-                      <option value="custom">Custom hours</option>
+                      <option value="closed">Closed (not open)</option>
+                      <option value="custom">Amended hours (custom times)</option>
                     </select>
                   </div>
                   {formExceptionType === 'custom' && (
@@ -1023,17 +1092,17 @@ export function ResourceTimelineView({
               </div>
             ) : (
               <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50/80 p-4">
-                <p className="text-xs font-semibold text-slate-700">Add exception</p>
+                <p className="text-xs font-semibold text-slate-700">Add closure or amended hours</p>
                 <div className="mt-2 flex flex-wrap items-end gap-2">
                   <div>
-                    <label className="mb-1 block text-xs text-slate-600">Type</label>
+                    <label className="mb-1 block text-xs text-slate-600">Closure or amended hours</label>
                     <select
                       value={formExceptionType}
                       onChange={(e) => setFormExceptionType(e.target.value as 'closed' | 'custom')}
                       className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm"
                     >
-                      <option value="closed">Closed</option>
-                      <option value="custom">Custom hours</option>
+                      <option value="closed">Closed (not open)</option>
+                      <option value="custom">Amended hours (custom times)</option>
                     </select>
                   </div>
                   {formExceptionType === 'custom' && (

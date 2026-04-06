@@ -1,10 +1,21 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { VenuePublic, GuestDetails } from './types';
 import { defaultPhoneCountryForVenueCurrency } from '@/lib/phone/default-country';
 import { DetailsStep } from './DetailsStep';
 import { PaymentStep } from './PaymentStep';
+import { ClassOfferingsCalendar } from './ClassOfferingsCalendar';
+
+interface EventOfferingSummary {
+  series_key: string;
+  event_name: string;
+  description: string | null;
+  image_url: string | null;
+  dates: string[];
+  occurrence_count: number;
+  from_price_pence: number | null;
+}
 
 interface TicketTypeAvail {
   id: string;
@@ -12,92 +23,177 @@ interface TicketTypeAvail {
   price_pence: number;
   capacity: number | null;
   remaining: number;
+  sort_order: number;
 }
 
-interface EventAvail {
+interface EventInstance {
   event_id: string;
+  series_key: string;
+  parent_event_id: string | null;
   event_name: string;
   event_date: string;
   start_time: string;
   end_time: string;
   description: string | null;
+  image_url: string | null;
+  total_capacity: number;
   remaining_capacity: number;
   ticket_types: TicketTypeAvail[];
 }
 
-type Step = 'events' | 'tickets' | 'details' | 'payment' | 'confirmation';
+type Step = 'pick-event' | 'pick-date' | 'summary' | 'details' | 'payment' | 'confirmation';
+
+function localTodayISO(): string {
+  const n = new Date();
+  const y = n.getFullYear();
+  const m = String(n.getMonth() + 1).padStart(2, '0');
+  const d = String(n.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function symForCurrency(currency: string): string {
+  return currency === 'EUR' ? '€' : '£';
+}
 
 export function EventBookingFlow({ venue, cancellationPolicy }: { venue: VenuePublic; cancellationPolicy?: string }) {
-  const phoneDefaultCountry = defaultPhoneCountryForVenueCurrency(venue.currency);
-  const sym = venue.currency === 'EUR' ? '€' : '£';
-  const [step, setStep] = useState<Step>('events');
-  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
-  const [events, setEvents] = useState<EventAvail[]>([]);
-  const [selectedEvent, setSelectedEvent] = useState<EventAvail | null>(null);
+  const currency = venue.currency ?? 'GBP';
+  const phoneDefaultCountry = defaultPhoneCountryForVenueCurrency(currency);
+  const terms = venue.terminology ?? { client: 'Member', booking: 'Booking', staff: 'Instructor' };
+  const sym = symForCurrency(currency);
+
+  const [step, setStep] = useState<Step>('pick-event');
+  const [rangeFrom, setRangeFrom] = useState('');
+  const [rangeTo, setRangeTo] = useState('');
+  const [eventSummaries, setEventSummaries] = useState<EventOfferingSummary[]>([]);
+  const [instances, setInstances] = useState<EventInstance[]>([]);
+  const [selectedSeriesKey, setSelectedSeriesKey] = useState<string | null>(null);
+  const [selectedCalendarDate, setSelectedCalendarDate] = useState<string | null>(null);
+  const [selectedOccurrence, setSelectedOccurrence] = useState<EventInstance | null>(null);
   const [ticketSelections, setTicketSelections] = useState<Record<string, number>>({});
-  const [createResult, setCreateResult] = useState<{ booking_id: string; client_secret?: string; stripe_account_id?: string; requires_deposit: boolean } | null>(null);
+  const [createResult, setCreateResult] = useState<{
+    booking_id: string;
+    client_secret?: string;
+    stripe_account_id?: string;
+    requires_deposit: boolean;
+  } | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchEvents = useCallback(async () => {
+  const fetchOfferings = useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
+      const from = localTodayISO();
       const res = await fetch(
-        `/api/booking/availability?venue_id=${venue.id}&date=${date}&booking_model=event_ticket`,
+        `/api/booking/event-offerings?venue_id=${encodeURIComponent(venue.id)}&from=${from}&days=90`,
       );
       const data = await res.json();
-      setEvents(data.events ?? []);
-    } catch {
-      setError('Failed to load events');
+      if (!res.ok) throw new Error(data.error ?? 'Failed to load events');
+      setRangeFrom(data.from ?? from);
+      setRangeTo(data.to ?? '');
+      setEventSummaries((data.events ?? []) as EventOfferingSummary[]);
+      setInstances((data.instances ?? []) as EventInstance[]);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to load events');
+      setEventSummaries([]);
+      setInstances([]);
     } finally {
       setLoading(false);
     }
-  }, [venue.id, date]);
+  }, [venue.id]);
 
-  useEffect(() => { fetchEvents(); }, [fetchEvents]);
+  useEffect(() => {
+    void fetchOfferings();
+  }, [fetchOfferings]);
 
-  const totalTickets = Object.values(ticketSelections).reduce((a, b) => a + b, 0);
-  const totalPricePence = selectedEvent
-    ? selectedEvent.ticket_types.reduce((sum, tt) => sum + (ticketSelections[tt.id] ?? 0) * tt.price_pence, 0)
+  const selectedSummary = useMemo(
+    () => eventSummaries.find((e) => e.series_key === selectedSeriesKey) ?? null,
+    [eventSummaries, selectedSeriesKey],
+  );
+
+  const instancesForSeries = useMemo(
+    () => instances.filter((i) => i.series_key === selectedSeriesKey && i.remaining_capacity > 0),
+    [instances, selectedSeriesKey],
+  );
+
+  const candidatesForCalendarDate = useMemo(() => {
+    if (!selectedCalendarDate) return [];
+    return instancesForSeries.filter((i) => i.event_date === selectedCalendarDate);
+  }, [instancesForSeries, selectedCalendarDate]);
+
+  function handleCalendarSelectDate(iso: string) {
+    const candidates = instancesForSeries.filter((i) => i.event_date === iso && i.remaining_capacity > 0);
+    if (candidates.length === 1) {
+      setSelectedOccurrence(candidates[0]!);
+      setTicketSelections({});
+      setStep('summary');
+      setSelectedCalendarDate(null);
+      return;
+    }
+    setSelectedCalendarDate(iso);
+  }
+
+  function pickTimeSlot(slot: EventInstance) {
+    setSelectedOccurrence(slot);
+    setTicketSelections({});
+    setStep('summary');
+    setSelectedCalendarDate(null);
+  }
+
+  const totalTickets = selectedOccurrence
+    ? selectedOccurrence.ticket_types.reduce((sum, tt) => sum + (ticketSelections[tt.id] ?? 0), 0)
+    : 0;
+  const totalPricePence = selectedOccurrence
+    ? selectedOccurrence.ticket_types.reduce((sum, tt) => sum + (ticketSelections[tt.id] ?? 0) * tt.price_pence, 0)
     : 0;
 
-  const handleDetailsSubmit = useCallback(async (details: GuestDetails) => {
-    setError(null);
-    if (!selectedEvent) return;
-    try {
-      const ticket_lines = selectedEvent.ticket_types
-        .filter((tt) => (ticketSelections[tt.id] ?? 0) > 0)
-        .map((tt) => ({
-          ticket_type_id: tt.id,
-          label: tt.name,
-          quantity: ticketSelections[tt.id]!,
-          unit_price_pence: tt.price_pence,
-        }));
+  const handleDetailsSubmit = useCallback(
+    async (details: GuestDetails) => {
+      setError(null);
+      if (!selectedOccurrence) return;
+      try {
+        const ticket_lines = selectedOccurrence.ticket_types
+          .filter((tt) => (ticketSelections[tt.id] ?? 0) > 0)
+          .map((tt) => ({
+            ticket_type_id: tt.id,
+            label: tt.name,
+            quantity: ticketSelections[tt.id]!,
+            unit_price_pence: tt.price_pence,
+          }));
 
-      const res = await fetch('/api/booking/create', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          venue_id: venue.id,
-          booking_date: selectedEvent.event_date,
-          booking_time: selectedEvent.start_time,
-          party_size: totalTickets,
-          name: details.name,
-          email: details.email || undefined,
-          phone: details.phone,
-          source: 'booking_page',
-          experience_event_id: selectedEvent.event_id,
-          ticket_lines,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? 'Booking failed');
-      setCreateResult({ booking_id: data.booking_id, client_secret: data.client_secret, stripe_account_id: data.stripe_account_id, requires_deposit: data.requires_deposit ?? false });
-      setStep(data.requires_deposit && data.client_secret ? 'payment' : 'confirmation');
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Booking failed');
-    }
-  }, [venue.id, selectedEvent, ticketSelections, totalTickets]);
+        const res = await fetch('/api/booking/create', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            venue_id: venue.id,
+            booking_date: selectedOccurrence.event_date,
+            booking_time: selectedOccurrence.start_time,
+            party_size: totalTickets,
+            name: details.name,
+            email: details.email || undefined,
+            phone: details.phone,
+            source: 'booking_page',
+            experience_event_id: selectedOccurrence.event_id,
+            ticket_lines,
+            dietary_notes: details.dietary_notes,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error ?? 'Booking failed');
+        setCreateResult({
+          booking_id: data.booking_id,
+          client_secret: data.client_secret,
+          stripe_account_id: data.stripe_account_id,
+          requires_deposit: data.requires_deposit ?? false,
+        });
+        const needsStripe = Boolean(data.requires_deposit && data.client_secret);
+        setStep(needsStripe ? 'payment' : 'confirmation');
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Booking failed');
+      }
+    },
+    [venue.id, selectedOccurrence, ticketSelections, totalTickets],
+  );
 
   const handlePaymentComplete = useCallback(async () => {
     if (createResult?.booking_id) {
@@ -107,7 +203,9 @@ export function EventBookingFlow({ venue, cancellationPolicy }: { venue: VenuePu
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ booking_id: createResult.booking_id }),
         });
-      } catch { /* webhook fallback */ }
+      } catch {
+        /* webhook fallback */
+      }
     }
     setStep('confirmation');
   }, [createResult?.booking_id]);
@@ -118,52 +216,150 @@ export function EventBookingFlow({ venue, cancellationPolicy }: { venue: VenuePu
         <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
       )}
 
-      {step === 'events' && (
+      {step === 'pick-event' && (
         <div>
-          <h2 className="mb-2 text-lg font-semibold text-slate-900">Upcoming Events</h2>
-          <div className="mb-4">
-            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
-          </div>
+          <h2 className="mb-1 text-lg font-semibold text-slate-900">Choose an event</h2>
+          <p className="mb-4 text-sm text-slate-500">
+            Events with sessions scheduled in the next 3 months. Pick one, then choose a date on the next step.
+          </p>
           {loading ? (
-            <div className="space-y-3">{[1, 2].map((i) => <div key={i} className="h-24 animate-pulse rounded-xl bg-slate-100" />)}</div>
-          ) : events.length === 0 ? (
+            <div className="space-y-3">
+              {[1, 2].map((i) => (
+                <div key={i} className="h-20 animate-pulse rounded-xl bg-slate-100" />
+              ))}
+            </div>
+          ) : eventSummaries.length === 0 ? (
             <p className="text-sm text-slate-500">
-              No events on this date. Try another date or contact the venue.
+              No upcoming events in the next few months. Please check back later or contact the venue.
             </p>
           ) : (
             <div className="space-y-3">
-              {events.map((event) => (
-                <button
-                  key={event.event_id}
-                  onClick={() => { setSelectedEvent(event); setTicketSelections({}); setStep('tickets'); }}
-                  className="w-full rounded-xl border border-slate-200 bg-white px-4 py-4 text-left shadow-sm transition hover:border-brand-300"
-                >
-                  <div className="font-semibold text-slate-900">{event.event_name}</div>
-                  <div className="text-sm text-slate-500">{event.start_time.slice(0, 5)} – {event.end_time.slice(0, 5)}</div>
-                  {event.description && <p className="mt-1 text-sm text-slate-600 line-clamp-2">{event.description}</p>}
-                  <div className="mt-2 text-xs text-slate-400">{event.remaining_capacity} spots remaining</div>
-                </button>
-              ))}
+              {eventSummaries.map((ev) => {
+                const priceLabel =
+                  ev.from_price_pence == null || ev.from_price_pence <= 0
+                    ? 'Free'
+                    : `From ${sym}${(ev.from_price_pence / 100).toFixed(2)}`;
+                return (
+                  <button
+                    key={ev.series_key}
+                    type="button"
+                    onClick={() => {
+                      setSelectedSeriesKey(ev.series_key);
+                      setSelectedCalendarDate(null);
+                      setStep('pick-date');
+                    }}
+                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-4 text-left shadow-sm transition hover:border-brand-300"
+                  >
+                    <div className="flex items-start gap-3">
+                      <div className="mt-1 h-3 w-3 shrink-0 rounded-full bg-brand-500" />
+                      <div className="min-w-0 flex-1">
+                        <div className="font-semibold text-slate-900">{ev.event_name}</div>
+                        <div className="text-sm text-slate-500">
+                          {ev.occurrence_count} date{ev.occurrence_count !== 1 ? 's' : ''} available
+                        </div>
+                        {ev.description ? (
+                          <p className="mt-1 line-clamp-2 text-xs text-slate-600">{ev.description}</p>
+                        ) : null}
+                        <div className="mt-2 text-sm font-medium text-slate-700">{priceLabel}</div>
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
             </div>
           )}
         </div>
       )}
 
-      {step === 'tickets' && selectedEvent && (
+      {step === 'pick-date' && selectedSummary && rangeFrom && rangeTo && (
         <div>
-          <button onClick={() => setStep('events')} className="mb-4 text-sm text-brand-600 hover:underline">&larr; Back</button>
-          <h2 className="mb-2 text-lg font-semibold text-slate-900">{selectedEvent.event_name}</h2>
-          <p className="mb-4 text-sm text-slate-500">{selectedEvent.event_date} &middot; {selectedEvent.start_time.slice(0, 5)} – {selectedEvent.end_time.slice(0, 5)}</p>
+          <button
+            type="button"
+            onClick={() => {
+              setStep('pick-event');
+              setSelectedSeriesKey(null);
+              setSelectedCalendarDate(null);
+            }}
+            className="mb-4 text-sm text-brand-600 hover:underline"
+          >
+            &larr; Back to events
+          </button>
+          <h2 className="mb-1 text-lg font-semibold text-slate-900">{selectedSummary.event_name}</h2>
+          <p className="mb-4 text-sm text-slate-500">Select a date when this event is running.</p>
+
+          <ClassOfferingsCalendar
+            rangeFrom={rangeFrom}
+            rangeTo={rangeTo}
+            highlightedDates={selectedSummary.dates}
+            selectedDate={selectedCalendarDate}
+            onSelectDate={handleCalendarSelectDate}
+            footerMessage="Dates when this event runs are highlighted in green. Select a date to continue."
+          />
+
+          {selectedCalendarDate && candidatesForCalendarDate.length > 1 && (
+            <div className="mt-4">
+              <p className="mb-2 text-sm font-medium text-slate-800">Choose a time</p>
+              <div className="flex flex-wrap gap-2">
+                {candidatesForCalendarDate.map((slot) => (
+                  <button
+                    key={slot.event_id}
+                    type="button"
+                    onClick={() => pickTimeSlot(slot)}
+                    className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-900 shadow-sm hover:border-brand-400 hover:bg-brand-50"
+                  >
+                    {slot.start_time.slice(0, 5)}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {step === 'summary' && selectedOccurrence && (
+        <div>
+          <button
+            type="button"
+            onClick={() => {
+              setSelectedOccurrence(null);
+              setTicketSelections({});
+              setStep('pick-date');
+            }}
+            className="mb-4 text-sm text-brand-600 hover:underline"
+          >
+            &larr; Back
+          </button>
+          <div className="mb-4 rounded-xl border border-slate-200 bg-white p-4 text-sm shadow-sm">
+            <div className="font-semibold text-slate-900">{selectedOccurrence.event_name}</div>
+            <div className="text-slate-500">
+              {selectedOccurrence.event_date} at {selectedOccurrence.start_time.slice(0, 5)} –{' '}
+              {selectedOccurrence.end_time.slice(0, 5)}
+            </div>
+            {selectedOccurrence.description ? (
+              <p className="mt-2 text-xs text-slate-600">{selectedOccurrence.description}</p>
+            ) : null}
+          </div>
+
           <div className="space-y-3">
-            {selectedEvent.ticket_types.map((tt) => (
-              <div key={tt.id} className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+            <p className="text-sm font-medium text-slate-800">Tickets</p>
+            {selectedOccurrence.ticket_types.map((tt) => (
+              <div
+                key={tt.id}
+                className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm"
+              >
                 <div>
                   <div className="font-medium text-slate-900">{tt.name}</div>
-                  <div className="text-sm text-slate-500">{sym}{(tt.price_pence / 100).toFixed(2)} &middot; {tt.remaining} left</div>
+                  <div className="text-sm text-slate-500">
+                    {sym}
+                    {(tt.price_pence / 100).toFixed(2)} · {tt.remaining} left
+                  </div>
                 </div>
                 <div className="flex items-center gap-2">
                   <button
-                    onClick={() => setTicketSelections((p) => ({ ...p, [tt.id]: Math.max(0, (p[tt.id] ?? 0) - 1) }))}
+                    type="button"
+                    onClick={() =>
+                      setTicketSelections((p) => ({ ...p, [tt.id]: Math.max(0, (p[tt.id] ?? 0) - 1) }))
+                    }
                     className="flex h-8 w-8 items-center justify-center rounded-full border border-slate-300 text-slate-600 hover:bg-slate-50"
                     disabled={(ticketSelections[tt.id] ?? 0) <= 0}
                   >
@@ -171,7 +367,13 @@ export function EventBookingFlow({ venue, cancellationPolicy }: { venue: VenuePu
                   </button>
                   <span className="w-6 text-center text-sm font-medium">{ticketSelections[tt.id] ?? 0}</span>
                   <button
-                    onClick={() => setTicketSelections((p) => ({ ...p, [tt.id]: Math.min(tt.remaining, (p[tt.id] ?? 0) + 1) }))}
+                    type="button"
+                    onClick={() =>
+                      setTicketSelections((p) => ({
+                        ...p,
+                        [tt.id]: Math.min(tt.remaining, (p[tt.id] ?? 0) + 1),
+                      }))
+                    }
                     className="flex h-8 w-8 items-center justify-center rounded-full border border-slate-300 text-slate-600 hover:bg-slate-50"
                     disabled={(ticketSelections[tt.id] ?? 0) >= tt.remaining}
                   >
@@ -181,38 +383,60 @@ export function EventBookingFlow({ venue, cancellationPolicy }: { venue: VenuePu
               </div>
             ))}
           </div>
+
           {totalTickets > 0 && (
-            <div className="mt-6">
-              <div className="mb-3 text-right text-sm font-medium text-slate-700">
-                Total: {sym}{(totalPricePence / 100).toFixed(2)} ({totalTickets} ticket{totalTickets !== 1 ? 's' : ''})
+            <>
+              <div className="mt-6 mb-4 rounded-xl border border-slate-100 bg-slate-50 p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Order summary</p>
+                <p className="mt-2 text-sm text-slate-800">
+                  {totalTickets} ticket{totalTickets !== 1 ? 's' : ''} · {sym}
+                  {(totalPricePence / 100).toFixed(2)}
+                </p>
               </div>
               <button
+                type="button"
                 onClick={() => setStep('details')}
-                className="w-full rounded-xl bg-brand-600 py-3 text-sm font-semibold text-white shadow-sm hover:bg-brand-700"
+                className="w-full rounded-xl bg-brand-600 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-brand-700"
               >
-                Continue
+                Continue to guest details
               </button>
-            </div>
+            </>
           )}
         </div>
       )}
 
-      {step === 'details' && (
+      {step === 'details' && selectedOccurrence && (
         <div>
-          <button onClick={() => setStep('tickets')} className="mb-4 text-sm text-brand-600 hover:underline">&larr; Back</button>
+          <button type="button" onClick={() => setStep('summary')} className="mb-4 text-sm text-brand-600 hover:underline">
+            &larr; Back
+          </button>
+          <div className="mb-4 rounded-xl border border-slate-200 bg-white p-4 text-sm">
+            <div className="font-medium text-slate-900">{selectedOccurrence.event_name}</div>
+            <div className="text-slate-500">
+              {selectedOccurrence.event_date} at {selectedOccurrence.start_time.slice(0, 5)} · {totalTickets} ticket
+              {totalTickets !== 1 ? 's' : ''}
+            </div>
+          </div>
           <DetailsStep
-            slot={{ key: 'event', label: selectedEvent?.event_name ?? '', start_time: selectedEvent?.start_time ?? '', end_time: selectedEvent?.end_time ?? '', available_covers: totalTickets }}
-            date={selectedEvent?.event_date ?? date}
+            slot={{
+              key: selectedOccurrence.event_id,
+              label: selectedOccurrence.event_name,
+              start_time: selectedOccurrence.start_time,
+              end_time: selectedOccurrence.end_time,
+              available_covers: totalTickets,
+            }}
+            date={selectedOccurrence.event_date}
             partySize={totalTickets}
             onSubmit={handleDetailsSubmit}
-            onBack={() => setStep('tickets')}
+            onBack={() => setStep('summary')}
             requiresDeposit={totalPricePence > 0}
+            variant="class"
             phoneDefaultCountry={phoneDefaultCountry}
           />
         </div>
       )}
 
-      {step === 'payment' && createResult?.client_secret && (
+      {step === 'payment' && createResult?.client_secret && selectedOccurrence && (
         <PaymentStep
           clientSecret={createResult.client_secret}
           stripeAccountId={createResult.stripe_account_id}
@@ -221,6 +445,7 @@ export function EventBookingFlow({ venue, cancellationPolicy }: { venue: VenuePu
           onComplete={handlePaymentComplete}
           onBack={() => setStep('details')}
           cancellationPolicy={cancellationPolicy}
+          summaryMode="total"
         />
       )}
 
@@ -231,12 +456,15 @@ export function EventBookingFlow({ venue, cancellationPolicy }: { venue: VenuePu
               <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
             </svg>
           </div>
-          <h2 className="text-xl font-bold text-green-900">Booking Confirmed</h2>
-          <p className="mt-2 text-sm text-green-700">
-            {selectedEvent?.event_name}<br />
-            {selectedEvent?.event_date} at {selectedEvent?.start_time.slice(0, 5)}<br />
+          <h2 className="text-xl font-bold text-green-900">{terms.booking} confirmed</h2>
+          <p className="mt-2 text-sm text-green-800">
+            {selectedOccurrence?.event_name}
+            <br />
+            {selectedOccurrence?.event_date} at {selectedOccurrence?.start_time.slice(0, 5)}
+            <br />
             {totalTickets} ticket{totalTickets !== 1 ? 's' : ''}
           </p>
+          <p className="mt-4 text-xs text-green-700">You&apos;ll receive a confirmation email shortly.</p>
         </div>
       )}
     </div>

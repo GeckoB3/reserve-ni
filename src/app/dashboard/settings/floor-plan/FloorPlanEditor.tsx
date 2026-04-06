@@ -527,7 +527,7 @@ export function FloorPlanEditor({ className, embedded = false }: Props) {
               <button
                 onClick={createCombination}
                 disabled={comboSaving}
-                className="w-full rounded-lg bg-purple-600 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-purple-700 disabled:opacity-50"
+                className="w-full rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-brand-700 disabled:opacity-50"
               >
                 {comboSaving ? 'Linking...' : 'Link as Combination'}
               </button>

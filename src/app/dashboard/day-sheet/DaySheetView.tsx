@@ -15,7 +15,8 @@ import {
 } from '@/lib/table-management/booking-status';
 import { UndoToast } from '@/app/dashboard/table-grid/UndoToast';
 import type { UndoAction } from '@/types/table-management';
-import { UnifiedBookingForm } from '@/components/booking/UnifiedBookingForm';
+import { DashboardStaffBookingModal } from '@/components/booking/DashboardStaffBookingModal';
+import type { BookingModel } from '@/types/booking-models';
 import { ModifyBookingInline } from '@/components/booking/ModifyBookingInline';
 import { BookingNotesEditablePanel } from '@/components/booking/BookingNotesEditablePanel';
 import { DashboardStatCard } from '@/components/dashboard/DashboardStatCard';
@@ -132,7 +133,7 @@ const POLL_INTERVAL_MS = 30_000;
 const STATUS_STYLE: Record<string, { dot: string; bg: string; text: string; ring: string }> = {
   Pending:   { dot: 'bg-amber-500',   bg: 'bg-amber-50',   text: 'text-amber-700',   ring: 'ring-amber-200' },
   Confirmed: { dot: 'bg-teal-500',    bg: 'bg-teal-50',    text: 'text-teal-700',    ring: 'ring-teal-200' },
-  Seated:    { dot: 'bg-blue-600',    bg: 'bg-blue-50',    text: 'text-blue-700',    ring: 'ring-blue-200' },
+  Seated:    { dot: 'bg-brand-600',    bg: 'bg-brand-50',    text: 'text-brand-800',    ring: 'ring-brand-200' },
   Completed: { dot: 'bg-slate-400',   bg: 'bg-slate-50',   text: 'text-slate-500',   ring: 'ring-slate-200' },
   'No-Show': { dot: 'bg-red-500',     bg: 'bg-red-50',     text: 'text-red-700',     ring: 'ring-red-200' },
   Cancelled: { dot: 'bg-slate-300',   bg: 'bg-slate-50',   text: 'text-slate-400',   ring: 'ring-slate-200' },
@@ -835,7 +836,17 @@ function DepositActions({ booking, onAction }: { booking: DaySheetBooking; onAct
 
 // ─── Main: DaySheetView ─────────────────────────────────────────────────────
 
-export function DaySheetView({ venueId, currency }: { venueId: string; currency?: string }) {
+export function DaySheetView({
+  venueId,
+  currency,
+  bookingModel = 'table_reservation',
+  enabledModels = [],
+}: {
+  venueId: string;
+  currency?: string;
+  bookingModel?: BookingModel;
+  enabledModels?: BookingModel[];
+}) {
   const { addToast } = useToast();
 
   // Core state
@@ -1590,7 +1601,7 @@ export function DaySheetView({ venueId, currency }: { venueId: string; currency?
                               }}
                               className={`rounded-lg px-3 py-1.5 text-xs font-semibold text-white shadow-sm disabled:opacity-50 print:hidden ${
                                 primaryAction.target === 'Confirmed' ? 'bg-teal-600 hover:bg-teal-700' :
-                                primaryAction.target === 'Seated' ? 'bg-blue-600 hover:bg-blue-700' :
+                                primaryAction.target === 'Seated' ? 'bg-brand-600 hover:bg-brand-700' :
                                 'bg-slate-600 hover:bg-slate-700'
                               }`}
                             >
@@ -1904,16 +1915,20 @@ export function DaySheetView({ venueId, currency }: { venueId: string; currency?
         />
       )}
       {showNewBooking && (
-        <UnifiedBookingForm
-          asModal
-          venueId={venueId}
-          advancedMode={tableManagementEnabled}
-          initialDate={date}
+        <DashboardStaffBookingModal
+          open
+          title="New booking"
+          onClose={() => setShowNewBooking(false)}
           onCreated={() => {
             setShowNewBooking(false);
             void fetchDaySheet();
           }}
-          onClose={() => setShowNewBooking(false)}
+          venueId={venueId}
+          currency={currency ?? 'GBP'}
+          bookingModel={bookingModel}
+          enabledModels={enabledModels}
+          advancedMode={tableManagementEnabled}
+          initialDate={date}
         />
       )}
       {editBooking && (

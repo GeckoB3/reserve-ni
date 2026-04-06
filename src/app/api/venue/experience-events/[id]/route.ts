@@ -4,6 +4,7 @@ import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { requireVenueExposesSecondaryModel } from '@/lib/booking/require-venue-secondary-model';
 import {
+  assertExperienceEventCalendarClearable,
   assertExperienceEventDeletable,
   resolveExperienceEventPatch,
 } from '@/lib/experience-events/experience-event-guards';
@@ -21,6 +22,7 @@ const eventSchema = z.object({
   recurrence_rule: z.string().optional(),
   parent_event_id: z.string().uuid().optional(),
   is_active: z.boolean().optional(),
+  calendar_id: z.union([z.string().uuid(), z.null()]).optional(),
   ticket_types: z
     .array(
       z.object({
@@ -100,6 +102,13 @@ export async function PATCH(
     const resolved = await resolveExperienceEventPatch(admin, staff.venue_id, id, parsed.data);
     if (!resolved.ok) {
       return NextResponse.json({ error: resolved.error }, { status: resolved.error === 'Event not found' ? 404 : 400 });
+    }
+
+    if (Object.prototype.hasOwnProperty.call(resolved.payload, 'calendar_id') && resolved.payload.calendar_id === null) {
+      const clear = await assertExperienceEventCalendarClearable(admin, staff.venue_id, id);
+      if (!clear.ok) {
+        return NextResponse.json({ error: clear.error }, { status: 409 });
+      }
     }
 
     if (Object.keys(resolved.payload).length > 0) {

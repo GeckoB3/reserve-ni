@@ -28,7 +28,8 @@ import { fetchClassInput, computeClassAvailability } from '@/lib/availability/cl
 import { fetchResourceInput, computeResourceAvailability } from '@/lib/availability/resource-booking-engine';
 import { cancellationDeadlineHoursBefore } from '@/lib/booking/cancellation-deadline';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
-import { getCancellationNoticeHoursForBooking, parseExtendedBookingRules } from '@/lib/booking/venue-booking-rules';
+import { resolveCancellationNoticeHoursForCreate } from '@/lib/booking/resolve-cancellation-notice-hours';
+import { isGuestBookingDateAllowed, loadServiceEntityBookingWindow } from '@/lib/booking/entity-booking-window';
 import {
   hasNonTableBookingPayload,
   inferSecondaryBookingModelFromPayload,
@@ -71,11 +72,6 @@ const createBookingSchema = z.object({
   event_session_id: z.string().uuid().optional(),
   capacity_used: z.number().int().min(1).max(50).optional(),
 });
-
-/** Table reservations: fixed 48h refund window (legacy). */
-function cancellationDeadline(bookingDate: string, bookingTime: string): string {
-  return cancellationDeadlineHoursBefore(bookingDate, bookingTime, 48);
-}
 
 /**
  * POST /api/booking/create
@@ -128,7 +124,7 @@ export async function POST(request: NextRequest) {
 
     const { data: venue, error: venueErr } = await supabase
       .from('venues')
-      .select('id, name, stripe_connected_account_id, booking_rules, deposit_config, timezone, table_management_enabled, show_table_in_confirmation, address, opening_hours')
+      .select('id, name, stripe_connected_account_id, booking_rules, deposit_config, timezone, table_management_enabled, show_table_in_confirmation, address, opening_hours, venue_opening_exceptions')
       .eq('id', venue_id)
       .single();
 
@@ -239,11 +235,17 @@ export async function POST(request: NextRequest) {
       phone: phoneE164,
     });
 
-    const cancellation_deadline = cancellationDeadline(booking_date, booking_time);
+    const refundWindowHoursTable = await resolveCancellationNoticeHoursForCreate({
+      supabase,
+      venueId: venue_id,
+      effectiveModel: 'table_reservation',
+      tableServiceId: resolvedServiceId,
+    });
+    const cancellation_deadline = cancellationDeadlineHoursBefore(booking_date, booking_time, refundWindowHoursTable);
 
     const cancellationPolicySnapshot = {
-      refund_window_hours: 48,
-      policy: 'Full refund if cancelled 48+ hours before reservation. No refund within 48 hours or for no-shows.',
+      refund_window_hours: refundWindowHoursTable,
+      policy: `Full refund if cancelled ${refundWindowHoursTable}+ hours before reservation. No refund within ${refundWindowHoursTable} hours or for no-shows.`,
     };
 
     const bookingInsert: Record<string, unknown> = {
@@ -565,8 +567,26 @@ async function handleNonTableBooking(
     if (!practitioner_id || !appointment_service_id) {
       return NextResponse.json({ error: 'practitioner_id and appointment_service_id are required' }, { status: 400 });
     }
+    const serviceWindow = await loadServiceEntityBookingWindow(
+      supabase,
+      venue_id,
+      venueMode.bookingModel,
+      appointment_service_id,
+    );
+    const tz =
+      typeof (venue as { timezone?: string | null }).timezone === 'string' &&
+      String((venue as { timezone?: string | null }).timezone).trim() !== ''
+        ? String((venue as { timezone?: string | null }).timezone).trim()
+        : 'Europe/London';
+    if (!isGuestBookingDateAllowed(booking_date, serviceWindow, tz)) {
+      return NextResponse.json({ error: 'This date is not available for booking' }, { status: 400 });
+    }
     const input = await fetchAppointmentInput({ supabase, venueId: venue_id, date: booking_date, practitionerId: practitioner_id, serviceId: appointment_service_id });
-    attachVenueClockToAppointmentInput(input, venue as { timezone?: string | null; booking_rules?: unknown; opening_hours?: unknown });
+    attachVenueClockToAppointmentInput(
+      input,
+      venue as { timezone?: string | null; booking_rules?: unknown; opening_hours?: unknown },
+      serviceWindow,
+    );
     const result = computeAppointmentAvailability(input);
     const prac = result.practitioners.find((p) => p.id === practitioner_id);
     const slotAvailable = prac?.slots.some((s) => s.start_time === timeStr && s.service_id === appointment_service_id);
@@ -604,8 +624,13 @@ async function handleNonTableBooking(
     if (!experience_event_id) {
       return NextResponse.json({ error: 'experience_event_id is required' }, { status: 400 });
     }
+    const tz =
+      typeof (venue as { timezone?: string | null }).timezone === 'string' &&
+      String((venue as { timezone?: string | null }).timezone).trim() !== ''
+        ? String((venue as { timezone?: string | null }).timezone).trim()
+        : 'Europe/London';
     const input = await fetchEventInput({ supabase, venueId: venue_id, date: booking_date });
-    const result = computeEventAvailability(input);
+    const result = computeEventAvailability(input, { venueTimezone: tz });
     const event = result.find((e) => e.event_id === experience_event_id);
     if (!event || event.remaining_capacity < party_size) {
       return NextResponse.json({ error: 'This event is fully booked or unavailable' }, { status: 409 });
@@ -717,8 +742,20 @@ async function handleNonTableBooking(
     phone: phoneE164,
   });
 
-  const bookingRulesParsed = parseExtendedBookingRules(venue.booking_rules);
-  const refundWindowHours = getCancellationNoticeHoursForBooking(bookingRulesParsed, effectiveModel, 48);
+  const refundWindowHours = await resolveCancellationNoticeHoursForCreate({
+    supabase,
+    venueId: venue_id,
+    effectiveModel,
+    appointmentServiceId: appointment_service_id ?? null,
+    serviceItemId:
+      effectiveModel === 'unified_scheduling'
+        ? (event_session_id ? unifiedSessionAnchor?.service_item_id ?? null : appointment_service_id ?? null)
+        : null,
+    experienceEventId: experience_event_id ?? null,
+    classInstanceId: class_instance_id ?? null,
+    resourceCalendarId: resource_id ?? null,
+    eventSessionServiceItemId: unifiedSessionAnchor?.service_item_id ?? null,
+  });
 
   const cancellation_deadline = cancellationDeadlineHoursBefore(booking_date, booking_time, refundWindowHours);
   const cancellationPolicySnapshot = {

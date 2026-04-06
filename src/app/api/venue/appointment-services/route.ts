@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
+import {
+  hasBlockingBookingsRemovingServicesFromCalendarLegacy,
+  hasBlockingBookingsRemovingServicesFromCalendarUnified,
+  SERVICE_REMOVAL_BLOCKED_BY_BOOKINGS,
+} from '@/lib/venue/service-calendar-removal';
 import { z } from 'zod';
 import type { ClassPaymentRequirement } from '@/types/booking-models';
 
@@ -29,6 +34,10 @@ const serviceSchema = z
     colour: z.string().max(20).optional(),
     is_active: z.boolean().optional(),
     sort_order: z.number().int().optional(),
+    max_advance_booking_days: z.number().int().min(1).max(365).optional(),
+    min_booking_notice_hours: z.number().int().min(0).max(168).optional(),
+    cancellation_notice_hours: z.number().int().min(0).max(168).optional(),
+    allow_same_day_booking: z.boolean().optional(),
     ...staffMaySchema,
   })
   .superRefine((data, ctx) => {
@@ -234,6 +243,10 @@ export async function POST(request: NextRequest) {
         staff_may_customize_price: parsed.data.staff_may_customize_price ?? false,
         staff_may_customize_deposit: parsed.data.staff_may_customize_deposit ?? false,
         staff_may_customize_colour: parsed.data.staff_may_customize_colour ?? false,
+        max_advance_booking_days: parsed.data.max_advance_booking_days ?? 90,
+        min_booking_notice_hours: parsed.data.min_booking_notice_hours ?? 1,
+        cancellation_notice_hours: parsed.data.cancellation_notice_hours ?? 48,
+        allow_same_day_booking: parsed.data.allow_same_day_booking ?? true,
       };
       const { data, error } = await admin.from('service_items').insert(insertRow).select().single();
 
@@ -270,6 +283,10 @@ export async function POST(request: NextRequest) {
       buffer_minutes: parsed.data.buffer_minutes ?? 0,
       payment_requirement: pay.payment_requirement,
       deposit_pence: pay.deposit_pence,
+      max_advance_booking_days: parsed.data.max_advance_booking_days ?? 90,
+      min_booking_notice_hours: parsed.data.min_booking_notice_hours ?? 1,
+      cancellation_notice_hours: parsed.data.cancellation_notice_hours ?? 48,
+      allow_same_day_booking: parsed.data.allow_same_day_booking ?? true,
     };
     const { data, error } = await admin.from('appointment_services').insert(insertRow).select().single();
 
@@ -315,6 +332,36 @@ export async function PATCH(request: NextRequest) {
     const bookingModel = await getVenueBookingModel(admin, staff.venue_id);
 
     if (bookingModel === 'unified_scheduling') {
+      if (Array.isArray(practitioner_ids)) {
+        const { data: existingLinks, error: existingErr } = await admin
+          .from('calendar_service_assignments')
+          .select('calendar_id')
+          .eq('service_item_id', id);
+
+        if (existingErr) {
+          console.error('PATCH /api/venue/appointment-services (existing calendar links):', existingErr.message);
+          return NextResponse.json({ error: 'Could not verify service calendar links.' }, { status: 500 });
+        }
+
+        const prev = new Set((existingLinks ?? []).map((r) => r.calendar_id as string));
+        const next = new Set(practitioner_ids as string[]);
+        const removedCalendars = [...prev].filter((cid) => !next.has(cid));
+
+        for (const cid of removedCalendars) {
+          const check = await hasBlockingBookingsRemovingServicesFromCalendarUnified(admin, {
+            venueId: staff.venue_id,
+            calendarId: cid,
+            serviceItemIds: [id],
+          });
+          if (check.error) {
+            return NextResponse.json({ error: check.error }, { status: 500 });
+          }
+          if (check.blocked) {
+            return NextResponse.json({ error: SERVICE_REMOVAL_BLOCKED_BY_BOOKINGS }, { status: 409 });
+          }
+        }
+      }
+
       const updatePayload: Record<string, unknown> = { ...parsed.data };
       if (parsed.data.payment_requirement !== undefined) {
         const norm = normalizeServicePaymentFields({
@@ -358,6 +405,36 @@ export async function PATCH(request: NextRequest) {
       }
 
       return NextResponse.json(mapServiceItemRowForDashboard(data as Record<string, unknown>));
+    }
+
+    if (Array.isArray(practitioner_ids)) {
+      const { data: existingLinks, error: existingErr } = await admin
+        .from('practitioner_services')
+        .select('practitioner_id')
+        .eq('service_id', id);
+
+      if (existingErr) {
+        console.error('PATCH /api/venue/appointment-services (existing practitioner links):', existingErr.message);
+        return NextResponse.json({ error: 'Could not verify service calendar links.' }, { status: 500 });
+      }
+
+      const prev = new Set((existingLinks ?? []).map((r) => r.practitioner_id as string));
+      const next = new Set(practitioner_ids as string[]);
+      const removedPractitioners = [...prev].filter((pid) => !next.has(pid));
+
+      for (const pid of removedPractitioners) {
+        const check = await hasBlockingBookingsRemovingServicesFromCalendarLegacy(admin, {
+          venueId: staff.venue_id,
+          practitionerId: pid,
+          appointmentServiceIds: [id],
+        });
+        if (check.error) {
+          return NextResponse.json({ error: check.error }, { status: 500 });
+        }
+        if (check.blocked) {
+          return NextResponse.json({ error: SERVICE_REMOVAL_BLOCKED_BY_BOOKINGS }, { status: 409 });
+        }
+      }
     }
 
     const patchPayload: Record<string, unknown> = { ...parsed.data };

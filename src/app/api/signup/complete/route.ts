@@ -6,7 +6,7 @@ import { getPersistedSubscriptionItemIds } from '@/lib/stripe/subscription-line-
 import { getBusinessConfig } from '@/lib/business-config';
 import { updateVenueSmsMonthlyAllowance } from '@/lib/billing/sms-allowance';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
-import { mergeNotificationSettingsPatch, parseNotificationSettings } from '@/lib/notifications/notification-settings';
+import { parseNotificationSettings } from '@/lib/notifications/notification-settings';
 
 export async function POST(request: Request) {
   try {
@@ -120,12 +120,9 @@ export async function POST(request: Request) {
 
     await updateVenueSmsMonthlyAllowance(venue.id);
 
-    /** Unified appointment venues: confirmation email on, confirmation SMS off by default (opt in under Communications). */
+    /** Unified appointment venues: use default notification_settings (email-only confirmation; SMS/reminder 2/no-show opt-in). */
     if (isUnifiedSchedulingVenue(config.model)) {
-      const defaults = parseNotificationSettings(null);
-      const notification_settings = mergeNotificationSettingsPatch(defaults, {
-        confirmation_channels: ['email'],
-      });
+      const notification_settings = parseNotificationSettings(null);
       const { error: notifErr } = await admin
         .from('venues')
         .update({ notification_settings: notification_settings as unknown as Record<string, never> })

@@ -286,7 +286,7 @@ export function VenueProfileSection({ venue, onUpdate, isAdmin, bookingModel = '
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label htmlFor="cuisine_type" className="block text-sm font-medium text-neutral-700 mb-1">Cuisine type</label>
-              <input id="cuisine_type" {...register('cuisine_type')} disabled={!isAdmin} placeholder="e.g. Italian, Irish, Gastropub" className="w-full rounded border border-neutral-300 px-3 py-2 disabled:bg-neutral-50" />
+              <input id="cuisine_type" {...register('cuisine_type')} disabled={!isAdmin} placeholder="e.g. Style or category" className="w-full rounded border border-neutral-300 px-3 py-2 disabled:bg-neutral-50" />
             </div>
             <div>
               <label htmlFor="price_band" className="block text-sm font-medium text-neutral-700 mb-1">Price band</label>

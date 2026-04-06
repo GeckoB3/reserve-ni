@@ -70,7 +70,7 @@ function blocksTouchingDay(blocks: Block[], iso: string): Block[] {
 function blockDotClass(t: Block['block_type']): string {
   if (t === 'closed') return 'bg-red-500';
   if (t === 'reduced_capacity') return 'bg-amber-500';
-  return 'bg-blue-500';
+  return 'bg-brand-500';
 }
 
 interface Props {
@@ -368,7 +368,7 @@ export function AvailabilityCalendarTab({ services, showToast }: Props) {
               <span className="h-2 w-2 shrink-0 rounded-full bg-amber-500" aria-hidden /> Reduced capacity
             </span>
             <span className="inline-flex items-center gap-1">
-              <span className="h-2 w-2 shrink-0 rounded-full bg-blue-500" aria-hidden /> Special event
+              <span className="h-2 w-2 shrink-0 rounded-full bg-brand-500" aria-hidden /> Special event
             </span>
           </p>
         </div>

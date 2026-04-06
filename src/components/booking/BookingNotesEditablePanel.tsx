@@ -251,7 +251,7 @@ export function BookingNotesEditablePanel({
         value={guestRequests ?? ''}
         bookingId={bookingId}
         fieldKey="special_requests"
-        placeholder={isAppointment ? 'e.g. Prefers morning appointments, needs wheelchair access' : 'e.g. Window seat preferred'}
+        placeholder="e.g. Accessibility, timing, or seating preferences"
         onSaved={onSaved}
       />
       <div className="border-t border-slate-100" />

@@ -987,10 +987,10 @@ export default function OnboardingPage() {
                 calendar and staff settings. Set{' '}
                 <strong>working hours, breaks, and days off</strong> under{' '}
                 <Link
-                  href="/dashboard/availability"
+                  href="/dashboard/calendar-availability"
                   className="font-medium text-brand-600 underline hover:text-brand-700"
                 >
-                  Availability
+                  Calendar availability
                 </Link>{' '}
                 after onboarding. You can also manage {terms.staff.toLowerCase()} under{' '}
                 <Link
@@ -1008,10 +1008,10 @@ export default function OnboardingPage() {
                 <strong>Remove</strong> to delete a row you don&apos;t need—you need at least one. Set{' '}
                 <strong>working hours, breaks, and days off</strong> under{' '}
                 <Link
-                  href="/dashboard/availability"
+                  href="/dashboard/calendar-availability"
                   className="font-medium text-brand-600 underline hover:text-brand-700"
                 >
-                  Availability
+                  Calendar availability
                 </Link>{' '}
                 after onboarding. Manage {terms.staff.toLowerCase()} under{' '}
                 <Link
@@ -1056,7 +1056,7 @@ export default function OnboardingPage() {
                           updated[i] = { ...p, name: e.target.value };
                           setPractitioners(updated);
                         }}
-                        placeholder="e.g. Sarah, or Room 1"
+                        placeholder="e.g. Staff name or room label"
                         className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
                       />
                     </div>
@@ -1167,7 +1167,7 @@ export default function OnboardingPage() {
                   type="text"
                   value={eventDraft.name}
                   onChange={(e) => setEventDraft({ ...eventDraft, name: e.target.value })}
-                  placeholder="e.g. Saturday Night Comedy"
+                  placeholder="e.g. Seasonal tasting, Open day"
                   className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
                 />
               </div>
@@ -1264,7 +1264,7 @@ export default function OnboardingPage() {
                         updated[i] = { ...c, name: e.target.value };
                         setClasses(updated);
                       }}
-                      placeholder="Class name"
+                      placeholder="e.g. Weekly session, Open class"
                       className="border-0 bg-transparent p-0 text-sm font-medium text-slate-900 focus:ring-0"
                     />
                     {classes.length > 1 && (
@@ -1406,7 +1406,7 @@ export default function OnboardingPage() {
                         updated[i] = { ...r, name: e.target.value };
                         setResources(updated);
                       }}
-                      placeholder={`Resource name (e.g. Court 1)`}
+                      placeholder="Resource name (e.g. Room 1, Lane A)"
                       className="flex-1 border-0 bg-transparent p-0 text-sm font-medium text-slate-900 focus:ring-0"
                     />
                     {resources.length > 1 && (
@@ -1512,8 +1512,8 @@ export default function OnboardingPage() {
                     : Stripe Connect and venue payment options
                   </li>
                   <li>
-                    <Link href="/dashboard/availability" className="font-medium text-brand-600 underline hover:text-brand-700">
-                      Availability
+                    <Link href="/dashboard/calendar-availability" className="font-medium text-brand-600 underline hover:text-brand-700">
+                      Calendar availability
                     </Link>
                     : breaks, time off, and fine-tune schedules anytime
                   </li>

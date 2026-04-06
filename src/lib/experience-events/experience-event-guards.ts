@@ -45,6 +45,28 @@ export async function assertExperienceEventDeletable(
   return { ok: true };
 }
 
+/**
+ * Clearing `calendar_id` (removing the event from the staff grid column) is blocked while non-cancelled bookings exist.
+ */
+export async function assertExperienceEventCalendarClearable(
+  admin: SupabaseClient,
+  venueId: string,
+  experienceEventId: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const n = await countBookingsBlockingEventDelete(admin, venueId, experienceEventId);
+  if (n < 0) {
+    return { ok: false, error: 'Could not verify bookings for this event.' };
+  }
+  if (n > 0) {
+    return {
+      ok: false,
+      error:
+        'This event has bookings. Cancel or resolve those bookings before removing the event from the calendar.',
+    };
+  }
+  return { ok: true };
+}
+
 export interface ExperienceEventPatchInput {
   name?: string;
   description?: string | null;
@@ -59,6 +81,10 @@ export interface ExperienceEventPatchInput {
   is_active?: boolean;
   /** Unified calendar column; null clears assignment. */
   calendar_id?: string | null;
+  max_advance_booking_days?: number;
+  min_booking_notice_hours?: number;
+  cancellation_notice_hours?: number;
+  allow_same_day_booking?: boolean;
 }
 
 /**

@@ -25,6 +25,7 @@ import { computeResourceAvailability, fetchResourceInput } from '@/lib/availabil
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 import { venueExposesBookingModel } from '@/lib/booking/enabled-models';
 import type { BookingModel } from '@/types/booking-models';
+import { DEFAULT_ENTITY_BOOKING_WINDOW, loadServiceEntityBookingWindow } from '@/lib/booking/entity-booking-window';
 
 /** Public availability can request C/D/E explicitly when the venue primary is another model (multi-tab embed). */
 const AVAILABILITY_REQUEST_MODELS = new Set<BookingModel>(['event_ticket', 'class_session', 'resource_booking']);
@@ -305,10 +306,14 @@ async function handleAppointmentAvailability(
   }
   const { data: venueClock } = await supabase
     .from('venues')
-    .select('timezone, booking_rules, opening_hours')
+    .select('timezone, booking_rules, opening_hours, venue_opening_exceptions')
     .eq('id', venueId)
     .single();
-  attachVenueClockToAppointmentInput(input, venueClock ?? {});
+  const venueMode = await resolveVenueMode(supabase, venueId);
+  const bookingWindow = serviceId
+    ? await loadServiceEntityBookingWindow(supabase, venueId, venueMode.bookingModel, serviceId)
+    : DEFAULT_ENTITY_BOOKING_WINDOW;
+  attachVenueClockToAppointmentInput(input, venueClock ?? {}, bookingWindow);
   const result = computeAppointmentAvailability(input);
 
   return NextResponse.json({ date, venue_id: venueId, ...result });
@@ -323,7 +328,13 @@ async function handleEventAvailability(
   date: string,
 ) {
   const input = await fetchEventInput({ supabase, venueId, date });
-  const result = computeEventAvailability(input);
+  const { data: v } = await supabase.from('venues').select('timezone').eq('id', venueId).maybeSingle();
+  const tz =
+    typeof (v as { timezone?: string | null } | null)?.timezone === 'string' &&
+    String((v as { timezone?: string | null }).timezone).trim() !== ''
+      ? String((v as { timezone?: string | null }).timezone).trim()
+      : 'Europe/London';
+  const result = computeEventAvailability(input, { venueTimezone: tz });
 
   return NextResponse.json({ date, venue_id: venueId, events: result });
 }

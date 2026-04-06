@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/browser';
-import { AppointmentBookingForm } from '@/components/booking/AppointmentBookingForm';
+import { DashboardStaffBookingModal } from '@/components/booking/DashboardStaffBookingModal';
 import { AppointmentWalkInModal } from '@/components/booking/AppointmentWalkInModal';
 import {
   AppointmentDetailSheet,
@@ -984,7 +984,7 @@ export function AppointmentBookingsDashboard({
               <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
               </svg>
-              New appointment
+              New Booking
             </button>
             <button
               type="button"
@@ -1303,8 +1303,9 @@ export function AppointmentBookingsDashboard({
         </div>
       )}
 
-      <AppointmentBookingForm
+      <DashboardStaffBookingModal
         open={newBookingOpen}
+        title="New booking"
         onClose={() => setNewBookingOpen(false)}
         onCreated={() => {
           setNewBookingOpen(false);
@@ -1313,6 +1314,8 @@ export function AppointmentBookingsDashboard({
         }}
         venueId={venueId}
         currency={currency}
+        bookingModel={primaryBookingModel}
+        enabledModels={enabledModels}
         preselectedPractitionerId={practitionerFilter === 'all' ? undefined : practitionerFilter}
       />
       <AppointmentWalkInModal
