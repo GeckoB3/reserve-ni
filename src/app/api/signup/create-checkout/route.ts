@@ -20,7 +20,7 @@ export async function POST(request: Request) {
     const body = await request.json();
     const { business_type, plan } = body as {
       business_type: string;
-      plan: 'appointments' | 'restaurant' | 'founding' | 'standard' | 'business';
+      plan: 'appointments' | 'restaurant' | 'founding';
     };
 
     if (!business_type || !plan) {
@@ -114,8 +114,6 @@ export async function POST(request: Request) {
     const priceIdMap: Record<string, string | undefined> = {
       appointments: process.env.STRIPE_APPOINTMENTS_PRICE_ID,
       restaurant: process.env.STRIPE_RESTAURANT_PRICE_ID,
-      standard: process.env.STRIPE_STANDARD_PRICE_ID ?? process.env.STRIPE_APPOINTMENTS_PRICE_ID,
-      business: process.env.STRIPE_BUSINESS_PRICE_ID ?? process.env.STRIPE_RESTAURANT_PRICE_ID,
     };
     const priceId = priceIdMap[plan];
 

@@ -4,7 +4,15 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { AppointmentService, ClassPaymentRequirement, Practitioner, PractitionerService } from '@/types/booking-models';
+import type {
+  AppointmentService,
+  BookingModel,
+  ClassPaymentRequirement,
+  Practitioner,
+  PractitionerService,
+} from '@/types/booking-models';
+import { normalizeEnabledModels } from '@/lib/booking/enabled-models';
+import { venueUsesUnifiedAppointmentData } from '@/lib/booking/unified-scheduling';
 import { entityBookingWindowFromRow } from '@/lib/booking/entity-booking-window';
 import { getOfferedAppointmentServicesForPractitioner } from '@/lib/availability/appointment-engine';
 import { unifiedCalendarRowToPractitioner } from '@/lib/availability/unified-calendar-mapper';
@@ -141,11 +149,15 @@ export async function fetchAppointmentCatalog(
 ): Promise<{ practitioners: AppointmentCatalogPractitioner[] }> {
   const { data: venueRow } = await supabase
     .from('venues')
-    .select('booking_model')
+    .select('booking_model, enabled_models')
     .eq('id', venueId)
     .maybeSingle();
-  const bookingModel = (venueRow as { booking_model?: string } | null)?.booking_model;
-  if (bookingModel === 'unified_scheduling') {
+  const primary = ((venueRow as { booking_model?: string } | null)?.booking_model as BookingModel) ?? 'table_reservation';
+  const enabled = normalizeEnabledModels(
+    (venueRow as { enabled_models?: unknown } | null)?.enabled_models,
+    primary,
+  );
+  if (venueUsesUnifiedAppointmentData(primary, enabled)) {
     return fetchUnifiedAppointmentCatalog(supabase, venueId, options);
   }
 

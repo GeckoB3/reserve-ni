@@ -18,7 +18,7 @@ import { z } from 'zod';
 import { cancellationDeadlineHoursBefore } from '@/lib/booking/cancellation-deadline';
 import { generateGroupBookingId } from '@/lib/booking/group-booking';
 import type { GroupAppointmentLine } from '@/lib/emails/types';
-import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
+import { isUnifiedSchedulingVenue, venueUsesUnifiedAppointmentData } from '@/lib/booking/unified-scheduling';
 import { createShortManageLink } from '@/lib/short-manage-link';
 import { loadServiceEntityBookingWindow } from '@/lib/booking/entity-booking-window';
 import { resolveCancellationNoticeHoursForCreate } from '@/lib/booking/resolve-cancellation-notice-hours';
@@ -82,7 +82,11 @@ export async function POST(request: NextRequest) {
     }
 
     const venueMode = await resolveVenueMode(supabase, venue_id);
-    if (!isUnifiedSchedulingVenue(venueMode.bookingModel)) {
+    const useUnifiedBookingRows = venueUsesUnifiedAppointmentData(
+      venueMode.bookingModel,
+      venueMode.enabledModels,
+    );
+    if (!isUnifiedSchedulingVenue(venueMode.bookingModel) && !useUnifiedBookingRows) {
       return NextResponse.json({ error: 'Group bookings are only available for appointment businesses' }, { status: 400 });
     }
 
@@ -187,10 +191,9 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const { data: nameRows } =
-      venueMode.bookingModel === 'unified_scheduling'
-        ? await supabase.from('unified_calendars').select('id, name').eq('venue_id', venue_id)
-        : await supabase.from('practitioners').select('id, name').eq('venue_id', venue_id);
+    const { data: nameRows } = useUnifiedBookingRows
+      ? await supabase.from('unified_calendars').select('id, name').eq('venue_id', venue_id)
+      : await supabase.from('practitioners').select('id, name').eq('venue_id', venue_id);
     const prMap = new Map((nameRows ?? []).map((p: { id: string; name: string }) => [p.id, p.name]));
     const groupAppointmentLines: GroupAppointmentLine[] = validatedPeople.map((p) => {
       return {
@@ -229,7 +232,7 @@ export async function POST(request: NextRequest) {
       supabase,
       venueId: venue_id,
       effectiveModel: venueMode.bookingModel,
-      serviceItemId: venueMode.bookingModel === 'unified_scheduling' ? firstForNotice.appointment_service_id : null,
+      serviceItemId: useUnifiedBookingRows ? firstForNotice.appointment_service_id : null,
       appointmentServiceId:
         venueMode.bookingModel === 'practitioner_appointment' ? firstForNotice.appointment_service_id : null,
     });
@@ -239,7 +242,7 @@ export async function POST(request: NextRequest) {
         supabase,
         venueId: venue_id,
         effectiveModel: venueMode.bookingModel,
-        serviceItemId: venueMode.bookingModel === 'unified_scheduling' ? person.appointment_service_id : null,
+        serviceItemId: useUnifiedBookingRows ? person.appointment_service_id : null,
         appointmentServiceId:
           venueMode.bookingModel === 'practitioner_appointment' ? person.appointment_service_id : null,
       });
@@ -265,13 +268,11 @@ export async function POST(request: NextRequest) {
         cancellation_deadline: deadline,
         cancellation_policy_snapshot: policySnapshot,
         estimated_end_time: person.estimated_end_time,
-        practitioner_id:
-          venueMode.bookingModel === 'unified_scheduling' ? null : person.practitioner_id,
-        appointment_service_id:
-          venueMode.bookingModel === 'unified_scheduling' ? null : person.appointment_service_id,
+        practitioner_id: useUnifiedBookingRows ? null : person.practitioner_id,
+        appointment_service_id: useUnifiedBookingRows ? null : person.appointment_service_id,
         group_booking_id: groupBookingId,
         person_label: person.person_label,
-        ...(venueMode.bookingModel === 'unified_scheduling'
+        ...(useUnifiedBookingRows
           ? {
               calendar_id: person.practitioner_id,
               service_item_id: person.appointment_service_id,

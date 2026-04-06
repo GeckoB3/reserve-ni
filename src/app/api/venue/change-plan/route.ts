@@ -116,9 +116,7 @@ export async function POST(request: Request) {
         const priceIdMap: Record<string, string | undefined> = {
           appointments: process.env.STRIPE_APPOINTMENTS_PRICE_ID,
           restaurant: process.env.STRIPE_RESTAURANT_PRICE_ID,
-          standard: process.env.STRIPE_APPOINTMENTS_PRICE_ID ?? process.env.STRIPE_STANDARD_PRICE_ID,
-          business: process.env.STRIPE_RESTAURANT_PRICE_ID ?? process.env.STRIPE_BUSINESS_PRICE_ID,
-          founding: process.env.STRIPE_RESTAURANT_PRICE_ID ?? process.env.STRIPE_BUSINESS_PRICE_ID,
+          founding: process.env.STRIPE_RESTAURANT_PRICE_ID,
         };
         const priceId = priceIdMap[tier];
 
@@ -132,7 +130,7 @@ export async function POST(request: Request) {
           line_items: buildCheckoutLineItems(priceId, 1),
           metadata: {
             venue_id: venue.id,
-            plan: tier === 'standard' ? 'appointments' : tier === 'business' ? 'restaurant' : tier,
+            plan: tier,
             action: 'resubscribe',
           },
           success_url: `${origin}/dashboard/settings?tab=plan&resubscribed=true`,

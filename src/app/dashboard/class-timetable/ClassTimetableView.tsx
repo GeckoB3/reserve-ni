@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { useToast } from '@/components/ui/Toast';
+import { defaultNewUnifiedCalendarWorkingHours } from '@/lib/availability/practitioner-defaults';
 import { ClassScheduleModal } from './ClassScheduleModal';
 import { ClassTimetableReadOnlyCalendar } from './ClassTimetableReadOnlyCalendar';
 
@@ -132,7 +132,6 @@ export function ClassTimetableView({
   currency?: string;
 }) {
   const sym = currency === 'EUR' ? '€' : '£';
-  const { addToast } = useToast();
   function formatPrice(pence: number): string {
     return `${sym}${(pence / 100).toFixed(2)}`;
   }
@@ -158,10 +157,6 @@ export function ClassTimetableView({
   const [classTypeForm, setClassTypeForm] = useState({ ...BLANK_CT });
   const [classTypeSaving, setClassTypeSaving] = useState(false);
   const [classTypeError, setClassTypeError] = useState<string | null>(null);
-  const [showNewColumnUi, setShowNewColumnUi] = useState(false);
-  const [newColumnName, setNewColumnName] = useState('');
-  const [creatingColumn, setCreatingColumn] = useState(false);
-
   const [timetableForm, setTimetableForm] = useState({ ...INITIAL_TIMETABLE_FORM });
 
   const [scheduleModalOpen, setScheduleModalOpen] = useState(false);
@@ -171,6 +166,11 @@ export function ClassTimetableView({
   const [editInstanceForm, setEditInstanceForm] = useState({ date: '', time: '', capacity: '' });
   const [patchSaving, setPatchSaving] = useState(false);
   const [instanceDeletingId, setInstanceDeletingId] = useState<string | null>(null);
+
+  const [showAddCalendarModal, setShowAddCalendarModal] = useState(false);
+  const [newCalendarName, setNewCalendarName] = useState('');
+  const [addCalendarSubmitting, setAddCalendarSubmitting] = useState(false);
+  const [addCalendarModalError, setAddCalendarModalError] = useState<string | null>(null);
 
   const fetchData = useCallback(async (opts?: { silent?: boolean }) => {
     const silent = opts?.silent ?? false;
@@ -198,6 +198,66 @@ export function ClassTimetableView({
   const refreshClassData = useCallback(async () => {
     await fetchData({ silent: true });
   }, [fetchData]);
+
+  const submitInlineNewCalendar = useCallback(async () => {
+    const name = newCalendarName.trim();
+    if (!name) {
+      setAddCalendarModalError('Enter a display name for the calendar.');
+      return;
+    }
+    setAddCalendarSubmitting(true);
+    setAddCalendarModalError(null);
+    try {
+      const res = await fetch('/api/venue/practitioners', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name,
+          is_active: true,
+          working_hours: defaultNewUnifiedCalendarWorkingHours(),
+          break_times: [],
+          days_off: [],
+        }),
+      });
+      const json = (await res.json()) as {
+        error?: string;
+        id?: string;
+        name?: string;
+        upgrade_required?: boolean;
+      };
+      if (!res.ok) {
+        if (res.status === 403 && json.upgrade_required) {
+          setAddCalendarModalError(json.error ?? 'Calendar limit reached for your plan.');
+        } else {
+          setAddCalendarModalError(json.error ?? 'Could not create calendar');
+        }
+        return;
+      }
+      const newId = json.id;
+      const newName = typeof json.name === 'string' ? json.name : name;
+      if (!newId) {
+        setAddCalendarModalError('Calendar was created but no id was returned. Refresh the page.');
+        return;
+      }
+      setUnifiedCalendars((prev) => {
+        if (prev.some((c) => c.id === newId)) return prev;
+        return [...prev, { id: newId, name: newName }].sort((a, b) => a.name.localeCompare(b.name));
+      });
+      setPractitioners((prev) => {
+        if (prev.some((p) => p.id === newId)) return prev;
+        return [...prev, { id: newId, name: newName }].sort((a, b) => a.name.localeCompare(b.name));
+      });
+      setClassTypeForm((f) => ({ ...f, instructor_staff_id: newId }));
+      setNewCalendarName('');
+      setShowAddCalendarModal(false);
+      setNotice({ kind: 'success', message: `Calendar "${newName}" created and selected.` });
+      void fetchData({ silent: true });
+    } catch {
+      setAddCalendarModalError('Could not create calendar');
+    } finally {
+      setAddCalendarSubmitting(false);
+    }
+  }, [newCalendarName, fetchData]);
 
   /** If a session row is removed (e.g. deleted elsewhere), drop selection and detail. */
   useEffect(() => {
@@ -304,44 +364,6 @@ export function ClassTimetableView({
     [unifiedCalendars, practitioners],
   );
 
-  async function createCalendarColumn() {
-    const name = newColumnName.trim();
-    if (!name) {
-      setClassTypeError('Enter a name for the new calendar column.');
-      return;
-    }
-    setCreatingColumn(true);
-    setClassTypeError(null);
-    try {
-      const res = await fetch('/api/venue/calendar-columns', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name }),
-      });
-      const json = (await res.json()) as { error?: string; id?: string; name?: string };
-      if (!res.ok) {
-        setClassTypeError(json.error ?? 'Could not create calendar column');
-        return;
-      }
-      const newId = json.id;
-      const newName = json.name;
-      if (newId && newName) {
-        setClassTypeForm((f) => ({ ...f, instructor_staff_id: newId }));
-        setUnifiedCalendars((prev) => {
-          if (prev.some((c) => c.id === newId)) return prev;
-          return [...prev, { id: newId, name: newName }].sort((a, b) => a.name.localeCompare(b.name));
-        });
-      }
-      setNewColumnName('');
-      setShowNewColumnUi(false);
-      addToast('Calendar column created. It appears on the staff calendar like your other columns.', 'success');
-    } catch {
-      setClassTypeError('Could not create calendar column');
-    } finally {
-      setCreatingColumn(false);
-    }
-  }
-
   const buildClassTypePayload = () => {
     const priceRaw = classTypeForm.price_pence.trim();
     const pricePence =
@@ -425,8 +447,6 @@ export function ClassTimetableView({
       setShowClassTypeForm(false);
       setEditingClassTypeId(null);
       setClassTypeForm({ ...BLANK_CT });
-      setShowNewColumnUi(false);
-      setNewColumnName('');
       setNotice({ kind: 'success', message: editingClassTypeId ? 'Class updated.' : 'Class created.' });
       await fetchData({ silent: true });
     } catch {
@@ -462,8 +482,6 @@ export function ClassTimetableView({
     });
     setEditingClassTypeId(ct.id);
     setClassTypeError(null);
-    setShowNewColumnUi(false);
-    setNewColumnName('');
     setShowClassTypeForm(true);
   };
 
@@ -724,8 +742,6 @@ export function ClassTimetableView({
               setEditingClassTypeId(null);
               setClassTypeForm({ ...BLANK_CT });
               setClassTypeError(null);
-              setShowNewColumnUi(false);
-              setNewColumnName('');
               setShowClassTypeForm(true);
             }}
             className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700"
@@ -773,8 +789,6 @@ export function ClassTimetableView({
                 onClick={() => {
                   setClassTypeForm({ ...BLANK_CT });
                   setClassTypeError(null);
-                  setShowNewColumnUi(false);
-                  setNewColumnName('');
                   setShowClassTypeForm(true);
                 }}
               >
@@ -1070,19 +1084,10 @@ export function ClassTimetableView({
                         Choose a calendar…
                       </option>
                       {unifiedCalendars.length > 0 && (
-                        <optgroup label="Calendars (staff)">
+                        <optgroup label="Calendar columns">
                           {unifiedCalendars.map((c) => (
                             <option key={c.id} value={c.id}>
                               {c.name}
-                            </option>
-                          ))}
-                        </optgroup>
-                      )}
-                      {practitioners.length > 0 && (
-                        <optgroup label="Practitioners (legacy)">
-                          {practitioners.map((p) => (
-                            <option key={p.id} value={p.id}>
-                              {p.name}
                             </option>
                           ))}
                         </optgroup>
@@ -1109,71 +1114,29 @@ export function ClassTimetableView({
                     see that name instead of the calendar name when booking.
                   </p>
                   <div className="mt-3 rounded-lg border border-slate-100 bg-slate-50/90 p-3">
-                    {!showNewColumnUi ? (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShowNewColumnUi(true);
-                          setClassTypeError(null);
-                        }}
-                        className="inline-flex w-full items-center justify-center rounded-lg border border-brand-200/90 bg-white px-3.5 py-2.5 text-sm font-semibold text-brand-700 shadow-sm transition-[color,background-color,border-color,box-shadow,transform] duration-150 ease-out hover:border-brand-400 hover:bg-brand-50 hover:text-brand-800 hover:shadow-md active:scale-[0.98] active:border-brand-500 active:bg-brand-100 active:shadow-inner motion-reduce:transition-colors motion-reduce:active:scale-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2"
-                      >
-                        New calendar column
-                      </button>
-                    ) : (
-                      <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-end">
-                        <div className="min-w-0 flex-1 sm:max-w-xs">
-                          <label
-                            htmlFor="class-type-form-new-calendar-column-name"
-                            className="mb-1 block text-[11px] font-medium text-slate-600"
-                          >
-                            Column name
-                          </label>
-                          <input
-                            id="class-type-form-new-calendar-column-name"
-                            type="text"
-                            value={newColumnName}
-                            onChange={(e) => setNewColumnName(e.target.value)}
-                            placeholder="e.g. Main hall, Host column"
-                            disabled={creatingColumn}
-                            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 disabled:opacity-60"
-                          />
-                        </div>
-                        <div className="flex flex-wrap gap-2">
-                          <button
-                            type="button"
-                            onClick={() => void createCalendarColumn()}
-                            disabled={creatingColumn}
-                            className="rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-brand-700 disabled:opacity-50"
-                          >
-                            {creatingColumn ? 'Creating…' : 'Create'}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setShowNewColumnUi(false);
-                              setNewColumnName('');
-                              setClassTypeError(null);
-                            }}
-                            disabled={creatingColumn}
-                            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-                          >
-                            Cancel
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                  <p className="mt-2 text-xs text-slate-500">
-                    New columns use the same setup as elsewhere: they appear on the staff calendar and can be managed in{' '}
-                    <Link
-                      href="/dashboard/calendar-availability?tab=availability"
-                      className="font-medium text-brand-700 underline hover:text-brand-800"
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAddCalendarModalError(null);
+                        setNewCalendarName('');
+                        setShowAddCalendarModal(true);
+                      }}
+                      className="inline-flex w-full items-center justify-center rounded-lg border border-brand-200/90 bg-white px-3.5 py-2.5 text-sm font-semibold text-brand-700 shadow-sm transition-[color,background-color,border-color,box-shadow,transform] duration-150 ease-out hover:border-brand-400 hover:bg-brand-50 hover:text-brand-800 hover:shadow-md active:scale-[0.98] active:border-brand-500 active:bg-brand-100 active:shadow-inner motion-reduce:transition-colors motion-reduce:active:scale-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2"
                     >
-                      Calendar availability
-                    </Link>
-                    .
-                  </p>
+                      Add calendar
+                    </button>
+                    <p className="mt-2 text-xs text-slate-500">
+                      Create a team calendar column here and assign it to this class immediately. For appointment
+                      links, services, and staff assignments, use{' '}
+                      <Link
+                        href="/dashboard/calendar-availability?tab=calendars"
+                        className="font-medium text-brand-700 underline hover:text-brand-800"
+                      >
+                        Calendar availability
+                      </Link>
+                      .
+                    </p>
+                  </div>
                 </div>
                 <div>
                   <label className="mb-1 block text-xs font-medium text-slate-600">Colour</label>
@@ -1216,8 +1179,6 @@ export function ClassTimetableView({
                     setShowClassTypeForm(false);
                     setEditingClassTypeId(null);
                     setClassTypeError(null);
-                    setShowNewColumnUi(false);
-                    setNewColumnName('');
                   }}
                   className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
                 >
@@ -1331,6 +1292,78 @@ export function ClassTimetableView({
           setNotice={setNotice}
           openEditInstance={openEditInstance}
         />
+      )}
+
+      {showAddCalendarModal && isAdmin && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4"
+          onClick={() => {
+            if (addCalendarSubmitting) return;
+            setShowAddCalendarModal(false);
+            setAddCalendarModalError(null);
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="add-calendar-modal-title"
+            className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-6 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 id="add-calendar-modal-title" className="mb-1 text-lg font-semibold text-slate-900">
+              Add calendar
+            </h2>
+            <p className="mb-4 text-sm text-slate-500">
+              Same defaults as Calendar availability: weekly hours are set automatically; you can edit them in
+              Availability later.
+            </p>
+            {addCalendarModalError && (
+              <div
+                role="alert"
+                className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800"
+              >
+                {addCalendarModalError}
+              </div>
+            )}
+            <label className="mb-1 block text-xs font-medium text-slate-600">Display name *</label>
+            <input
+              type="text"
+              value={newCalendarName}
+              onChange={(e) => setNewCalendarName(e.target.value)}
+              placeholder="e.g. Studio A, Main column"
+              disabled={addCalendarSubmitting}
+              className="mb-4 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 disabled:opacity-60"
+              autoFocus
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  void submitInlineNewCalendar();
+                }
+              }}
+            />
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => void submitInlineNewCalendar()}
+                disabled={addCalendarSubmitting}
+                className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
+              >
+                {addCalendarSubmitting ? 'Creating…' : 'Create and select'}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowAddCalendarModal(false);
+                  setAddCalendarModalError(null);
+                }}
+                disabled={addCalendarSubmitting}
+                className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {editingTimetable && (

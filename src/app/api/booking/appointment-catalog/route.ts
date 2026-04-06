@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { fetchAppointmentCatalog } from '@/lib/availability/appointment-catalog';
 import { resolveVenueMode } from '@/lib/venue-mode';
-import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
+import { isUnifiedSchedulingVenue, venueUsesUnifiedAppointmentData } from '@/lib/booking/unified-scheduling';
 
 /**
  * GET /api/booking/appointment-catalog?venue_id=uuid
@@ -19,7 +19,10 @@ export async function GET(request: NextRequest) {
 
     const supabase = getSupabaseAdminClient();
     const venueMode = await resolveVenueMode(supabase, venueId);
-    if (!isUnifiedSchedulingVenue(venueMode.bookingModel)) {
+    if (
+      !isUnifiedSchedulingVenue(venueMode.bookingModel) &&
+      !venueUsesUnifiedAppointmentData(venueMode.bookingModel, venueMode.enabledModels)
+    ) {
       return NextResponse.json({ error: 'Not an appointment venue' }, { status: 404 });
     }
 

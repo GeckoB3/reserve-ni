@@ -760,8 +760,7 @@ export function BookableCalendarsPanel({
               </span>
               <p>
                 You&apos;ve reached your plan&apos;s calendar limit
-                {entitlement.calendar_limit != null ? ` (${entitlement.calendar_limit})` : ''}. Increase your allowance
-                on Standard or upgrade to Business for unlimited calendars — see{' '}
+                {entitlement.calendar_limit != null ? ` (${entitlement.calendar_limit})` : ''}. Visit{' '}
                 <a href="/dashboard/settings?tab=plan" className="font-semibold text-amber-950 underline underline-offset-2">
                   Settings → Plan
                 </a>

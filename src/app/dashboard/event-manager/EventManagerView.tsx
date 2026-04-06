@@ -24,13 +24,14 @@ interface ExperienceEvent {
   capacity: number;
   image_url: string | null;
   is_active: boolean;
-  /** Unified calendar column for staff grid (unified scheduling). */
   calendar_id: string | null;
   ticket_types: TicketType[];
   max_advance_booking_days?: number;
   min_booking_notice_hours?: number;
   cancellation_notice_hours?: number;
   allow_same_day_booking?: boolean;
+  payment_requirement?: 'none' | 'deposit' | 'full_payment';
+  deposit_amount_pence?: number | null;
 }
 
 interface AttendeeRow {
@@ -68,12 +69,13 @@ interface EventFormState {
   scheduleMode: ScheduleMode;
   recurrenceUntil: string;
   customDatesText: string;
-  /** Unified calendar id, or empty for unassigned. */
   calendar_id: string;
   max_advance_booking_days: number;
   min_booking_notice_hours: number;
   cancellation_notice_hours: number;
   allow_same_day_booking: boolean;
+  payment_requirement: 'none' | 'deposit' | 'full_payment';
+  deposit_pounds: string;
 }
 
 function parseCustomDatesFromText(text: string): string[] {
@@ -105,6 +107,8 @@ const BLANK_EVENT: EventFormState = {
   min_booking_notice_hours: 1,
   cancellation_notice_hours: 48,
   allow_same_day_booking: true,
+  payment_requirement: 'none',
+  deposit_pounds: '',
 };
 
 export function EventManagerView({
@@ -112,13 +116,13 @@ export function EventManagerView({
   isAdmin,
   currency = 'GBP',
   publicBookingUrl,
-  bookingModel = 'table_reservation',
+  stripeConnected = false,
 }: {
   venueId: string;
   isAdmin: boolean;
   currency?: string;
   publicBookingUrl: string;
-  bookingModel?: string;
+  stripeConnected?: boolean;
 }) {
   const { addToast } = useToast();
   const sym = currency === 'EUR' ? '€' : '£';
@@ -148,12 +152,8 @@ export function EventManagerView({
   const [teamCalendars, setTeamCalendars] = useState<Array<{ id: string; name: string; calendar_type?: string }>>(
     [],
   );
-  const [showNewColumnUi, setShowNewColumnUi] = useState(false);
-  const [newColumnName, setNewColumnName] = useState('');
-  const [creatingColumn, setCreatingColumn] = useState(false);
-
   useEffect(() => {
-    if (!showEventForm || bookingModel !== 'unified_scheduling') return;
+    if (!showEventForm) return;
     let cancelled = false;
     void fetch('/api/venue/practitioners?roster=1')
       .then((r) => (r.ok ? r.json() : null))
@@ -169,45 +169,65 @@ export function EventManagerView({
     return () => {
       cancelled = true;
     };
-  }, [showEventForm, bookingModel]);
+  }, [showEventForm]);
 
-  async function createCalendarColumn() {
-    const name = newColumnName.trim();
+  const [showAddCalendarModal, setShowAddCalendarModal] = useState(false);
+  const [newCalendarName, setNewCalendarName] = useState('');
+  const [addCalendarSubmitting, setAddCalendarSubmitting] = useState(false);
+  const [addCalendarModalError, setAddCalendarModalError] = useState<string | null>(null);
+
+  const submitInlineNewCalendar = useCallback(async () => {
+    const name = newCalendarName.trim();
     if (!name) {
-      setEventError('Enter a name for the new calendar column.');
+      setAddCalendarModalError('Enter a display name for the calendar.');
       return;
     }
-    setCreatingColumn(true);
-    setEventError(null);
+    setAddCalendarSubmitting(true);
+    setAddCalendarModalError(null);
     try {
-      const res = await fetch('/api/venue/calendar-columns', {
+      const res = await fetch('/api/venue/practitioners', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name }),
+        body: JSON.stringify({
+          name,
+          calendar_type: 'practitioner',
+          is_active: true,
+        }),
       });
-      const json = (await res.json()) as { error?: string; id?: string; name?: string };
+      const json = (await res.json()) as {
+        id?: string;
+        name?: string;
+        error?: string;
+        upgrade_required?: boolean;
+      };
       if (!res.ok) {
-        setEventError(json.error ?? 'Could not create calendar column');
+        if (res.status === 403 && json.upgrade_required) {
+          setAddCalendarModalError(json.error ?? 'Calendar limit reached for your plan.');
+        } else {
+          setAddCalendarModalError(json.error ?? 'Could not create calendar');
+        }
         return;
       }
       const newId = json.id;
-      const newName = json.name;
-      if (newId && newName) {
-        setEventForm((f) => ({ ...f, calendar_id: newId }));
-        setTeamCalendars((prev) => {
-          if (prev.some((c) => c.id === newId)) return prev;
-          return [...prev, { id: newId, name: newName }].sort((a, b) => a.name.localeCompare(b.name));
-        });
+      const newName = typeof json.name === 'string' ? json.name : name;
+      if (!newId) {
+        setAddCalendarModalError('Calendar was created but no id was returned. Refresh the page.');
+        return;
       }
-      setNewColumnName('');
-      setShowNewColumnUi(false);
-      addToast('Calendar column created. It appears on the staff calendar like your other columns.', 'success');
+      setTeamCalendars((prev) => {
+        if (prev.some((c) => c.id === newId)) return prev;
+        return [...prev, { id: newId, name: newName }].sort((a, b) => a.name.localeCompare(b.name));
+      });
+      setEventForm((f) => ({ ...f, calendar_id: newId }));
+      setNewCalendarName('');
+      setShowAddCalendarModal(false);
+      addToast(`Calendar "${newName}" created and selected.`, 'success');
     } catch {
-      setEventError('Could not create calendar column');
+      setAddCalendarModalError('Could not create calendar');
     } finally {
-      setCreatingColumn(false);
+      setAddCalendarSubmitting(false);
     }
-  }
+  }, [newCalendarName, addToast]);
 
   const fetchEvents = useCallback(async () => {
     setLoading(true);
@@ -324,14 +344,10 @@ export function EventManagerView({
     setEventSaving(true);
     setEventError(null);
     try {
-      const calendarPayload: Record<string, unknown> = {};
-      if (bookingModel === 'unified_scheduling') {
-        if (eventForm.calendar_id) {
-          calendarPayload.calendar_id = eventForm.calendar_id;
-        } else {
-          calendarPayload.calendar_id = null;
-        }
-      }
+      const depositPence =
+        eventForm.payment_requirement === 'deposit' && eventForm.deposit_pounds.trim() !== ''
+          ? Math.max(0, Math.round(parseFloat(eventForm.deposit_pounds) * 100))
+          : null;
 
       const basePayload = {
         name: eventForm.name.trim(),
@@ -346,11 +362,13 @@ export function EventManagerView({
           price_pence: Math.round(parseFloat(tt.price_pence || '0') * 100),
           ...(tt.capacity !== '' && { capacity: parseInt(tt.capacity) }),
         })),
-        ...calendarPayload,
+        calendar_id: eventForm.calendar_id || null,
         max_advance_booking_days: eventForm.max_advance_booking_days,
         min_booking_notice_hours: eventForm.min_booking_notice_hours,
         cancellation_notice_hours: eventForm.cancellation_notice_hours,
         allow_same_day_booking: eventForm.allow_same_day_booking,
+        payment_requirement: eventForm.payment_requirement,
+        deposit_amount_pence: depositPence,
       };
 
       let postBody: Record<string, unknown> = { ...basePayload };
@@ -411,8 +429,6 @@ export function EventManagerView({
       setShowEventForm(false);
       setEditingEventId(null);
       setEventForm({ ...BLANK_EVENT });
-      setShowNewColumnUi(false);
-      setNewColumnName('');
       await fetchEvents();
     } catch {
       setEventError('Save failed');
@@ -446,11 +462,14 @@ export function EventManagerView({
       min_booking_notice_hours: event.min_booking_notice_hours ?? 1,
       cancellation_notice_hours: event.cancellation_notice_hours ?? 48,
       allow_same_day_booking: event.allow_same_day_booking ?? true,
+      payment_requirement: event.payment_requirement ?? 'none',
+      deposit_pounds:
+        event.deposit_amount_pence != null && event.deposit_amount_pence > 0
+          ? (event.deposit_amount_pence / 100).toFixed(2)
+          : '',
     });
     setEditingEventId(event.id);
     setEventError(null);
-    setShowNewColumnUi(false);
-    setNewColumnName('');
     setShowEventForm(true);
     setSelectedId(null);
   };
@@ -637,8 +656,6 @@ export function EventManagerView({
                 setEditingEventId(null);
                 setEventForm({ ...BLANK_EVENT });
                 setEventError(null);
-                setShowNewColumnUi(false);
-                setNewColumnName('');
                 setShowEventForm(true);
               }}
               className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700"
@@ -871,90 +888,44 @@ export function EventManagerView({
                   </div>
                 </div>
               </div>
-              {bookingModel === 'unified_scheduling' && (
-                <div className="sm:col-span-2 space-y-3 rounded-lg border border-slate-100 bg-slate-50/80 p-3">
-                  <p className="text-xs font-medium text-slate-700">Staff calendar column</p>
-                  <p className="text-xs text-slate-500">
-                    Show this event on a team calendar column in the practitioner calendar. The time must not overlap
-                    other appointments, classes, resources on that column, or blocked time.
-                  </p>
-                  <div>
-                    <label className="mb-1 block text-xs font-medium text-slate-600">Calendar</label>
-                    <select
-                      value={eventForm.calendar_id}
-                      onChange={(e) => setEventForm((f) => ({ ...f, calendar_id: e.target.value }))}
-                      className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
-                    >
-                      <option value="">Not on a column (events strip only)</option>
-                      {teamCalendars.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="rounded-lg border border-slate-100 bg-slate-50/90 p-3">
-                    {!showNewColumnUi ? (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShowNewColumnUi(true);
-                          setEventError(null);
-                        }}
-                        className="inline-flex w-full items-center justify-center rounded-lg border border-brand-200/90 bg-white px-3.5 py-2.5 text-sm font-semibold text-brand-700 shadow-sm transition-[color,background-color,border-color,box-shadow,transform] duration-150 ease-out hover:border-brand-400 hover:bg-brand-50 hover:text-brand-800 hover:shadow-md active:scale-[0.98] active:border-brand-500 active:bg-brand-100 active:shadow-inner motion-reduce:transition-colors motion-reduce:active:scale-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2"
-                      >
-                        New calendar column
-                      </button>
-                    ) : (
-                      <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-end">
-                        <div className="min-w-0 flex-1 sm:max-w-xs">
-                          <label
-                            htmlFor="event-form-new-calendar-column-name"
-                            className="mb-1 block text-[11px] font-medium text-slate-600"
-                          >
-                            Column name
-                          </label>
-                          <input
-                            id="event-form-new-calendar-column-name"
-                            type="text"
-                            value={newColumnName}
-                            onChange={(e) => setNewColumnName(e.target.value)}
-                            placeholder="e.g. Main hall, Host column"
-                            disabled={creatingColumn}
-                            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 disabled:opacity-60"
-                          />
-                        </div>
-                        <div className="flex flex-wrap gap-2">
-                          <button
-                            type="button"
-                            onClick={() => void createCalendarColumn()}
-                            disabled={creatingColumn}
-                            className="rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-brand-700 disabled:opacity-50"
-                          >
-                            {creatingColumn ? 'Creating…' : 'Create'}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setShowNewColumnUi(false);
-                              setNewColumnName('');
-                              setEventError(null);
-                            }}
-                            disabled={creatingColumn}
-                            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-                          >
-                            Cancel
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                  <p className="text-xs text-slate-500">
-                    New columns use the same setup as elsewhere: they appear on the staff calendar and can be managed in
-                    Calendar availability.
+              <div className="sm:col-span-2 space-y-3 rounded-lg border border-slate-100 bg-slate-50/80 p-3">
+                <p className="text-xs font-medium text-slate-700">Calendar column</p>
+                <p className="text-xs text-slate-500">
+                  Show this event on a calendar column in the staff calendar. The time must not overlap
+                  other appointments, classes, resources on that column, or blocked time.
+                </p>
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-slate-600">Calendar</label>
+                  <select
+                    value={eventForm.calendar_id}
+                    onChange={(e) => setEventForm((f) => ({ ...f, calendar_id: e.target.value }))}
+                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
+                  >
+                    <option value="">Not assigned to a calendar</option>
+                    {teamCalendars.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="mt-3 rounded-lg border border-slate-100 bg-slate-50/90 p-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAddCalendarModalError(null);
+                      setNewCalendarName('');
+                      setShowAddCalendarModal(true);
+                    }}
+                    className="inline-flex w-full items-center justify-center rounded-lg border border-brand-200/90 bg-white px-3.5 py-2.5 text-sm font-semibold text-brand-700 shadow-sm transition-[color,background-color,border-color,box-shadow,transform] duration-150 ease-out hover:border-brand-400 hover:bg-brand-50 hover:text-brand-800 hover:shadow-md active:scale-[0.98] active:border-brand-500 active:bg-brand-100 active:shadow-inner motion-reduce:transition-colors motion-reduce:active:scale-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2"
+                  >
+                    Add calendar
+                  </button>
+                  <p className="mt-2 text-xs text-slate-500">
+                    Create a calendar column here and assign it to this event immediately.
                   </p>
                 </div>
-              )}
+              </div>
               <div className="sm:col-span-2">
                 <label className="mb-1 block text-xs font-medium text-slate-600">
                   Description <span className="font-normal text-slate-400">optional</span>
@@ -1056,6 +1027,69 @@ export function EventManagerView({
               </button>
             </div>
 
+            {/* Online payment */}
+            <div>
+              <label className="mb-2 block text-sm font-medium text-slate-700">Online payment (Stripe)</label>
+              <div className="space-y-2">
+                <label className="flex cursor-pointer items-start gap-2 text-sm text-slate-700">
+                  <input
+                    type="radio"
+                    name="event_payment_requirement"
+                    className="mt-0.5"
+                    checked={eventForm.payment_requirement === 'none'}
+                    onChange={() =>
+                      setEventForm((f) => ({ ...f, payment_requirement: 'none', deposit_pounds: '' }))
+                    }
+                  />
+                  <span>None - pay at venue or free event</span>
+                </label>
+                <label className="flex cursor-pointer items-start gap-2 text-sm text-slate-700">
+                  <input
+                    type="radio"
+                    name="event_payment_requirement"
+                    className="mt-0.5"
+                    checked={eventForm.payment_requirement === 'deposit'}
+                    onChange={() => setEventForm((f) => ({ ...f, payment_requirement: 'deposit' }))}
+                  />
+                  <span>Deposit per person (partial payment online)</span>
+                </label>
+                <label className="flex cursor-pointer items-start gap-2 text-sm text-slate-700">
+                  <input
+                    type="radio"
+                    name="event_payment_requirement"
+                    className="mt-0.5"
+                    checked={eventForm.payment_requirement === 'full_payment'}
+                    onChange={() =>
+                      setEventForm((f) => ({ ...f, payment_requirement: 'full_payment', deposit_pounds: '' }))
+                    }
+                  />
+                  <span>Full payment online (per ticket)</span>
+                </label>
+              </div>
+              {eventForm.payment_requirement === 'deposit' && (
+                <div className="mt-3 max-w-xs">
+                  <label className="mb-1 block text-xs font-medium text-slate-600">Deposit amount ({sym}) *</label>
+                  <input
+                    type="number"
+                    min={0}
+                    step={0.01}
+                    value={eventForm.deposit_pounds}
+                    onChange={(e) => setEventForm((f) => ({ ...f, deposit_pounds: e.target.value }))}
+                    placeholder="e.g. 5.00"
+                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
+                  />
+                </div>
+              )}
+              <p className="mt-2 text-xs text-slate-500">
+                Deposit and full payment require ticket prices &gt; 0 and a connected Stripe account.
+                {!stripeConnected && (eventForm.payment_requirement === 'deposit' || eventForm.payment_requirement === 'full_payment') && (
+                  <span className="mt-1 block font-medium text-amber-700">
+                    Stripe is not connected. Connect your Stripe account in Settings before guests can pay online.
+                  </span>
+                )}
+              </p>
+            </div>
+
             {eventError && <p className="text-sm text-red-600">{eventError}</p>}
             <div className="flex gap-2">
               <button
@@ -1072,8 +1106,6 @@ export function EventManagerView({
                   setShowEventForm(false);
                   setEditingEventId(null);
                   setEventError(null);
-                  setShowNewColumnUi(false);
-                  setNewColumnName('');
                 }}
                 className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
               >
@@ -1136,6 +1168,78 @@ export function EventManagerView({
               </div>
             </section>
           )}
+        </div>
+      )}
+
+      {showAddCalendarModal && isAdmin && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4"
+          onClick={() => {
+            if (addCalendarSubmitting) return;
+            setShowAddCalendarModal(false);
+            setAddCalendarModalError(null);
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="add-calendar-modal-title"
+            className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-6 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 id="add-calendar-modal-title" className="mb-1 text-lg font-semibold text-slate-900">
+              Add calendar
+            </h2>
+            <p className="mb-4 text-sm text-slate-500">
+              Same defaults as Calendar availability: weekly hours are set automatically; you can edit them in
+              Availability later.
+            </p>
+            {addCalendarModalError && (
+              <div
+                role="alert"
+                className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800"
+              >
+                {addCalendarModalError}
+              </div>
+            )}
+            <label className="mb-1 block text-xs font-medium text-slate-600">Display name *</label>
+            <input
+              type="text"
+              value={newCalendarName}
+              onChange={(e) => setNewCalendarName(e.target.value)}
+              placeholder="e.g. Studio A, Main column"
+              disabled={addCalendarSubmitting}
+              className="mb-4 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 disabled:opacity-60"
+              autoFocus
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  void submitInlineNewCalendar();
+                }
+              }}
+            />
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => void submitInlineNewCalendar()}
+                disabled={addCalendarSubmitting}
+                className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
+              >
+                {addCalendarSubmitting ? 'Creating\u2026' : 'Create and select'}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowAddCalendarModal(false);
+                  setAddCalendarModalError(null);
+                }}
+                disabled={addCalendarSubmitting}
+                className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

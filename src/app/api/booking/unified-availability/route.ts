@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { resolveVenueMode } from '@/lib/venue-mode';
-import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
+import { isUnifiedSchedulingVenue, venueUsesUnifiedAppointmentData } from '@/lib/booking/unified-scheduling';
 import { getUnifiedAvailableSlots } from '@/lib/unified-availability';
 import { z } from 'zod';
 
@@ -35,7 +35,10 @@ export async function GET(request: NextRequest) {
     const { venue_id, calendar_id, date, service_item_id, duration_minutes } = parsed.data;
     const supabase = getSupabaseAdminClient();
     const venueMode = await resolveVenueMode(supabase, venue_id);
-    if (!isUnifiedSchedulingVenue(venueMode.bookingModel)) {
+    if (
+      !isUnifiedSchedulingVenue(venueMode.bookingModel) &&
+      !venueUsesUnifiedAppointmentData(venueMode.bookingModel, venueMode.enabledModels)
+    ) {
       return NextResponse.json({ error: 'Venue does not use unified scheduling' }, { status: 400 });
     }
 

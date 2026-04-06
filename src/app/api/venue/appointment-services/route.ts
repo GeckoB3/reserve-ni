@@ -9,6 +9,10 @@ import {
 } from '@/lib/venue/service-calendar-removal';
 import { z } from 'zod';
 import type { ClassPaymentRequirement } from '@/types/booking-models';
+import type { BookingModel } from '@/types/booking-models';
+import { normalizeEnabledModels } from '@/lib/booking/enabled-models';
+import { venueUsesUnifiedAppointmentData } from '@/lib/booking/unified-scheduling';
+import { ensureUnifiedMirrorForPractitionerId } from '@/lib/class-instances/instructor-calendar-block';
 
 const staffMaySchema = {
   staff_may_customize_name: z.boolean().optional(),
@@ -92,12 +96,139 @@ function mapServiceItemRowForDashboard(row: Record<string, unknown>): Record<str
   };
 }
 
-async function getVenueBookingModel(
+/**
+ * Calendar IDs from the client must be a string array. A single string or non-array
+ * would make `.map` throw and surface as 500 — normalize here.
+ * `undefined` when the field was omitted (PATCH: do not change links).
+ */
+function normalizePractitionerIdsInput(raw: unknown): string[] | undefined {
+  if (raw === undefined) return undefined;
+  if (raw === null) return [];
+  if (Array.isArray(raw)) {
+    const ids = raw
+      .filter((x): x is string => typeof x === 'string' && x.trim().length > 0)
+      .map((x) => x.trim());
+    return [...new Set(ids)];
+  }
+  if (typeof raw === 'string' && raw.trim().length > 0) return [raw.trim()];
+  return [];
+}
+
+/**
+ * USE service links (`calendar_service_assignments`) reference `unified_calendars.id`. New calendars created via
+ * `POST /api/venue/practitioners` are stored in `practitioners` when the venue primary is not `unified_scheduling`,
+ * without a matching `unified_calendars` row — mirror those rows (same id) before validating links.
+ */
+async function ensureUnifiedMirrorsForAppointmentCalendarIds(
   admin: ReturnType<typeof getSupabaseAdminClient>,
   venueId: string,
-): Promise<string> {
-  const { data } = await admin.from('venues').select('booking_model').eq('id', venueId).maybeSingle();
-  return ((data as { booking_model?: string } | null)?.booking_model as string) ?? '';
+  calendarIds: string[],
+): Promise<{ ok: true } | { ok: false; message: string }> {
+  if (calendarIds.length === 0) return { ok: true };
+  for (const id of calendarIds) {
+    const { data: existingUc } = await admin
+      .from('unified_calendars')
+      .select('id')
+      .eq('venue_id', venueId)
+      .eq('id', id)
+      .maybeSingle();
+    if (existingUc) continue;
+
+    const { data: pr, error: prErr } = await admin
+      .from('practitioners')
+      .select(
+        'id, name, staff_id, slug, working_hours, break_times, break_times_by_day, days_off, sort_order, is_active',
+      )
+      .eq('venue_id', venueId)
+      .eq('id', id)
+      .maybeSingle();
+    if (prErr) {
+      console.error('ensureUnifiedMirrorsForAppointmentCalendarIds: practitioners query failed:', prErr);
+      return { ok: false, message: 'Could not verify calendars for this venue.' };
+    }
+    if (!pr) {
+      return {
+        ok: false,
+        message:
+          'One or more calendars are not valid for this venue. Refresh the page and try again, or pick calendars from the list.',
+      };
+    }
+    const mirrored = await ensureUnifiedMirrorForPractitionerId(admin, venueId, pr as Parameters<
+      typeof ensureUnifiedMirrorForPractitionerId
+    >[2]);
+    if (!mirrored) {
+      return { ok: false, message: 'Could not sync a calendar for service links. Try again or contact support.' };
+    }
+  }
+  return { ok: true };
+}
+
+async function assertCalendarIdsBelongToVenueUnified(
+  admin: ReturnType<typeof getSupabaseAdminClient>,
+  venueId: string,
+  calendarIds: string[],
+): Promise<{ ok: true } | { ok: false; message: string }> {
+  if (calendarIds.length === 0) return { ok: true };
+  const { data, error } = await admin
+    .from('unified_calendars')
+    .select('id')
+    .eq('venue_id', venueId)
+    .in('id', calendarIds);
+  if (error) {
+    console.error('appointment-services: verify unified_calendars failed:', error);
+    return { ok: false, message: 'Could not verify calendars for this venue.' };
+  }
+  const allowed = new Set((data ?? []).map((r) => r.id as string));
+  const missing = calendarIds.filter((id) => !allowed.has(id));
+  if (missing.length > 0) {
+    return {
+      ok: false,
+      message:
+        'One or more calendars are not valid for this venue. Refresh the page and try again, or pick calendars from the list.',
+    };
+  }
+  return { ok: true };
+}
+
+async function assertPractitionerIdsBelongToVenueLegacy(
+  admin: ReturnType<typeof getSupabaseAdminClient>,
+  venueId: string,
+  practitionerIds: string[],
+): Promise<{ ok: true } | { ok: false; message: string }> {
+  if (practitionerIds.length === 0) return { ok: true };
+  const { data, error } = await admin
+    .from('practitioners')
+    .select('id')
+    .eq('venue_id', venueId)
+    .in('id', practitionerIds);
+  if (error) {
+    console.error('appointment-services: verify practitioners failed:', error);
+    return { ok: false, message: 'Could not verify calendars for this venue.' };
+  }
+  const allowed = new Set((data ?? []).map((r) => r.id as string));
+  const missing = practitionerIds.filter((id) => !allowed.has(id));
+  if (missing.length > 0) {
+    return {
+      ok: false,
+      message:
+        'One or more team members are not valid for this venue. Refresh the page and try again.',
+    };
+  }
+  return { ok: true };
+}
+
+/** USE stores services in `service_items` when primary is unified_scheduling or it is enabled as a secondary. */
+async function venueUsesUnifiedServiceItems(
+  admin: ReturnType<typeof getSupabaseAdminClient>,
+  venueId: string,
+): Promise<boolean> {
+  const { data } = await admin.from('venues').select('booking_model, enabled_models').eq('id', venueId).maybeSingle();
+  const primary = ((data as { booking_model?: string } | null)?.booking_model as BookingModel) ?? 'table_reservation';
+  const enabled = normalizeEnabledModels(
+    (data as { enabled_models?: unknown } | null)?.enabled_models,
+    primary,
+  );
+  return venueUsesUnifiedAppointmentData(primary, enabled);
 }
 
 /** GET /api/venue/appointment-services - list appointment services for the venue. */
@@ -108,9 +239,9 @@ export async function GET() {
     if (!staff) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
 
     const admin = getSupabaseAdminClient();
-    const bookingModel = await getVenueBookingModel(admin, staff.venue_id);
+    const useUnified = await venueUsesUnifiedServiceItems(admin, staff.venue_id);
 
-    if (bookingModel === 'unified_scheduling') {
+    if (useUnified) {
       const [servicesRes, calRes] = await Promise.all([
         admin
           .from('service_items')
@@ -214,9 +345,24 @@ export async function POST(request: NextRequest) {
     }
 
     const admin = getSupabaseAdminClient();
-    const bookingModel = await getVenueBookingModel(admin, staff.venue_id);
+    const useUnified = await venueUsesUnifiedServiceItems(admin, staff.venue_id);
+    const practitionerIdsForLinks = normalizePractitionerIdsInput(body.practitioner_ids) ?? [];
 
-    if (bookingModel === 'unified_scheduling') {
+    if (useUnified) {
+      if (practitionerIdsForLinks.length > 0) {
+        const mirrorOk = await ensureUnifiedMirrorsForAppointmentCalendarIds(
+          admin,
+          staff.venue_id,
+          practitionerIdsForLinks,
+        );
+        if (!mirrorOk.ok) {
+          return NextResponse.json({ error: mirrorOk.message }, { status: 400 });
+        }
+        const calCheck = await assertCalendarIdsBelongToVenueUnified(admin, staff.venue_id, practitionerIdsForLinks);
+        if (!calCheck.ok) {
+          return NextResponse.json({ error: calCheck.message }, { status: 400 });
+        }
+      }
       const pay = normalizeServicePaymentFields({
         payment_requirement: parsed.data.payment_requirement,
         deposit_pence: parsed.data.deposit_pence,
@@ -255,9 +401,8 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'Failed to create service' }, { status: 500 });
       }
 
-      const practitioner_ids: string[] = body.practitioner_ids ?? [];
-      if (practitioner_ids.length > 0) {
-        const links = practitioner_ids.map((calendarId: string) => ({
+      if (practitionerIdsForLinks.length > 0) {
+        const links = practitionerIdsForLinks.map((calendarId: string) => ({
           calendar_id: calendarId,
           service_item_id: data.id as string,
         }));
@@ -270,6 +415,13 @@ export async function POST(request: NextRequest) {
       }
 
       return NextResponse.json(mapServiceItemRowForDashboard(data as Record<string, unknown>), { status: 201 });
+    }
+
+    if (practitionerIdsForLinks.length > 0) {
+      const pCheck = await assertPractitionerIdsBelongToVenueLegacy(admin, staff.venue_id, practitionerIdsForLinks);
+      if (!pCheck.ok) {
+        return NextResponse.json({ error: pCheck.message }, { status: 400 });
+      }
     }
 
     const pay = normalizeServicePaymentFields({
@@ -295,13 +447,17 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to create service' }, { status: 500 });
     }
 
-    const practitioner_ids: string[] = body.practitioner_ids ?? [];
-    if (practitioner_ids.length > 0) {
-      const links = practitioner_ids.map((pid: string) => ({
+    if (practitionerIdsForLinks.length > 0) {
+      const links = practitionerIdsForLinks.map((pid: string) => ({
         practitioner_id: pid,
         service_id: data.id,
       }));
-      await admin.from('practitioner_services').insert(links);
+      const { error: linkErr } = await admin.from('practitioner_services').insert(links);
+      if (linkErr) {
+        console.error('POST /api/venue/appointment-services practitioner_services failed:', linkErr);
+        await admin.from('appointment_services').delete().eq('id', data.id).eq('venue_id', staff.venue_id);
+        return NextResponse.json({ error: 'Failed to link service to calendars' }, { status: 500 });
+      }
     }
 
     return NextResponse.json(data, { status: 201 });
@@ -320,7 +476,8 @@ export async function PATCH(request: NextRequest) {
     if (!requireAdmin(staff)) return NextResponse.json({ error: 'Forbidden: admin only' }, { status: 403 });
 
     const body = await request.json();
-    const { id, practitioner_ids, ...rest } = body;
+    const { id, practitioner_ids: rawPractitionerIds, ...rest } = body;
+    const practitioner_ids = normalizePractitionerIdsInput(rawPractitionerIds);
     if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 });
 
     const parsed = serviceSchema.partial().safeParse(rest);
@@ -329,10 +486,25 @@ export async function PATCH(request: NextRequest) {
     }
 
     const admin = getSupabaseAdminClient();
-    const bookingModel = await getVenueBookingModel(admin, staff.venue_id);
+    const useUnified = await venueUsesUnifiedServiceItems(admin, staff.venue_id);
 
-    if (bookingModel === 'unified_scheduling') {
-      if (Array.isArray(practitioner_ids)) {
+    if (useUnified) {
+      if (practitioner_ids !== undefined && practitioner_ids.length > 0) {
+        const mirrorOk = await ensureUnifiedMirrorsForAppointmentCalendarIds(
+          admin,
+          staff.venue_id,
+          practitioner_ids,
+        );
+        if (!mirrorOk.ok) {
+          return NextResponse.json({ error: mirrorOk.message }, { status: 400 });
+        }
+        const calCheck = await assertCalendarIdsBelongToVenueUnified(admin, staff.venue_id, practitioner_ids);
+        if (!calCheck.ok) {
+          return NextResponse.json({ error: calCheck.message }, { status: 400 });
+        }
+      }
+
+      if (practitioner_ids !== undefined) {
         const { data: existingLinks, error: existingErr } = await admin
           .from('calendar_service_assignments')
           .select('calendar_id')
@@ -344,7 +516,7 @@ export async function PATCH(request: NextRequest) {
         }
 
         const prev = new Set((existingLinks ?? []).map((r) => r.calendar_id as string));
-        const next = new Set(practitioner_ids as string[]);
+        const next = new Set(practitioner_ids);
         const removedCalendars = [...prev].filter((cid) => !next.has(cid));
 
         for (const cid of removedCalendars) {
@@ -389,7 +561,7 @@ export async function PATCH(request: NextRequest) {
         return NextResponse.json({ error: 'Failed to update service' }, { status: 500 });
       }
 
-      if (Array.isArray(practitioner_ids)) {
+      if (practitioner_ids !== undefined) {
         await admin.from('calendar_service_assignments').delete().eq('service_item_id', id);
         if (practitioner_ids.length > 0) {
           const links = practitioner_ids.map((calendarId: string) => ({
@@ -407,7 +579,14 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json(mapServiceItemRowForDashboard(data as Record<string, unknown>));
     }
 
-    if (Array.isArray(practitioner_ids)) {
+    if (practitioner_ids !== undefined && practitioner_ids.length > 0) {
+      const pCheck = await assertPractitionerIdsBelongToVenueLegacy(admin, staff.venue_id, practitioner_ids);
+      if (!pCheck.ok) {
+        return NextResponse.json({ error: pCheck.message }, { status: 400 });
+      }
+    }
+
+    if (practitioner_ids !== undefined) {
       const { data: existingLinks, error: existingErr } = await admin
         .from('practitioner_services')
         .select('practitioner_id')
@@ -419,7 +598,7 @@ export async function PATCH(request: NextRequest) {
       }
 
       const prev = new Set((existingLinks ?? []).map((r) => r.practitioner_id as string));
-      const next = new Set(practitioner_ids as string[]);
+      const next = new Set(practitioner_ids);
       const removedPractitioners = [...prev].filter((pid) => !next.has(pid));
 
       for (const pid of removedPractitioners) {
@@ -464,14 +643,18 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to update service' }, { status: 500 });
     }
 
-    if (Array.isArray(practitioner_ids)) {
+    if (practitioner_ids !== undefined) {
       await admin.from('practitioner_services').delete().eq('service_id', id);
       if (practitioner_ids.length > 0) {
         const links = practitioner_ids.map((pid: string) => ({
           practitioner_id: pid,
           service_id: id,
         }));
-        await admin.from('practitioner_services').insert(links);
+        const { error: linkErr } = await admin.from('practitioner_services').insert(links);
+        if (linkErr) {
+          console.error('PATCH /api/venue/appointment-services practitioner_services failed:', linkErr);
+          return NextResponse.json({ error: 'Failed to update service links' }, { status: 500 });
+        }
       }
     }
 
@@ -494,9 +677,9 @@ export async function DELETE(request: NextRequest) {
     if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 });
 
     const admin = getSupabaseAdminClient();
-    const bookingModel = await getVenueBookingModel(admin, staff.venue_id);
+    const useUnified = await venueUsesUnifiedServiceItems(admin, staff.venue_id);
 
-    const table = bookingModel === 'unified_scheduling' ? 'service_items' : 'appointment_services';
+    const table = useUnified ? 'service_items' : 'appointment_services';
     const { error } = await admin.from(table).delete().eq('id', id).eq('venue_id', staff.venue_id);
 
     if (error) {

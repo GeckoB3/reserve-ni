@@ -635,14 +635,20 @@ async function handleNonTableBooking(
     if (!event || event.remaining_capacity < party_size) {
       return NextResponse.json({ error: 'This event is fully booked or unavailable' }, { status: 409 });
     }
-    if (ticket_lines && ticket_lines.length > 0) {
-      depositAmountPence = ticket_lines.reduce((sum, tl) => sum + tl.quantity * tl.unit_price_pence, 0);
-      if (depositAmountPence > 0) requiresDeposit = true;
+    const ticketTotal = (ticket_lines && ticket_lines.length > 0)
+      ? ticket_lines.reduce((sum, tl) => sum + tl.quantity * tl.unit_price_pence, 0)
+      : 0;
+    const eventPayReq = event.payment_requirement ?? 'none';
+    const eventDepPerPerson = event.deposit_amount_pence ?? 0;
+    if (eventPayReq === 'full_payment' && ticketTotal > 0) {
+      requiresDeposit = true;
+      depositAmountPence = ticketTotal;
+    } else if (eventPayReq === 'deposit' && eventDepPerPerson > 0) {
+      requiresDeposit = true;
+      depositAmountPence = eventDepPerPerson * party_size;
     }
     const ticketTotalDisplay =
-      depositAmountPence != null && depositAmountPence > 0
-        ? `£${(depositAmountPence / 100).toFixed(2)}`
-        : null;
+      ticketTotal > 0 ? `£${(ticketTotal / 100).toFixed(2)}` : null;
     appointmentEmailExtras = {
       email_variant: 'appointment',
       booking_model: 'event_ticket',

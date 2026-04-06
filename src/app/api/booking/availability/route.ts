@@ -22,7 +22,7 @@ import {
 import { computeEventAvailability, fetchEventInput } from '@/lib/availability/event-ticket-engine';
 import { computeClassAvailability, fetchClassInput } from '@/lib/availability/class-session-engine';
 import { computeResourceAvailability, fetchResourceInput } from '@/lib/availability/resource-booking-engine';
-import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
+import { isUnifiedSchedulingVenue, venueUsesUnifiedAppointmentData } from '@/lib/booking/unified-scheduling';
 import { venueExposesBookingModel } from '@/lib/booking/enabled-models';
 import type { BookingModel } from '@/types/booking-models';
 import { DEFAULT_ENTITY_BOOKING_WINDOW, loadServiceEntityBookingWindow } from '@/lib/booking/entity-booking-window';
@@ -175,6 +175,16 @@ export async function GET(request: NextRequest) {
 
     const supabase = getSupabaseAdminClient();
     const venueMode = await resolveVenueMode(supabase, venueId);
+
+    const serviceIdParam = searchParams.get('service_id');
+    const practitionerIdParam = searchParams.get('practitioner_id');
+    if (
+      serviceIdParam &&
+      practitionerIdParam &&
+      venueUsesUnifiedAppointmentData(venueMode.bookingModel, venueMode.enabledModels)
+    ) {
+      return handleAppointmentAvailability(supabase, venueId, dateStr, searchParams);
+    }
 
     const bookingModelParam = searchParams.get('booking_model');
     if (bookingModelParam) {

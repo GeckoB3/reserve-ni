@@ -1,8 +1,10 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 /**
- * Bookable calendar IDs (`unified_calendars.id`) this staff user may manage for unified scheduling.
- * Legacy appointment venues use a single `practitioners` row per staff.
+ * Bookable calendar IDs (`unified_calendars.id`) and/or legacy `practitioners.id` this staff user may use.
+ * - Unified Scheduling: junction + `unified_calendars.staff_id` (calendar UUIDs only).
+ * - Other models: same calendars plus legacy `practitioners.id` when present (same shape the class timetable
+ *   instructor dropdown uses).
  */
 export async function getStaffManagedCalendarIds(
   admin: SupabaseClient,
@@ -12,33 +14,62 @@ export async function getStaffManagedCalendarIds(
   const { data: venue } = await admin.from('venues').select('booking_model').eq('id', venueId).maybeSingle();
   const bookingModel = (venue as { booking_model?: string } | null)?.booking_model;
 
-  if (bookingModel === 'unified_scheduling') {
-    const { data, error } = await admin
-      .from('staff_calendar_assignments')
-      .select('calendar_id')
-      .eq('venue_id', venueId)
-      .eq('staff_id', staffId);
+  const merged = new Set<string>();
 
-    if (error) {
-      console.error('[getStaffManagedCalendarIds] unified junction failed:', error.message, { venueId, staffId });
-      return [];
+  const { data: junctionRows, error: jErr } = await admin
+    .from('staff_calendar_assignments')
+    .select('calendar_id')
+    .eq('venue_id', venueId)
+    .eq('staff_id', staffId);
+
+  if (jErr) {
+    console.error('[getStaffManagedCalendarIds] staff_calendar_assignments failed:', jErr.message, {
+      venueId,
+      staffId,
+    });
+  } else {
+    for (const r of junctionRows ?? []) {
+      merged.add((r as { calendar_id: string }).calendar_id);
     }
-    return (data ?? []).map((r) => r.calendar_id as string);
   }
 
-  const { data, error } = await admin
-    .from('practitioners')
+  /** Calendars linked via legacy `unified_calendars.staff_id` (before or alongside junction rows). */
+  const { data: legacyRows, error: legacyErr } = await admin
+    .from('unified_calendars')
     .select('id')
     .eq('venue_id', venueId)
     .eq('staff_id', staffId)
-    .maybeSingle();
+    .eq('is_active', true)
+    .neq('calendar_type', 'resource');
 
-  if (error) {
-    console.error('[getStaffManagedCalendarIds] legacy practitioners failed:', error.message, { venueId, staffId });
-    return [];
+  if (legacyErr) {
+    console.error('[getStaffManagedCalendarIds] unified_calendars.staff_id failed:', legacyErr.message, {
+      venueId,
+      staffId,
+    });
+  } else {
+    for (const r of legacyRows ?? []) {
+      merged.add((r as { id: string }).id);
+    }
   }
 
-  return data?.id ? [data.id] : [];
+  /** Legacy appointment model: staff still has a practitioners row (used by older UIs and class instructor pickers). */
+  if (bookingModel !== 'unified_scheduling') {
+    const { data: prRow, error: pErr } = await admin
+      .from('practitioners')
+      .select('id')
+      .eq('venue_id', venueId)
+      .eq('staff_id', staffId)
+      .maybeSingle();
+
+    if (pErr) {
+      console.error('[getStaffManagedCalendarIds] practitioners failed:', pErr.message, { venueId, staffId });
+    } else if (prRow?.id) {
+      merged.add((prRow as { id: string }).id);
+    }
+  }
+
+  return [...merged];
 }
 
 export async function staffManagesCalendar(

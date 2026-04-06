@@ -13,6 +13,7 @@ const createBodySchema = z.object({
  * POST /api/venue/calendar-columns
  * Admin: create a new unified_calendars row (same shape as a team/practitioner column) so a resource
  * can use it as display_on_calendar_id. Treated like any other non-resource calendar column.
+ * Dashboard UIs should direct users to /dashboard/calendar-availability?tab=calendars (Calendars tab) as the primary place to create calendars.
  */
 export async function POST(request: NextRequest) {
   try {

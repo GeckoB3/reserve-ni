@@ -108,8 +108,8 @@ export function UnifiedAppointmentNotificationSection({
         const cur: Array<"email" | "sms"> = [...prev[key]];
         const has = cur.includes(ch);
         const next = has ? cur.filter((c) => c !== ch) : [...cur, ch];
-        const emptyFallback: Array<"email" | "sms"> =
-          key === "reminder_2_channels" ? ["sms"] : ["email"];
+        /** If both unchecked, revert to email-first (same as reminder_1_channels). */
+        const emptyFallback: Array<"email" | "sms"> = ["email"];
         const normalized: Array<"email" | "sms"> = next.length
           ? next
           : emptyFallback;
@@ -283,7 +283,7 @@ export function UnifiedAppointmentNotificationSection({
               type="number"
               min={1}
               max={48}
-              disabled={!isAdmin || !ns.reminder_2_enabled}
+              disabled={!isAdmin}
               value={ns.reminder_2_hours_before}
               onChange={(e) =>
                 patchNs({
@@ -302,7 +302,7 @@ export function UnifiedAppointmentNotificationSection({
                 type="checkbox"
                 className="h-4 w-4 rounded border-slate-300 text-brand-600"
                 checked={ns.reminder_2_channels.includes("email")}
-                disabled={!isAdmin || !ns.reminder_2_enabled}
+                disabled={!isAdmin}
                 onChange={() => toggleChannel("reminder_2_channels", "email")}
               />
               <span className="text-slate-700">Email</span>
@@ -312,7 +312,7 @@ export function UnifiedAppointmentNotificationSection({
                 type="checkbox"
                 className="h-4 w-4 rounded border-slate-300 text-brand-600"
                 checked={ns.reminder_2_channels.includes("sms")}
-                disabled={!isAdmin || !ns.reminder_2_enabled}
+                disabled={!isAdmin}
                 onChange={() => toggleChannel("reminder_2_channels", "sms")}
               />
               <span className="text-slate-700">Text</span>

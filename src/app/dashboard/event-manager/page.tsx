@@ -25,7 +25,7 @@ export default async function EventManagerPage() {
   const admin = getSupabaseAdminClient();
   const { data: venue } = await admin
     .from('venues')
-    .select('currency, slug, booking_model')
+    .select('currency, slug, stripe_account_id')
     .eq('id', staff.venue_id)
     .single();
   const currency = (venue?.currency as string) ?? 'GBP';
@@ -42,7 +42,7 @@ export default async function EventManagerPage() {
             isAdmin={staff.role === 'admin'}
             currency={currency}
             publicBookingUrl={publicBookingUrl}
-            bookingModel={(venue?.booking_model as string) ?? 'table_reservation'}
+            stripeConnected={!!(venue as { stripe_account_id?: string | null })?.stripe_account_id}
           />
         </div>
       </div>

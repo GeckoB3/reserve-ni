@@ -1,5 +1,5 @@
 /**
- * Dev-only: create a Supabase auth user + USE (appointments) venue on Standard with N calendars.
+ * Dev-only: create a Supabase auth user + USE (appointments) venue on the Appointments plan.
  *
  * Requires .env.local: NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
  *
@@ -22,7 +22,7 @@ config();
 const EMAIL = 'andrew5@reserveni.com';
 const PASSWORD = 'Password123';
 const CALENDAR_COUNT = 3;
-const PRICING_TIER = 'standard';
+const PRICING_TIER = 'appointments';
 
 /** Primary booking model: unified scheduling (appointments / calendars). */
 const BOOKING_MODEL = 'unified_scheduling';
@@ -216,7 +216,7 @@ async function main() {
   );
 
   console.log('[seed] Done. Log in with', EMAIL, '/ password you set.');
-  console.log('[seed] Venue ID:', venueId, '| Standard |', CALENDAR_COUNT, 'calendars |', BOOKING_MODEL);
+  console.log('[seed] Venue ID:', venueId, '| Appointments |', CALENDAR_COUNT, 'calendars |', BOOKING_MODEL);
 }
 
 main().catch((e) => {

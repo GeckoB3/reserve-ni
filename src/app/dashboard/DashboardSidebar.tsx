@@ -12,6 +12,7 @@ import {
   isVenueScheduleCalendarEligible,
   shouldShowAppointmentAvailabilitySettings,
 } from '@/lib/booking/schedule-calendar-eligibility';
+import { isRestaurantTableProductTier } from '@/lib/tier-enforcement';
 
 type NavItem = { href: string; label: string; icon: React.ComponentType<{ className?: string }> };
 
@@ -48,7 +49,7 @@ interface Props {
   venueName?: string;
   venueSlug?: string;
   tableManagementEnabled?: boolean;
-  /** Restaurant / Business / Founding tier — with `table_reservation` and `tableManagementEnabled`, shows table grid / floor plan. */
+  /** Restaurant / Founding tier — with `table_reservation` and `tableManagementEnabled`, shows table grid / floor plan. */
   pricingTier?: string;
   bookingModel?: BookingModel;
   /** Secondary bookable models (C/D/E); merged into model-specific nav. */
@@ -66,7 +67,7 @@ export function DashboardSidebar({
   staffName,
   venueSlug,
   tableManagementEnabled,
-  pricingTier = 'standard',
+  pricingTier = 'appointments',
   bookingModel = 'table_reservation',
   enabledModels = [],
   isAdmin = false,
@@ -77,8 +78,7 @@ export function DashboardSidebar({
   const [mobileOpen, setMobileOpen] = useState(false);
 
   /** Restaurant / Founding / legacy Business — matches table-management and SMS tier checks. */
-  const isRestaurantPlanTier =
-    pricingTier === 'business' || pricingTier === 'founding' || pricingTier === 'restaurant';
+  const isRestaurantPlanTier = isRestaurantTableProductTier(pricingTier);
 
   const showTableManagementNav =
     Boolean(tableManagementEnabled) &&
@@ -96,7 +96,8 @@ export function DashboardSidebar({
     const isTableReservation = bookingModel === 'table_reservation';
     const isRestaurantTablePrimaryInner = isTableReservation && isRestaurantPlanTier;
     const isAppointment = isUnifiedSchedulingVenue(bookingModel);
-    const showDiningAvailability = isTableReservation;
+    /** Dining covers / Model A — restaurant SKU only (not Appointments or Standard tier). */
+    const showDiningAvailability = isTableReservation && isRestaurantPlanTier;
     const showCalendarAvailability = shouldShowAppointmentAvailabilitySettings(bookingModel, enabledModels);
 
     let items = BASE_NAV_ITEMS.filter((item) => {
@@ -273,6 +274,25 @@ export function DashboardSidebar({
                       {item.label}
                     </Link>
                   </div>
+                );
+              }
+
+              /** Legacy `table_reservation` on Appointments/Standard SKU: single list link, not restaurant Day Sheet bundle. */
+              if (bookingModel === 'table_reservation' && !isRestaurantPlanTier) {
+                const active = isActive(item.href);
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    onClick={() => setMobileOpen(false)}
+                    className={`
+                      flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors
+                      ${active ? 'bg-brand-50 text-brand-700' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'}
+                    `}
+                  >
+                    <item.icon className={`h-5 w-5 flex-shrink-0 ${active ? 'text-brand-600' : 'text-slate-400'}`} />
+                    {item.label}
+                  </Link>
                 );
               }
 

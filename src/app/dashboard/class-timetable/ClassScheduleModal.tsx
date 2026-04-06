@@ -169,6 +169,8 @@ export function ClassScheduleModal({
 
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  /** Shown inside this modal (parent page notice sits under the overlay). */
+  const [scheduleFormError, setScheduleFormError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -188,6 +190,7 @@ export function ClassScheduleModal({
       setViewYear(t.getFullYear());
       setViewMonth(t.getMonth());
       setSheetIso(null);
+      setScheduleFormError(null);
     }
   }, [open]);
 
@@ -255,6 +258,7 @@ export function ClassScheduleModal({
   const todayIso = new Date().toISOString().slice(0, 10);
 
   const openScheduleSheet = useCallback((iso: string) => {
+    setScheduleFormError(null);
     setSheetIso(iso);
     setMode('single');
     setSingleTime('09:00');
@@ -290,14 +294,15 @@ export function ClassScheduleModal({
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setNotice({ kind: 'error', message: (json as { error?: string }).error ?? 'Could not remove session' });
+        setScheduleFormError((json as { error?: string }).error ?? 'Could not remove session');
         return;
       }
+      setScheduleFormError(null);
       setNotice({ kind: 'success', message: 'Session removed from the calendar.' });
       onInstanceRemoved?.(inst.id);
       await onRefresh();
     } catch {
-      setNotice({ kind: 'error', message: 'Could not remove session' });
+      setScheduleFormError('Could not remove session');
     } finally {
       setDeletingId(null);
     }
@@ -305,6 +310,7 @@ export function ClassScheduleModal({
 
   const handleSubmit = async () => {
     if (!sheetIso || !selectedClass) return;
+    setScheduleFormError(null);
     setSaving(true);
     try {
       if (mode === 'single') {
@@ -323,9 +329,10 @@ export function ClassScheduleModal({
         });
         const json = await res.json();
         if (!res.ok) {
-          setNotice({ kind: 'error', message: (json as { error?: string }).error ?? 'Could not add session' });
+          setScheduleFormError((json as { error?: string }).error ?? 'Could not add session');
           return;
         }
+        setScheduleFormError(null);
         setNotice({ kind: 'success', message: 'Session added.' });
         setSheetIso(null);
         await onRefresh();
@@ -335,16 +342,16 @@ export function ClassScheduleModal({
       if (mode === 'weekly') {
         const h = parseInt(weeklyHorizonWeeks, 10);
         if (weeklyScope === 'weeks' && (Number.isNaN(h) || h < 1 || h > 52)) {
-          setNotice({ kind: 'error', message: 'Enter a number of weeks between 1 and 52.' });
+          setScheduleFormError('Enter a number of weeks between 1 and 52.');
           return;
         }
         if (weeklyScope === 'range') {
           if (!weeklyRangeStart.trim() || !weeklyRangeEnd.trim()) {
-            setNotice({ kind: 'error', message: 'Choose a start and end date for scheduling.' });
+            setScheduleFormError('Choose a start and end date for scheduling.');
             return;
           }
           if (weeklyRangeStart > weeklyRangeEnd) {
-            setNotice({ kind: 'error', message: 'End date must be on or after the start date.' });
+            setScheduleFormError('End date must be on or after the start date.');
             return;
           }
         }
@@ -359,20 +366,15 @@ export function ClassScheduleModal({
         );
 
         if (dates.length === 0) {
-          setNotice({
-            kind: 'error',
-            message:
-              weeklyScope === 'range'
-                ? 'No sessions fall in that date range on this weekday. Check your dates.'
-                : 'No sessions could be scheduled. Try a longer horizon.',
-          });
+          setScheduleFormError(
+            weeklyScope === 'range'
+              ? 'No sessions fall in that date range on this weekday. Check your dates.'
+              : 'No sessions could be scheduled. Try a longer horizon.',
+          );
           return;
         }
         if (dates.length > 100) {
-          setNotice({
-            kind: 'error',
-            message: 'That would create more than 100 sessions. Shorten the range or number of weeks.',
-          });
+          setScheduleFormError('That would create more than 100 sessions. Shorten the range or number of weeks.');
           return;
         }
 
@@ -390,11 +392,12 @@ export function ClassScheduleModal({
         });
         const json = await res.json();
         if (!res.ok) {
-          setNotice({ kind: 'error', message: (json as { error?: string }).error ?? 'Could not schedule sessions' });
+          setScheduleFormError((json as { error?: string }).error ?? 'Could not schedule sessions');
           return;
         }
         const created = (json as { created?: number }).created ?? 0;
         const skipped = (json as { skipped?: number }).skipped ?? 0;
+        setScheduleFormError(null);
         setNotice({
           kind: 'success',
           message:
@@ -412,16 +415,16 @@ export function ClassScheduleModal({
         const until =
           intervalEnd === 'until' && intervalUntil.trim() !== '' ? intervalUntil.trim() : null;
         if (intervalEnd === 'until' && !until) {
-          setNotice({ kind: 'error', message: 'Choose an end date or switch to a number of sessions.' });
+          setScheduleFormError('Choose an end date or switch to a number of sessions.');
           return;
         }
         if (intervalEnd === 'count' && (Number.isNaN(occ) || occ < 1)) {
-          setNotice({ kind: 'error', message: 'Enter a valid number of sessions (1–100).' });
+          setScheduleFormError('Enter a valid number of sessions (1–100).');
           return;
         }
 
         if (intervalEnd === 'until' && until && until < sheetIso) {
-          setNotice({ kind: 'error', message: 'End date must be on or after the start date.' });
+          setScheduleFormError('End date must be on or after the start date.');
           return;
         }
 
@@ -434,7 +437,7 @@ export function ClassScheduleModal({
         );
 
         if (dates.length === 0) {
-          setNotice({ kind: 'error', message: 'No dates in range.' });
+          setScheduleFormError('No dates in range.');
           return;
         }
 
@@ -451,11 +454,12 @@ export function ClassScheduleModal({
         });
         const json = await res.json();
         if (!res.ok) {
-          setNotice({ kind: 'error', message: (json as { error?: string }).error ?? 'Could not create sessions' });
+          setScheduleFormError((json as { error?: string }).error ?? 'Could not create sessions');
           return;
         }
         const created = (json as { created?: number }).created ?? 0;
         const skipped = (json as { skipped?: number }).skipped ?? 0;
+        setScheduleFormError(null);
         setNotice({
           kind: 'success',
           message:
@@ -467,7 +471,7 @@ export function ClassScheduleModal({
         await onRefresh();
       }
     } catch {
-      setNotice({ kind: 'error', message: 'Request failed' });
+      setScheduleFormError('Request failed');
     } finally {
       setSaving(false);
     }
@@ -752,6 +756,14 @@ export function ClassScheduleModal({
           </div>
 
           <div className="flex w-full shrink-0 flex-col border-t border-slate-200/80 bg-gradient-to-b from-slate-50/90 to-slate-50 lg:w-[min(26rem,100%)] lg:border-l lg:border-t-0">
+            {scheduleFormError && (
+              <div
+                className="border-b border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-800"
+                role="alert"
+              >
+                {scheduleFormError}
+              </div>
+            )}
             {sheetIso ? (
               <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
                 <div className="border-b border-slate-200/80 bg-slate-50/50 px-4 py-4">

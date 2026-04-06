@@ -18,7 +18,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   let venueSlug: string | undefined;
   let staffName: string | undefined;
   let tableManagementEnabled = false;
-  let pricingTier = 'standard';
+  let pricingTier = 'appointments';
   let bookingModel: BookingModel = 'table_reservation';
   let enabledModels: BookingModel[] = [];
   let venueId: string | undefined;
@@ -53,7 +53,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
       venueName = venue?.name ?? undefined;
       venueSlug = venue?.slug ?? undefined;
       tableManagementEnabled = venue?.table_management_enabled ?? false;
-      pricingTier = (venue?.pricing_tier as string) ?? 'standard';
+      pricingTier = (venue?.pricing_tier as string) ?? 'appointments';
       bookingModel = (venue?.booking_model as BookingModel) ?? 'table_reservation';
       enabledModels = normalizeEnabledModels(
         (venue as { enabled_models?: unknown } | null)?.enabled_models,

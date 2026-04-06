@@ -170,6 +170,41 @@ async function assertCanClearClassInstructor(
   return null;
 }
 
+/**
+ * Team calendar columns for the class-type picker — must match the Calendars tab source:
+ * `GET /api/venue/practitioners?roster=1` uses `unified_calendars` only when `booking_model === 'unified_scheduling'`,
+ * otherwise legacy `practitioners` rows (e.g. table + class_session venues).
+ */
+async function fetchTeamCalendarColumnsForClassPicker(
+  admin: ReturnType<typeof getSupabaseAdminClient>,
+  venueId: string,
+  bookingModel: string,
+): Promise<Array<{ id: string; name: string; sort_order: number | null }>> {
+  if (bookingModel === 'unified_scheduling') {
+    const { data, error } = await admin
+      .from('unified_calendars')
+      .select('id, name, sort_order')
+      .eq('venue_id', venueId)
+      .neq('calendar_type', 'resource')
+      .order('sort_order', { ascending: true });
+    if (error) {
+      console.error('fetchTeamCalendarColumnsForClassPicker (unified_calendars):', error);
+      return [];
+    }
+    return (data ?? []) as Array<{ id: string; name: string; sort_order: number | null }>;
+  }
+  const { data, error } = await admin
+    .from('practitioners')
+    .select('id, name, sort_order')
+    .eq('venue_id', venueId)
+    .order('sort_order', { ascending: true });
+  if (error) {
+    console.error('fetchTeamCalendarColumnsForClassPicker (practitioners):', error);
+    return [];
+  }
+  return (data ?? []) as Array<{ id: string; name: string; sort_order: number | null }>;
+}
+
 /** GET /api/venue/classes - list class types, timetable, and upcoming instances. */
 export async function GET() {
   try {
@@ -190,31 +225,32 @@ export async function GET() {
       return NextResponse.json({ error: 'Failed to fetch class types' }, { status: 500 });
     }
 
+    const { data: venueRow } = await admin
+      .from('venues')
+      .select('booking_model')
+      .eq('id', staff.venue_id)
+      .maybeSingle();
+    const bookingModel = (venueRow as { booking_model?: string } | null)?.booking_model ?? '';
+
+    const teamCalendarPicklist = await fetchTeamCalendarColumnsForClassPicker(admin, staff.venue_id, bookingModel);
+
     const ids = (classTypes ?? []).map((ct) => ct.id as string);
     if (ids.length === 0) {
-      const [{ data: practitioners }, { data: unifiedCalendars }] = await Promise.all([
-        admin
-          .from('practitioners')
-          .select('id, name, sort_order')
-          .eq('venue_id', staff.venue_id)
-          .order('sort_order', { ascending: true }),
-        admin
-          .from('unified_calendars')
-          .select('id, name, sort_order')
-          .eq('venue_id', staff.venue_id)
-          .eq('is_active', true)
-          .order('sort_order', { ascending: true }),
-      ]);
+      const { data: practitioners } = await admin
+        .from('practitioners')
+        .select('id, name, sort_order')
+        .eq('venue_id', staff.venue_id)
+        .order('sort_order', { ascending: true });
       return NextResponse.json({
         class_types: [],
         timetable: [],
         instances: [],
         practitioners: practitioners ?? [],
-        unified_calendars: unifiedCalendars ?? [],
+        unified_calendars: teamCalendarPicklist,
       });
     }
 
-    const [timetableRes, instancesRes, practitionersRes, unifiedCalRes] = await Promise.all([
+    const [timetableRes, instancesRes, practitionersRes] = await Promise.all([
       admin.from('class_timetable').select('*').in('class_type_id', ids),
       admin
         .from('class_instances')
@@ -224,12 +260,6 @@ export async function GET() {
         .order('instance_date')
         .limit(200),
       admin.from('practitioners').select('id, name, sort_order').eq('venue_id', staff.venue_id).order('sort_order', { ascending: true }),
-      admin
-        .from('unified_calendars')
-        .select('id, name, sort_order')
-        .eq('venue_id', staff.venue_id)
-        .eq('is_active', true)
-        .order('sort_order', { ascending: true }),
     ]);
 
     if (timetableRes.error) {
@@ -243,10 +273,6 @@ export async function GET() {
     if (practitionersRes.error) {
       console.error('GET /api/venue/classes failed (practitioners):', practitionersRes.error);
       return NextResponse.json({ error: 'Failed to fetch practitioners' }, { status: 500 });
-    }
-    if (unifiedCalRes.error) {
-      console.error('GET /api/venue/classes failed (unified_calendars):', unifiedCalRes.error);
-      return NextResponse.json({ error: 'Failed to fetch calendars' }, { status: 500 });
     }
 
     const rawInstances = instancesRes.data ?? [];
@@ -301,7 +327,7 @@ export async function GET() {
       timetable: timetableRes.data ?? [],
       instances,
       practitioners: practitionersRes.data ?? [],
-      unified_calendars: unifiedCalRes.data ?? [],
+      unified_calendars: teamCalendarPicklist,
     });
   } catch (err) {
     console.error('GET /api/venue/classes failed:', err);
@@ -352,6 +378,21 @@ export async function POST(request: NextRequest) {
       cancellation_notice_hours: parsed.data.cancellation_notice_hours ?? DEFAULT_ENTITY_BOOKING_WINDOW.cancellation_notice_hours,
       allow_same_day_booking: parsed.data.allow_same_day_booking ?? DEFAULT_ENTITY_BOOKING_WINDOW.allow_same_day_booking,
     };
+
+    const calendarForScheduling = await resolveInstructorCalendarIdForClass(
+      admin,
+      staff.venue_id,
+      parsed.data.instructor_id,
+    );
+    if (!calendarForScheduling) {
+      return NextResponse.json(
+        {
+          error:
+            'That calendar column cannot be used for class scheduling. Refresh the page, pick a calendar from the list, and try again.',
+        },
+        { status: 400 },
+      );
+    }
 
     const { data, error } = await admin.from('class_types').insert(insertRow).select().single();
 
@@ -494,6 +535,23 @@ export async function PATCH(request: NextRequest) {
     const fullParsed = (merged.instructor_id === null ? classTypeMergedSchema : classTypeSchema).safeParse(merged);
     if (!fullParsed.success) {
       return NextResponse.json({ error: 'Invalid request', details: fullParsed.error.flatten() }, { status: 400 });
+    }
+
+    if (fullParsed.data.instructor_id != null) {
+      const calendarForScheduling = await resolveInstructorCalendarIdForClass(
+        admin,
+        staff.venue_id,
+        fullParsed.data.instructor_id,
+      );
+      if (!calendarForScheduling) {
+        return NextResponse.json(
+          {
+            error:
+              'That calendar column cannot be used for class scheduling. Refresh the page, pick a calendar from the list, and try again.',
+          },
+          { status: 400 },
+        );
+      }
     }
 
     const oldInst = String(existing.instructor_id ?? '');

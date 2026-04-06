@@ -323,8 +323,6 @@ async function handleSubscriptionUpdated(
   };
   addMapping('STRIPE_APPOINTMENTS_PRICE_ID', 'appointments');
   addMapping('STRIPE_RESTAURANT_PRICE_ID', 'restaurant');
-  addMapping('STRIPE_STANDARD_PRICE_ID', 'appointments');
-  addMapping('STRIPE_BUSINESS_PRICE_ID', 'restaurant');
   if (priceId && priceToTier[priceId]) {
     updates.pricing_tier = priceToTier[priceId];
     updates.calendar_count = null;

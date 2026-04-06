@@ -1,8 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useState, useMemo } from 'react';
+import { useCallback, useEffect, useState, useMemo, useRef } from 'react';
 import Link from 'next/link';
-import { useSearchParams } from 'next/navigation';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { defaultNewUnifiedCalendarWorkingHours } from '@/lib/availability/practitioner-defaults';
 import type { TimeRange, WorkingHours } from '@/types/booking-models';
 import { StaffLeaveCalendarPanel } from '@/app/dashboard/availability/StaffLeaveCalendarPanel';
@@ -142,6 +142,8 @@ export function AppointmentAvailabilitySettings({
   currentStaffId: string | null;
 }) {
   const searchParams = useSearchParams();
+  const pathname = usePathname();
+  const router = useRouter();
   const [tab, setTab] = useState<Tab>(() => {
     const fromUrl = parseTabQueryParam(searchParams.get('tab'));
     if (fromUrl) {
@@ -424,7 +426,7 @@ export function AppointmentAvailabilitySettings({
   }
 
   // ─── Team Tab ───────────────────────────────────────────────────────
-  function openAdd() {
+  const openAdd = useCallback(() => {
     if (!isAdmin) return;
     if (entitlement && !entitlement.unlimited && entitlement.at_calendar_limit) {
       setShowUpgradeModal(true);
@@ -443,7 +445,25 @@ export function AppointmentAvailabilitySettings({
     setError(null);
     setCalendarModalError(null);
     setShowForm(true);
-  }
+  }, [isAdmin, entitlement]);
+
+  const openedAddCalendarFromQuery = useRef(false);
+
+  useEffect(() => {
+    if (loading) return;
+    if (openedAddCalendarFromQuery.current) return;
+    if (searchParams.get('addCalendar') !== '1') return;
+    if (!isAdmin) return;
+    openedAddCalendarFromQuery.current = true;
+    setTab('team');
+    queueMicrotask(() => {
+      openAdd();
+    });
+    const next = new URLSearchParams(searchParams.toString());
+    next.delete('addCalendar');
+    const q = next.toString();
+    router.replace(q ? `${pathname}?${q}` : pathname, { scroll: false });
+  }, [loading, isAdmin, openAdd, pathname, router, searchParams]);
 
   async function openEdit(p: { id: string; name: string; is_active: boolean }) {
     if (!isAdmin) return;
@@ -1133,7 +1153,7 @@ export function AppointmentAvailabilitySettings({
             </h2>
             <p className="mt-3 text-sm text-slate-600">
               Your current subscription includes a limited number of calendars (team members). To add another practitioner,
-              increase your calendar count on the Standard plan or upgrade to Business for unlimited calendars.
+              visit your plan settings to adjust your calendar allowance.
             </p>
             {entitlement && !entitlement.unlimited && entitlement.calendar_limit != null && (
               <p className="mt-2 text-sm text-slate-700">

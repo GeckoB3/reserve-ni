@@ -225,9 +225,6 @@ export function ResourceTimelineView({
   const [formCancellationHours, setFormCancellationHours] = useState(48);
   const [formAllowSameDay, setFormAllowSameDay] = useState(true);
   const [hostCalendars, setHostCalendars] = useState<Array<{ id: string; name: string }>>([]);
-  const [showNewColumnUi, setShowNewColumnUi] = useState(false);
-  const [newColumnName, setNewColumnName] = useState('');
-  const [creatingColumn, setCreatingColumn] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -339,8 +336,6 @@ export function ResourceTimelineView({
     setFormMinNoticeHours(1);
     setFormCancellationHours(48);
     setFormAllowSameDay(true);
-    setShowNewColumnUi(false);
-    setNewColumnName('');
     setError(null);
     setShowForm(true);
   }
@@ -368,50 +363,8 @@ export function ResourceTimelineView({
     setFormMinNoticeHours(r.min_booking_notice_hours ?? 1);
     setFormCancellationHours(r.cancellation_notice_hours ?? 48);
     setFormAllowSameDay(r.allow_same_day_booking ?? true);
-    setShowNewColumnUi(false);
-    setNewColumnName('');
     setError(null);
     setShowForm(true);
-  }
-
-  async function createCalendarColumn() {
-    const name = newColumnName.trim();
-    if (!name) {
-      setError('Enter a name for the new calendar column.');
-      return;
-    }
-    setCreatingColumn(true);
-    setError(null);
-    try {
-      const res = await fetch('/api/venue/calendar-columns', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name }),
-      });
-      const json = (await res.json()) as { error?: string; id?: string; name?: string };
-      if (!res.ok) {
-        setError(json.error ?? 'Could not create calendar column');
-        return;
-      }
-      const newId = json.id;
-      const newName = json.name;
-      if (newId && newName) {
-        setFormDisplayCalendarId(newId);
-      }
-      setNewColumnName('');
-      setShowNewColumnUi(false);
-      await fetchHostCalendars();
-      if (newId && newName) {
-        setHostCalendars((prev) => {
-          if (prev.some((c) => c.id === newId)) return prev;
-          return [...prev, { id: newId, name: newName }].sort((a, b) => a.name.localeCompare(b.name));
-        });
-      }
-    } catch {
-      setError('Could not create calendar column');
-    } finally {
-      setCreatingColumn(false);
-    }
   }
 
   function applyExceptionRange() {
@@ -777,57 +730,16 @@ export function ResourceTimelineView({
               </select>
               {isAdmin && (
                 <div className="mt-3 rounded-lg border border-slate-100 bg-slate-50/90 p-3">
-                  {!showNewColumnUi ? (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShowNewColumnUi(true);
-                        setError(null);
-                      }}
-                      className="inline-flex w-full items-center justify-center rounded-lg border border-brand-200/90 bg-white px-3.5 py-2.5 text-sm font-semibold text-brand-700 shadow-sm transition-[color,background-color,border-color,box-shadow,transform] duration-150 ease-out hover:border-brand-400 hover:bg-brand-50 hover:text-brand-800 hover:shadow-md active:scale-[0.98] active:border-brand-500 active:bg-brand-100 active:shadow-inner motion-reduce:transition-colors motion-reduce:active:scale-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2"
-                    >
-                      New calendar column
-                    </button>
-                  ) : (
-                    <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-end">
-                      <div className="min-w-0 flex-1 sm:max-w-xs">
-                        <label htmlFor="new-calendar-column-name" className="mb-1 block text-[11px] font-medium text-slate-600">
-                          Column name
-                        </label>
-                        <input
-                          id="new-calendar-column-name"
-                          type="text"
-                          value={newColumnName}
-                          onChange={(e) => setNewColumnName(e.target.value)}
-                          placeholder="e.g. Resource bookings, Front of house"
-                          disabled={creatingColumn}
-                          className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 disabled:opacity-60"
-                        />
-                      </div>
-                      <div className="flex flex-wrap gap-2">
-                        <button
-                          type="button"
-                          onClick={() => void createCalendarColumn()}
-                          disabled={creatingColumn}
-                          className="rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-brand-700 disabled:opacity-50"
-                        >
-                          {creatingColumn ? 'Creating\u2026' : 'Create'}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setShowNewColumnUi(false);
-                            setNewColumnName('');
-                            setError(null);
-                          }}
-                          disabled={creatingColumn}
-                          className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    </div>
-                  )}
+                  <Link
+                    href="/dashboard/calendar-availability?tab=calendars&addCalendar=1"
+                    className="inline-flex w-full items-center justify-center rounded-lg border border-brand-200/90 bg-white px-3.5 py-2.5 text-sm font-semibold text-brand-700 shadow-sm transition-[color,background-color,border-color,box-shadow,transform] duration-150 ease-out hover:border-brand-400 hover:bg-brand-50 hover:text-brand-800 hover:shadow-md active:scale-[0.98] active:border-brand-500 active:bg-brand-100 active:shadow-inner motion-reduce:transition-colors motion-reduce:active:scale-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2"
+                  >
+                    Add calendar
+                  </Link>
+                  <p className="mt-2 text-xs text-slate-500">
+                    Opens the same Add calendar form as the Calendars tab. When you are done, return here and refresh
+                    if your new column does not appear in the list yet.
+                  </p>
                 </div>
               )}
               <p className="mt-1 text-xs text-slate-500">

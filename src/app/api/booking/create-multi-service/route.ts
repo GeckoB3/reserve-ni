@@ -19,7 +19,7 @@ import { cancellationDeadlineHoursBefore } from '@/lib/booking/cancellation-dead
 import { generateGroupBookingId } from '@/lib/booking/group-booking';
 import type { GroupAppointmentLine } from '@/lib/emails/types';
 import { timeToMinutes, minutesToTime } from '@/lib/availability';
-import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
+import { isUnifiedSchedulingVenue, venueUsesUnifiedAppointmentData } from '@/lib/booking/unified-scheduling';
 import { createShortManageLink } from '@/lib/short-manage-link';
 import { loadServiceEntityBookingWindow } from '@/lib/booking/entity-booking-window';
 import { resolveCancellationNoticeHoursForCreate } from '@/lib/booking/resolve-cancellation-notice-hours';
@@ -83,7 +83,11 @@ export async function POST(request: NextRequest) {
     }
 
     const venueMode = await resolveVenueMode(supabase, venue_id);
-    if (!isUnifiedSchedulingVenue(venueMode.bookingModel)) {
+    const useUnifiedBookingRows = venueUsesUnifiedAppointmentData(
+      venueMode.bookingModel,
+      venueMode.enabledModels,
+    );
+    if (!isUnifiedSchedulingVenue(venueMode.bookingModel) && !useUnifiedBookingRows) {
       return NextResponse.json({ error: 'Multi-service bookings are only for appointment businesses' }, { status: 400 });
     }
 
@@ -198,10 +202,9 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const { data: nameRows } =
-      venueMode.bookingModel === 'unified_scheduling'
-        ? await supabase.from('unified_calendars').select('id, name').eq('venue_id', venue_id)
-        : await supabase.from('practitioners').select('id, name').eq('venue_id', venue_id);
+    const { data: nameRows } = useUnifiedBookingRows
+      ? await supabase.from('unified_calendars').select('id, name').eq('venue_id', venue_id)
+      : await supabase.from('practitioners').select('id, name').eq('venue_id', venue_id);
     const prMap = new Map(
       (nameRows ?? []).map((p: { id: string; name: string }) => [p.id, p.name]),
     );
@@ -239,7 +242,7 @@ export async function POST(request: NextRequest) {
       supabase,
       venueId: venue_id,
       effectiveModel: venueMode.bookingModel,
-      serviceItemId: venueMode.bookingModel === 'unified_scheduling' ? validated[0]!.appointment_service_id : null,
+      serviceItemId: useUnifiedBookingRows ? validated[0]!.appointment_service_id : null,
       appointmentServiceId:
         venueMode.bookingModel === 'practitioner_appointment' ? validated[0]!.appointment_service_id : null,
     });
@@ -269,13 +272,11 @@ export async function POST(request: NextRequest) {
         cancellation_deadline: deadline,
         cancellation_policy_snapshot: policySnapshot,
         estimated_end_time: seg.estimated_end_time,
-        practitioner_id:
-          venueMode.bookingModel === 'unified_scheduling' ? null : seg.practitioner_id,
-        appointment_service_id:
-          venueMode.bookingModel === 'unified_scheduling' ? null : seg.appointment_service_id,
+        practitioner_id: useUnifiedBookingRows ? null : seg.practitioner_id,
+        appointment_service_id: useUnifiedBookingRows ? null : seg.appointment_service_id,
         group_booking_id: groupBookingId,
         person_label: null,
-        ...(venueMode.bookingModel === 'unified_scheduling'
+        ...(useUnifiedBookingRows
           ? {
               calendar_id: seg.practitioner_id,
               service_item_id: seg.appointment_service_id,

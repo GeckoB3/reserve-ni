@@ -1,9 +1,12 @@
 'use client';
 
+import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { defaultNewUnifiedCalendarWorkingHours } from '@/lib/availability/practitioner-defaults';
 import { mergeAppointmentServiceWithPractitionerLink } from '@/lib/appointments/merge-service-with-overrides';
 import type { AppointmentService, ClassPaymentRequirement, PractitionerService } from '@/types/booking-models';
 import { DEFAULT_ENTITY_BOOKING_WINDOW } from '@/lib/booking/entity-booking-window';
+import { HelpTooltip } from '@/components/dashboard/HelpTooltip';
 import { StaffServiceOverrideModal } from './StaffServiceOverrideModal';
 
 interface Service {
@@ -106,7 +109,7 @@ const DEFAULT_FORM: ServiceFormData = {
   staffMay: { ...DEFAULT_STAFF_MAY },
   max_advance_booking_days: DEFAULT_ENTITY_BOOKING_WINDOW.max_advance_booking_days,
   min_booking_notice_hours: DEFAULT_ENTITY_BOOKING_WINDOW.min_booking_notice_hours,
-  cancellation_notice_hours: DEFAULT_ENTITY_BOOKING_WINDOW.cancellation_notice_hours,
+  cancellation_notice_hours: 24,
   allow_same_day_booking: DEFAULT_ENTITY_BOOKING_WINDOW.allow_same_day_booking,
 };
 
@@ -157,11 +160,12 @@ export function AppointmentServicesView({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
-  const [showBulkDeposit, setShowBulkDeposit] = useState(false);
-  const [bulkDepositAmount, setBulkDepositAmount] = useState('');
-  const [bulkSaving, setBulkSaving] = useState(false);
   const [overrideService, setOverrideService] = useState<Service | null>(null);
   const [overrideCalendarId, setOverrideCalendarId] = useState<string | null>(null);
+  const [showAddCalendarModal, setShowAddCalendarModal] = useState(false);
+  const [newCalendarName, setNewCalendarName] = useState('');
+  const [creatingCalendar, setCreatingCalendar] = useState(false);
+  const [addCalendarModalError, setAddCalendarModalError] = useState<string | null>(null);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
@@ -261,6 +265,9 @@ export function AppointmentServicesView({
     setForm({ ...DEFAULT_FORM, staffMay: { ...DEFAULT_STAFF_MAY } });
     setEditingId(null);
     setError(null);
+    setShowAddCalendarModal(false);
+    setNewCalendarName('');
+    setAddCalendarModalError(null);
     setShowModal(true);
   }
 
@@ -299,7 +306,63 @@ export function AppointmentServicesView({
     });
     setEditingId(svc.id);
     setError(null);
+    setShowAddCalendarModal(false);
+    setNewCalendarName('');
+    setAddCalendarModalError(null);
     setShowModal(true);
+  }
+
+  async function handleCreateCalendar() {
+    const name = newCalendarName.trim();
+    if (!name) {
+      setAddCalendarModalError('Enter a display name for the calendar.');
+      return;
+    }
+    setCreatingCalendar(true);
+    setAddCalendarModalError(null);
+    try {
+      const res = await fetch('/api/venue/practitioners', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name,
+          is_active: true,
+          working_hours: defaultNewUnifiedCalendarWorkingHours(),
+          break_times: [],
+          days_off: [],
+        }),
+      });
+      const data = (await res.json()) as {
+        error?: string;
+        id?: string;
+        name?: string;
+        upgrade_required?: boolean;
+      };
+      if (!res.ok) {
+        if (res.status === 403 && data.upgrade_required) {
+          setAddCalendarModalError(data.error ?? 'Calendar limit reached for your plan.');
+        } else {
+          setAddCalendarModalError(data.error ?? 'Failed to create calendar');
+        }
+        return;
+      }
+      const newId = data.id;
+      if (!newId) {
+        setAddCalendarModalError('Calendar was created but no id was returned. Refresh the page.');
+        return;
+      }
+      await fetchAll();
+      setForm((f) => ({
+        ...f,
+        practitioner_ids: f.practitioner_ids.includes(newId) ? f.practitioner_ids : [...f.practitioner_ids, newId],
+      }));
+      setNewCalendarName('');
+      setShowAddCalendarModal(false);
+    } catch {
+      setAddCalendarModalError('Failed to create calendar');
+    } finally {
+      setCreatingCalendar(false);
+    }
   }
 
   async function handleSave() {
@@ -410,37 +473,6 @@ export function AppointmentServicesView({
     }));
   }
 
-  async function handleBulkDeposit() {
-    const pence = poundsToPence(bulkDepositAmount);
-    if (pence == null || pence < 0) {
-      setError('Please enter a valid deposit amount');
-      return;
-    }
-    setBulkSaving(true);
-    setError(null);
-    try {
-      const activeServices = services.filter((s) => s.is_active);
-      for (const svc of activeServices) {
-        await fetch('/api/venue/appointment-services', {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            id: svc.id,
-            payment_requirement: pence > 0 ? 'deposit' : 'none',
-            deposit_pence: pence,
-          }),
-        });
-      }
-      setShowBulkDeposit(false);
-      setBulkDepositAmount('');
-      await fetchAll();
-    } catch {
-      setError('Failed to update deposits. Please try again.');
-    } finally {
-      setBulkSaving(false);
-    }
-  }
-
   function practitionersForService(serviceId: string): Array<{ id: string; name: string }> {
     return links
       .filter((l) => l.service_id === serviceId)
@@ -466,71 +498,15 @@ export function AppointmentServicesView({
           )}
         </div>
         {isAdmin && (
-          <div className="flex items-center gap-2">
-            {services.length > 0 && (
-              <button
-                onClick={() => setShowBulkDeposit(true)}
-                className="inline-flex items-center gap-2 rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors"
-              >
-                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path d="M12 6v12m-3-2.818.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" /></svg>
-                Set Deposits for All
-              </button>
-            )}
-            <button
-              onClick={openCreate}
-              className="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 transition-colors"
-            >
-              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path d="M12 5v14m-7-7h14"/></svg>
-              Add Service
-            </button>
-          </div>
+          <button
+            onClick={openCreate}
+            className="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 transition-colors"
+          >
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path d="M12 5v14m-7-7h14"/></svg>
+            Add Service
+          </button>
         )}
       </div>
-
-      {/* Bulk Deposit Modal */}
-      {showBulkDeposit && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div role="dialog" aria-modal="true" className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl">
-            <h2 className="text-lg font-semibold text-slate-900 mb-4">Set deposit for all services</h2>
-            <p className="text-sm text-slate-500 mb-4">
-              This sets a <span className="font-medium text-slate-700">custom deposit</span> amount for every active
-              service. Use {sym}0 to switch services to no online payment.
-            </p>
-            {error && (
-              <div className="mb-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
-            )}
-            <div className="mb-4">
-              <label className="mb-1 block text-sm font-medium text-slate-700">Deposit amount ({sym})</label>
-              <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-400">{sym}</span>
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  value={bulkDepositAmount}
-                  onChange={(e) => setBulkDepositAmount(e.target.value)}
-                  className="w-full rounded-lg border border-slate-300 pl-7 pr-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-                  placeholder="5.00"
-                />
-              </div>
-            </div>
-            <div className="flex justify-end gap-3">
-              <button
-                onClick={() => { setShowBulkDeposit(false); setError(null); }}
-                className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleBulkDeposit}
-                disabled={bulkSaving}
-                className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
-              >
-                {bulkSaving ? 'Updating...' : 'Apply to All'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {!showModal && error && (
         <div className="mb-4 rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700 flex items-center justify-between">
@@ -883,8 +859,15 @@ export function AppointmentServicesView({
                     />
                   </div>
                   <div>
-                    <label className="mb-1 block text-sm text-slate-700">Cancellation notice (hours)</label>
+                    <label htmlFor="service-cancellation-notice-hours" className="mb-1 block text-sm text-slate-700">
+                      Cancellation notice (hours){' '}
+                      <HelpTooltip
+                        maxWidth={300}
+                        content="This sets when deposits and online payments are refundable until: guests who cancel at least this many hours before the start time get a full refund (subject to your payment settings)."
+                      />
+                    </label>
                     <input
+                      id="service-cancellation-notice-hours"
                       type="number"
                       min={0}
                       max={168}
@@ -995,6 +978,27 @@ export function AppointmentServicesView({
                   <p className="mb-2 text-xs text-slate-500">
                     Tick the calendars that should offer this service.
                   </p>
+                  {isAdmin && (
+                    <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAddCalendarModalError(null);
+                          setNewCalendarName('');
+                          setShowAddCalendarModal(true);
+                        }}
+                        className="inline-flex w-full items-center justify-center rounded-lg border border-brand-200/90 bg-white px-3.5 py-2.5 text-sm font-semibold text-brand-700 shadow-sm transition-[color,background-color,border-color,box-shadow,transform] duration-150 ease-out hover:border-brand-400 hover:bg-brand-50 hover:text-brand-800 hover:shadow-md active:scale-[0.98] active:border-brand-500 active:bg-brand-100 active:shadow-inner motion-reduce:transition-colors motion-reduce:active:scale-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 sm:w-auto"
+                      >
+                        Add calendar
+                      </button>
+                      <Link
+                        href="/dashboard/calendar-availability?tab=calendars"
+                        className="text-sm text-slate-600 underline hover:text-slate-800"
+                      >
+                        Calendar availability
+                      </Link>
+                    </div>
+                  )}
                   {practitioners.length === 0 && (
                     <p className="text-sm text-slate-500">
                       No calendars found for this venue. Add calendars in Availability → Team.
@@ -1067,6 +1071,77 @@ export function AppointmentServicesView({
                 className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
               >
                 {saving ? 'Saving...' : editingId ? 'Save Changes' : 'Create Service'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showAddCalendarModal && isAdmin && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4"
+          onClick={() => {
+            if (creatingCalendar) return;
+            setShowAddCalendarModal(false);
+            setAddCalendarModalError(null);
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="appointment-add-calendar-title"
+            className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-6 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 id="appointment-add-calendar-title" className="mb-1 text-lg font-semibold text-slate-900">
+              Add calendar
+            </h2>
+            <p className="mb-4 text-sm text-slate-500">
+              Same defaults as Calendar availability: weekly hours are set automatically; you can edit them later.
+            </p>
+            {addCalendarModalError && (
+              <div
+                role="alert"
+                className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800"
+              >
+                {addCalendarModalError}
+              </div>
+            )}
+            <label className="mb-1 block text-xs font-medium text-slate-600">Display name *</label>
+            <input
+              type="text"
+              value={newCalendarName}
+              onChange={(e) => setNewCalendarName(e.target.value)}
+              placeholder="e.g. Room 2, Senior stylist"
+              disabled={creatingCalendar}
+              className="mb-4 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 disabled:opacity-60"
+              autoFocus
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  void handleCreateCalendar();
+                }
+              }}
+            />
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => void handleCreateCalendar()}
+                disabled={creatingCalendar}
+                className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
+              >
+                {creatingCalendar ? 'Creating…' : 'Create and assign'}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowAddCalendarModal(false);
+                  setAddCalendarModalError(null);
+                }}
+                disabled={creatingCalendar}
+                className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              >
+                Cancel
               </button>
             </div>
           </div>

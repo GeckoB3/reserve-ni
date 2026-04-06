@@ -18,8 +18,6 @@ function priceIdOf(item: Stripe.SubscriptionItem): string | undefined {
 /** Subscription line item for the main plan recurring price (quantity updates). */
 export function findMainPlanSubscriptionItem(sub: Stripe.Subscription): Stripe.SubscriptionItem | undefined {
   const knownPriceIds = [
-    process.env.STRIPE_STANDARD_PRICE_ID?.trim(),
-    process.env.STRIPE_BUSINESS_PRICE_ID?.trim(),
     process.env.STRIPE_APPOINTMENTS_PRICE_ID?.trim(),
     process.env.STRIPE_RESTAURANT_PRICE_ID?.trim(),
   ].filter(Boolean) as string[];

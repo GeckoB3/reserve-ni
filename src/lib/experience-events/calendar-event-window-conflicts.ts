@@ -239,7 +239,7 @@ export async function assertClassSessionWindowFreeOnCalendar(
   const { instructorId, durationMinutes, instanceDate, startTime, excludeClassInstanceId } = params;
   const calendarId = await resolveInstructorCalendarIdForClass(admin, venueId, instructorId);
   if (!calendarId) {
-    return 'No team calendar is linked to this instructor. Assign a team column before scheduling.';
+    return 'This class is not linked to a calendar column. Edit the class and choose which column it appears on, then try again.';
   }
 
   const startNorm = String(startTime).trim();

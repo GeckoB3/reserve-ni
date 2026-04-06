@@ -8,6 +8,10 @@ import { isUnifiedSchedulingVenue } from "@/lib/booking/unified-scheduling";
 import type { DepositConfigLike } from "@/lib/venue/deposit-workflow";
 import { venueUsesDepositWorkflow } from "@/lib/venue/deposit-workflow";
 import type { VenueNotificationSettings } from "@/lib/notifications/notification-settings";
+import {
+  isAppointmentPlanTier,
+  isRestaurantCommsTier,
+} from "@/lib/tier-enforcement";
 import { BookingConfirmationSettingsBlock } from "./BookingConfirmationSettingsBlock";
 import { TableConfirmOrCancelSettingsBlock } from "./TableConfirmOrCancelSettingsBlock";
 import { UnifiedAppointmentNotificationSection } from "./UnifiedAppointmentNotificationSection";
@@ -47,36 +51,25 @@ interface CommCardConfig {
   requireOneSubToggle?: boolean;
 }
 
-/**
- * When true, Standard-tier restaurant (Model A) limits several templates to email-only.
- * Unified scheduling Standard tier includes SMS per product plan §1.1; pass false when `unified_scheduling`.
- */
 function buildCommunicationCards(
-  restrictSmsForStandard: boolean,
   unifiedVenue: boolean,
 ): CommCardConfig[] {
-  const daySub: CommCardConfig["subToggles"] = restrictSmsForStandard
-    ? [{ key: "day_of_reminder_email_enabled", label: "Email" }]
-    : [
-        { key: "day_of_reminder_email_enabled", label: "Email" },
-        { key: "day_of_reminder_sms_enabled", label: "SMS" },
-      ];
+  const daySub: CommCardConfig["subToggles"] = [
+    { key: "day_of_reminder_email_enabled", label: "Email" },
+    { key: "day_of_reminder_sms_enabled", label: "SMS" },
+  ];
 
-  const modSub: CommCardConfig["subToggles"] = restrictSmsForStandard
-    ? [{ key: "modification_email_enabled", label: "Email" }]
-    : [
-        { key: "modification_email_enabled", label: "Email" },
-        { key: "modification_sms_enabled", label: "SMS" },
-      ];
+  const modSub: CommCardConfig["subToggles"] = [
+    { key: "modification_email_enabled", label: "Email" },
+    { key: "modification_sms_enabled", label: "SMS" },
+  ];
 
   const cancelSub: CommCardConfig["subToggles"] = unifiedVenue
     ? [{ key: "cancellation_email_enabled", label: "Email" }]
-    : restrictSmsForStandard
-      ? [{ key: "cancellation_email_enabled", label: "Email" }]
-      : [
-          { key: "cancellation_email_enabled", label: "Email" },
-          { key: "cancellation_sms_enabled", label: "SMS" },
-        ];
+    : [
+        { key: "cancellation_email_enabled", label: "Email" },
+        { key: "cancellation_sms_enabled", label: "SMS" },
+      ];
 
   const cards: CommCardConfig[] = [
     {
@@ -102,21 +95,18 @@ function buildCommunicationCards(
       customMessageKey: "deposit_request_email_custom_message",
       maxChars: 500,
     },
-  ];
-
-  if (!restrictSmsForStandard) {
-    cards.push({
+    {
       messageType: "deposit_request_sms",
       label: "Deposit request (SMS)",
       description: unifiedVenue
         ? "Text message with a payment link when staff create a booking that needs a separate deposit payment."
-        : "SMS with a payment link for staff pay-by-link deposits. (Restaurant Standard tier uses email-only deposit requests.)",
+        : "SMS with a payment link for staff pay-by-link deposits.",
       channel: "sms",
       enabledKey: "deposit_sms_enabled",
       customMessageKey: "deposit_sms_custom_message",
       maxChars: 160,
-    });
-  }
+    },
+  ];
 
   cards.push(
     {
@@ -144,48 +134,35 @@ function buildCommunicationCards(
       messageType: "day_of_reminder_email",
       label: "Day-of Reminder",
       description: unifiedVenue
-        ? restrictSmsForStandard
-          ? "Reminder on the day of the booking. Restaurant Standard: email only (SMS on Business)."
-          : "Reminder sent on the day of the booking. Choose email and/or SMS."
+        ? "Reminder sent on the day of the booking. Choose email and/or SMS."
         : "A simple reminder on the day of the booking.",
       hideChannelBadge: true,
-      channel: restrictSmsForStandard ? "email" : "both",
+      channel: "both",
       enabledKey: "day_of_reminder_enabled",
       customMessageKey: "day_of_reminder_custom_message",
       timeKey: "day_of_reminder_time",
       maxChars: 500,
       subToggles: daySub,
-      optionalMessageSections: restrictSmsForStandard
-        ? [
-            {
-              label: "Day-of reminder (email)",
-              description: "Optional line added to the day-of email.",
-              messageKey: "day_of_reminder_custom_message",
-              previewMessageType: "day_of_reminder_email",
-              maxChars: 500,
-              previewButtonLabel: "Preview email",
-            },
-          ]
-        : [
-            {
-              label: "Day-of reminder (email)",
-              description: "Optional line added to the day-of email.",
-              messageKey: "day_of_reminder_custom_message",
-              previewMessageType: "day_of_reminder_email",
-              maxChars: 500,
-              previewButtonLabel: "Preview email",
-            },
-            {
-              label: "Day-of reminder (text)",
-              description:
-                "Optional line at the start of the day-of text. Leave blank to use the same line as the email.",
-              messageKey: "day_of_reminder_sms_custom_message",
-              previewMessageType: "day_of_reminder_sms",
-              maxChars: 500,
-              previewButtonLabel: "Preview text",
-              showSmsSegmentHint: true,
-            },
-          ],
+      optionalMessageSections: [
+        {
+          label: "Day-of reminder (email)",
+          description: "Optional line added to the day-of email.",
+          messageKey: "day_of_reminder_custom_message",
+          previewMessageType: "day_of_reminder_email",
+          maxChars: 500,
+          previewButtonLabel: "Preview email",
+        },
+        {
+          label: "Day-of reminder (text)",
+          description:
+            "Optional line at the start of the day-of text. Leave blank to use the same line as the email.",
+          messageKey: "day_of_reminder_sms_custom_message",
+          previewMessageType: "day_of_reminder_sms",
+          maxChars: 500,
+          previewButtonLabel: "Preview text",
+          showSmsSegmentHint: true,
+        },
+      ],
     },
     {
       messageType: "post_visit_email",
@@ -203,10 +180,8 @@ function buildCommunicationCards(
       label: "Booking Modification",
       description: unifiedVenue
         ? "Channels and optional wording for reschedule and change notices."
-        : restrictSmsForStandard
-          ? "Sent when a booking is changed. Restaurant Standard: email only (SMS on Business)."
-          : "Sent when a booking's date, time, or party size is changed. Choose email and/or SMS.",
-      channel: restrictSmsForStandard ? "email" : "both",
+        : "Sent when a booking's date, time, or party size is changed. Choose email and/or SMS.",
+      channel: "both",
       enabledKey: "modification_email_enabled",
       customMessageKey: "modification_custom_message",
       locked: true,
@@ -219,10 +194,8 @@ function buildCommunicationCards(
       label: "Booking Cancellation",
       description: unifiedVenue
         ? "Email content for cancellation notices (appointments: email only)."
-        : restrictSmsForStandard
-          ? "Sent when a booking is cancelled. Restaurant Standard: email only (SMS on Business)."
-          : "Sent when a booking is cancelled. Choose email and/or SMS.",
-      channel: unifiedVenue || restrictSmsForStandard ? "email" : "both",
+        : "Sent when a booking is cancelled. Choose email and/or SMS.",
+      channel: unifiedVenue ? "email" : "both",
       enabledKey: "cancellation_email_enabled",
       customMessageKey: "cancellation_custom_message",
       locked: true,
@@ -244,7 +217,6 @@ const CHANNEL_BADGE: Record<string, { label: string; className: string }> = {
 interface CommunicationTemplatesSectionProps {
   venue: { id: string };
   isAdmin: boolean;
-  /** Standard tier on restaurants only: email-only deposit request; SMS comms hidden for several message types. */
   pricingTier?: string;
   bookingModel?: string;
   /** Normalised secondaries (C/D/E); used to show merge-variable hints for multi-model venues. */
@@ -311,9 +283,9 @@ function sortTableRestaurantCards(list: CommCardConfig[]): CommCardConfig[] {
 }
 
 export function CommunicationTemplatesSection({
-  venue: _venue,
+  venue,
   isAdmin,
-  pricingTier = "standard",
+  pricingTier = "appointments",
   bookingModel,
   enabledModels = [],
   depositConfig,
@@ -323,19 +295,28 @@ export function CommunicationTemplatesSection({
     (bookingModel as BookingModel | undefined) ?? "table_reservation";
   const tablePrimaryWithSecondaries =
     primary === "table_reservation" && enabledModels.length > 0;
+  const appointmentPlanTier = isAppointmentPlanTier(pricingTier);
   /** Show unified automation + grouped templates (same as pure unified venues). */
-  const unifiedColumnStyle = unifiedVenue || tablePrimaryWithSecondaries;
-  /** Table + secondaries: two tabs; pure unified: single column (no tabs). */
-  const showCommsTabs = tablePrimaryWithSecondaries && !unifiedVenue;
+  const unifiedColumnStyle =
+    unifiedVenue ||
+    tablePrimaryWithSecondaries ||
+    (appointmentPlanTier && !unifiedVenue);
+  /**
+   * Restaurant plans with table primary + secondaries: two tabs (table vs appointments).
+   * Appointments plan never shows table-only tabs — they use the unified column only.
+   */
+  const showCommsTabs =
+    tablePrimaryWithSecondaries &&
+    !unifiedVenue &&
+    isRestaurantCommsTier(pricingTier);
 
-  const restrictSmsForStandard = pricingTier === "standard" && !unifiedVenue;
   const cardsTable = useMemo(
-    () => buildCommunicationCards(restrictSmsForStandard, false),
-    [restrictSmsForStandard],
+    () => buildCommunicationCards(false),
+    [],
   );
   const cardsUnifiedColumn = useMemo(
-    () => buildCommunicationCards(restrictSmsForStandard, true),
-    [restrictSmsForStandard],
+    () => buildCommunicationCards(true),
+    [],
   );
 
   /** When deposit JSON is missing, keep deposit cards visible for unified-style column (cannot infer intent). */
@@ -396,10 +377,17 @@ export function CommunicationTemplatesSection({
         ...visibleCardsTable,
         ...visibleCardsUnified,
       ]);
+    if (appointmentPlanTier && unifiedColumnStyle)
+      return withAutomationCards([
+        ...visibleCardsTable,
+        ...visibleCardsUnified,
+      ]);
     return withAutomationCards(visibleCardsTable);
   }, [
     unifiedVenue,
     showCommsTabs,
+    appointmentPlanTier,
+    unifiedColumnStyle,
     visibleCardsTable,
     visibleCardsUnified,
     cardsTable,
@@ -416,6 +404,10 @@ export function CommunicationTemplatesSection({
   }, [unifiedColumnStyle]);
 
   const [commsTab, setCommsTab] = useState<"table" | "appointments">("table");
+
+  useEffect(() => {
+    setCommsTab("table");
+  }, [venue.id]);
 
   const [settings, setSettings] = useState<CommunicationSettings | null>(null);
   const [notificationSettings, setNotificationSettings] =
@@ -628,10 +620,14 @@ export function CommunicationTemplatesSection({
   ];
 
   const showUnifiedCommsBlocks =
-    unifiedVenue || (showCommsTabs && commsTab === "appointments");
+    unifiedVenue ||
+    (showCommsTabs && commsTab === "appointments") ||
+    (appointmentPlanTier && unifiedColumnStyle && !unifiedVenue);
   const showRestaurantTemplatesSection =
-    (!unifiedVenue && !showCommsTabs) ||
-    (showCommsTabs && commsTab === "table");
+    isRestaurantCommsTier(pricingTier) &&
+    !unifiedVenue &&
+    ((showCommsTabs && commsTab === "table") ||
+      (!showCommsTabs && primary === "table_reservation"));
 
   const previewLabels: Partial<Record<CommMessageType, string>> = {
     booking_confirmation_email: "Booking confirmation (email)",
@@ -673,14 +669,6 @@ export function CommunicationTemplatesSection({
             <p className="mt-2 text-sm text-slate-500">
               Deposit wording is hidden while deposits are off in your booking
               and payment settings.
-            </p>
-          )}
-          {restrictSmsForStandard && (
-            <p className="mt-2 text-xs text-slate-500">
-              Restaurant Standard plan: several guest SMS options are off here;
-              upgrade to Business for full SMS on deposit requests, day-of
-              reminders, and change/cancel notices. Unified scheduling venues on
-              Standard include SMS with a monthly allowance (see Plan).
             </p>
           )}
         </div>

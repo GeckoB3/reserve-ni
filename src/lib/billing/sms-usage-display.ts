@@ -19,8 +19,7 @@ export interface SmsUsageDisplay {
 
 /**
  * Current-month SMS figures for dashboard / settings.
- * Included count always comes from `computeSmsMonthlyAllowance` (tier + calendar_count) so it
- * never shows the column default (800) when the venue is Standard with multiple calendars.
+ * Included count comes from `computeSmsMonthlyAllowance` (tier-based).
  */
 export async function getSmsUsageDisplayForVenue(
   admin: SupabaseClient,
@@ -38,7 +37,7 @@ export async function getSmsUsageDisplayForVenue(
     pricing_tier?: string | null;
     calendar_count?: number | null;
   };
-  const included = computeSmsMonthlyAllowance(row.pricing_tier ?? 'standard', row.calendar_count ?? null);
+  const included = computeSmsMonthlyAllowance(row.pricing_tier ?? 'appointments', row.calendar_count ?? null);
 
   const { data: usage } = await admin
     .from('sms_usage')

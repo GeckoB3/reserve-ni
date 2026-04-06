@@ -41,14 +41,33 @@ export interface PublicBookTabDef {
   bookingModel: BookingModel;
 }
 
-function labelForModel(m: BookingModel, terminology: VenueTerminology | undefined): string {
-  const t = terminology ?? DEFAULT_TERMINOLOGY[m];
+function labelForModel(m: BookingModel, terminology: Partial<VenueTerminology> | null | undefined): string {
+  /**
+   * Merge venue overrides with the defaults for the model being labelled (not the venue primary).
+   * Do not apply venue-wide `terminology.booking` to appointment surfaces: many venues set `booking` to
+   * "Reservation" for the table tab, which must not relabel the Appointments tab.
+   */
+  const defaults = DEFAULT_TERMINOLOGY[m];
+  const venue = terminology && typeof terminology === 'object' ? terminology : undefined;
+  const t: VenueTerminology =
+    m === 'table_reservation'
+      ? { ...defaults, ...venue }
+      : {
+          ...defaults,
+          ...(venue
+            ? {
+                client: venue.client ?? defaults.client,
+                staff: venue.staff ?? defaults.staff,
+              }
+            : {}),
+          booking: defaults.booking,
+        };
   switch (m) {
     case 'table_reservation':
       return t.booking === 'Reservation' ? 'Tables' : t.booking;
     case 'practitioner_appointment':
     case 'unified_scheduling':
-      return t.booking === 'Appointment' ? 'Appointments' : t.booking;
+      return t.booking === 'Appointment' ? 'Appointment' : t.booking;
     case 'event_ticket':
       return 'Events';
     case 'class_session':
@@ -68,17 +87,15 @@ export function publicBookTabsForVenue(
   enabledModels: BookingModel[],
   terminology?: Partial<VenueTerminology> | null
 ): PublicBookTabDef[] {
-  const mergedTerms: VenueTerminology = {
-    ...DEFAULT_TERMINOLOGY[primary],
-    ...(terminology && typeof terminology === 'object' ? terminology : {}),
-  };
+  const venueTermOverrides =
+    terminology && typeof terminology === 'object' ? terminology : undefined;
   const models = new Set<BookingModel>([primary, ...enabledModels]);
   const ordered = BOOKING_MODEL_ORDER.filter((m) => models.has(m));
   const out: PublicBookTabDef[] = [];
   for (const m of ordered) {
     out.push({
       slug: BOOKING_MODEL_TO_PUBLIC_TAB[m],
-      label: labelForModel(m, mergedTerms),
+      label: labelForModel(m, venueTermOverrides),
       bookingModel: m,
     });
   }

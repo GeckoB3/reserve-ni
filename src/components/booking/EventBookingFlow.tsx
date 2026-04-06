@@ -15,6 +15,8 @@ interface EventOfferingSummary {
   dates: string[];
   occurrence_count: number;
   from_price_pence: number | null;
+  payment_requirement: 'none' | 'deposit' | 'full_payment';
+  deposit_amount_pence: number | null;
 }
 
 interface TicketTypeAvail {
@@ -38,6 +40,8 @@ interface EventInstance {
   image_url: string | null;
   total_capacity: number;
   remaining_capacity: number;
+  payment_requirement: 'none' | 'deposit' | 'full_payment';
+  deposit_amount_pence: number | null;
   ticket_types: TicketTypeAvail[];
 }
 
@@ -53,6 +57,67 @@ function localTodayISO(): string {
 
 function symForCurrency(currency: string): string {
   return currency === 'EUR' ? '€' : '£';
+}
+
+function eventPaymentSummaryLines(
+  occurrence: EventInstance,
+  totalTickets: number,
+  totalPricePence: number,
+  currency: string,
+): { lines: string[]; chargePence: number } {
+  const sym = symForCurrency(currency);
+  const req = occurrence.payment_requirement ?? 'none';
+  const depPerPerson = occurrence.deposit_amount_pence ?? 0;
+
+  if (totalPricePence <= 0) {
+    return { lines: ['Free - no payment required'], chargePence: 0 };
+  }
+
+  if (req === 'none') {
+    return {
+      lines: [
+        `Total: ${sym}${(totalPricePence / 100).toFixed(2)} - pay at venue.`,
+      ],
+      chargePence: 0,
+    };
+  }
+
+  if (req === 'full_payment') {
+    return {
+      lines: [`Total due now: ${sym}${(totalPricePence / 100).toFixed(2)}`],
+      chargePence: totalPricePence,
+    };
+  }
+
+  if (req === 'deposit' && depPerPerson > 0) {
+    const totalDeposit = depPerPerson * totalTickets;
+    const remainingPence = Math.max(0, totalPricePence - totalDeposit);
+    return {
+      lines: [
+        `Deposit: ${sym}${(depPerPerson / 100).toFixed(2)} per person (total deposit: ${sym}${(totalDeposit / 100).toFixed(2)}).`,
+        remainingPence > 0
+          ? `Remaining ${sym}${(remainingPence / 100).toFixed(2)} due at venue.`
+          : 'Balance due at venue.',
+      ],
+      chargePence: totalDeposit,
+    };
+  }
+
+  return { lines: [`Total: ${sym}${(totalPricePence / 100).toFixed(2)}`], chargePence: 0 };
+}
+
+function eventListingPriceLabel(
+  ev: EventOfferingSummary,
+  sym: string,
+): string {
+  const req = ev.payment_requirement ?? 'none';
+  if (ev.from_price_pence == null || ev.from_price_pence <= 0) return 'Free';
+  const base = `From ${sym}${(ev.from_price_pence / 100).toFixed(2)}`;
+  if (req === 'none') return `${base} (pay at venue)`;
+  if (req === 'deposit' && ev.deposit_amount_pence != null && ev.deposit_amount_pence > 0) {
+    return `${base} (${sym}${(ev.deposit_amount_pence / 100).toFixed(2)} deposit pp)`;
+  }
+  return base;
 }
 
 export function EventBookingFlow({ venue, cancellationPolicy }: { venue: VenuePublic; cancellationPolicy?: string }) {
@@ -147,6 +212,13 @@ export function EventBookingFlow({ venue, cancellationPolicy }: { venue: VenuePu
     ? selectedOccurrence.ticket_types.reduce((sum, tt) => sum + (ticketSelections[tt.id] ?? 0) * tt.price_pence, 0)
     : 0;
 
+  const paymentSummary = useMemo(() => {
+    if (!selectedOccurrence || totalTickets <= 0) return null;
+    return eventPaymentSummaryLines(selectedOccurrence, totalTickets, totalPricePence, currency);
+  }, [selectedOccurrence, totalTickets, totalPricePence, currency]);
+
+  const chargePence = paymentSummary?.chargePence ?? 0;
+
   const handleDetailsSubmit = useCallback(
     async (details: GuestDetails) => {
       setError(null);
@@ -235,10 +307,7 @@ export function EventBookingFlow({ venue, cancellationPolicy }: { venue: VenuePu
           ) : (
             <div className="space-y-3">
               {eventSummaries.map((ev) => {
-                const priceLabel =
-                  ev.from_price_pence == null || ev.from_price_pence <= 0
-                    ? 'Free'
-                    : `From ${sym}${(ev.from_price_pence / 100).toFixed(2)}`;
+                const priceLabel = eventListingPriceLabel(ev, sym);
                 return (
                   <button
                     key={ev.series_key}
@@ -384,7 +453,7 @@ export function EventBookingFlow({ venue, cancellationPolicy }: { venue: VenuePu
             ))}
           </div>
 
-          {totalTickets > 0 && (
+          {totalTickets > 0 && paymentSummary && (
             <>
               <div className="mt-6 mb-4 rounded-xl border border-slate-100 bg-slate-50 p-4">
                 <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Order summary</p>
@@ -392,6 +461,11 @@ export function EventBookingFlow({ venue, cancellationPolicy }: { venue: VenuePu
                   {totalTickets} ticket{totalTickets !== 1 ? 's' : ''} · {sym}
                   {(totalPricePence / 100).toFixed(2)}
                 </p>
+                <div className="mt-2 space-y-1">
+                  {paymentSummary.lines.map((line, i) => (
+                    <p key={i} className="text-sm text-slate-600">{line}</p>
+                  ))}
+                </div>
               </div>
               <button
                 type="button"
@@ -429,7 +503,7 @@ export function EventBookingFlow({ venue, cancellationPolicy }: { venue: VenuePu
             partySize={totalTickets}
             onSubmit={handleDetailsSubmit}
             onBack={() => setStep('summary')}
-            requiresDeposit={totalPricePence > 0}
+            requiresDeposit={chargePence > 0}
             variant="class"
             phoneDefaultCountry={phoneDefaultCountry}
           />
@@ -440,7 +514,7 @@ export function EventBookingFlow({ venue, cancellationPolicy }: { venue: VenuePu
         <PaymentStep
           clientSecret={createResult.client_secret}
           stripeAccountId={createResult.stripe_account_id}
-          amountPence={totalPricePence}
+          amountPence={chargePence}
           partySize={totalTickets}
           onComplete={handlePaymentComplete}
           onBack={() => setStep('details')}

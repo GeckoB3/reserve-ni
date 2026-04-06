@@ -32,7 +32,8 @@ const DEFAULT_NOTIFICATION_SETTINGS: VenueNotificationSettings = {
   reminder_1_channels: ['email', 'sms'],
   reminder_2_enabled: false,
   reminder_2_hours_before: 2,
-  reminder_2_channels: ['sms'],
+  /** Same channel affordances as reminder_1; opt-in via reminder_2_enabled. */
+  reminder_2_channels: ['email', 'sms'],
   reschedule_notification_enabled: true,
   cancellation_notification_enabled: true,
   no_show_notification_enabled: false,
@@ -57,7 +58,7 @@ export function parseNotificationSettings(raw: unknown): VenueNotificationSettin
     /** Explicit opt-in only (default off for new venues). */
     reminder_2_enabled: o.reminder_2_enabled === true,
     reminder_2_hours_before: num(o.reminder_2_hours_before, 2),
-    reminder_2_channels: parseChannels(o.reminder_2_channels, ['sms']),
+    reminder_2_channels: parseChannels(o.reminder_2_channels, ['email', 'sms']),
     reschedule_notification_enabled: o.reschedule_notification_enabled !== false,
     cancellation_notification_enabled: o.cancellation_notification_enabled !== false,
     /** Explicit opt-in only (default off for new venues). */

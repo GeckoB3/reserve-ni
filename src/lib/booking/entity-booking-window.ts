@@ -64,29 +64,32 @@ export function isGuestBookingDateAllowed(
 const SERVICE_WINDOW_SELECT =
   'max_advance_booking_days, min_booking_notice_hours, cancellation_notice_hours, allow_same_day_booking';
 
-/** Loads booking window for an appointment service (unified `service_items` or legacy `appointment_services`). */
+/**
+ * Loads booking window for an appointment service.
+ * Tries `service_items` first (USE), then legacy `appointment_services`, so secondary-tab
+ * appointments work when the venue primary is not `unified_scheduling`.
+ */
 export async function loadServiceEntityBookingWindow(
   supabase: SupabaseClient,
   venueId: string,
-  bookingModel: string,
+  _bookingModel: string,
   serviceId: string,
 ): Promise<EntityBookingWindow> {
-  if (bookingModel === 'unified_scheduling') {
-    const { data } = await supabase
-      .from('service_items')
-      .select(SERVICE_WINDOW_SELECT)
-      .eq('id', serviceId)
-      .eq('venue_id', venueId)
-      .maybeSingle();
-    if (data) return entityBookingWindowFromRow(data as Record<string, unknown>);
-  } else {
-    const { data } = await supabase
-      .from('appointment_services')
-      .select(SERVICE_WINDOW_SELECT)
-      .eq('id', serviceId)
-      .eq('venue_id', venueId)
-      .maybeSingle();
-    if (data) return entityBookingWindowFromRow(data as Record<string, unknown>);
-  }
+  const { data: fromItems } = await supabase
+    .from('service_items')
+    .select(SERVICE_WINDOW_SELECT)
+    .eq('id', serviceId)
+    .eq('venue_id', venueId)
+    .maybeSingle();
+  if (fromItems) return entityBookingWindowFromRow(fromItems as Record<string, unknown>);
+
+  const { data: fromLegacy } = await supabase
+    .from('appointment_services')
+    .select(SERVICE_WINDOW_SELECT)
+    .eq('id', serviceId)
+    .eq('venue_id', venueId)
+    .maybeSingle();
+  if (fromLegacy) return entityBookingWindowFromRow(fromLegacy as Record<string, unknown>);
+
   return { ...DEFAULT_ENTITY_BOOKING_WINDOW };
 }

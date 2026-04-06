@@ -980,9 +980,9 @@ export default function OnboardingPage() {
         {currentStepKey === 'team' && venue && (
           <div>
             <h2 className="mb-1 text-lg font-bold text-slate-900">{unifiedTeamStepLabel(terms)}</h2>
-            {venue.pricing_tier === 'business' || venue.pricing_tier === 'founding' ? (
+            {venue.pricing_tier === 'founding' ? (
               <p className="mb-4 text-sm text-slate-500">
-                Your Business plan includes <strong>unlimited bookable calendars</strong> and{' '}
+                Your Founding Partner plan includes <strong>unlimited bookable calendars</strong> and{' '}
                 <strong>unlimited team members</strong>: add everyone you need. Each person below gets their own
                 calendar and staff settings. Set{' '}
                 <strong>working hours, breaks, and days off</strong> under{' '}

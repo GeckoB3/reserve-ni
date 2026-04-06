@@ -162,6 +162,8 @@ export interface ExperienceEvent {
   min_booking_notice_hours?: number;
   cancellation_notice_hours?: number;
   allow_same_day_booking?: boolean;
+  payment_requirement?: 'none' | 'deposit' | 'full_payment';
+  deposit_amount_pence?: number | null;
 }
 
 export interface EventTicketType {

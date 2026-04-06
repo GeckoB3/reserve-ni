@@ -1,48 +1,147 @@
 'use client';
 
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, useLayoutEffect } from 'react';
+import { createPortal } from 'react-dom';
 
 interface HelpTooltipProps {
   content: string;
   maxWidth?: number;
 }
 
+interface PanelCoords {
+  top: number;
+  left: number;
+  width: number;
+}
+
 export function HelpTooltip({ content, maxWidth = 280 }: HelpTooltipProps) {
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLSpanElement>(null);
+  const [mounted, setMounted] = useState(false);
+  const [coords, setCoords] = useState<PanelCoords | null>(null);
 
-  const handleClickOutside = useCallback((e: MouseEvent) => {
-    if (ref.current && !ref.current.contains(e.target as Node)) {
-      setOpen(false);
+  const rootRef = useRef<HTMLSpanElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  const computePanelPosition = useCallback(() => {
+    const btn = rootRef.current?.querySelector('button');
+    const panel = panelRef.current;
+    if (!btn || !panel) return;
+
+    const margin = 12;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const btnRect = btn.getBoundingClientRect();
+
+    const panelWidth = Math.min(maxWidth, vw - margin * 2);
+    panel.style.width = `${panelWidth}px`;
+
+    const ph = panel.getBoundingClientRect().height;
+
+    let left = btnRect.left + btnRect.width / 2 - panelWidth / 2;
+    left = Math.max(margin, Math.min(left, vw - panelWidth - margin));
+
+    let top = btnRect.top - ph - 8;
+    if (top < margin) {
+      top = btnRect.bottom + 8;
     }
+    if (top + ph > vh - margin) {
+      top = Math.max(margin, vh - ph - margin);
+    }
+
+    setCoords({ top, left, width: panelWidth });
+  }, [maxWidth]);
+
+  useLayoutEffect(() => {
+    if (!open) {
+      setCoords(null);
+      return;
+    }
+    computePanelPosition();
+    const raf = requestAnimationFrame(() => computePanelPosition());
+    return () => cancelAnimationFrame(raf);
+  }, [open, content, maxWidth, computePanelPosition]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onResize = () => computePanelPosition();
+    window.addEventListener('resize', onResize);
+    window.addEventListener('scroll', onResize, true);
+    return () => {
+      window.removeEventListener('resize', onResize);
+      window.removeEventListener('scroll', onResize, true);
+    };
+  }, [open, computePanelPosition]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [open]);
+
+  const handleClickOutside = useCallback((e: MouseEvent | TouchEvent) => {
+    const t = e.target as Node;
+    if (rootRef.current?.contains(t)) return;
+    if (panelRef.current?.contains(t)) return;
+    setOpen(false);
   }, []);
 
   useEffect(() => {
-    if (open) {
-      document.addEventListener('mousedown', handleClickOutside);
-      return () => document.removeEventListener('mousedown', handleClickOutside);
-    }
+    if (!open) return;
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('touchstart', handleClickOutside, { passive: true });
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('touchstart', handleClickOutside);
+    };
   }, [open, handleClickOutside]);
 
+  const fallbackWidth =
+    typeof window !== 'undefined' ? Math.min(maxWidth, window.innerWidth - 24) : maxWidth;
+
+  const panel =
+    open &&
+    mounted &&
+    createPortal(
+      <div
+        ref={panelRef}
+        role="dialog"
+        aria-label="Help"
+        className="z-[1001] box-border rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-xs leading-relaxed text-slate-600 shadow-lg"
+        style={{
+          position: 'fixed',
+          top: coords?.top ?? -9999,
+          left: coords?.left ?? 0,
+          width: coords?.width ?? fallbackWidth,
+          visibility: coords ? 'visible' : 'hidden',
+          pointerEvents: coords ? 'auto' : 'none',
+        }}
+      >
+        {content}
+      </div>,
+      document.body,
+    );
+
   return (
-    <span ref={ref} className="relative inline-flex">
+    <span ref={rootRef} className="relative inline-flex align-middle">
       <button
         type="button"
         onClick={() => setOpen(!open)}
-        className="flex h-4 w-4 items-center justify-center rounded-full bg-slate-200 text-[10px] font-bold text-slate-500 transition-colors hover:bg-brand-100 hover:text-brand-600"
+        className="inline-flex min-h-[44px] min-w-[44px] shrink-0 touch-manipulation items-center justify-center rounded-full border-0 bg-transparent p-0 text-slate-500"
+        aria-expanded={open}
         aria-label="Help"
       >
-        i
-      </button>
-      {open && (
-        <span
-          className="absolute bottom-full left-1/2 z-50 mb-2 -translate-x-1/2 rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-xs leading-relaxed text-slate-600 shadow-lg"
-          style={{ maxWidth, minWidth: 200, width: 'max-content', display: 'block' }}
-        >
-          {content}
-          <span className="absolute left-1/2 top-full -translate-x-1/2 border-4 border-transparent border-t-white" />
+        <span className="flex h-4 w-4 items-center justify-center rounded-full bg-slate-200 text-[10px] font-bold text-slate-500 transition-colors hover:bg-brand-100 hover:text-brand-600">
+          i
         </span>
-      )}
+      </button>
+      {panel}
     </span>
   );
 }

@@ -35,6 +35,8 @@ const eventSchema = z.object({
   min_booking_notice_hours: z.number().int().min(0).max(168).optional(),
   cancellation_notice_hours: z.number().int().min(0).max(168).optional(),
   allow_same_day_booking: z.boolean().optional(),
+  payment_requirement: z.enum(['none', 'deposit', 'full_payment']).optional(),
+  deposit_amount_pence: z.number().int().min(0).nullish(),
   ticket_types: z.array(z.object({
     name: z.string().min(1),
     price_pence: z.number().int().min(0),
@@ -64,11 +66,6 @@ const createEventBodySchema = eventSchema.extend({
 const patchEventBodySchema = eventSchema.partial().extend({
   new_calendar_name: z.string().min(1).max(200).optional(),
 });
-
-async function getVenueBookingModel(admin: ReturnType<typeof getSupabaseAdminClient>, venueId: string): Promise<string> {
-  const { data } = await admin.from('venues').select('booking_model').eq('id', venueId).maybeSingle();
-  return ((data as { booking_model?: string } | null)?.booking_model as string) ?? '';
-}
 
 function timeHhMm(t: string): string {
   const s = String(t).trim();
@@ -126,20 +123,22 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid request', details: parsed.error.flatten() }, { status: 400 });
     }
 
-    const { ticket_types, schedule, new_calendar_name, calendar_id: requestedCalendarId, ...eventFields } =
-      parsed.data;
+    const {
+      ticket_types, schedule, new_calendar_name,
+      calendar_id: requestedCalendarId, payment_requirement, deposit_amount_pence,
+      ...eventFields
+    } = parsed.data;
 
-    if (new_calendar_name && requestedCalendarId !== undefined) {
+    if (payment_requirement === 'deposit' && (!deposit_amount_pence || deposit_amount_pence <= 0)) {
       return NextResponse.json(
-        { error: 'Use either calendar_id or new_calendar_name, not both.' },
+        { error: 'Deposit amount must be greater than zero when payment requirement is deposit.' },
         { status: 400 },
       );
     }
 
-    const bookingModel = await getVenueBookingModel(admin, staff.venue_id);
-    if ((new_calendar_name || requestedCalendarId !== undefined) && bookingModel !== 'unified_scheduling') {
+    if (new_calendar_name && requestedCalendarId !== undefined) {
       return NextResponse.json(
-        { error: 'Assigning an event to a calendar column requires unified scheduling.' },
+        { error: 'Use either calendar_id or new_calendar_name, not both.' },
         { status: 400 },
       );
     }
@@ -214,6 +213,8 @@ export async function POST(request: NextRequest) {
         eventFields.cancellation_notice_hours ?? DEFAULT_ENTITY_BOOKING_WINDOW.cancellation_notice_hours,
       allow_same_day_booking:
         eventFields.allow_same_day_booking ?? DEFAULT_ENTITY_BOOKING_WINDOW.allow_same_day_booking,
+      payment_requirement: payment_requirement ?? 'none',
+      deposit_amount_pence: payment_requirement === 'deposit' ? (deposit_amount_pence ?? null) : null,
     };
 
     const startHm = timeHhMm(baseInsert.start_time);
@@ -302,7 +303,14 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid request', details: parsed.error.flatten() }, { status: 400 });
     }
 
-    const { new_calendar_name: newCalendarName, ...fieldsForResolve } = parsed.data;
+    const { new_calendar_name: newCalendarName, payment_requirement: patchPayReq, deposit_amount_pence: patchDepositPence, ...fieldsForResolve } = parsed.data;
+
+    if (patchPayReq === 'deposit' && (patchDepositPence === undefined || patchDepositPence === null || patchDepositPence <= 0)) {
+      return NextResponse.json(
+        { error: 'Deposit amount must be greater than zero when payment requirement is deposit.' },
+        { status: 400 },
+      );
+    }
 
     if (newCalendarName && fieldsForResolve.calendar_id !== undefined) {
       return NextResponse.json(
@@ -328,31 +336,19 @@ export async function PATCH(request: NextRequest) {
       }
     }
 
-    const bookingModel = await getVenueBookingModel(admin, staff.venue_id);
-    if (bookingModel !== 'unified_scheduling' && newCalendarName) {
-      const { data: venueRow } = await admin
-        .from('venues')
-        .select('enabled_models')
-        .eq('id', staff.venue_id)
-        .maybeSingle();
-      const rawSecondaries = (venueRow as { enabled_models?: unknown } | null)?.enabled_models;
-      const hasUnifiedSecondary =
-        Array.isArray(rawSecondaries) && rawSecondaries.includes('unified_scheduling');
-      if (!hasUnifiedSecondary) {
-        return NextResponse.json(
-          { error: 'Creating a new team calendar from Event manager requires unified scheduling (or enable it as an add-on).' },
-          { status: 400 },
-        );
-      }
+    const paymentPatch: Record<string, unknown> = {};
+    if (patchPayReq !== undefined) {
+      paymentPatch.payment_requirement = patchPayReq;
+      paymentPatch.deposit_amount_pence = patchPayReq === 'deposit' ? (patchDepositPence ?? null) : null;
     }
 
-    let patchInput = { ...fieldsForResolve };
+    let patchInput = { ...fieldsForResolve, ...paymentPatch };
     if (newCalendarName) {
       const created = await createTeamCalendarForEvent(admin, staff.venue_id, newCalendarName);
       if (!created.ok) {
         return NextResponse.json({ error: created.error }, { status: created.status });
       }
-      patchInput = { ...fieldsForResolve, calendar_id: created.id };
+      patchInput = { ...fieldsForResolve, ...paymentPatch, calendar_id: created.id };
     }
 
     const resolved = await resolveExperienceEventPatch(admin, staff.venue_id, id, patchInput);

@@ -36,6 +36,8 @@ export interface EventAvailabilitySlot {
   image_url: string | null;
   total_capacity: number;
   remaining_capacity: number;
+  payment_requirement: 'none' | 'deposit' | 'full_payment';
+  deposit_amount_pence: number | null;
   ticket_types: Array<{
     id: string;
     name: string;
@@ -117,6 +119,8 @@ export function computeEventAvailability(
       image_url: event.image_url,
       total_capacity: event.capacity,
       remaining_capacity: remaining,
+      payment_requirement: (event.payment_requirement as 'none' | 'deposit' | 'full_payment') ?? 'none',
+      deposit_amount_pence: (event.deposit_amount_pence as number | null) ?? null,
       ticket_types: ticketResults,
     });
   }
@@ -148,7 +152,6 @@ export async function fetchEventInput(params: {
       .select('*')
       .in(
         'event_id',
-        // sub-select: all event ids for this venue on this date
         (await supabase
           .from('experience_events')
           .select('id')
@@ -170,11 +173,9 @@ export async function fetchEventInput(params: {
   const events = (eventsRes.data ?? []) as ExperienceEvent[];
   const ticketTypes = (ticketTypesRes.data ?? []) as EventTicketType[];
 
-  // Aggregate booked counts
   const bookedByEvent: Record<string, number> = {};
   const bookedByTicketType: Record<string, number> = {};
 
-  // Also need ticket lines for per-ticket-type counts
   const bookingIds = (bookingsRes.data ?? []).map((b) => b.id);
   let ticketLines: Array<{ booking_id: string; ticket_type_id: string | null; quantity: number }> = [];
   if (bookingIds.length > 0) {
@@ -212,8 +213,10 @@ export interface EventOfferingSummary {
   dates: string[];
   /** Bookable occurrences in range for this series. */
   occurrence_count: number;
-  /** Minimum ticket price across occurrences (for “from £x” labels). */
+  /** Minimum ticket price across occurrences (for "from £x" labels). */
   from_price_pence: number | null;
+  payment_requirement: 'none' | 'deposit' | 'full_payment';
+  deposit_amount_pence: number | null;
 }
 
 function minTicketPricePence(slot: EventAvailabilitySlot): number | null {
@@ -251,6 +254,8 @@ export function buildEventOfferingSummaries(slots: EventAvailabilitySlot[]): Eve
       dates,
       occurrence_count: arr.length,
       from_price_pence: fromPrice,
+      payment_requirement: first.payment_requirement,
+      deposit_amount_pence: first.deposit_amount_pence,
     });
   }
   out.sort((a, b) => a.event_name.localeCompare(b.event_name));

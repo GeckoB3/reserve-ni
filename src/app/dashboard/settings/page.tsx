@@ -74,7 +74,7 @@ export default async function SettingsPage({
         (fullVenue as { venue_opening_exceptions?: unknown }).venue_opening_exceptions,
       ),
     };
-    const pt = ((fullVenue as { pricing_tier?: string | null }).pricing_tier ?? 'standard') as string;
+    const pt = ((fullVenue as { pricing_tier?: string | null }).pricing_tier ?? 'appointments') as string;
     const cc = (fullVenue as { calendar_count?: number | null }).calendar_count ?? null;
     const expectedAllowance = computeSmsMonthlyAllowance(pt, cc);
     const stored = (fullVenue as { sms_monthly_allowance?: number | null }).sms_monthly_allowance;

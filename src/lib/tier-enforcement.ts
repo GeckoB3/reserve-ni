@@ -1,7 +1,29 @@
 import { getSupabaseAdminClient } from '@/lib/supabase';
 
-export type PricingTier = 'standard' | 'business' | 'founding' | 'appointments' | 'restaurant';
+export type PricingTier = 'appointments' | 'restaurant' | 'founding';
 
+/**
+ * Restaurant / Founding tiers: table reservations, dining availability, floor plan.
+ * Appointments tier excludes these even if `booking_model` is `table_reservation`.
+ */
+export function isRestaurantTableProductTier(pricingTier: string | null | undefined): boolean {
+  const t = (pricingTier ?? '').toLowerCase().trim();
+  return t === 'restaurant' || t === 'founding';
+}
+
+/**
+ * Guest communications "Table bookings" templates (restaurant-product plans).
+ */
+export function isRestaurantCommsTier(pricingTier: string | null | undefined): boolean {
+  const t = (pricingTier ?? '').toLowerCase().trim();
+  return t === 'restaurant' || t === 'founding';
+}
+
+/** Appointments product plan — use unified / "Appointments & other bookings" messaging, not table-only. */
+export function isAppointmentPlanTier(pricingTier: string | null | undefined): boolean {
+  const t = (pricingTier ?? '').toLowerCase().trim();
+  return t === 'appointments';
+}
 
 /**
  * Calendar limits have been removed - all plans now include unlimited calendars.
@@ -26,26 +48,22 @@ export async function checkExperienceEventBatchLimit(
 }
 
 /**
- * Check if a venue's tier allows SMS communications.
- * Unified Scheduling plan §1.1: Standard, Business, and Founding all include SMS (allowances differ).
+ * All active tiers (appointments, restaurant, founding) include SMS.
+ * Returns true when the venue exists (i.e. has a known tier).
  */
 export async function isSmsAllowed(venueId: string): Promise<boolean> {
   const admin = getSupabaseAdminClient();
   const { data: venue } = await admin
     .from('venues')
-    .select('pricing_tier')
+    .select('id')
     .eq('id', venueId)
     .single();
 
-  if (!venue) return false;
-  const tier = ((venue.pricing_tier as string) ?? 'appointments').toLowerCase();
-  return tier === 'standard' || tier === 'business' || tier === 'founding'
-    || tier === 'appointments' || tier === 'restaurant';
+  return !!venue;
 }
 
 /**
- * Check if table management is allowed for a venue.
- * Restaurant, Business, and Founding tier restaurants get table management.
+ * Table management is allowed for restaurant / founding tier venues with table_reservation model.
  */
 export async function isTableManagementAllowed(venueId: string): Promise<boolean> {
   const admin = getSupabaseAdminClient();
@@ -56,9 +74,8 @@ export async function isTableManagementAllowed(venueId: string): Promise<boolean
     .single();
 
   if (!venue) return false;
-  const tier = ((venue.pricing_tier as string) ?? '').toLowerCase();
   return (
     (venue.booking_model as string) === 'table_reservation' &&
-    (tier === 'restaurant' || tier === 'business' || tier === 'founding')
+    isRestaurantTableProductTier(venue.pricing_tier as string)
   );
 }

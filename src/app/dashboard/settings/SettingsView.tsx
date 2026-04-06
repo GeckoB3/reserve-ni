@@ -28,6 +28,7 @@ import { computeSmsMonthlyAllowance } from '@/lib/billing/sms-allowance';
 import { RESTAURANT_PRICE, SMS_OVERAGE_GBP_PER_MESSAGE } from '@/lib/pricing-constants';
 import { normalizeEnabledModels } from '@/lib/booking/enabled-models';
 import type { BookingModel } from '@/types/booking-models';
+import { isRestaurantTableProductTier } from '@/lib/tier-enforcement';
 
 interface SettingsViewProps {
   initialVenue: VenueSettings | null;
@@ -74,7 +75,7 @@ function PlanSection({
   const planStatus = venue.plan_status ?? 'active';
   const tierLabel =
     tier === 'founding' ? 'Founding Partner' :
-    tier === 'restaurant' || tier === 'business' ? 'Restaurant' :
+    tier === 'restaurant' ? 'Restaurant' :
     'Appointments';
   const periodEndLabel = venue.subscription_current_period_end
     ? new Date(venue.subscription_current_period_end).toLocaleDateString('en-GB', {
@@ -133,7 +134,7 @@ function PlanSection({
     setLoading(false);
   }
 
-  const isRestaurantTier = tier === 'restaurant' || tier === 'business';
+  const isRestaurantTier = tier === 'restaurant';
   const smsIncludedMonthly = computeSmsMonthlyAllowance(tier, null);
 
   return (
@@ -242,6 +243,8 @@ export function SettingsView({
   const router = useRouter();
   const isAppointment = isUnifiedSchedulingVenue(bookingModel);
   const [venue, setVenue] = useState<VenueSettings | null>(initialVenue);
+  const showRestaurantTableProfileSections =
+    isAdmin && isRestaurantTableProductTier(venue?.pricing_tier ?? null);
   const visibleTabs = useMemo(() => [...TABS], []);
   const [activeTab, setActiveTab] = useState<TabKey>(() => resolveInitialTab(initialTab));
   const [planBannerDismissed, setPlanBannerDismissed] = useState(false);
@@ -338,8 +341,10 @@ export function SettingsView({
             <VenueProfileSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} bookingModel={bookingModel} />
             <BookingTypesSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} />
             <OpeningHoursSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} bookingModel={bookingModel ?? 'table_reservation'} />
-            {!isAppointment && <TableManagementSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} />}
-            {!isAppointment && !hasServiceConfig && (
+            {showRestaurantTableProfileSections && !isAppointment && (
+              <TableManagementSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} />
+            )}
+            {showRestaurantTableProfileSections && !isAppointment && !hasServiceConfig && (
               <AvailabilityConfigSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} />
             )}
             {isAppointment && (
@@ -372,7 +377,7 @@ export function SettingsView({
           <CommunicationTemplatesSection
             venue={venue}
             isAdmin={isAdmin}
-            pricingTier={venue.pricing_tier ?? 'standard'}
+            pricingTier={venue.pricing_tier ?? 'appointments'}
             bookingModel={bookingModel}
             enabledModels={normalizeEnabledModels(venue.enabled_models, (bookingModel as BookingModel) ?? 'table_reservation')}
             depositConfig={venue.deposit_config}
