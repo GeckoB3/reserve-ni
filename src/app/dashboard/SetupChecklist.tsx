@@ -122,10 +122,11 @@ function getSecondaryCatalogSteps(enabledModels: BookingModel[]): Step[] {
   if (enabledModels.includes('resource_booking')) {
     steps.push({
       key: 'secondary_resource_catalog_ready',
-      label: 'Resources (add-on)',
-      description: 'Add at least one bookable resource so guests can book it.',
-      href: '/dashboard/resource-timeline',
-      actionLabel: 'View resources',
+      label: 'Additional Booking Models',
+      description:
+        'Enable additional booking options including Appointments, Classes, Events, and Resources.',
+      href: '/dashboard/settings?tab=profile#additional-booking-types',
+      actionLabel: 'Configure booking types',
     });
   }
   return steps;

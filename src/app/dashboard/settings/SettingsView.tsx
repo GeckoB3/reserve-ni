@@ -264,6 +264,18 @@ export function SettingsView({
   }, [isAdmin, activeTab]);
 
   useEffect(() => {
+    if (activeTab !== 'profile') return;
+    const timer = window.setTimeout(() => {
+      if (typeof window === 'undefined' || window.location.hash !== '#additional-booking-types') return;
+      document.getElementById('additional-booking-types')?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'start',
+      });
+    }, 150);
+    return () => window.clearTimeout(timer);
+  }, [activeTab]);
+
+  useEffect(() => {
     if (!planCheckoutReturn) return;
     setActiveTab('plan');
     setPlanBannerDismissed(false);
