@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation';
 import { getDashboardStaff } from '@/lib/venue-auth';
 import { normalizeEnabledModels } from '@/lib/booking/enabled-models';
 import type { BookingModel } from '@/types/booking-models';
+import { buildVenuePublicForBookingById } from '@/lib/booking/build-venue-public';
 import { NewBookingPageClient } from './NewBookingPageClient';
 
 export default async function NewBookingPage() {
@@ -34,9 +35,21 @@ export default async function NewBookingPage() {
   const currency = (venue?.currency as string) ?? 'GBP';
   const enabledModels = normalizeEnabledModels(venue?.enabled_models, bookingModel);
 
+  const venuePublic = await buildVenuePublicForBookingById(venueId);
+  if (!venuePublic) {
+    return (
+      <div className="flex items-center justify-center p-12">
+        <div className="rounded-xl border border-slate-200 bg-white p-8 text-center shadow-sm">
+          <p className="text-slate-500">Could not load venue profile.</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <NewBookingPageClient
       venueId={venueId}
+      venue={venuePublic}
       advancedMode={advancedMode}
       bookingModel={bookingModel}
       currency={currency}

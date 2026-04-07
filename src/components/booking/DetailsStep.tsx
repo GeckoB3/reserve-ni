@@ -45,7 +45,26 @@ function buildDetailsSchemaWithTerms(phoneCc: CountryCode) {
       }),
     );
 }
+
+/** Staff dashboard: name + phone required; email optional when provided. No guest terms checkbox. */
+function buildDetailsSchemaStaff(phoneCc: CountryCode) {
+  return z.object({
+    name: z.string().min(1, 'Name is required').max(200),
+    email: z.union([z.literal(''), z.string().email('Valid email required')]),
+    phone: z
+      .string()
+      .min(1, 'Phone is required')
+      .max(24)
+      .refine((v) => normalizeToE164(v, phoneCc) !== null, 'Enter a valid mobile number'),
+    dietary_notes: z.string().max(1000).optional(),
+    occasion: z.string().max(200).optional(),
+    comments_requests: z.string().max(1000).optional(),
+    acceptTerms: z.boolean().optional(),
+  });
+}
+
 type FormDataWithTerms = z.infer<ReturnType<typeof buildDetailsSchemaWithTerms>>;
+type FormDataStaff = z.infer<ReturnType<typeof buildDetailsSchemaStaff>>;
 
 interface DetailsStepProps {
   slot: AvailableSlot;
@@ -69,6 +88,8 @@ interface DetailsStepProps {
   payAtVenueBalancePence?: number | null;
   /** When set with payAtVenueBalancePence, explains why no online charge (e.g. resource pay at venue). */
   payAtVenuePaymentRequirement?: ClassPaymentRequirement;
+  /** Staff dashboard: email optional; guest terms checkbox omitted. */
+  audience?: 'public' | 'staff';
 }
 
 export function DetailsStep({
@@ -88,13 +109,19 @@ export function DetailsStep({
   appointmentChargeLabel = 'deposit',
   payAtVenueBalancePence,
   payAtVenuePaymentRequirement,
+  audience = 'public',
 }: DetailsStepProps) {
+  const isStaff = audience === 'staff';
   const detailsSchemaWithTerms = useMemo(
     () => buildDetailsSchemaWithTerms(phoneDefaultCountry),
     [phoneDefaultCountry],
   );
-  const { register, control, handleSubmit, formState: { errors, isSubmitting } } = useForm<FormDataWithTerms>({
-    resolver: zodResolver(detailsSchemaWithTerms),
+  const detailsSchemaStaff = useMemo(
+    () => buildDetailsSchemaStaff(phoneDefaultCountry),
+    [phoneDefaultCountry],
+  );
+  const { register, control, handleSubmit, formState: { errors, isSubmitting } } = useForm<FormDataWithTerms | FormDataStaff>({
+    resolver: zodResolver(isStaff ? detailsSchemaStaff : detailsSchemaWithTerms),
     defaultValues: {
       name: '',
       email: '',
@@ -250,8 +277,14 @@ export function DetailsStep({
           <input {...register('name')} className="min-h-[44px] w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base placeholder:text-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500" placeholder="Your full name" />
         </FormField>
 
-        <FormField label="Email" required error={errors.email?.message}>
-          <input type="email" {...register('email')} className="min-h-[44px] w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base placeholder:text-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500" placeholder="you@example.com" />
+        <FormField label="Email" required={!isStaff} error={errors.email?.message}>
+          <input
+            type="email"
+            {...register('email')}
+            className="min-h-[44px] w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base placeholder:text-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+            placeholder="you@example.com"
+          />
+          {isStaff && <p className="mt-1 text-xs text-slate-500">Optional — add if you want email confirmation sent to the guest.</p>}
         </FormField>
 
         <FormField label="Phone" required error={errors.phone?.message}>
@@ -305,16 +338,20 @@ export function DetailsStep({
           </FormField>
         )}
 
-        <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 bg-slate-50/50 px-4 py-3">
-          <input type="checkbox" {...register('acceptTerms')} className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500" />
-          <span className="text-sm text-slate-600">
-            I accept the{' '}
-            <a href="/terms" target="_blank" rel="noopener noreferrer" className="text-brand-600 underline hover:text-brand-700">booking terms</a>
-            {' '}and{' '}
-            <a href="/privacy" target="_blank" rel="noopener noreferrer" className="text-brand-600 underline hover:text-brand-700">privacy policy</a>.
-          </span>
-        </label>
-        {errors.acceptTerms && <p className="text-xs text-red-600">{errors.acceptTerms.message}</p>}
+        {!isStaff && (
+          <>
+            <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 bg-slate-50/50 px-4 py-3">
+              <input type="checkbox" {...register('acceptTerms')} className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500" />
+              <span className="text-sm text-slate-600">
+                I accept the{' '}
+                <a href="/terms" target="_blank" rel="noopener noreferrer" className="text-brand-600 underline hover:text-brand-700">booking terms</a>
+                {' '}and{' '}
+                <a href="/privacy" target="_blank" rel="noopener noreferrer" className="text-brand-600 underline hover:text-brand-700">privacy policy</a>.
+              </span>
+            </label>
+            {errors.acceptTerms && <p className="text-xs text-red-600">{errors.acceptTerms.message}</p>}
+          </>
+        )}
 
         <button
           type="submit"

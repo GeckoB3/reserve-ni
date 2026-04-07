@@ -1,0 +1,51 @@
+import type { User } from '@supabase/supabase-js';
+
+const PLATFORM_ROLE_KEY = 'platform_role';
+const PLATFORM_ROLE_VALUE = 'superuser';
+
+/**
+ * Comma-separated lowercase emails that are allowed to access the platform dashboard.
+ * Defense-in-depth: even if app_metadata is set, the email must also be in this list.
+ */
+function getAllowedEmails(): Set<string> {
+  const raw = process.env.PLATFORM_SUPERUSER_EMAILS ?? '';
+  return new Set(
+    raw
+      .split(',')
+      .map((e) => e.trim().toLowerCase())
+      .filter(Boolean),
+  );
+}
+
+/**
+ * Returns true when the Supabase Auth user has `app_metadata.platform_role === "superuser"`
+ * AND their email is in the `PLATFORM_SUPERUSER_EMAILS` env allowlist.
+ */
+export function isPlatformSuperuser(user: User | null | undefined): boolean {
+  if (!user) return false;
+
+  const meta = user.app_metadata ?? {};
+  if (meta[PLATFORM_ROLE_KEY] !== PLATFORM_ROLE_VALUE) return false;
+
+  const allowed = getAllowedEmails();
+  if (allowed.size === 0) return false;
+
+  const email = (user.email ?? '').toLowerCase().trim();
+  return allowed.has(email);
+}
+
+/**
+ * Lightweight check usable in middleware where only JWT claims are available.
+ * `appMetadata` is the decoded `app_metadata` object from the JWT.
+ */
+export function isPlatformRoleInJwt(
+  appMetadata: Record<string, unknown> | undefined,
+  email: string | undefined,
+): boolean {
+  if (!appMetadata || appMetadata[PLATFORM_ROLE_KEY] !== PLATFORM_ROLE_VALUE) return false;
+
+  const allowed = getAllowedEmails();
+  if (allowed.size === 0) return false;
+
+  return allowed.has((email ?? '').toLowerCase().trim());
+}

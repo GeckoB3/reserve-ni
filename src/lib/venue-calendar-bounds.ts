@@ -1,8 +1,12 @@
 import type { OpeningHours, OpeningHoursPeriod } from '@/types/availability';
 
 function timeToMinutesHM(t: string): number {
+  if (typeof t !== 'string' || t.trim() === '') return NaN;
   const [h, m] = t.slice(0, 5).split(':').map(Number);
-  return (h ?? 0) * 60 + (m ?? 0);
+  const hh = h ?? 0;
+  const mm = m ?? 0;
+  if (!Number.isFinite(hh) || !Number.isFinite(mm)) return NaN;
+  return hh * 60 + mm;
 }
 
 /** UTC weekday 0–6 for YYYY-MM-DD (aligned with appointment engine). */
@@ -42,12 +46,19 @@ export function getCalendarGridBounds(
     return { startHour: fallbackStart, endHour: fallbackEnd };
   }
   let minM = Infinity;
-  let maxM = 0;
+  let maxM = -Infinity;
   for (const p of periods) {
-    minM = Math.min(minM, timeToMinutesHM(p.open));
-    maxM = Math.max(maxM, timeToMinutesHM(p.close));
+    if (typeof p.open !== 'string' || typeof p.close !== 'string') continue;
+    const openM = timeToMinutesHM(p.open);
+    const closeM = timeToMinutesHM(p.close);
+    if (!Number.isFinite(openM) || !Number.isFinite(closeM)) continue;
+    minM = Math.min(minM, openM);
+    maxM = Math.max(maxM, closeM);
   }
-  if (!Number.isFinite(minM)) {
+  if (!Number.isFinite(minM) || minM === Infinity || !Number.isFinite(maxM) || maxM === -Infinity) {
+    return { startHour: fallbackStart, endHour: fallbackEnd };
+  }
+  if (maxM < minM) {
     return { startHour: fallbackStart, endHour: fallbackEnd };
   }
   const startHour = Math.max(0, Math.floor(minM / 60));

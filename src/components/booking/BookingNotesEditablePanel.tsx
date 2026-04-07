@@ -207,6 +207,9 @@ function EditableField({ label, value, bookingId, fieldKey, placeholder, multili
   );
 }
 
+/** `table`: restaurant table bookings (dietary + guest requests + staff). `cde`: appointments, events, classes, resources (booking notes + staff only). */
+export type BookingNotesVariant = 'table' | 'cde';
+
 export interface BookingNotesEditablePanelProps {
   bookingId: string;
   dietaryNotes: string | null | undefined;
@@ -215,7 +218,12 @@ export interface BookingNotesEditablePanelProps {
   onSaved: () => void;
   /** When true, values are visible but editing is blocked (e.g. booking detail still loading). */
   disabled?: boolean;
-  /** When true, hides dietary notes and uses appointment-style labels/placeholders. */
+  /**
+   * Which note fields to show. `cde` maps guest-facing copy to `special_requests` (booking notes from the guest flow).
+   * If omitted, falls back to `isAppointment` (deprecated).
+   */
+  notesVariant?: BookingNotesVariant;
+  /** @deprecated Use `notesVariant="cde"` instead. */
   isAppointment?: boolean;
 }
 
@@ -226,14 +234,18 @@ export function BookingNotesEditablePanel({
   staffNotes,
   onSaved,
   disabled = false,
+  notesVariant: notesVariantProp,
   isAppointment = false,
 }: BookingNotesEditablePanelProps) {
+  const variant: BookingNotesVariant = notesVariantProp ?? (isAppointment ? 'cde' : 'table');
+  const isCde = variant === 'cde';
+
   return (
     <div
       className={`rounded-xl border border-slate-200 bg-white p-3.5 space-y-4 ${disabled ? 'pointer-events-none opacity-50' : ''}`}
       aria-busy={disabled || undefined}
     >
-      {!isAppointment && (
+      {!isCde && (
         <>
           <EditableField
             label="Dietary Notes"
@@ -246,12 +258,29 @@ export function BookingNotesEditablePanel({
           <div className="border-t border-slate-100" />
         </>
       )}
+      {isCde && (dietaryNotes?.trim() ?? '') !== '' && (
+        <>
+          <div className="rounded-lg border border-amber-100 bg-amber-50/60 px-3 py-2 text-xs text-amber-900">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-amber-800/90">Legacy dietary</p>
+            <p className="mt-1 whitespace-pre-wrap text-slate-800">{dietaryNotes}</p>
+            <p className="mt-1.5 text-[11px] text-amber-800/80">
+              Table-style dietary was stored on this booking. Use Booking Notes for guest-facing text on calendar bookings.
+            </p>
+          </div>
+          <div className="border-t border-slate-100" />
+        </>
+      )}
       <EditableField
-        label={isAppointment ? 'Client Requests' : 'Guest Requests'}
+        label={isCde ? 'Booking Notes' : 'Guest Requests'}
         value={guestRequests ?? ''}
         bookingId={bookingId}
         fieldKey="special_requests"
-        placeholder="e.g. Accessibility, timing, or seating preferences"
+        placeholder={
+          isCde
+            ? 'Notes, comments or requests the guest entered when booking'
+            : 'e.g. Accessibility, timing, or seating preferences'
+        }
+        multiline={isCde}
         onSaved={onSaved}
       />
       <div className="border-t border-slate-100" />
@@ -260,7 +289,7 @@ export function BookingNotesEditablePanel({
         value={staffNotes ?? ''}
         bookingId={bookingId}
         fieldKey="internal_notes"
-        placeholder={isAppointment ? 'Internal notes (not visible to client)' : 'Internal notes (not visible to guest)'}
+        placeholder={isCde ? 'Internal notes (not visible to the guest)' : 'Internal notes (not visible to guest)'}
         multiline
         onSaved={onSaved}
       />

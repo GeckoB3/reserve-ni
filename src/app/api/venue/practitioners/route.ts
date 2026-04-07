@@ -11,6 +11,8 @@ import {
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { checkCalendarLimit } from '@/lib/tier-enforcement';
 import { defaultNewUnifiedCalendarWorkingHours } from '@/lib/availability/practitioner-defaults';
+import { venueUsesUnifiedAppointmentServiceData } from '@/lib/booking/uses-unified-appointment-data';
+import { ensureUnifiedMirrorForPractitionerId } from '@/lib/class-instances/instructor-calendar-block';
 import { z } from 'zod';
 
 /** Map unified_calendars rows to the practitioner shape expected by dashboard + booking UI. */
@@ -355,6 +357,30 @@ export async function POST(request: NextRequest) {
         );
       }
       return NextResponse.json({ error: 'Failed to create practitioner' }, { status: 500 });
+    }
+
+    const useUnifiedServices = await venueUsesUnifiedAppointmentServiceData(admin, staff.venue_id);
+    if (useUnifiedServices && data) {
+      const prRow = data as Record<string, unknown>;
+      const mirrored = await ensureUnifiedMirrorForPractitionerId(admin, staff.venue_id, {
+        id: prRow.id as string,
+        name: String(prRow.name ?? ''),
+        staff_id: (prRow.staff_id as string | null | undefined) ?? null,
+        slug: (prRow.slug as string | null | undefined) ?? null,
+        working_hours: prRow.working_hours,
+        break_times: prRow.break_times,
+        break_times_by_day: prRow.break_times_by_day,
+        days_off: prRow.days_off,
+        sort_order: typeof prRow.sort_order === 'number' ? prRow.sort_order : undefined,
+        is_active: prRow.is_active !== false,
+      });
+      if (!mirrored) {
+        await admin.from('practitioners').delete().eq('id', prRow.id).eq('venue_id', staff.venue_id);
+        return NextResponse.json(
+          { error: 'Could not create calendar for service links. Please try again or contact support.' },
+          { status: 500 },
+        );
+      }
     }
 
     return NextResponse.json(data, { status: 201 });

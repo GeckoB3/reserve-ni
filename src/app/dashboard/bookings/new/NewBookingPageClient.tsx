@@ -14,16 +14,19 @@ import {
   staffBookingSurfaceTabIdToQueryParam,
   type StaffBookingSurfaceTabId,
 } from '@/lib/booking/staff-booking-modal-options';
+import type { VenuePublic } from '@/components/booking/types';
 import type { BookingModel } from '@/types/booking-models';
 
 export function NewBookingPageClient({
   venueId,
+  venue,
   advancedMode,
   bookingModel = 'table_reservation',
   currency = 'GBP',
   enabledModels = [],
 }: {
   venueId: string;
+  venue: VenuePublic;
   advancedMode: boolean;
   bookingModel?: BookingModel;
   currency?: string;
@@ -81,6 +84,7 @@ export function NewBookingPageClient({
             bookingModel={bookingModel}
             enabledModels={enabledModels}
             venueId={venueId}
+            venue={venue}
             currency={currency}
             advancedMode={advancedMode}
             onCreated={onDone}

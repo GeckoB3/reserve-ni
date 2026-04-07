@@ -186,12 +186,22 @@ export async function GET(request: NextRequest) {
       : { data: [] };
     const resourceMap = new Map((resourceRows ?? []).map((r: { id: string; name: string }) => [r.id, r.name]));
 
-    const bookedEventIds = new Set<string>();
     const bookedClassIds = new Set<string>();
     const classEnrolledByInstance = new Map<string, number>();
+    const eventStats = new Map<string, { bookingCount: number; partyTotal: number }>();
+    for (const r of rows) {
+      const bmStat = inferBookingRowModel(r as Parameters<typeof inferBookingRowModel>[0]);
+      if (bmStat === 'event_ticket' && r.experience_event_id && r.status !== 'Cancelled') {
+        const eid = r.experience_event_id as string;
+        const cur = eventStats.get(eid) ?? { bookingCount: 0, partyTotal: 0 };
+        cur.bookingCount += 1;
+        cur.partyTotal += Number(r.party_size ?? 1);
+        eventStats.set(eid, cur);
+      }
+    }
+
     for (const r of rows) {
       if (r.status === 'Cancelled') continue;
-      if (r.experience_event_id) bookedEventIds.add(r.experience_event_id);
       if (r.class_instance_id) bookedClassIds.add(r.class_instance_id);
       const bmRow = inferBookingRowModel(r as Parameters<typeof inferBookingRowModel>[0]);
       if (bmRow === 'class_session' && r.class_instance_id) {
@@ -245,13 +255,11 @@ export async function GET(request: NextRequest) {
     for (const r of rows) {
       const bm = inferBookingRowModel(r as Parameters<typeof inferBookingRowModel>[0]) as ScheduleBlockKind;
       if (!wantByKind[bm]) continue;
+      if (bm === 'event_ticket') continue;
 
       const gn = (guestName.get(r.guest_id as string) as string | undefined) ?? 'Guest';
       let title = gn;
-      if (bm === 'event_ticket' && r.experience_event_id) {
-        const evn = (eventMap.get(r.experience_event_id) as { name?: string } | undefined)?.name ?? 'Event';
-        title = `${evn} · ${gn}`;
-      } else if (bm === 'class_session' && r.class_instance_id) {
+      if (bm === 'class_session' && r.class_instance_id) {
         const ci = classInstMap.get(r.class_instance_id);
         const ct = classTypeFromInstanceRow(ci);
         const cn = ct?.name ?? 'Class';
@@ -266,8 +274,6 @@ export async function GET(request: NextRequest) {
         const ci = classInstMap.get(r.class_instance_id);
         const ct = classTypeFromInstanceRow(ci);
         accent = ct?.colour ?? '#22C55E';
-      } else if (bm === 'event_ticket') {
-        accent = '#F59E0B';
       } else if (bm === 'resource_booking') {
         accent = '#64748B';
       }
@@ -288,11 +294,6 @@ export async function GET(request: NextRequest) {
             ? `${r.party_size} guests`
             : null;
 
-      const eventCal =
-        bm === 'event_ticket' && r.experience_event_id
-          ? (eventMap.get(r.experience_event_id) as { calendar_id?: string | null } | undefined)?.calendar_id ?? null
-          : null;
-
       blocks.push({
         id: `bk-${r.id}`,
         kind: bm,
@@ -309,19 +310,14 @@ export async function GET(request: NextRequest) {
         accent_colour: accent,
         class_capacity: classCap,
         class_booked_spots: classBooked,
-        calendar_id:
-          bm === 'class_session'
-            ? calendarIdForClassInstance(r.class_instance_id as string)
-            : bm === 'event_ticket'
-              ? eventCal
-              : null,
+        calendar_id: bm === 'class_session' ? calendarIdForClassInstance(r.class_instance_id as string) : null,
       });
     }
 
     if (wantEvents) {
       const { data: evRows, error: evErr } = await staff.db
         .from('experience_events')
-        .select('id, name, event_date, start_time, end_time, calendar_id')
+        .select('id, name, event_date, start_time, end_time, calendar_id, capacity')
         .eq('venue_id', venueId)
         .eq('is_active', true)
         .gte('event_date', fromStr)
@@ -338,8 +334,16 @@ export async function GET(request: NextRequest) {
             start_time: string;
             end_time: string;
             calendar_id: string | null;
+            capacity: number;
           };
-          if (bookedEventIds.has(e.id)) continue;
+          const st = eventStats.get(e.id);
+          const bookingCount = st?.bookingCount ?? 0;
+          const partyTotal = st?.partyTotal ?? 0;
+          const subtitle =
+            bookingCount === 0
+              ? 'No bookings yet'
+              : `${bookingCount} booking${bookingCount === 1 ? '' : 's'} · ${partyTotal} guest${partyTotal === 1 ? '' : 's'}`;
+
           blocks.push({
             id: `ev-${e.id}`,
             kind: 'event_ticket',
@@ -347,10 +351,13 @@ export async function GET(request: NextRequest) {
             start_time: hhmm(e.start_time),
             end_time: hhmm(e.end_time),
             title: e.name,
-            subtitle: 'No bookings yet',
+            subtitle,
             accent_colour: '#F59E0B',
             experience_event_id: e.id,
             calendar_id: e.calendar_id ?? null,
+            event_capacity: e.capacity ?? null,
+            event_booking_count: bookingCount,
+            event_party_total: partyTotal,
           });
         }
       }

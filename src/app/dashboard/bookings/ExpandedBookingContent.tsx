@@ -11,8 +11,9 @@ import {
 } from '@/lib/table-management/booking-status';
 import { ModifyBookingInline } from '@/components/booking/ModifyBookingInline';
 import { BookingNotesEditablePanel } from '@/components/booking/BookingNotesEditablePanel';
+import type { BookingNotesVariant } from '@/components/booking/BookingNotesEditablePanel';
 import type { BookingModel } from '@/types/booking-models';
-import { bookingModelShortLabel } from '@/lib/booking/infer-booking-row-model';
+import { bookingModelShortLabel, inferBookingRowModel } from '@/lib/booking/infer-booking-row-model';
 
 interface BookingRow {
   id: string;
@@ -32,6 +33,12 @@ interface BookingRow {
   guest_phone: string | null;
   group_booking_id?: string | null;
   person_label?: string | null;
+  experience_event_id?: string | null;
+  class_instance_id?: string | null;
+  resource_id?: string | null;
+  event_session_id?: string | null;
+  calendar_id?: string | null;
+  service_item_id?: string | null;
 }
 
 interface BookingDetailLite {
@@ -136,6 +143,9 @@ export function ExpandedBookingContent({
   }, [booking.group_booking_id, booking.id]);
 
   const displayLinkedBookings = booking.group_booking_id ? linkedBookings : [];
+
+  const notesVariant: BookingNotesVariant =
+    inferBookingRowModel(booking) === 'table_reservation' ? 'table' : 'cde';
 
   if (detailLoading) {
     return (
@@ -255,7 +265,7 @@ export function ExpandedBookingContent({
           guestRequests={detail?.special_requests}
           staffNotes={detail?.internal_notes}
           onSaved={onDetailUpdated}
-          isAppointment={isAppointment}
+          notesVariant={notesVariant}
         />
       </div>
 

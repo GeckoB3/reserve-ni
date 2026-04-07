@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { formatEventUptakeLine } from '@/lib/calendar/event-block-label';
 import type { ScheduleBlockDTO } from '@/types/schedule-blocks';
 
 const SLOT_HEIGHT = 48;
@@ -25,6 +26,8 @@ interface ScheduleFeedColumnProps {
   onBookingClick: (bookingId: string) => void;
   /** When set, class session blocks open this handler (full session roster) instead of a single booking. */
   onClassInstanceClick?: (block: ScheduleBlockDTO) => void;
+  /** When set, experience event aggregate blocks open this handler (roster + event detail). */
+  onEventInstanceClick?: (block: ScheduleBlockDTO) => void;
 }
 
 /**
@@ -38,8 +41,12 @@ export function ScheduleFeedColumn({
   endHour,
   onBookingClick,
   onClassInstanceClick,
+  onEventInstanceClick,
 }: ScheduleFeedColumnProps) {
-  const totalSlots = ((endHour - startHour) * 60) / SLOT_MINUTES;
+  const totalSlots = (() => {
+    const n = ((endHour - startHour) * 60) / SLOT_MINUTES;
+    return Number.isFinite(n) && n > 0 ? n : ((21 - 7) * 60) / SLOT_MINUTES;
+  })();
 
   function slotTop(time: string): number {
     const mins = timeToMinutes(time);
@@ -64,7 +71,11 @@ export function ScheduleFeedColumn({
           const top = slotTop(b.start_time);
           const height = slotHeight(b.start_time, b.end_time);
           const accent = b.accent_colour ?? '#64748B';
-          const clickable = Boolean(b.booking_id);
+          const eventUptake = b.kind === 'event_ticket' ? formatEventUptakeLine(b) : null;
+          const eventOpensDetail =
+            b.kind === 'event_ticket' && b.experience_event_id && typeof onEventInstanceClick === 'function';
+          const clickable =
+            Boolean(b.booking_id) || Boolean(eventOpensDetail);
           const classUptake =
             b.kind === 'class_session' &&
             b.class_capacity != null &&
@@ -83,7 +94,11 @@ export function ScheduleFeedColumn({
               <span className={`truncate text-xs font-semibold ${isClass ? CLASS_LANE_TEXT : 'text-slate-900'}`}>
                 {b.title}
               </span>
-              {b.subtitle ? (
+              {b.kind === 'event_ticket' ? (
+                eventUptake ? (
+                  <span className="truncate text-[10px] text-slate-600">{eventUptake}</span>
+                ) : null
+              ) : b.subtitle ? (
                 <span className={`truncate text-[10px] ${isClass ? 'text-blue-800/90' : 'text-slate-500'}`}>
                   {b.subtitle}
                 </span>
@@ -108,6 +123,14 @@ export function ScheduleFeedColumn({
                 <button
                   type="button"
                   onClick={() => onClassInstanceClick(b)}
+                  className="h-full w-full text-left"
+                >
+                  {body}
+                </button>
+              ) : eventOpensDetail ? (
+                <button
+                  type="button"
+                  onClick={() => onEventInstanceClick!(b)}
                   className="h-full w-full text-left"
                 >
                   {body}

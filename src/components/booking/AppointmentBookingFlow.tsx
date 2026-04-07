@@ -16,6 +16,17 @@ import { MultiServiceSummaryCard } from './MultiServiceSummaryCard';
 import { resolveAppointmentServiceOnlineCharge } from '@/lib/appointments/appointment-service-payment';
 import { formatBookablePricePence, formatFromBookablePricePence } from '@/lib/booking/format-price-display';
 import type { ClassPaymentRequirement } from '@/types/booking-models';
+import {
+  type BookingFlowAudience,
+  appointmentCatalogUrl,
+  bookingAvailabilityUrl,
+  validateAppointmentSlotUrl,
+  bookingCreateUrl,
+  bookingCreateMultiServiceUrl,
+  bookingCreateGroupUrl,
+  bookingConfirmPaymentUrl,
+  venueBookingsCreateUrl,
+} from '@/lib/booking/booking-flow-api';
 
 /** Services + staff from catalog (no date / slots). */
 interface CatalogPractitioner {
@@ -97,6 +108,11 @@ interface AppointmentBookingFlowProps {
   accentColour?: string;
   /** From /book/{venue}/{practitioner-slug}: skip staff step; catalog filtered */
   lockedPractitioner?: { id: string; name: string; bookingSlug: string };
+  bookingAudience?: BookingFlowAudience;
+  onBookingCreated?: () => void;
+  initialDate?: string;
+  initialTime?: string;
+  preselectedPractitionerId?: string;
 }
 
 function formatDateHuman(dateStr: string): string {
@@ -134,8 +150,15 @@ export function AppointmentBookingFlow({
   onHeightChange,
   accentColour,
   lockedPractitioner,
+  bookingAudience = 'public',
+  onBookingCreated,
+  initialDate,
+  initialTime,
+  preselectedPractitionerId,
 }: AppointmentBookingFlowProps) {
+  const isStaff = bookingAudience === 'staff';
   const terms = venue.terminology ?? { client: 'Client', booking: 'Appointment', staff: 'Staff' };
+  const [staffRequireDeposit, setStaffRequireDeposit] = useState(false);
 
   const isLockedPractitionerFlow = Boolean(
     lockedPractitioner?.id && lockedPractitioner?.bookingSlug,
@@ -146,7 +169,7 @@ export function AppointmentBookingFlow({
   const [step, setStep] = useState<Step>(() =>
     isLockedPractitionerFlow ? 'service' : 'mode_choice',
   );
-  const [date, setDate] = useState(todayStr);
+  const [date, setDate] = useState(() => initialDate ?? todayStr());
   const [catalogStaff, setCatalogStaff] = useState<CatalogPractitioner[]>([]);
   const [catalogLoading, setCatalogLoading] = useState(false);
   const [slotPractitioners, setSlotPractitioners] = useState<SlotPractitioner[]>([]);
@@ -158,7 +181,7 @@ export function AppointmentBookingFlow({
   const [selectedPractitionerId, setSelectedPractitionerId] = useState<string | null>(() =>
     lockedPractitioner?.id && lockedPractitioner?.bookingSlug ? lockedPractitioner.id : null,
   );
-  const [selectedTime, setSelectedTime] = useState<string | null>(null);
+  const [selectedTime, setSelectedTime] = useState<string | null>(() => initialTime ?? null);
   const [guestDetails, setGuestDetails] = useState<GuestDetails | null>(null);
   const [createResult, setCreateResult] = useState<{
     booking_id: string;
@@ -168,6 +191,7 @@ export function AppointmentBookingFlow({
     requires_deposit: boolean;
     deposit_amount_pence: number;
     cancellation_notice_hours: number;
+    payment_url?: string;
   } | null>(null);
 
   const [multiServiceSegments, setMultiServiceSegments] = useState<MultiServiceSegment[] | null>(null);
@@ -242,11 +266,7 @@ export function AppointmentBookingFlow({
   const fetchCatalog = useCallback(async () => {
     setCatalogLoading(true);
     try {
-      const qs = new URLSearchParams({ venue_id: venue.id });
-      if (lockedPractitioner?.bookingSlug) {
-        qs.set('practitioner_slug', lockedPractitioner.bookingSlug);
-      }
-      const res = await fetch(`/api/booking/appointment-catalog?${qs}`);
+      const res = await fetch(appointmentCatalogUrl(venue.id, lockedPractitioner?.bookingSlug));
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? 'Failed to load catalog');
       setCatalogStaff(data.practitioners ?? []);
@@ -262,6 +282,17 @@ export function AppointmentBookingFlow({
     fetchCatalog();
   }, [fetchCatalog]);
 
+  useEffect(() => {
+    if (initialDate) setDate(initialDate);
+  }, [initialDate]);
+
+  useEffect(() => {
+    if (!preselectedPractitionerId || catalogStaff.length === 0 || lockedPractitioner) return;
+    if (catalogStaff.some((p) => p.id === preselectedPractitionerId)) {
+      setSelectedPractitionerId(preselectedPractitionerId);
+    }
+  }, [preselectedPractitionerId, catalogStaff, lockedPractitioner]);
+
   const fetchAvailability = useCallback(
     async (opts: { serviceId: string; practitionerId: string }) => {
       setLoading(true);
@@ -272,7 +303,7 @@ export function AppointmentBookingFlow({
         if (phantomBookings.length > 0) {
           params.set('phantoms', JSON.stringify(phantomBookings));
         }
-        const res = await fetch(`/api/booking/availability?${params}`);
+        const res = await fetch(bookingAvailabilityUrl(params));
         const data = await res.json();
         setSlotPractitioners(data.practitioners ?? []);
       } catch {
@@ -414,7 +445,7 @@ export function AppointmentBookingFlow({
         buffer_minutes: number;
       }> = [];
       for (const seg of chain) {
-        const res = await fetch('/api/booking/validate-appointment-slot', {
+        const res = await fetch(validateAppointmentSlotUrl(), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -507,7 +538,7 @@ export function AppointmentBookingFlow({
           return;
         }
         try {
-          const res = await fetch('/api/booking/create-multi-service', {
+          const res = await fetch(bookingCreateMultiServiceUrl(), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -516,7 +547,7 @@ export function AppointmentBookingFlow({
               name: details.name,
               email: details.email || undefined,
               phone: details.phone,
-              source: 'booking_page',
+              source: isStaff ? 'phone' : 'booking_page',
               dietary_notes: details.dietary_notes,
               occasion: details.occasion,
               services: chain.map((s) => ({
@@ -541,7 +572,9 @@ export function AppointmentBookingFlow({
             cancellation_notice_hours:
               typeof data.cancellation_notice_hours === 'number' ? data.cancellation_notice_hours : refundNoticeHours,
           });
-          setStep(data.requires_deposit && data.client_secret ? 'payment' : 'confirmation');
+          const needsStripe = Boolean(data.requires_deposit && data.client_secret);
+          setStep(needsStripe ? 'payment' : 'confirmation');
+          if (isStaff && !needsStripe) onBookingCreated?.();
         } catch (e) {
           setError(e instanceof Error ? e.message : 'Booking failed');
         }
@@ -549,7 +582,46 @@ export function AppointmentBookingFlow({
       }
 
       try {
-        const res = await fetch('/api/booking/create', {
+        if (isStaff) {
+          const online = selectedServiceForPractitioner
+            ? onlineChargeFromCatalogOffer(selectedServiceForPractitioner)
+            : null;
+          const require_deposit =
+            online != null &&
+            online.amountPence > 0 &&
+            (online.chargeLabel === 'full_payment' || (online.chargeLabel === 'deposit' && staffRequireDeposit));
+          const res = await fetch(venueBookingsCreateUrl(), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              booking_date: date,
+              booking_time: selectedTime,
+              party_size: 1,
+              name: details.name,
+              phone: details.phone,
+              email: details.email || undefined,
+              dietary_notes: details.dietary_notes,
+              occasion: details.occasion,
+              require_deposit,
+              practitioner_id: selectedPractitionerId,
+              appointment_service_id: selectedServiceId,
+            }),
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error ?? 'Booking failed');
+          setCreateResult({
+            booking_id: data.booking_id,
+            requires_deposit: Boolean(data.payment_url),
+            deposit_amount_pence: 0,
+            cancellation_notice_hours: refundNoticeHours,
+            payment_url: data.payment_url,
+          });
+          setStep('confirmation');
+          onBookingCreated?.();
+          return;
+        }
+
+        const res = await fetch(bookingCreateUrl(), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -592,13 +664,17 @@ export function AppointmentBookingFlow({
       refundNoticeHours,
       multiServiceSegments,
       validateMultiServiceChain,
+      isStaff,
+      staffRequireDeposit,
+      selectedServiceForPractitioner,
+      onBookingCreated,
     ],
   );
 
   const handlePaymentComplete = useCallback(async () => {
     if (createResult?.booking_id) {
       try {
-        await fetch('/api/booking/confirm-payment', {
+        await fetch(bookingConfirmPaymentUrl(), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ booking_id: createResult.booking_id }),
@@ -653,7 +729,7 @@ export function AppointmentBookingFlow({
     setGuestDetails(details);
     setError(null);
     try {
-      const res = await fetch('/api/booking/create-group', {
+      const res = await fetch(bookingCreateGroupUrl(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -661,7 +737,7 @@ export function AppointmentBookingFlow({
           name: details.name,
           email: details.email || undefined,
           phone: details.phone,
-          source: 'booking_page',
+          source: isStaff ? 'phone' : 'booking_page',
           dietary_notes: details.dietary_notes,
           people: groupPeople.map((p) => ({
             person_label: p.label,
@@ -683,16 +759,18 @@ export function AppointmentBookingFlow({
         total_deposit_pence: data.total_deposit_pence ?? 0,
         cancellation_notice_hours: typeof data.cancellation_notice_hours === 'number' ? data.cancellation_notice_hours : refundNoticeHours,
       });
-      setStep(data.requires_deposit && data.client_secret ? 'group_payment' : 'group_confirmation');
+      const needsStripe = Boolean(data.requires_deposit && data.client_secret);
+      setStep(needsStripe ? 'group_payment' : 'group_confirmation');
+      if (isStaff && !needsStripe) onBookingCreated?.();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Group booking failed');
     }
-  }, [venue.id, groupPeople, refundNoticeHours]);
+  }, [venue.id, groupPeople, refundNoticeHours, isStaff, onBookingCreated]);
 
   const handleGroupPaymentComplete = useCallback(async () => {
     if (groupCreateResult?.booking_ids?.[0]) {
       try {
-        await fetch('/api/booking/confirm-payment', {
+        await fetch(bookingConfirmPaymentUrl(), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ booking_id: groupCreateResult.booking_ids[0] }),
@@ -1179,6 +1257,34 @@ export function AppointmentBookingFlow({
               </div>
             </div>
           )}
+          {isStaff && !(multiServiceSegments && multiServiceSegments.length > 1) && (() => {
+            const o = selectedServiceForPractitioner
+              ? onlineChargeFromCatalogOffer(selectedServiceForPractitioner)
+              : null;
+            if (!o || o.amountPence <= 0) return null;
+            if (o.chargeLabel === 'full_payment') {
+              return (
+                <p className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                  Full payment online ({sym}
+                  {(o.amountPence / 100).toFixed(2)}) — a payment link will be sent to the client.
+                </p>
+              );
+            }
+            return (
+              <label className="mb-4 flex cursor-pointer items-center gap-3 rounded-lg border border-slate-200 px-3 py-2 hover:bg-slate-50">
+                <input
+                  type="checkbox"
+                  checked={staffRequireDeposit}
+                  onChange={(e) => setStaffRequireDeposit(e.target.checked)}
+                  className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                />
+                <span className="text-sm text-slate-700">
+                  Require deposit ({sym}
+                  {(o.amountPence / 100).toFixed(2)})
+                </span>
+              </label>
+            );
+          })()}
           <DetailsStep
             slot={{ key: selectedTime, label: selectedTime, start_time: selectedTime, end_time: '', available_covers: 1 }}
             date={date}
@@ -1208,6 +1314,7 @@ export function AppointmentBookingFlow({
             currencySymbol={sym}
             refundNoticeHours={refundNoticeHours}
             phoneDefaultCountry={phoneDefaultCountry}
+            audience={isStaff ? 'staff' : 'public'}
           />
         </div>
       )}
@@ -1258,6 +1365,9 @@ export function AppointmentBookingFlow({
             </>
           )}
           {guestDetails?.name && <p className="mt-3 text-xs text-green-600">A confirmation will be sent to {guestDetails.email || guestDetails.phone}.</p>}
+          {isStaff && createResult?.payment_url ? (
+            <p className="mt-3 text-xs text-green-800">A deposit payment link was sent to the guest.</p>
+          ) : null}
           {(createResult?.deposit_amount_pence ?? 0) > 0 ? (
             <p className="mt-4 max-w-sm mx-auto text-left text-xs text-green-800/90">
               <span className="font-medium">Refund policy:</span>{' '}
@@ -1564,6 +1674,7 @@ export function AppointmentBookingFlow({
             refundNoticeHours={refundNoticeHours}
             multiAppointmentSlots={groupPeople.map((p) => ({ date: p.date, time: p.time }))}
             phoneDefaultCountry={phoneDefaultCountry}
+            audience={isStaff ? 'staff' : 'public'}
           />
         </div>
       )}

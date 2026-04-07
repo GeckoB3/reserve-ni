@@ -7,6 +7,14 @@ import { defaultPhoneCountryForVenueCurrency } from '@/lib/phone/default-country
 import { DetailsStep } from './DetailsStep';
 import { PaymentStep } from './PaymentStep';
 import { ClassOfferingsCalendar } from './ClassOfferingsCalendar';
+import {
+  type BookingFlowAudience,
+  classOfferingsUrl,
+  localTodayISO,
+  bookingCreateUrl,
+  bookingConfirmPaymentUrl,
+  venueBookingsCreateUrl,
+} from '@/lib/booking/booking-flow-api';
 
 interface ClassOfferingSummary {
   class_type_id: string;
@@ -40,14 +48,6 @@ interface ClassSlot {
 }
 
 type Step = 'pick-class' | 'pick-date' | 'summary' | 'details' | 'payment' | 'confirmation';
-
-function localTodayISO(): string {
-  const n = new Date();
-  const y = n.getFullYear();
-  const m = String(n.getMonth() + 1).padStart(2, '0');
-  const d = String(n.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
-}
 
 function symForCurrency(currency: string): string {
   return currency === 'EUR' ? '€' : '£';
@@ -122,7 +122,22 @@ function mapInstanceToSlot(row: Record<string, unknown>): ClassSlot {
   };
 }
 
-export function ClassBookingFlow({ venue, cancellationPolicy }: { venue: VenuePublic; cancellationPolicy?: string }) {
+export interface ClassBookingFlowProps {
+  venue: VenuePublic;
+  cancellationPolicy?: string;
+  bookingAudience?: BookingFlowAudience;
+  staffBookingSource?: 'phone' | 'walk-in';
+  onBookingCreated?: () => void;
+}
+
+export function ClassBookingFlow({
+  venue,
+  cancellationPolicy,
+  bookingAudience = 'public',
+  staffBookingSource = 'phone',
+  onBookingCreated,
+}: ClassBookingFlowProps) {
+  const isStaff = bookingAudience === 'staff';
   const currency = venue.currency ?? 'GBP';
   const phoneDefaultCountry = defaultPhoneCountryForVenueCurrency(currency);
   const terms = venue.terminology ?? { client: 'Member', booking: 'Booking', staff: 'Instructor' };
@@ -142,6 +157,7 @@ export function ClassBookingFlow({ venue, cancellationPolicy }: { venue: VenuePu
     client_secret?: string;
     stripe_account_id?: string;
     requires_deposit: boolean;
+    payment_url?: string;
   } | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -151,9 +167,7 @@ export function ClassBookingFlow({ venue, cancellationPolicy }: { venue: VenuePu
     setError(null);
     try {
       const from = localTodayISO();
-      const res = await fetch(
-        `/api/booking/class-offerings?venue_id=${encodeURIComponent(venue.id)}&from=${from}&days=90`,
-      );
+      const res = await fetch(classOfferingsUrl(bookingAudience, venue.id));
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? 'Failed to load classes');
       setRangeFrom(data.from ?? from);
@@ -168,7 +182,7 @@ export function ClassBookingFlow({ venue, cancellationPolicy }: { venue: VenuePu
     } finally {
       setLoading(false);
     }
-  }, [venue.id]);
+  }, [venue.id, bookingAudience]);
 
   useEffect(() => {
     void fetchOfferings();
@@ -211,7 +225,35 @@ export function ClassBookingFlow({ venue, cancellationPolicy }: { venue: VenuePu
       setError(null);
       if (!selectedClass) return;
       try {
-        const res = await fetch('/api/booking/create', {
+        if (isStaff) {
+          const res = await fetch(venueBookingsCreateUrl(), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              booking_date: selectedClass.instance_date,
+              booking_time: selectedClass.start_time,
+              party_size: spots,
+              name: details.name,
+              email: details.email || undefined,
+              phone: details.phone,
+              class_instance_id: selectedClass.instance_id,
+              dietary_notes: details.dietary_notes,
+              source: staffBookingSource,
+            }),
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error ?? 'Booking failed');
+          setCreateResult({
+            booking_id: data.booking_id,
+            requires_deposit: Boolean(data.payment_url),
+            payment_url: data.payment_url,
+          });
+          setStep('confirmation');
+          onBookingCreated?.();
+          return;
+        }
+
+        const res = await fetch(bookingCreateUrl(), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -241,13 +283,13 @@ export function ClassBookingFlow({ venue, cancellationPolicy }: { venue: VenuePu
         setError(e instanceof Error ? e.message : 'Booking failed');
       }
     },
-    [venue.id, selectedClass, spots],
+    [venue.id, selectedClass, spots, isStaff, staffBookingSource, onBookingCreated],
   );
 
   const handlePaymentComplete = useCallback(async () => {
     if (createResult?.booking_id) {
       try {
-        await fetch('/api/booking/confirm-payment', {
+        await fetch(bookingConfirmPaymentUrl(), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ booking_id: createResult.booking_id }),
@@ -472,11 +514,12 @@ export function ClassBookingFlow({ venue, cancellationPolicy }: { venue: VenuePu
             appointmentDepositPence={depositPenceForDetails > 0 ? depositPenceForDetails : null}
             currencySymbol={sym}
             phoneDefaultCountry={phoneDefaultCountry}
+            audience={isStaff ? 'staff' : 'public'}
           />
         </div>
       )}
 
-      {step === 'payment' && createResult?.client_secret && selectedClass && summary && (
+      {step === 'payment' && !isStaff && createResult?.client_secret && selectedClass && summary && (
         <PaymentStep
           clientSecret={createResult.client_secret}
           stripeAccountId={createResult.stripe_account_id}
@@ -504,7 +547,11 @@ export function ClassBookingFlow({ venue, cancellationPolicy }: { venue: VenuePu
             <br />
             {spots} spot{spots !== 1 ? 's' : ''}
           </p>
-          <p className="mt-4 text-xs text-green-700">You&apos;ll receive a confirmation email shortly.</p>
+          {isStaff && createResult?.payment_url ? (
+            <p className="mt-4 text-xs text-green-800">Deposit link sent to the guest.</p>
+          ) : (
+            <p className="mt-4 text-xs text-green-700">You&apos;ll receive a confirmation email shortly.</p>
+          )}
         </div>
       )}
     </div>

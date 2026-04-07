@@ -7,6 +7,7 @@ import { createClient } from '@/lib/supabase/browser';
 import { getBusinessConfig, formatSignupBusinessTypeLabel, isDirectModelBusinessType } from '@/lib/business-config';
 import { APPOINTMENTS_PRICE, RESTAURANT_PRICE, SMS_OVERAGE_GBP_PER_MESSAGE } from '@/lib/pricing-constants';
 import { SMS_INCLUDED_APPOINTMENTS, SMS_INCLUDED_RESTAURANT } from '@/lib/billing/sms-allowance';
+import { signupPlanToFamily, SIGNUP_PLAN_CONFLICT_MESSAGE } from '@/lib/signup-plan-family';
 
 type PlanType = 'appointments' | 'restaurant' | 'founding';
 
@@ -19,6 +20,8 @@ export default function PaymentPage() {
   /** Until checked, we do not know if the browser has a Supabase session (required for checkout). */
   const [sessionChecked, setSessionChecked] = useState(false);
   const [hasSession, setHasSession] = useState(false);
+  /** Logged-in user already has the other plan family — block checkout before hitting Stripe. */
+  const [planFamilyBlocked, setPlanFamilyBlocked] = useState(false);
 
   useEffect(() => {
     const id = requestAnimationFrame(() => {
@@ -41,6 +44,24 @@ export default function PaymentPage() {
       setSessionChecked(true);
     });
   }, []);
+
+  useEffect(() => {
+    if (!sessionChecked || !hasSession || !plan) return;
+    let cancelled = false;
+    void (async () => {
+      const res = await fetch('/api/signup/existing-plan', { credentials: 'same-origin' });
+      if (!res.ok || cancelled) return;
+      const data = (await res.json()) as { hasVenue?: boolean; planFamily?: 'appointments' | 'restaurant' };
+      if (!data.hasVenue || !data.planFamily) return;
+      const requested = signupPlanToFamily(plan);
+      if (requested !== data.planFamily) {
+        setPlanFamilyBlocked(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionChecked, hasSession, plan]);
 
   const config = useMemo(
     () => (businessType ? getBusinessConfig(businessType) : null),
@@ -84,9 +105,11 @@ export default function PaymentPage() {
 
       if (!res.ok) {
         const msg =
-          data.error === 'Not authenticated'
-            ? 'You must be signed in to continue. Confirm your email from the signup message, or sign in.'
-            : data.error || 'Failed to start checkout.';
+          res.status === 409
+            ? (data.error ?? SIGNUP_PLAN_CONFLICT_MESSAGE)
+            : data.error === 'Not authenticated'
+              ? 'You must be signed in to continue. Confirm your email from the signup message, or sign in.'
+              : data.error || 'Failed to start checkout.';
         setError(msg);
         setLoading(false);
         return;
@@ -213,7 +236,7 @@ export default function PaymentPage() {
         <button
           type="button"
           onClick={handleCheckout}
-          disabled={loading || !hasSession}
+          disabled={loading || !hasSession || planFamilyBlocked}
           className="mt-6 w-full rounded-xl bg-brand-600 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 disabled:opacity-50 transition-colors"
         >
           {loading

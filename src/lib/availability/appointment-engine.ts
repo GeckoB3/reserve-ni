@@ -12,6 +12,11 @@ import { getOpeningPeriodsForDay, timeToMinutes, minutesToTime } from '@/lib/ava
 import { getDayOfWeek } from '@/lib/availability/engine';
 import { getVenueLocalDateAndMinutes } from '@/lib/venue/venue-local-clock';
 import { unifiedCalendarRowToPractitioner } from '@/lib/availability/unified-calendar-mapper';
+import {
+  mapCalendarToResource,
+  attachHostCalendarsToResources,
+  mergedResourceEffectiveRangesForHost,
+} from '@/lib/availability/resource-booking-engine';
 import type { EntityBookingWindow } from '@/lib/booking/entity-booking-window';
 import { DEFAULT_ENTITY_BOOKING_WINDOW } from '@/lib/booking/entity-booking-window';
 import type { VenueOpeningException } from '@/types/venue-opening-exceptions';
@@ -869,7 +874,7 @@ export async function fetchCalendarAppointmentInput(params: {
     }
   }
 
-  const [bookingsRes, blocksRes, calBlocksRes, venueRes] = await Promise.all([
+  const [bookingsRes, blocksRes, calBlocksRes, venueRes, siblingResourcesRes] = await Promise.all([
     supabase
       .from('bookings')
       .select('id, practitioner_id, calendar_id, booking_time, appointment_service_id, service_item_id, status')
@@ -890,6 +895,13 @@ export async function fetchCalendarAppointmentInput(params: {
       .eq('calendar_id', calendarId)
       .eq('block_date', date),
     supabase.from('venues').select('opening_hours, venue_opening_exceptions').eq('id', venueId).single(),
+    supabase
+      .from('unified_calendars')
+      .select('*')
+      .eq('venue_id', venueId)
+      .eq('calendar_type', 'resource')
+      .eq('display_on_calendar_id', calendarId)
+      .eq('is_active', true),
   ]);
 
   const serviceMapForBookings = new Map(services.map((s) => [s.id, s]));
@@ -938,9 +950,24 @@ export async function fetchCalendarAppointmentInput(params: {
       }))
       .filter((b) => b.end > b.start);
 
+  let resourceHostBlockRanges: PractitionerCalendarBlockedRange[] = [];
+  if (!siblingResourcesRes.error && (siblingResourcesRes.data?.length ?? 0) > 0) {
+    let siblings = (siblingResourcesRes.data ?? []).map((r) =>
+      mapCalendarToResource(r as Record<string, unknown>),
+    );
+    siblings = await attachHostCalendarsToResources(supabase, venueId, siblings);
+    const union = mergedResourceEffectiveRangesForHost(siblings, date);
+    resourceHostBlockRanges = union.map((r) => ({
+      practitioner_id: calendarId,
+      start: r.start,
+      end: r.end,
+    }));
+  }
+
   const practitionerBlockedRanges: PractitionerCalendarBlockedRange[] = [
     ...legacyBlockRanges,
     ...unifiedCalBlockRanges,
+    ...resourceHostBlockRanges,
   ];
 
   if (blocksRes.error) {
@@ -948,6 +975,9 @@ export async function fetchCalendarAppointmentInput(params: {
   }
   if (calBlocksRes.error) {
     console.warn('[fetchCalendarAppointmentInput] calendar_blocks:', calBlocksRes.error.message);
+  }
+  if (siblingResourcesRes.error) {
+    console.warn('[fetchCalendarAppointmentInput] sibling resources:', siblingResourcesRes.error.message);
   }
 
   const venueOpeningHours = venueRes.error

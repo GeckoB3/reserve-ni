@@ -1,5 +1,6 @@
 import { Suspense } from 'react';
 import Link from 'next/link';
+import { SignupPlanConflictBanner } from '@/components/signup/SignupPlanConflictBanner';
 
 export default function SignupLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -14,12 +15,17 @@ export default function SignupLayout({ children }: { children: React.ReactNode }
           </Link>
         </div>
       </nav>
-      <main className="flex flex-1 items-start justify-center px-4 py-12 sm:py-16">
-        <Suspense fallback={
-          <div className="flex min-h-[40vh] items-center justify-center">
-            <div className="h-8 w-8 animate-spin rounded-full border-4 border-brand-200 border-t-brand-600" />
-          </div>
-        }>
+      <main className="flex flex-1 flex-col items-center px-4 py-12 sm:py-16">
+        <Suspense fallback={null}>
+          <SignupPlanConflictBanner />
+        </Suspense>
+        <Suspense
+          fallback={
+            <div className="flex min-h-[40vh] w-full flex-1 items-center justify-center">
+              <div className="h-8 w-8 animate-spin rounded-full border-4 border-brand-200 border-t-brand-600" />
+            </div>
+          }
+        >
           {children}
         </Suspense>
       </main>

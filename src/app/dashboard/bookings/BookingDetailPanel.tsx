@@ -10,6 +10,8 @@ import type { CountryCode } from 'libphonenumber-js';
 import { ModifyBookingInline } from '@/components/booking/ModifyBookingInline';
 import { BookingNotesEditablePanel } from '@/components/booking/BookingNotesEditablePanel';
 import { GuestTagEditor } from '@/components/dashboard/GuestTagEditor';
+import type { BookingNotesVariant } from '@/components/booking/BookingNotesEditablePanel';
+import type { BookingModel } from '@/types/booking-models';
 
 interface Guest {
   id: string;
@@ -58,6 +60,8 @@ interface BookingDetail {
   events: EventRow[];
   communications: CommRow[];
   table_assignments?: Array<{ id: string; name: string }>;
+  /** Set by GET /api/venue/bookings/[id] for notes UI (table vs C/D/E). */
+  inferred_booking_model?: BookingModel;
 }
 
 function timeToMinutes(value: string): number {
@@ -214,6 +218,13 @@ export function BookingDetailPanel({
 
   const displayDetail = detail ?? optimisticDetail;
   const isHydrated = detail !== null;
+
+  const notesVariant: BookingNotesVariant = useMemo(() => {
+    const m = displayDetail?.inferred_booking_model;
+    if (m === 'table_reservation') return 'table';
+    if (m != null) return 'cde';
+    return isAppointment ? 'cde' : 'table';
+  }, [displayDetail?.inferred_booking_model, isAppointment]);
 
   const load = useCallback(async () => {
     const [bookingRes, tablesRes] = await Promise.all([
@@ -391,18 +402,22 @@ export function BookingDetailPanel({
         return;
       }
 
+      const metadataPayload: Record<string, unknown> = {
+        guest_name: modifyGuestName,
+        guest_phone: guestPhoneNormalized,
+        guest_email: modifyGuestEmail,
+        occasion: modifyOccasion,
+        special_requests: modifySpecialRequests,
+        internal_notes: modifyInternalNotes,
+      };
+      if (notesVariant === 'table') {
+        metadataPayload.dietary_notes = modifyDietary;
+      }
+
       const metadataRes = await fetch(`/api/venue/bookings/${bookingId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          guest_name: modifyGuestName,
-          guest_phone: guestPhoneNormalized,
-          guest_email: modifyGuestEmail,
-          dietary_notes: modifyDietary,
-          occasion: modifyOccasion,
-          special_requests: modifySpecialRequests,
-          internal_notes: modifyInternalNotes,
-        }),
+        body: JSON.stringify(metadataPayload),
       });
       if (!metadataRes.ok) {
         const payload = await metadataRes.json().catch(() => ({}));
@@ -478,6 +493,7 @@ export function BookingDetailPanel({
     assignedTables,
     load,
     onUpdated,
+    notesVariant,
   ]);
 
   const runDepositAction = useCallback(async (action: 'send_payment_link' | 'waive' | 'record_cash' | 'refund') => {
@@ -930,7 +946,7 @@ export function BookingDetailPanel({
             guestRequests={d.special_requests}
             staffNotes={d.internal_notes}
             disabled={!isHydrated}
-            isAppointment={isAppointment}
+            notesVariant={notesVariant}
             onSaved={() => {
               void (async () => {
                 await load();
@@ -1031,20 +1047,26 @@ export function BookingDetailPanel({
                     className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
                   />
                 </div>
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-slate-500">Dietary Notes</label>
-                  <input type="text" value={modifyDietary} onChange={(e) => setModifyDietary(e.target.value)} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" />
-                </div>
+                {notesVariant === 'table' && (
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-slate-500">Dietary Notes</label>
+                    <input type="text" value={modifyDietary} onChange={(e) => setModifyDietary(e.target.value)} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" />
+                  </div>
+                )}
                 <div>
                   <label className="mb-1 block text-xs font-medium text-slate-500">Occasion</label>
                   <input type="text" value={modifyOccasion} onChange={(e) => setModifyOccasion(e.target.value)} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" />
                 </div>
                 <div>
-                  <label className="mb-1 block text-xs font-medium text-slate-500">Special Requests</label>
+                  <label className="mb-1 block text-xs font-medium text-slate-500">
+                    {notesVariant === 'cde' ? 'Booking notes' : 'Special Requests'}
+                  </label>
                   <textarea value={modifySpecialRequests} onChange={(e) => setModifySpecialRequests(e.target.value)} rows={2} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" />
                 </div>
                 <div>
-                  <label className="mb-1 block text-xs font-medium text-slate-500">Internal Notes</label>
+                  <label className="mb-1 block text-xs font-medium text-slate-500">
+                    {notesVariant === 'cde' ? 'Staff notes' : 'Internal Notes'}
+                  </label>
                   <textarea value={modifyInternalNotes} onChange={(e) => setModifyInternalNotes(e.target.value)} rows={2} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" />
                 </div>
                 {(tableManagementEnabled || allTables.length > 0) && (

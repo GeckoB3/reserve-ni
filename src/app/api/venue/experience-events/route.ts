@@ -13,9 +13,12 @@ import {
   assertExperienceEventCalendarClearable,
 } from '@/lib/experience-events/experience-event-guards';
 import { assertExperienceEventWindowFreeOnCalendar } from '@/lib/experience-events/calendar-event-window-conflicts';
+import { validateExperienceEventWindowAgainstVenueAndCalendar } from '@/lib/experience-events/event-hours-vs-venue-calendar';
 import { createTeamCalendarForEvent } from '@/lib/experience-events/create-team-calendar';
 import { z } from 'zod';
 import { DEFAULT_ENTITY_BOOKING_WINDOW } from '@/lib/booking/entity-booking-window';
+import type { OpeningHours } from '@/types/availability';
+import { parseVenueOpeningExceptions } from '@/types/venue-opening-exceptions';
 
 const eventSchema = z.object({
   name: z.string().min(1).max(200),
@@ -265,7 +268,45 @@ export async function POST(request: NextRequest) {
 
     const createdIds: string[] = [];
 
+    let venueHoursPayload: {
+      opening_hours: OpeningHours | null;
+      venue_opening_exceptions: ReturnType<typeof parseVenueOpeningExceptions>;
+    } | null = null;
+    let calendarRowForHours: Record<string, unknown> | null = null;
+
+    if (resolvedCalendarId) {
+      const [{ data: venueRow }, { data: ucFull, error: ucFullErr }] = await Promise.all([
+        admin.from('venues').select('opening_hours, venue_opening_exceptions').eq('id', staff.venue_id).single(),
+        admin
+          .from('unified_calendars')
+          .select('*')
+          .eq('id', resolvedCalendarId)
+          .eq('venue_id', staff.venue_id)
+          .maybeSingle(),
+      ]);
+      if (ucFullErr || !ucFull) {
+        return NextResponse.json({ error: 'Calendar column not found for this venue.' }, { status: 400 });
+      }
+      calendarRowForHours = ucFull as Record<string, unknown>;
+      venueHoursPayload = {
+        opening_hours: (venueRow?.opening_hours as OpeningHours | null) ?? null,
+        venue_opening_exceptions: parseVenueOpeningExceptions(venueRow?.venue_opening_exceptions),
+      };
+    }
+
     for (const eventDate of datesToCreate) {
+      if (resolvedCalendarId && venueHoursPayload && calendarRowForHours) {
+        const hoursErr = validateExperienceEventWindowAgainstVenueAndCalendar(
+          eventDate,
+          startHm,
+          endHm,
+          venueHoursPayload,
+          calendarRowForHours,
+        );
+        if (hoursErr) {
+          return NextResponse.json({ error: hoursErr }, { status: 400 });
+        }
+      }
       if (resolvedCalendarId) {
         const conflict = await assertExperienceEventWindowFreeOnCalendar(
           admin,
@@ -471,6 +512,32 @@ export async function PATCH(request: NextRequest) {
     }
 
     if (mergedCalendarId) {
+      const [{ data: venueRowPatch }, { data: ucPatch, error: ucPatchErr }] = await Promise.all([
+        admin.from('venues').select('opening_hours, venue_opening_exceptions').eq('id', staff.venue_id).single(),
+        admin
+          .from('unified_calendars')
+          .select('*')
+          .eq('id', mergedCalendarId)
+          .eq('venue_id', staff.venue_id)
+          .maybeSingle(),
+      ]);
+      if (ucPatchErr || !ucPatch) {
+        return NextResponse.json({ error: 'Calendar column not found for this venue.' }, { status: 400 });
+      }
+      const hoursErrPatch = validateExperienceEventWindowAgainstVenueAndCalendar(
+        mergedDate,
+        timeHhMm(mergedStart),
+        timeHhMm(mergedEnd),
+        {
+          opening_hours: (venueRowPatch?.opening_hours as OpeningHours | null) ?? null,
+          venue_opening_exceptions: parseVenueOpeningExceptions(venueRowPatch?.venue_opening_exceptions),
+        },
+        ucPatch as Record<string, unknown>,
+      );
+      if (hoursErrPatch) {
+        return NextResponse.json({ error: hoursErrPatch }, { status: 400 });
+      }
+
       const conflict = await assertExperienceEventWindowFreeOnCalendar(
         admin,
         staff.venue_id,

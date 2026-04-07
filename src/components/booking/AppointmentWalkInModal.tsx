@@ -155,7 +155,7 @@ export function AppointmentWalkInModal({
 
   async function handleSubmit() {
     if (!selectedPractitioner || !selectedService) {
-      setError('Select a service and a team member');
+      setError('Select a service and who to book with');
       return;
     }
 
@@ -300,7 +300,7 @@ export function AppointmentWalkInModal({
 
             {walkStep === 'staff' && (
               <div className="space-y-3">
-                <p className="text-sm font-medium text-slate-700">Select team member</p>
+                <p className="text-sm font-medium text-slate-700">Book with</p>
                 {practitionersForSelectedService.map((p) => {
                   const merged = getMergedServicesForPractitioner(p.id).find((s) => s.id === selectedService);
                   return (
@@ -325,7 +325,7 @@ export function AppointmentWalkInModal({
                   );
                 })}
                 {practitionersForSelectedService.length === 0 && (
-                  <p className="text-sm text-slate-500">No team members offer this service.</p>
+                  <p className="text-sm text-slate-500">No availability for this service.</p>
                 )}
                 <button type="button" onClick={() => setWalkStep('service')} className="text-sm text-blue-600 hover:underline">
                   &larr; Back
@@ -342,7 +342,7 @@ export function AppointmentWalkInModal({
                     <span className="max-w-[60%] text-right font-medium">{selectedSvcMerged?.name}</span>
                   </div>
                   <div className="flex justify-between gap-2">
-                    <span className="text-slate-500">Team member</span>
+                    <span className="text-slate-500">Booked with</span>
                     <span className="max-w-[60%] text-right font-medium">
                       {activePractitioners.find((p) => p.id === selectedPractitioner)?.name}
                     </span>

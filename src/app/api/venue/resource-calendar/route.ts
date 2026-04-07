@@ -6,13 +6,14 @@ import { resolveVenueMode } from '@/lib/venue-mode';
 import {
   mapCalendarToResource,
   computeResourceAvailableDatesInMonth,
-  fetchBookingsGroupedByDateForResourceMonth,
+  computeResourceAvailableDatesInMonthAnyDuration,
   attachHostCalendarsToResources,
 } from '@/lib/availability/resource-booking-engine';
 
 /**
  * GET /api/venue/resource-calendar?resource_id=&year=&month=&duration=
  * Staff: available dates for one resource in a calendar month.
+ * Omit `duration` or use `duration=any` to mark days where any valid slot-interval-based duration can book.
  */
 export async function GET(request: NextRequest) {
   try {
@@ -39,9 +40,13 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid month (1–12)' }, { status: 400 });
     }
 
-    const durationMinutes = durationParam ? parseInt(durationParam, 10) : 60;
-    if (Number.isNaN(durationMinutes) || durationMinutes < 5 || durationMinutes > 1440) {
-      return NextResponse.json({ error: 'duration must be between 5 and 1440 minutes' }, { status: 400 });
+    const durationAny = !durationParam || durationParam === 'any' || durationParam === 'flex';
+    let durationMinutes = 60;
+    if (!durationAny) {
+      durationMinutes = parseInt(durationParam, 10);
+      if (Number.isNaN(durationMinutes) || durationMinutes < 5 || durationMinutes > 1440) {
+        return NextResponse.json({ error: 'duration must be between 5 and 1440 minutes' }, { status: 400 });
+      }
     }
 
     const admin = getSupabaseAdminClient();
@@ -73,28 +78,24 @@ export async function GET(request: NextRequest) {
     const [enriched] = await attachHostCalendarsToResources(admin, staff.venue_id, [resource]);
     resource = enriched ?? resource;
 
-    const bookingsByDate = await fetchBookingsGroupedByDateForResourceMonth(
-      admin,
-      staff.venue_id,
-      resourceId,
-      year,
-      month,
-    );
-
-    const available_dates = computeResourceAvailableDatesInMonth(
-      resource,
-      year,
-      month,
-      durationMinutes,
-      bookingsByDate,
-    );
+    const available_dates = durationAny
+      ? await computeResourceAvailableDatesInMonthAnyDuration(admin, staff.venue_id, resource, year, month)
+      : await computeResourceAvailableDatesInMonth(
+          admin,
+          staff.venue_id,
+          resource,
+          year,
+          month,
+          durationMinutes,
+        );
 
     return NextResponse.json({
       venue_id: staff.venue_id,
       resource_id: resourceId,
       year,
       month,
-      duration_minutes: durationMinutes,
+      duration_minutes: durationAny ? null : durationMinutes,
+      duration_mode: durationAny ? 'any' : 'fixed',
       available_dates,
     });
   } catch (err) {

@@ -9,6 +9,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { ClassPaymentRequirement, VenueResource, WorkingHours } from '@/types/booking-models';
 import { timeToMinutes, minutesToTime } from '@/lib/availability';
+import { bookingRowEndMinutes, unionMinuteRanges } from '@/lib/availability/calendar-resource-occupancy';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -18,6 +19,11 @@ export interface ResourceEngineInput {
   date: string;
   resources: VenueResource[];
   existingBookings: ResourceBooking[];
+  /**
+   * When set (from fetchResourceInput), per-resource bookable minute ranges after host/sibling conflict rules.
+   * If absent, computeResourceAvailability derives ranges from each resource row.
+   */
+  effectiveAvailabilityRangesByResourceId?: Map<string, Array<{ start: number; end: number }>>;
 }
 
 export interface ResourceBooking {
@@ -183,7 +189,7 @@ function getBaseResourceAvailabilityRanges(
  * Bookable windows for the resource on this date: resource row hours, intersected with the host
  * calendar column when `display_on_calendar_id` is set; host breaks are then carved out.
  */
-function getEffectiveAvailabilityRanges(
+export function getEffectiveAvailabilityRanges(
   resource: VenueResource,
   dateStr: string,
 ): Array<{ start: number; end: number }> {
@@ -205,6 +211,34 @@ function overlaps(startA: number, endA: number, startB: number, endB: number): b
   return startA < endB && startB < endA;
 }
 
+/** Union of effective ranges for sibling resources on the same host, excluding one id. */
+function mergedSiblingResourceRangesExcluding(
+  siblingsOnHost: VenueResource[],
+  excludeResourceId: string,
+  dateStr: string,
+): Array<{ start: number; end: number }> {
+  const others = siblingsOnHost.filter((r) => r.id !== excludeResourceId);
+  const all: Array<{ start: number; end: number }> = [];
+  for (const r of others) {
+    all.push(...getEffectiveAvailabilityRanges(r, dateStr));
+  }
+  return unionMinuteRanges(all);
+}
+
+/**
+ * Union of effective bookable windows for resources attached to the same host column (same date).
+ */
+export function mergedResourceEffectiveRangesForHost(
+  resourcesOnHost: VenueResource[],
+  dateStr: string,
+): Array<{ start: number; end: number }> {
+  const all: Array<{ start: number; end: number }> = [];
+  for (const r of resourcesOnHost) {
+    all.push(...getEffectiveAvailabilityRanges(r, dateStr));
+  }
+  return unionMinuteRanges(all);
+}
+
 // ---------------------------------------------------------------------------
 // Core engine
 // ---------------------------------------------------------------------------
@@ -213,7 +247,7 @@ export function computeResourceAvailability(
   input: ResourceEngineInput,
   requestedDurationMinutes: number,
 ): ResourceAvailabilityResult[] {
-  const { date, resources, existingBookings } = input;
+  const { date, resources, existingBookings, effectiveAvailabilityRangesByResourceId } = input;
   const results: ResourceAvailabilityResult[] = [];
 
   for (const resource of resources) {
@@ -224,7 +258,9 @@ export function computeResourceAvailability(
       Math.min(requestedDurationMinutes, resource.max_booking_minutes),
     );
 
-    const ranges = getEffectiveAvailabilityRanges(resource, date);
+    const ranges =
+      effectiveAvailabilityRangesByResourceId?.get(resource.id) ??
+      getEffectiveAvailabilityRanges(resource, date);
     if (ranges.length === 0) continue;
 
     const resourceBookings = existingBookings.filter(
@@ -271,31 +307,89 @@ export function computeResourceAvailability(
   return results;
 }
 
+/** Booking lengths (minutes) allowed for this resource: multiples of the slot interval within min/max. */
+export function resourceDurationCandidatesMinutes(
+  resource: Pick<VenueResource, 'min_booking_minutes' | 'max_booking_minutes' | 'slot_interval_minutes'>,
+): number[] {
+  const step = Math.max(1, resource.slot_interval_minutes);
+  const minB = resource.min_booking_minutes;
+  const maxB = resource.max_booking_minutes;
+  const out: number[] = [];
+  let d = Math.ceil(minB / step) * step;
+  for (; d <= maxB; d += step) {
+    out.push(d);
+  }
+  if (out.length === 0) {
+    const fallback = Math.min(maxB, Math.max(minB, step));
+    out.push(fallback);
+  }
+  return out;
+}
+
 /**
  * Dates in the given month (YYYY-MM-DD) where the resource has at least one bookable slot
  * for the requested duration (after min/max clamping inside the engine).
+ * Uses fetchResourceInput per day so host/sibling conflict rules match single-day availability.
  */
-export function computeResourceAvailableDatesInMonth(
+export async function computeResourceAvailableDatesInMonth(
+  supabase: SupabaseClient,
+  venueId: string,
   resource: VenueResource,
   year: number,
   month: number,
   durationMinutes: number,
-  bookingsByDate: Map<string, ResourceBooking[]>,
-): string[] {
+): Promise<string[]> {
   const pad = (n: number) => String(n).padStart(2, '0');
   const out: string[] = [];
   const lastDay = new Date(year, month, 0).getDate();
   for (let d = 1; d <= lastDay; d++) {
     const dateStr = `${year}-${pad(month)}-${pad(d)}`;
-    const bookings = bookingsByDate.get(dateStr) ?? [];
-    const input: ResourceEngineInput = {
+    const input = await fetchResourceInput({
+      supabase,
+      venueId,
       date: dateStr,
-      resources: [resource],
-      existingBookings: bookings,
-    };
+      resourceId: resource.id,
+    });
     const results = computeResourceAvailability(input, durationMinutes);
     const row = results.find((r) => r.id === resource.id);
     if (row && row.slots.length > 0) out.push(dateStr);
+  }
+  return out;
+}
+
+/**
+ * Dates in the month where at least one allowed duration (slot-interval multiples) has a bookable slot.
+ * Used when the user picks a date before choosing duration.
+ */
+export async function computeResourceAvailableDatesInMonthAnyDuration(
+  supabase: SupabaseClient,
+  venueId: string,
+  resource: VenueResource,
+  year: number,
+  month: number,
+): Promise<string[]> {
+  const durations = resourceDurationCandidatesMinutes(resource);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const out: string[] = [];
+  const lastDay = new Date(year, month, 0).getDate();
+  for (let day = 1; day <= lastDay; day++) {
+    const dateStr = `${year}-${pad(month)}-${pad(day)}`;
+    const input = await fetchResourceInput({
+      supabase,
+      venueId,
+      date: dateStr,
+      resourceId: resource.id,
+    });
+    let hasSlot = false;
+    for (const dur of durations) {
+      const results = computeResourceAvailability(input, dur);
+      const row = results.find((r) => r.id === resource.id);
+      if (row && row.slots.length > 0) {
+        hasSlot = true;
+        break;
+      }
+    }
+    if (hasSlot) out.push(dateStr);
   }
   return out;
 }
@@ -445,7 +539,7 @@ export async function fetchResourceInput(params: {
     resourcesQuery = resourcesQuery.eq('id', resourceId);
   }
 
-  const [resourcesRes, bookingsRes] = await Promise.all([
+  const [resourcesRes, bookingsRes, hostDayBookingsRes] = await Promise.all([
     resourcesQuery,
     supabase
       .from('bookings')
@@ -454,10 +548,41 @@ export async function fetchResourceInput(params: {
       .eq('booking_date', date)
       .or('resource_id.not.is.null,calendar_id.not.is.null')
       .in('status', CAPACITY_CONSUMING_STATUSES),
+    supabase
+      .from('bookings')
+      .select(
+        'booking_time, booking_end_time, estimated_end_time, resource_id, calendar_id, practitioner_id',
+      )
+      .eq('venue_id', venueId)
+      .eq('booking_date', date)
+      .in('status', CAPACITY_CONSUMING_STATUSES),
   ]);
 
   let resources = (resourcesRes.data ?? []).map((r) => mapCalendarToResource(r as Record<string, unknown>));
   resources = await attachHostCalendarsToResources(supabase, venueId, resources);
+
+  const hostIdsForSiblings = [...new Set(resources.map((r) => r.display_on_calendar_id).filter(Boolean))] as string[];
+  let conflictResources = resources;
+  if (hostIdsForSiblings.length > 0) {
+    const { data: sibRows, error: sibErr } = await supabase
+      .from('unified_calendars')
+      .select('*')
+      .eq('venue_id', venueId)
+      .eq('calendar_type', 'resource')
+      .eq('is_active', true)
+      .in('display_on_calendar_id', hostIdsForSiblings);
+    if (sibErr) {
+      console.warn('[fetchResourceInput] sibling resources:', sibErr.message);
+    }
+    const byId = new Map(resources.map((r) => [r.id, r] as const));
+    for (const row of sibRows ?? []) {
+      const r = mapCalendarToResource(row as Record<string, unknown>);
+      if (!byId.has(r.id)) byId.set(r.id, r);
+    }
+    conflictResources = [...byId.values()];
+    conflictResources = await attachHostCalendarsToResources(supabase, venueId, conflictResources);
+  }
+
   const resourceIdSet = new Set(resources.map((r) => r.id));
 
   const existingBookings: ResourceBooking[] = (bookingsRes.data ?? [])
@@ -478,5 +603,51 @@ export async function fetchResourceInput(params: {
       };
     });
 
-  return { date, resources, existingBookings };
+  const resourcesByHost = new Map<string, VenueResource[]>();
+  for (const r of conflictResources) {
+    const h = r.display_on_calendar_id;
+    if (!h) continue;
+    const list = resourcesByHost.get(h) ?? [];
+    list.push(r);
+    resourcesByHost.set(h, list);
+  }
+
+  const occupancyByHost = new Map<string, Array<{ start: number; end: number }>>();
+  const hostIds = [...resourcesByHost.keys()];
+  const dayRows = hostDayBookingsRes.data ?? [];
+
+  for (const hostId of hostIds) {
+    const occ: Array<{ start: number; end: number }> = [];
+    for (const raw of dayRows) {
+      const row = raw as Record<string, unknown>;
+      if (row.resource_id) continue;
+      const cal = row.calendar_id as string | null | undefined;
+      const pid = row.practitioner_id as string | null | undefined;
+      if (cal !== hostId && pid !== hostId) continue;
+      const bt = row.booking_time as string;
+      const start = timeToMinutes(String(bt).slice(0, 5));
+      const end = bookingRowEndMinutes({
+        booking_time: String(bt).slice(0, 5),
+        booking_end_time: (row.booking_end_time as string | null) ?? null,
+        estimated_end_time: (row.estimated_end_time as string | null) ?? null,
+      });
+      if (end > start) occ.push({ start, end });
+    }
+    occupancyByHost.set(hostId, unionMinuteRanges(occ));
+  }
+
+  const effectiveAvailabilityRangesByResourceId = new Map<string, Array<{ start: number; end: number }>>();
+  for (const resource of resources) {
+    let ranges = getEffectiveAvailabilityRanges(resource, date);
+    const hostId = resource.display_on_calendar_id;
+    if (hostId) {
+      ranges = subtractRangesFromRanges(ranges, occupancyByHost.get(hostId) ?? []);
+      const siblings = resourcesByHost.get(hostId) ?? [];
+      const siblingExcl = mergedSiblingResourceRangesExcluding(siblings, resource.id, date);
+      ranges = subtractRangesFromRanges(ranges, siblingExcl);
+    }
+    effectiveAvailabilityRangesByResourceId.set(resource.id, ranges);
+  }
+
+  return { date, resources, existingBookings, effectiveAvailabilityRangesByResourceId };
 }

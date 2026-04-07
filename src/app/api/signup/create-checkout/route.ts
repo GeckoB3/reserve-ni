@@ -5,6 +5,8 @@ import { stripe } from '@/lib/stripe';
 import { buildCheckoutLineItems } from '@/lib/stripe/subscription-line-items';
 import { getBusinessConfig } from '@/lib/business-config';
 import { FOUNDING_PARTNER_CAP } from '@/lib/pricing-constants';
+import { getExistingVenueForUserEmail } from '@/lib/signup-existing-venue';
+import { pricingTierToSignupFamily, signupPlanToFamily, SIGNUP_PLAN_CONFLICT_MESSAGE } from '@/lib/signup-plan-family';
 
 export async function POST(request: Request) {
   try {
@@ -29,6 +31,20 @@ export async function POST(request: Request) {
 
     const config = getBusinessConfig(business_type);
 
+    const admin = getSupabaseAdminClient();
+    const existingVenue = await getExistingVenueForUserEmail(admin, user.email);
+    if (existingVenue) {
+      const requestedFamily = signupPlanToFamily(plan);
+      const existingFamily = pricingTierToSignupFamily(existingVenue.pricing_tier);
+      if (existingFamily !== requestedFamily) {
+        return NextResponse.json(
+          { error: SIGNUP_PLAN_CONFLICT_MESSAGE, code: 'PLAN_FAMILY_MISMATCH' },
+          { status: 409 },
+        );
+      }
+      return NextResponse.json({ redirect_url: '/onboarding' });
+    }
+
     // Founding Partner: skip Stripe, create venue directly
     if (plan === 'founding') {
       if (config.model !== 'table_reservation') {
@@ -37,8 +53,6 @@ export async function POST(request: Request) {
           { status: 400 }
         );
       }
-      const admin = getSupabaseAdminClient();
-
       const { count: foundingCount, error: foundingCountErr } = await admin
         .from('venues')
         .select('id', { count: 'exact', head: true })
@@ -50,17 +64,6 @@ export async function POST(request: Request) {
             { status: 400 },
           );
         }
-      }
-
-      // Idempotency: check if this user already has a venue
-      const { data: existingStaff } = await admin
-        .from('staff')
-        .select('venue_id')
-        .ilike('email', (user.email ?? '').toLowerCase().trim())
-        .limit(1);
-
-      if (existingStaff && existingStaff.length > 0) {
-        return NextResponse.json({ redirect_url: '/onboarding' });
       }
 
       const slug = `venue-${Date.now()}`;

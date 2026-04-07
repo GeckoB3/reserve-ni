@@ -22,7 +22,7 @@ import { z } from 'zod';
 import { normalizeToE164 } from '@/lib/phone/e164';
 import { createPaymentPageUrl } from '@/lib/payment-token';
 import { createShortManageLink } from '@/lib/short-manage-link';
-import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
+import { isUnifiedSchedulingVenue, venueUsesUnifiedAppointmentData } from '@/lib/booking/unified-scheduling';
 import { fetchEventInput, computeEventAvailability } from '@/lib/availability/event-ticket-engine';
 import { cancellationDeadlineHoursBefore } from '@/lib/booking/cancellation-deadline';
 import { getCancellationNoticeHoursForBooking, parseExtendedBookingRules } from '@/lib/booking/venue-booking-rules';
@@ -46,7 +46,7 @@ const phoneBookingSchema = z.object({
   booking_time: z.string().regex(/^([01]?[0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9])?$/),
   party_size: z.number().int().min(1).max(50),
   name: z.string().min(1).max(200),
-  /** Required for table (Model A) phone bookings; optional for practitioner appointments (Model B). */
+  /** Required for table (Model A) phone bookings and staff-created practitioner appointments (Model B); optional only for non-appointment unified paths if added later. */
   phone: z.string().max(24).optional(),
   email: z.union([z.literal(''), z.string().email()]).optional(),
   dietary_notes: z.string().max(500).optional(),
@@ -139,7 +139,13 @@ export async function POST(request: NextRequest) {
 
     const phoneRaw = (phone ?? '').trim();
     let phoneE164: string | null = null;
+    const isStaffAppointmentBooking = Boolean(
+      parsed.data.practitioner_id && parsed.data.appointment_service_id,
+    );
     if (isUnifiedSchedulingVenue(venueMode.bookingModel)) {
+      if (isStaffAppointmentBooking && !phoneRaw) {
+        return NextResponse.json({ error: 'Phone number is required' }, { status: 400 });
+      }
       if (phoneRaw) {
         const n = normalizeToE164(phoneRaw, 'GB');
         if (!n) {
@@ -217,13 +223,21 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      let depositAmountPence = ticketLines.reduce((sum, tl) => sum + tl.quantity * tl.unit_price_pence, 0);
-      const requiresDeposit = depositAmountPence > 0;
-      if (!requiresDeposit) {
-        depositAmountPence = 0;
+      const ticketTotal = ticketLines.reduce((sum, tl) => sum + tl.quantity * tl.unit_price_pence, 0);
+      const eventPayReq = evSlot.payment_requirement ?? 'none';
+      const eventDepPerPerson = evSlot.deposit_amount_pence ?? 0;
+
+      let depositAmountPence = 0;
+      let requiresDeposit = false;
+      if (eventPayReq === 'full_payment' && ticketTotal > 0) {
+        requiresDeposit = true;
+        depositAmountPence = ticketTotal;
+      } else if (eventPayReq === 'deposit' && eventDepPerPerson > 0) {
+        requiresDeposit = true;
+        depositAmountPence = eventDepPerPerson * party_size;
       }
-      const ticketTotalDisplay =
-        requiresDeposit && depositAmountPence > 0 ? `£${(depositAmountPence / 100).toFixed(2)}` : null;
+
+      const ticketTotalDisplay = ticketTotal > 0 ? `£${(ticketTotal / 100).toFixed(2)}` : null;
       const eventEmailExtras = {
         email_variant: 'appointment' as const,
         booking_model: 'event_ticket' as const,
@@ -667,15 +681,16 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // --- Model B: Practitioner appointment ---
-    if (isUnifiedSchedulingVenue(venueMode.bookingModel)) {
-      const { practitioner_id, appointment_service_id } = parsed.data;
-      if (!practitioner_id || !appointment_service_id) {
-        return NextResponse.json(
-          { error: 'practitioner_id and appointment_service_id are required for appointment bookings' },
-          { status: 400 },
-        );
-      }
+    // --- Model B: Practitioner / calendar appointment ---
+    // Primary USE/practitioner venues, OR restaurant + appointments secondary (unified_scheduling in enabled_models).
+    const hasAppointmentAnchorIds = Boolean(parsed.data.practitioner_id && parsed.data.appointment_service_id);
+    const supportsStaffAppointmentCreate =
+      isUnifiedSchedulingVenue(venueMode.bookingModel) ||
+      venueUsesUnifiedAppointmentData(venueMode.bookingModel, venueMode.enabledModels);
+
+    if (supportsStaffAppointmentCreate && hasAppointmentAnchorIds) {
+      const practitioner_id = parsed.data.practitioner_id as string;
+      const appointment_service_id = parsed.data.appointment_service_id as string;
 
       const svcWindow = await loadServiceEntityBookingWindow(
         admin,
@@ -735,11 +750,16 @@ export async function POST(request: NextRequest) {
       const estimatedEndTime = endDate.toISOString();
       const bookingEndTime = `${String(endDate.getUTCHours()).padStart(2, '0')}:${String(endDate.getUTCMinutes()).padStart(2, '0')}:00`;
 
+      /** Same storage as public POST /api/booking/create: USE rows use service_items + unified_calendars, not appointment_services. */
+      const useUnifiedAppointmentStorage =
+        venueMode.bookingModel === 'unified_scheduling' ||
+        venueUsesUnifiedAppointmentData(venueMode.bookingModel, venueMode.enabledModels);
+
       const refundWindowHoursAppt = await resolveCancellationNoticeHoursForCreate({
         supabase: admin,
         venueId,
         effectiveModel: venueMode.bookingModel,
-        ...(venueMode.bookingModel === 'unified_scheduling'
+        ...(useUnifiedAppointmentStorage
           ? { serviceItemId: appointment_service_id }
           : { appointmentServiceId: appointment_service_id }),
       });
@@ -764,7 +784,7 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      const apptInsert = {
+      const apptInsert: Record<string, unknown> = {
         venue_id: venueId,
         guest_id: guest.id,
         booking_date,
@@ -780,10 +800,18 @@ export async function POST(request: NextRequest) {
         dietary_notes: dietary_notes?.trim() || null,
         occasion: occasion?.trim() || null,
         special_requests: special_requests?.trim() || null,
-        practitioner_id,
-        appointment_service_id,
         estimated_end_time: estimatedEndTime,
       };
+
+      if (useUnifiedAppointmentStorage) {
+        apptInsert.calendar_id = practitioner_id;
+        apptInsert.service_item_id = appointment_service_id;
+        apptInsert.practitioner_id = null;
+        apptInsert.appointment_service_id = null;
+      } else {
+        apptInsert.practitioner_id = practitioner_id;
+        apptInsert.appointment_service_id = appointment_service_id;
+      }
 
       const { data: apptBooking, error: apptErr } = await admin
         .from('bookings')
@@ -898,6 +926,13 @@ export async function POST(request: NextRequest) {
           message: payment_url ? 'Appointment created. Deposit link sent.' : 'Appointment created.',
         },
         { status: 201 },
+      );
+    }
+
+    if (isUnifiedSchedulingVenue(venueMode.bookingModel) && !hasAppointmentAnchorIds) {
+      return NextResponse.json(
+        { error: 'practitioner_id and appointment_service_id are required for appointment bookings' },
+        { status: 400 },
       );
     }
 

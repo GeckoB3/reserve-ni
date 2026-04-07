@@ -25,7 +25,7 @@ import { isRestaurantTableProductTier } from '@/lib/tier-enforcement';
  *
  * **Staff:** Settings link → label **Account**; page is account-only (`settings/page.tsx`). Reports and Dining Availability are omitted from nav.
  *
- * **Restaurant/founding + table primary:** Day Sheet + Reservations grouped (when not using table-management bundle); optional Table Grid + Floor Plan under Reservations when `table_management_enabled`. Injected **Calendar** (`/dashboard/calendar`) when `isVenueScheduleCalendarEligible`.
+ * **Restaurant/founding + table primary:** Day Sheet + Bookings grouped (when not using table-management bundle); optional Table Grid + Floor Plan under Bookings when `table_management_enabled`. Injected **Calendar** (`/dashboard/calendar`) when `isVenueScheduleCalendarEligible`.
  *
  * **Calendar Availability** (`/dashboard/calendar-availability`): when `shouldShowAppointmentAvailabilitySettings` (unified/practitioner primary, or C/D/E primary/secondary).
  *
@@ -37,7 +37,7 @@ type NavItem = { href: string; label: string; icon: React.ComponentType<{ classN
 
 const BASE_NAV_ITEMS: NavItem[] = [
   { href: '/dashboard', label: 'Home', icon: HomeIcon },
-  { href: '/dashboard/bookings', label: 'Reservations', icon: CalendarIcon },
+  { href: '/dashboard/bookings', label: 'Bookings', icon: CalendarIcon },
   { href: '/dashboard/bookings/new', label: 'New Booking', icon: PlusIcon },
   { href: '/dashboard/waitlist', label: 'Waitlist', icon: QueueIcon },
   { href: '/dashboard/availability', label: 'Dining Availability', icon: ClockIcon },
@@ -174,7 +174,7 @@ export function DashboardSidebar({
     }
 
     /**
-     * Restaurant plan + table primary + schedule calendar: Calendar sits after Reservations / table
+     * Restaurant plan + table primary + schedule calendar: Calendar sits after Bookings / table
      * views and before New Booking (and merged model links), not down by Waitlist.
      */
     if (isRestaurantTablePrimaryInner && calendarEligible) {
@@ -247,7 +247,7 @@ export function DashboardSidebar({
           {navItems.map((item) => {
             if (item.href === '/dashboard/bookings' && !showTableManagementNav) {
               if (isRestaurantTablePrimary) {
-                /** Day Sheet + Reservations: restaurant table venues (with or without schedule calendar secondaries). */
+                /** Day Sheet + Bookings: restaurant table venues (with or without schedule calendar secondaries). */
                 const daySheetActive = pathname.startsWith('/dashboard/day-sheet');
                 return (
                   <div key="reservations-with-day-sheet" className="space-y-1">

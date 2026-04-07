@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { formatEventUptakeLine } from '@/lib/calendar/event-block-label';
 import type { ScheduleBlockDTO } from '@/types/schedule-blocks';
 
 interface Props {
@@ -8,12 +9,19 @@ interface Props {
   blocksByDate: Map<string, ScheduleBlockDTO[]>;
   onBookingClick: (bookingId: string) => void;
   onClassInstanceClick?: (block: ScheduleBlockDTO) => void;
+  onEventInstanceClick?: (block: ScheduleBlockDTO) => void;
 }
 
 /**
  * Shared row under the practitioner week grid: compact chips for events (ScheduleBlock feed).
  */
-export function WeekScheduleCdeStrip({ weekDays, blocksByDate, onBookingClick, onClassInstanceClick }: Props) {
+export function WeekScheduleCdeStrip({
+  weekDays,
+  blocksByDate,
+  onBookingClick,
+  onClassInstanceClick,
+  onEventInstanceClick,
+}: Props) {
   return (
     <tr className="border-t border-slate-200 bg-slate-50/80">
       <td className="sticky left-0 z-10 bg-slate-50 px-3 py-2 align-top text-xs font-semibold text-slate-600">
@@ -28,7 +36,14 @@ export function WeekScheduleCdeStrip({ weekDays, blocksByDate, onBookingClick, o
                 <span className="text-[10px] text-slate-400">-</span>
               ) : (
                 dayBlocks.map((b) => {
-                  const shell = !b.booking_id;
+                  const emptyEvent =
+                    b.kind === 'event_ticket' &&
+                    b.experience_event_id &&
+                    (b.event_booking_count ?? (b.booking_id ? 1 : 0)) === 0;
+                  const shell =
+                    b.kind === 'event_ticket' && b.experience_event_id
+                      ? emptyEvent
+                      : !b.booking_id;
                   const accent = b.accent_colour ?? '#64748B';
                   const classUptake =
                     b.kind === 'class_session' &&
@@ -36,6 +51,7 @@ export function WeekScheduleCdeStrip({ weekDays, blocksByDate, onBookingClick, o
                     b.class_booked_spots != null
                       ? `${b.class_booked_spots}/${b.class_capacity} booked`
                       : null;
+                  const eventUptake = b.kind === 'event_ticket' ? formatEventUptakeLine(b) : null;
                   const body = (
                     <div
                       className={`rounded border px-1.5 py-1 text-left text-[10px] shadow-sm ${
@@ -44,7 +60,11 @@ export function WeekScheduleCdeStrip({ weekDays, blocksByDate, onBookingClick, o
                       style={{ borderLeftWidth: 3, borderLeftColor: accent }}
                     >
                       <div className="truncate font-semibold text-slate-900">{b.title}</div>
-                      {b.subtitle ? <div className="truncate text-slate-500">{b.subtitle}</div> : null}
+                      {eventUptake ? (
+                        <div className="truncate text-slate-600">{eventUptake}</div>
+                      ) : b.subtitle ? (
+                        <div className="truncate text-slate-500">{b.subtitle}</div>
+                      ) : null}
                       {classUptake ? (
                         <div className="truncate font-medium text-slate-600">{classUptake}</div>
                       ) : null}
@@ -53,6 +73,18 @@ export function WeekScheduleCdeStrip({ weekDays, blocksByDate, onBookingClick, o
                       </div>
                     </div>
                   );
+                  if (b.kind === 'event_ticket' && b.experience_event_id && onEventInstanceClick) {
+                    return (
+                      <button
+                        key={b.id}
+                        type="button"
+                        onClick={() => onEventInstanceClick(b)}
+                        className="block w-full text-left"
+                      >
+                        {body}
+                      </button>
+                    );
+                  }
                   if (b.booking_id) {
                     return (
                       <button

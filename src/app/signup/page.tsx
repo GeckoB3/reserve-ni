@@ -19,6 +19,7 @@ export default function SignupPage() {
   const supabase = createClient();
 
   // Already signed in (e.g. second tab) with plan chosen: skip straight to payment.
+  // Account already linked to a venue: dashboard only (cannot run signup again).
   useEffect(() => {
     let cancelled = false;
     const client = createClient();
@@ -27,6 +28,16 @@ export default function SignupPage() {
         data: { session },
       } = await client.auth.getSession();
       if (cancelled || !session) return;
+
+      const planRes = await fetch('/api/signup/existing-plan', { credentials: 'same-origin' });
+      if (planRes.ok) {
+        const planData = (await planRes.json()) as { hasVenue?: boolean };
+        if (planData.hasVenue) {
+          router.replace('/dashboard');
+          return;
+        }
+      }
+
       if (getSignupResumePath() === '/signup/payment') {
         router.replace('/signup/payment');
       }

@@ -1,5 +1,6 @@
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
+import { isPlatformRoleInJwt } from '@/lib/platform-auth';
 
 export async function middleware(request: NextRequest) {
   let response = NextResponse.next({ request });
@@ -34,19 +35,44 @@ export async function middleware(request: NextRequest) {
   // Refresh session; required so server and client stay in sync
   const { data: { user } } = await supabase.auth.getUser();
 
-  const isDashboard = request.nextUrl.pathname.startsWith('/dashboard');
+  const { pathname } = request.nextUrl;
+  const isDashboard = pathname.startsWith('/dashboard');
+  const isPlatformUI = pathname.startsWith('/super');
+  const isPlatformAPI = pathname.startsWith('/api/platform');
 
-  if (!user && isDashboard) {
+  // Unauthenticated: protect /dashboard and /super
+  if (!user && (isDashboard || isPlatformUI)) {
     const url = request.nextUrl.clone();
     url.pathname = '/login';
-    url.searchParams.set('redirectTo', request.nextUrl.pathname);
+    url.searchParams.set('redirectTo', pathname);
     return NextResponse.redirect(url);
   }
 
-  if (user && request.nextUrl.pathname === '/login') {
-    const redirectTo =
-      request.nextUrl.searchParams.get('redirectTo') ?? '/dashboard';
-    return NextResponse.redirect(new URL(redirectTo, request.url));
+  // Platform routes: require superuser role + email allowlist
+  if ((isPlatformUI || isPlatformAPI) && user) {
+    const isSuperuser = isPlatformRoleInJwt(
+      user.app_metadata as Record<string, unknown> | undefined,
+      user.email,
+    );
+    if (!isSuperuser) {
+      if (isPlatformAPI) {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+      }
+      return NextResponse.redirect(new URL('/dashboard', request.url));
+    }
+  }
+
+  // Logged-in user on /login: redirect to the right surface
+  if (user && pathname === '/login') {
+    const explicit = request.nextUrl.searchParams.get('redirectTo');
+    if (explicit) {
+      return NextResponse.redirect(new URL(explicit, request.url));
+    }
+    const isSuperuser = isPlatformRoleInJwt(
+      user.app_metadata as Record<string, unknown> | undefined,
+      user.email,
+    );
+    return NextResponse.redirect(new URL(isSuperuser ? '/super' : '/dashboard', request.url));
   }
 
   return response;

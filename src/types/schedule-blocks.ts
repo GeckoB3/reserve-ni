@@ -34,4 +34,10 @@ export interface ScheduleBlockDTO {
    * (`experience_events.calendar_id`).
    */
   calendar_id?: string | null;
+  /** Model C: experience event capacity (when block is one row per event). */
+  event_capacity?: number | null;
+  /** Non-cancelled bookings count for this event occurrence. */
+  event_booking_count?: number | null;
+  /** Sum of party_size for those bookings. */
+  event_party_total?: number | null;
 }

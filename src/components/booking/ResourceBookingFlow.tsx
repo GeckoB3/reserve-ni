@@ -9,6 +9,16 @@ import { PaymentStep } from './PaymentStep';
 import { ResourceCalendarMonth, todayYmdLocal } from './ResourceCalendarMonth';
 import { slotIntervalDurationLabel } from '@/lib/booking/slot-interval-label';
 import { formatResourcePricePerSlotLine } from '@/lib/booking/format-price-display';
+import { resourceDurationCandidatesMinutes } from '@/lib/availability/resource-booking-engine';
+import {
+  type BookingFlowAudience,
+  resourceOptionsUrl,
+  resourceCalendarUrl,
+  resourceSlotsUrl,
+  bookingCreateUrl,
+  bookingConfirmPaymentUrl,
+  venueBookingsCreateUrl,
+} from '@/lib/booking/booking-flow-api';
 
 interface ResourceSlot {
   resource_id: string;
@@ -36,13 +46,37 @@ interface ResourceAvail extends ResourceOption {
 type Step =
   | 'pick_resource'
   | 'pick_date'
+  | 'pick_duration'
   | 'pick_slot'
   | 'summary'
   | 'details'
   | 'payment'
   | 'confirmation';
 
-export function ResourceBookingFlow({ venue, cancellationPolicy }: { venue: VenuePublic; cancellationPolicy?: string }) {
+function formatDurationLabel(mins: number): string {
+  if (mins < 60) return `${mins} min`;
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  return m > 0 ? `${h}h ${m}m` : `${h}h`;
+}
+
+export interface ResourceBookingFlowProps {
+  venue: VenuePublic;
+  cancellationPolicy?: string;
+  bookingAudience?: BookingFlowAudience;
+  /** Staff dashboard: walk-in vs phone booking source for venue API. */
+  staffBookingSource?: 'phone' | 'walk-in';
+  onBookingCreated?: () => void;
+}
+
+export function ResourceBookingFlow({
+  venue,
+  cancellationPolicy,
+  bookingAudience = 'public',
+  staffBookingSource = 'phone',
+  onBookingCreated,
+}: ResourceBookingFlowProps) {
+  const isStaff = bookingAudience === 'staff';
   const phoneDefaultCountry = defaultPhoneCountryForVenueCurrency(venue.currency);
   const terms = venue.terminology ?? { client: 'Booker', booking: 'Booking', staff: 'Manager' };
 
@@ -70,15 +104,27 @@ export function ResourceBookingFlow({ venue, cancellationPolicy }: { venue: Venu
     stripe_account_id?: string;
     requires_deposit: boolean;
     amount_pence_charged?: number;
+    payment_url?: string;
+    staffMessage?: string;
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const durationOptions = useMemo(() => {
+    if (!selectedMeta) return [];
+    return resourceDurationCandidatesMinutes(selectedMeta);
+  }, [selectedMeta]);
+
+  useEffect(() => {
+    if (!selectedMeta || durationOptions.length === 0) return;
+    setDuration((d) => (durationOptions.includes(d) ? d : durationOptions[0]!));
+  }, [selectedMeta, durationOptions]);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       setLoadingOptions(true);
       try {
-        const res = await fetch(`/api/booking/resource-options?venue_id=${encodeURIComponent(venue.id)}`);
+        const res = await fetch(resourceOptionsUrl(bookingAudience, venue.id));
         const data = await res.json();
         if (cancelled) return;
         if (!res.ok) throw new Error(data.error ?? 'Failed to load resources');
@@ -92,7 +138,7 @@ export function ResourceBookingFlow({ venue, cancellationPolicy }: { venue: Venu
     return () => {
       cancelled = true;
     };
-  }, [venue.id]);
+  }, [venue.id, bookingAudience]);
 
   useEffect(() => {
     if (step !== 'pick_date' || !selectedMeta) return;
@@ -100,14 +146,8 @@ export function ResourceBookingFlow({ venue, cancellationPolicy }: { venue: Venu
     (async () => {
       setLoadingCalendar(true);
       try {
-        const params = new URLSearchParams({
-          venue_id: venue.id,
-          resource_id: selectedMeta.id,
-          year: String(calendarMonth.year),
-          month: String(calendarMonth.month),
-          duration: String(duration),
-        });
-        const res = await fetch(`/api/booking/resource-calendar?${params}`);
+        const url = resourceCalendarUrl(bookingAudience, venue.id, selectedMeta.id, calendarMonth.year, calendarMonth.month, 'any');
+        const res = await fetch(url);
         const data = await res.json();
         if (cancelled) return;
         if (!res.ok) throw new Error(data.error ?? 'Failed to load calendar');
@@ -125,7 +165,7 @@ export function ResourceBookingFlow({ venue, cancellationPolicy }: { venue: Venu
     return () => {
       cancelled = true;
     };
-  }, [step, venue.id, selectedMeta, calendarMonth.year, calendarMonth.month, duration]);
+  }, [step, venue.id, selectedMeta, calendarMonth.year, calendarMonth.month, bookingAudience]);
 
   useEffect(() => {
     if (step !== 'pick_date' || !date) return;
@@ -142,18 +182,14 @@ export function ResourceBookingFlow({ venue, cancellationPolicy }: { venue: Venu
     (async () => {
       setLoadingSlots(true);
       try {
-        const params = new URLSearchParams({
-          venue_id: venue.id,
-          date,
-          duration: String(duration),
-          booking_model: 'resource_booking',
-          resource_id: selectedMeta.id,
-        });
-        const res = await fetch(`/api/booking/availability?${params}`);
+        const url = resourceSlotsUrl(bookingAudience, venue.id, date, duration, selectedMeta.id);
+        const res = await fetch(url);
         const data = await res.json();
         if (cancelled) return;
         if (!res.ok) throw new Error(data.error ?? 'Failed to load times');
-        const r = (data.resources ?? [])[0] as ResourceAvail | undefined;
+        const r = (data.resources ?? []).find((x: ResourceAvail) => x.id === selectedMeta.id) as
+          | ResourceAvail
+          | undefined;
         setSelectedResource(r ?? null);
       } catch {
         if (!cancelled) {
@@ -167,7 +203,7 @@ export function ResourceBookingFlow({ venue, cancellationPolicy }: { venue: Venu
     return () => {
       cancelled = true;
     };
-  }, [step, venue.id, date, duration, selectedMeta]);
+  }, [step, venue.id, date, duration, selectedMeta, bookingAudience]);
 
   function computeEndTime(start: string, mins: number): string {
     const [h, m] = start.split(':').map(Number);
@@ -198,7 +234,38 @@ export function ResourceBookingFlow({ venue, cancellationPolicy }: { venue: Venu
       if (!resourceId || !selectedTime) return;
       const endTime = computeEndTime(selectedTime, duration);
       try {
-        const res = await fetch('/api/booking/create', {
+        if (isStaff) {
+          const res = await fetch(venueBookingsCreateUrl(), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              booking_date: date,
+              booking_time: selectedTime,
+              booking_end_time: endTime,
+              party_size: 1,
+              name: details.name,
+              phone: details.phone,
+              email: details.email || undefined,
+              dietary_notes: details.dietary_notes || undefined,
+              resource_id: resourceId,
+              source: staffBookingSource,
+            }),
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error ?? 'Booking failed');
+          setCreateResult({
+            booking_id: data.booking_id,
+            payment_url: data.payment_url,
+            staffMessage: typeof data.message === 'string' ? data.message : undefined,
+            requires_deposit: Boolean(data.payment_url),
+            amount_pence_charged: onlineChargePence,
+          });
+          setStep('confirmation');
+          onBookingCreated?.();
+          return;
+        }
+
+        const res = await fetch(bookingCreateUrl(), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -229,13 +296,24 @@ export function ResourceBookingFlow({ venue, cancellationPolicy }: { venue: Venu
         setError(e instanceof Error ? e.message : 'Booking failed');
       }
     },
-    [venue.id, date, selectedTime, selectedResource?.id, selectedMeta?.id, duration, onlineChargePence],
+    [
+      venue.id,
+      date,
+      selectedTime,
+      selectedResource?.id,
+      selectedMeta?.id,
+      duration,
+      onlineChargePence,
+      isStaff,
+      staffBookingSource,
+      onBookingCreated,
+    ],
   );
 
   const handlePaymentComplete = useCallback(async () => {
     if (createResult?.booking_id) {
       try {
-        await fetch('/api/booking/confirm-payment', {
+        await fetch(bookingConfirmPaymentUrl(), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ booking_id: createResult.booking_id }),
@@ -250,7 +328,6 @@ export function ResourceBookingFlow({ venue, cancellationPolicy }: { venue: Venu
   function selectResource(r: ResourceOption) {
     setError(null);
     setSelectedMeta(r);
-    setDuration((d) => Math.min(Math.max(d, r.min_booking_minutes), r.max_booking_minutes));
     const n = new Date();
     setCalendarMonth({ year: n.getFullYear(), month: n.getMonth() + 1 });
     setDate('');
@@ -263,7 +340,8 @@ export function ResourceBookingFlow({ venue, cancellationPolicy }: { venue: Venu
     setError(null);
     setDate(ymd);
     setSelectedTime(null);
-    setStep('pick_slot');
+    setSelectedResource(null);
+    setStep('pick_duration');
   }
 
   function goPrevMonth() {
@@ -291,22 +369,9 @@ export function ResourceBookingFlow({ venue, cancellationPolicy }: { venue: Venu
       {step === 'pick_resource' && (
         <div>
           <h2 className="mb-2 text-lg font-semibold text-slate-900">Book a resource</h2>
-          <p className="mb-4 text-sm text-slate-600">Choose how long you need, then pick a resource. You will choose a date and time next.</p>
-          <div className="mb-4">
-            <label className="text-sm text-slate-500">Duration</label>
-            <select
-              value={duration}
-              onChange={(e) => setDuration(Number(e.target.value))}
-              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-            >
-              <option value={30}>30 min</option>
-              <option value={60}>1 hour</option>
-              <option value={90}>1.5 hours</option>
-              <option value={120}>2 hours</option>
-              <option value={180}>3 hours</option>
-              <option value={240}>4 hours</option>
-            </select>
-          </div>
+          <p className="mb-4 text-sm text-slate-600">
+            Choose a resource, then pick a date, how long you need it, and a start time.
+          </p>
           {loadingOptions ? (
             <div className="space-y-3">{[1, 2].map((i) => <div key={i} className="h-20 animate-pulse rounded-xl bg-slate-100" />)}</div>
           ) : resourceOptions.length === 0 ? (
@@ -355,9 +420,7 @@ export function ResourceBookingFlow({ venue, cancellationPolicy }: { venue: Venu
             &larr; Back to resources
           </button>
           <h2 className="mb-1 text-lg font-semibold text-slate-900">{selectedMeta.name}</h2>
-          <p className="mb-4 text-sm text-slate-600">
-            Green days have availability for {duration} minutes. Select a day to choose a start time.
-          </p>
+          <p className="mb-4 text-sm text-slate-600">Green days have at least one bookable slot. Select a day to choose duration and time.</p>
           <ResourceCalendarMonth
             year={calendarMonth.year}
             month={calendarMonth.month}
@@ -372,27 +435,62 @@ export function ResourceBookingFlow({ venue, cancellationPolicy }: { venue: Venu
         </div>
       )}
 
-      {step === 'pick_slot' && selectedMeta && (
+      {step === 'pick_duration' && selectedMeta && date && (
         <div>
           <button
             type="button"
             onClick={() => {
-              setSelectedTime(null);
+              setDate('');
               setStep('pick_date');
             }}
             className="mb-4 text-sm text-brand-600 hover:underline"
           >
             &larr; Back to calendar
           </button>
-          <h2 className="mb-1 text-lg font-semibold text-slate-900">Choose a start time</h2>
+          <h2 className="mb-1 text-lg font-semibold text-slate-900">How long?</h2>
           <p className="mb-4 text-sm text-slate-500">
             {selectedMeta.name} &middot; {date}
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {durationOptions.map((mins) => (
+              <button
+                key={mins}
+                type="button"
+                onClick={() => {
+                  setDuration(mins);
+                  setSelectedTime(null);
+                  setStep('pick_slot');
+                }}
+                className="rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-800 shadow-sm transition hover:border-brand-300 hover:text-brand-600"
+              >
+                {formatDurationLabel(mins)}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {step === 'pick_slot' && selectedMeta && (
+        <div>
+          <button
+            type="button"
+            onClick={() => {
+              setSelectedTime(null);
+              setStep('pick_duration');
+            }}
+            className="mb-4 text-sm text-brand-600 hover:underline"
+          >
+            &larr; Back to duration
+          </button>
+          <h2 className="mb-1 text-lg font-semibold text-slate-900">Choose a start time</h2>
+          <p className="mb-4 text-sm text-slate-500">
+            {selectedMeta.name} &middot; {date} &middot; {formatDurationLabel(duration)}
           </p>
           {loadingSlots ? (
             <div className="h-24 animate-pulse rounded-xl bg-slate-100" />
           ) : !selectedResource || selectedResource.slots.length === 0 ? (
             <p className="text-sm text-slate-500">
-              No available times for this duration on this date. Go back and pick another day or contact the venue.
+              No available times for this duration on this date. Go back and pick another duration or day.
             </p>
           ) : (
             <div className="flex flex-wrap gap-2">
@@ -423,7 +521,7 @@ export function ResourceBookingFlow({ venue, cancellationPolicy }: { venue: Venu
           <div className="mb-6 space-y-2 rounded-xl border border-slate-200 bg-white p-4 text-sm">
             <div className="font-medium text-slate-900">{selectedMeta.name}</div>
             <div className="text-slate-600">
-              {date} &middot; {selectedTime} – {computeEndTime(selectedTime, duration)} ({duration} min)
+              {date} &middot; {selectedTime} – {computeEndTime(selectedTime, duration)} ({formatDurationLabel(duration)})
             </div>
             {totalPricePence <= 0 ? (
               <div className="font-medium text-brand-600">Free</div>
@@ -487,6 +585,7 @@ export function ResourceBookingFlow({ venue, cancellationPolicy }: { venue: Venu
             payAtVenuePaymentRequirement={payReq === 'none' ? 'none' : undefined}
             currencySymbol={venue.currency === 'EUR' ? '€' : '£'}
             phoneDefaultCountry={phoneDefaultCountry}
+            audience={isStaff ? 'staff' : 'public'}
           />
         </div>
       )}
@@ -511,6 +610,11 @@ export function ResourceBookingFlow({ venue, cancellationPolicy }: { venue: Venu
             </svg>
           </div>
           <h2 className="text-xl font-bold text-green-900">{terms.booking} confirmed</h2>
+          {isStaff && createResult?.payment_url ? (
+            <p className="mt-3 text-sm text-green-800">
+              Deposit link sent to the guest.{createResult.staffMessage ? ` ${createResult.staffMessage}` : ''}
+            </p>
+          ) : null}
           <p className="mt-2 text-sm text-green-700">
             {selectedResource?.name ?? selectedMeta?.name}
             <br />

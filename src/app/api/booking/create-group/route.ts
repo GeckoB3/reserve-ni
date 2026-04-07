@@ -69,6 +69,10 @@ export async function POST(request: NextRequest) {
       phoneE164 = n;
     }
 
+    if (source === 'phone' && !phoneE164) {
+      return NextResponse.json({ error: 'Phone number is required' }, { status: 400 });
+    }
+
     const supabase = getSupabaseAdminClient();
 
     const { data: venue, error: venueErr } = await supabase

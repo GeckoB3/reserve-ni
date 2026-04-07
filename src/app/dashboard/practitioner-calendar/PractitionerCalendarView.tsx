@@ -32,6 +32,7 @@ import {
   type AppointmentDetailPrefetch,
 } from '@/components/booking/AppointmentDetailSheet';
 import { ClassInstanceDetailSheet } from '@/components/practitioner-calendar/ClassInstanceDetailSheet';
+import { EventInstanceDetailSheet } from '@/components/practitioner-calendar/EventInstanceDetailSheet';
 import { useToast } from '@/components/ui/Toast';
 import { getCalendarGridBounds } from '@/lib/venue-calendar-bounds';
 import { canMarkNoShowForSlot, type BookingStatus } from '@/lib/table-management/booking-status';
@@ -54,6 +55,7 @@ import {
   buildMonthDayScheduleCounts,
   type ScheduleModelFilter,
 } from '@/lib/calendar/schedule-blocks-grouping';
+import { formatEventUptakeLine } from '@/lib/calendar/event-block-label';
 import { ScheduleFeedColumn } from './ScheduleFeedColumn';
 import { WeekScheduleCdeStrip } from './WeekScheduleCdeStrip';
 import { ScheduleCalendarLegend } from './ScheduleCalendarLegend';
@@ -641,6 +643,10 @@ export function PractitionerCalendarView({
     instanceId: string;
     block: ScheduleBlockDTO;
   } | null>(null);
+  const [eventInstanceSheet, setEventInstanceSheet] = useState<{
+    eventId: string;
+    block: ScheduleBlockDTO;
+  } | null>(null);
   const [filterPractitioner, setFilterPractitioner] = useState<string>(defaultPractitionerFilter);
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [fetchError, setFetchError] = useState<string | null>(null);
@@ -699,7 +705,10 @@ export function PractitionerCalendarView({
     () => getCalendarGridBounds(activeDayDate, openingHours ?? undefined, 7, 21),
     [activeDayDate, openingHours],
   );
-  const TOTAL_SLOTS = ((endHour - startHour) * 60) / SLOT_MINUTES;
+  const TOTAL_SLOTS = (() => {
+    const n = ((endHour - startHour) * 60) / SLOT_MINUTES;
+    return Number.isFinite(n) && n > 0 ? n : ((21 - 7) * 60) / SLOT_MINUTES;
+  })();
 
   const listFromTo = useMemo(() => {
     if (viewMode === 'day') return { from: date, to: date };
@@ -1294,13 +1303,22 @@ export function PractitionerCalendarView({
 
   const openBookingDetail = useCallback((id: string) => {
     setClassInstanceSheet(null);
+    setEventInstanceSheet(null);
     setDetailBookingId(id);
   }, []);
 
   const openClassInstanceDetail = useCallback((b: ScheduleBlockDTO) => {
     if (!b.class_instance_id) return;
     setDetailBookingId(null);
+    setEventInstanceSheet(null);
     setClassInstanceSheet({ instanceId: b.class_instance_id, block: b });
+  }, []);
+
+  const openEventInstanceDetail = useCallback((b: ScheduleBlockDTO) => {
+    if (!b.experience_event_id) return;
+    setDetailBookingId(null);
+    setClassInstanceSheet(null);
+    setEventInstanceSheet({ eventId: b.experience_event_id, block: b });
   }, []);
 
   const detailPrefetch = useMemo((): AppointmentDetailPrefetch | null => {
@@ -1537,7 +1555,10 @@ export function PractitionerCalendarView({
                             })}
                             {dayEventBlocks.map((eb) => {
                               const accent = eb.accent_colour ?? '#F59E0B';
-                              const shell = !eb.booking_id;
+                              const uptake = formatEventUptakeLine(eb);
+                              const emptyOccurrence =
+                                (eb.event_booking_count ?? (eb.booking_id ? 1 : 0)) === 0;
+                              const shell = eb.experience_event_id ? emptyOccurrence : !eb.booking_id;
                               const inner = (
                                 <div
                                   className={`rounded-md border px-2 py-1 text-left text-xs ${
@@ -1546,14 +1567,26 @@ export function PractitionerCalendarView({
                                   style={{ borderLeftWidth: 3, borderLeftColor: accent }}
                                 >
                                   <div className="font-semibold text-slate-900">{eb.title}</div>
-                                  {eb.subtitle ? (
-                                    <div className="text-[10px] text-slate-600">{eb.subtitle}</div>
+                                  {uptake ? (
+                                    <div className="text-[10px] text-slate-600">{uptake}</div>
                                   ) : null}
                                   <div className="text-[10px] text-slate-500">
                                     {eb.start_time.slice(0, 5)}–{eb.end_time.slice(0, 5)}
                                   </div>
                                 </div>
                               );
+                              if (eb.experience_event_id) {
+                                return (
+                                  <button
+                                    key={eb.id}
+                                    type="button"
+                                    onClick={() => openEventInstanceDetail(eb)}
+                                    className="block w-full text-left"
+                                  >
+                                    {inner}
+                                  </button>
+                                );
+                              }
                               if (eb.booking_id) {
                                 return (
                                   <button
@@ -1584,6 +1617,7 @@ export function PractitionerCalendarView({
                     blocksByDate={stripScheduleBlocksByDate}
                     onBookingClick={openBookingDetail}
                     onClassInstanceClick={openClassInstanceDetail}
+                    onEventInstanceClick={openEventInstanceDetail}
                   />
                 ) : null}
               </tbody>
@@ -1803,31 +1837,45 @@ export function PractitionerCalendarView({
                         );
                         const height = Math.max(slotHeightFromDuration(durMins), SLOT_HEIGHT * 0.75);
                         const accent = eb.accent_colour ?? '#F59E0B';
-                        const shell = !eb.booking_id;
+                        const uptake = formatEventUptakeLine(eb);
+                        const emptyOccurrence =
+                          (eb.event_booking_count ?? (eb.booking_id ? 1 : 0)) === 0;
+                        const shell = eb.experience_event_id ? emptyOccurrence : !eb.booking_id;
                         const body = (
                           <>
                             <span className="truncate text-xs font-semibold text-slate-900">{eb.title}</span>
-                            {eb.subtitle ? (
-                              <span className="truncate text-[10px] text-slate-600">{eb.subtitle}</span>
+                            {uptake ? (
+                              <span className="truncate text-[10px] text-slate-600">{uptake}</span>
                             ) : null}
                             <span className="mt-auto text-[10px] text-slate-400">
                               {eb.start_time.slice(0, 5)} – {eb.end_time.slice(0, 5)}
                             </span>
                           </>
                         );
+                        const cardClass = `flex h-full min-h-0 w-full flex-col overflow-hidden rounded-lg border px-1.5 py-1 text-left shadow-sm transition-shadow hover:shadow-md ${
+                          shell ? 'border-dashed border-amber-200 bg-amber-50/90' : 'border-slate-200 bg-white'
+                        }`;
                         return (
                           <div
                             key={eb.id}
                             className="absolute left-1 right-1 z-[20]"
                             style={{ top, height }}
                           >
-                            {eb.booking_id ? (
+                            {eb.experience_event_id ? (
+                              <button
+                                type="button"
+                                onClick={() => openEventInstanceDetail(eb)}
+                                className={cardClass}
+                                style={{ borderLeftWidth: 3, borderLeftColor: accent }}
+                                title={eb.title}
+                              >
+                                {body}
+                              </button>
+                            ) : eb.booking_id ? (
                               <button
                                 type="button"
                                 onClick={() => openBookingDetail(eb.booking_id!)}
-                                className={`flex h-full min-h-0 w-full flex-col overflow-hidden rounded-lg border px-1.5 py-1 text-left shadow-sm transition-shadow hover:shadow-md ${
-                                  shell ? 'border-dashed border-amber-200 bg-amber-50/90' : 'border-slate-200 bg-white'
-                                }`}
+                                className={cardClass}
                                 style={{ borderLeftWidth: 3, borderLeftColor: accent }}
                                 title={eb.title}
                               >
@@ -1836,7 +1884,7 @@ export function PractitionerCalendarView({
                             ) : (
                               <Link
                                 href="/dashboard/event-manager"
-                                className={`flex h-full min-h-0 w-full flex-col overflow-hidden rounded-lg border border-dashed border-amber-200 bg-amber-50/90 px-1.5 py-1 text-left shadow-sm transition-shadow hover:shadow-md`}
+                                className={`${cardClass} border-dashed border-amber-200 bg-amber-50/90`}
                                 style={{ borderLeftWidth: 3, borderLeftColor: accent }}
                                 title={eb.title}
                               >
@@ -2205,6 +2253,12 @@ export function PractitionerCalendarView({
       <ClassInstanceDetailSheet
         selection={classInstanceSheet}
         onClose={() => setClassInstanceSheet(null)}
+        currency={currency}
+      />
+
+      <EventInstanceDetailSheet
+        selection={eventInstanceSheet}
+        onClose={() => setEventInstanceSheet(null)}
         currency={currency}
       />
 

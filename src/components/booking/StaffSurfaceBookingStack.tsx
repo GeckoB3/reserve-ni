@@ -1,13 +1,15 @@
 'use client';
 
-import { useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { StaffBookingSurfaceTabsBar } from '@/components/booking/StaffBookingSurfaceTabsBar';
 import { UnifiedBookingForm } from '@/components/booking/UnifiedBookingForm';
-import { AppointmentBookingForm } from '@/components/booking/AppointmentBookingForm';
 import { AppointmentWalkInModal } from '@/components/booking/AppointmentWalkInModal';
-import { StaffEventBookingForm } from '@/components/booking/StaffEventBookingForm';
-import { StaffClassBookingForm } from '@/components/booking/StaffClassBookingForm';
-import { StaffResourceBookingForm } from '@/components/booking/StaffResourceBookingForm';
+import { AppointmentBookingFlow } from '@/components/booking/AppointmentBookingFlow';
+import { EventBookingFlow } from '@/components/booking/EventBookingFlow';
+import { ClassBookingFlow } from '@/components/booking/ClassBookingFlow';
+import { ResourceBookingFlow } from '@/components/booking/ResourceBookingFlow';
+import type { VenuePublic } from '@/components/booking/types';
+import { mapApiVenueToVenuePublic } from '@/lib/booking/map-api-venue-to-public';
 import {
   defaultStaffBookingSurfaceTab,
   getStaffBookingSurfaceTabs,
@@ -30,6 +32,8 @@ export interface StaffSurfaceBookingStackProps {
   bookingModel: BookingModel;
   enabledModels: BookingModel[];
   venueId: string;
+  /** When omitted (e.g. dashboard modals), loaded once from GET /api/venue. */
+  venue?: VenuePublic;
   currency: string;
   advancedMode?: boolean;
   onCreated: () => void;
@@ -64,6 +68,7 @@ function StaffSurfaceBookingStackInner({
   bookingModel,
   enabledModels,
   venueId,
+  venue: venueProp,
   currency,
   advancedMode = false,
   onCreated,
@@ -97,12 +102,56 @@ function StaffSurfaceBookingStackInner({
     }
   };
 
+  /** Venue from parent when provided; otherwise filled by GET /api/venue in the effect below. */
+  const [fetchedVenue, setFetchedVenue] = useState<VenuePublic | null>(null);
+  const [venueError, setVenueError] = useState<string | null>(null);
+  const resolvedVenue = venueProp ?? fetchedVenue;
+
+  useEffect(() => {
+    if (venueProp) {
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch('/api/venue');
+        const data = (await res.json()) as Record<string, unknown>;
+        if (!res.ok) {
+          if (!cancelled) setVenueError(typeof data.error === 'string' ? data.error : 'Could not load venue');
+          return;
+        }
+        if (!cancelled) {
+          setFetchedVenue(mapApiVenueToVenuePublic(data));
+          setVenueError(null);
+        }
+      } catch {
+        if (!cancelled) setVenueError('Could not load venue');
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [venueProp]);
+
   const showTabs = surfaceTabs.length > 1;
   const tabsForBar = showTabs ? surfaceTabs : [];
   const walkInDefaultSource = bookingIntent === 'walk-in' ? ('walk-in' as const) : undefined;
   const isAppointmentPlan = isUnifiedSchedulingVenue(bookingModel);
 
   const body = (): ReactNode => {
+    if (venueError) {
+      return <p className="text-sm text-red-600">{venueError}</p>;
+    }
+    if (!resolvedVenue) {
+      return (
+        <div className="flex items-center justify-center py-12">
+          <div className="h-8 w-8 animate-spin rounded-full border-2 border-brand-600 border-t-transparent" />
+        </div>
+      );
+    }
+
+    const v = resolvedVenue;
+
     switch (activeTab) {
       case 'table_reservation':
         if (!surfaceTabs.some((t) => t.id === 'table_reservation')) return null;
@@ -142,16 +191,13 @@ function StaffSurfaceBookingStackInner({
         if (!surfaceTabs.some((t) => t.id === 'unified_scheduling')) return null;
         if (bookingIntent === 'new') {
           return (
-            <AppointmentBookingForm
-              open
-              embedded
-              onClose={onClose ?? onCreated}
-              onCreated={onCreated}
-              venueId={venueId}
-              currency={currency}
-              preselectedDate={initialDate}
+            <AppointmentBookingFlow
+              venue={v}
+              bookingAudience="staff"
+              onBookingCreated={onCreated}
+              initialDate={initialDate}
+              initialTime={initialTime}
               preselectedPractitionerId={preselectedPractitionerId}
-              preselectedTime={initialTime}
             />
           );
         }
@@ -161,37 +207,31 @@ function StaffSurfaceBookingStackInner({
       case 'event_ticket':
         if (!surfaceTabs.some((t) => t.id === 'event_ticket')) return null;
         return (
-          <StaffEventBookingForm
-            venueId={venueId}
-            currency={currency}
-            embedded
-            initialDate={initialDate}
-            defaultSource={walkInDefaultSource}
-            onCreated={onCreated}
+          <EventBookingFlow
+            venue={v}
+            bookingAudience="staff"
+            staffBookingSource={walkInDefaultSource ?? 'phone'}
+            onBookingCreated={onCreated}
           />
         );
       case 'class_session':
         if (!surfaceTabs.some((t) => t.id === 'class_session')) return null;
         return (
-          <StaffClassBookingForm
-            venueId={venueId}
-            currency={currency}
-            embedded
-            initialDate={initialDate}
-            defaultSource={walkInDefaultSource}
-            onCreated={onCreated}
+          <ClassBookingFlow
+            venue={v}
+            bookingAudience="staff"
+            staffBookingSource={walkInDefaultSource ?? 'phone'}
+            onBookingCreated={onCreated}
           />
         );
       case 'resource_booking':
         if (!surfaceTabs.some((t) => t.id === 'resource_booking')) return null;
         return (
-          <StaffResourceBookingForm
-            venueId={venueId}
-            currency={currency}
-            embedded
-            initialDate={initialDate}
-            defaultSource={walkInDefaultSource}
-            onCreated={onCreated}
+          <ResourceBookingFlow
+            venue={v}
+            bookingAudience="staff"
+            staffBookingSource={walkInDefaultSource ?? 'phone'}
+            onBookingCreated={onCreated}
           />
         );
       default:

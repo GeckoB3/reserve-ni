@@ -7,6 +7,14 @@ import { DetailsStep } from './DetailsStep';
 import { PaymentStep } from './PaymentStep';
 import { ClassOfferingsCalendar } from './ClassOfferingsCalendar';
 import { formatBookablePricePence } from '@/lib/booking/format-price-display';
+import {
+  type BookingFlowAudience,
+  eventOfferingsUrl,
+  localTodayISO,
+  bookingCreateUrl,
+  bookingConfirmPaymentUrl,
+  venueBookingsCreateUrl,
+} from '@/lib/booking/booking-flow-api';
 
 interface EventOfferingSummary {
   series_key: string;
@@ -47,14 +55,6 @@ interface EventInstance {
 }
 
 type Step = 'pick-event' | 'pick-date' | 'summary' | 'details' | 'payment' | 'confirmation';
-
-function localTodayISO(): string {
-  const n = new Date();
-  const y = n.getFullYear();
-  const m = String(n.getMonth() + 1).padStart(2, '0');
-  const d = String(n.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
-}
 
 function symForCurrency(currency: string): string {
   return currency === 'EUR' ? '€' : '£';
@@ -121,7 +121,22 @@ function eventListingPriceLabel(
   return base;
 }
 
-export function EventBookingFlow({ venue, cancellationPolicy }: { venue: VenuePublic; cancellationPolicy?: string }) {
+export interface EventBookingFlowProps {
+  venue: VenuePublic;
+  cancellationPolicy?: string;
+  bookingAudience?: BookingFlowAudience;
+  staffBookingSource?: 'phone' | 'walk-in';
+  onBookingCreated?: () => void;
+}
+
+export function EventBookingFlow({
+  venue,
+  cancellationPolicy,
+  bookingAudience = 'public',
+  staffBookingSource = 'phone',
+  onBookingCreated,
+}: EventBookingFlowProps) {
+  const isStaff = bookingAudience === 'staff';
   const currency = venue.currency ?? 'GBP';
   const phoneDefaultCountry = defaultPhoneCountryForVenueCurrency(currency);
   const terms = venue.terminology ?? { client: 'Member', booking: 'Booking', staff: 'Instructor' };
@@ -141,6 +156,8 @@ export function EventBookingFlow({ venue, cancellationPolicy }: { venue: VenuePu
     client_secret?: string;
     stripe_account_id?: string;
     requires_deposit: boolean;
+    payment_url?: string;
+    staffMessage?: string;
   } | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -150,9 +167,7 @@ export function EventBookingFlow({ venue, cancellationPolicy }: { venue: VenuePu
     setError(null);
     try {
       const from = localTodayISO();
-      const res = await fetch(
-        `/api/booking/event-offerings?venue_id=${encodeURIComponent(venue.id)}&from=${from}&days=90`,
-      );
+      const res = await fetch(eventOfferingsUrl(bookingAudience, venue.id));
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? 'Failed to load events');
       setRangeFrom(data.from ?? from);
@@ -166,7 +181,7 @@ export function EventBookingFlow({ venue, cancellationPolicy }: { venue: VenuePu
     } finally {
       setLoading(false);
     }
-  }, [venue.id]);
+  }, [venue.id, bookingAudience]);
 
   useEffect(() => {
     void fetchOfferings();
@@ -234,7 +249,37 @@ export function EventBookingFlow({ venue, cancellationPolicy }: { venue: VenuePu
             unit_price_pence: tt.price_pence,
           }));
 
-        const res = await fetch('/api/booking/create', {
+        if (isStaff) {
+          const res = await fetch(venueBookingsCreateUrl(), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              booking_date: selectedOccurrence.event_date,
+              booking_time: selectedOccurrence.start_time,
+              party_size: totalTickets,
+              name: details.name,
+              email: details.email || undefined,
+              phone: details.phone,
+              experience_event_id: selectedOccurrence.event_id,
+              ticket_lines,
+              dietary_notes: details.dietary_notes,
+              source: staffBookingSource,
+            }),
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error ?? 'Booking failed');
+          setCreateResult({
+            booking_id: data.booking_id,
+            requires_deposit: Boolean(data.payment_url),
+            payment_url: data.payment_url,
+            staffMessage: typeof data.message === 'string' ? data.message : undefined,
+          });
+          setStep('confirmation');
+          onBookingCreated?.();
+          return;
+        }
+
+        const res = await fetch(bookingCreateUrl(), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -265,13 +310,21 @@ export function EventBookingFlow({ venue, cancellationPolicy }: { venue: VenuePu
         setError(e instanceof Error ? e.message : 'Booking failed');
       }
     },
-    [venue.id, selectedOccurrence, ticketSelections, totalTickets],
+    [
+      venue.id,
+      selectedOccurrence,
+      ticketSelections,
+      totalTickets,
+      isStaff,
+      staffBookingSource,
+      onBookingCreated,
+    ],
   );
 
   const handlePaymentComplete = useCallback(async () => {
     if (createResult?.booking_id) {
       try {
-        await fetch('/api/booking/confirm-payment', {
+        await fetch(bookingConfirmPaymentUrl(), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ booking_id: createResult.booking_id }),
@@ -506,11 +559,12 @@ export function EventBookingFlow({ venue, cancellationPolicy }: { venue: VenuePu
             requiresDeposit={chargePence > 0}
             variant="class"
             phoneDefaultCountry={phoneDefaultCountry}
+            audience={isStaff ? 'staff' : 'public'}
           />
         </div>
       )}
 
-      {step === 'payment' && createResult?.client_secret && selectedOccurrence && (
+      {step === 'payment' && !isStaff && createResult?.client_secret && selectedOccurrence && (
         <PaymentStep
           clientSecret={createResult.client_secret}
           stripeAccountId={createResult.stripe_account_id}
@@ -538,7 +592,11 @@ export function EventBookingFlow({ venue, cancellationPolicy }: { venue: VenuePu
             <br />
             {totalTickets} ticket{totalTickets !== 1 ? 's' : ''}
           </p>
-          <p className="mt-4 text-xs text-green-700">You&apos;ll receive a confirmation email shortly.</p>
+          {isStaff && createResult?.payment_url ? (
+            <p className="mt-4 text-xs text-green-800">Deposit link sent to the guest.</p>
+          ) : (
+            <p className="mt-4 text-xs text-green-700">You&apos;ll receive a confirmation email shortly.</p>
+          )}
         </div>
       )}
     </div>

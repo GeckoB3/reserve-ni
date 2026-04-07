@@ -10,7 +10,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "smoke:cron": "node scripts/smoke-cron.mjs",
-    "seed:dev-use-account": "node scripts/seed-dev-use-standard-account.mjs"
+    "seed:dev-use-account": "node scripts/seed-dev-use-standard-account.mjs",
+    "delete:user-venue": "node scripts/delete-user-and-venue.mjs"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
