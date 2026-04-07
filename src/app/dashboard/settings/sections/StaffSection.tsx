@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { BookingModel } from '@/types/booking-models';
-import { shouldShowAppointmentAvailabilitySettings } from '@/lib/booking/schedule-calendar-eligibility';
 import type { StaffMember } from '../types';
 
 interface StaffSectionProps {
@@ -25,14 +24,9 @@ interface PractitionerOption {
 export function StaffSection({
   venueId: _venueId,
   isAdmin,
-  bookingModel,
-  enabledModels = [],
+  bookingModel: _bookingModel,
+  enabledModels: _enabledModels = [],
 }: StaffSectionProps) {
-  const isAppointmentVenue = shouldShowAppointmentAvailabilitySettings(
-    (bookingModel as BookingModel) ?? 'table_reservation',
-    enabledModels,
-  );
-
   const [staff, setStaff] = useState<StaffMember[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -99,7 +93,7 @@ export function StaffSection({
   }, []);
 
   const loadPractitioners = useCallback(async () => {
-    if (!isAppointmentVenue || !isAdmin) return;
+    if (!isAdmin) return;
     try {
       const res = await fetch('/api/venue/practitioners?staff_assignable=1', { cache: 'no-store' });
       if (!res.ok) return;
@@ -119,7 +113,7 @@ export function StaffSection({
     } catch {
       /* ignore */
     }
-  }, [isAppointmentVenue, isAdmin]);
+  }, [isAdmin]);
 
   /** Active practitioner/class columns only (API staff_assignable=1); resource calendars excluded server-side. */
   const allocatablePractitioners = useMemo(
@@ -192,7 +186,7 @@ export function StaffSection({
           password_confirm: createPasswordConfirm,
           name: createName.trim() || undefined,
           role: createRole,
-          ...(isAppointmentVenue && createCalendarIds.length > 0 ? { calendar_ids: createCalendarIds } : {}),
+          ...(createRole === 'staff' && createCalendarIds.length > 0 ? { calendar_ids: createCalendarIds } : {}),
         }),
       });
       if (!res.ok) {
@@ -222,7 +216,7 @@ export function StaffSection({
     } finally {
       setCreating(false);
     }
-  }, [createEmail, createPassword, createPasswordConfirm, createName, createRole, createCalendarIds, isAppointmentVenue]);
+  }, [createEmail, createPassword, createPasswordConfirm, createName, createRole, createCalendarIds]);
 
   const onCalendarAssignmentsChange = useCallback(async (member: StaffMember, calendarIds: string[]) => {
     setCalendarError(null);
@@ -519,7 +513,7 @@ export function StaffSection({
         </div>
 
         <div className="px-6 py-4 space-y-4">
-          {isAppointmentVenue && isAdmin && calendarError && (
+          {isAdmin && calendarError && (
             <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-700">{calendarError}</div>
           )}
           {createSuccess && (
@@ -585,14 +579,18 @@ export function StaffSection({
                   <label className="mb-1 block text-sm font-medium text-slate-700">Role <span className="text-red-400">*</span></label>
                   <select
                     value={createRole}
-                    onChange={(e) => setCreateRole(e.target.value as 'admin' | 'staff')}
+                    onChange={(e) => {
+                      const role = e.target.value as 'admin' | 'staff';
+                      setCreateRole(role);
+                      if (role === 'admin') setCreateCalendarIds([]);
+                    }}
                     className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
                   >
                     <option value="staff">Staff</option>
                     <option value="admin">Admin</option>
                   </select>
                 </div>
-                {isAppointmentVenue && (
+                {createRole === 'staff' && (
                   <div className="sm:col-span-2">
                     <span className="mb-2 block text-sm font-medium text-slate-700">
                       Calendars they can manage{' '}
@@ -686,7 +684,7 @@ export function StaffSection({
                       <p className="text-[10px] text-slate-400">Joined {new Date(s.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</p>
                     </div>
                   </div>
-                  {isAppointmentVenue && isAdmin && (
+                  {isAdmin && s.role === 'staff' && (
                     <div className="flex min-w-0 flex-col gap-2 sm:ml-2 sm:max-w-md sm:flex-1">
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <span className="text-xs font-medium text-slate-600">Calendars they manage</span>
@@ -810,14 +808,13 @@ export function StaffSection({
                 operations — schedule, bookings, and guest details for the calendars you assign below
               </div>
             </div>
-            {isAppointmentVenue && (
+            {isAdmin && practitioners.length > 0 && (
               <p className="mt-3 text-xs text-slate-600 border-t border-slate-200 pt-3">
                 <span className="font-medium text-slate-700">Calendars:</span> Add or rename bookable calendars under{' '}
                 <a href="/dashboard/calendar-availability" className="font-medium text-brand-600 hover:text-brand-700">
                   Calendar availability
                 </a>
-                . Then tick the calendars each team member should manage — you can assign one, several, or all. Admins
-                can be given calendar access too when they run a bookable column.
+                . Then tick the calendars each staff member should manage — you can assign one, several, or all.
               </p>
             )}
           </div>

@@ -89,7 +89,7 @@ export function BookPublicBookingFlow({
                 key={t.slug}
                 type="button"
                 onClick={() => replaceTabInUrl(t.slug)}
-                className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
+                className={`min-h-[44px] rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
                   isActive
                     ? 'bg-brand-600 text-white shadow-sm'
                     : 'bg-slate-100 text-slate-700 hover:bg-slate-200'

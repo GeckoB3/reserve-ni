@@ -13,6 +13,8 @@ const restrictionSchema = z.object({
   large_party_threshold: z.number().int().min(1).nullable().optional(),
   large_party_message: z.string().max(500).nullable().optional(),
   deposit_required_from_party_size: z.number().int().min(1).nullable().optional(),
+  deposit_amount_per_person_gbp: z.number().min(0).max(100).nullable().optional(),
+  online_requires_deposit: z.boolean().optional(),
   /** Table reservation: hours before start for deposit refund for this dining service. */
   cancellation_notice_hours: z.number().int().min(0).max(168).optional(),
 });

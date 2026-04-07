@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect, useCallback, useLayoutEffect } from 'react';
+import { useState, useRef, useCallback, useLayoutEffect, useEffect, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 
 interface HelpTooltipProps {
@@ -14,17 +14,17 @@ interface PanelCoords {
   width: number;
 }
 
+function subscribeToNothing() {
+  return () => {};
+}
+
 export function HelpTooltip({ content, maxWidth = 280 }: HelpTooltipProps) {
   const [open, setOpen] = useState(false);
-  const [mounted, setMounted] = useState(false);
+  const mounted = useSyncExternalStore(subscribeToNothing, () => true, () => false);
   const [coords, setCoords] = useState<PanelCoords | null>(null);
 
   const rootRef = useRef<HTMLSpanElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
 
   const computePanelPosition = useCallback(() => {
     const btn = rootRef.current?.querySelector('button');
@@ -56,13 +56,12 @@ export function HelpTooltip({ content, maxWidth = 280 }: HelpTooltipProps) {
   }, [maxWidth]);
 
   useLayoutEffect(() => {
-    if (!open) {
-      setCoords(null);
-      return;
-    }
-    computePanelPosition();
-    const raf = requestAnimationFrame(() => computePanelPosition());
-    return () => cancelAnimationFrame(raf);
+    if (!open) return;
+    const raf1 = requestAnimationFrame(() => {
+      computePanelPosition();
+      requestAnimationFrame(() => computePanelPosition());
+    });
+    return () => cancelAnimationFrame(raf1);
   }, [open, content, maxWidth, computePanelPosition]);
 
   useEffect(() => {

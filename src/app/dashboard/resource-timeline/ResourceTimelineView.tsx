@@ -178,10 +178,12 @@ function resourceBookingPaymentLine(b: ResourceBooking, formatPrice: (pence: num
 export function ResourceTimelineView({
   venueId: _venueId,
   isAdmin = false,
+  linkedPractitionerIds = [],
   currency = 'GBP',
 }: {
   venueId: string;
   isAdmin?: boolean;
+  linkedPractitionerIds?: string[];
   currency?: string;
 }) {
   const sym = currency === 'EUR' ? '\u20ac' : '\u00a3';
@@ -259,11 +261,12 @@ export function ResourceTimelineView({
       const list = (data.practitioners ?? []).filter(
         (p: { calendar_type?: string }) => p.calendar_type !== 'resource',
       ) as Array<{ id: string; name: string }>;
-      setHostCalendars(list.map((p) => ({ id: p.id, name: p.name })));
+      const pick = isAdmin ? list : list.filter((p) => linkedPractitionerIds.includes(p.id));
+      setHostCalendars(pick.map((p) => ({ id: p.id, name: p.name })));
     } catch {
       /* ignore */
     }
-  }, []);
+  }, [isAdmin, linkedPractitionerIds]);
 
   useEffect(() => {
     void fetchHostCalendars();
@@ -472,6 +475,10 @@ export function ResourceTimelineView({
   }
 
   async function handleSave() {
+    if (!isAdmin && !editingId && linkedPractitionerIds.length === 0) {
+      setError('Ask an admin to assign at least one calendar before you can create resources.');
+      return;
+    }
     if (!formName.trim()) { setError('Resource name is required.'); return; }
 
     const formSlot = parseInt(formSlotStr.trim(), 10);
@@ -604,7 +611,7 @@ export function ResourceTimelineView({
         <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
           <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
             <h2 className="text-sm font-semibold text-slate-900">Resources</h2>
-            {isAdmin && (
+            {(isAdmin || linkedPractitionerIds.length > 0) && (
               <button type="button" onClick={openCreate} className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-brand-700 transition-colors">
                 + Add
               </button>
@@ -616,7 +623,7 @@ export function ResourceTimelineView({
                 <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5M10 11.25h4M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z" />
               </svg>
               <p className="mt-2 text-sm text-slate-500">No resources yet.</p>
-              {isAdmin && (
+              {(isAdmin || linkedPractitionerIds.length > 0) && (
                 <button type="button" onClick={openCreate} className="mt-3 text-sm font-medium text-brand-600 hover:text-brand-800">
                   Create your first resource
                 </button>
@@ -649,6 +656,13 @@ export function ResourceTimelineView({
             </ul>
           )}
         </div>
+        {!isAdmin && (
+          <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+            {linkedPractitionerIds.length === 0
+              ? 'Ask an admin to assign at least one calendar before you can create, edit, or delete resources.'
+              : 'You can create, edit, or delete resources when they are shown on a calendar column you control (choose under Show on calendar). Admins can assign any column.'}
+          </div>
+        )}
       </div>
 
       {/* ─── Main panel ─── */}
@@ -681,6 +695,28 @@ export function ResourceTimelineView({
           /* ── Create / Edit form ── */
           <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
             <h2 className="text-lg font-semibold text-slate-900">{editingId ? 'Edit resource' : 'New resource'}</h2>
+            {isAdmin && !editingId && (
+              <div className="mt-3 rounded-lg border border-blue-100 bg-blue-50/90 px-3 py-2.5 text-xs text-slate-700">
+                <p className="font-semibold text-slate-900">Calendar assignment and permissions</p>
+                <p className="mt-1.5 leading-relaxed text-slate-600">
+                  You can assign this resource to <strong>any</strong> team calendar column. Staff linked to a column can{' '}
+                  <strong>create</strong>, <strong>edit</strong>, and <strong>delete</strong> resources on that column
+                  only.
+                </p>
+              </div>
+            )}
+            {!isAdmin && !editingId && linkedPractitionerIds.length > 0 && (
+              <p className="mt-3 text-xs leading-relaxed text-slate-600">
+                Choose a calendar column you control under <strong>Show on calendar</strong>. Only admins can assign a
+                resource to columns you do not manage or clear the calendar assignment.
+              </p>
+            )}
+            {!isAdmin && editingId && (
+              <p className="mt-3 text-xs leading-relaxed text-slate-600">
+                You can change this resource because it is shown on a calendar column you control. You may move it to
+                another column you control below. Only admins can clear the calendar assignment.
+              </p>
+            )}
 
             {/* Basic info */}
             <div className="mt-4 grid gap-4 sm:grid-cols-2">
@@ -721,7 +757,7 @@ export function ResourceTimelineView({
                 onChange={(e) => setFormDisplayCalendarId(e.target.value)}
                 className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
               >
-                <option value="">Select a calendar column</option>
+                {(isAdmin || !editingId) && <option value="">Select a calendar column</option>}
                 {hostCalendars.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.name}
@@ -745,6 +781,11 @@ export function ResourceTimelineView({
               <p className="mt-1 text-xs text-slate-500">
                 Resource bookings and free slots appear on that calendar. Two resources can use the same calendar only if
                 their weekly hours do not overlap (e.g. 9–1 vs 3–6).
+                {isAdmin && (
+                  <span className="mt-1 block text-slate-600">
+                    Staff can only manage resources tied to calendars they control — choose the column accordingly.
+                  </span>
+                )}
               </p>
             </div>
 
@@ -1106,7 +1147,9 @@ export function ResourceTimelineView({
                 </div>
                 {selected.resource_type && <p className="mt-0.5 text-sm text-slate-500">{selected.resource_type}</p>}
               </div>
-              {isAdmin && (
+              {(isAdmin ||
+                (selected.display_on_calendar_id !== null &&
+                  linkedPractitionerIds.includes(selected.display_on_calendar_id))) && (
                 <div className="flex gap-2">
                   <button type="button" onClick={() => openEdit(selected)} className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 transition-colors">
                     Edit

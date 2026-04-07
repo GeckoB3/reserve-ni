@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { AppointmentService, PractitionerService } from '@/types/booking-models';
 import { effectiveAppointmentServiceForPractitioner } from '@/lib/appointments/effective-service-for-practitioner';
+import { formatBookablePricePence, formatFromBookablePricePence } from '@/lib/booking/format-price-display';
 
 interface Practitioner {
   id: string;
@@ -145,13 +146,11 @@ export function AppointmentWalkInModal({
   }, [selectedService, selectedPractitioner, services, links]);
 
   function formatFromPrice(pence: number | null): string {
-    if (pence == null) return 'POA';
-    return `From ${sym}${(pence / 100).toFixed(2)}`;
+    return formatFromBookablePricePence(pence, sym);
   }
 
   function formatPrice(pence: number | null): string {
-    if (pence == null) return 'POA';
-    return `${sym}${(pence / 100).toFixed(2)}`;
+    return formatBookablePricePence(pence, sym);
   }
 
   async function handleSubmit() {

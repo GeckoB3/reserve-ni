@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse, after } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { getVenueStaff } from '@/lib/venue-auth';
+import { getVenueStaff, requireManagedCalendarAccess } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { stripe } from '@/lib/stripe';
 import { computeAvailability, fetchEngineInput } from '@/lib/availability';
@@ -32,6 +32,7 @@ import { communicationService } from '@/lib/communications';
 import { inferBookingRowModel } from '@/lib/booking/infer-booking-row-model';
 import { logBookingOp } from '@/lib/observability/booking-ops-log';
 import { resolveCdeBookingContext } from '@/lib/booking/cde-booking-context';
+import { resolveBookingScopedCalendarId } from '@/lib/booking/staff-booking-calendar-scope';
 import type { BookingModel } from '@/types/booking-models';
 
 const statusSchema = z.enum(BOOKING_MUTABLE_STATUSES);
@@ -168,6 +169,34 @@ export async function PATCH(
     }
 
     const admin = getSupabaseAdminClient();
+    const scopedCalendarId =
+      staff.role === 'admin'
+        ? null
+        : await resolveBookingScopedCalendarId(admin, staff.venue_id, booking as Parameters<
+            typeof resolveBookingScopedCalendarId
+          >[2]);
+
+    if (staff.role !== 'admin') {
+      if (!scopedCalendarId) {
+        return NextResponse.json(
+          {
+            error:
+              'This booking is not linked to a team calendar column tied to your permissions. Ask a venue admin to update this booking, or contact support if that seems wrong.',
+          },
+          { status: 403 },
+        );
+      }
+      const access = await requireManagedCalendarAccess(
+        admin,
+        staff.venue_id,
+        staff,
+        scopedCalendarId,
+        'You can only modify bookings on calendars assigned to your account.',
+      );
+      if (!access.ok) {
+        return NextResponse.json({ error: access.error }, { status: 403 });
+      }
+    }
 
     if (body.status !== undefined) {
       const parsed = statusSchema.safeParse(body.status);
@@ -676,16 +705,32 @@ export async function PATCH(
       }
 
       if (newPartySize > booking.party_size && booking.deposit_status === 'Paid' && booking.deposit_amount_pence) {
+        const tableServiceId = booking.service_id as string | null | undefined;
         const { data: venueForDeposit } = await admin
           .from('venues')
           .select('deposit_config, stripe_connected_account_id')
           .eq('id', staff.venue_id)
           .single();
 
-        const depCfg = (venueForDeposit?.deposit_config as { amount_per_person_gbp?: number }) ?? {};
-        const perPersonGbp = depCfg.amount_per_person_gbp ?? 5;
+        const { data: brRow } = tableServiceId
+          ? await admin
+              .from('booking_restrictions')
+              .select('deposit_amount_per_person_gbp')
+              .eq('service_id', tableServiceId)
+              .maybeSingle()
+          : { data: null };
+
+        const legacyGbp = (venueForDeposit?.deposit_config as { amount_per_person_gbp?: number })?.amount_per_person_gbp;
+        const perPersonGbp =
+          typeof brRow?.deposit_amount_per_person_gbp === 'number'
+            ? brRow.deposit_amount_per_person_gbp
+            : typeof legacyGbp === 'number'
+              ? legacyGbp
+              : null;
+
         const additionalCovers = newPartySize - booking.party_size;
-        const additionalPence = Math.round(perPersonGbp * additionalCovers * 100);
+        const additionalPence =
+          perPersonGbp != null && perPersonGbp > 0 ? Math.round(perPersonGbp * additionalCovers * 100) : 0;
 
         if (additionalPence > 0 && venueForDeposit?.stripe_connected_account_id) {
           try {

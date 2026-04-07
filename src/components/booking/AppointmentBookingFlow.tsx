@@ -14,6 +14,7 @@ import { defaultPhoneCountryForVenueCurrency } from '@/lib/phone/default-country
 import { minutesToTime, timeToMinutes } from '@/lib/availability';
 import { MultiServiceSummaryCard } from './MultiServiceSummaryCard';
 import { resolveAppointmentServiceOnlineCharge } from '@/lib/appointments/appointment-service-payment';
+import { formatBookablePricePence, formatFromBookablePricePence } from '@/lib/booking/format-price-display';
 import type { ClassPaymentRequirement } from '@/types/booking-models';
 
 /** Services + staff from catalog (no date / slots). */
@@ -353,13 +354,11 @@ export function AppointmentBookingFlow({
   }
 
   function formatPrice(pence: number | null): string {
-    if (pence == null) return 'POA';
-    return `${sym}${(pence / 100).toFixed(2)}`;
+    return formatBookablePricePence(pence, sym);
   }
 
   function formatFromPrice(pence: number | null): string {
-    if (pence == null) return 'POA';
-    return `From ${sym}${(pence / 100).toFixed(2)}`;
+    return formatFromBookablePricePence(pence, sym);
   }
 
   const phoneDefaultCountry = defaultPhoneCountryForVenueCurrency(venue.currency);

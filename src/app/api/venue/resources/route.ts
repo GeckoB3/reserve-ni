@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
+import {
+  getVenueStaff,
+  getStaffManagedCalendarIds,
+  requireAdmin,
+  requireManagedCalendarAccess,
+  requireManagedCalendarIds,
+} from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { requireVenueExposesSecondaryModel } from '@/lib/booking/require-venue-secondary-model';
 import { assertResourceAvailabilityClearOnHostCalendar } from '@/lib/booking/resource-host-calendar-conflicts';
@@ -258,13 +264,12 @@ export async function GET() {
   }
 }
 
-/** POST /api/venue/resources - create a resource (admin only). */
+/** POST /api/venue/resources - create a resource (admin or staff on a managed calendar column). */
 export async function POST(request: NextRequest) {
   try {
     const supabase = await createClient();
     const staff = await getVenueStaff(supabase);
     if (!staff) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
-    if (!requireAdmin(staff)) return NextResponse.json({ error: 'Forbidden: admin only' }, { status: 403 });
 
     const admin = getSupabaseAdminClient();
     const modelGate = await requireVenueExposesSecondaryModel(admin, staff.venue_id, 'resource_booking');
@@ -285,6 +290,24 @@ export async function POST(request: NextRequest) {
         { status: 400 },
       );
     }
+
+    if (staff.role !== 'admin') {
+      const scope = await requireManagedCalendarIds(admin, staff.venue_id, staff);
+      if (!scope.ok) {
+        return NextResponse.json({ error: scope.error }, { status: 403 });
+      }
+      const access = await requireManagedCalendarAccess(
+        admin,
+        staff.venue_id,
+        staff,
+        parsed.data.display_on_calendar_id,
+        'You can only create resources on calendars assigned to your account.',
+      );
+      if (!access.ok) {
+        return NextResponse.json({ error: access.error }, { status: 403 });
+      }
+    }
+
     const workingHours = (parsed.data.availability_hours ?? {}) as WorkingHours;
     const displayCheck = await assertResourceDisplayOnCalendarValid(
       admin,
@@ -357,13 +380,12 @@ export async function POST(request: NextRequest) {
   }
 }
 
-/** PATCH /api/venue/resources - update a resource (admin only). */
+/** PATCH /api/venue/resources - update a resource (admins: any column; staff: managed calendars only). */
 export async function PATCH(request: NextRequest) {
   try {
     const supabase = await createClient();
     const staff = await getVenueStaff(supabase);
     if (!staff) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
-    if (!requireAdmin(staff)) return NextResponse.json({ error: 'Forbidden: admin only' }, { status: 403 });
 
     const admin = getSupabaseAdminClient();
     const modelGate = await requireVenueExposesSecondaryModel(admin, staff.venue_id, 'resource_booking');
@@ -388,6 +410,50 @@ export async function PATCH(request: NextRequest) {
 
     if (exErr || !existing) {
       return NextResponse.json({ error: 'Resource not found' }, { status: 404 });
+    }
+
+    if (staff.role !== 'admin') {
+      const scope = await getStaffManagedCalendarIds(admin, staff.venue_id, staff.id);
+      if (scope.length === 0) {
+        return NextResponse.json(
+          { error: 'No calendars are assigned to your account. Ask an admin to assign at least one calendar.' },
+          { status: 403 },
+        );
+      }
+      const managedCalendarIds = scope;
+      const existingDisplayOn =
+        ((existing as Record<string, unknown>).display_on_calendar_id as string | null | undefined) ?? null;
+      if (!existingDisplayOn) {
+        return NextResponse.json(
+          {
+            error:
+              'Only venue admins can edit resources that are not assigned to a calendar column. Ask an admin to assign this resource to a calendar first.',
+          },
+          { status: 403 },
+        );
+      }
+      if (!managedCalendarIds.includes(existingDisplayOn)) {
+        return NextResponse.json(
+          { error: 'You can only edit resources on calendars assigned to your account.' },
+          { status: 403 },
+        );
+      }
+      if (parsed.data.display_on_calendar_id === null) {
+        return NextResponse.json(
+          { error: 'Only venue admins can remove a resource from its calendar column.' },
+          { status: 403 },
+        );
+      }
+      if (
+        parsed.data.display_on_calendar_id !== undefined &&
+        parsed.data.display_on_calendar_id !== null &&
+        !managedCalendarIds.includes(parsed.data.display_on_calendar_id)
+      ) {
+        return NextResponse.json(
+          { error: 'You can only move resources to calendars assigned to your account.' },
+          { status: 403 },
+        );
+      }
     }
 
     const ex = existing as Record<string, unknown>;
@@ -521,13 +587,12 @@ export async function PATCH(request: NextRequest) {
   }
 }
 
-/** DELETE /api/venue/resources - delete a resource (admin only). */
+/** DELETE /api/venue/resources - delete a resource (admin, or staff if resource is on a calendar they manage). */
 export async function DELETE(request: NextRequest) {
   try {
     const supabase = await createClient();
     const staff = await getVenueStaff(supabase);
     if (!staff) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
-    if (!requireAdmin(staff)) return NextResponse.json({ error: 'Forbidden: admin only' }, { status: 403 });
 
     const { id } = await request.json();
     if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 });
@@ -535,6 +600,46 @@ export async function DELETE(request: NextRequest) {
     const admin = getSupabaseAdminClient();
     const modelGate = await requireVenueExposesSecondaryModel(admin, staff.venue_id, 'resource_booking');
     if (!modelGate.ok) return modelGate.response;
+
+    const { data: row, error: fetchErr } = await admin
+      .from('unified_calendars')
+      .select('id, display_on_calendar_id')
+      .eq('id', id)
+      .eq('venue_id', staff.venue_id)
+      .eq('calendar_type', 'resource')
+      .maybeSingle();
+
+    if (fetchErr) {
+      console.error('DELETE /api/venue/resources lookup:', fetchErr);
+      return NextResponse.json({ error: 'Failed to load resource' }, { status: 500 });
+    }
+    if (!row) {
+      return NextResponse.json({ error: 'Resource not found' }, { status: 404 });
+    }
+
+    if (staff.role !== 'admin') {
+      const displayOn = (row as { display_on_calendar_id: string | null }).display_on_calendar_id;
+      if (!displayOn) {
+        return NextResponse.json(
+          {
+            error:
+              'Only venue admins can delete resources that are not assigned to a calendar column. Ask an admin to assign this resource or delete it.',
+          },
+          { status: 403 },
+        );
+      }
+      const access = await requireManagedCalendarAccess(
+        admin,
+        staff.venue_id,
+        staff,
+        displayOn,
+        'You can only delete resources on calendars assigned to your account.',
+      );
+      if (!access.ok) {
+        return NextResponse.json({ error: access.error }, { status: 403 });
+      }
+    }
+
     const { error } = await admin
       .from('unified_calendars')
       .delete()

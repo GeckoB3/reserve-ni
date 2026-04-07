@@ -8,6 +8,7 @@ import { DetailsStep } from './DetailsStep';
 import { PaymentStep } from './PaymentStep';
 import { ResourceCalendarMonth, todayYmdLocal } from './ResourceCalendarMonth';
 import { slotIntervalDurationLabel } from '@/lib/booking/slot-interval-label';
+import { formatResourcePricePerSlotLine } from '@/lib/booking/format-price-display';
 
 interface ResourceSlot {
   resource_id: string;
@@ -325,12 +326,13 @@ export function ResourceBookingFlow({ venue, cancellationPolicy }: { venue: Venu
                       {r.resource_type && <div className="text-xs text-slate-500">{r.resource_type}</div>}
                     </div>
                     <div className="text-right text-sm">
-                      {r.price_per_slot_pence != null && (
-                        <span className="font-medium text-brand-600">
-                          {venue.currency === 'EUR' ? '€' : '£'}
-                          {(r.price_per_slot_pence / 100).toFixed(2)} per {slotIntervalDurationLabel(r.slot_interval_minutes)}
-                        </span>
-                      )}
+                      <span className="font-medium text-brand-600">
+                        {formatResourcePricePerSlotLine(
+                          r.price_per_slot_pence,
+                          venue.currency === 'EUR' ? '€' : '£',
+                          slotIntervalDurationLabel(r.slot_interval_minutes),
+                        )}
+                      </span>
                     </div>
                   </div>
                 </button>
@@ -423,7 +425,9 @@ export function ResourceBookingFlow({ venue, cancellationPolicy }: { venue: Venu
             <div className="text-slate-600">
               {date} &middot; {selectedTime} – {computeEndTime(selectedTime, duration)} ({duration} min)
             </div>
-            {totalPricePence > 0 && (
+            {totalPricePence <= 0 ? (
+              <div className="font-medium text-brand-600">Free</div>
+            ) : (
               <div className="font-medium text-brand-600">
                 {venue.currency === 'EUR' ? '€' : '£'}
                 {(totalPricePence / 100).toFixed(2)}
@@ -451,7 +455,9 @@ export function ResourceBookingFlow({ venue, cancellationPolicy }: { venue: Venu
             <div className="text-slate-500">
               {date} &middot; {selectedTime} – {computeEndTime(selectedTime, duration)}
             </div>
-            {totalPricePence > 0 && (
+            {totalPricePence <= 0 ? (
+              <div className="mt-1 font-medium text-brand-600">Free</div>
+            ) : (
               <div className="mt-1 space-y-0.5">
                 <div className="font-medium text-brand-600">
                   {venue.currency === 'EUR' ? '€' : '£'}

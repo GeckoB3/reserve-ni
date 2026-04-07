@@ -5,7 +5,8 @@ import {
   getVenueStaff,
   requireAdmin,
   getStaffManagedCalendarIds,
-  staffManagesCalendar,
+  requireManagedCalendarAccess,
+  OUTSIDE_ASSIGNED_CALENDARS_ERROR,
 } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { checkCalendarLimit } from '@/lib/tier-enforcement';
@@ -414,12 +415,9 @@ export async function PATCH(request: NextRequest) {
         if (calErr || !cal) {
           return NextResponse.json({ error: 'Team member not found' }, { status: 404 });
         }
-        const mayEdit = await staffManagesCalendar(admin, staff.venue_id, staff.id, id);
-        if (!mayEdit) {
-          return NextResponse.json(
-            { error: 'You can only edit calendars assigned to your account.' },
-            { status: 403 },
-          );
+        const access = await requireManagedCalendarAccess(admin, staff.venue_id, staff, id, OUTSIDE_ASSIGNED_CALENDARS_ERROR);
+        if (!access.ok) {
+          return NextResponse.json({ error: access.error }, { status: 403 });
         }
 
         const { data, error } = await admin
@@ -448,11 +446,15 @@ export async function PATCH(request: NextRequest) {
       if (pracErr || !prac) {
         return NextResponse.json({ error: 'Team member not found' }, { status: 404 });
       }
-      if (prac.staff_id !== staff.id) {
-        return NextResponse.json(
-          { error: 'You can only edit the calendar linked to your account.' },
-          { status: 403 },
-        );
+      const access = await requireManagedCalendarAccess(
+        admin,
+        staff.venue_id,
+        staff,
+        prac.id,
+        'You can only edit the calendar linked to your account.',
+      );
+      if (!access.ok) {
+        return NextResponse.json({ error: access.error }, { status: 403 });
       }
 
       const { data, error } = await admin

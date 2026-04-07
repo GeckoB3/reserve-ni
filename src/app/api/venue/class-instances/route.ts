@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
+import { getVenueStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { requireVenueExposesSecondaryModel } from '@/lib/booking/require-venue-secondary-model';
 import { assertClassSessionWindowFreeOnCalendar } from '@/lib/experience-events/calendar-event-window-conflicts';
 import { syncCalendarBlockForClassInstance } from '@/lib/class-instances/instructor-calendar-block';
+import { staffMayManageClassTypeSessions } from '@/lib/class-instances/class-staff-scope';
 import { z } from 'zod';
 
 const createBodySchema = z.object({
@@ -22,7 +23,6 @@ export async function POST(request: NextRequest) {
     const supabase = await createClient();
     const staff = await getVenueStaff(supabase);
     if (!staff) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
-    if (!requireAdmin(staff)) return NextResponse.json({ error: 'Forbidden: admin only' }, { status: 403 });
 
     const admin = getSupabaseAdminClient();
     const modelGate = await requireVenueExposesSecondaryModel(admin, staff.venue_id, 'class_session');
@@ -45,6 +45,11 @@ export async function POST(request: NextRequest) {
 
     if (ctErr || !ct) {
       return NextResponse.json({ error: 'Class type not found' }, { status: 404 });
+    }
+
+    const scope = await staffMayManageClassTypeSessions(admin, staff.venue_id, staff, class_type_id);
+    if (!scope.ok) {
+      return NextResponse.json({ error: scope.error }, { status: scope.status });
     }
 
     const startNorm = start_time.length === 5 ? `${start_time}:00` : start_time;

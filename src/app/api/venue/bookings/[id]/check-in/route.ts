@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { getVenueStaff } from '@/lib/venue-auth';
+import { getVenueStaff, requireManagedCalendarAccess } from '@/lib/venue-auth';
+import { getSupabaseAdminClient } from '@/lib/supabase';
+import { resolveBookingScopedCalendarId } from '@/lib/booking/staff-booking-calendar-scope';
 
 /**
  * POST /api/venue/bookings/[id]/check-in
@@ -27,13 +29,30 @@ export async function POST(
 
     const { data: row, error: fetchErr } = await staff.db
       .from('bookings')
-      .select('id, venue_id')
+      .select('id, venue_id, calendar_id, practitioner_id, resource_id, experience_event_id, class_instance_id')
       .eq('id', bookingId)
       .eq('venue_id', staff.venue_id)
       .maybeSingle();
 
     if (fetchErr || !row) {
       return NextResponse.json({ error: 'Booking not found' }, { status: 404 });
+    }
+
+    if (staff.role !== 'admin') {
+      const admin = getSupabaseAdminClient();
+      const scopedCalendarId = await resolveBookingScopedCalendarId(admin, staff.venue_id, row);
+      if (scopedCalendarId) {
+        const access = await requireManagedCalendarAccess(
+          admin,
+          staff.venue_id,
+          staff,
+          scopedCalendarId,
+          'You can only update check-in on calendars assigned to your account.',
+        );
+        if (!access.ok) {
+          return NextResponse.json({ error: access.error }, { status: 403 });
+        }
+      }
     }
 
     const now = new Date().toISOString();

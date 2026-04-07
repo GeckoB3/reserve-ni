@@ -76,7 +76,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   }
 
   return (
-    <div className="flex h-screen overflow-hidden bg-slate-50">
+    <div className="flex h-[100dvh] max-h-[100dvh] overflow-hidden bg-slate-50">
       <DashboardSidebar
         email={email}
         staffName={staffName}
@@ -89,7 +89,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
         isAdmin={isAdmin}
         venueTerminology={venueTerminology}
       />
-      <main className="flex-1 overflow-y-auto pt-14 lg:pt-0">
+      <main className="min-h-0 flex-1 overflow-y-auto pt-[calc(3.5rem+env(safe-area-inset-top,0px))] lg:pt-0">
         {planStatus === 'cancelling' && (
           <div className="border-b border-amber-200 bg-amber-50 px-6 py-3">
             <div className="flex flex-wrap items-center justify-between gap-2">

@@ -10,6 +10,7 @@ import { DataExportSection } from './DataExportSection';
 import { ClientsSection, type ClientSummary } from './ClientsSection';
 import type { BookingModel, VenueTerminology } from '@/types/booking-models';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
+import { HorizontalScrollHint } from '@/components/ui/HorizontalScrollHint';
 
 interface Report1 {
   total_bookings_created: number;
@@ -608,7 +609,8 @@ export function ReportsView({ bookingModel, terminology, venueId }: ReportsViewP
                 </BarChart>
               </ResponsiveContainer>
             </div>
-            <div className="overflow-x-auto rounded-lg border border-slate-100">
+            <HorizontalScrollHint />
+            <div className="touch-pan-x overflow-x-auto rounded-lg border border-slate-100">
               <table className="w-full min-w-[640px] text-left text-sm">
                 <thead>
                   <tr className="border-b border-slate-100 bg-slate-50">

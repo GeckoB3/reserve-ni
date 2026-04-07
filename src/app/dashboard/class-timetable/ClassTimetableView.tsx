@@ -23,6 +23,8 @@ interface ClassType {
   colour: string;
   is_active: boolean;
   instructor_id?: string | null;
+  /** Host team calendar id (from GET); use with `instructor_id` for staff scope checks. */
+  instructor_calendar_id?: string | null;
   instructor_name?: string | null;
   payment_requirement?: PaymentRequirement;
   deposit_amount_pence?: number | null;
@@ -125,10 +127,12 @@ function escapeCsvCell(s: string | number | null | undefined): string {
 export function ClassTimetableView({
   venueId: _venueId,
   isAdmin,
+  linkedPractitionerIds = [],
   currency = 'GBP',
 }: {
   venueId: string;
   isAdmin: boolean;
+  linkedPractitionerIds?: string[];
   currency?: string;
 }) {
   const sym = currency === 'EUR' ? '€' : '£';
@@ -182,13 +186,19 @@ export function ClassTimetableView({
       setTimetable(data.timetable ?? []);
       setInstances(data.instances ?? []);
       setPractitioners(data.practitioners ?? []);
-      setUnifiedCalendars(data.unified_calendars ?? []);
+      setUnifiedCalendars(
+        isAdmin
+          ? (data.unified_calendars ?? [])
+          : (data.unified_calendars ?? []).filter((c: PractitionerOption) =>
+              linkedPractitionerIds.includes(c.id),
+            ),
+      );
     } catch {
       setNotice({ kind: 'error', message: 'Failed to load class data.' });
     } finally {
       if (!silent) setLoading(false);
     }
-  }, []);
+  }, [isAdmin, linkedPractitionerIds]);
 
   useEffect(() => {
     void fetchData();
@@ -321,6 +331,23 @@ export function ClassTimetableView({
   }, [selectedId, loadDetail]);
 
   const typeMap = useMemo(() => new Map(classTypes.map((ct) => [ct.id, ct])), [classTypes]);
+
+  const staffManagesClassType = useCallback(
+    (ct: ClassType | undefined): boolean => {
+      if (!ct) return false;
+      const calId = ct.instructor_calendar_id ?? ct.instructor_id ?? null;
+      return calId != null && linkedPractitionerIds.includes(calId);
+    },
+    [linkedPractitionerIds],
+  );
+
+  const scheduleModalClassTypes = useMemo(() => {
+    if (isAdmin) return classTypes;
+    return classTypes.filter((ct) => staffManagesClassType(ct));
+  }, [isAdmin, classTypes, staffManagesClassType]);
+
+  const canOpenScheduleModal =
+    isAdmin || (linkedPractitionerIds.length > 0 && scheduleModalClassTypes.length > 0);
 
   const stats = useMemo(() => {
     const activeClassTypes = classTypes.filter((c) => c.is_active).length;
@@ -713,6 +740,13 @@ export function ClassTimetableView({
           <span className="font-medium text-slate-700">Scheduled sessions</span> below to add or change sessions.
         </p>
       </div>
+      {!isAdmin && (
+        <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50/80 px-4 py-3 text-sm text-slate-600">
+          {linkedPractitionerIds.length === 0
+            ? 'Your account is not linked to a calendar yet. Ask an admin to assign at least one calendar before managing class sessions.'
+            : 'You can view all class types. You can create, edit, or delete class types and recurring schedule rows when the class is on a calendar you control. You can schedule, edit, or remove sessions the same way. Cancelling a class with guest notifications remains admin-only.'}
+        </div>
+      )}
 
       {notice && (
         <div
@@ -735,7 +769,7 @@ export function ClassTimetableView({
 
       <div className="mb-6 flex items-center justify-between">
         <h1 className="text-2xl font-semibold text-slate-900">Class Timetable</h1>
-        {isAdmin && (
+        {(isAdmin || linkedPractitionerIds.length > 0) && (
           <button
             type="button"
             onClick={() => {
@@ -772,8 +806,7 @@ export function ClassTimetableView({
         </div>
       )}
 
-      {isAdmin && (
-        <div className="mb-6 rounded-xl border border-slate-200 bg-white shadow-sm">
+      <div className="mb-6 rounded-xl border border-slate-200 bg-white shadow-sm">
           <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
             <h2 className="text-sm font-semibold text-slate-700">Class types</h2>
           </div>
@@ -782,18 +815,23 @@ export function ClassTimetableView({
             <div className="m-4 h-12 animate-pulse rounded bg-slate-100" />
           ) : classTypes.length === 0 && !showClassTypeForm ? (
             <p className="px-5 py-4 text-sm text-slate-500">
-              No class types yet.{' '}
-              <button
-                type="button"
-                className="text-brand-600 underline hover:text-brand-700"
-                onClick={() => {
-                  setClassTypeForm({ ...BLANK_CT });
-                  setClassTypeError(null);
-                  setShowClassTypeForm(true);
-                }}
-              >
-                Add one to get started.
-              </button>
+              No class types yet.
+              {(isAdmin || linkedPractitionerIds.length > 0) ? (
+                <>
+                  {' '}
+                  <button
+                    type="button"
+                    className="text-brand-600 underline hover:text-brand-700"
+                    onClick={() => {
+                      setClassTypeForm({ ...BLANK_CT });
+                      setClassTypeError(null);
+                      setShowClassTypeForm(true);
+                    }}
+                  >
+                    Add one to get started.
+                  </button>
+                </>
+              ) : null}
             </p>
           ) : (
             <div className="divide-y divide-slate-50">
@@ -819,6 +857,7 @@ export function ClassTimetableView({
                         <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-500">Inactive</span>
                       )}
                       <div className="ml-auto flex gap-2">
+                        {(isAdmin || staffManagesClassType(ct)) && (
                         <button
                           type="button"
                           onClick={() => handleEditClassType(ct)}
@@ -826,13 +865,16 @@ export function ClassTimetableView({
                         >
                           Edit
                         </button>
-                        <button
-                          type="button"
-                          onClick={() => void handleDeleteClassType(ct.id)}
-                          className="text-xs font-medium text-red-500 hover:text-red-700"
-                        >
-                          Delete
-                        </button>
+                        )}
+                        {(isAdmin || staffManagesClassType(ct)) && (
+                          <button
+                            type="button"
+                            onClick={() => void handleDeleteClassType(ct.id)}
+                            className="text-xs font-medium text-red-500 hover:text-red-700"
+                          >
+                            Delete
+                          </button>
+                        )}
                       </div>
                     </div>
                     {ct.description ? (
@@ -859,22 +901,26 @@ export function ClassTimetableView({
                             {e.total_occurrences != null && e.total_occurrences > 0 && (
                               <span className="text-slate-400"> · max {e.total_occurrences} sessions</span>
                             )}
-                            <button
-                              type="button"
-                              onClick={() => openEditTimetable(e)}
-                              className="text-slate-500 hover:text-brand-600"
-                              aria-label="Edit schedule entry"
-                            >
-                              edit
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => void handleDeleteTimetableEntry(e.id)}
-                              className="text-slate-400 hover:text-red-500"
-                              aria-label="Remove schedule entry"
-                            >
-                              ×
-                            </button>
+                            {(isAdmin || staffManagesClassType(ct)) && (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => openEditTimetable(e)}
+                                  className="text-slate-500 hover:text-brand-600"
+                                  aria-label="Edit schedule entry"
+                                >
+                                  edit
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => void handleDeleteTimetableEntry(e.id)}
+                                  className="text-slate-400 hover:text-red-500"
+                                  aria-label="Remove schedule entry"
+                                >
+                                  ×
+                                </button>
+                              </>
+                            )}
                           </span>
                         ))}
                       </div>
@@ -886,7 +932,7 @@ export function ClassTimetableView({
             </div>
           )}
 
-          {showClassTypeForm && (
+          {showClassTypeForm && (isAdmin || linkedPractitionerIds.length > 0) && (
             <div className="border-t border-slate-100 px-5 py-4">
               <h3 className="mb-3 text-sm font-semibold text-slate-800">
                 {editingClassTypeId ? 'Edit class type' : 'New class type'}
@@ -1113,30 +1159,32 @@ export function ClassTimetableView({
                     The class appears on this team calendar in the schedule. If you add a class instructor name, guests
                     see that name instead of the calendar name when booking.
                   </p>
-                  <div className="mt-3 rounded-lg border border-slate-100 bg-slate-50/90 p-3">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setAddCalendarModalError(null);
-                        setNewCalendarName('');
-                        setShowAddCalendarModal(true);
-                      }}
-                      className="inline-flex w-full items-center justify-center rounded-lg border border-brand-200/90 bg-white px-3.5 py-2.5 text-sm font-semibold text-brand-700 shadow-sm transition-[color,background-color,border-color,box-shadow,transform] duration-150 ease-out hover:border-brand-400 hover:bg-brand-50 hover:text-brand-800 hover:shadow-md active:scale-[0.98] active:border-brand-500 active:bg-brand-100 active:shadow-inner motion-reduce:transition-colors motion-reduce:active:scale-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2"
-                    >
-                      Add calendar
-                    </button>
-                    <p className="mt-2 text-xs text-slate-500">
-                      Create a team calendar column here and assign it to this class immediately. For appointment
-                      links, services, and staff assignments, use{' '}
-                      <Link
-                        href="/dashboard/calendar-availability?tab=calendars"
-                        className="font-medium text-brand-700 underline hover:text-brand-800"
+                  {isAdmin && (
+                    <div className="mt-3 rounded-lg border border-slate-100 bg-slate-50/90 p-3">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAddCalendarModalError(null);
+                          setNewCalendarName('');
+                          setShowAddCalendarModal(true);
+                        }}
+                        className="inline-flex w-full items-center justify-center rounded-lg border border-brand-200/90 bg-white px-3.5 py-2.5 text-sm font-semibold text-brand-700 shadow-sm transition-[color,background-color,border-color,box-shadow,transform] duration-150 ease-out hover:border-brand-400 hover:bg-brand-50 hover:text-brand-800 hover:shadow-md active:scale-[0.98] active:border-brand-500 active:bg-brand-100 active:shadow-inner motion-reduce:transition-colors motion-reduce:active:scale-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2"
                       >
-                        Calendar availability
-                      </Link>
-                      .
-                    </p>
-                  </div>
+                        Add calendar
+                      </button>
+                      <p className="mt-2 text-xs text-slate-500">
+                        Create a team calendar column here and assign it to this class immediately. For appointment
+                        links, services, and staff assignments, use{' '}
+                        <Link
+                          href="/dashboard/calendar-availability?tab=calendars"
+                          className="font-medium text-brand-700 underline hover:text-brand-800"
+                        >
+                          Calendar availability
+                        </Link>
+                        .
+                      </p>
+                    </div>
+                  )}
                 </div>
                 <div>
                   <label className="mb-1 block text-xs font-medium text-slate-600">Colour</label>
@@ -1188,7 +1236,6 @@ export function ClassTimetableView({
             </div>
           )}
         </div>
-      )}
 
       {loading ? (
         <div className="h-96 animate-pulse rounded-xl bg-slate-100" />
@@ -1209,14 +1256,22 @@ export function ClassTimetableView({
             instances={instances}
             isAdmin={isAdmin}
             onEditInstance={
-              isAdmin
+              canOpenScheduleModal
                 ? (ro) => {
                     const full = instances.find((i) => i.id === ro.id);
-                    if (full) openEditInstance(full);
+                    if (!full) return;
+                    const ct = typeMap.get(full.class_type_id);
+                    if (isAdmin || staffManagesClassType(ct)) openEditInstance(full);
                   }
                 : undefined
             }
-            onOpenSchedule={isAdmin ? () => setScheduleModalOpen(true) : undefined}
+            canEditInstance={(ro) => {
+              const full = instances.find((i) => i.id === ro.id);
+              if (!full) return false;
+              const ct = typeMap.get(full.class_type_id);
+              return isAdmin || staffManagesClassType(ct);
+            }}
+            onOpenSchedule={canOpenScheduleModal ? () => setScheduleModalOpen(true) : undefined}
           />
 
           {instances.length > 0 && (
@@ -1248,7 +1303,7 @@ export function ClassTimetableView({
                           <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs text-red-700">Cancelled</span>
                         )}
                       </button>
-                      {isAdmin && (
+                      {(isAdmin || staffManagesClassType(ct)) && (
                         <span className="flex gap-3">
                           <button
                             type="button"
@@ -1276,11 +1331,12 @@ export function ClassTimetableView({
         </div>
       )}
 
-      {scheduleModalOpen && classTypes.length > 0 && (
+      {scheduleModalOpen &&
+        (isAdmin ? classTypes.length > 0 : scheduleModalClassTypes.length > 0) && (
         <ClassScheduleModal
           open={scheduleModalOpen}
           onClose={() => setScheduleModalOpen(false)}
-          classTypes={classTypes.map((ct) => ({
+          classTypes={scheduleModalClassTypes.map((ct) => ({
             id: ct.id,
             name: ct.name,
             colour: ct.colour ?? '#6366f1',
@@ -1530,7 +1586,9 @@ export function ClassTimetableView({
               </div>
             </div>
             <div className="mt-6 flex flex-wrap items-center justify-between gap-2">
-              {isAdmin && editingInstance && (
+              {editingInstance &&
+                (isAdmin ||
+                  staffManagesClassType(typeMap.get(editingInstance.class_type_id))) && (
                 <button
                   type="button"
                   onClick={() => void handleDeleteInstance(editingInstance)}
@@ -1579,6 +1637,11 @@ export function ClassTimetableView({
                     <span className="mt-2 inline-block rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-800">
                       Cancelled
                     </span>
+                  )}
+                  {!isAdmin && !detail.is_cancelled && (
+                    <p className="mt-2 max-w-md text-xs text-slate-500">
+                      Only venue admins can cancel a session and notify enrolled guests.
+                    </p>
                   )}
                 </div>
                 <div className="flex flex-wrap gap-2">

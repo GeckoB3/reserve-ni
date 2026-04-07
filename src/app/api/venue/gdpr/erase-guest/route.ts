@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createClient } from '@/lib/supabase/server';
-import { getVenueStaff } from '@/lib/venue-auth';
+import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 
 const bodySchema = z.object({
@@ -19,6 +19,9 @@ export async function POST(request: NextRequest) {
     const staff = await getVenueStaff(supabase);
     if (!staff) {
       return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
+    }
+    if (!requireAdmin(staff)) {
+      return NextResponse.json({ error: 'Forbidden: admin only' }, { status: 403 });
     }
 
     const parsed = bodySchema.safeParse(await request.json().catch(() => ({})));

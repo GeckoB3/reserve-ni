@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState, useMemo } from 'react';
 import type { AppointmentService, PractitionerService } from '@/types/booking-models';
 import { effectiveAppointmentServiceForPractitioner } from '@/lib/appointments/effective-service-for-practitioner';
 import { resolveAppointmentServiceOnlineCharge } from '@/lib/appointments/appointment-service-payment';
+import { formatBookablePricePence, formatFromBookablePricePence } from '@/lib/booking/format-price-display';
 import type { ClassPaymentRequirement } from '@/types/booking-models';
 
 interface Practitioner {
@@ -478,7 +479,7 @@ export function AppointmentBookingForm({
                         </div>
                       </div>
                       <div className="text-sm font-medium text-slate-700">
-                        {minPricePence != null ? `From ${sym}${(minPricePence / 100).toFixed(2)}` : 'POA'}
+                        {formatFromBookablePricePence(minPricePence, sym)}
                       </div>
                     </div>
                   </button>
@@ -509,7 +510,7 @@ export function AppointmentBookingForm({
                       <div className="flex items-center justify-between gap-2">
                         <span>{p.name}</span>
                         <span className="text-slate-600">
-                          {merged?.price_pence != null ? `${sym}${(merged.price_pence / 100).toFixed(2)}` : 'POA'}
+                          {formatBookablePricePence(merged?.price_pence ?? null, sym)}
                         </span>
                       </div>
                     </button>
@@ -813,7 +814,7 @@ export function AppointmentBookingForm({
                         <div className="text-xs text-slate-500">{s.duration_minutes} min</div>
                       </div>
                       <div className="text-sm font-medium text-slate-700">
-                        {minPricePence != null ? `From ${sym}${(minPricePence / 100).toFixed(2)}` : 'POA'}
+                        {formatFromBookablePricePence(minPricePence, sym)}
                       </div>
                     </div>
                   </button>
@@ -845,7 +846,7 @@ export function AppointmentBookingForm({
                       <div className="flex items-center justify-between gap-2">
                         <span>{p.name}</span>
                         <span className="text-slate-600">
-                          {merged?.price_pence != null ? `${sym}${(merged.price_pence / 100).toFixed(2)}` : 'POA'}
+                          {formatBookablePricePence(merged?.price_pence ?? null, sym)}
                         </span>
                       </div>
                     </button>
@@ -903,9 +904,9 @@ export function AppointmentBookingForm({
                     <div className="flex justify-between border-t border-slate-200 pt-2"><span className="font-medium text-slate-700">Total</span><span className="font-semibold text-brand-700">{sym}{(totalGroupPrice / 100).toFixed(2)}</span></div>
                   )}
                 </div>
-                <div><label className="mb-1 block text-sm font-medium text-slate-700">Contact name *</label><input type="text" value={groupClientName} onChange={(e) => setGroupClientName(e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500" placeholder="Full name" /></div>
-                <div><label className="mb-1 block text-sm font-medium text-slate-700">Email <span className="text-slate-400 font-normal">(optional)</span></label><input type="email" value={groupClientEmail} onChange={(e) => setGroupClientEmail(e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500" placeholder="client@example.com" /></div>
-                <div><label className="mb-1 block text-sm font-medium text-slate-700">Phone <span className="text-slate-400 font-normal">(optional)</span></label><input type="tel" value={groupClientPhone} onChange={(e) => setGroupClientPhone(e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500" placeholder="07123 456789" /></div>
+                <div><label className="mb-1 block text-sm font-medium text-slate-700">Contact name *</label><input type="text" value={groupClientName} onChange={(e) => setGroupClientName(e.target.value)} className="min-h-[44px] w-full rounded-lg border border-slate-300 px-3 py-2 text-base focus:border-brand-500 focus:ring-1 focus:ring-brand-500" placeholder="Full name" /></div>
+                <div><label className="mb-1 block text-sm font-medium text-slate-700">Email <span className="text-slate-400 font-normal">(optional)</span></label><input type="email" value={groupClientEmail} onChange={(e) => setGroupClientEmail(e.target.value)} className="min-h-[44px] w-full rounded-lg border border-slate-300 px-3 py-2 text-base focus:border-brand-500 focus:ring-1 focus:ring-brand-500" placeholder="client@example.com" /></div>
+                <div><label className="mb-1 block text-sm font-medium text-slate-700">Phone <span className="text-slate-400 font-normal">(optional)</span></label><input type="tel" value={groupClientPhone} onChange={(e) => setGroupClientPhone(e.target.value)} className="min-h-[44px] w-full rounded-lg border border-slate-300 px-3 py-2 text-base focus:border-brand-500 focus:ring-1 focus:ring-brand-500" placeholder="07123 456789" /></div>
                 <div className="flex justify-between">
                   <button onClick={() => setGroupStep('list')} className="text-sm text-brand-700 hover:underline">&larr; Back</button>
                   <button onClick={handleGroupSubmit} disabled={submitting} className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50">{submitting ? 'Creating...' : 'Create Group Booking'}</button>

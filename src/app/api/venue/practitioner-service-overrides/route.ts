@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { getVenueStaff } from '@/lib/venue-auth';
-import { getStaffManagedCalendarIds } from '@/lib/venue-auth';
+import { getVenueStaff, requireManagedCalendarAccess, requireManagedCalendarIds } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { z } from 'zod';
 import type { AppointmentService } from '@/types/booking-models';
+import { venueUsesUnifiedAppointmentServiceData } from '@/lib/booking/uses-unified-appointment-data';
 
 const patchSchema = z.object({
   service_id: z.string().uuid(),
@@ -55,7 +55,7 @@ async function practitionerOffersService(
     return false;
   }
   const list = links ?? [];
-  if (list.length === 0) return true;
+  if (list.length === 0) return false;
   return list.some((l: { service_id: string }) => l.service_id === serviceId);
 }
 
@@ -73,7 +73,7 @@ async function calendarOffersServiceItem(
     return false;
   }
   const list = links ?? [];
-  if (list.length === 0) return true;
+  if (list.length === 0) return false;
   return list.some((l: { service_item_id: string }) => l.service_item_id === serviceItemId);
 }
 
@@ -102,31 +102,38 @@ export async function PATCH(request: NextRequest) {
     const { service_id, calendar_id: calendarIdOpt, ...rawPatch } = parsed.data;
     const admin = getSupabaseAdminClient();
 
-    const { data: venue } = await admin.from('venues').select('booking_model').eq('id', staff.venue_id).maybeSingle();
-    const bookingModel = (venue as { booking_model?: string } | null)?.booking_model ?? '';
+    const useUnified = await venueUsesUnifiedAppointmentServiceData(admin, staff.venue_id);
 
-    if (bookingModel === 'unified_scheduling') {
-      const managed = await getStaffManagedCalendarIds(admin, staff.venue_id, staff.id);
-      if (managed.length === 0) {
-        return NextResponse.json({ error: 'No calendar linked to your account' }, { status: 403 });
-      }
-
+    if (useUnified) {
       let calendarId: string;
       if (calendarIdOpt) {
-        if (!managed.includes(calendarIdOpt)) {
-          return NextResponse.json({ error: 'That calendar is not assigned to your account' }, { status: 403 });
+        const access = await requireManagedCalendarAccess(
+          admin,
+          staff.venue_id,
+          staff,
+          calendarIdOpt,
+          'That calendar is not assigned to your account',
+        );
+        if (!access.ok) {
+          return NextResponse.json({ error: access.error }, { status: 403 });
         }
         calendarId = calendarIdOpt;
-      } else if (managed.length === 1) {
-        calendarId = managed[0];
       } else {
-        return NextResponse.json(
-          {
-            error:
-              'You manage more than one calendar — choose which calendar to update (calendar_id in the request body).',
-          },
-          { status: 400 },
-        );
+        const scope = await requireManagedCalendarIds(admin, staff.venue_id, staff);
+        if (!scope.ok) {
+          return NextResponse.json({ error: scope.error }, { status: 403 });
+        }
+        if (scope.managedCalendarIds.length === 1) {
+          calendarId = scope.managedCalendarIds[0];
+        } else {
+          return NextResponse.json(
+            {
+              error:
+                'You manage more than one calendar — choose which calendar to update (calendar_id in the request body).',
+            },
+            { status: 400 },
+          );
+        }
       }
 
       const offers = await calendarOffersServiceItem(admin, calendarId, service_id);
@@ -203,18 +210,47 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ success: true });
     }
 
-    const { data: mine, error: mineErr } = await admin
+    const scope = await requireManagedCalendarIds(admin, staff.venue_id, staff);
+    if (!scope.ok) {
+      return NextResponse.json({ error: scope.error }, { status: 403 });
+    }
+    if (scope.managedCalendarIds.length === 0) {
+      return NextResponse.json({ error: 'No calendars are assigned to your account. Ask an admin to assign at least one calendar.' }, { status: 403 });
+    }
+
+    const { data: practitionerRows, error: practitionerErr } = await admin
       .from('practitioners')
       .select('id')
       .eq('venue_id', staff.venue_id)
-      .eq('staff_id', staff.id)
-      .maybeSingle();
-
-    if (mineErr || !mine?.id) {
-      return NextResponse.json({ error: 'No calendar linked to your account' }, { status: 403 });
+      .in('id', scope.managedCalendarIds);
+    if (practitionerErr) {
+      console.error('PATCH practitioner-service-overrides practitioners lookup:', practitionerErr.message);
+      return NextResponse.json({ error: 'Could not verify your assigned appointment calendars.' }, { status: 500 });
     }
+    const practitionerIds = new Set((practitionerRows ?? []).map((r) => r.id as string));
 
-    const practitionerId = mine.id;
+    let practitionerId: string;
+    if (calendarIdOpt) {
+      if (!scope.managedCalendarIds.includes(calendarIdOpt) || !practitionerIds.has(calendarIdOpt)) {
+        return NextResponse.json({ error: 'That calendar is not assigned to your account' }, { status: 403 });
+      }
+      practitionerId = calendarIdOpt;
+    } else {
+      const assignedPractitionerIds = scope.managedCalendarIds.filter((id) => practitionerIds.has(id));
+      if (assignedPractitionerIds.length === 0) {
+        return NextResponse.json(
+          { error: 'No appointment calendar is assigned to your account. Ask an admin to assign one.' },
+          { status: 403 },
+        );
+      }
+      if (assignedPractitionerIds.length > 1) {
+        return NextResponse.json(
+          { error: 'You manage more than one calendar — choose which calendar to update (calendar_id in the request body).' },
+          { status: 400 },
+        );
+      }
+      practitionerId = assignedPractitionerIds[0];
+    }
 
     const offers = await practitionerOffersService(admin, practitionerId, service_id);
     if (!offers) {

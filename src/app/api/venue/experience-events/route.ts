@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
+import { getVenueStaff, requireManagedCalendarAccess, requireManagedCalendarIds } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { checkExperienceEventBatchLimit } from '@/lib/tier-enforcement';
 import { requireVenueExposesSecondaryModel } from '@/lib/booking/require-venue-secondary-model';
@@ -105,13 +105,12 @@ export async function GET(request: NextRequest) {
   }
 }
 
-/** POST /api/venue/experience-events - create an event with ticket types (admin only). */
+/** POST /api/venue/experience-events - create an event with ticket types (admin or staff on a managed calendar). */
 export async function POST(request: NextRequest) {
   try {
     const supabase = await createClient();
     const staff = await getVenueStaff(supabase);
     if (!staff) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
-    if (!requireAdmin(staff)) return NextResponse.json({ error: 'Forbidden: admin only' }, { status: 403 });
 
     const admin = getSupabaseAdminClient();
     const modelGate = await requireVenueExposesSecondaryModel(admin, staff.venue_id, 'event_ticket');
@@ -143,6 +142,16 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    if (staff.role !== 'admin' && new_calendar_name) {
+      return NextResponse.json(
+        {
+          error:
+            'Only venue admins can create new calendar columns. Pick an existing calendar or ask an admin.',
+        },
+        { status: 403 },
+      );
+    }
+
     let resolvedCalendarId: string | null | undefined;
     if (new_calendar_name) {
       const created = await createTeamCalendarForEvent(admin, staff.venue_id, new_calendar_name);
@@ -154,6 +163,40 @@ export async function POST(request: NextRequest) {
       resolvedCalendarId = requestedCalendarId;
     } else {
       resolvedCalendarId = undefined;
+    }
+
+    if (staff.role !== 'admin') {
+      if (!resolvedCalendarId) {
+        return NextResponse.json(
+          { error: 'Choose a calendar column for this event.' },
+          { status: 400 },
+        );
+      }
+      const { data: ucRow } = await admin
+        .from('unified_calendars')
+        .select('id')
+        .eq('venue_id', staff.venue_id)
+        .eq('id', resolvedCalendarId)
+        .maybeSingle();
+      if (!ucRow) {
+        return NextResponse.json(
+          {
+            error:
+              'That staff calendar column was not found for this venue. Add it under Calendar availability first.',
+          },
+          { status: 400 },
+        );
+      }
+      const access = await requireManagedCalendarAccess(
+        admin,
+        staff.venue_id,
+        staff,
+        resolvedCalendarId,
+        'You can only create events on calendars assigned to your account.',
+      );
+      if (!access.ok) {
+        return NextResponse.json({ error: access.error }, { status: 403 });
+      }
     }
 
     const timeErr = validateStartEndTimes(eventFields.start_time, eventFields.end_time);
@@ -282,13 +325,17 @@ export async function POST(request: NextRequest) {
   }
 }
 
-/** PATCH /api/venue/experience-events - update an event (admin only). */
+/**
+ * PATCH /api/venue/experience-events — update an event (JSON body must include `id`).
+ * Venue admins may edit any event. Non-admin staff may edit only events already assigned to a calendar they
+ * manage; they cannot use `new_calendar_name` (admin-only). For PATCH/DELETE by path segment
+ * `/api/venue/experience-events/[id]`, see that route (admin-only on those paths).
+ */
 export async function PATCH(request: NextRequest) {
   try {
     const supabase = await createClient();
     const staff = await getVenueStaff(supabase);
     if (!staff) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
-    if (!requireAdmin(staff)) return NextResponse.json({ error: 'Forbidden: admin only' }, { status: 403 });
 
     const admin = getSupabaseAdminClient();
     const modelGate = await requireVenueExposesSecondaryModel(admin, staff.venue_id, 'event_ticket');
@@ -316,6 +363,12 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json(
         { error: 'Use either calendar_id or new_calendar_name, not both.' },
         { status: 400 },
+      );
+    }
+    if (staff.role !== 'admin' && newCalendarName) {
+      return NextResponse.json(
+        { error: 'Only admins can create new calendars. Ask an admin to create it first.' },
+        { status: 403 },
       );
     }
 
@@ -388,6 +441,35 @@ export async function PATCH(request: NextRequest) {
         ? (resolved.payload.calendar_id as string | null)
         : ex.calendar_id;
 
+    if (staff.role !== 'admin') {
+      const scope = await requireManagedCalendarIds(admin, staff.venue_id, staff);
+      if (!scope.ok) {
+        return NextResponse.json({ error: scope.error }, { status: 403 });
+      }
+      const managedCalendarIds = scope.managedCalendarIds;
+      if (!ex.calendar_id) {
+        return NextResponse.json(
+          {
+            error:
+              'Only venue admins can edit events that are not assigned to a calendar. Ask an admin to assign this event to a calendar first.',
+          },
+          { status: 403 },
+        );
+      }
+      if (!managedCalendarIds.includes(ex.calendar_id)) {
+        return NextResponse.json(
+          { error: 'You can only update events on calendars assigned to your account.' },
+          { status: 403 },
+        );
+      }
+      if (mergedCalendarId && !managedCalendarIds.includes(mergedCalendarId)) {
+        return NextResponse.json(
+          { error: 'You can only assign events to calendars assigned to your account.' },
+          { status: 403 },
+        );
+      }
+    }
+
     if (mergedCalendarId) {
       const conflict = await assertExperienceEventWindowFreeOnCalendar(
         admin,
@@ -444,13 +526,12 @@ export async function PATCH(request: NextRequest) {
   }
 }
 
-/** DELETE /api/venue/experience-events - delete an event (admin only). */
+/** DELETE /api/venue/experience-events - delete an event (admin, or staff if event is on a calendar they manage). */
 export async function DELETE(request: NextRequest) {
   try {
     const supabase = await createClient();
     const staff = await getVenueStaff(supabase);
     if (!staff) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
-    if (!requireAdmin(staff)) return NextResponse.json({ error: 'Forbidden: admin only' }, { status: 403 });
 
     const { id } = await request.json();
     if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 });
@@ -458,6 +539,44 @@ export async function DELETE(request: NextRequest) {
     const admin = getSupabaseAdminClient();
     const modelGate = await requireVenueExposesSecondaryModel(admin, staff.venue_id, 'event_ticket');
     if (!modelGate.ok) return modelGate.response;
+
+    const { data: eventRow, error: evErr } = await admin
+      .from('experience_events')
+      .select('id, calendar_id')
+      .eq('id', id)
+      .eq('venue_id', staff.venue_id)
+      .maybeSingle();
+
+    if (evErr) {
+      console.error('DELETE /api/venue/experience-events lookup:', evErr);
+      return NextResponse.json({ error: 'Failed to load event' }, { status: 500 });
+    }
+    if (!eventRow) {
+      return NextResponse.json({ error: 'Event not found' }, { status: 404 });
+    }
+
+    if (staff.role !== 'admin') {
+      const calId = (eventRow as { calendar_id: string | null }).calendar_id;
+      if (!calId) {
+        return NextResponse.json(
+          {
+            error:
+              'Only venue admins can delete events that are not assigned to a calendar. Ask an admin to assign this event to a calendar first, or ask an admin to delete it.',
+          },
+          { status: 403 },
+        );
+      }
+      const access = await requireManagedCalendarAccess(
+        admin,
+        staff.venue_id,
+        staff,
+        calId,
+        'You can only delete events on calendars assigned to your account.',
+      );
+      if (!access.ok) {
+        return NextResponse.json({ error: access.error }, { status: 403 });
+      }
+    }
 
     const canDelete = await assertExperienceEventDeletable(admin, staff.venue_id, id);
     if (!canDelete.ok) {

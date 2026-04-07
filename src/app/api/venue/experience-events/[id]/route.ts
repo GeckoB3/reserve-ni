@@ -36,12 +36,14 @@ const eventSchema = z.object({
 });
 
 /**
- * GET /api/venue/experience-events/[id] - single event with ticket types.
- * PATCH /api/venue/experience-events/[id] - update event (admin).
- * DELETE /api/venue/experience-events/[id] - delete event (admin).
+ * GET /api/venue/experience-events/[id] — single event with ticket types (any authenticated venue staff).
  *
- * Behaviour matches the collection `/api/venue/experience-events` PATCH/DELETE (shared guards in
- * `lib/experience-events/experience-event-guards.ts`). The dashboard uses the collection route.
+ * PATCH and DELETE on this path are admin-only. Non-admin staff must use the collection routes instead:
+ * - PATCH `/api/venue/experience-events` with `{ id, ... }` for updates when the event is on a managed calendar
+ * - DELETE `/api/venue/experience-events` with `{ id }` for deletes under the same rules
+ *
+ * Calling PATCH/DELETE here as non-admin returns 403 by design. Shared guards live in
+ * `lib/experience-events/experience-event-guards.ts`.
  */
 export async function GET(
   _request: NextRequest,

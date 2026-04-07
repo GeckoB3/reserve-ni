@@ -14,6 +14,25 @@ import {
 } from '@/lib/booking/schedule-calendar-eligibility';
 import { isRestaurantTableProductTier } from '@/lib/tier-enforcement';
 
+/**
+ * Sidebar visibility matrix (maintainers: keep in sync with route guards and `lib/booking/schedule-calendar-eligibility.ts`).
+ *
+ * **Tier:** `venues.pricing_tier` — restaurant | founding → table SKU (`isRestaurantTableProductTier`); otherwise appointments SKU.
+ *
+ * **All roles:** Home, New Booking, Support, external booking page (if slug). Staff and admin see the same links unless noted.
+ *
+ * **Admin only:** Dining Availability (`/dashboard/availability`), Reports. Matches redirects on those pages.
+ *
+ * **Staff:** Settings link → label **Account**; page is account-only (`settings/page.tsx`). Reports and Dining Availability are omitted from nav.
+ *
+ * **Restaurant/founding + table primary:** Day Sheet + Reservations grouped (when not using table-management bundle); optional Table Grid + Floor Plan under Reservations when `table_management_enabled`. Injected **Calendar** (`/dashboard/calendar`) when `isVenueScheduleCalendarEligible`.
+ *
+ * **Calendar Availability** (`/dashboard/calendar-availability`): when `shouldShowAppointmentAvailabilitySettings` (unified/practitioner primary, or C/D/E primary/secondary).
+ *
+ * **Model links:** Services, Events, Classes, Resources from `MODEL_NAV_ITEMS` + `mergeModelNavEntries` by primary and `enabled_models`.
+ *
+ * **Waitlist:** only when `booking_model === 'table_reservation'`.
+ */
 type NavItem = { href: string; label: string; icon: React.ComponentType<{ className?: string }> };
 
 const BASE_NAV_ITEMS: NavItem[] = [
@@ -119,6 +138,12 @@ export function DashboardSidebar({
       return true;
     });
 
+    if (!isAdmin) {
+      items = items.map((item) =>
+        item.href === '/dashboard/settings' ? { ...item, label: 'Account' } : item,
+      );
+    }
+
     // Rename nav items for appointment businesses; broader labels when secondaries are enabled.
     const hasSecondaryModels = enabledModels.length > 0;
     if (isAppointment) {
@@ -187,13 +212,13 @@ export function DashboardSidebar({
   return (
     <>
       {/* Mobile top bar */}
-      <div className="lg:hidden fixed top-0 left-0 right-0 z-40 flex items-center justify-between border-b border-slate-200 bg-white px-4 py-3">
+      <div className="lg:hidden fixed top-0 left-0 right-0 z-40 flex items-center justify-between border-b border-slate-200 bg-white px-4 py-3 pt-[calc(0.75rem+env(safe-area-inset-top,0px))]">
         <div className="flex items-center gap-3">
           <img src="/Logo.png" alt="Reserve NI" className="h-7 w-auto" />
         </div>
         <button
           onClick={() => setMobileOpen(!mobileOpen)}
-          className="rounded-lg p-2 text-slate-500 hover:bg-slate-100"
+          className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg p-2 text-slate-500 hover:bg-slate-100"
           aria-label="Toggle navigation"
         >
           {mobileOpen ? <XIcon /> : <MenuIcon />}
@@ -207,10 +232,10 @@ export function DashboardSidebar({
 
       {/* Sidebar */}
       <aside className={`
-        fixed top-0 left-0 z-40 h-full w-64 flex flex-col border-r border-slate-200 bg-white
+        fixed top-0 left-0 z-40 flex h-[100dvh] w-64 flex-col border-r border-slate-200 bg-white
         transition-transform duration-200 ease-in-out
         ${mobileOpen ? 'translate-x-0' : '-translate-x-full'}
-        lg:translate-x-0 lg:static lg:z-auto
+        lg:h-full lg:min-h-0 lg:translate-x-0 lg:static lg:self-stretch lg:z-auto
       `}>
         {/* Brand */}
         <div className="border-b border-slate-100 px-5 py-4">
@@ -222,26 +247,7 @@ export function DashboardSidebar({
           {navItems.map((item) => {
             if (item.href === '/dashboard/bookings' && !showTableManagementNav) {
               if (isRestaurantTablePrimary) {
-                /** When schedule calendar is on, Calendar is a separate nav item (after Reservations, before New Booking). */
-                if (calendarEligible) {
-                  return (
-                    <Link
-                      key="reservations-only"
-                      href={item.href}
-                      onClick={() => setMobileOpen(false)}
-                      className={`
-                      flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors
-                      ${isActive(item.href)
-                        ? 'bg-brand-50 text-brand-700'
-                        : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
-                      }
-                    `}
-                    >
-                      <item.icon className={`h-5 w-5 flex-shrink-0 ${isActive(item.href) ? 'text-brand-600' : 'text-slate-400'}`} />
-                      {item.label}
-                    </Link>
-                  );
-                }
+                /** Day Sheet + Reservations: restaurant table venues (with or without schedule calendar secondaries). */
                 const daySheetActive = pathname.startsWith('/dashboard/day-sheet');
                 return (
                   <div key="reservations-with-day-sheet" className="space-y-1">
@@ -433,7 +439,7 @@ export function DashboardSidebar({
         </div>
 
         {/* Footer */}
-        <div className="border-t border-slate-100 px-4 py-4 space-y-3">
+        <div className="border-t border-slate-100 px-4 py-4 pb-[max(1rem,env(safe-area-inset-bottom,0px))] space-y-3">
           <div className="flex items-center gap-3">
             <div className="flex h-8 w-8 items-center justify-center rounded-full bg-brand-100 text-xs font-medium text-brand-700">
               {(staffName ?? email).charAt(0).toUpperCase()}

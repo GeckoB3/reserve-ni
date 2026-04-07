@@ -23,8 +23,10 @@ interface ClassTimetableReadOnlyCalendarProps {
   classTypes: ReadOnlyCalendarClassType[];
   instances: ReadOnlyCalendarInstance[];
   isAdmin?: boolean;
-  /** When set, session chips are clickable to edit (admin only). */
+  /** When set, session chips may be clickable to edit. */
   onEditInstance?: (inst: ReadOnlyCalendarInstance) => void;
+  /** If set, only matching instances are clickable (e.g. staff scoped to their calendar). */
+  canEditInstance?: (inst: ReadOnlyCalendarInstance) => boolean;
   onOpenSchedule?: () => void;
 }
 
@@ -36,6 +38,7 @@ export function ClassTimetableReadOnlyCalendar({
   instances,
   isAdmin = false,
   onEditInstance,
+  canEditInstance,
   onOpenSchedule,
 }: ClassTimetableReadOnlyCalendarProps) {
   const now = new Date();
@@ -78,7 +81,11 @@ export function ClassTimetableReadOnlyCalendar({
   const grid = useMemo(() => monthGrid(viewYear, viewMonth), [viewYear, viewMonth]);
   const todayIso = new Date().toISOString().slice(0, 10);
 
-  const canEdit = isAdmin && typeof onEditInstance === 'function';
+  const canClickInstance = (inst: ReadOnlyCalendarInstance) => {
+    if (typeof onEditInstance !== 'function') return false;
+    if (canEditInstance) return canEditInstance(inst);
+    return Boolean(isAdmin);
+  };
 
   return (
     <section className="rounded-xl border border-slate-200 bg-white shadow-sm">
@@ -207,7 +214,7 @@ export function ClassTimetableReadOnlyCalendar({
                         borderLeftColor: accent,
                       };
 
-                      if (canEdit) {
+                      if (canClickInstance(inst)) {
                         return (
                           <button
                             key={inst.id}

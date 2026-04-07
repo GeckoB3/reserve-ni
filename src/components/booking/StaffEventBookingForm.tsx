@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
 import { defaultPhoneCountryForVenueCurrency } from '@/lib/phone/default-country';
 import { ClassOfferingsCalendar } from './ClassOfferingsCalendar';
+import { formatBookablePricePence } from '@/lib/booking/format-price-display';
 
 interface EventOfferingSummary {
   series_key: string;
@@ -346,8 +347,7 @@ export function StaffEventBookingForm({
                 <div>
                   <div className="text-sm font-medium text-slate-800">{tt.name}</div>
                   <div className="text-xs text-slate-500">
-                    {sym}
-                    {(tt.price_pence / 100).toFixed(2)} · {tt.remaining} left
+                    {formatBookablePricePence(tt.price_pence, sym)} · {tt.remaining} left
                   </div>
                 </div>
                 <input
@@ -367,8 +367,7 @@ export function StaffEventBookingForm({
 
           {totalTickets > 0 && (
             <p className="mt-3 text-sm text-slate-600">
-              Total: {totalTickets} ticket{totalTickets === 1 ? '' : 's'} · {sym}
-              {(totalPricePence / 100).toFixed(2)}
+              Total: {totalTickets} ticket{totalTickets === 1 ? '' : 's'} · {formatBookablePricePence(totalPricePence, sym)}
             </p>
           )}
 
@@ -398,8 +397,7 @@ export function StaffEventBookingForm({
             <div className="mt-2 font-semibold text-slate-900">{selectedOccurrence.event_name}</div>
             <div className="text-slate-600">
               {selectedOccurrence.event_date} at {timeForApi(selectedOccurrence.start_time)} · {totalTickets} ticket
-              {totalTickets !== 1 ? 's' : ''} · {sym}
-              {(totalPricePence / 100).toFixed(2)}
+              {totalTickets !== 1 ? 's' : ''} · {formatBookablePricePence(totalPricePence, sym)}
             </div>
           </div>
 

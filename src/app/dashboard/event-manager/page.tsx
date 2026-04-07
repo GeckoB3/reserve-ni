@@ -1,6 +1,6 @@
 import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
-import { getDashboardStaff } from '@/lib/venue-auth';
+import { getDashboardStaff, getStaffManagedCalendarIds } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { normalizePublicBaseUrl } from '@/lib/public-base-url';
 import { ToastProvider } from '@/components/ui/Toast';
@@ -32,6 +32,10 @@ export default async function EventManagerPage() {
   const slug = (venue?.slug as string) ?? '';
   const base = normalizePublicBaseUrl(process.env.NEXT_PUBLIC_BASE_URL);
   const publicBookingUrl = slug ? `${base}/book/${encodeURIComponent(slug)}` : base;
+  const linkedPractitionerIds =
+    staff.role === 'admin' || !staff.id
+      ? []
+      : await getStaffManagedCalendarIds(admin, staff.venue_id, staff.id);
 
   return (
     <ToastProvider>
@@ -40,6 +44,7 @@ export default async function EventManagerPage() {
           <EventManagerView
             venueId={staff.venue_id}
             isAdmin={staff.role === 'admin'}
+            linkedPractitionerIds={linkedPractitionerIds}
             currency={currency}
             publicBookingUrl={publicBookingUrl}
             stripeConnected={!!(venue as { stripe_account_id?: string | null })?.stripe_account_id}

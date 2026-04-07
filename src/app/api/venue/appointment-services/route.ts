@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
+import {
+  filterIdsToManagedCalendars,
+  getVenueStaff,
+  requireManagedCalendarIds,
+} from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import {
   hasBlockingBookingsRemovingServicesFromCalendarLegacy,
@@ -8,11 +12,9 @@ import {
   SERVICE_REMOVAL_BLOCKED_BY_BOOKINGS,
 } from '@/lib/venue/service-calendar-removal';
 import { z } from 'zod';
-import type { ClassPaymentRequirement } from '@/types/booking-models';
-import type { BookingModel } from '@/types/booking-models';
-import { normalizeEnabledModels } from '@/lib/booking/enabled-models';
-import { venueUsesUnifiedAppointmentData } from '@/lib/booking/unified-scheduling';
+import type { ClassPaymentRequirement, PractitionerService } from '@/types/booking-models';
 import { ensureUnifiedMirrorForPractitionerId } from '@/lib/class-instances/instructor-calendar-block';
+import { venueUsesUnifiedAppointmentServiceData } from '@/lib/booking/uses-unified-appointment-data';
 
 const staffMaySchema = {
   staff_may_customize_name: z.boolean().optional(),
@@ -25,6 +27,15 @@ const staffMaySchema = {
 };
 
 const paymentRequirementSchema = z.enum(['none', 'deposit', 'full_payment']);
+const STAFF_SERVICE_FIELD_PERMISSIONS = {
+  name: 'staff_may_customize_name',
+  description: 'staff_may_customize_description',
+  duration_minutes: 'staff_may_customize_duration',
+  buffer_minutes: 'staff_may_customize_buffer',
+  price_pence: 'staff_may_customize_price',
+  deposit_pence: 'staff_may_customize_deposit',
+  colour: 'staff_may_customize_colour',
+} as const;
 
 const serviceSchema = z
   .object({
@@ -70,6 +81,47 @@ const serviceSchema = z
     }
   });
 
+const servicePatchSchema = z
+  .object({
+    name: z.string().min(1).max(200).optional(),
+    description: z.string().max(1000).optional(),
+    duration_minutes: z.number().int().min(5).max(480).optional(),
+    buffer_minutes: z.number().int().min(0).max(120).optional(),
+    price_pence: z.number().int().min(0).optional(),
+    deposit_pence: z.number().int().min(0).optional().nullable(),
+    payment_requirement: paymentRequirementSchema.optional(),
+    colour: z.string().max(20).optional(),
+    is_active: z.boolean().optional(),
+    sort_order: z.number().int().optional(),
+    max_advance_booking_days: z.number().int().min(1).max(365).optional(),
+    min_booking_notice_hours: z.number().int().min(0).max(168).optional(),
+    cancellation_notice_hours: z.number().int().min(0).max(168).optional(),
+    allow_same_day_booking: z.boolean().optional(),
+    ...staffMaySchema,
+  })
+  .superRefine((data, ctx) => {
+    if (data.payment_requirement === 'deposit') {
+      const d = data.deposit_pence;
+      if (d == null || d <= 0) {
+        ctx.addIssue({
+          code: 'custom',
+          message: 'Enter a deposit amount greater than zero',
+          path: ['deposit_pence'],
+        });
+      }
+    }
+    if (data.payment_requirement === 'full_payment') {
+      const p = data.price_pence;
+      if (p == null || p <= 0) {
+        ctx.addIssue({
+          code: 'custom',
+          message: 'Set a price when charging full payment online',
+          path: ['price_pence'],
+        });
+      }
+    }
+  });
+
 function normalizeServicePaymentFields(data: {
   payment_requirement?: ClassPaymentRequirement;
   deposit_pence?: number | null;
@@ -94,6 +146,28 @@ function mapServiceItemRowForDashboard(row: Record<string, unknown>): Record<str
     staff_may_customize_deposit: (row.staff_may_customize_deposit as boolean | undefined) ?? false,
     staff_may_customize_colour: (row.staff_may_customize_colour as boolean | undefined) ?? false,
   };
+}
+
+const STAFF_MAY_PERMISSION_KEYS = Object.keys(staffMaySchema) as (keyof typeof staffMaySchema)[];
+
+function buildStaffEditableServicePatch(
+  service: Record<string, unknown>,
+  patch: Record<string, unknown>,
+): { ok: true; updates: Record<string, unknown> } | { ok: false; error: string } {
+  const updates: Record<string, unknown> = {};
+
+  for (const [field, permission] of Object.entries(STAFF_SERVICE_FIELD_PERMISSIONS)) {
+    if (!Object.prototype.hasOwnProperty.call(patch, field)) continue;
+    if (!Boolean(service[permission])) {
+      return {
+        ok: false,
+        error: `You are not allowed to change ${field.replace(/_/g, ' ')} for this service.`,
+      };
+    }
+    updates[field] = patch[field];
+  }
+
+  return { ok: true, updates };
 }
 
 /**
@@ -218,18 +292,7 @@ async function assertPractitionerIdsBelongToVenueLegacy(
 }
 
 /** USE stores services in `service_items` when primary is unified_scheduling or it is enabled as a secondary. */
-async function venueUsesUnifiedServiceItems(
-  admin: ReturnType<typeof getSupabaseAdminClient>,
-  venueId: string,
-): Promise<boolean> {
-  const { data } = await admin.from('venues').select('booking_model, enabled_models').eq('id', venueId).maybeSingle();
-  const primary = ((data as { booking_model?: string } | null)?.booking_model as BookingModel) ?? 'table_reservation';
-  const enabled = normalizeEnabledModels(
-    (data as { enabled_models?: unknown } | null)?.enabled_models,
-    primary,
-  );
-  return venueUsesUnifiedAppointmentData(primary, enabled);
-}
+const venueUsesUnifiedServiceItems = venueUsesUnifiedAppointmentServiceData;
 
 /** GET /api/venue/appointment-services - list appointment services for the venue. */
 export async function GET() {
@@ -330,13 +393,12 @@ export async function GET() {
   }
 }
 
-/** POST /api/venue/appointment-services - create an appointment service (admin only). */
+/** POST /api/venue/appointment-services - create an appointment service (admin or staff on managed calendars). */
 export async function POST(request: NextRequest) {
   try {
     const supabase = await createClient();
     const staff = await getVenueStaff(supabase);
     if (!staff) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
-    if (!requireAdmin(staff)) return NextResponse.json({ error: 'Forbidden: admin only' }, { status: 403 });
 
     const body = await request.json();
     const parsed = serviceSchema.safeParse(body);
@@ -347,6 +409,26 @@ export async function POST(request: NextRequest) {
     const admin = getSupabaseAdminClient();
     const useUnified = await venueUsesUnifiedServiceItems(admin, staff.venue_id);
     const practitionerIdsForLinks = normalizePractitionerIdsInput(body.practitioner_ids) ?? [];
+
+    if (staff.role !== 'admin') {
+      const scope = await requireManagedCalendarIds(admin, staff.venue_id, staff);
+      if (!scope.ok) {
+        return NextResponse.json({ error: scope.error }, { status: 403 });
+      }
+      if (practitionerIdsForLinks.length === 0) {
+        return NextResponse.json(
+          { error: 'Choose at least one calendar column to offer this service on.' },
+          { status: 400 },
+        );
+      }
+      const { rejectedIds } = filterIdsToManagedCalendars(scope.managedCalendarIds, practitionerIdsForLinks);
+      if (rejectedIds.length > 0) {
+        return NextResponse.json(
+          { error: 'You can only link services to calendars assigned to your account.' },
+          { status: 403 },
+        );
+      }
+    }
 
     if (useUnified) {
       if (practitionerIdsForLinks.length > 0) {
@@ -367,6 +449,7 @@ export async function POST(request: NextRequest) {
         payment_requirement: parsed.data.payment_requirement,
         deposit_pence: parsed.data.deposit_pence,
       });
+      const staffMayAllTrue = staff.role !== 'admin';
       const insertRow = {
         venue_id: staff.venue_id,
         name: parsed.data.name,
@@ -382,13 +465,13 @@ export async function POST(request: NextRequest) {
         colour: parsed.data.colour ?? '#3B82F6',
         is_active: parsed.data.is_active ?? true,
         sort_order: parsed.data.sort_order ?? 0,
-        staff_may_customize_name: parsed.data.staff_may_customize_name ?? false,
-        staff_may_customize_description: parsed.data.staff_may_customize_description ?? false,
-        staff_may_customize_duration: parsed.data.staff_may_customize_duration ?? false,
-        staff_may_customize_buffer: parsed.data.staff_may_customize_buffer ?? false,
-        staff_may_customize_price: parsed.data.staff_may_customize_price ?? false,
-        staff_may_customize_deposit: parsed.data.staff_may_customize_deposit ?? false,
-        staff_may_customize_colour: parsed.data.staff_may_customize_colour ?? false,
+        staff_may_customize_name: staffMayAllTrue ? true : (parsed.data.staff_may_customize_name ?? false),
+        staff_may_customize_description: staffMayAllTrue ? true : (parsed.data.staff_may_customize_description ?? false),
+        staff_may_customize_duration: staffMayAllTrue ? true : (parsed.data.staff_may_customize_duration ?? false),
+        staff_may_customize_buffer: staffMayAllTrue ? true : (parsed.data.staff_may_customize_buffer ?? false),
+        staff_may_customize_price: staffMayAllTrue ? true : (parsed.data.staff_may_customize_price ?? false),
+        staff_may_customize_deposit: staffMayAllTrue ? true : (parsed.data.staff_may_customize_deposit ?? false),
+        staff_may_customize_colour: staffMayAllTrue ? true : (parsed.data.staff_may_customize_colour ?? false),
         max_advance_booking_days: parsed.data.max_advance_booking_days ?? 90,
         min_booking_notice_hours: parsed.data.min_booking_notice_hours ?? 1,
         cancellation_notice_hours: parsed.data.cancellation_notice_hours ?? 48,
@@ -467,57 +550,113 @@ export async function POST(request: NextRequest) {
   }
 }
 
-/** PATCH /api/venue/appointment-services - update a service (admin only). */
+/** PATCH /api/venue/appointment-services - admin: full edit; staff: assigned calendars only. */
 export async function PATCH(request: NextRequest) {
   try {
     const supabase = await createClient();
     const staff = await getVenueStaff(supabase);
     if (!staff) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
-    if (!requireAdmin(staff)) return NextResponse.json({ error: 'Forbidden: admin only' }, { status: 403 });
 
     const body = await request.json();
     const { id, practitioner_ids: rawPractitionerIds, ...rest } = body;
     const practitioner_ids = normalizePractitionerIdsInput(rawPractitionerIds);
     if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 });
 
-    const parsed = serviceSchema.partial().safeParse(rest);
+    const parsed = servicePatchSchema.safeParse(rest);
     if (!parsed.success) {
       return NextResponse.json({ error: 'Invalid request', details: parsed.error.flatten() }, { status: 400 });
+    }
+
+    if (staff.role !== 'admin') {
+      for (const key of STAFF_MAY_PERMISSION_KEYS) {
+        if (Object.prototype.hasOwnProperty.call(rest, key)) {
+          return NextResponse.json(
+            { error: 'Only venue admins can change staff permission settings for services.' },
+            { status: 403 },
+          );
+        }
+      }
     }
 
     const admin = getSupabaseAdminClient();
     const useUnified = await venueUsesUnifiedServiceItems(admin, staff.venue_id);
 
     if (useUnified) {
-      if (practitioner_ids !== undefined && practitioner_ids.length > 0) {
+      const { data: serviceRow, error: serviceErr } = await admin
+        .from('service_items')
+        .select('*')
+        .eq('id', id)
+        .eq('venue_id', staff.venue_id)
+        .maybeSingle();
+
+      if (serviceErr || !serviceRow) {
+        return NextResponse.json({ error: 'Service not found' }, { status: 404 });
+      }
+
+      let managedScope: Awaited<ReturnType<typeof requireManagedCalendarIds>> | null = null;
+      let requestedManagedCalendarIds = practitioner_ids;
+      let updatePayload: Record<string, unknown> = { ...parsed.data };
+
+      if (staff.role !== 'admin') {
+        managedScope = await requireManagedCalendarIds(admin, staff.venue_id, staff);
+        if (!managedScope.ok) {
+          return NextResponse.json({ error: managedScope.error }, { status: 403 });
+        }
+
+        const filteredPatch = buildStaffEditableServicePatch(serviceRow as Record<string, unknown>, updatePayload);
+        if (!filteredPatch.ok) {
+          return NextResponse.json({ error: filteredPatch.error }, { status: 403 });
+        }
+        updatePayload = filteredPatch.updates;
+
+        if (requestedManagedCalendarIds !== undefined) {
+          const { allowedIds, rejectedIds } = filterIdsToManagedCalendars(
+            managedScope.managedCalendarIds,
+            requestedManagedCalendarIds,
+          );
+          if (rejectedIds.length > 0) {
+            return NextResponse.json(
+              { error: 'You can only change service links on calendars assigned to your account.' },
+              { status: 403 },
+            );
+          }
+          requestedManagedCalendarIds = allowedIds;
+        }
+      }
+
+      if (requestedManagedCalendarIds !== undefined && requestedManagedCalendarIds.length > 0) {
         const mirrorOk = await ensureUnifiedMirrorsForAppointmentCalendarIds(
           admin,
           staff.venue_id,
-          practitioner_ids,
+          requestedManagedCalendarIds,
         );
         if (!mirrorOk.ok) {
           return NextResponse.json({ error: mirrorOk.message }, { status: 400 });
         }
-        const calCheck = await assertCalendarIdsBelongToVenueUnified(admin, staff.venue_id, practitioner_ids);
+        const calCheck = await assertCalendarIdsBelongToVenueUnified(admin, staff.venue_id, requestedManagedCalendarIds);
         if (!calCheck.ok) {
           return NextResponse.json({ error: calCheck.message }, { status: 400 });
         }
       }
 
-      if (practitioner_ids !== undefined) {
-        const { data: existingLinks, error: existingErr } = await admin
-          .from('calendar_service_assignments')
-          .select('calendar_id')
-          .eq('service_item_id', id);
+      const { data: existingLinks, error: existingErr } = await admin
+        .from('calendar_service_assignments')
+        .select('*')
+        .eq('service_item_id', id);
 
-        if (existingErr) {
-          console.error('PATCH /api/venue/appointment-services (existing calendar links):', existingErr.message);
-          return NextResponse.json({ error: 'Could not verify service calendar links.' }, { status: 500 });
-        }
+      if (existingErr) {
+        console.error('PATCH /api/venue/appointment-services (existing calendar links):', existingErr.message);
+        return NextResponse.json({ error: 'Could not verify service calendar links.' }, { status: 500 });
+      }
 
-        const prev = new Set((existingLinks ?? []).map((r) => r.calendar_id as string));
-        const next = new Set(practitioner_ids);
-        const removedCalendars = [...prev].filter((cid) => !next.has(cid));
+      if (requestedManagedCalendarIds !== undefined) {
+        const currentLinks = (existingLinks ?? []) as Array<Record<string, unknown>>;
+        const currentCalendarIds = currentLinks.map((r) => r.calendar_id as string);
+        const currentManagedIds =
+          staff.role === 'admin'
+            ? currentCalendarIds
+            : currentCalendarIds.filter((cid) => managedScope?.ok && managedScope.managedCalendarIds.includes(cid));
+        const removedCalendars = currentManagedIds.filter((cid) => !requestedManagedCalendarIds.includes(cid));
 
         for (const cid of removedCalendars) {
           const check = await hasBlockingBookingsRemovingServicesFromCalendarUnified(admin, {
@@ -532,9 +671,35 @@ export async function PATCH(request: NextRequest) {
             return NextResponse.json({ error: SERVICE_REMOVAL_BLOCKED_BY_BOOKINGS }, { status: 409 });
           }
         }
+
+        const preservedOutsideScope =
+          staff.role === 'admin'
+            ? []
+            : currentLinks.filter((r) => !managedScope?.ok || !managedScope.managedCalendarIds.includes(r.calendar_id as string));
+        const preserveByCalendar = new Map(currentLinks.map((r) => [r.calendar_id as string, r] as const));
+        const finalLinks = [
+          ...preservedOutsideScope,
+          ...requestedManagedCalendarIds.map((calendarId) => {
+            const prev = preserveByCalendar.get(calendarId);
+            return {
+              calendar_id: calendarId,
+              service_item_id: id,
+              custom_duration_minutes: (prev?.custom_duration_minutes as number | null | undefined) ?? null,
+              custom_price_pence: (prev?.custom_price_pence as number | null | undefined) ?? null,
+            };
+          }),
+        ];
+
+        await admin.from('calendar_service_assignments').delete().eq('service_item_id', id);
+        if (finalLinks.length > 0) {
+          const { error: linkErr } = await admin.from('calendar_service_assignments').insert(finalLinks);
+          if (linkErr) {
+            console.error('PATCH /api/venue/appointment-services calendar_service_assignments failed:', linkErr);
+            return NextResponse.json({ error: 'Failed to update service links' }, { status: 500 });
+          }
+        }
       }
 
-      const updatePayload: Record<string, unknown> = { ...parsed.data };
       if (parsed.data.payment_requirement !== undefined) {
         const norm = normalizeServicePaymentFields({
           payment_requirement: parsed.data.payment_requirement,
@@ -548,58 +713,95 @@ export async function PATCH(request: NextRequest) {
         updatePayload.deposit_pence = dp > 0 ? dp : null;
       }
 
-      const { data, error } = await admin
-        .from('service_items')
-        .update(updatePayload)
-        .eq('id', id)
-        .eq('venue_id', staff.venue_id)
-        .select()
-        .single();
+      let savedRow = serviceRow as Record<string, unknown>;
+      if (Object.keys(updatePayload).length > 0) {
+        const { data, error } = await admin
+          .from('service_items')
+          .update(updatePayload)
+          .eq('id', id)
+          .eq('venue_id', staff.venue_id)
+          .select()
+          .single();
 
-      if (error) {
-        console.error('PATCH /api/venue/appointment-services (service_items) failed:', error);
-        return NextResponse.json({ error: 'Failed to update service' }, { status: 500 });
-      }
-
-      if (practitioner_ids !== undefined) {
-        await admin.from('calendar_service_assignments').delete().eq('service_item_id', id);
-        if (practitioner_ids.length > 0) {
-          const links = practitioner_ids.map((calendarId: string) => ({
-            calendar_id: calendarId,
-            service_item_id: id,
-          }));
-          const { error: linkErr } = await admin.from('calendar_service_assignments').insert(links);
-          if (linkErr) {
-            console.error('PATCH /api/venue/appointment-services calendar_service_assignments failed:', linkErr);
-            return NextResponse.json({ error: 'Failed to update service links' }, { status: 500 });
-          }
+        if (error) {
+          console.error('PATCH /api/venue/appointment-services (service_items) failed:', error);
+          return NextResponse.json({ error: 'Failed to update service' }, { status: 500 });
         }
+        savedRow = (data as Record<string, unknown>) ?? savedRow;
+      } else if (requestedManagedCalendarIds === undefined) {
+        return NextResponse.json({ error: 'No valid fields to update' }, { status: 400 });
       }
 
-      return NextResponse.json(mapServiceItemRowForDashboard(data as Record<string, unknown>));
+      return NextResponse.json(mapServiceItemRowForDashboard(savedRow));
     }
 
-    if (practitioner_ids !== undefined && practitioner_ids.length > 0) {
-      const pCheck = await assertPractitionerIdsBelongToVenueLegacy(admin, staff.venue_id, practitioner_ids);
+    const { data: serviceRow, error: serviceErr } = await admin
+      .from('appointment_services')
+      .select('*')
+      .eq('id', id)
+      .eq('venue_id', staff.venue_id)
+      .maybeSingle();
+
+    if (serviceErr || !serviceRow) {
+      return NextResponse.json({ error: 'Service not found' }, { status: 404 });
+    }
+
+    let managedScope: Awaited<ReturnType<typeof requireManagedCalendarIds>> | null = null;
+    let requestedPractitionerIds = practitioner_ids;
+    let patchPayload: Record<string, unknown> = { ...parsed.data };
+
+    if (staff.role !== 'admin') {
+      managedScope = await requireManagedCalendarIds(admin, staff.venue_id, staff);
+      if (!managedScope.ok) {
+        return NextResponse.json({ error: managedScope.error }, { status: 403 });
+      }
+
+      const filteredPatch = buildStaffEditableServicePatch(serviceRow as Record<string, unknown>, patchPayload);
+      if (!filteredPatch.ok) {
+        return NextResponse.json({ error: filteredPatch.error }, { status: 403 });
+      }
+      patchPayload = filteredPatch.updates;
+
+      if (requestedPractitionerIds !== undefined) {
+        const { allowedIds, rejectedIds } = filterIdsToManagedCalendars(
+          managedScope.managedCalendarIds,
+          requestedPractitionerIds,
+        );
+        if (rejectedIds.length > 0) {
+          return NextResponse.json(
+            { error: 'You can only change service links on calendars assigned to your account.' },
+            { status: 403 },
+          );
+        }
+        requestedPractitionerIds = allowedIds;
+      }
+    }
+
+    if (requestedPractitionerIds !== undefined && requestedPractitionerIds.length > 0) {
+      const pCheck = await assertPractitionerIdsBelongToVenueLegacy(admin, staff.venue_id, requestedPractitionerIds);
       if (!pCheck.ok) {
         return NextResponse.json({ error: pCheck.message }, { status: 400 });
       }
     }
 
-    if (practitioner_ids !== undefined) {
-      const { data: existingLinks, error: existingErr } = await admin
-        .from('practitioner_services')
-        .select('practitioner_id')
-        .eq('service_id', id);
+    const { data: existingLinks, error: existingErr } = await admin
+      .from('practitioner_services')
+      .select('*')
+      .eq('service_id', id);
 
-      if (existingErr) {
-        console.error('PATCH /api/venue/appointment-services (existing practitioner links):', existingErr.message);
-        return NextResponse.json({ error: 'Could not verify service calendar links.' }, { status: 500 });
-      }
+    if (existingErr) {
+      console.error('PATCH /api/venue/appointment-services (existing practitioner links):', existingErr.message);
+      return NextResponse.json({ error: 'Could not verify service calendar links.' }, { status: 500 });
+    }
 
-      const prev = new Set((existingLinks ?? []).map((r) => r.practitioner_id as string));
-      const next = new Set(practitioner_ids);
-      const removedPractitioners = [...prev].filter((pid) => !next.has(pid));
+    if (requestedPractitionerIds !== undefined) {
+      const currentLinks = (existingLinks ?? []) as PractitionerService[];
+      const currentPractitionerIds = currentLinks.map((r) => r.practitioner_id);
+      const currentManagedIds =
+        staff.role === 'admin'
+          ? currentPractitionerIds
+          : currentPractitionerIds.filter((pid) => managedScope?.ok && managedScope.managedCalendarIds.includes(pid));
+      const removedPractitioners = currentManagedIds.filter((pid) => !requestedPractitionerIds.includes(pid));
 
       for (const pid of removedPractitioners) {
         const check = await hasBlockingBookingsRemovingServicesFromCalendarLegacy(admin, {
@@ -614,9 +816,40 @@ export async function PATCH(request: NextRequest) {
           return NextResponse.json({ error: SERVICE_REMOVAL_BLOCKED_BY_BOOKINGS }, { status: 409 });
         }
       }
+
+      const preservedOutsideScope =
+        staff.role === 'admin'
+          ? []
+          : currentLinks.filter((r) => !managedScope?.ok || !managedScope.managedCalendarIds.includes(r.practitioner_id));
+      const preserveByPractitioner = new Map(currentLinks.map((r) => [r.practitioner_id, r] as const));
+      const finalLinks = [
+        ...preservedOutsideScope,
+        ...requestedPractitionerIds.map((pid) => {
+          const prev = preserveByPractitioner.get(pid);
+          return {
+            practitioner_id: pid,
+            service_id: id,
+            custom_price_pence: prev?.custom_price_pence ?? null,
+            custom_duration_minutes: prev?.custom_duration_minutes ?? null,
+            custom_name: prev?.custom_name ?? null,
+            custom_description: prev?.custom_description ?? null,
+            custom_buffer_minutes: prev?.custom_buffer_minutes ?? null,
+            custom_deposit_pence: prev?.custom_deposit_pence ?? null,
+            custom_colour: prev?.custom_colour ?? null,
+          };
+        }),
+      ];
+
+      await admin.from('practitioner_services').delete().eq('service_id', id);
+      if (finalLinks.length > 0) {
+        const { error: linkErr } = await admin.from('practitioner_services').insert(finalLinks);
+        if (linkErr) {
+          console.error('PATCH /api/venue/appointment-services practitioner_services failed:', linkErr);
+          return NextResponse.json({ error: 'Failed to update service links' }, { status: 500 });
+        }
+      }
     }
 
-    const patchPayload: Record<string, unknown> = { ...parsed.data };
     if (parsed.data.payment_requirement !== undefined) {
       const norm = normalizeServicePaymentFields({
         payment_requirement: parsed.data.payment_requirement,
@@ -630,54 +863,137 @@ export async function PATCH(request: NextRequest) {
       patchPayload.deposit_pence = dp > 0 ? dp : null;
     }
 
-    const { data, error } = await admin
-      .from('appointment_services')
-      .update(patchPayload)
-      .eq('id', id)
-      .eq('venue_id', staff.venue_id)
-      .select()
-      .single();
+    let savedRow = serviceRow as Record<string, unknown>;
+    if (Object.keys(patchPayload).length > 0) {
+      const { data, error } = await admin
+        .from('appointment_services')
+        .update(patchPayload)
+        .eq('id', id)
+        .eq('venue_id', staff.venue_id)
+        .select()
+        .single();
 
-    if (error) {
-      console.error('PATCH /api/venue/appointment-services failed:', error);
-      return NextResponse.json({ error: 'Failed to update service' }, { status: 500 });
-    }
-
-    if (practitioner_ids !== undefined) {
-      await admin.from('practitioner_services').delete().eq('service_id', id);
-      if (practitioner_ids.length > 0) {
-        const links = practitioner_ids.map((pid: string) => ({
-          practitioner_id: pid,
-          service_id: id,
-        }));
-        const { error: linkErr } = await admin.from('practitioner_services').insert(links);
-        if (linkErr) {
-          console.error('PATCH /api/venue/appointment-services practitioner_services failed:', linkErr);
-          return NextResponse.json({ error: 'Failed to update service links' }, { status: 500 });
-        }
+      if (error) {
+        console.error('PATCH /api/venue/appointment-services failed:', error);
+        return NextResponse.json({ error: 'Failed to update service' }, { status: 500 });
       }
+      savedRow = (data as Record<string, unknown>) ?? savedRow;
+    } else if (requestedPractitionerIds === undefined) {
+      return NextResponse.json({ error: 'No valid fields to update' }, { status: 400 });
     }
 
-    return NextResponse.json(data);
+    return NextResponse.json(savedRow);
   } catch (err) {
     console.error('PATCH /api/venue/appointment-services failed:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
 
-/** DELETE /api/venue/appointment-services - delete a service (admin only). */
+/** DELETE /api/venue/appointment-services - delete a service (admin, or staff if only on managed calendars). */
 export async function DELETE(request: NextRequest) {
   try {
     const supabase = await createClient();
     const staff = await getVenueStaff(supabase);
     if (!staff) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
-    if (!requireAdmin(staff)) return NextResponse.json({ error: 'Forbidden: admin only' }, { status: 403 });
 
     const { id } = await request.json();
     if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 });
 
     const admin = getSupabaseAdminClient();
     const useUnified = await venueUsesUnifiedServiceItems(admin, staff.venue_id);
+
+    if (staff.role !== 'admin') {
+      const scope = await requireManagedCalendarIds(admin, staff.venue_id, staff);
+      if (!scope.ok) {
+        return NextResponse.json({ error: scope.error }, { status: 403 });
+      }
+
+      if (useUnified) {
+        const { data: row } = await admin
+          .from('service_items')
+          .select('id')
+          .eq('id', id)
+          .eq('venue_id', staff.venue_id)
+          .maybeSingle();
+        if (!row) {
+          return NextResponse.json({ error: 'Service not found' }, { status: 404 });
+        }
+
+        const { data: links, error: linksErr } = await admin
+          .from('calendar_service_assignments')
+          .select('calendar_id')
+          .eq('service_item_id', id);
+        if (linksErr) {
+          console.error('DELETE appointment-services (links):', linksErr);
+          return NextResponse.json({ error: 'Could not verify service calendar links.' }, { status: 500 });
+        }
+        const calIds = [...new Set((links ?? []).map((r) => (r as { calendar_id: string }).calendar_id))];
+        if (calIds.some((cid) => !scope.managedCalendarIds.includes(cid))) {
+          return NextResponse.json(
+            {
+              error:
+                'You can only delete services that are not linked to calendars outside your account. Ask an admin to adjust links first.',
+            },
+            { status: 403 },
+          );
+        }
+        for (const cid of calIds) {
+          const check = await hasBlockingBookingsRemovingServicesFromCalendarUnified(admin, {
+            venueId: staff.venue_id,
+            calendarId: cid,
+            serviceItemIds: [id],
+          });
+          if (check.error) {
+            return NextResponse.json({ error: check.error }, { status: 500 });
+          }
+          if (check.blocked) {
+            return NextResponse.json({ error: SERVICE_REMOVAL_BLOCKED_BY_BOOKINGS }, { status: 409 });
+          }
+        }
+      } else {
+        const { data: row } = await admin
+          .from('appointment_services')
+          .select('id')
+          .eq('id', id)
+          .eq('venue_id', staff.venue_id)
+          .maybeSingle();
+        if (!row) {
+          return NextResponse.json({ error: 'Service not found' }, { status: 404 });
+        }
+
+        const { data: links, error: linksErr } = await admin
+          .from('practitioner_services')
+          .select('practitioner_id')
+          .eq('service_id', id);
+        if (linksErr) {
+          console.error('DELETE appointment-services (practitioner links):', linksErr);
+          return NextResponse.json({ error: 'Could not verify service calendar links.' }, { status: 500 });
+        }
+        const pids = [...new Set((links ?? []).map((r) => (r as { practitioner_id: string }).practitioner_id))];
+        if (pids.some((pid) => !scope.managedCalendarIds.includes(pid))) {
+          return NextResponse.json(
+            {
+              error:
+                'You can only delete services that are not linked to calendars outside your account. Ask an admin to adjust links first.',
+            },
+            { status: 403 },
+          );
+        }
+        for (const pid of pids) {
+          const check = await hasBlockingBookingsRemovingServicesFromCalendarLegacy(admin, {
+            venueId: staff.venue_id,
+            practitionerId: pid,
+            appointmentServiceIds: [id],
+          });
+          if (check.error) {
+            return NextResponse.json({ error: check.error }, { status: 500 });
+          }
+          if (check.blocked) {
+            return NextResponse.json({ error: SERVICE_REMOVAL_BLOCKED_BY_BOOKINGS }, { status: 409 });
+          }
+        }
+      }
+    }
 
     const table = useUnified ? 'service_items' : 'appointment_services';
     const { error } = await admin.from(table).delete().eq('id', id).eq('venue_id', staff.venue_id);

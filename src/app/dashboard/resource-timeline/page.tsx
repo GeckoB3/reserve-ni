@@ -1,6 +1,6 @@
 import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
-import { getDashboardStaff } from '@/lib/venue-auth';
+import { getDashboardStaff, getStaffManagedCalendarIds } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { ToastProvider } from '@/components/ui/Toast';
 import { ResourceTimelineView } from './ResourceTimelineView';
@@ -26,12 +26,21 @@ export default async function ResourceTimelinePage() {
   const admin = getSupabaseAdminClient();
   const { data: venue } = await admin.from('venues').select('currency').eq('id', staff.venue_id).single();
   const currency = (venue?.currency as string) ?? 'GBP';
+  const linkedPractitionerIds =
+    staff.role === 'admin' || !staff.id
+      ? []
+      : await getStaffManagedCalendarIds(admin, staff.venue_id, staff.id);
 
   return (
     <ToastProvider>
       <div className="p-4 md:p-6 lg:p-8">
         <div className="mx-auto max-w-[1600px]">
-          <ResourceTimelineView venueId={staff.venue_id} isAdmin={staff.role === 'admin'} currency={currency} />
+          <ResourceTimelineView
+            venueId={staff.venue_id}
+            isAdmin={staff.role === 'admin'}
+            linkedPractitionerIds={linkedPractitionerIds}
+            currency={currency}
+          />
         </div>
       </div>
     </ToastProvider>

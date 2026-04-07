@@ -6,6 +6,7 @@ import { defaultNewUnifiedCalendarWorkingHours } from '@/lib/availability/practi
 import { mergeAppointmentServiceWithPractitionerLink } from '@/lib/appointments/merge-service-with-overrides';
 import type { AppointmentService, ClassPaymentRequirement, PractitionerService } from '@/types/booking-models';
 import { DEFAULT_ENTITY_BOOKING_WINDOW } from '@/lib/booking/entity-booking-window';
+import { formatPricePenceForServiceCatalog } from '@/lib/booking/format-price-display';
 import { HelpTooltip } from '@/components/dashboard/HelpTooltip';
 import { StaffServiceOverrideModal } from './StaffServiceOverrideModal';
 
@@ -146,8 +147,7 @@ export function AppointmentServicesView({
   const sym = currency === 'EUR' ? '€' : '£';
 
   function formatPrice(pence: number | null): string {
-    if (pence == null) return 'POA';
-    return `${sym}${(pence / 100).toFixed(2)}`;
+    return formatPricePenceForServiceCatalog(pence, sym);
   }
 
   const [services, setServices] = useState<Service[]>([]);
@@ -160,6 +160,7 @@ export function AppointmentServicesView({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [linkSavingKey, setLinkSavingKey] = useState<string | null>(null);
   const [overrideService, setOverrideService] = useState<Service | null>(null);
   const [overrideCalendarId, setOverrideCalendarId] = useState<string | null>(null);
   const [showAddCalendarModal, setShowAddCalendarModal] = useState(false);
@@ -204,6 +205,15 @@ export function AppointmentServicesView({
     [practitioners],
   );
 
+  /** Staff can only link new or edited services to calendars they manage. */
+  const calendarsForServiceForm = useMemo(
+    () =>
+      isAdmin
+        ? allocatableCalendars
+        : allocatableCalendars.filter((p) => linkedPractitionerIds.includes(p.id)),
+    [isAdmin, allocatableCalendars, linkedPractitionerIds],
+  );
+
   /** IDs still on the service but not in the allocatable list (inactive calendar, etc.). */
   const lingeringCalendarLinks = useMemo(
     () =>
@@ -236,10 +246,42 @@ export function AppointmentServicesView({
     if (linkedPractitionerIds.length === 0) return false;
     for (const pid of linkedPractitionerIds) {
       const mine = links.filter((l) => l.practitioner_id === pid);
-      if (mine.length === 0) return true;
+      if (mine.length === 0) continue;
       if (mine.some((l) => l.service_id === serviceId)) return true;
     }
     return false;
+  }
+
+  function calendarOffersService(calendarId: string, serviceId: string): boolean {
+    const mine = links.filter((l) => l.practitioner_id === calendarId);
+    if (mine.length === 0) return false;
+    return mine.some((l) => l.service_id === serviceId);
+  }
+
+  async function toggleStaffServiceCalendar(serviceId: string, calendarId: string, nextEnabled: boolean) {
+    setLinkSavingKey(`${serviceId}:${calendarId}`);
+    setError(null);
+    try {
+      const explicit = links.filter((l) => l.practitioner_id === calendarId).map((l) => l.service_id);
+      const baseline = explicit;
+      const nextServiceIds = nextEnabled
+        ? Array.from(new Set([...baseline, serviceId]))
+        : baseline.filter((id) => id !== serviceId);
+      const res = await fetch('/api/venue/practitioner-services', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ practitioner_id: calendarId, service_ids: nextServiceIds }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error ?? 'Failed to update service allocation');
+      }
+      await fetchAll();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update service allocation');
+    } finally {
+      setLinkSavingKey(null);
+    }
   }
 
   function myLinkForService(serviceId: string, calendarPractitionerId?: string): PractitionerService | null {
@@ -389,12 +431,17 @@ export function AppointmentServicesView({
       }
     }
 
+    if (!isAdmin && !editingId && form.practitioner_ids.length === 0) {
+      setError('Select at least one calendar column to offer this service on.');
+      return;
+    }
+
     setSaving(true);
     setError(null);
     try {
       const depositPence =
         form.payment_requirement === 'deposit' ? (poundsToPence(form.deposit) ?? 0) : 0;
-      const payload = {
+      const payload: Record<string, unknown> = {
         ...(editingId ? { id: editingId } : {}),
         name: form.name.trim(),
         description: form.description.trim() || undefined,
@@ -406,18 +453,20 @@ export function AppointmentServicesView({
         colour: form.colour,
         is_active: form.is_active,
         practitioner_ids: form.practitioner_ids,
-        staff_may_customize_name: form.staffMay.name,
-        staff_may_customize_description: form.staffMay.description,
-        staff_may_customize_duration: form.staffMay.duration,
-        staff_may_customize_buffer: form.staffMay.buffer,
-        staff_may_customize_price: form.staffMay.price,
-        staff_may_customize_deposit: form.staffMay.deposit,
-        staff_may_customize_colour: form.staffMay.colour,
         max_advance_booking_days: form.max_advance_booking_days,
         min_booking_notice_hours: form.min_booking_notice_hours,
         cancellation_notice_hours: form.cancellation_notice_hours,
         allow_same_day_booking: form.allow_same_day_booking,
       };
+      if (isAdmin) {
+        payload.staff_may_customize_name = form.staffMay.name;
+        payload.staff_may_customize_description = form.staffMay.description;
+        payload.staff_may_customize_duration = form.staffMay.duration;
+        payload.staff_may_customize_buffer = form.staffMay.buffer;
+        payload.staff_may_customize_price = form.staffMay.price;
+        payload.staff_may_customize_deposit = form.staffMay.deposit;
+        payload.staff_may_customize_colour = form.staffMay.colour;
+      }
 
       const res = await fetch('/api/venue/appointment-services', {
         method: editingId ? 'PATCH' : 'POST',
@@ -474,12 +523,10 @@ export function AppointmentServicesView({
   }
 
   function practitionersForService(serviceId: string): Array<{ id: string; name: string }> {
-    return links
-      .filter((l) => l.service_id === serviceId)
-      .map((l) => {
-        const p = practitioners.find((pr) => pr.id === l.practitioner_id);
-        return { id: l.practitioner_id, name: p?.name ?? 'Unknown' };
-      });
+    return practitioners
+      .filter((p) => p.calendar_type !== 'resource')
+      .filter((p) => calendarOffersService(p.id, serviceId))
+      .map((p) => ({ id: p.id, name: p.name }));
   }
 
   return (
@@ -489,15 +536,13 @@ export function AppointmentServicesView({
           <h1 className="text-2xl font-semibold text-slate-900">Services</h1>
           {!isAdmin && (
             <p className="mt-1 text-sm text-slate-500">
-              Venue-wide service details and which calendars offer each service are shown for reference. Only an admin can
-              add, edit, or remove services. Use <span className="font-medium text-slate-700">Availability → Services</span>{' '}
-              to choose which services your calendar offers. When your admin allows it, use{' '}
-              <span className="font-medium text-slate-700">Edit your settings</span> on a service to customise your own
-              price, duration, and other fields for your calendar only.
+              {linkedPractitionerIds.length === 0
+                ? 'Ask an admin to assign you to a calendar in Team settings before you can add services or manage offers.'
+                : 'You can add services and link them only to calendars you control. Venue-wide details apply to every calendar that offers the service. Use Availability → Services to toggle which services each column offers. When permitted, use Edit your settings for calendar-only overrides.'}
             </p>
           )}
         </div>
-        {isAdmin && (
+        {(isAdmin || linkedPractitionerIds.length > 0) && (
           <button
             onClick={openCreate}
             className="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 transition-colors"
@@ -524,7 +569,7 @@ export function AppointmentServicesView({
       ) : services.length === 0 ? (
         <div className="rounded-xl border border-slate-200 bg-white p-12 text-center">
           <p className="mb-4 text-slate-500">No services configured yet.</p>
-          {isAdmin && (
+          {(isAdmin || linkedPractitionerIds.length > 0) && (
             <button
               onClick={openCreate}
               className="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700"
@@ -599,19 +644,48 @@ export function AppointmentServicesView({
                       </div>
                       {!isAdmin &&
                         linkedPractitionerIds.length > 0 &&
-                        staffOffersService(svc.id) &&
-                        staffMayCustomizeAny(svc) && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setOverrideCalendarId(linkedPractitionerIds[0] ?? null);
-                            setOverrideService(svc);
-                          }}
-                          className="mt-3 rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-medium text-white shadow-sm hover:bg-brand-700"
-                        >
-                          Edit your settings
-                        </button>
-                      )}
+                        (
+                          <div className="mt-3 space-y-2">
+                            <div className="rounded-lg border border-slate-200 bg-slate-50/70 p-3">
+                              <p className="mb-2 text-xs font-medium text-slate-700">Offer on your calendars</p>
+                              <div className="space-y-2">
+                                {linkedPractitionerIds.map((calendarId) => {
+                                  const calendar = practitioners.find((p) => p.id === calendarId);
+                                  const enabled = calendarOffersService(calendarId, svc.id);
+                                  return (
+                                    <label
+                                      key={calendarId}
+                                      className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
+                                    >
+                                      <span>{calendar?.name ?? 'Calendar'}</span>
+                                      <input
+                                        type="checkbox"
+                                        checked={enabled}
+                                        disabled={linkSavingKey === `${svc.id}:${calendarId}`}
+                                        onChange={(e) =>
+                                          void toggleStaffServiceCalendar(svc.id, calendarId, e.target.checked)
+                                        }
+                                        className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                                      />
+                                    </label>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                            {staffOffersService(svc.id) && staffMayCustomizeAny(svc) && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setOverrideCalendarId(linkedPractitionerIds[0] ?? null);
+                                  setOverrideService(svc);
+                                }}
+                                className="rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-medium text-white shadow-sm hover:bg-brand-700"
+                              >
+                                Edit your settings
+                              </button>
+                            )}
+                          </div>
+                        )}
                       {linkedCalendars.length > 0 && (
                         <div className="mt-1.5 flex flex-wrap gap-1">
                           {linkedCalendars.map((lp) => {
@@ -639,7 +713,7 @@ export function AppointmentServicesView({
                     </div>
                   </div>
 
-                  {isAdmin && (
+                  {(isAdmin || linkedPractitionerIds.length > 0) && (
                     <div className="flex flex-shrink-0 items-center gap-1">
                       <button
                         onClick={() => openEdit(svc)}
@@ -698,6 +772,13 @@ export function AppointmentServicesView({
 
             {error && (
               <div className="mb-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
+            )}
+
+            {!isAdmin && (
+              <p className="mb-4 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                Link this service to at least one calendar you control. Only venue admins can change which fields other
+                staff may customise for their calendars.
+              </p>
             )}
 
             <div className="space-y-4">
@@ -930,45 +1011,47 @@ export function AppointmentServicesView({
                 <span className="text-sm text-slate-700">Active (visible to clients)</span>
               </div>
 
-              {/* Per-calendar overrides (Model B) */}
-              <div className="rounded-lg border border-slate-200 bg-slate-50/90 p-4 space-y-3">
-                <p className="text-sm font-medium text-slate-800">Optional overrides per calendar</p>
-                <p className="text-xs text-slate-500">
-                  Allow staff users assigned to an individual calendar to adjust the following values for their calendar
-                  only. Leave unticked and all calendars use the value set above.
-                </p>
-                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                  {(
-                    [
-                      ['name', 'Display name'],
-                      ['description', 'Description'],
-                      ['duration', 'Duration'],
-                      ['buffer', 'Buffer time'],
-                      ['price', 'Price'],
-                      ['deposit', 'Deposit'],
-                      ['colour', 'Colour'],
-                    ] as const
-                  ).map(([key, label]) => (
-                    <label key={key} className="flex items-center gap-2 text-sm text-slate-700">
-                      <input
-                        type="checkbox"
-                        checked={form.staffMay[key]}
-                        onChange={(e) =>
-                          setForm((prev) => ({
-                            ...prev,
-                            staffMay: { ...prev.staffMay, [key]: e.target.checked },
-                          }))
-                        }
-                        className="h-4 w-4 rounded border-slate-300 text-blue-600"
-                      />
-                      {label}
-                    </label>
-                  ))}
+              {/* Per-calendar overrides (Model B) — admin sets which fields staff may customise */}
+              {isAdmin && (
+                <div className="rounded-lg border border-slate-200 bg-slate-50/90 p-4 space-y-3">
+                  <p className="text-sm font-medium text-slate-800">Optional overrides per calendar</p>
+                  <p className="text-xs text-slate-500">
+                    Allow staff users assigned to an individual calendar to adjust the following values for their calendar
+                    only. Leave unticked and all calendars use the value set above.
+                  </p>
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    {(
+                      [
+                        ['name', 'Display name'],
+                        ['description', 'Description'],
+                        ['duration', 'Duration'],
+                        ['buffer', 'Buffer time'],
+                        ['price', 'Price'],
+                        ['deposit', 'Deposit'],
+                        ['colour', 'Colour'],
+                      ] as const
+                    ).map(([key, label]) => (
+                      <label key={key} className="flex items-center gap-2 text-sm text-slate-700">
+                        <input
+                          type="checkbox"
+                          checked={form.staffMay[key]}
+                          onChange={(e) =>
+                            setForm((prev) => ({
+                              ...prev,
+                              staffMay: { ...prev.staffMay, [key]: e.target.checked },
+                            }))
+                          }
+                          className="h-4 w-4 rounded border-slate-300 text-blue-600"
+                        />
+                        {label}
+                      </label>
+                    ))}
+                  </div>
                 </div>
-              </div>
+              )}
 
               {/* Calendar allocation */}
-              {(allocatableCalendars.length > 0 ||
+              {(calendarsForServiceForm.length > 0 ||
                 lingeringCalendarLinks.length > 0 ||
                 practitioners.length === 0) && (
                 <div>
@@ -1032,9 +1115,9 @@ export function AppointmentServicesView({
                     </div>
                   )}
                   {practitioners.length > 0 &&
-                    (allocatableCalendars.length > 0 ? (
+                    (calendarsForServiceForm.length > 0 ? (
                       <div className="space-y-2">
-                        {allocatableCalendars.map((p) => (
+                        {calendarsForServiceForm.map((p) => (
                           <label
                             key={p.id}
                             className="flex cursor-pointer items-center gap-3 rounded-lg border border-slate-200 px-3 py-2 hover:bg-slate-50"

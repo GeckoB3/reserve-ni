@@ -315,12 +315,16 @@ export function StaffClassBookingForm({
               {selected.instance_date} at {timeForApi(selected.start_time)} · {selected.duration_minutes} min
             </div>
             {selected.description ? <p className="mt-2 text-xs text-slate-600">{selected.description}</p> : null}
-            {selected.price_pence != null && selected.price_pence > 0 ? (
-              <div className="mt-2 text-slate-800">
-                {sym}
-                {(selected.price_pence / 100).toFixed(2)} per person (informational)
-              </div>
-            ) : null}
+            <div className="mt-2 text-slate-800">
+              {selected.price_pence != null && selected.price_pence > 0 ? (
+                <>
+                  {sym}
+                  {(selected.price_pence / 100).toFixed(2)} per person (informational)
+                </>
+              ) : (
+                'Free'
+              )}
+            </div>
           </div>
 
           <div>

@@ -164,8 +164,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const depositConfig = (venue.deposit_config as { enabled?: boolean; amount_per_person_gbp?: number; online_requires_deposit?: boolean; phone_requires_deposit?: boolean; min_party_size_for_deposit?: number; weekend_only?: boolean }) ?? {};
-
     const timeForDb = booking_time.length === 5 ? booking_time + ':00' : booking_time;
     const timeStr = timeForDb.slice(0, 5);
 
@@ -212,14 +210,13 @@ export async function POST(request: NextRequest) {
     estimatedEndTime = endDate.toISOString();
 
     const isOnlineSource = source === 'online' || source === 'widget' || source === 'booking_page';
-    const channelRequires =
-      (isOnlineSource && (depositConfig.online_requires_deposit !== false)) ||
-      (source === 'phone' && (depositConfig.phone_requires_deposit ?? false));
+    const onlineDepositApplies =
+      isOnlineSource && slot.deposit_required && slot.online_requires_deposit !== false;
 
-    if (slot.deposit_required && channelRequires) {
+    if (onlineDepositApplies) {
       requiresDeposit = true;
-      const amountPerPerson = depositConfig.amount_per_person_gbp ?? 5;
-      depositAmountPence = Math.round(amountPerPerson * party_size * 100);
+      const totalGbp = slot.deposit_amount ?? 0;
+      depositAmountPence = Math.round(totalGbp * 100);
     }
 
     if (requiresDeposit && !venue.stripe_connected_account_id) {

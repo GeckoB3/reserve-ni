@@ -886,7 +886,7 @@ export function TimelineGrid({
           </div>
         </div>
 
-        <div ref={scrollRef} className="flex-1 overflow-auto">
+        <div ref={scrollRef} className="flex-1 touch-manipulation overflow-auto">
           <div style={{ width: gridWidth, position: 'relative' }}>
             <div className="sticky top-0 z-10 flex border-b border-slate-200 bg-white" style={{ height: HEADER_HEIGHT }}>
               {timeSlots.map((time, i) => (

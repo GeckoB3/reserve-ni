@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
+import {
+  getVenueStaff,
+  requireAdmin,
+  requireManagedCalendarAccess,
+  requireManagedCalendarIds,
+} from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { z } from 'zod';
 
@@ -50,26 +55,34 @@ export async function GET(request: NextRequest) {
 
     const filterPractitionerId: string | undefined = practitionerId ?? undefined;
 
+    let query = admin
+      .from('practitioner_leave_periods')
+      .select(
+        'id, practitioner_id, start_date, end_date, leave_type, notes, created_at, practitioner:practitioners(name)',
+      )
+      .eq('venue_id', staff.venue_id)
+      .lte('start_date', to)
+      .gte('end_date', from)
+      .order('start_date', { ascending: true });
+
     if (staff.role !== 'admin') {
-      const { data: mine } = await admin
-        .from('practitioners')
-        .select('id')
-        .eq('venue_id', staff.venue_id)
-        .eq('staff_id', staff.id)
-        .maybeSingle();
-      if (!mine?.id) {
+      const scope = await requireManagedCalendarIds(admin, staff.venue_id, staff);
+      if (!scope.ok) {
         return NextResponse.json({ periods: [] });
       }
       if (filterPractitionerId) {
-        const { data: pRow } = await admin
-          .from('practitioners')
-          .select('id')
-          .eq('id', filterPractitionerId)
-          .eq('venue_id', staff.venue_id)
-          .maybeSingle();
-        if (!pRow) {
-          return NextResponse.json({ error: 'Practitioner not found' }, { status: 404 });
+        const access = await requireManagedCalendarAccess(
+          admin,
+          staff.venue_id,
+          staff,
+          filterPractitionerId,
+          'You can only view time off for calendars assigned to your account.',
+        );
+        if (!access.ok) {
+          return NextResponse.json({ error: access.error }, { status: 403 });
         }
+      } else {
+        query = query.in('practitioner_id', scope.managedCalendarIds);
       }
     } else if (filterPractitionerId) {
       const { data: pRow } = await admin
@@ -82,16 +95,6 @@ export async function GET(request: NextRequest) {
         return NextResponse.json({ error: 'Practitioner not found' }, { status: 404 });
       }
     }
-
-    let query = admin
-      .from('practitioner_leave_periods')
-      .select(
-        'id, practitioner_id, start_date, end_date, leave_type, notes, created_at, practitioner:practitioners(name)',
-      )
-      .eq('venue_id', staff.venue_id)
-      .lte('start_date', to)
-      .gte('end_date', from)
-      .order('start_date', { ascending: true });
 
     if (filterPractitionerId) {
       query = query.eq('practitioner_id', filterPractitionerId);
@@ -141,25 +144,27 @@ export async function POST(request: NextRequest) {
     const { practitioner_id, apply_to_all_active, start_date, end_date, leave_type, notes } = parsed.data;
 
     if (staff.role !== 'admin') {
-      const { data: mine } = await admin
-        .from('practitioners')
-        .select('id')
-        .eq('venue_id', staff.venue_id)
-        .eq('staff_id', staff.id)
-        .maybeSingle();
-      if (!mine?.id) {
-        return NextResponse.json({ error: 'No calendar linked to your account' }, { status: 403 });
+      const scope = await requireManagedCalendarIds(admin, staff.venue_id, staff);
+      if (!scope.ok) {
+        return NextResponse.json({ error: scope.error }, { status: 403 });
       }
       if (apply_to_all_active) {
         return NextResponse.json({ error: 'Only admins can add whole-team time off' }, { status: 403 });
       }
-      if (!practitioner_id || practitioner_id !== mine.id) {
-        return NextResponse.json({ error: 'You can only add time off for your own calendar' }, { status: 403 });
+      const access = await requireManagedCalendarAccess(
+        admin,
+        staff.venue_id,
+        staff,
+        practitioner_id,
+        'You can only add time off for calendars assigned to your account.',
+      );
+      if (!access.ok) {
+        return NextResponse.json({ error: access.error }, { status: 403 });
       }
       const rows = [
         {
           venue_id: staff.venue_id,
-          practitioner_id: mine.id,
+          practitioner_id,
           start_date,
           end_date,
           leave_type,
@@ -261,14 +266,9 @@ export async function PATCH(request: NextRequest) {
     const admin = getSupabaseAdminClient();
 
     if (staff.role !== 'admin') {
-      const { data: mine } = await admin
-        .from('practitioners')
-        .select('id')
-        .eq('venue_id', staff.venue_id)
-        .eq('staff_id', staff.id)
-        .maybeSingle();
-      if (!mine?.id) {
-        return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+      const scope = await requireManagedCalendarIds(admin, staff.venue_id, staff);
+      if (!scope.ok) {
+        return NextResponse.json({ error: scope.error }, { status: 403 });
       }
       const { data: leaveRow, error: leaveErr } = await admin
         .from('practitioner_leave_periods')
@@ -276,8 +276,18 @@ export async function PATCH(request: NextRequest) {
         .eq('id', id)
         .eq('venue_id', staff.venue_id)
         .maybeSingle();
-      if (leaveErr || !leaveRow || leaveRow.practitioner_id !== mine.id) {
+      if (leaveErr || !leaveRow) {
         return NextResponse.json({ error: 'Leave entry not found' }, { status: 404 });
+      }
+      const access = await requireManagedCalendarAccess(
+        admin,
+        staff.venue_id,
+        staff,
+        leaveRow.practitioner_id,
+        'You can only edit time off on calendars assigned to your account.',
+      );
+      if (!access.ok) {
+        return NextResponse.json({ error: access.error }, { status: 403 });
       }
     } else if (!requireAdmin(staff)) {
       return NextResponse.json({ error: 'Forbidden: admin only' }, { status: 403 });
@@ -333,14 +343,9 @@ export async function DELETE(request: NextRequest) {
     const admin = getSupabaseAdminClient();
 
     if (staff.role !== 'admin') {
-      const { data: mine } = await admin
-        .from('practitioners')
-        .select('id')
-        .eq('venue_id', staff.venue_id)
-        .eq('staff_id', staff.id)
-        .maybeSingle();
-      if (!mine?.id) {
-        return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+      const scope = await requireManagedCalendarIds(admin, staff.venue_id, staff);
+      if (!scope.ok) {
+        return NextResponse.json({ error: scope.error }, { status: 403 });
       }
       const { data: leaveRow, error: leaveErr } = await admin
         .from('practitioner_leave_periods')
@@ -348,8 +353,18 @@ export async function DELETE(request: NextRequest) {
         .eq('id', id)
         .eq('venue_id', staff.venue_id)
         .maybeSingle();
-      if (leaveErr || !leaveRow || leaveRow.practitioner_id !== mine.id) {
+      if (leaveErr || !leaveRow) {
         return NextResponse.json({ error: 'Leave entry not found' }, { status: 404 });
+      }
+      const access = await requireManagedCalendarAccess(
+        admin,
+        staff.venue_id,
+        staff,
+        leaveRow.practitioner_id,
+        'You can only delete time off on calendars assigned to your account.',
+      );
+      if (!access.ok) {
+        return NextResponse.json({ error: access.error }, { status: 403 });
       }
     } else if (!requireAdmin(staff)) {
       return NextResponse.json({ error: 'Forbidden: admin only' }, { status: 403 });

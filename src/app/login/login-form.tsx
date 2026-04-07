@@ -52,7 +52,8 @@ export function LoginForm({ redirectTo }: { redirectTo?: string }) {
     setSuccessMessage('Check your inbox for a link to reset your password.');
   }
 
-  const inputClass = 'w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm placeholder:text-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500';
+  const inputClass =
+    'min-h-[44px] w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base placeholder:text-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500';
   const primaryBtn = 'w-full rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 disabled:opacity-50';
   const secondaryLink = 'text-sm font-medium text-slate-500 hover:text-brand-600';
 

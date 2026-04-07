@@ -114,12 +114,14 @@ const BLANK_EVENT: EventFormState = {
 export function EventManagerView({
   venueId: _venueId,
   isAdmin,
+  linkedPractitionerIds = [],
   currency = 'GBP',
   publicBookingUrl,
   stripeConnected = false,
 }: {
   venueId: string;
   isAdmin: boolean;
+  linkedPractitionerIds?: string[];
   currency?: string;
   publicBookingUrl: string;
   stripeConnected?: boolean;
@@ -160,16 +162,16 @@ export function EventManagerView({
       .then((d) => {
         if (cancelled || !d?.practitioners) return;
         setTeamCalendars(
-          (d.practitioners as Array<{ id: string; name: string; calendar_type?: string }>).filter(
-            (p) => p.calendar_type !== 'resource',
-          ),
+          (d.practitioners as Array<{ id: string; name: string; calendar_type?: string }>)
+            .filter((p) => p.calendar_type !== 'resource')
+            .filter((p) => isAdmin || linkedPractitionerIds.includes(p.id)),
         );
       })
       .catch(() => setTeamCalendars([]));
     return () => {
       cancelled = true;
     };
-  }, [showEventForm]);
+  }, [showEventForm, isAdmin, linkedPractitionerIds]);
 
   const [showAddCalendarModal, setShowAddCalendarModal] = useState(false);
   const [newCalendarName, setNewCalendarName] = useState('');
@@ -339,6 +341,11 @@ export function EventManagerView({
         setEventError('End date must be on or after the first occurrence date.');
         return;
       }
+    }
+
+    if (!editingEventId && !isAdmin && !String(eventForm.calendar_id ?? '').trim()) {
+      setEventError('Choose a calendar column for this event.');
+      return;
     }
 
     setEventSaving(true);
@@ -649,7 +656,7 @@ export function EventManagerView({
               Copy booking link
             </button>
           )}
-          {isAdmin && (
+          {(isAdmin || linkedPractitionerIds.length > 0) && (
             <button
               type="button"
               onClick={() => {
@@ -668,7 +675,9 @@ export function EventManagerView({
 
       {!isAdmin && (
         <p className="mb-4 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
-          View-only: only venue admins can create, edit, or delete events. You can browse events and attendees.
+          {linkedPractitionerIds.length === 0
+            ? 'Your account is not linked to a calendar yet. Ask an admin to assign at least one calendar before you can create, edit, or delete events.'
+            : 'You can create, edit, or delete events when you assign them to a calendar column you control below. Only admins can add new calendar columns or cancel an event with guest notifications.'}
         </p>
       )}
 
@@ -700,10 +709,37 @@ export function EventManagerView({
       )}
 
       {/* Create / edit event form */}
-      {showEventForm && isAdmin && (
+      {showEventForm && (
         <div className="mb-6 rounded-xl border border-slate-200 bg-white shadow-sm">
-          <div className="border-b border-slate-100 px-5 py-4">
+          <div className="space-y-3 border-b border-slate-100 px-5 py-4">
             <h2 className="font-semibold text-slate-800">{editingEventId ? 'Edit event' : 'Create event'}</h2>
+            {isAdmin && !editingEventId && (
+              <div className="rounded-lg border border-blue-100 bg-blue-50/90 px-3 py-2.5 text-xs text-slate-700">
+                <p className="font-semibold text-slate-900">Who can manage this event later</p>
+                <p className="mt-1.5 leading-relaxed text-slate-600">
+                  If you assign this event to a <strong>calendar column</strong> below, staff linked to that column can{' '}
+                  <strong>create</strong>, <strong>edit</strong>, or <strong>delete</strong> it later. If you leave it
+                  unassigned, only admins can change or remove it.
+                </p>
+              </div>
+            )}
+            {!isAdmin && !editingEventId && linkedPractitionerIds.length > 0 && (
+              <p className="text-xs leading-relaxed text-slate-600">
+                Choose a <strong>calendar column</strong> you control below. You cannot create new team columns here.
+              </p>
+            )}
+            {isAdmin && editingEventId && (
+              <p className="text-xs leading-relaxed text-slate-600">
+                The calendar below controls which staff can edit or delete this event: only staff assigned to that
+                column see those actions.
+              </p>
+            )}
+            {!isAdmin && editingEventId && (
+              <p className="text-xs leading-relaxed text-slate-600">
+                You can change this event because it is assigned to a calendar you control. You cannot add new calendar
+                columns here.
+              </p>
+            )}
           </div>
           <div className="px-5 py-4 space-y-4">
             {!editingEventId && (
@@ -891,8 +927,14 @@ export function EventManagerView({
               <div className="sm:col-span-2 space-y-3 rounded-lg border border-slate-100 bg-slate-50/80 p-3">
                 <p className="text-xs font-medium text-slate-700">Calendar column</p>
                 <p className="text-xs text-slate-500">
-                  Show this event on a calendar column in the staff calendar. The time must not overlap
-                  other appointments, classes, resources on that column, or blocked time.
+                  Show this event on a team calendar column in the dashboard. The time must not overlap other
+                  appointments, classes, resources on that column, or blocked time.
+                  {isAdmin && (
+                    <span className="mt-1 block text-slate-600">
+                      Choosing a column here also decides which staff can edit or delete this event later (see note
+                      above).
+                    </span>
+                  )}
                 </p>
                 <div>
                   <label className="mb-1 block text-xs font-medium text-slate-600">Calendar</label>
@@ -909,22 +951,24 @@ export function EventManagerView({
                     ))}
                   </select>
                 </div>
-                <div className="mt-3 rounded-lg border border-slate-100 bg-slate-50/90 p-3">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setAddCalendarModalError(null);
-                      setNewCalendarName('');
-                      setShowAddCalendarModal(true);
-                    }}
-                    className="inline-flex w-full items-center justify-center rounded-lg border border-brand-200/90 bg-white px-3.5 py-2.5 text-sm font-semibold text-brand-700 shadow-sm transition-[color,background-color,border-color,box-shadow,transform] duration-150 ease-out hover:border-brand-400 hover:bg-brand-50 hover:text-brand-800 hover:shadow-md active:scale-[0.98] active:border-brand-500 active:bg-brand-100 active:shadow-inner motion-reduce:transition-colors motion-reduce:active:scale-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2"
-                  >
-                    Add calendar
-                  </button>
-                  <p className="mt-2 text-xs text-slate-500">
-                    Create a calendar column here and assign it to this event immediately.
-                  </p>
-                </div>
+                {isAdmin && (
+                  <div className="mt-3 rounded-lg border border-slate-100 bg-slate-50/90 p-3">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAddCalendarModalError(null);
+                        setNewCalendarName('');
+                        setShowAddCalendarModal(true);
+                      }}
+                      className="inline-flex w-full items-center justify-center rounded-lg border border-brand-200/90 bg-white px-3.5 py-2.5 text-sm font-semibold text-brand-700 shadow-sm transition-[color,background-color,border-color,box-shadow,transform] duration-150 ease-out hover:border-brand-400 hover:bg-brand-50 hover:text-brand-800 hover:shadow-md active:scale-[0.98] active:border-brand-500 active:bg-brand-100 active:shadow-inner motion-reduce:transition-colors motion-reduce:active:scale-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2"
+                    >
+                      Add calendar
+                    </button>
+                    <p className="mt-2 text-xs text-slate-500">
+                      Create a calendar column here and assign it to this event immediately.
+                    </p>
+                  </div>
+                )}
               </div>
               <div className="sm:col-span-2">
                 <label className="mb-1 block text-xs font-medium text-slate-600">
@@ -1125,7 +1169,8 @@ export function EventManagerView({
       ) : events.length === 0 ? (
         <div className="rounded-xl border border-slate-200 bg-white p-12 text-center">
           <p className="text-slate-500">
-            No events created yet.{isAdmin ? ' Use "Create event" above to add your first event.' : ''}
+            No events created yet.
+            {(isAdmin || linkedPractitionerIds.length > 0) ? ' Use "Create event" above to add your first event.' : ''}
           </p>
         </div>
       ) : (
@@ -1141,7 +1186,10 @@ export function EventManagerView({
                     formatPrice={formatPrice}
                     selected={selectedId === event.id}
                     onSelect={() => setSelectedId(selectedId === event.id ? null : event.id)}
-                    isAdmin={isAdmin}
+                    canEdit={
+                      isAdmin ||
+                      (event.calendar_id !== null && linkedPractitionerIds.includes(event.calendar_id))
+                    }
                     onEdit={() => handleEditEvent(event)}
                     onDelete={() => void handleDeleteEvent(event.id)}
                   />
@@ -1160,7 +1208,10 @@ export function EventManagerView({
                     formatPrice={formatPrice}
                     selected={selectedId === event.id}
                     onSelect={() => setSelectedId(selectedId === event.id ? null : event.id)}
-                    isAdmin={isAdmin}
+                    canEdit={
+                      isAdmin ||
+                      (event.calendar_id !== null && linkedPractitionerIds.includes(event.calendar_id))
+                    }
                     onEdit={() => handleEditEvent(event)}
                     onDelete={() => void handleDeleteEvent(event.id)}
                   />
@@ -1272,8 +1323,18 @@ export function EventManagerView({
                       Cancelled / inactive
                     </span>
                   )}
+                  {!isAdmin &&
+                    detail.is_active &&
+                    detail.calendar_id !== null &&
+                    linkedPractitionerIds.includes(detail.calendar_id) && (
+                    <p className="mt-2 max-w-md text-xs text-slate-500">
+                      Cancelling an event and notifying guests is limited to venue admins. You can still edit or
+                      delete this event when allowed.
+                    </p>
+                  )}
                 </div>
-                {isAdmin && (
+                {(isAdmin ||
+                  (detail.calendar_id !== null && linkedPractitionerIds.includes(detail.calendar_id))) && (
                   <div className="flex flex-wrap gap-2">
                     <button
                       type="button"
@@ -1282,7 +1343,7 @@ export function EventManagerView({
                     >
                       Edit event
                     </button>
-                    {detail.is_active && (
+                    {isAdmin && detail.is_active && (
                       <button
                         type="button"
                         onClick={() => void handleCancelEvent()}
@@ -1292,13 +1353,17 @@ export function EventManagerView({
                         {cancelLoading ? 'Cancelling…' : 'Cancel event & notify guests'}
                       </button>
                     )}
-                    <button
-                      type="button"
-                      onClick={() => void handleDeleteEvent(detail.id)}
-                      className="rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-100"
-                    >
-                      Delete event
-                    </button>
+                    {(isAdmin ||
+                      (detail.calendar_id !== null &&
+                        linkedPractitionerIds.includes(detail.calendar_id))) && (
+                      <button
+                        type="button"
+                        onClick={() => void handleDeleteEvent(detail.id)}
+                        className="rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-100"
+                      >
+                        Delete event
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
@@ -1393,7 +1458,7 @@ function EventCard({
   formatPrice,
   selected,
   onSelect,
-  isAdmin,
+  canEdit,
   onEdit,
   onDelete,
 }: {
@@ -1401,7 +1466,7 @@ function EventCard({
   formatPrice: (pence: number) => string;
   selected: boolean;
   onSelect: () => void;
-  isAdmin: boolean;
+  canEdit: boolean;
   onEdit: () => void;
   onDelete: () => void;
 }) {
@@ -1445,7 +1510,7 @@ function EventCard({
         )}
         <p className="mt-2 text-xs text-slate-500">{selected ? 'Hide details' : 'View attendees & actions'}</p>
       </button>
-      {selected && isAdmin && (
+      {selected && canEdit && (
         <div className="flex gap-2 border-t border-slate-100 px-5 py-3">
           <button
             type="button"
@@ -1456,7 +1521,10 @@ function EventCard({
           </button>
           <button
             type="button"
-            onClick={(e) => { e.stopPropagation(); onDelete(); }}
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete();
+            }}
             className="text-sm font-medium text-red-500 hover:text-red-700"
           >
             Delete

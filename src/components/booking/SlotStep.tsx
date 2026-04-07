@@ -263,15 +263,15 @@ function WaitlistForm({
       {status === 'error' && (
         <p className="text-xs text-red-600">{message}</p>
       )}
-      <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="Your name" required className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm placeholder:text-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
+      <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="Your name" required className="min-h-[44px] w-full rounded-lg border border-slate-200 px-3 py-2 text-base placeholder:text-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
       <PhoneWithCountryField
         value={phone}
         onChange={setPhone}
         defaultCountry={phoneDefaultCountry}
-        inputClassName="w-full min-w-0 rounded-lg border border-slate-200 px-3 py-2 text-sm placeholder:text-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+        inputClassName="min-h-[44px] w-full min-w-0 rounded-lg border border-slate-200 px-3 py-2 text-base placeholder:text-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
       />
-      <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email (optional)" className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm placeholder:text-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
-      <input type="time" value={desiredTime} onChange={(e) => setDesiredTime(e.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
+      <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email (optional)" className="min-h-[44px] w-full rounded-lg border border-slate-200 px-3 py-2 text-base placeholder:text-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
+      <input type="time" value={desiredTime} onChange={(e) => setDesiredTime(e.target.value)} className="min-h-[44px] w-full rounded-lg border border-slate-200 px-3 py-2 text-base focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
       <div className="flex gap-2">
         <button type="submit" disabled={status === 'submitting' || !name.trim() || !normalizeToE164(phone, phoneDefaultCountry)} className="flex-1 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50">
           {status === 'submitting' ? 'Adding...' : 'Join Standby'}

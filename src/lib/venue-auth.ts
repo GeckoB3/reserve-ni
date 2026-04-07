@@ -10,6 +10,10 @@ import { getSupabaseAdminClient } from '@/lib/supabase';
 import { getStaffManagedCalendarIds, staffManagesCalendar } from '@/lib/staff-calendar-access';
 
 export { getStaffManagedCalendarIds, staffManagesCalendar };
+export const NO_ASSIGNED_CALENDARS_ERROR =
+  'No calendars are assigned to your account. Ask an admin to assign at least one calendar.';
+export const OUTSIDE_ASSIGNED_CALENDARS_ERROR =
+  'You can only manage calendars assigned to your account.';
 
 export interface VenueStaff {
   id: string;
@@ -91,10 +95,68 @@ export async function getDashboardStaff(
 }
 
 /**
- * Require admin role. Use after getVenueStaff; returns true if staff is admin.
+ * Require admin role. Use after getVenueStaff; narrows to venue admin when true.
  */
-export function requireAdmin(staff: VenueStaff | null): staff is VenueStaff {
+export function requireAdmin(staff: VenueStaff | null): staff is VenueStaff & { role: 'admin' } {
   return staff !== null && staff.role === 'admin';
+}
+
+export async function requireManagedCalendarIds(
+  admin: SupabaseClient,
+  venueId: string,
+  staff: Pick<VenueStaff, 'id' | 'role'>,
+): Promise<{ ok: true; managedCalendarIds: string[] } | { ok: false; error: string }> {
+  if (staff.role === 'admin') {
+    return { ok: true, managedCalendarIds: [] };
+  }
+
+  const managedCalendarIds = await getStaffManagedCalendarIds(admin, venueId, staff.id);
+  if (managedCalendarIds.length === 0) {
+    return { ok: false, error: NO_ASSIGNED_CALENDARS_ERROR };
+  }
+
+  return { ok: true, managedCalendarIds };
+}
+
+export async function requireManagedCalendarAccess(
+  admin: SupabaseClient,
+  venueId: string,
+  staff: Pick<VenueStaff, 'id' | 'role'>,
+  calendarId: string | null | undefined,
+  errorMessage = OUTSIDE_ASSIGNED_CALENDARS_ERROR,
+): Promise<{ ok: true; managedCalendarIds: string[] } | { ok: false; error: string }> {
+  if (!calendarId) {
+    return { ok: false, error: errorMessage };
+  }
+
+  const scope = await requireManagedCalendarIds(admin, venueId, staff);
+  if (!scope.ok) {
+    return scope;
+  }
+  if (staff.role === 'admin' || scope.managedCalendarIds.includes(calendarId)) {
+    return scope;
+  }
+
+  return { ok: false, error: errorMessage };
+}
+
+export function filterIdsToManagedCalendars(
+  managedCalendarIds: string[],
+  requestedCalendarIds: string[],
+): { allowedIds: string[]; rejectedIds: string[] } {
+  const managedSet = new Set(managedCalendarIds);
+  const allowedIds: string[] = [];
+  const rejectedIds: string[] = [];
+
+  for (const calendarId of requestedCalendarIds) {
+    if (managedSet.has(calendarId)) {
+      allowedIds.push(calendarId);
+    } else {
+      rejectedIds.push(calendarId);
+    }
+  }
+
+  return { allowedIds, rejectedIds };
 }
 
 /**

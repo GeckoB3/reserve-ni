@@ -147,7 +147,9 @@ export async function fetchEngineInput({
     serviceIds.length > 0
       ? supabase
           .from('booking_restrictions')
-          .select('id, service_id, min_advance_minutes, max_advance_days, min_party_size_online, max_party_size_online, large_party_threshold, large_party_message, deposit_required_from_party_size')
+          .select(
+            'id, service_id, min_advance_minutes, max_advance_days, min_party_size_online, max_party_size_online, large_party_threshold, large_party_message, deposit_required_from_party_size, deposit_amount_per_person_gbp, online_requires_deposit',
+          )
           .in('service_id', serviceIds)
       : Promise.resolve({ data: [] as BookingRestriction[] }),
   ]);
@@ -162,7 +164,11 @@ export async function fetchEngineInput({
     estimated_end_time: b.estimated_end_time ?? null,
   }));
 
-  const depositConfig = venueRes.data?.deposit_config as { enabled?: boolean; amount_per_person_gbp?: number } | null;
+  const depositConfig = venueRes.data?.deposit_config as { amount_per_person_gbp?: number } | null;
+  const deposit_legacy_amount_per_person_gbp =
+    typeof depositConfig?.amount_per_person_gbp === 'number' && !Number.isNaN(depositConfig.amount_per_person_gbp)
+      ? depositConfig.amount_per_person_gbp
+      : null;
 
   if (restrictionExcRes.error) {
     console.error('fetchEngineInput: booking_restriction_exceptions', restrictionExcRes.error.message);
@@ -222,14 +228,22 @@ export async function fetchEngineInput({
       time_range_end: r.time_range_end ? String(r.time_range_end).slice(0, 5) : null,
     })),
     durations: (durationsRes.data ?? []) as PartySizeDuration[],
-    restrictions: (restrictionsRes.data ?? []) as BookingRestriction[],
+    restrictions: (restrictionsRes.data ?? []).map((r) => {
+      const row = r as Record<string, unknown>;
+      return {
+        ...(r as BookingRestriction),
+        deposit_amount_per_person_gbp:
+          row.deposit_amount_per_person_gbp != null && row.deposit_amount_per_person_gbp !== ''
+            ? Number(row.deposit_amount_per_person_gbp)
+            : null,
+        online_requires_deposit: row.online_requires_deposit !== false,
+      };
+    }),
     blocks: blocksData as AvailabilityBlock[],
     restriction_exceptions,
     schedule_exceptions,
     bookings,
-    deposit_config: depositConfig?.enabled
-      ? { enabled: true, amount_per_person_gbp: depositConfig.amount_per_person_gbp ?? 5 }
-      : null,
+    deposit_legacy_amount_per_person_gbp,
     now: now ?? new Date(),
   };
 }

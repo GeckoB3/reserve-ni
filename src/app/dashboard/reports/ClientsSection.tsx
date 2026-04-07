@@ -6,6 +6,7 @@ import { GuestTagEditor } from '@/components/dashboard/GuestTagEditor';
 import { buildCsvFromRows, downloadCsvString } from '@/lib/appointments-csv';
 import type { BookingModel, VenueTerminology } from '@/types/booking-models';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
+import { HorizontalScrollHint } from '@/components/ui/HorizontalScrollHint';
 
 export interface ClientSummary {
   identified_clients_total: number;
@@ -435,7 +436,8 @@ export function ClientsSection({
         </div>
       ) : (
         <>
-          <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
+          <HorizontalScrollHint />
+          <div className="touch-pan-x overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
             <table className="w-full min-w-[720px] text-sm">
               <thead className="border-b border-slate-100 bg-slate-50">
                 <tr>

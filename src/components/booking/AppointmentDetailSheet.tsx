@@ -11,6 +11,7 @@ import {
 } from '@/lib/table-management/booking-status';
 import type { BookingModel, ClassPaymentRequirement } from '@/types/booking-models';
 import { inferBookingRowModel, bookingModelShortLabel } from '@/lib/booking/infer-booking-row-model';
+import { formatBookablePricePence } from '@/lib/booking/format-price-display';
 
 export interface DetailPractitionerOption {
   id: string;
@@ -547,7 +548,10 @@ export function AppointmentDetailSheet({
                   <dd className="mt-0.5 text-slate-700">
                     {detail.appointment_service_id &&
                     serviceMap.get(detail.appointment_service_id)?.price_pence != null
-                      ? `${sym}${(Number(serviceMap.get(detail.appointment_service_id)?.price_pence) / 100).toFixed(2)}`
+                      ? formatBookablePricePence(
+                          Number(serviceMap.get(detail.appointment_service_id)?.price_pence),
+                          sym,
+                        )
                       : '-'}
                   </dd>
                 </div>

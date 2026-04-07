@@ -6,7 +6,6 @@ import { sendEmail } from '@/lib/emails/send-email';
 import { renderStaffWelcomeEmail } from '@/lib/emails/templates/staff-welcome-email';
 import { z } from 'zod';
 import { setStaffPractitionerLink, setStaffUnifiedCalendarAssignments } from '@/lib/staff-practitioner-link';
-import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 
 const createSchema = z
   .object({
@@ -56,19 +55,17 @@ export async function POST(request: NextRequest) {
     const venueName = venueRow?.name?.trim() || 'Your venue';
     const bookingModel = (venueRow?.booking_model as string) ?? 'table_reservation';
 
-    const unifiedCalendarIdsToValidate =
-      isUnifiedSchedulingVenue(bookingModel) && calendarIdsOpt && calendarIdsOpt.length > 0
-        ? calendarIdsOpt
-        : isUnifiedSchedulingVenue(bookingModel) && practitionerIdOpt
-          ? [practitionerIdOpt]
-          : [];
+    // Admin users are never calendar-restricted.
+    const effectiveCalendarIds =
+      role === 'staff'
+        ? calendarIdsOpt && calendarIdsOpt.length > 0
+          ? calendarIdsOpt
+          : practitionerIdOpt
+            ? [practitionerIdOpt]
+            : []
+        : [];
 
-    if ((practitionerIdOpt || (calendarIdsOpt && calendarIdsOpt.length > 0)) && !isUnifiedSchedulingVenue(bookingModel)) {
-      return NextResponse.json(
-        { error: 'Calendar linking is only available for appointment businesses' },
-        { status: 400 },
-      );
-    }
+    const unifiedCalendarIdsToValidate = effectiveCalendarIds;
     if (unifiedCalendarIdsToValidate.length > 0) {
       const { data: ucs } = await admin
         .from('unified_calendars')
@@ -87,7 +84,7 @@ export async function POST(request: NextRequest) {
           { status: 400 },
         );
       }
-    } else if (practitionerIdOpt && !isUnifiedSchedulingVenue(bookingModel)) {
+    } else if (practitionerIdOpt) {
       const { data: prCheck } = await admin
         .from('practitioners')
         .select('id, is_active')
@@ -187,14 +184,9 @@ export async function POST(request: NextRequest) {
     let linkedPractitionerName: string | null = null;
     let linked_calendar_ids: string[] = [];
 
-    const unifiedIdsToAssign =
-      isUnifiedSchedulingVenue(bookingModel) && calendarIdsOpt && calendarIdsOpt.length > 0
-        ? calendarIdsOpt
-        : isUnifiedSchedulingVenue(bookingModel) && practitionerIdOpt
-          ? [practitionerIdOpt]
-          : [];
+    const unifiedIdsToAssign = effectiveCalendarIds;
 
-    if (isUnifiedSchedulingVenue(bookingModel) && unifiedIdsToAssign.length > 0) {
+    if (unifiedIdsToAssign.length > 0) {
       const linkResult = await setStaffUnifiedCalendarAssignments(
         admin,
         staff.venue_id,
@@ -221,7 +213,7 @@ export async function POST(request: NextRequest) {
       const nameById = new Map((nameRows ?? []).map((r) => [r.id as string, ((r.name as string) ?? '').trim()]));
       linkedPractitionerName =
         unifiedIdsToAssign.map((id) => nameById.get(id) ?? '').filter(Boolean).join(', ') || null;
-    } else if (!isUnifiedSchedulingVenue(bookingModel) && practitionerIdOpt) {
+    } else if (role === 'staff' && practitionerIdOpt) {
       const linkResult = await setStaffPractitionerLink(
         admin,
         staff.venue_id,

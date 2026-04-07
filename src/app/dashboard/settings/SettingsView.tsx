@@ -20,6 +20,7 @@ import { CommunicationTemplatesSection } from './sections/CommunicationTemplates
 import { StripeConnectSection } from './sections/StripeConnectSection';
 import { TableManagementSection } from './sections/TableManagementSection';
 import { AvailabilityConfigSection } from './sections/AvailabilityConfigSection';
+import { DepositConfigSection } from './sections/DepositConfigSection';
 import { BookingRulesSection } from './sections/BookingRulesSection';
 import { BookingTypesSection } from './sections/BookingTypesSection';
 import { StaffPersonalSettingsSection } from './sections/StaffPersonalSettingsSection';
@@ -52,9 +53,10 @@ const TABS = [
 
 type TabKey = typeof TABS[number]['key'];
 
-function resolveInitialTab(initialTab: string | undefined): TabKey {
+function resolveInitialTab(initialTab: string | undefined, isAdmin: boolean): TabKey {
   const t = initialTab as TabKey | undefined;
   if (t && TABS.some((x) => x.key === t)) {
+    if (t === 'staff' && !isAdmin) return 'profile';
     return t;
   }
   return 'profile';
@@ -246,12 +248,18 @@ export function SettingsView({
   const showRestaurantTableProfileSections =
     isAdmin && isRestaurantTableProductTier(venue?.pricing_tier ?? null);
   const visibleTabs = useMemo(() => [...TABS], []);
-  const [activeTab, setActiveTab] = useState<TabKey>(() => resolveInitialTab(initialTab));
+  const [activeTab, setActiveTab] = useState<TabKey>(() => resolveInitialTab(initialTab, isAdmin));
   const [planBannerDismissed, setPlanBannerDismissed] = useState(false);
 
   useEffect(() => {
     setVenue(initialVenue);
   }, [initialVenue]);
+
+  useEffect(() => {
+    if (!isAdmin && activeTab === 'staff') {
+      setActiveTab('profile');
+    }
+  }, [isAdmin, activeTab]);
 
   useEffect(() => {
     if (!planCheckoutReturn) return;
@@ -344,8 +352,14 @@ export function SettingsView({
             {showRestaurantTableProfileSections && !isAppointment && (
               <TableManagementSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} />
             )}
+            {showRestaurantTableProfileSections && !isAppointment && hasServiceConfig && (
+              <DepositConfigSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} variant="service_engine_table" />
+            )}
             {showRestaurantTableProfileSections && !isAppointment && !hasServiceConfig && (
               <AvailabilityConfigSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} />
+            )}
+            {showRestaurantTableProfileSections && !isAppointment && !hasServiceConfig && (
+              <DepositConfigSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} variant="legacy_table" />
             )}
             {isAppointment && (
               <BookingRulesSection
@@ -381,6 +395,7 @@ export function SettingsView({
             bookingModel={bookingModel}
             enabledModels={normalizeEnabledModels(venue.enabled_models, (bookingModel as BookingModel) ?? 'table_reservation')}
             depositConfig={venue.deposit_config}
+            serviceEngineTable={showRestaurantTableProfileSections && !isAppointment && hasServiceConfig}
           />
         )}
         {activeTab === 'staff' && isAdmin && (

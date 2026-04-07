@@ -3,7 +3,6 @@ import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { setStaffUnifiedCalendarAssignments } from '@/lib/staff-practitioner-link';
-import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 import { z } from 'zod';
 
 const bodySchema = z.object({
@@ -34,30 +33,21 @@ export async function PATCH(
 
     const admin = getSupabaseAdminClient();
 
-    const { data: venue } = await admin
-      .from('venues')
-      .select('booking_model')
-      .eq('id', staff.venue_id)
-      .single();
-
-    const bookingModel = venue?.booking_model ?? '';
-
-    if (!isUnifiedSchedulingVenue(bookingModel)) {
-      return NextResponse.json(
-        { error: 'Calendar linking is only available for appointment businesses' },
-        { status: 400 },
-      );
-    }
-
     const { data: target } = await admin
       .from('staff')
-      .select('id')
+      .select('id, role')
       .eq('id', targetStaffId)
       .eq('venue_id', staff.venue_id)
       .maybeSingle();
 
     if (!target) {
       return NextResponse.json({ error: 'Staff member not found' }, { status: 404 });
+    }
+    if (target.role === 'admin') {
+      return NextResponse.json(
+        { error: 'Admin users are not calendar-restricted.' },
+        { status: 400 },
+      );
     }
 
     const result = await setStaffUnifiedCalendarAssignments(

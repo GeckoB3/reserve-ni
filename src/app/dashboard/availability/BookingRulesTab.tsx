@@ -16,14 +16,9 @@ interface Restriction {
   large_party_threshold: number | null;
   large_party_message: string | null;
   deposit_required_from_party_size: number | null;
-  cancellation_notice_hours?: number;
-}
-
-interface DepositConfig {
-  enabled: boolean;
-  amount_per_person_gbp: number;
+  deposit_amount_per_person_gbp: number | null;
   online_requires_deposit: boolean;
-  phone_requires_deposit: boolean;
+  cancellation_notice_hours?: number;
 }
 
 interface Props {
@@ -40,46 +35,25 @@ const defaultRestriction = (serviceId: string): Omit<Restriction, 'id'> => ({
   large_party_threshold: null,
   large_party_message: null,
   deposit_required_from_party_size: null,
+  deposit_amount_per_person_gbp: null,
+  online_requires_deposit: true,
   cancellation_notice_hours: 48,
 });
 
-const defaultDeposit: DepositConfig = {
-  enabled: false,
-  amount_per_person_gbp: 5,
-  online_requires_deposit: true,
-  phone_requires_deposit: false,
-};
-
 export function BookingRulesTab({ services, showToast }: Props) {
   const [restrictions, setRestrictions] = useState<Restriction[]>([]);
-  const [depositConfig, setDepositConfig] = useState<DepositConfig>(defaultDeposit);
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<Restriction | null>(null);
   const [saving, setSaving] = useState(false);
-  const [savingDeposit, setSavingDeposit] = useState(false);
 
   useEffect(() => {
     async function load() {
       try {
-        const [restrictionsRes, venueRes] = await Promise.all([
-          fetch('/api/venue/booking-restrictions'),
-          fetch('/api/venue'),
-        ]);
+        const restrictionsRes = await fetch('/api/venue/booking-restrictions');
         if (restrictionsRes.ok) {
           const data = await restrictionsRes.json();
           setRestrictions(data.restrictions ?? []);
-        }
-        if (venueRes.ok) {
-          const venue = await venueRes.json();
-          if (venue.deposit_config) {
-            setDepositConfig({
-              enabled: venue.deposit_config.enabled ?? false,
-              amount_per_person_gbp: venue.deposit_config.amount_per_person_gbp ?? 5,
-              online_requires_deposit: venue.deposit_config.online_requires_deposit !== false,
-              phone_requires_deposit: venue.deposit_config.phone_requires_deposit ?? false,
-            });
-          }
         }
       } finally {
         setLoading(false);
@@ -87,23 +61,6 @@ export function BookingRulesTab({ services, showToast }: Props) {
     }
     load();
   }, []);
-
-  async function handleSaveDeposit() {
-    setSavingDeposit(true);
-    try {
-      const res = await fetch('/api/venue/deposit-config', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(depositConfig),
-      });
-      if (!res.ok) throw new Error();
-      showToast('Deposit settings saved');
-    } catch {
-      showToast('Failed to save deposit settings');
-    } finally {
-      setSavingDeposit(false);
-    }
-  }
 
   async function handleSave(serviceId: string, data: Restriction) {
     setSaving(true);
@@ -145,73 +102,10 @@ export function BookingRulesTab({ services, showToast }: Props) {
 
   return (
     <div className="space-y-6">
-      {/* Venue-wide deposit settings */}
-      <div className="rounded-xl border border-slate-200 bg-white p-5">
-        <h3 className="mb-4 font-semibold text-slate-900">Deposit Settings</h3>
-        <div className="mb-4 rounded-lg bg-amber-50 border border-amber-200 p-3 text-xs text-amber-800">
-          <strong>Deposit refunds:</strong> Configure hours-before-start for each dining service below. Guests who cancel
-          after that cut-off forfeit the deposit (unless you refund manually).
-        </div>
-        <div className="space-y-4">
-          <label className="flex cursor-pointer items-center gap-3">
-            <input
-              type="checkbox"
-              checked={depositConfig.enabled}
-              onChange={(e) => setDepositConfig({ ...depositConfig, enabled: e.target.checked })}
-              className="h-4 w-4 rounded border-slate-300 text-brand-600"
-            />
-            <span className="text-sm font-medium text-slate-700">Enable deposits</span>
-          </label>
-
-          {depositConfig.enabled && (
-            <div className="space-y-4 rounded-lg border border-slate-100 bg-slate-50 p-4">
-              <div className="max-w-xs">
-                <label className="mb-1 flex items-center gap-1.5 text-xs font-medium text-slate-600">
-                  Amount per person (£) <HelpTooltip content="The deposit amount charged per guest. For example, £5 per person for a party of 4 = £20 total deposit." />
-                </label>
-                <NumericInput
-                  allowFloat
-                  min={0}
-                  max={100}
-                  value={depositConfig.amount_per_person_gbp}
-                  onChange={(v) => setDepositConfig({ ...depositConfig, amount_per_person_gbp: v })}
-                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                />
-              </div>
-              <div className="space-y-2">
-                <label className="flex cursor-pointer items-center gap-3">
-                  <input
-                    type="checkbox"
-                    checked={depositConfig.online_requires_deposit}
-                    onChange={(e) => setDepositConfig({ ...depositConfig, online_requires_deposit: e.target.checked })}
-                    className="h-4 w-4 rounded border-slate-300 text-brand-600"
-                  />
-                  <span className="text-xs font-medium text-slate-600">Online bookings require deposit</span>
-                </label>
-                <label className="flex cursor-pointer items-center gap-3">
-                  <input
-                    type="checkbox"
-                    checked={depositConfig.phone_requires_deposit}
-                    onChange={(e) => setDepositConfig({ ...depositConfig, phone_requires_deposit: e.target.checked })}
-                    className="h-4 w-4 rounded border-slate-300 text-brand-600"
-                  />
-                  <span className="text-xs font-medium text-slate-600">Phone bookings require deposit</span>
-                </label>
-              </div>
-              <p className="text-[11px] text-slate-400">
-                Use the per-service &ldquo;Require deposits&rdquo; toggle below to control which party sizes need a deposit for each service.
-              </p>
-            </div>
-          )}
-
-          <button
-            onClick={handleSaveDeposit}
-            disabled={savingDeposit}
-            className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
-          >
-            {savingDeposit ? 'Saving...' : 'Save deposit settings'}
-          </button>
-        </div>
+      <div className="rounded-lg bg-amber-50 border border-amber-200 p-3 text-xs text-amber-800">
+        <strong>Deposits:</strong> Configure per dining service below (amount per person, which party sizes trigger a
+        deposit, and whether online bookings must pay). Staff phone bookings use the &ldquo;Require deposit&rdquo; toggle on
+        the New Booking form only. Deposit refunds use the cancellation notice hours set for each service.
       </div>
 
       {/* Per-service booking rules */}
@@ -230,7 +124,11 @@ export function BookingRulesTab({ services, showToast }: Props) {
                     setEditingId(service.id);
                     setEditDraft(
                       restriction
-                        ? { ...restriction }
+                        ? {
+                            ...restriction,
+                            deposit_amount_per_person_gbp: restriction.deposit_amount_per_person_gbp ?? null,
+                            online_requires_deposit: restriction.online_requires_deposit !== false,
+                          }
                         : ({ id: '', ...defaultRestriction(service.id) } as Restriction),
                     );
                   }}
@@ -312,8 +210,8 @@ export function BookingRulesTab({ services, showToast }: Props) {
                   )}
                 </div>
 
-                {/* Deposit threshold */}
-                <div className={`rounded-lg border p-3 space-y-3 ${depositConfig.enabled ? 'border-slate-200' : 'border-slate-100 bg-slate-50 opacity-60'}`}>
+                {/* Deposits (per service) */}
+                <div className="rounded-lg border border-slate-200 p-3 space-y-3">
                   <label className="flex cursor-pointer items-center gap-3">
                     <input
                       type="checkbox"
@@ -321,24 +219,44 @@ export function BookingRulesTab({ services, showToast }: Props) {
                       onChange={(e) => setEditDraft({
                         ...draft,
                         deposit_required_from_party_size: e.target.checked ? 6 : null,
+                        ...(e.target.checked && draft.deposit_amount_per_person_gbp == null
+                          ? { deposit_amount_per_person_gbp: 5 }
+                          : {}),
                       })}
-                      disabled={!depositConfig.enabled}
                       className="h-4 w-4 rounded border-slate-300 text-brand-600"
                     />
                     <span className="flex items-center gap-1.5 text-xs font-medium text-slate-600">
                       Require deposits for this service <HelpTooltip content={helpContent.bookingRules.depositThreshold} />
                     </span>
                   </label>
-                  {!depositConfig.enabled && (
-                    <p className="text-[11px] text-slate-400">Enable deposits in the Deposit Settings section above first.</p>
-                  )}
-                  {draft.deposit_required_from_party_size != null && depositConfig.enabled && (
-                    <div>
-                      <label className="mb-1 block text-xs font-medium text-slate-600">Deposit from party size</label>
-                      <NumericInput min={1} value={draft.deposit_required_from_party_size} onChange={(v) => setEditDraft({ ...draft, deposit_required_from_party_size: v })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
-                      <p className="mt-1 text-[11px] text-slate-400">
-                        £{depositConfig.amount_per_person_gbp} per person for parties of {draft.deposit_required_from_party_size}+
-                      </p>
+                  {draft.deposit_required_from_party_size != null && (
+                    <div className="space-y-3">
+                      <div>
+                        <label className="mb-1 block text-xs font-medium text-slate-600">Deposit from party size</label>
+                        <NumericInput min={1} value={draft.deposit_required_from_party_size} onChange={(v) => setEditDraft({ ...draft, deposit_required_from_party_size: v })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+                      </div>
+                      <div className="max-w-xs">
+                        <label className="mb-1 flex items-center gap-1.5 text-xs font-medium text-slate-600">
+                          Amount per person (£) <HelpTooltip content="Charged per guest when the party size threshold is met. Example: £5 × 4 guests = £20 total." />
+                        </label>
+                        <NumericInput
+                          allowFloat
+                          min={0}
+                          max={100}
+                          value={draft.deposit_amount_per_person_gbp ?? 0}
+                          onChange={(v) => setEditDraft({ ...draft, deposit_amount_per_person_gbp: v > 0 ? v : null })}
+                          className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                        />
+                      </div>
+                      <label className="flex cursor-pointer items-center gap-3">
+                        <input
+                          type="checkbox"
+                          checked={draft.online_requires_deposit}
+                          onChange={(e) => setEditDraft({ ...draft, online_requires_deposit: e.target.checked })}
+                          className="h-4 w-4 rounded border-slate-300 text-brand-600"
+                        />
+                        <span className="text-xs font-medium text-slate-600">Online bookings require deposit</span>
+                      </label>
                     </div>
                   )}
                 </div>
@@ -362,10 +280,12 @@ export function BookingRulesTab({ services, showToast }: Props) {
                     {restriction.large_party_threshold ? `${restriction.large_party_threshold}+` : 'Off'}
                   </span>
                 </div>
-                <div>
-                  <span className="text-slate-500">Deposit required:</span>{' '}
+                <div className="sm:col-span-2">
+                  <span className="text-slate-500">Deposits:</span>{' '}
                   <span className="font-medium text-slate-700">
-                    {restriction.deposit_required_from_party_size ? `${restriction.deposit_required_from_party_size}+ guests` : 'Off'}
+                    {restriction.deposit_required_from_party_size
+                      ? `${restriction.deposit_required_from_party_size}+ guests, £${restriction.deposit_amount_per_person_gbp ?? '—'} pp, online ${restriction.online_requires_deposit !== false ? 'on' : 'off'}`
+                      : 'Off'}
                   </span>
                 </div>
               </div>

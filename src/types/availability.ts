@@ -148,6 +148,10 @@ export interface BookingRestriction {
   large_party_threshold: number | null;
   large_party_message: string | null;
   deposit_required_from_party_size: number | null;
+  /** Per-person deposit for this dining service; null falls back to legacy venue deposit_config amount. */
+  deposit_amount_per_person_gbp: number | null;
+  /** When deposits apply, gate online/widget bookings (staff phone flow uses the Require deposit toggle only). */
+  online_requires_deposit: boolean;
 }
 
 /** Optional JSON on availability_blocks (reduced_capacity); merged when several blocks apply. */
@@ -230,7 +234,10 @@ export interface ServiceAvailableSlot {
   available_bookings: number;
   estimated_duration: number;
   deposit_required: boolean;
+  /** Total deposit in GBP for this slot and party size (per-person × party_size). */
   deposit_amount: number | null;
+  /** When deposits apply, whether online/widget bookings should require payment (public flow). */
+  online_requires_deposit: boolean;
   limited: boolean;
 }
 
@@ -248,10 +255,11 @@ export interface EngineInput {
   /** Date-overlapping rows; engine picks best match per service/date. */
   schedule_exceptions: ServiceScheduleException[];
   restriction_exceptions: BookingRestrictionException[];
-  deposit_config: {
-    enabled: boolean;
-    amount_per_person_gbp: number;
-  } | null;
+  /**
+   * When `booking_restrictions.deposit_amount_per_person_gbp` is null, use this legacy
+   * venue-level amount (from `venues.deposit_config`) so migrated venues stay stable.
+   */
+  deposit_legacy_amount_per_person_gbp: number | null;
   now: Date;
 }
 

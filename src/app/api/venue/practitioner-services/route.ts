@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { getVenueStaff, staffManagesCalendar } from '@/lib/venue-auth';
+import {
+  getVenueStaff,
+  requireManagedCalendarAccess,
+  requireManagedCalendarIds,
+} from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import type { PractitionerService } from '@/types/booking-models';
 import {
@@ -9,6 +13,7 @@ import {
   SERVICE_REMOVAL_BLOCKED_BY_BOOKINGS,
 } from '@/lib/venue/service-calendar-removal';
 import { z } from 'zod';
+import { venueUsesUnifiedAppointmentServiceData } from '@/lib/booking/uses-unified-appointment-data';
 
 const syncSchema = z.object({
   practitioner_id: z.string().uuid(),
@@ -36,13 +41,12 @@ export async function PUT(request: NextRequest) {
     const { practitioner_id, service_ids } = parsed.data;
     const admin = getSupabaseAdminClient();
 
-    const { data: venue } = await admin.from('venues').select('booking_model').eq('id', staff.venue_id).maybeSingle();
-    const bookingModel = (venue as { booking_model?: string } | null)?.booking_model ?? '';
+    const useUnified = await venueUsesUnifiedAppointmentServiceData(admin, staff.venue_id);
 
     /** Empty array clears all service links for that calendar (classes/resources can still use the column). */
     const effectiveServiceIds = [...service_ids];
 
-    if (bookingModel === 'unified_scheduling') {
+    if (useUnified) {
       const { data: cal, error: calErr } = await admin
         .from('unified_calendars')
         .select('id')
@@ -55,12 +59,15 @@ export async function PUT(request: NextRequest) {
       }
 
       if (staff.role !== 'admin') {
-        const mayEdit = await staffManagesCalendar(admin, staff.venue_id, staff.id, practitioner_id);
-        if (!mayEdit) {
-          return NextResponse.json(
-            { error: 'You can only update service links for calendars assigned to your account.' },
-            { status: 403 },
-          );
+        const access = await requireManagedCalendarAccess(
+          admin,
+          staff.venue_id,
+          staff,
+          practitioner_id,
+          'You can only update service links for calendars assigned to your account.',
+        );
+        if (!access.ok) {
+          return NextResponse.json({ error: access.error }, { status: 403 });
         }
       }
 
@@ -129,11 +136,12 @@ export async function PUT(request: NextRequest) {
     }
 
     if (staff.role !== 'admin') {
-      if (prac.staff_id !== staff.id) {
-        return NextResponse.json(
-          { error: 'You can only update service links for your own calendar.' },
-          { status: 403 },
-        );
+      const scope = await requireManagedCalendarIds(admin, staff.venue_id, staff);
+      if (!scope.ok) {
+        return NextResponse.json({ error: scope.error }, { status: 403 });
+      }
+      if (!scope.managedCalendarIds.includes(practitioner_id)) {
+        return NextResponse.json({ error: 'You can only update service links for your own calendar.' }, { status: 403 });
       }
     }
 

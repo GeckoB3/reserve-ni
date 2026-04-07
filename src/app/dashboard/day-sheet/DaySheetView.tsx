@@ -30,6 +30,7 @@ import type { CountryCode } from 'libphonenumber-js';
 import { PhoneWithCountryField } from '@/components/phone/PhoneWithCountryField';
 import { normalizeToE164 } from '@/lib/phone/e164';
 import { defaultPhoneCountryForVenueCurrency } from '@/lib/phone/default-country';
+import { HorizontalScrollHint } from '@/components/ui/HorizontalScrollHint';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -319,7 +320,9 @@ function TimelineBreakdown({ periods, date }: { periods: DaySheetPeriod[]; date:
   }
 
   return (
-    <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white print:hidden">
+    <div>
+      <HorizontalScrollHint />
+      <div className="touch-pan-x overflow-x-auto rounded-lg border border-slate-200 bg-white print:hidden">
       <div className="flex min-w-max">
         {slots.map((slot) => {
           const isCurrent = isToday && currentMinutes >= slot.minutes && currentMinutes < slot.minutes + 30;
@@ -347,6 +350,7 @@ function TimelineBreakdown({ periods, date }: { periods: DaySheetPeriod[]; date:
             </div>
           );
         })}
+      </div>
       </div>
     </div>
   );

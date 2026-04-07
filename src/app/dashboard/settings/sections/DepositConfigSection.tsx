@@ -31,9 +31,34 @@ interface DepositConfigSectionProps {
   venue: VenueSettings;
   onUpdate: (patch: Partial<VenueSettings>) => void;
   isAdmin: boolean;
+  /**
+   * Legacy JSON availability: venue-wide deposit toggles apply.
+   * Service-based table engine: deposits are per dining service (Availability → Booking rules).
+   */
+  variant?: 'legacy_table' | 'service_engine_table';
 }
 
-export function DepositConfigSection({ venue, onUpdate, isAdmin }: DepositConfigSectionProps) {
+function ServiceEngineTableDepositMessage() {
+  return (
+    <section className="rounded-lg border border-neutral-200 bg-white p-6 shadow-sm">
+      <h2 className="mb-2 text-lg font-semibold text-neutral-900">Deposit config</h2>
+      <p className="text-sm text-neutral-600">
+        Table deposits for each dining period are set under{' '}
+        <strong>Dashboard → Availability → Booking rules</strong> (per service: amount, party-size threshold, and online
+        deposit requirement). Staff phone bookings use the &ldquo;Require deposit&rdquo; toggle on the New Booking form.
+      </p>
+      <p className="mt-3 text-sm text-neutral-600">
+        Use the <strong>Communications</strong> tab for deposit request and confirmation message wording.
+      </p>
+    </section>
+  );
+}
+
+function LegacyDepositConfigForm({
+  venue,
+  onUpdate,
+  isAdmin,
+}: Pick<DepositConfigSectionProps, 'venue' | 'onUpdate' | 'isAdmin'>) {
   const config = venue.deposit_config ?? defaultConfig;
   const { integerProps, floatProps } = useNumericField();
   const int = integerProps();
@@ -118,4 +143,17 @@ export function DepositConfigSection({ venue, onUpdate, isAdmin }: DepositConfig
       </form>
     </section>
   );
+}
+
+export function DepositConfigSection({
+  venue,
+  onUpdate,
+  isAdmin,
+  variant = 'legacy_table',
+}: DepositConfigSectionProps) {
+  if (variant === 'service_engine_table') {
+    return <ServiceEngineTableDepositMessage />;
+  }
+
+  return <LegacyDepositConfigForm venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} />;
 }

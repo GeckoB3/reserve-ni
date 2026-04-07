@@ -34,6 +34,8 @@ const DEFAULT_RESTRICTION_WHEN_MISSING: Omit<BookingRestriction, 'id' | 'service
   large_party_threshold: null,
   large_party_message: null,
   deposit_required_from_party_size: null,
+  deposit_amount_per_person_gbp: null,
+  online_requires_deposit: true,
 };
 
 /** Parse "HH:mm" or "HH:mm:ss" to minutes since midnight. */
@@ -267,6 +269,24 @@ export function resolveRestriction(
   serviceId: string,
 ): BookingRestriction | null {
   return restrictions.find((r) => r.service_id === serviceId) ?? null;
+}
+
+function resolveDepositPerPersonGbp(
+  restriction: BookingRestriction | null,
+  legacyAmountPerPersonGbp: number | null,
+): number | null {
+  if (restriction) {
+    const direct = restriction.deposit_amount_per_person_gbp;
+    if (direct != null && Number.isFinite(Number(direct))) {
+      return Number(direct);
+    }
+  }
+  return legacyAmountPerPersonGbp;
+}
+
+function depositThresholdMet(restriction: BookingRestriction | null, partySize: number): boolean {
+  const t = restriction?.deposit_required_from_party_size;
+  return t != null && partySize >= t;
 }
 
 function applicableRestrictionExceptions(
@@ -557,12 +577,6 @@ function generateServiceSlots(
 
   const defaultRule = resolveCapacityRule(input.capacity_rules, service.id, dayOfWeek, serviceStart);
 
-  const depositRequired = !!(
-    input.deposit_config?.enabled &&
-    dayRestriction?.deposit_required_from_party_size &&
-    input.party_size >= dayRestriction.deposit_required_from_party_size
-  );
-
   for (let slotMin = serviceStart; slotMin <= lastBooking; slotMin += SLOT_PROBE_STEP_MINUTES) {
     const slotRestriction = mergeBookingRestrictionForContext(
       baseRestriction,
@@ -572,6 +586,16 @@ function generateServiceSlots(
       input.date,
       slotMin,
     );
+
+    const perPersonGbp = resolveDepositPerPersonGbp(
+      slotRestriction,
+      input.deposit_legacy_amount_per_person_gbp,
+    );
+    const depositRequired =
+      perPersonGbp != null &&
+      perPersonGbp > 0 &&
+      depositThresholdMet(slotRestriction, input.party_size);
+    const onlineRequiresDeposit = slotRestriction?.online_requires_deposit ?? true;
 
     if (slotRestriction) {
       const minAdvanceMs = slotRestriction.min_advance_minutes * 60 * 1000;
@@ -635,9 +659,8 @@ function generateServiceSlots(
       available_bookings: availableBookings,
       estimated_duration: duration,
       deposit_required: depositRequired,
-      deposit_amount: depositRequired && input.deposit_config
-        ? input.deposit_config.amount_per_person_gbp * input.party_size
-        : null,
+      deposit_amount: depositRequired && perPersonGbp != null ? perPersonGbp * input.party_size : null,
+      online_requires_deposit: onlineRequiresDeposit,
       limited,
     });
   }

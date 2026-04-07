@@ -223,6 +223,8 @@ interface CommunicationTemplatesSectionProps {
   enabledModels?: BookingModel[];
   /** When unset, deposit-related template cards are shown for unified venues (conservative default). */
   depositConfig?: DepositConfigLike | null;
+  /** Restaurant table + service engine: deposits are per dining service; still allow deposit message templates. */
+  serviceEngineTable?: boolean;
   onUpdate?: (patch: Record<string, unknown>) => void;
 }
 
@@ -289,6 +291,7 @@ export function CommunicationTemplatesSection({
   bookingModel,
   enabledModels = [],
   depositConfig,
+  serviceEngineTable = false,
 }: CommunicationTemplatesSectionProps) {
   const unifiedVenue = isUnifiedSchedulingVenue(bookingModel);
   const primary =
@@ -323,7 +326,7 @@ export function CommunicationTemplatesSection({
   const showDepositTemplates =
     !unifiedColumnStyle ||
     depositConfig == null ||
-    venueUsesDepositWorkflow(depositConfig);
+    venueUsesDepositWorkflow(depositConfig, { serviceEngineTable });
 
   const visibleCardsTable = useMemo(() => {
     const filtered = cardsTable.filter(

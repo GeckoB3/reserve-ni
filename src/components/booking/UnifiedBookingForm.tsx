@@ -783,7 +783,7 @@ export function UnifiedBookingForm({
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="Full name"
-            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm transition-colors focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20 sm:rounded-xl sm:px-3.5 sm:py-2.5"
+            className="min-h-[44px] w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-base transition-colors focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20 sm:rounded-xl sm:px-3.5 sm:py-2.5"
             required
           />
         </div>
@@ -797,7 +797,7 @@ export function UnifiedBookingForm({
             value={phone}
             onChange={setPhone}
             defaultCountry={phoneDefaultCountry}
-            inputClassName="w-full min-w-0 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm transition-colors focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20 sm:rounded-xl sm:px-3.5 sm:py-2.5"
+            inputClassName="min-h-[44px] w-full min-w-0 rounded-lg border border-slate-200 bg-white px-3 py-2 text-base transition-colors focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20 sm:rounded-xl sm:px-3.5 sm:py-2.5"
           />
         </div>
 
@@ -811,7 +811,7 @@ export function UnifiedBookingForm({
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             placeholder="guest@example.com"
-            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm transition-colors focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20 sm:rounded-xl sm:px-3.5 sm:py-2.5"
+            className="min-h-[44px] w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-base transition-colors focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20 sm:rounded-xl sm:px-3.5 sm:py-2.5"
           />
         </div>
 
@@ -825,7 +825,7 @@ export function UnifiedBookingForm({
             onChange={(e) => setDietaryNotes(e.target.value)}
             rows={2}
             placeholder="Allergies, intolerances, dietary requirements..."
-            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm transition-colors focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20 sm:rounded-xl sm:px-3.5 sm:py-2.5"
+            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-base transition-colors focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20 sm:rounded-xl sm:px-3.5 sm:py-2.5"
           />
         </div>
 
@@ -839,7 +839,7 @@ export function UnifiedBookingForm({
             onChange={(e) => setNotes(e.target.value)}
             rows={2}
             placeholder="Internal notes for staff..."
-            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm transition-colors focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20 sm:rounded-xl sm:px-3.5 sm:py-2.5"
+            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-base transition-colors focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20 sm:rounded-xl sm:px-3.5 sm:py-2.5"
           />
         </div>
       </div>

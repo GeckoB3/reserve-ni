@@ -158,13 +158,6 @@ export async function POST(request: NextRequest) {
       phoneE164 = n;
     }
 
-    const depositConfig = (venue.deposit_config as {
-      enabled?: boolean;
-      amount_per_person_gbp?: number;
-      phone_requires_deposit?: boolean;
-    }) ?? {};
-    const amountPerPersonGbp = depositConfig.amount_per_person_gbp ?? 5;
-
     const emailNorm = email && email.trim() !== '' ? email.trim().toLowerCase() : null;
     const { guest } = await findOrCreateGuest(admin, venueId, {
       name,
@@ -938,13 +931,36 @@ export async function POST(request: NextRequest) {
     endDate.setMinutes(endDate.getMinutes() + durationMinutes);
     const estimatedEndTime = endDate.toISOString();
 
-    const channelRequiresPhone = depositConfig.phone_requires_deposit ?? false;
-    const requiresDeposit =
-      require_deposit !== undefined
-        ? require_deposit
-        : (slot.deposit_required && channelRequiresPhone) ||
-          ((depositConfig.enabled ?? false) && channelRequiresPhone);
-    const depositAmountPence = requiresDeposit ? Math.round(amountPerPersonGbp * party_size * 100) : null;
+    const { data: tableRestriction } = await admin
+      .from('booking_restrictions')
+      .select('deposit_amount_per_person_gbp')
+      .eq('service_id', slot.service_id)
+      .maybeSingle();
+
+    const legacyGbp = (venue.deposit_config as { amount_per_person_gbp?: number } | null)?.amount_per_person_gbp;
+    const amountPerPersonGbp =
+      typeof tableRestriction?.deposit_amount_per_person_gbp === 'number'
+        ? tableRestriction.deposit_amount_per_person_gbp
+        : typeof legacyGbp === 'number'
+          ? legacyGbp
+          : null;
+
+    const requiresDeposit = Boolean(require_deposit);
+
+    if (requiresDeposit && (amountPerPersonGbp == null || amountPerPersonGbp <= 0)) {
+      return NextResponse.json(
+        {
+          error:
+            'No per-person deposit amount is configured for this dining service. Set it under Availability → Booking rules for that service.',
+        },
+        { status: 400 },
+      );
+    }
+
+    const depositAmountPence =
+      requiresDeposit && amountPerPersonGbp != null
+        ? Math.round(amountPerPersonGbp * party_size * 100)
+        : null;
 
     if (requiresDeposit && !venue.stripe_connected_account_id) {
       return NextResponse.json(

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { defaultPhoneCountryForVenueCurrency } from '@/lib/phone/default-country';
 import { ResourceCalendarMonth, todayYmdLocal } from './ResourceCalendarMonth';
 import { slotIntervalDurationLabel } from '@/lib/booking/slot-interval-label';
+import { formatResourcePricePerSlotLine, isFreePricePence } from '@/lib/booking/format-price-display';
 
 interface ResourceSlot {
   resource_id: string;
@@ -343,9 +344,11 @@ export function StaffResourceBookingForm({
                     {r.resource_type && <div className="text-xs text-slate-500">{r.resource_type}</div>}
                     <div className="mt-1 text-xs text-slate-500">
                       {r.min_booking_minutes}–{r.max_booking_minutes} min ·{' '}
-                      {r.price_per_slot_pence != null
-                        ? `${sym}${(r.price_per_slot_pence / 100).toFixed(2)} per ${slotIntervalDurationLabel(r.slot_interval_minutes)}`
-                        : '—'}
+                      {formatResourcePricePerSlotLine(
+                        r.price_per_slot_pence,
+                        sym,
+                        slotIntervalDurationLabel(r.slot_interval_minutes),
+                      )}
                     </div>
                   </button>
                 ))}
@@ -422,9 +425,11 @@ export function StaffResourceBookingForm({
                   }`}
                 >
                   {timeForApi(slot.start_time)}
-                  {slot.price_per_slot_pence != null
-                    ? ` · ${sym}${(slot.price_per_slot_pence / 100).toFixed(2)} per ${slotIntervalDurationLabel(selectedResource.slot_interval_minutes)}`
-                    : ''}
+                  {` · ${formatResourcePricePerSlotLine(
+                    slot.price_per_slot_pence,
+                    sym,
+                    slotIntervalDurationLabel(selectedResource.slot_interval_minutes),
+                  )}`}
                 </button>
               ))}
             </div>
@@ -443,15 +448,19 @@ export function StaffResourceBookingForm({
             <div className="mt-1 text-slate-600">
               {date} · {timeForApi(selectedStart)} – {addMinutesToHHmm(selectedStart, durationMinutes)} ({durationMinutes} min)
             </div>
-            {selectedResource.price_per_slot_pence != null && (
-              <div className="mt-2 text-slate-700">
-                From {sym}
-                {((selectedResource.price_per_slot_pence * Math.ceil(durationMinutes / selectedResource.slot_interval_minutes)) / 100).toFixed(2)}{' '}
-                <span className="text-slate-500">
-                  (price per {slotIntervalDurationLabel(selectedResource.slot_interval_minutes)})
-                </span>
-              </div>
-            )}
+            <div className="mt-2 text-slate-700">
+              {isFreePricePence(selectedResource.price_per_slot_pence) ? (
+                'Free'
+              ) : (
+                <>
+                  From {sym}
+                  {((selectedResource.price_per_slot_pence! * Math.ceil(durationMinutes / selectedResource.slot_interval_minutes)) / 100).toFixed(2)}{' '}
+                  <span className="text-slate-500">
+                    (price per {slotIntervalDurationLabel(selectedResource.slot_interval_minutes)})
+                  </span>
+                </>
+              )}
+            </div>
           </div>
           <button
             type="button"

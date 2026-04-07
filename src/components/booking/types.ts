@@ -54,6 +54,8 @@ export interface AvailableSlot {
   estimated_duration?: number;
   deposit_required?: boolean;
   deposit_amount?: number | null;
+  /** When deposits apply for this dining service, require them for online/widget checkout. */
+  online_requires_deposit?: boolean;
   limited?: boolean;
   available_bookings?: number;
 }

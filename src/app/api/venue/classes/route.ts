@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
+import { getVenueStaff, requireAdmin, requireManagedCalendarAccess } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { requireVenueExposesSecondaryModel } from '@/lib/booking/require-venue-secondary-model';
 import { assertClassSessionWindowFreeOnCalendar } from '@/lib/experience-events/calendar-event-window-conflicts';
@@ -8,6 +8,7 @@ import {
   resolveInstructorCalendarIdForClass,
   syncCalendarBlockForClassInstance,
 } from '@/lib/class-instances/instructor-calendar-block';
+import { staffMayManageClassTypeSessions } from '@/lib/class-instances/class-staff-scope';
 import { DEFAULT_ENTITY_BOOKING_WINDOW } from '@/lib/booking/entity-booking-window';
 import { z } from 'zod';
 
@@ -335,13 +336,12 @@ export async function GET() {
   }
 }
 
-/** POST /api/venue/classes - create a class type or timetable entry (admin only). */
+/** POST /api/venue/classes - create a class type or timetable entry (admin or scoped staff). */
 export async function POST(request: NextRequest) {
   try {
     const supabase = await createClient();
     const staff = await getVenueStaff(supabase);
     if (!staff) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
-    if (!requireAdmin(staff)) return NextResponse.json({ error: 'Forbidden: admin only' }, { status: 403 });
 
     const admin = getSupabaseAdminClient();
     const modelGate = await requireVenueExposesSecondaryModel(admin, staff.venue_id, 'class_session');
@@ -355,6 +355,17 @@ export async function POST(request: NextRequest) {
       const parsed = timetableEntrySchema.safeParse(body);
       if (!parsed.success) {
         return NextResponse.json({ error: 'Invalid request', details: parsed.error.flatten() }, { status: 400 });
+      }
+      if (staff.role !== 'admin') {
+        const scope = await staffMayManageClassTypeSessions(
+          admin,
+          staff.venue_id,
+          staff,
+          parsed.data.class_type_id,
+        );
+        if (!scope.ok) {
+          return NextResponse.json({ error: scope.error }, { status: scope.status });
+        }
       }
       const { data, error } = await admin.from('class_timetable').insert(parsed.data).select().single();
       if (error) {
@@ -394,6 +405,19 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    if (staff.role !== 'admin') {
+      const access = await requireManagedCalendarAccess(
+        admin,
+        staff.venue_id,
+        staff,
+        calendarForScheduling,
+        'You can only create classes on calendars assigned to your account.',
+      );
+      if (!access.ok) {
+        return NextResponse.json({ error: access.error }, { status: 403 });
+      }
+    }
+
     const { data, error } = await admin.from('class_types').insert(insertRow).select().single();
 
     if (error) {
@@ -414,7 +438,6 @@ export async function PATCH(request: NextRequest) {
     const supabase = await createClient();
     const staff = await getVenueStaff(supabase);
     if (!staff) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
-    if (!requireAdmin(staff)) return NextResponse.json({ error: 'Forbidden: admin only' }, { status: 403 });
 
     const admin = getSupabaseAdminClient();
     const modelGate = await requireVenueExposesSecondaryModel(admin, staff.venue_id, 'class_session');
@@ -424,7 +447,28 @@ export async function PATCH(request: NextRequest) {
     const { id, entity_type, ...rest } = body;
     if (!id || !entity_type) return NextResponse.json({ error: 'Missing id or entity_type' }, { status: 400 });
 
+    if (entity_type === 'class_type' && staff.role !== 'admin') {
+      return NextResponse.json({ error: 'Forbidden: only venue admins can edit class types.' }, { status: 403 });
+    }
+
     if (entity_type === 'timetable') {
+      const { data: ttRow, error: ttFetchErr } = await admin
+        .from('class_timetable')
+        .select('id, class_type_id')
+        .eq('id', id)
+        .maybeSingle();
+      if (ttFetchErr) {
+        console.error('PATCH /api/venue/classes (timetable) fetch failed:', ttFetchErr);
+        return NextResponse.json({ error: 'Failed to update timetable entry' }, { status: 500 });
+      }
+      if (!ttRow) {
+        return NextResponse.json({ error: 'Timetable entry not found' }, { status: 404 });
+      }
+      const ctId = (ttRow as { class_type_id: string }).class_type_id;
+      const scope = await staffMayManageClassTypeSessions(admin, staff.venue_id, staff, ctId);
+      if (!scope.ok) {
+        return NextResponse.json({ error: scope.error }, { status: scope.status });
+      }
       const { data, error } = await admin.from('class_timetable').update(rest).eq('id', id).select().single();
       if (error) return NextResponse.json({ error: 'Failed to update timetable entry' }, { status: 500 });
       return NextResponse.json(data);
@@ -454,6 +498,16 @@ export async function PATCH(request: NextRequest) {
 
       if (ctFetchErr || !ctRow) {
         return NextResponse.json({ error: 'Instance not found' }, { status: 404 });
+      }
+
+      const sessionScope = await staffMayManageClassTypeSessions(
+        admin,
+        staff.venue_id,
+        staff,
+        (existingInst as { class_type_id: string }).class_type_id,
+      );
+      if (!sessionScope.ok) {
+        return NextResponse.json({ error: sessionScope.error }, { status: sessionScope.status });
       }
 
       const mergedInst = { ...existingInst, ...rest } as {
@@ -520,6 +574,7 @@ export async function PATCH(request: NextRequest) {
     }
 
     const patch = patchParsed.data;
+
     const merged = {
       ...existing,
       ...patch,
@@ -608,13 +663,12 @@ export async function PATCH(request: NextRequest) {
   }
 }
 
-/** DELETE /api/venue/classes - delete class type, timetable entry, or instance. */
+/** DELETE /api/venue/classes - delete class type, timetable entry or instance (admin or scoped staff). */
 export async function DELETE(request: NextRequest) {
   try {
     const supabase = await createClient();
     const staff = await getVenueStaff(supabase);
     if (!staff) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
-    if (!requireAdmin(staff)) return NextResponse.json({ error: 'Forbidden: admin only' }, { status: 403 });
 
     const { id, entity_type } = await request.json();
     if (!id || !entity_type) return NextResponse.json({ error: 'Missing id or entity_type' }, { status: 400 });
@@ -645,6 +699,17 @@ export async function DELETE(request: NextRequest) {
       if (ctErr || !ct) {
         return NextResponse.json({ error: 'Forbidden or not found' }, { status: 404 });
       }
+      if (staff.role !== 'admin') {
+        const scope = await staffMayManageClassTypeSessions(
+          admin,
+          staff.venue_id,
+          staff,
+          (inst as { class_type_id: string }).class_type_id,
+        );
+        if (!scope.ok) {
+          return NextResponse.json({ error: scope.error }, { status: scope.status });
+        }
+      }
       const { error } = await admin.from('class_instances').delete().eq('id', id);
       if (error) {
         console.error('DELETE /api/venue/classes (instance) failed:', error);
@@ -653,11 +718,61 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ success: true });
     }
 
-    const table = entity_type === 'timetable' ? 'class_timetable' : 'class_types';
+    if (entity_type === 'timetable') {
+      const { data: ttRow, error: ttErr } = await admin
+        .from('class_timetable')
+        .select('id, class_type_id')
+        .eq('id', id)
+        .maybeSingle();
+      if (ttErr) {
+        console.error('DELETE /api/venue/classes (timetable) lookup failed:', ttErr);
+        return NextResponse.json({ error: 'Failed to delete' }, { status: 500 });
+      }
+      if (!ttRow) {
+        return NextResponse.json({ error: 'Schedule entry not found' }, { status: 404 });
+      }
+      const { data: ct, error: ctErr } = await admin
+        .from('class_types')
+        .select('id')
+        .eq('id', (ttRow as { class_type_id: string }).class_type_id)
+        .eq('venue_id', staff.venue_id)
+        .maybeSingle();
+      if (ctErr || !ct) {
+        return NextResponse.json({ error: 'Forbidden or not found' }, { status: 404 });
+      }
+      if (staff.role !== 'admin') {
+        const scope = await staffMayManageClassTypeSessions(
+          admin,
+          staff.venue_id,
+          staff,
+          (ttRow as { class_type_id: string }).class_type_id,
+        );
+        if (!scope.ok) {
+          return NextResponse.json({ error: scope.error }, { status: scope.status });
+        }
+      }
+      const { error } = await admin.from('class_timetable').delete().eq('id', id);
+      if (error) {
+        console.error('DELETE /api/venue/classes (timetable) failed:', error);
+        return NextResponse.json({ error: 'Failed to delete' }, { status: 500 });
+      }
+      return NextResponse.json({ success: true });
+    }
 
-    const { error } = await admin.from(table).delete().eq('id', id);
+    if (entity_type !== 'class_type') {
+      return NextResponse.json({ error: 'Invalid entity_type' }, { status: 400 });
+    }
+
+    if (staff.role !== 'admin') {
+      const scope = await staffMayManageClassTypeSessions(admin, staff.venue_id, staff, id);
+      if (!scope.ok) {
+        return NextResponse.json({ error: scope.error }, { status: scope.status });
+      }
+    }
+
+    const { error } = await admin.from('class_types').delete().eq('id', id).eq('venue_id', staff.venue_id);
     if (error) {
-      console.error(`DELETE /api/venue/classes (${entity_type}) failed:`, error);
+      console.error('DELETE /api/venue/classes (class_type) failed:', error);
       return NextResponse.json({ error: 'Failed to delete' }, { status: 500 });
     }
 

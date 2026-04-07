@@ -6,6 +6,7 @@ import { defaultPhoneCountryForVenueCurrency } from '@/lib/phone/default-country
 import { DetailsStep } from './DetailsStep';
 import { PaymentStep } from './PaymentStep';
 import { ClassOfferingsCalendar } from './ClassOfferingsCalendar';
+import { formatBookablePricePence } from '@/lib/booking/format-price-display';
 
 interface EventOfferingSummary {
   series_key: string;
@@ -419,8 +420,7 @@ export function EventBookingFlow({ venue, cancellationPolicy }: { venue: VenuePu
                 <div>
                   <div className="font-medium text-slate-900">{tt.name}</div>
                   <div className="text-sm text-slate-500">
-                    {sym}
-                    {(tt.price_pence / 100).toFixed(2)} · {tt.remaining} left
+                    {formatBookablePricePence(tt.price_pence, sym)} · {tt.remaining} left
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
