@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 import { BOOKING_ACTIVE_STATUSES } from '@/lib/table-management/constants';
+import { seedDefaultFloorPlanLayoutIfNeeded } from '@/lib/table-management/seed-default-floor-plan';
+import { isRestaurantTableProductTier } from '@/lib/tier-enforcement';
 import { z } from 'zod';
 
 const settingsSchema = z.object({
@@ -98,6 +100,28 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ error: 'No updates provided' }, { status: 400 });
   }
 
+  let enablingAdvancedFirstTime = false;
+  if (parsed.data.table_management_enabled === true) {
+    const { data: prior } = await staff.db
+      .from('venues')
+      .select('table_management_enabled, pricing_tier, booking_model')
+      .eq('id', staff.venue_id)
+      .single();
+
+    enablingAdvancedFirstTime =
+      prior?.table_management_enabled === false &&
+      isRestaurantTableProductTier(prior?.pricing_tier as string | undefined) &&
+      (prior?.booking_model as string | undefined) === 'table_reservation';
+
+    if (
+      enablingAdvancedFirstTime &&
+      parsed.data.combination_threshold === undefined &&
+      updates.table_management_enabled === true
+    ) {
+      updates.combination_threshold = 25;
+    }
+  }
+
   const { data, error } = await staff.db
     .from('venues')
     .update(updates)
@@ -110,5 +134,11 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ error: 'Failed to update settings' }, { status: 500 });
   }
 
-  return NextResponse.json({ settings: data });
+  let default_floor_plan_seeded = false;
+  if (enablingAdvancedFirstTime && data?.table_management_enabled) {
+    const seedResult = await seedDefaultFloorPlanLayoutIfNeeded(staff.db, staff.venue_id);
+    default_floor_plan_seeded = seedResult.seeded;
+  }
+
+  return NextResponse.json({ settings: data, default_floor_plan_seeded });
 }

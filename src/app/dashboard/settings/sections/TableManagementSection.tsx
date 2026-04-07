@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import type { VenueSettings } from '../types';
 import type { VenueTable } from '@/types/table-management';
 import { AdjacencyPreview } from './AdjacencyPreview';
@@ -29,10 +30,15 @@ export function TableManagementSection({ venue, onUpdate, isAdmin }: Props) {
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewUnassignedCount, setPreviewUnassignedCount] = useState(0);
   const [assigningUnassigned, setAssigningUnassigned] = useState(false);
-  const [thresholdDraft, setThresholdDraft] = useState<number>(venue.combination_threshold ?? 80);
+  const [thresholdDraft, setThresholdDraft] = useState<number>(venue.combination_threshold ?? 25);
   const [thresholdSaving, setThresholdSaving] = useState(false);
   const [recalcLoading, setRecalcLoading] = useState(false);
   const [recalcResult, setRecalcResult] = useState<string | null>(null);
+
+  const [floorPlanPrompt, setFloorPlanPrompt] = useState<{ open: boolean; seeded: boolean }>({
+    open: false,
+    seeded: false,
+  });
 
   const [coversTables, setCoversTables] = useState<VenueTable[]>([]);
   const [coversTablesLoading, setCoversTablesLoading] = useState(false);
@@ -71,13 +77,16 @@ export function TableManagementSection({ venue, onUpdate, isAdmin }: Props) {
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [venue.table_management_enabled]);
 
   useEffect(() => {
-    setThresholdDraft(venue.combination_threshold ?? 80);
+    setThresholdDraft(venue.combination_threshold ?? 25);
   }, [venue.combination_threshold]);
 
-  async function commitToggle(nextValue: boolean): Promise<boolean> {
+  async function commitToggle(nextValue: boolean): Promise<{
+    success: boolean;
+    defaultFloorPlanSeeded?: boolean;
+  }> {
     setSaving(true);
     setNotice(null);
     try {
@@ -86,19 +95,34 @@ export function TableManagementSection({ venue, onUpdate, isAdmin }: Props) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ table_management_enabled: nextValue }),
       });
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        setNotice(data.error ?? 'Failed to update table management mode.');
-        return false;
+        setNotice((data as { error?: string }).error ?? 'Failed to update table management mode.');
+        return { success: false };
       }
 
-      onUpdate({ table_management_enabled: nextValue } as Partial<VenueSettings>);
+      const payload = data as {
+        settings?: { combination_threshold?: number };
+        default_floor_plan_seeded?: boolean;
+      };
+      onUpdate({
+        table_management_enabled: nextValue,
+        ...(payload.settings?.combination_threshold != null
+          ? { combination_threshold: payload.settings.combination_threshold }
+          : {}),
+      } as Partial<VenueSettings>);
       setNotice(`Advanced table management ${nextValue ? 'enabled' : 'disabled'}.`);
+      if (!nextValue) {
+        setFloorPlanPrompt({ open: false, seeded: false });
+      }
       router.refresh();
-      return true;
+      return {
+        success: true,
+        defaultFloorPlanSeeded: payload.default_floor_plan_seeded === true,
+      };
     } catch {
       setNotice('Failed to update table management mode.');
-      return false;
+      return { success: false };
     } finally {
       setSaving(false);
     }
@@ -170,8 +194,12 @@ export function TableManagementSection({ venue, onUpdate, isAdmin }: Props) {
       setShowDisableWarning(true);
       return;
     }
-    const success = await commitToggle(nextValue);
-    if (success && nextValue) {
+    const result = await commitToggle(nextValue);
+    if (result.success && nextValue) {
+      setFloorPlanPrompt({
+        open: true,
+        seeded: result.defaultFloorPlanSeeded ?? false,
+      });
       await previewUnassignedBookings();
     }
   }
@@ -355,6 +383,30 @@ export function TableManagementSection({ venue, onUpdate, isAdmin }: Props) {
 
       {notice && <p className="mt-3 text-xs text-slate-600">{notice}</p>}
 
+      {floorPlanPrompt.open && venue.table_management_enabled && (
+        <div className="mt-4 rounded-lg border border-brand-200 bg-brand-50/90 p-4 shadow-sm">
+          <p className="text-sm text-slate-800">
+            {floorPlanPrompt.seeded ? (
+              <>
+                We placed your existing tables on a <strong className="font-semibold">starter floor layout</strong>. Open the
+                Floor Plan to upload a background image, fine-tune positions, and set table combinations.
+              </>
+            ) : (
+              <>
+                Open the <strong className="font-semibold">Floor Plan</strong> to arrange your tables, upload a background
+                image, and configure combinations.
+              </>
+            )}
+          </p>
+          <Link
+            href="/dashboard/floor-plan"
+            className="mt-3 inline-flex items-center justify-center rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-brand-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
+          >
+            Open Floor Plan
+          </Link>
+        </div>
+      )}
+
       {/* Covers-mode: simplified table list for seating tracking */}
       {!venue.table_management_enabled && (
         <div className="mt-4 space-y-3">
@@ -383,7 +435,7 @@ export function TableManagementSection({ venue, onUpdate, isAdmin }: Props) {
           Combination Detection Distance
         </label>
         <p className="mt-1 text-xs text-slate-500">
-          How close two tables need to be on your floor plan to be suggested as a combination. Default is 80.
+          How close two tables need to be on your floor plan to be suggested as a combination. Default is 25 when you first turn on advanced table management.
         </p>
         <div className="mt-2 flex items-center gap-2">
           <NumericInput
@@ -492,6 +544,12 @@ export function TableManagementSection({ venue, onUpdate, isAdmin }: Props) {
             >
               Open Table Grid
             </button>
+            <Link
+              href="/dashboard/floor-plan"
+              className="inline-flex items-center justify-center rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            >
+              Open Floor Plan
+            </Link>
           </div>
         </div>
       )}
