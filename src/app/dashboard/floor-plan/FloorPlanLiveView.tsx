@@ -10,7 +10,6 @@ import type { BookingModel } from '@/types/booking-models';
 import { UndoToast } from '@/app/dashboard/table-grid/UndoToast';
 import { BookingDetailPanel, type BookingDetailPanelSnapshot } from '@/app/dashboard/bookings/BookingDetailPanel';
 import { ViewToolbar } from '@/components/dashboard/ViewToolbar';
-import { WalkInModal } from '@/app/dashboard/bookings/WalkInModal';
 import { useToast } from '@/components/ui/Toast';
 import { detectAdjacentTables, type CombinationTable } from '@/lib/table-management/combination-engine';
 import { BOOKING_REVERT_ACTIONS, canMarkNoShowForSlot, canTransitionBookingStatus, isDestructiveBookingStatus, isRevertTransition, type BookingStatus } from '@/lib/table-management/booking-status';
@@ -922,12 +921,19 @@ export function FloorPlanLiveView({
 
       {/* Walk-in modal */}
       {showWalkInModal && (
-        <WalkInModal
-          advancedMode
-          initialDate={selectedDate}
-          venueCurrency={currency}
+        <DashboardStaffBookingModal
+          open
+          title="Walk-in"
+          bookingIntent="walk-in"
           onClose={() => setShowWalkInModal(false)}
           onCreated={() => { setShowWalkInModal(false); fetchData(); }}
+          venueId={venueId}
+          currency={currency ?? 'GBP'}
+          bookingModel={bookingModel}
+          enabledModels={enabledModels}
+          advancedMode
+          initialDate={selectedDate}
+          initialTime={debouncedTime}
         />
       )}
 

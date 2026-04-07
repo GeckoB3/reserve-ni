@@ -14,7 +14,6 @@ import { canMarkNoShowForSlot, canTransitionBookingStatus, type BookingStatus } 
 import { computeValidMoveTargets, type BookingMoveContext } from '@/lib/table-management/move-validation';
 import { ViewToolbar } from '@/components/dashboard/ViewToolbar';
 import type { ViewToolbarSummary } from '@/components/dashboard/ViewToolbar';
-import { WalkInModal } from '@/app/dashboard/bookings/WalkInModal';
 import { coversInUseAtTime } from '@/lib/table-management/covers-at-time';
 import { computeNextBookingsSlot } from '@/lib/table-management/next-bookings-slot';
 
@@ -1470,12 +1469,19 @@ export function TableGridView({
         />
       )}
       {walkInCell && (
-        <WalkInModal
-          advancedMode
-          initialDate={date}
-          venueCurrency={currency}
+        <DashboardStaffBookingModal
+          open
+          title="Walk-in"
+          bookingIntent="walk-in"
           onClose={() => setWalkInCell(null)}
           onCreated={() => { setWalkInCell(null); fetchGrid(); }}
+          venueId={venueId}
+          currency={currency ?? 'GBP'}
+          bookingModel={bookingModel}
+          enabledModels={enabledModels}
+          advancedMode
+          initialDate={date}
+          initialTime={walkInCell.time || undefined}
         />
       )}
       {blockForm && (

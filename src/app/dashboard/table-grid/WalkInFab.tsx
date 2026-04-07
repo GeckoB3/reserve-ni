@@ -81,7 +81,7 @@ export function WalkInFab({ tables, cells, onCreated }: Props) {
         body: JSON.stringify({
           table_id: tableId,
           party_size: partySize,
-          name: name || 'Walk-in',
+          name: name.trim() || 'Walk In',
           phone: walkinPhone || undefined,
           booking_date: new Date().toISOString().slice(0, 10),
           booking_time: `${String(new Date().getHours()).padStart(2, '0')}:${String(new Date().getMinutes()).padStart(2, '0')}`,

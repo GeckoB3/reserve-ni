@@ -27,6 +27,9 @@ export function WalkInModal({
   initialDate,
   initialTime,
   venueCurrency,
+  embedded = false,
+  suppressTitle = false,
+  remainingCapacity,
   onClose,
   onCreated,
 }: {
@@ -34,6 +37,12 @@ export function WalkInModal({
   initialDate?: string;
   initialTime?: string;
   venueCurrency?: string;
+  /** When true, render only the inner card (no full-screen backdrop); parent provides the modal shell. */
+  embedded?: boolean;
+  /** Hide the "Add Walk-in" header when embedded inside another titled modal. */
+  suppressTitle?: boolean;
+  /** Optional: show remaining covers banner (e.g. day sheet). */
+  remainingCapacity?: number | null;
   onClose: () => void;
   onCreated: () => void;
 }) {
@@ -177,7 +186,7 @@ export function WalkInModal({
       }
       const walkinBody: Record<string, unknown> = {
         party_size: partySize,
-        name: name.trim() || undefined,
+        name: name.trim() || 'Walk In',
         phone: walkinPhone || undefined,
         dietary_notes: dietaryNotes.trim() || undefined,
         occasion: occasion.trim() || undefined,
@@ -219,18 +228,24 @@ export function WalkInModal({
     }
   };
 
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/20 p-4 backdrop-blur-sm"
-      onClick={onClose}
-    >
+  const capacityWarning =
+    remainingCapacity != null
+      ? remainingCapacity <= 0
+        ? 'No capacity remaining - are you sure?'
+        : partySize > remainingCapacity
+          ? 'This may exceed your remaining capacity'
+          : null
+      : null;
+
+  const inner = (
       <div
         role="dialog"
         aria-modal="true"
         aria-label="Add walk-in booking"
-        className={`my-8 w-full rounded-2xl bg-white p-6 shadow-2xl ${advancedMode ? 'max-w-2xl' : 'max-w-sm'}`}
+        className={`w-full rounded-2xl bg-white p-6 shadow-2xl ${embedded ? '' : 'my-8'} ${advancedMode ? 'max-w-2xl' : 'max-w-sm'}`}
         onClick={(e) => e.stopPropagation()}
       >
+        {!suppressTitle && (
         <div className="mb-5 flex items-center justify-between">
           <div>
             <h2 className="text-lg font-semibold text-slate-900">Add Walk-in</h2>
@@ -247,8 +262,27 @@ export function WalkInModal({
             </svg>
           </button>
         </div>
+        )}
 
         <form onSubmit={handleSubmit} className="space-y-4">
+          {remainingCapacity != null && (
+            <div
+              className={`rounded-lg px-3 py-2 text-sm font-medium ${
+                remainingCapacity <= 0
+                  ? 'bg-red-50 text-red-700'
+                  : remainingCapacity <= 5
+                    ? 'bg-amber-50 text-amber-700'
+                    : 'bg-emerald-50 text-emerald-700'
+              }`}
+            >
+              Remaining capacity now: {remainingCapacity} covers
+            </div>
+          )}
+          {capacityWarning && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
+              ⚠ {capacityWarning}
+            </div>
+          )}
           {/* Date + Time */}
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -544,6 +578,7 @@ export function WalkInModal({
             </div>
           )}
 
+          {!embedded && (
           <div className="flex gap-3 pt-1">
             <button
               type="submit"
@@ -560,8 +595,30 @@ export function WalkInModal({
               Cancel
             </button>
           </div>
+          )}
+          {embedded && (
+            <div className="flex gap-3 pt-1">
+              <button
+                type="submit"
+                disabled={loading}
+                className="flex-1 rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {loading ? 'Adding...' : 'Seat Walk-in'}
+              </button>
+            </div>
+          )}
         </form>
       </div>
+  );
+
+  if (embedded) return inner;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/20 p-4 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      {inner}
     </div>
   );
 }

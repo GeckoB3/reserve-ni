@@ -97,10 +97,17 @@ export function attachVenueClockToAppointmentInput(
   if (venue.opening_hours !== undefined) {
     input.venueOpeningHours = venue.opening_hours as OpeningHours | null;
   }
-  if (venueBlocks && venueBlocks.length > 0) {
+  if (venueBlocks != null && venueBlocks.length > 0) {
     input.venueOpeningExceptions = blocksToVenueOpeningExceptions(venueBlocks);
+  } else if (venueBlocks != null && venueBlocks.length === 0) {
+    input.venueOpeningExceptions = [];
   } else if (venue.venue_opening_exceptions !== undefined) {
-    input.venueOpeningExceptions = parseVenueOpeningExceptions(venue.venue_opening_exceptions);
+    const parsed = parseVenueOpeningExceptions(venue.venue_opening_exceptions);
+    if (parsed.length > 0) {
+      input.venueOpeningExceptions = parsed;
+    } else if (input.venueOpeningExceptions == null) {
+      input.venueOpeningExceptions = parsed;
+    }
   }
 }
 
@@ -653,7 +660,7 @@ export async function fetchAppointmentInput(params: {
       .select('id, venue_id, service_id, block_type, date_start, date_end, time_start, time_end, override_max_covers, reason, yield_overrides, override_periods')
       .eq('venue_id', venueId)
       .is('service_id', null)
-      .in('block_type', ['closed', 'amended_hours'])
+      .in('block_type', ['closed', 'amended_hours', 'special_event'])
       .lte('date_start', date)
       .gte('date_end', date),
   ]);
@@ -923,7 +930,7 @@ export async function fetchCalendarAppointmentInput(params: {
       .select('id, venue_id, service_id, block_type, date_start, date_end, time_start, time_end, override_max_covers, reason, yield_overrides, override_periods')
       .eq('venue_id', venueId)
       .is('service_id', null)
-      .in('block_type', ['closed', 'amended_hours'])
+      .in('block_type', ['closed', 'amended_hours', 'special_event'])
       .lte('date_start', date)
       .gte('date_end', date),
   ]);

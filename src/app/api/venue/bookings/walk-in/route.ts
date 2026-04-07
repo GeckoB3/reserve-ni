@@ -169,7 +169,7 @@ export async function POST(request: NextRequest) {
         .from('guests')
         .insert({
           venue_id: staff.venue_id,
-          name: name?.trim() || 'Walk-in',
+          name: name?.trim() || 'Walk In',
           email: emailNorm,
           phone: phoneE164,
           visit_count: 1,
@@ -312,7 +312,7 @@ export async function POST(request: NextRequest) {
       .from('guests')
       .insert({
         venue_id: staff.venue_id,
-        name: name?.trim() || 'Walk-in',
+        name: name?.trim() || 'Walk In',
         email: null,
         phone: phoneE164,
         visit_count: 1,

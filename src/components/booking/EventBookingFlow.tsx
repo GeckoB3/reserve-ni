@@ -137,6 +137,8 @@ export function EventBookingFlow({
   onBookingCreated,
 }: EventBookingFlowProps) {
   const isStaff = bookingAudience === 'staff';
+  const detailsAudience =
+    isStaff && staffBookingSource === 'walk-in' ? ('staff_walk_in' as const) : isStaff ? ('staff' as const) : ('public' as const);
   const currency = venue.currency ?? 'GBP';
   const phoneDefaultCountry = defaultPhoneCountryForVenueCurrency(currency);
   const terms = venue.terminology ?? { client: 'Member', booking: 'Booking', staff: 'Instructor' };
@@ -259,7 +261,7 @@ export function EventBookingFlow({
               party_size: totalTickets,
               name: details.name,
               email: details.email || undefined,
-              phone: details.phone,
+              phone: details.phone?.trim() || undefined,
               experience_event_id: selectedOccurrence.event_id,
               ticket_lines,
               dietary_notes: details.dietary_notes,
@@ -559,7 +561,7 @@ export function EventBookingFlow({
             requiresDeposit={chargePence > 0}
             variant="class"
             phoneDefaultCountry={phoneDefaultCountry}
-            audience={isStaff ? 'staff' : 'public'}
+            audience={detailsAudience}
           />
         </div>
       )}

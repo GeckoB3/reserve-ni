@@ -5,7 +5,18 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
+import type { AvailabilityBlock, OpeningHours } from '@/types/availability';
 import type { ExperienceEvent, EventTicketType } from '@/types/booking-models';
+import { timeToMinutes } from '@/lib/availability';
+import {
+  resolveVenueWideAllowedMinuteRanges,
+  isMinuteSubintervalCoveredByRanges,
+} from '@/lib/availability/venue-wide-business-hours';
+import {
+  rowsToVenueWideBlocks,
+  venueWideBlocksQueryForDate,
+  venueWideBlocksQueryForRange,
+} from '@/lib/availability/venue-wide-blocks-fetch';
 import { entityBookingWindowFromRow, isGuestBookingDateAllowed } from '@/lib/booking/entity-booking-window';
 import { venueLocalDateTimeToUtcMs } from '@/lib/venue/venue-local-clock';
 
@@ -21,6 +32,9 @@ export interface EventEngineInput {
   bookedByEvent: Record<string, number>;
   /** Total booked quantity per ticket type. */
   bookedByTicketType: Record<string, number>;
+  /** Venue-wide Business Hours blocks (closures / amended hours) for `date`. */
+  venueWideBlocks?: AvailabilityBlock[];
+  venueOpeningHours?: OpeningHours | null;
 }
 
 export interface EventAvailabilitySlot {
@@ -58,7 +72,7 @@ export function computeEventAvailability(
   input: EventEngineInput,
   guestCtx?: { venueTimezone: string; referenceNowMs?: number },
 ): EventAvailabilitySlot[] {
-  const { events, ticketTypes, bookedByEvent, bookedByTicketType } = input;
+  const { events, ticketTypes, bookedByEvent, bookedByTicketType, venueWideBlocks, venueOpeningHours } = input;
   const ticketsByEvent = new Map<string, EventTicketType[]>();
 
   for (const tt of ticketTypes) {
@@ -71,6 +85,16 @@ export function computeEventAvailability(
 
   for (const event of events) {
     if (!event.is_active) continue;
+
+    if (venueWideBlocks != null) {
+      const res = resolveVenueWideAllowedMinuteRanges(venueOpeningHours ?? null, event.event_date, venueWideBlocks);
+      if (res.kind === 'closed') continue;
+      if (res.kind === 'allowed') {
+        const start = timeToMinutes(String(event.start_time).slice(0, 5));
+        const end = timeToMinutes(String(event.end_time).slice(0, 5));
+        if (!isMinuteSubintervalCoveredByRanges(start, end, res.ranges)) continue;
+      }
+    }
 
     if (guestCtx) {
       const w = entityBookingWindowFromRow(event as unknown as Record<string, unknown>);
@@ -139,7 +163,7 @@ export async function fetchEventInput(params: {
 }): Promise<EventEngineInput> {
   const { supabase, venueId, date } = params;
 
-  const [eventsRes, ticketTypesRes, bookingsRes] = await Promise.all([
+  const [eventsRes, ticketTypesRes, bookingsRes, venueRes, venueBlocksRes] = await Promise.all([
     supabase
       .from('experience_events')
       .select('*')
@@ -168,6 +192,8 @@ export async function fetchEventInput(params: {
       .eq('booking_date', date)
       .not('experience_event_id', 'is', null)
       .in('status', CAPACITY_CONSUMING_STATUSES),
+    supabase.from('venues').select('opening_hours').eq('id', venueId).maybeSingle(),
+    venueWideBlocksQueryForDate(supabase, venueId, date),
   ]);
 
   const events = (eventsRes.data ?? []) as ExperienceEvent[];
@@ -197,7 +223,22 @@ export async function fetchEventInput(params: {
     }
   }
 
-  return { date, events, ticketTypes, bookedByEvent, bookedByTicketType };
+  if (venueBlocksRes.error) {
+    console.warn('[fetchEventInput] availability_blocks:', venueBlocksRes.error.message);
+  }
+
+  const venueOpeningHours = (venueRes.data?.opening_hours as OpeningHours | null) ?? null;
+  const venueWideBlocks = rowsToVenueWideBlocks(venueBlocksRes.data);
+
+  return {
+    date,
+    events,
+    ticketTypes,
+    bookedByEvent,
+    bookedByTicketType,
+    venueWideBlocks,
+    venueOpeningHours,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -274,15 +315,19 @@ export async function fetchEventInputForRange(params: {
 }): Promise<EventEngineInput> {
   const { supabase, venueId, fromDate, toDate } = params;
 
-  const eventsRes = await supabase
-    .from('experience_events')
-    .select('*')
-    .eq('venue_id', venueId)
-    .gte('event_date', fromDate)
-    .lte('event_date', toDate)
-    .eq('is_active', true)
-    .order('event_date', { ascending: true })
-    .order('start_time', { ascending: true });
+  const [eventsRes, venueRes, venueBlocksRes] = await Promise.all([
+    supabase
+      .from('experience_events')
+      .select('*')
+      .eq('venue_id', venueId)
+      .gte('event_date', fromDate)
+      .lte('event_date', toDate)
+      .eq('is_active', true)
+      .order('event_date', { ascending: true })
+      .order('start_time', { ascending: true }),
+    supabase.from('venues').select('opening_hours').eq('id', venueId).maybeSingle(),
+    venueWideBlocksQueryForRange(supabase, venueId, fromDate, toDate),
+  ]);
 
   const events = (eventsRes.data ?? []) as ExperienceEvent[];
   const eventIds = events.map((e) => e.id);
@@ -326,5 +371,20 @@ export async function fetchEventInputForRange(params: {
     }
   }
 
-  return { date: fromDate, events, ticketTypes, bookedByEvent, bookedByTicketType };
+  if (venueBlocksRes.error) {
+    console.warn('[fetchEventInputForRange] availability_blocks:', venueBlocksRes.error.message);
+  }
+
+  const venueOpeningHours = (venueRes.data?.opening_hours as OpeningHours | null) ?? null;
+  const venueWideBlocks = rowsToVenueWideBlocks(venueBlocksRes.data);
+
+  return {
+    date: fromDate,
+    events,
+    ticketTypes,
+    bookedByEvent,
+    bookedByTicketType,
+    venueWideBlocks,
+    venueOpeningHours,
+  };
 }

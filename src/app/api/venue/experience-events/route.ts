@@ -19,6 +19,7 @@ import { z } from 'zod';
 import { DEFAULT_ENTITY_BOOKING_WINDOW } from '@/lib/booking/entity-booking-window';
 import type { OpeningHours } from '@/types/availability';
 import { parseVenueOpeningExceptions } from '@/types/venue-opening-exceptions';
+import { rowsToVenueWideBlocks, venueWideBlocksQueryForDate, venueWideBlocksQueryForRange } from '@/lib/availability/venue-wide-blocks-fetch';
 
 const eventSchema = z.object({
   name: z.string().min(1).max(200),
@@ -271,19 +272,28 @@ export async function POST(request: NextRequest) {
     let venueHoursPayload: {
       opening_hours: OpeningHours | null;
       venue_opening_exceptions: ReturnType<typeof parseVenueOpeningExceptions>;
+      availability_blocks: ReturnType<typeof rowsToVenueWideBlocks>;
     } | null = null;
     let calendarRowForHours: Record<string, unknown> | null = null;
 
     if (resolvedCalendarId) {
-      const [{ data: venueRow }, { data: ucFull, error: ucFullErr }] = await Promise.all([
-        admin.from('venues').select('opening_hours, venue_opening_exceptions').eq('id', staff.venue_id).single(),
-        admin
-          .from('unified_calendars')
-          .select('*')
-          .eq('id', resolvedCalendarId)
-          .eq('venue_id', staff.venue_id)
-          .maybeSingle(),
-      ]);
+      const sortedCreateDates = [...datesToCreate].sort();
+      const minCreateDate = sortedCreateDates[0]!;
+      const maxCreateDate = sortedCreateDates[sortedCreateDates.length - 1]!;
+      const [{ data: venueRow }, { data: venueWideBlockRows, error: venueBlocksErr }, { data: ucFull, error: ucFullErr }] =
+        await Promise.all([
+          admin.from('venues').select('opening_hours, venue_opening_exceptions').eq('id', staff.venue_id).single(),
+          venueWideBlocksQueryForRange(admin, staff.venue_id, minCreateDate, maxCreateDate),
+          admin
+            .from('unified_calendars')
+            .select('*')
+            .eq('id', resolvedCalendarId)
+            .eq('venue_id', staff.venue_id)
+            .maybeSingle(),
+        ]);
+      if (venueBlocksErr) {
+        console.warn('POST /api/venue/experience-events availability_blocks:', venueBlocksErr.message);
+      }
       if (ucFullErr || !ucFull) {
         return NextResponse.json({ error: 'Calendar column not found for this venue.' }, { status: 400 });
       }
@@ -291,6 +301,7 @@ export async function POST(request: NextRequest) {
       venueHoursPayload = {
         opening_hours: (venueRow?.opening_hours as OpeningHours | null) ?? null,
         venue_opening_exceptions: parseVenueOpeningExceptions(venueRow?.venue_opening_exceptions),
+        availability_blocks: rowsToVenueWideBlocks(venueWideBlockRows),
       };
     }
 
@@ -512,15 +523,20 @@ export async function PATCH(request: NextRequest) {
     }
 
     if (mergedCalendarId) {
-      const [{ data: venueRowPatch }, { data: ucPatch, error: ucPatchErr }] = await Promise.all([
-        admin.from('venues').select('opening_hours, venue_opening_exceptions').eq('id', staff.venue_id).single(),
-        admin
-          .from('unified_calendars')
-          .select('*')
-          .eq('id', mergedCalendarId)
-          .eq('venue_id', staff.venue_id)
-          .maybeSingle(),
-      ]);
+      const [{ data: venueRowPatch }, { data: patchBlockRows, error: patchBlocksErr }, { data: ucPatch, error: ucPatchErr }] =
+        await Promise.all([
+          admin.from('venues').select('opening_hours, venue_opening_exceptions').eq('id', staff.venue_id).single(),
+          venueWideBlocksQueryForDate(admin, staff.venue_id, mergedDate),
+          admin
+            .from('unified_calendars')
+            .select('*')
+            .eq('id', mergedCalendarId)
+            .eq('venue_id', staff.venue_id)
+            .maybeSingle(),
+        ]);
+      if (patchBlocksErr) {
+        console.warn('PATCH /api/venue/experience-events availability_blocks:', patchBlocksErr.message);
+      }
       if (ucPatchErr || !ucPatch) {
         return NextResponse.json({ error: 'Calendar column not found for this venue.' }, { status: 400 });
       }
@@ -531,6 +547,7 @@ export async function PATCH(request: NextRequest) {
         {
           opening_hours: (venueRowPatch?.opening_hours as OpeningHours | null) ?? null,
           venue_opening_exceptions: parseVenueOpeningExceptions(venueRowPatch?.venue_opening_exceptions),
+          availability_blocks: rowsToVenueWideBlocks(patchBlockRows),
         },
         ucPatch as Record<string, unknown>,
       );

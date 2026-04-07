@@ -7,9 +7,18 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
+import type { OpeningHours } from '@/types/availability';
 import type { ClassPaymentRequirement, VenueResource, WorkingHours } from '@/types/booking-models';
 import { timeToMinutes, minutesToTime } from '@/lib/availability';
 import { bookingRowEndMinutes, unionMinuteRanges } from '@/lib/availability/calendar-resource-occupancy';
+import {
+  resolveVenueWideAllowedMinuteRanges,
+  intersectRangesWithVenueWideResolution,
+} from '@/lib/availability/venue-wide-business-hours';
+import {
+  rowsToVenueWideBlocks,
+  venueWideBlocksQueryForDate,
+} from '@/lib/availability/venue-wide-blocks-fetch';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -539,7 +548,7 @@ export async function fetchResourceInput(params: {
     resourcesQuery = resourcesQuery.eq('id', resourceId);
   }
 
-  const [resourcesRes, bookingsRes, hostDayBookingsRes] = await Promise.all([
+  const [resourcesRes, bookingsRes, hostDayBookingsRes, venueRes, venueBlocksRes] = await Promise.all([
     resourcesQuery,
     supabase
       .from('bookings')
@@ -556,6 +565,8 @@ export async function fetchResourceInput(params: {
       .eq('venue_id', venueId)
       .eq('booking_date', date)
       .in('status', CAPACITY_CONSUMING_STATUSES),
+    supabase.from('venues').select('opening_hours').eq('id', venueId).maybeSingle(),
+    venueWideBlocksQueryForDate(supabase, venueId, date),
   ]);
 
   let resources = (resourcesRes.data ?? []).map((r) => mapCalendarToResource(r as Record<string, unknown>));
@@ -636,6 +647,13 @@ export async function fetchResourceInput(params: {
     occupancyByHost.set(hostId, unionMinuteRanges(occ));
   }
 
+  if (venueBlocksRes.error) {
+    console.warn('[fetchResourceInput] availability_blocks:', venueBlocksRes.error.message);
+  }
+  const venueOpeningHours = (venueRes.data?.opening_hours as OpeningHours | null) ?? null;
+  const venueWideBlocks = rowsToVenueWideBlocks(venueBlocksRes.data);
+  const venueWideResolution = resolveVenueWideAllowedMinuteRanges(venueOpeningHours, date, venueWideBlocks);
+
   const effectiveAvailabilityRangesByResourceId = new Map<string, Array<{ start: number; end: number }>>();
   for (const resource of resources) {
     let ranges = getEffectiveAvailabilityRanges(resource, date);
@@ -646,6 +664,7 @@ export async function fetchResourceInput(params: {
       const siblingExcl = mergedSiblingResourceRangesExcluding(siblings, resource.id, date);
       ranges = subtractRangesFromRanges(ranges, siblingExcl);
     }
+    ranges = intersectRangesWithVenueWideResolution(ranges, venueWideResolution);
     effectiveAvailabilityRangesByResourceId.set(resource.id, ranges);
   }
 

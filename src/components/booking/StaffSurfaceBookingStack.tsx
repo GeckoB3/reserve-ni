@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { StaffBookingSurfaceTabsBar } from '@/components/booking/StaffBookingSurfaceTabsBar';
 import { UnifiedBookingForm } from '@/components/booking/UnifiedBookingForm';
-import { AppointmentWalkInModal } from '@/components/booking/AppointmentWalkInModal';
+import { WalkInModal } from '@/app/dashboard/bookings/WalkInModal';
 import { AppointmentBookingFlow } from '@/components/booking/AppointmentBookingFlow';
 import { EventBookingFlow } from '@/components/booking/EventBookingFlow';
 import { ClassBookingFlow } from '@/components/booking/ClassBookingFlow';
@@ -49,6 +49,8 @@ export interface StaffSurfaceBookingStackProps {
   /** Controlled tab (e.g. URL sync on /dashboard/bookings/new). Omit for internal state only. */
   activeTab?: StaffBookingSurfaceTabId;
   onActiveTabChange?: (id: StaffBookingSurfaceTabId) => void;
+  /** Day sheet: show remaining covers banner on the table walk-in tab. */
+  walkInRemainingCapacity?: number | null;
 }
 
 function staffSurfacePropsKey(bookingModel: BookingModel, enabledModels: BookingModel[]): string {
@@ -79,6 +81,7 @@ function StaffSurfaceBookingStackInner({
   bookingIntent = 'new',
   activeTab: controlledActiveTab,
   onActiveTabChange,
+  walkInRemainingCapacity,
 }: StaffSurfaceBookingStackProps) {
   const surfaceTabs = useMemo(
     () => getStaffBookingSurfaceTabs(bookingModel, enabledModels),
@@ -136,6 +139,7 @@ function StaffSurfaceBookingStackInner({
   const showTabs = surfaceTabs.length > 1;
   const tabsForBar = showTabs ? surfaceTabs : [];
   const walkInDefaultSource = bookingIntent === 'walk-in' ? ('walk-in' as const) : undefined;
+  const staffBookingSource = walkInDefaultSource ?? 'phone';
   const isAppointmentPlan = isUnifiedSchedulingVenue(bookingModel);
 
   const body = (): ReactNode => {
@@ -157,23 +161,17 @@ function StaffSurfaceBookingStackInner({
         if (!surfaceTabs.some((t) => t.id === 'table_reservation')) return null;
         if (bookingIntent === 'walk-in') {
           return (
-            <p className="text-sm leading-relaxed text-slate-600">
-              Table walk-ins are added from the{' '}
-              <a href="/dashboard/day-sheet" className="font-medium text-brand-700 underline underline-offset-2">
-                Day sheet
-              </a>{' '}
-              or{' '}
-              <a href="/dashboard/floor-plan" className="font-medium text-brand-700 underline underline-offset-2">
-                Floor plan
-              </a>
-              {showTabs ? (
-                <>
-                  . Use the tabs above for classes, events, or resources.
-                </>
-              ) : (
-                '.'
-              )}
-            </p>
+            <WalkInModal
+              embedded
+              suppressTitle
+              advancedMode={advancedMode}
+              venueCurrency={currency}
+              initialDate={initialDate}
+              initialTime={initialTime}
+              remainingCapacity={walkInRemainingCapacity}
+              onClose={onClose ?? (() => {})}
+              onCreated={onCreated}
+            />
           );
         }
         return (
@@ -189,20 +187,16 @@ function StaffSurfaceBookingStackInner({
         );
       case 'unified_scheduling':
         if (!surfaceTabs.some((t) => t.id === 'unified_scheduling')) return null;
-        if (bookingIntent === 'new') {
-          return (
-            <AppointmentBookingFlow
-              venue={v}
-              bookingAudience="staff"
-              onBookingCreated={onCreated}
-              initialDate={initialDate}
-              initialTime={initialTime}
-              preselectedPractitionerId={preselectedPractitionerId}
-            />
-          );
-        }
         return (
-          <AppointmentWalkInModal open embedded onClose={onClose ?? (() => {})} onCreated={onCreated} currency={currency} />
+          <AppointmentBookingFlow
+            venue={v}
+            bookingAudience="staff"
+            staffBookingSource={staffBookingSource}
+            onBookingCreated={onCreated}
+            initialDate={initialDate}
+            initialTime={initialTime}
+            preselectedPractitionerId={preselectedPractitionerId}
+          />
         );
       case 'event_ticket':
         if (!surfaceTabs.some((t) => t.id === 'event_ticket')) return null;
@@ -210,7 +204,7 @@ function StaffSurfaceBookingStackInner({
           <EventBookingFlow
             venue={v}
             bookingAudience="staff"
-            staffBookingSource={walkInDefaultSource ?? 'phone'}
+            staffBookingSource={staffBookingSource}
             onBookingCreated={onCreated}
           />
         );
@@ -220,7 +214,7 @@ function StaffSurfaceBookingStackInner({
           <ClassBookingFlow
             venue={v}
             bookingAudience="staff"
-            staffBookingSource={walkInDefaultSource ?? 'phone'}
+            staffBookingSource={staffBookingSource}
             onBookingCreated={onCreated}
           />
         );
@@ -230,7 +224,7 @@ function StaffSurfaceBookingStackInner({
           <ResourceBookingFlow
             venue={v}
             bookingAudience="staff"
-            staffBookingSource={walkInDefaultSource ?? 'phone'}
+            staffBookingSource={staffBookingSource}
             onBookingCreated={onCreated}
           />
         );

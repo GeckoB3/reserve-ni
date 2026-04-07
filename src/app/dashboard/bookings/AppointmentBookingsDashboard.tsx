@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/browser';
 import { DashboardStaffBookingModal } from '@/components/booking/DashboardStaffBookingModal';
-import { AppointmentWalkInModal } from '@/components/booking/AppointmentWalkInModal';
 import {
   AppointmentDetailSheet,
   type AppointmentDetailPrefetch,
@@ -1318,15 +1317,21 @@ export function AppointmentBookingsDashboard({
         enabledModels={enabledModels}
         preselectedPractitionerId={practitionerFilter === 'all' ? undefined : practitionerFilter}
       />
-      <AppointmentWalkInModal
+      <DashboardStaffBookingModal
         open={walkInOpen}
+        title="Walk-in"
+        bookingIntent="walk-in"
         onClose={() => setWalkInOpen(false)}
         onCreated={() => {
           setWalkInOpen(false);
           void fetchBookings({ silent: true });
           void fetchBookingsForStats();
         }}
+        venueId={venueId}
         currency={currency}
+        bookingModel={primaryBookingModel}
+        enabledModels={enabledModels}
+        preselectedPractitionerId={practitionerFilter === 'all' ? undefined : practitionerFilter}
       />
 
       <AppointmentDetailSheet

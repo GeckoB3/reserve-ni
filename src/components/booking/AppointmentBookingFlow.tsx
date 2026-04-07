@@ -113,6 +113,8 @@ interface AppointmentBookingFlowProps {
   initialDate?: string;
   initialTime?: string;
   preselectedPractitionerId?: string;
+  /** Staff walk-ins: optional guest contact (defaults name to Walk In). */
+  staffBookingSource?: 'phone' | 'walk-in';
 }
 
 function formatDateHuman(dateStr: string): string {
@@ -155,8 +157,11 @@ export function AppointmentBookingFlow({
   initialDate,
   initialTime,
   preselectedPractitionerId,
+  staffBookingSource = 'phone',
 }: AppointmentBookingFlowProps) {
   const isStaff = bookingAudience === 'staff';
+  const detailsAudience =
+    isStaff && staffBookingSource === 'walk-in' ? ('staff_walk_in' as const) : isStaff ? ('staff' as const) : ('public' as const);
   const terms = venue.terminology ?? { client: 'Client', booking: 'Appointment', staff: 'Staff' };
   const [staffRequireDeposit, setStaffRequireDeposit] = useState(false);
 
@@ -546,8 +551,8 @@ export function AppointmentBookingFlow({
               booking_date: date,
               name: details.name,
               email: details.email || undefined,
-              phone: details.phone,
-              source: isStaff ? 'phone' : 'booking_page',
+              phone: details.phone?.trim() || undefined,
+              source: isStaff ? staffBookingSource : 'booking_page',
               dietary_notes: details.dietary_notes,
               occasion: details.occasion,
               services: chain.map((s) => ({
@@ -598,13 +603,14 @@ export function AppointmentBookingFlow({
               booking_time: selectedTime,
               party_size: 1,
               name: details.name,
-              phone: details.phone,
+              phone: details.phone?.trim() || undefined,
               email: details.email || undefined,
               dietary_notes: details.dietary_notes,
               occasion: details.occasion,
               require_deposit,
               practitioner_id: selectedPractitionerId,
               appointment_service_id: selectedServiceId,
+              source: staffBookingSource,
             }),
           });
           const data = await res.json();
@@ -736,8 +742,8 @@ export function AppointmentBookingFlow({
           venue_id: venue.id,
           name: details.name,
           email: details.email || undefined,
-          phone: details.phone,
-          source: isStaff ? 'phone' : 'booking_page',
+          phone: details.phone?.trim() || undefined,
+          source: isStaff ? staffBookingSource : 'booking_page',
           dietary_notes: details.dietary_notes,
           people: groupPeople.map((p) => ({
             person_label: p.label,
@@ -765,7 +771,7 @@ export function AppointmentBookingFlow({
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Group booking failed');
     }
-  }, [venue.id, groupPeople, refundNoticeHours, isStaff, onBookingCreated]);
+  }, [venue.id, groupPeople, refundNoticeHours, isStaff, onBookingCreated, staffBookingSource]);
 
   const handleGroupPaymentComplete = useCallback(async () => {
     if (groupCreateResult?.booking_ids?.[0]) {
@@ -1314,7 +1320,7 @@ export function AppointmentBookingFlow({
             currencySymbol={sym}
             refundNoticeHours={refundNoticeHours}
             phoneDefaultCountry={phoneDefaultCountry}
-            audience={isStaff ? 'staff' : 'public'}
+            audience={detailsAudience}
           />
         </div>
       )}
@@ -1674,7 +1680,7 @@ export function AppointmentBookingFlow({
             refundNoticeHours={refundNoticeHours}
             multiAppointmentSlots={groupPeople.map((p) => ({ date: p.date, time: p.time }))}
             phoneDefaultCountry={phoneDefaultCountry}
-            audience={isStaff ? 'staff' : 'public'}
+            audience={detailsAudience}
           />
         </div>
       )}

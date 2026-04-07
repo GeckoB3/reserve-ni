@@ -5,9 +5,20 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
+import type { AvailabilityBlock, OpeningHours } from '@/types/availability';
 import type { ClassPaymentRequirement, ClassType, ClassInstance } from '@/types/booking-models';
+import { timeToMinutes } from '@/lib/availability';
 import { venueLocalDateTimeToUtcMs } from '@/lib/venue/venue-local-clock';
 import { entityBookingWindowFromRow, isGuestBookingDateAllowed } from '@/lib/booking/entity-booking-window';
+import {
+  resolveVenueWideAllowedMinuteRanges,
+  isMinuteSubintervalCoveredByRanges,
+} from '@/lib/availability/venue-wide-business-hours';
+import {
+  rowsToVenueWideBlocks,
+  venueWideBlocksQueryForDate,
+  venueWideBlocksQueryForRange,
+} from '@/lib/availability/venue-wide-blocks-fetch';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -35,6 +46,9 @@ export interface ClassEngineInput {
   guestBookingWindow?: GuestClassBookingWindow;
   /** Resolved names for `class_types.instructor_id` (calendar or legacy practitioner) when `instructor_name` is empty. */
   instructorDisplayNamesById?: Record<string, string>;
+  /** Venue-wide Business Hours blocks overlapping instance dates. */
+  venueWideBlocks?: AvailabilityBlock[];
+  venueOpeningHours?: OpeningHours | null;
 }
 
 export interface ClassAvailabilitySlot {
@@ -117,8 +131,36 @@ export function isClassInstanceBookableForGuest(
 // Core engine
 // ---------------------------------------------------------------------------
 
+function classInstanceAllowedByVenueWideBlocks(
+  instanceDate: string,
+  startTimeHhMm: string,
+  durationMinutes: number,
+  venueWideBlocks: AvailabilityBlock[] | undefined,
+  venueOpeningHours: OpeningHours | null | undefined,
+): boolean {
+  if (venueWideBlocks == null) return true;
+  const res = resolveVenueWideAllowedMinuteRanges(venueOpeningHours ?? null, instanceDate, venueWideBlocks);
+  if (res.kind === 'unrestricted') return true;
+  if (res.kind === 'closed') return false;
+  const startMin = timeToMinutes(String(startTimeHhMm).slice(0, 5));
+  const endMin = startMin + durationMinutes;
+  if (endMin <= startMin) return false;
+  if (endMin <= 24 * 60) {
+    return isMinuteSubintervalCoveredByRanges(startMin, endMin, res.ranges);
+  }
+  return res.ranges.some((r) => startMin >= r.start && startMin < r.end);
+}
+
 export function computeClassAvailability(input: ClassEngineInput): ClassAvailabilitySlot[] {
-  const { classTypes, instances, bookedByInstance, guestBookingWindow, instructorDisplayNamesById } = input;
+  const {
+    classTypes,
+    instances,
+    bookedByInstance,
+    guestBookingWindow,
+    instructorDisplayNamesById,
+    venueWideBlocks,
+    venueOpeningHours,
+  } = input;
   const typeMap = new Map(classTypes.map((ct) => [ct.id, ct]));
 
   const results: ClassAvailabilitySlot[] = [];
@@ -127,6 +169,17 @@ export function computeClassAvailability(input: ClassEngineInput): ClassAvailabi
     if (instance.is_cancelled) continue;
     const classType = typeMap.get(instance.class_type_id);
     if (!classType || !classType.is_active) continue;
+    if (
+      !classInstanceAllowedByVenueWideBlocks(
+        instance.instance_date,
+        instance.start_time,
+        classType.duration_minutes,
+        venueWideBlocks,
+        venueOpeningHours,
+      )
+    ) {
+      continue;
+    }
     if (guestBookingWindow) {
       const win = entityBookingWindowFromRow(classType as unknown as Record<string, unknown>);
       if (!isGuestBookingDateAllowed(instance.instance_date, win, guestBookingWindow.venueTimezone, guestBookingWindow.referenceNowMs)) {
@@ -244,11 +297,10 @@ export async function fetchClassInput(params: {
 }): Promise<ClassEngineInput> {
   const { supabase, venueId, date, forPublicBooking } = params;
 
-  const [typesRes, venueRes] = await Promise.all([
+  const [typesRes, venueRes, venueBlocksRes] = await Promise.all([
     supabase.from('class_types').select('*').eq('venue_id', venueId).eq('is_active', true),
-    forPublicBooking === true
-      ? supabase.from('venues').select('timezone').eq('id', venueId).maybeSingle()
-      : Promise.resolve({ data: null, error: null }),
+    supabase.from('venues').select('timezone, opening_hours').eq('id', venueId).maybeSingle(),
+    venueWideBlocksQueryForDate(supabase, venueId, date),
   ]);
 
   const classTypes = (typesRes.data ?? []) as ClassType[];
@@ -307,6 +359,13 @@ export async function fetchClassInput(params: {
     bookedByInstance[instId] = (bookedByInstance[instId] ?? 0) + (b.party_size ?? 1);
   }
 
+  if (venueBlocksRes.error) {
+    console.warn('[fetchClassInput] availability_blocks:', venueBlocksRes.error.message);
+  }
+
+  const venueOpeningHours = (venueRes.data?.opening_hours as OpeningHours | null) ?? null;
+  const venueWideBlocks = rowsToVenueWideBlocks(venueBlocksRes.data);
+
   let guestBookingWindow: GuestClassBookingWindow | undefined;
   if (forPublicBooking === true) {
     if ('error' in venueRes && venueRes.error) {
@@ -318,7 +377,16 @@ export async function fetchClassInput(params: {
     guestBookingWindow = { minNoticeHours: 0, venueTimezone: tz };
   }
 
-  return { date, classTypes, instances, bookedByInstance, guestBookingWindow, instructorDisplayNamesById };
+  return {
+    date,
+    classTypes,
+    instances,
+    bookedByInstance,
+    guestBookingWindow,
+    instructorDisplayNamesById,
+    venueWideBlocks,
+    venueOpeningHours,
+  };
 }
 
 /**
@@ -334,11 +402,10 @@ export async function fetchClassInputForRange(params: {
 }): Promise<ClassEngineInput> {
   const { supabase, venueId, fromDate, toDate, forPublicBooking } = params;
 
-  const [typesRes, venueRes] = await Promise.all([
+  const [typesRes, venueRes, venueBlocksRes] = await Promise.all([
     supabase.from('class_types').select('*').eq('venue_id', venueId).eq('is_active', true),
-    forPublicBooking === true
-      ? supabase.from('venues').select('timezone').eq('id', venueId).maybeSingle()
-      : Promise.resolve({ data: null, error: null }),
+    supabase.from('venues').select('timezone, opening_hours').eq('id', venueId).maybeSingle(),
+    venueWideBlocksQueryForRange(supabase, venueId, fromDate, toDate),
   ]);
 
   const classTypes = (typesRes.data ?? []) as ClassType[];
@@ -400,6 +467,13 @@ export async function fetchClassInputForRange(params: {
     bookedByInstance[instId] = (bookedByInstance[instId] ?? 0) + (b.party_size ?? 1);
   }
 
+  if (venueBlocksRes.error) {
+    console.warn('[fetchClassInputForRange] availability_blocks:', venueBlocksRes.error.message);
+  }
+
+  const venueOpeningHours = (venueRes.data?.opening_hours as OpeningHours | null) ?? null;
+  const venueWideBlocks = rowsToVenueWideBlocks(venueBlocksRes.data);
+
   let guestBookingWindow: GuestClassBookingWindow | undefined;
   if (forPublicBooking === true) {
     if ('error' in venueRes && venueRes.error) {
@@ -418,5 +492,7 @@ export async function fetchClassInputForRange(params: {
     bookedByInstance,
     guestBookingWindow,
     instructorDisplayNamesById,
+    venueWideBlocks,
+    venueOpeningHours,
   };
 }

@@ -122,6 +122,7 @@ export async function POST(request: NextRequest) {
       special_requests,
       require_deposit,
     } = parsed.data;
+    const staffWalkIn = parsed.data.source === 'walk-in';
     const venueId = staff.venue_id;
     const admin = getSupabaseAdminClient();
 
@@ -143,7 +144,7 @@ export async function POST(request: NextRequest) {
       parsed.data.practitioner_id && parsed.data.appointment_service_id,
     );
     if (isUnifiedSchedulingVenue(venueMode.bookingModel)) {
-      if (isStaffAppointmentBooking && !phoneRaw) {
+      if (isStaffAppointmentBooking && !phoneRaw && !staffWalkIn) {
         return NextResponse.json({ error: 'Phone number is required' }, { status: 400 });
       }
       if (phoneRaw) {
@@ -154,14 +155,16 @@ export async function POST(request: NextRequest) {
         phoneE164 = n;
       }
     } else {
-      if (!phoneRaw) {
+      if (!phoneRaw && !staffWalkIn) {
         return NextResponse.json({ error: 'Phone number is required' }, { status: 400 });
       }
-      const n = normalizeToE164(phoneRaw, 'GB');
-      if (!n) {
-        return NextResponse.json({ error: 'Invalid phone number' }, { status: 400 });
+      if (phoneRaw) {
+        const n = normalizeToE164(phoneRaw, 'GB');
+        if (!n) {
+          return NextResponse.json({ error: 'Invalid phone number' }, { status: 400 });
+        }
+        phoneE164 = n;
       }
-      phoneE164 = n;
     }
 
     const emailNorm = email && email.trim() !== '' ? email.trim().toLowerCase() : null;
@@ -183,7 +186,7 @@ export async function POST(request: NextRequest) {
           { status: 400 },
         );
       }
-      if (!phoneE164) {
+      if (!phoneE164 && !staffWalkIn) {
         return NextResponse.json({ error: 'Phone number is required for event bookings' }, { status: 400 });
       }
       const ticketLines = parsed.data.ticket_lines ?? [];
@@ -370,7 +373,7 @@ export async function POST(request: NextRequest) {
           { status: 400 },
         );
       }
-      if (!phoneE164) {
+      if (!phoneE164 && !staffWalkIn) {
         return NextResponse.json({ error: 'Phone number is required for class bookings' }, { status: 400 });
       }
 
@@ -519,7 +522,7 @@ export async function POST(request: NextRequest) {
           { status: 400 },
         );
       }
-      if (!phoneE164) {
+      if (!phoneE164 && !staffWalkIn) {
         return NextResponse.json({ error: 'Phone number is required for resource bookings' }, { status: 400 });
       }
 
@@ -792,7 +795,7 @@ export async function POST(request: NextRequest) {
         booking_end_time: bookingEndTime,
         party_size: 1,
         status: requiresDeposit ? 'Pending' : 'Confirmed',
-        source: 'phone' as const,
+        source: (parsed.data.source ?? 'phone') as 'phone' | 'walk-in',
         guest_email: guest.email || null,
         deposit_amount_pence: depositAmountPence,
         deposit_status: requiresDeposit ? ('Pending' as const) : ('Not Required' as const),

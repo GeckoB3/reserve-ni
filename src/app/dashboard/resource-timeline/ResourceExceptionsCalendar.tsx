@@ -93,10 +93,15 @@ export function ResourceExceptionsCalendar({
         ))}
       </div>
 
-      <div className="mt-1 grid grid-cols-7 gap-1">
+      {/*
+        Do not use aspect-square on leading empty cells: it makes height = column width,
+        which blows up the first row when the month does not start on Monday.
+        Use the same min height as day buttons and uniform grid rows instead.
+      */}
+      <div className="mt-1 grid grid-cols-7 gap-1 auto-rows-[minmax(2.75rem,auto)]">
         {cells.map((d, idx) => {
           if (d === null) {
-            return <div key={`e-${idx}`} className="aspect-square min-h-[2.25rem]" aria-hidden />;
+            return <div key={`e-${idx}`} className="min-h-[2.75rem]" aria-hidden />;
           }
           const ymd = `${year}-${pad2(month)}-${pad2(d)}`;
           const ex = exceptions[ymd];
@@ -139,7 +144,7 @@ export function ResourceExceptionsCalendar({
               key={ymd}
               type="button"
               onClick={() => onDayClick(ymd)}
-              className={`flex min-h-[2.25rem] flex-col items-center justify-center rounded-md px-0.5 text-xs font-medium text-slate-800 transition ${bg} ${ring}`}
+              className={`flex min-h-[2.75rem] flex-col items-center justify-center rounded-md px-0.5 text-xs font-medium text-slate-800 transition ${bg} ${ring}`}
               title={label}
               aria-label={`${ymd}${label ? `. ${label}` : ''}`}
               aria-pressed={isEditing || inRange}

@@ -138,6 +138,8 @@ export function ClassBookingFlow({
   onBookingCreated,
 }: ClassBookingFlowProps) {
   const isStaff = bookingAudience === 'staff';
+  const detailsAudience =
+    isStaff && staffBookingSource === 'walk-in' ? ('staff_walk_in' as const) : isStaff ? ('staff' as const) : ('public' as const);
   const currency = venue.currency ?? 'GBP';
   const phoneDefaultCountry = defaultPhoneCountryForVenueCurrency(currency);
   const terms = venue.terminology ?? { client: 'Member', booking: 'Booking', staff: 'Instructor' };
@@ -514,7 +516,7 @@ export function ClassBookingFlow({
             appointmentDepositPence={depositPenceForDetails > 0 ? depositPenceForDetails : null}
             currencySymbol={sym}
             phoneDefaultCountry={phoneDefaultCountry}
-            audience={isStaff ? 'staff' : 'public'}
+            audience={detailsAudience}
           />
         </div>
       )}

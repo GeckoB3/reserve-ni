@@ -8,6 +8,7 @@ type Props = Omit<StaffSurfaceBookingStackProps, 'onCreated' | 'bookingIntent'> 
   onClose: () => void;
   onCreated: () => void;
   title?: string;
+  bookingIntent?: 'new' | 'walk-in';
 };
 
 /**
@@ -19,6 +20,7 @@ export function DashboardStaffBookingModal({
   onClose,
   onCreated,
   title = 'New booking',
+  bookingIntent = 'new',
   ...stack
 }: Props) {
   if (!open) return null;
@@ -51,7 +53,7 @@ export function DashboardStaffBookingModal({
           </button>
         </div>
 
-        <StaffSurfaceBookingStack {...stack} bookingIntent="new" onCreated={onCreated} onClose={onClose} />
+        <StaffSurfaceBookingStack {...stack} bookingIntent={bookingIntent} onCreated={onCreated} onClose={onClose} />
       </div>
     </div>
   );

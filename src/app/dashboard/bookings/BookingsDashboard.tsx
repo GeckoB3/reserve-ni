@@ -6,7 +6,6 @@ import { TableSelector } from '@/components/table-tracking/TableSelector';
 import type { OccupancyMap, TableForSelector } from '@/components/table-tracking/TableSelector';
 import { createClient } from '@/lib/supabase/browser';
 import { BookingDetailPanel } from './BookingDetailPanel';
-import { WalkInModal } from './WalkInModal';
 import { DashboardStaffBookingModal } from '@/components/booking/DashboardStaffBookingModal';
 import { ExpandedBookingContent } from './ExpandedBookingContent';
 import { UndoToast } from '@/app/dashboard/table-grid/UndoToast';
@@ -986,11 +985,17 @@ export function BookingsDashboard({
         />
       )}
       {walkInOpen && (
-        <WalkInModal
-          advancedMode={tableManagementEnabled}
-          venueCurrency={currency}
+        <DashboardStaffBookingModal
+          open
+          title="Walk-in"
+          bookingIntent="walk-in"
           onClose={() => setWalkInOpen(false)}
           onCreated={handleWalkInCreated}
+          venueId={venueId}
+          currency={currency ?? 'GBP'}
+          bookingModel={primaryBookingModel}
+          enabledModels={enabledModels}
+          advancedMode={tableManagementEnabled}
         />
       )}
       {newBookingOpen && (

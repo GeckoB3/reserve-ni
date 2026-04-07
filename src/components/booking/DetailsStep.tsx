@@ -63,8 +63,25 @@ function buildDetailsSchemaStaff(phoneCc: CountryCode) {
   });
 }
 
+/** Walk-in staff: no required contact fields; name defaults to "Walk In" on submit when blank. */
+function buildDetailsSchemaStaffWalkIn(phoneCc: CountryCode) {
+  return z.object({
+    name: z.string().max(200),
+    email: z.union([z.literal(''), z.string().email('Valid email required')]),
+    phone: z
+      .string()
+      .max(24)
+      .refine((v) => !v.trim() || normalizeToE164(v, phoneCc) !== null, 'Enter a valid mobile number or leave blank'),
+    dietary_notes: z.string().max(1000).optional(),
+    occasion: z.string().max(200).optional(),
+    comments_requests: z.string().max(1000).optional(),
+    acceptTerms: z.boolean().optional(),
+  });
+}
+
 type FormDataWithTerms = z.infer<ReturnType<typeof buildDetailsSchemaWithTerms>>;
 type FormDataStaff = z.infer<ReturnType<typeof buildDetailsSchemaStaff>>;
+type FormDataStaffWalkIn = z.infer<ReturnType<typeof buildDetailsSchemaStaffWalkIn>>;
 
 interface DetailsStepProps {
   slot: AvailableSlot;
@@ -89,7 +106,7 @@ interface DetailsStepProps {
   /** When set with payAtVenueBalancePence, explains why no online charge (e.g. resource pay at venue). */
   payAtVenuePaymentRequirement?: ClassPaymentRequirement;
   /** Staff dashboard: email optional; guest terms checkbox omitted. */
-  audience?: 'public' | 'staff';
+  audience?: 'public' | 'staff' | 'staff_walk_in';
 }
 
 export function DetailsStep({
@@ -112,6 +129,7 @@ export function DetailsStep({
   audience = 'public',
 }: DetailsStepProps) {
   const isStaff = audience === 'staff';
+  const isStaffWalkIn = audience === 'staff_walk_in';
   const detailsSchemaWithTerms = useMemo(
     () => buildDetailsSchemaWithTerms(phoneDefaultCountry),
     [phoneDefaultCountry],
@@ -120,8 +138,15 @@ export function DetailsStep({
     () => buildDetailsSchemaStaff(phoneDefaultCountry),
     [phoneDefaultCountry],
   );
-  const { register, control, handleSubmit, formState: { errors, isSubmitting } } = useForm<FormDataWithTerms | FormDataStaff>({
-    resolver: zodResolver(isStaff ? detailsSchemaStaff : detailsSchemaWithTerms),
+  const detailsSchemaStaffWalkIn = useMemo(
+    () => buildDetailsSchemaStaffWalkIn(phoneDefaultCountry),
+    [phoneDefaultCountry],
+  );
+  const activeSchema = isStaffWalkIn ? detailsSchemaStaffWalkIn : isStaff ? detailsSchemaStaff : detailsSchemaWithTerms;
+  const { register, control, handleSubmit, formState: { errors, isSubmitting } } = useForm<
+    FormDataWithTerms | FormDataStaff | FormDataStaffWalkIn
+  >({
+    resolver: zodResolver(activeSchema),
     defaultValues: {
       name: '',
       email: '',
@@ -260,34 +285,48 @@ export function DetailsStep({
       )}
 
       <form
-        onSubmit={handleSubmit((d) =>
+        onSubmit={handleSubmit((d) => {
+          const phoneRaw = 'phone' in d ? d.phone : '';
+          const e164 = phoneRaw.trim() ? normalizeToE164(phoneRaw, phoneDefaultCountry) : null;
+          const nameRaw = 'name' in d ? String(d.name ?? '') : '';
           onSubmit({
-            name: d.name,
+            name: isStaffWalkIn ? (nameRaw.trim() || 'Walk In') : nameRaw,
             email: d.email || '',
-            phone: normalizeToE164(d.phone, phoneDefaultCountry) ?? d.phone,
+            phone: e164 ?? (phoneRaw.trim() ? phoneRaw : ''),
             dietary_notes: useAppointmentFields
               ? (d.comments_requests?.trim() ? d.comments_requests.trim() : undefined)
               : (d.dietary_notes?.trim() ? d.dietary_notes.trim() : undefined),
             occasion: useAppointmentFields ? undefined : (d.occasion?.trim() ? d.occasion.trim() : undefined),
-          }),
-        )}
+          });
+        })}
         className="space-y-4"
       >
-        <FormField label="Name" required error={errors.name?.message}>
-          <input {...register('name')} className="min-h-[44px] w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base placeholder:text-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500" placeholder="Your full name" />
+        <FormField label="Name" required={audience !== 'staff_walk_in'} error={errors.name?.message}>
+          <input
+            {...register('name')}
+            className="min-h-[44px] w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base placeholder:text-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+            placeholder={isStaffWalkIn ? 'Walk In' : 'Your full name'}
+          />
         </FormField>
+        {isStaffWalkIn && (
+          <p className="-mt-2 text-xs text-slate-500">Leave blank to save as &quot;Walk In&quot;.</p>
+        )}
 
-        <FormField label="Email" required={!isStaff} error={errors.email?.message}>
+        <FormField label="Email" required={audience === 'public'} error={errors.email?.message}>
           <input
             type="email"
             {...register('email')}
             className="min-h-[44px] w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base placeholder:text-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
             placeholder="you@example.com"
           />
-          {isStaff && <p className="mt-1 text-xs text-slate-500">Optional — add if you want email confirmation sent to the guest.</p>}
+          {(isStaff || isStaffWalkIn) && (
+            <p className="mt-1 text-xs text-slate-500">
+              {isStaffWalkIn ? 'Optional.' : 'Optional — add if you want email confirmation sent to the guest.'}
+            </p>
+          )}
         </FormField>
 
-        <FormField label="Phone" required error={errors.phone?.message}>
+        <FormField label="Phone" required={audience !== 'staff_walk_in'} error={errors.phone?.message}>
           <Controller
             name="phone"
             control={control}
@@ -338,7 +377,7 @@ export function DetailsStep({
           </FormField>
         )}
 
-        {!isStaff && (
+        {audience === 'public' && (
           <>
             <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 bg-slate-50/50 px-4 py-3">
               <input type="checkbox" {...register('acceptTerms')} className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500" />

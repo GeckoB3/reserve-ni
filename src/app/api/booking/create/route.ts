@@ -39,6 +39,17 @@ import type { BookingModel, ClassPaymentRequirement } from '@/types/booking-mode
 import { createShortManageLink } from '@/lib/short-manage-link';
 import type { BookingEmailData } from '@/lib/emails/types';
 import { logBookingOp } from '@/lib/observability/booking-ops-log';
+import { timeToMinutes } from '@/lib/availability';
+import { venueWideBlocksRejectBookingWindow } from '@/lib/availability/venue-wide-business-hours';
+import { fetchVenueOpeningHoursAndWideBlocksForDate } from '@/lib/availability/venue-wide-blocks-fetch';
+
+function hhMmAfterAddingMinutes(startHhMm: string, durationMinutes: number): string {
+  const base = timeToMinutes(startHhMm.slice(0, 5));
+  const end = Math.min(base + durationMinutes, 24 * 60 - 1);
+  const h = Math.floor(end / 60);
+  const m = end % 60;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
 
 const createBookingSchema = z.object({
   venue_id: z.string().uuid(),
@@ -446,6 +457,8 @@ async function handleNonTableBooking(
     );
   }
 
+  const venueWideHours = await fetchVenueOpeningHoursAndWideBlocksForDate(supabase, venue_id, booking_date);
+
   // ---- Validate slot availability per model ----
   let estimatedEndTime: string | null = null;
   let depositAmountPence: number | null = null;
@@ -560,6 +573,17 @@ async function handleNonTableBooking(
     }
 
     unifiedSessionAnchor = { calendar_id: sess.calendar_id, service_item_id: sess.service_item_id };
+
+    const venueWideErr = venueWideBlocksRejectBookingWindow(
+      venueWideHours.openingHours,
+      booking_date,
+      sessionStart,
+      endHm,
+      venueWideHours.blocks,
+    );
+    if (venueWideErr) {
+      return NextResponse.json({ error: venueWideErr }, { status: 400 });
+    }
   } else if (isUnifiedSchedulingVenue(effectiveModel)) {
     if (!practitioner_id || !appointment_service_id) {
       return NextResponse.json({ error: 'practitioner_id and appointment_service_id are required' }, { status: 400 });
@@ -632,6 +656,16 @@ async function handleNonTableBooking(
     if (!event || event.remaining_capacity < party_size) {
       return NextResponse.json({ error: 'This event is fully booked or unavailable' }, { status: 409 });
     }
+    const venueWideErrEvent = venueWideBlocksRejectBookingWindow(
+      venueWideHours.openingHours,
+      booking_date,
+      event.start_time.slice(0, 5),
+      event.end_time.slice(0, 5),
+      venueWideHours.blocks,
+    );
+    if (venueWideErrEvent) {
+      return NextResponse.json({ error: venueWideErrEvent }, { status: 400 });
+    }
     const ticketTotal = (ticket_lines && ticket_lines.length > 0)
       ? ticket_lines.reduce((sum, tl) => sum + tl.quantity * tl.unit_price_pence, 0)
       : 0;
@@ -669,6 +703,17 @@ async function handleNonTableBooking(
     if (!cls || cls.remaining < party_size) {
       return NextResponse.json({ error: 'This class is full or unavailable' }, { status: 409 });
     }
+    const classEndHhMm = hhMmAfterAddingMinutes(cls.start_time, cls.duration_minutes);
+    const venueWideErrClass = venueWideBlocksRejectBookingWindow(
+      venueWideHours.openingHours,
+      booking_date,
+      cls.start_time.slice(0, 5),
+      classEndHhMm,
+      venueWideHours.blocks,
+    );
+    if (venueWideErrClass) {
+      return NextResponse.json({ error: venueWideErrClass }, { status: 400 });
+    }
     const classPayReq = cls.payment_requirement;
     const priceP = cls.price_pence ?? 0;
     const depPer = cls.deposit_amount_pence ?? 0;
@@ -703,6 +748,17 @@ async function handleNonTableBooking(
     const slotAvailable = res?.slots.some((s) => s.start_time === timeStr);
     if (!slotAvailable) {
       return NextResponse.json({ error: 'This resource slot is no longer available' }, { status: 409 });
+    }
+    const endForVenue = (booking_end_time.length === 5 ? booking_end_time : booking_end_time.slice(0, 5)).slice(0, 5);
+    const venueWideErrRes = venueWideBlocksRejectBookingWindow(
+      venueWideHours.openingHours,
+      booking_date,
+      timeStr,
+      endForVenue,
+      venueWideHours.blocks,
+    );
+    if (venueWideErrRes) {
+      return NextResponse.json({ error: venueWideErrRes }, { status: 400 });
     }
     const numSlots = Math.ceil(durationMinutes / (res?.slot_interval_minutes ?? 30));
     const totalPricePence = (res?.price_per_slot_pence ?? 0) * numSlots;

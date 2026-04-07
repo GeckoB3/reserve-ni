@@ -577,188 +577,6 @@ function EditBookingModal({
   );
 }
 
-// ─── WalkInModal (Day Sheet enhanced) ───────────────────────────────────────
-
-function DaySheetWalkInModal({
-  remainingCapacity,
-  onClose,
-  onCreated,
-  activeTables,
-  occupancyMap,
-}: {
-  remainingCapacity: number | null;
-  onClose: () => void;
-  onCreated: () => void;
-  activeTables: ActiveTable[];
-  occupancyMap: OccupancyMap;
-}) {
-  const [partySize, setPartySize] = useState(2);
-  const [name, setName] = useState('');
-  const [phone, setPhone] = useState('');
-  const [notes, setNotes] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [selectedTableIds, setSelectedTableIds] = useState<string[]>([]);
-  const partySizeRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    partySizeRef.current?.focus();
-    partySizeRef.current?.select();
-  }, []);
-
-  const capacityWarning = useMemo(() => {
-    if (remainingCapacity == null) return null;
-    if (remainingCapacity <= 0) return 'No capacity remaining - are you sure?';
-    if (partySize > remainingCapacity) return 'This may exceed your remaining capacity';
-    return null;
-  }, [remainingCapacity, partySize]);
-
-  const submit = async () => {
-    setError(null);
-    setLoading(true);
-    try {
-      const walkinPhone = normalizeToE164(phone, 'GB');
-      if (phone.trim() && !walkinPhone) {
-        setError('Enter a valid phone number or leave phone blank');
-        setLoading(false);
-        return;
-      }
-      const walkinBody: Record<string, unknown> = {
-        party_size: partySize,
-        name: name.trim() || undefined,
-        phone: walkinPhone || undefined,
-        notes: notes.trim() || undefined,
-      };
-      if (selectedTableIds.length > 0) {
-        walkinBody.table_ids = selectedTableIds;
-      }
-      const res = await fetch('/api/venue/bookings/walk-in', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(walkinBody),
-      });
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        setError(j.error ?? 'Failed to add walk-in');
-        return;
-      }
-      onCreated();
-    } catch {
-      setError('Failed to add walk-in');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 backdrop-blur-sm p-4" onClick={onClose}>
-      <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-slate-900">Walk-in</h2>
-          <button type="button" onClick={onClose} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600">
-            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" /></svg>
-          </button>
-        </div>
-
-        <div className="space-y-4">
-          <div>
-            <label className="mb-1.5 block text-sm font-medium text-slate-700">Party size</label>
-            <div className="flex items-center gap-3">
-              <button type="button" onClick={() => setPartySize(Math.max(1, partySize - 1))} className="flex h-12 w-12 items-center justify-center rounded-xl border border-slate-200 text-xl font-bold text-slate-600 hover:bg-slate-50 active:bg-slate-100">−</button>
-              <NumericInput
-                ref={partySizeRef}
-                min={1}
-                max={50}
-                value={partySize}
-                onChange={(v) => setPartySize(v)}
-                className="h-12 w-20 rounded-xl border border-slate-200 text-center text-xl font-bold tabular-nums focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
-              />
-              <button type="button" onClick={() => setPartySize(partySize + 1)} className="flex h-12 w-12 items-center justify-center rounded-xl border border-slate-200 text-xl font-bold text-slate-600 hover:bg-slate-50 active:bg-slate-100">+</button>
-            </div>
-          </div>
-
-          {remainingCapacity != null && (
-            <div className={`rounded-lg px-3 py-2 text-sm font-medium ${
-              remainingCapacity <= 0 ? 'bg-red-50 text-red-700' :
-              remainingCapacity <= 5 ? 'bg-amber-50 text-amber-700' :
-              'bg-emerald-50 text-emerald-700'
-            }`}>
-              Remaining capacity now: {remainingCapacity} covers
-            </div>
-          )}
-          {capacityWarning && (
-            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
-              ⚠ {capacityWarning}
-            </div>
-          )}
-
-          <div>
-            <label className="mb-1 block text-sm font-medium text-slate-700">Guest name <span className="text-slate-400">(optional)</span></label>
-            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Walk-in guest" className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
-          </div>
-          <div>
-            <label className="mb-1 block text-sm font-medium text-slate-700">Phone <span className="text-slate-400">(optional)</span></label>
-            <PhoneWithCountryField
-              value={phone}
-              onChange={setPhone}
-              inputClassName="w-full min-w-0 rounded-xl border border-slate-200 px-4 py-2.5 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-sm font-medium text-slate-700">Notes <span className="text-slate-400">(optional)</span></label>
-            <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} placeholder="Any dietary or special notes" className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
-          </div>
-
-          {activeTables.length > 0 && (
-            <div>
-              <label className="mb-1 block text-sm font-medium text-slate-700">Table <span className="text-slate-400">(optional)</span></label>
-              <div className="flex flex-wrap gap-1.5">
-                {activeTables.map((table) => {
-                  const isSelected = selectedTableIds.includes(table.id);
-                  const occupant = occupancyMap[table.id] ?? null;
-                  return (
-                    <button
-                      key={table.id}
-                      type="button"
-                      onClick={() =>
-                        setSelectedTableIds((prev) =>
-                          isSelected ? prev.filter((id) => id !== table.id) : [...prev, table.id]
-                        )
-                      }
-                      title={occupant ? `Occupied by ${occupant.guestName}` : `${table.name} (${table.max_covers} seats)`}
-                      className={`rounded-lg border px-2 py-1 text-xs font-medium transition-colors ${
-                        isSelected
-                          ? 'border-brand-400 bg-brand-50 text-brand-800 ring-1 ring-brand-400'
-                          : occupant
-                            ? 'border-red-200 bg-red-50 text-red-700'
-                            : 'border-emerald-200 bg-emerald-50 text-emerald-800'
-                      }`}
-                    >
-                      {table.name}
-                      <span className="ml-1 text-[10px] opacity-60">({table.max_covers})</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          {error && <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
-
-          <div className="flex gap-3 pt-1">
-            <button type="button" disabled={loading} onClick={() => void submit()} className="flex-1 rounded-xl bg-brand-600 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 disabled:opacity-50">
-              {loading ? 'Seating...' : 'Seat Now →'}
-            </button>
-            <button type="button" onClick={onClose} className="rounded-xl border border-slate-200 px-4 py-3 text-sm font-medium text-slate-600 hover:bg-slate-50">
-              Cancel
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // ─── DepositActions ─────────────────────────────────────────────────────────
 
 function DepositActions({ booking, onAction }: { booking: DaySheetBooking; onAction: () => void }) {
@@ -1906,16 +1724,23 @@ export function DaySheetView({
 
       {/* ── Modals ── */}
       {showWalkIn && (
-        <DaySheetWalkInModal
-          remainingCapacity={walkInCapacity}
-          activeTables={activeTables}
-          occupancyMap={occupancyMap}
+        <DashboardStaffBookingModal
+          open
+          title="Walk-in"
+          bookingIntent="walk-in"
           onClose={() => setShowWalkIn(false)}
           onCreated={() => {
             setShowWalkIn(false);
             addToast('Walk-in added', 'success');
             void fetchDaySheet();
           }}
+          venueId={venueId}
+          currency={currency ?? 'GBP'}
+          bookingModel={bookingModel}
+          enabledModels={enabledModels}
+          advancedMode={tableManagementEnabled}
+          initialDate={date}
+          walkInRemainingCapacity={walkInCapacity}
         />
       )}
       {showNewBooking && (

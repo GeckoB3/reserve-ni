@@ -77,6 +77,8 @@ export function ResourceBookingFlow({
   onBookingCreated,
 }: ResourceBookingFlowProps) {
   const isStaff = bookingAudience === 'staff';
+  const detailsAudience =
+    isStaff && staffBookingSource === 'walk-in' ? ('staff_walk_in' as const) : isStaff ? ('staff' as const) : ('public' as const);
   const phoneDefaultCountry = defaultPhoneCountryForVenueCurrency(venue.currency);
   const terms = venue.terminology ?? { client: 'Booker', booking: 'Booking', staff: 'Manager' };
 
@@ -244,7 +246,7 @@ export function ResourceBookingFlow({
               booking_end_time: endTime,
               party_size: 1,
               name: details.name,
-              phone: details.phone,
+              phone: details.phone?.trim() || undefined,
               email: details.email || undefined,
               dietary_notes: details.dietary_notes || undefined,
               resource_id: resourceId,
@@ -585,7 +587,7 @@ export function ResourceBookingFlow({
             payAtVenuePaymentRequirement={payReq === 'none' ? 'none' : undefined}
             currencySymbol={venue.currency === 'EUR' ? '€' : '£'}
             phoneDefaultCountry={phoneDefaultCountry}
-            audience={isStaff ? 'staff' : 'public'}
+            audience={detailsAudience}
           />
         </div>
       )}
