@@ -30,7 +30,7 @@ interface OpeningHoursControlProps {
 }
 
 /**
- * Controlled venue opening hours (up to two periods per day). Same behaviour as Settings → Opening hours.
+ * Controlled venue opening hours (up to two periods per day). Same behaviour as Settings → Business Hours.
  */
 export function OpeningHoursControl({ value, onChange, disabled = false }: OpeningHoursControlProps) {
   const setDay = (day: string, config: OpeningHoursDaySettings) => {

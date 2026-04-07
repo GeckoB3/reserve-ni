@@ -21,6 +21,16 @@ function getAllowedEmails(): Set<string> {
  * Returns true when the Supabase Auth user has `app_metadata.platform_role === "superuser"`
  * AND their email is in the `PLATFORM_SUPERUSER_EMAILS` env allowlist.
  */
+/**
+ * True when the JWT has `platform_role: superuser` (no email allowlist).
+ * Use for client-side default redirects; middleware and `isPlatformSuperuser` still enforce the allowlist.
+ */
+export function hasPlatformSuperuserJwtRole(user: User | null | undefined): boolean {
+  if (!user) return false;
+  const meta = user.app_metadata ?? {};
+  return meta[PLATFORM_ROLE_KEY] === PLATFORM_ROLE_VALUE;
+}
+
 export function isPlatformSuperuser(user: User | null | undefined): boolean {
   if (!user) return false;
 

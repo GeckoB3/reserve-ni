@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server';
+import { isPlatformSuperuser } from '@/lib/platform-auth';
 import { NextResponse } from 'next/server';
 
 function getBaseUrl(requestUrl: string): string {
@@ -20,7 +21,15 @@ export async function GET(request: Request) {
     const supabase = await createClient();
     const { error } = await supabase.auth.exchangeCodeForSession(code);
     if (!error) {
-      return NextResponse.redirect(`${base}${next}`);
+      const { data: { user } } = await supabase.auth.getUser();
+      let destination = next;
+      if (user && isPlatformSuperuser(user)) {
+        const pathOnly = next.split('?')[0] ?? '';
+        if (pathOnly !== '/super' && !pathOnly.startsWith('/super/')) {
+          destination = '/super';
+        }
+      }
+      return NextResponse.redirect(`${base}${destination}`);
     }
   }
 

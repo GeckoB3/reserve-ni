@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
+import { isPlatformSuperuser } from '@/lib/platform-auth';
 import { LoginForm } from './login-form';
 
 export default async function LoginPage({
@@ -11,8 +12,11 @@ export default async function LoginPage({
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (user) {
-    const redirectTo = (await searchParams).redirectTo ?? '/dashboard';
-    redirect(redirectTo);
+    const explicit = (await searchParams).redirectTo;
+    if (explicit) {
+      redirect(explicit);
+    }
+    redirect(isPlatformSuperuser(user) ? '/super' : '/dashboard');
   }
 
   return (

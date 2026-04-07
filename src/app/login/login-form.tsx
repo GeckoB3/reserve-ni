@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { createClient } from '@/lib/supabase/browser';
+import { hasPlatformSuperuserJwtRole } from '@/lib/platform-auth';
 
 export function LoginForm({ redirectTo }: { redirectTo?: string }) {
   const [mode, setMode] = useState<'password' | 'magic'>('password');
@@ -27,7 +28,12 @@ export function LoginForm({ redirectTo }: { redirectTo?: string }) {
     const { error: err } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
     setLoading(false);
     if (err) { setError(err.message); return; }
-    window.location.href = redirectTo ?? '/dashboard';
+    const { data: { user } } = await supabase.auth.getUser();
+    let destination = redirectTo ?? '/dashboard';
+    if (!redirectTo && hasPlatformSuperuserJwtRole(user)) {
+      destination = '/super';
+    }
+    window.location.href = destination;
   }
 
   async function handleMagicSubmit(e: React.FormEvent) {

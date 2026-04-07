@@ -1,8 +1,16 @@
 import { Suspense } from 'react';
 import Link from 'next/link';
+import { redirect } from 'next/navigation';
+import { createClient } from '@/lib/supabase/server';
+import { isPlatformSuperuser } from '@/lib/platform-auth';
 import { SignupPlanConflictBanner } from '@/components/signup/SignupPlanConflictBanner';
 
-export default function SignupLayout({ children }: { children: React.ReactNode }) {
+export default async function SignupLayout({ children }: { children: React.ReactNode }) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (user && isPlatformSuperuser(user)) {
+    redirect('/super');
+  }
   return (
     <div className="flex min-h-screen flex-col bg-slate-50">
       <nav className="border-b border-slate-100 bg-white/80 backdrop-blur-md">

@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
 import { getSupabaseAdminClient } from '@/lib/supabase';
+import { isPlatformSuperuser } from '@/lib/platform-auth';
 import { DashboardSidebar } from './DashboardSidebar';
 import { SessionTimeoutGuard } from '@/components/SessionTimeoutGuard';
 import { normalizeEnabledModels } from '@/lib/booking/enabled-models';
@@ -11,6 +12,10 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) {
     redirect('/login?redirectTo=/dashboard');
+  }
+
+  if (isPlatformSuperuser(user)) {
+    redirect('/super');
   }
 
   const email = user.email ?? '';

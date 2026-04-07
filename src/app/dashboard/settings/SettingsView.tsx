@@ -2,7 +2,8 @@
 
 /**
  * Dashboard settings shell. For `unified_scheduling` venues, sections map broadly to plan §9.1:
- * business profile → ProfileSection / VenueProfileSection; bookable calendars & staff → StaffSection;
+ * business profile → ProfileSection / VenueProfileSection; opening hours & closures → Business Hours tab;
+ * bookable calendars & staff → StaffSection;
  * services → `/dashboard/appointment-services` (linked from staff flow); communications →
  * CommunicationTemplatesSection + venue notification APIs; plan & billing → StripeConnectSection;
  * booking page URL/widgets → dashboard home / embed docs elsewhere.
@@ -45,6 +46,7 @@ interface SettingsViewProps {
 
 const TABS = [
   { key: 'profile', label: 'Profile' },
+  { key: 'business-hours', label: 'Business Hours' },
   { key: 'plan', label: 'Plan' },
   { key: 'payments', label: 'Payments' },
   { key: 'comms', label: 'Communications' },
@@ -348,7 +350,6 @@ export function SettingsView({
             )}
             <VenueProfileSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} bookingModel={bookingModel} />
             <BookingTypesSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} />
-            <OpeningHoursSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} bookingModel={bookingModel ?? 'table_reservation'} />
             {showRestaurantTableProfileSections && !isAppointment && (
               <TableManagementSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} />
             )}
@@ -380,6 +381,9 @@ export function SettingsView({
               </Link>
             </div>
           </>
+        )}
+        {activeTab === 'business-hours' && (
+          <OpeningHoursSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} bookingModel={bookingModel ?? 'table_reservation'} />
         )}
         {activeTab === 'plan' && (
           <PlanSection venue={venue} activePractitionerCount={activePractitionerCount} />

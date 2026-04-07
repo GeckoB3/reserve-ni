@@ -156,8 +156,8 @@ export function ClosuresTab({ services, showToast }: Props) {
     <div className="space-y-6">
       <p className="text-xs text-slate-500">
         You can also manage closures from{' '}
-        <Link href="/dashboard/settings?tab=profile" className="font-medium text-brand-600 hover:underline">
-          Settings → Profile → Opening hours
+        <Link href="/dashboard/settings?tab=business-hours" className="font-medium text-brand-600 hover:underline">
+          Settings → Business Hours
         </Link>
         .
       </p>
