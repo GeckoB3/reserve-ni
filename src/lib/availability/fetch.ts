@@ -72,7 +72,7 @@ export async function fetchEngineInput({
     supabase
       .from('availability_blocks')
       .select(
-        'id, venue_id, service_id, block_type, date_start, date_end, time_start, time_end, override_max_covers, reason, yield_overrides',
+        'id, venue_id, service_id, block_type, date_start, date_end, time_start, time_end, override_max_covers, reason, yield_overrides, override_periods',
       )
       .eq('venue_id', venueId)
       .lte('date_start', date)
@@ -103,7 +103,7 @@ export async function fetchEngineInput({
   let blocksData: unknown[] = blocksRes.data ?? [];
   if (
     blocksRes.error &&
-    (blocksRes.error.code === '42703' || blocksRes.error.message?.includes('yield_overrides'))
+    (blocksRes.error.code === '42703' || blocksRes.error.message?.includes('yield_overrides') || blocksRes.error.message?.includes('override_periods'))
   ) {
     const retry = await supabase
       .from('availability_blocks')

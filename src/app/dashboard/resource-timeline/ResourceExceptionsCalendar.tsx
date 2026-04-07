@@ -20,7 +20,10 @@ function pad2(n: number): string {
   return String(n).padStart(2, '0');
 }
 
-export type ExceptionDayValue = { closed: true } | { periods: Array<{ start: string; end: string }> };
+export type ExceptionDayValue =
+  | { closed: true }
+  | { periods: Array<{ start: string; end: string }> }
+  | { reducedCapacity: true; maxCovers?: number };
 
 function isInSelectionRange(ymd: string, rangeStart: string | null, rangeEnd: string | null): boolean {
   if (!rangeStart) return false;
@@ -106,6 +109,9 @@ export function ResourceExceptionsCalendar({
             if ('closed' in ex) {
               bg = 'bg-red-50 hover:bg-red-100';
               ring = 'ring-1 ring-red-200';
+            } else if ('reducedCapacity' in ex) {
+              bg = 'bg-orange-50 hover:bg-orange-100';
+              ring = 'ring-1 ring-orange-200';
             } else {
               bg = 'bg-amber-50 hover:bg-amber-100';
               ring = 'ring-1 ring-amber-200';
@@ -121,7 +127,9 @@ export function ResourceExceptionsCalendar({
           const label = ex
             ? 'closed' in ex
               ? 'Closed'
-              : `Amended hours ${ex.periods[0]?.start ?? ''}–${ex.periods[0]?.end ?? ''}`
+              : 'reducedCapacity' in ex
+                ? `Reduced capacity${ex.maxCovers != null ? ` (${ex.maxCovers} covers)` : ''}`
+                : `Amended hours ${ex.periods[0]?.start ?? ''}–${ex.periods[0]?.end ?? ''}`
             : inRange
               ? 'Selected for new range'
               : '';
@@ -139,7 +147,7 @@ export function ResourceExceptionsCalendar({
               <span>{d}</span>
               {ex && (
                 <span className="mt-0.5 max-w-full truncate px-0.5 text-[9px] font-normal leading-tight text-slate-600">
-                  {'closed' in ex ? 'Off' : 'Hrs'}
+                  {'closed' in ex ? 'Off' : 'reducedCapacity' in ex ? 'Cap' : 'Hrs'}
                 </span>
               )}
             </button>
@@ -155,6 +163,10 @@ export function ResourceExceptionsCalendar({
         <span className="inline-flex items-center gap-1.5">
           <span className="h-3 w-3 rounded border border-amber-200 bg-amber-50" aria-hidden />
           Amended hours
+        </span>
+        <span className="inline-flex items-center gap-1.5">
+          <span className="h-3 w-3 rounded border border-orange-200 bg-orange-50" aria-hidden />
+          Reduced capacity
         </span>
         <span className="inline-flex items-center gap-1.5">
           <span className="h-3 w-3 rounded border-2 border-brand-500 bg-white" aria-hidden />

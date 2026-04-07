@@ -3,11 +3,12 @@
  * and the assigned team calendar's working hours, excluding breaks.
  */
 
-import type { OpeningHours } from '@/types/availability';
+import type { AvailabilityBlock, OpeningHours } from '@/types/availability';
 import type { Practitioner, WorkingHours } from '@/types/booking-models';
 import type { VenueOpeningException } from '@/types/venue-opening-exceptions';
 import { getOpeningPeriodsForDay, getDayOfWeek, timeToMinutes } from '@/lib/availability';
 import { unifiedCalendarRowToPractitioner } from '@/lib/availability/unified-calendar-mapper';
+import { blocksToVenueOpeningExceptions } from '@/lib/availability/venue-exceptions-adapter';
 
 const DAY_NAMES = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const;
 
@@ -147,6 +148,8 @@ export function calendarSegmentsForDate(ucRow: Record<string, unknown>, dateStr:
 export type VenueHoursInput = {
   opening_hours: OpeningHours | null | undefined;
   venue_opening_exceptions: VenueOpeningException[] | null | undefined;
+  /** When set, takes priority over venue_opening_exceptions for closures/amended hours. */
+  availability_blocks?: AvailabilityBlock[] | null;
 };
 
 /**
@@ -171,7 +174,10 @@ export function validateExperienceEventWindowAgainstVenueAndCalendar(
     return 'This calendar has no working hours on that date (or the team is marked off). Choose another date or time.';
   }
 
-  const venueRanges = venueMinuteRangesForDate(venue.opening_hours, eventDate, venue.venue_opening_exceptions ?? null);
+  const effectiveExceptions = (venue.availability_blocks && venue.availability_blocks.length > 0)
+    ? blocksToVenueOpeningExceptions(venue.availability_blocks)
+    : (venue.venue_opening_exceptions ?? null);
+  const venueRanges = venueMinuteRangesForDate(venue.opening_hours, eventDate, effectiveExceptions);
 
   let allowed: Array<{ start: number; end: number }>;
   if (venueRanges === null) {

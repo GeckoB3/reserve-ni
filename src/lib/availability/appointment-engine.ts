@@ -21,6 +21,8 @@ import type { EntityBookingWindow } from '@/lib/booking/entity-booking-window';
 import { DEFAULT_ENTITY_BOOKING_WINDOW } from '@/lib/booking/entity-booking-window';
 import type { VenueOpeningException } from '@/types/venue-opening-exceptions';
 import { parseVenueOpeningExceptions } from '@/types/venue-opening-exceptions';
+import type { AvailabilityBlock } from '@/types/availability';
+import { blocksToVenueOpeningExceptions } from '@/lib/availability/venue-exceptions-adapter';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -84,6 +86,7 @@ export function attachVenueClockToAppointmentInput(
     venue_opening_exceptions?: unknown;
   },
   bookingWindow?: EntityBookingWindow | null,
+  venueBlocks?: AvailabilityBlock[] | null,
 ): void {
   const tz =
     typeof venue.timezone === 'string' && venue.timezone.trim() !== '' ? venue.timezone.trim() : 'Europe/London';
@@ -94,7 +97,9 @@ export function attachVenueClockToAppointmentInput(
   if (venue.opening_hours !== undefined) {
     input.venueOpeningHours = venue.opening_hours as OpeningHours | null;
   }
-  if (venue.venue_opening_exceptions !== undefined) {
+  if (venueBlocks && venueBlocks.length > 0) {
+    input.venueOpeningExceptions = blocksToVenueOpeningExceptions(venueBlocks);
+  } else if (venue.venue_opening_exceptions !== undefined) {
     input.venueOpeningExceptions = parseVenueOpeningExceptions(venue.venue_opening_exceptions);
   }
 }
@@ -621,7 +626,7 @@ export async function fetchAppointmentInput(params: {
     bookingsQuery = bookingsQuery.not('practitioner_id', 'is', null);
   }
 
-  const [practitionersRes, allServicesRes, psRes, bookingsRes, blocksRes, leaveRes, venueRes] = await Promise.all([
+  const [practitionersRes, allServicesRes, psRes, bookingsRes, blocksRes, leaveRes, venueRes, venueBlocksRes] = await Promise.all([
     practitionerQuery,
     supabase
       .from('appointment_services')
@@ -643,6 +648,14 @@ export async function fetchAppointmentInput(params: {
       .lte('start_date', date)
       .gte('end_date', date),
     supabase.from('venues').select('opening_hours, venue_opening_exceptions').eq('id', venueId).single(),
+    supabase
+      .from('availability_blocks')
+      .select('id, venue_id, service_id, block_type, date_start, date_end, time_start, time_end, override_max_covers, reason, yield_overrides, override_periods')
+      .eq('venue_id', venueId)
+      .is('service_id', null)
+      .in('block_type', ['closed', 'amended_hours'])
+      .lte('date_start', date)
+      .gte('date_end', date),
   ]);
 
   let practitioners = (practitionersRes.data ?? []) as Practitioner[];
@@ -728,11 +741,14 @@ export async function fetchAppointmentInput(params: {
     ? null
     : ((venueRes.data?.opening_hours as OpeningHours | null) ?? null);
 
-  const venueOpeningExceptions = venueRes.error
-    ? null
-    : parseVenueOpeningExceptions(
-        (venueRes.data as { venue_opening_exceptions?: unknown } | null)?.venue_opening_exceptions,
-      );
+  const venueBlocks = (venueBlocksRes.data ?? []) as AvailabilityBlock[];
+  const venueOpeningExceptions = venueBlocks.length > 0
+    ? blocksToVenueOpeningExceptions(venueBlocks)
+    : venueRes.error
+      ? null
+      : parseVenueOpeningExceptions(
+          (venueRes.data as { venue_opening_exceptions?: unknown } | null)?.venue_opening_exceptions,
+        );
 
   if (venueRes.error) {
     console.warn('[fetchAppointmentInput] venues.opening_hours:', venueRes.error.message);
@@ -874,7 +890,7 @@ export async function fetchCalendarAppointmentInput(params: {
     }
   }
 
-  const [bookingsRes, blocksRes, calBlocksRes, venueRes, siblingResourcesRes] = await Promise.all([
+  const [bookingsRes, blocksRes, calBlocksRes, venueRes, siblingResourcesRes, venueBlocksRes] = await Promise.all([
     supabase
       .from('bookings')
       .select('id, practitioner_id, calendar_id, booking_time, appointment_service_id, service_item_id, status')
@@ -902,6 +918,14 @@ export async function fetchCalendarAppointmentInput(params: {
       .eq('calendar_type', 'resource')
       .eq('display_on_calendar_id', calendarId)
       .eq('is_active', true),
+    supabase
+      .from('availability_blocks')
+      .select('id, venue_id, service_id, block_type, date_start, date_end, time_start, time_end, override_max_covers, reason, yield_overrides, override_periods')
+      .eq('venue_id', venueId)
+      .is('service_id', null)
+      .in('block_type', ['closed', 'amended_hours'])
+      .lte('date_start', date)
+      .gte('date_end', date),
   ]);
 
   const serviceMapForBookings = new Map(services.map((s) => [s.id, s]));
@@ -984,11 +1008,14 @@ export async function fetchCalendarAppointmentInput(params: {
     ? null
     : ((venueRes.data?.opening_hours as OpeningHours | null) ?? null);
 
-  const venueOpeningExceptions = venueRes.error
-    ? null
-    : parseVenueOpeningExceptions(
-        (venueRes.data as { venue_opening_exceptions?: unknown } | null)?.venue_opening_exceptions,
-      );
+  const calVenueBlocks = (venueBlocksRes.data ?? []) as AvailabilityBlock[];
+  const venueOpeningExceptions = calVenueBlocks.length > 0
+    ? blocksToVenueOpeningExceptions(calVenueBlocks)
+    : venueRes.error
+      ? null
+      : parseVenueOpeningExceptions(
+          (venueRes.data as { venue_opening_exceptions?: unknown } | null)?.venue_opening_exceptions,
+        );
 
   return {
     date,

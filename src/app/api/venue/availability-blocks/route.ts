@@ -15,21 +15,50 @@ const yieldOverridesSchema = z
   .nullable()
   .optional();
 
-const blockSchema = z.object({
-  service_id: z.string().uuid().nullable().optional(),
-  block_type: z.enum(['closed', 'reduced_capacity', 'special_event']),
-  date_start: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  date_end: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  time_start: z.string().regex(/^\d{2}:\d{2}$/).nullable().optional(),
-  time_end: z.string().regex(/^\d{2}:\d{2}$/).nullable().optional(),
-  override_max_covers: z.number().int().min(0).nullable().optional(),
-  reason: z.string().max(500).nullable().optional(),
-  yield_overrides: yieldOverridesSchema,
-});
+const overridePeriodsSchema = z
+  .array(
+    z.object({
+      open: z.string().regex(/^\d{2}:\d{2}$/),
+      close: z.string().regex(/^\d{2}:\d{2}$/),
+    }),
+  )
+  .min(1)
+  .max(4)
+  .nullable()
+  .optional();
 
-const blockPatchSchema = blockSchema.partial().extend({
-  id: z.string().uuid(),
-});
+const blockSchema = z
+  .object({
+    service_id: z.string().uuid().nullable().optional(),
+    block_type: z.enum(['closed', 'reduced_capacity', 'special_event', 'amended_hours']),
+    date_start: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    date_end: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    time_start: z.string().regex(/^\d{2}:\d{2}$/).nullable().optional(),
+    time_end: z.string().regex(/^\d{2}:\d{2}$/).nullable().optional(),
+    override_max_covers: z.number().int().min(0).nullable().optional(),
+    reason: z.string().max(500).nullable().optional(),
+    yield_overrides: yieldOverridesSchema,
+    override_periods: overridePeriodsSchema,
+  })
+  .refine(
+    (v) => v.block_type !== 'amended_hours' || (Array.isArray(v.override_periods) && v.override_periods.length > 0),
+    { message: 'override_periods required for amended_hours', path: ['override_periods'] },
+  );
+
+const blockPatchSchema = z
+  .object({
+    id: z.string().uuid(),
+    service_id: z.string().uuid().nullable().optional(),
+    block_type: z.enum(['closed', 'reduced_capacity', 'special_event', 'amended_hours']).optional(),
+    date_start: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+    date_end: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+    time_start: z.string().regex(/^\d{2}:\d{2}$/).nullable().optional(),
+    time_end: z.string().regex(/^\d{2}:\d{2}$/).nullable().optional(),
+    override_max_covers: z.number().int().min(0).nullable().optional(),
+    reason: z.string().max(500).nullable().optional(),
+    yield_overrides: yieldOverridesSchema,
+    override_periods: overridePeriodsSchema,
+  });
 
 /** GET /api/venue/availability-blocks */
 export async function GET() {

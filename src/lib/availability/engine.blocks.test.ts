@@ -73,6 +73,121 @@ describe('resolveSlotBlockState', () => {
     const r = resolveSlotBlockState(blocks, venueId, serviceId, date, slot);
     expect(r.blocked).toBe(false);
   });
+
+  it('allows slot within amended_hours periods', () => {
+    const blocks = [
+      block({
+        id: '1',
+        block_type: 'amended_hours',
+        override_periods: [{ open: '16:00', close: '20:00' }],
+      }),
+    ];
+    const r = resolveSlotBlockState(blocks, venueId, serviceId, date, 17 * 60);
+    expect(r.blocked).toBe(false);
+  });
+
+  it('blocks slot outside amended_hours periods', () => {
+    const blocks = [
+      block({
+        id: '1',
+        block_type: 'amended_hours',
+        override_periods: [{ open: '10:00', close: '14:00' }],
+      }),
+    ];
+    const r = resolveSlotBlockState(blocks, venueId, serviceId, date, 17 * 60);
+    expect(r.blocked).toBe(true);
+  });
+
+  it('amended_hours with multiple periods: allows slot in second period', () => {
+    const blocks = [
+      block({
+        id: '1',
+        block_type: 'amended_hours',
+        override_periods: [
+          { open: '08:00', close: '12:00' },
+          { open: '16:00', close: '20:00' },
+        ],
+      }),
+    ];
+    const r = resolveSlotBlockState(blocks, venueId, serviceId, date, 18 * 60);
+    expect(r.blocked).toBe(false);
+  });
+
+  it('amended_hours + reduced_capacity: slot within periods gets reduced capacity', () => {
+    const blocks = [
+      block({
+        id: '1',
+        block_type: 'amended_hours',
+        override_periods: [{ open: '16:00', close: '22:00' }],
+      }),
+      block({ id: '2', block_type: 'reduced_capacity', override_max_covers: 8 }),
+    ];
+    const r = resolveSlotBlockState(blocks, venueId, serviceId, date, 17 * 60);
+    expect(r.blocked).toBe(false);
+    expect(r.mergedYield.overrideMaxCovers).toBe(8);
+  });
+
+  it('amended_hours + reduced_capacity: slot outside periods is blocked', () => {
+    const blocks = [
+      block({
+        id: '1',
+        block_type: 'amended_hours',
+        override_periods: [{ open: '16:00', close: '18:00' }],
+      }),
+      block({ id: '2', block_type: 'reduced_capacity', override_max_covers: 8 }),
+    ];
+    const r = resolveSlotBlockState(blocks, venueId, serviceId, date, 19 * 60);
+    expect(r.blocked).toBe(true);
+  });
+
+  it('closed block wins over amended_hours', () => {
+    const blocks = [
+      block({
+        id: '1',
+        block_type: 'amended_hours',
+        override_periods: [{ open: '10:00', close: '22:00' }],
+      }),
+      block({ id: '2', block_type: 'closed' }),
+    ];
+    const r = resolveSlotBlockState(blocks, venueId, serviceId, date, 12 * 60);
+    expect(r.blocked).toBe(true);
+  });
+
+  it('multiple amended_hours blocks: union of periods', () => {
+    const blocks = [
+      block({
+        id: '1',
+        block_type: 'amended_hours',
+        override_periods: [{ open: '08:00', close: '12:00' }],
+      }),
+      block({
+        id: '2',
+        block_type: 'amended_hours',
+        override_periods: [{ open: '16:00', close: '20:00' }],
+      }),
+    ];
+    const mid = resolveSlotBlockState(blocks, venueId, serviceId, date, 14 * 60);
+    expect(mid.blocked).toBe(true);
+
+    const morning = resolveSlotBlockState(blocks, venueId, serviceId, date, 10 * 60);
+    expect(morning.blocked).toBe(false);
+
+    const evening = resolveSlotBlockState(blocks, venueId, serviceId, date, 18 * 60);
+    expect(evening.blocked).toBe(false);
+  });
+
+  it('amended_hours with service_id set does not affect venue-wide check', () => {
+    const blocks = [
+      block({
+        id: '1',
+        block_type: 'amended_hours',
+        service_id: 'some-service',
+        override_periods: [{ open: '10:00', close: '12:00' }],
+      }),
+    ];
+    const r = resolveSlotBlockState(blocks, venueId, serviceId, date, 17 * 60);
+    expect(r.blocked).toBe(false);
+  });
 });
 
 describe('resolveServiceForDate', () => {

@@ -160,9 +160,40 @@ function blocksMatchingSlot(
   return out;
 }
 
+/** Collect amended_hours blocks covering a venue + date (ignoring time_start/time_end). */
+function amendedHoursBlocksForDate(
+  blocks: AvailabilityBlock[],
+  venueId: string,
+  dateStr: string,
+): AvailabilityBlock[] {
+  const out: AvailabilityBlock[] = [];
+  for (const b of blocks) {
+    if (b.block_type !== 'amended_hours') continue;
+    if (b.venue_id !== venueId) continue;
+    if (b.service_id != null) continue;
+    if (dateStr < b.date_start || dateStr > b.date_end) continue;
+    out.push(b);
+  }
+  return out;
+}
+
+/** Check whether slotMinutes falls inside any period from an amended_hours block set. */
+function isSlotWithinAmendedPeriods(amended: AvailabilityBlock[], slotMinutes: number): boolean {
+  for (const b of amended) {
+    if (!Array.isArray(b.override_periods)) continue;
+    for (const p of b.override_periods) {
+      const pStart = timeToMinutes(p.open);
+      const pEnd = timeToMinutes(p.close);
+      if (slotMinutes >= pStart && slotMinutes < pEnd) return true;
+    }
+  }
+  return false;
+}
+
 /**
- * Deterministic merge: closed or special_event wins; else minimum override_max_covers
- * and merged JSON yield overrides (min bookings, max interval/buffer/duration).
+ * Deterministic merge: closed or special_event wins; amended_hours blocks slot
+ * outside their periods; else minimum override_max_covers and merged JSON yield
+ * overrides (min bookings, max interval/buffer/duration).
  */
 export function resolveSlotBlockState(
   blocks: AvailabilityBlock[],
@@ -175,6 +206,11 @@ export function resolveSlotBlockState(
   const merged = emptyMergedYield();
 
   if (matching.some((b) => b.block_type === 'closed' || b.block_type === 'special_event')) {
+    return { blocked: true, mergedYield: merged };
+  }
+
+  const amended = amendedHoursBlocksForDate(blocks, venueId, dateStr);
+  if (amended.length > 0 && !isSlotWithinAmendedPeriods(amended, slotMinutes)) {
     return { blocked: true, mergedYield: merged };
   }
 

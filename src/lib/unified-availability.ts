@@ -17,6 +17,7 @@ import { timeToMinutes } from '@/lib/availability';
 import { getDayOfWeek } from '@/lib/availability/engine';
 import type { EntityBookingWindow } from '@/lib/booking/entity-booking-window';
 import { entityBookingWindowFromRow, isGuestBookingDateAllowed } from '@/lib/booking/entity-booking-window';
+import type { AvailabilityBlock } from '@/types/availability';
 
 export interface UnifiedAvailableSlot {
   time: string;
@@ -115,14 +116,15 @@ async function slotsFromEngineInput(params: {
   } | null;
   bookingWindow: EntityBookingWindow;
   extraBlocks: PractitionerCalendarBlockedRange[];
+  venueBlocks?: AvailabilityBlock[] | null;
 }): Promise<UnifiedAvailableSlot[]> {
-  const { input, calendarId, serviceItemId, venueRow, bookingWindow, extraBlocks } = params;
+  const { input, calendarId, serviceItemId, venueRow, bookingWindow, extraBlocks, venueBlocks } = params;
   const merged: AppointmentEngineInput = {
     ...input,
     practitionerBlockedRanges: [...(input.practitionerBlockedRanges ?? []), ...extraBlocks],
   };
   if (venueRow) {
-    attachVenueClockToAppointmentInput(merged, venueRow, bookingWindow);
+    attachVenueClockToAppointmentInput(merged, venueRow, bookingWindow, venueBlocks ?? null);
   }
   const result = computeAppointmentAvailability(merged);
   const practitioner = result.practitioners.find((p) => p.id === calendarId);
@@ -180,7 +182,7 @@ export async function getUnifiedAvailableSlots(params: {
     return await getEventClassSlots(supabase, venueId, calendarId, date, serviceItemId);
   }
 
-  const [{ data: venue }, extraBlocks, serviceItemRes] = await Promise.all([
+  const [{ data: venue }, extraBlocks, serviceItemRes, venueBlocksRes] = await Promise.all([
     supabase.from('venues').select('timezone, booking_rules, opening_hours, venue_opening_exceptions').eq('id', venueId).maybeSingle(),
     fetchCalendarBlocksMerged(supabase, venueId, calendarId, date),
     calendarType === 'resource'
@@ -191,6 +193,14 @@ export async function getUnifiedAvailableSlots(params: {
           .eq('id', serviceItemId)
           .eq('venue_id', venueId)
           .maybeSingle(),
+    supabase
+      .from('availability_blocks')
+      .select('id, venue_id, service_id, block_type, date_start, date_end, time_start, time_end, override_max_covers, reason, yield_overrides, override_periods')
+      .eq('venue_id', venueId)
+      .is('service_id', null)
+      .in('block_type', ['closed', 'amended_hours'])
+      .lte('date_start', date)
+      .gte('date_end', date),
   ]);
 
   const venueRow = venue as {
@@ -199,6 +209,7 @@ export async function getUnifiedAvailableSlots(params: {
     opening_hours?: unknown;
     venue_opening_exceptions?: unknown;
   } | null;
+  const venueBlocks = (venueBlocksRes.data ?? []) as AvailabilityBlock[];
   const tz =
     typeof venueRow?.timezone === 'string' && venueRow.timezone.trim() !== ''
       ? venueRow.timezone.trim()
@@ -243,6 +254,7 @@ export async function getUnifiedAvailableSlots(params: {
           venueRow,
           bookingWindow,
           extraBlocks,
+          venueBlocks,
         });
         for (const s of slots) {
           mergedByKey.set(`${s.time}|${s.durationMinutes ?? d}`, s);
@@ -260,6 +272,7 @@ export async function getUnifiedAvailableSlots(params: {
       venueRow,
       bookingWindow,
       extraBlocks,
+      venueBlocks,
     });
   }
 
@@ -278,6 +291,7 @@ export async function getUnifiedAvailableSlots(params: {
     venueRow,
     bookingWindow,
     extraBlocks,
+    venueBlocks,
   });
 }
 

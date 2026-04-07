@@ -6,7 +6,6 @@ import { ServicesTab } from './ServicesTab';
 import { CapacityRulesTab } from './CapacityRulesTab';
 import { DiningDurationTab } from './DiningDurationTab';
 import { BookingRulesTab } from './BookingRulesTab';
-import { ClosuresTab } from './ClosuresTab';
 import { AvailabilityCalendarTab } from './AvailabilityCalendarTab';
 
 const TABS = [
@@ -15,7 +14,6 @@ const TABS = [
   { key: 'duration', label: 'Dining Duration' },
   { key: 'rules', label: 'Booking Rules' },
   { key: 'calendar', label: 'Calendar' },
-  { key: 'closures', label: 'Closures' },
 ] as const;
 
 type TabKey = (typeof TABS)[number]['key'];
@@ -70,7 +68,7 @@ export default function AvailabilitySettingsClient() {
       <div className="mb-6 flex items-start justify-between">
         <div>
           <h1 className="mb-1 text-xl font-bold text-slate-900">Availability Settings</h1>
-          <p className="text-sm text-slate-500">Manage services, capacity, durations, booking rules, calendar blocks, and closures.</p>
+          <p className="text-sm text-slate-500">Manage services, capacity, durations, booking rules, and schedule exceptions.</p>
         </div>
         <Link
           href="/dashboard/onboarding"
@@ -113,10 +111,6 @@ export default function AvailabilitySettingsClient() {
       {activeTab === 'calendar' && (
         <AvailabilityCalendarTab services={services} showToast={showToast} />
       )}
-      {activeTab === 'closures' && (
-        <ClosuresTab services={services} showToast={showToast} />
-      )}
-
       {/* Toast */}
       {toast && (
         <div className="fixed bottom-6 right-6 z-50 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-medium text-white shadow-lg">

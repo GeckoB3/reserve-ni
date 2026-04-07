@@ -167,7 +167,7 @@ export interface AvailabilityBlock {
   id: string;
   venue_id: string;
   service_id: string | null;
-  block_type: 'closed' | 'reduced_capacity' | 'special_event';
+  block_type: 'closed' | 'reduced_capacity' | 'special_event' | 'amended_hours';
   date_start: string;
   date_end: string;
   time_start: string | null;
@@ -175,6 +175,7 @@ export interface AvailabilityBlock {
   override_max_covers: number | null;
   reason: string | null;
   yield_overrides?: BlockYieldOverridesPayload | null;
+  override_periods?: Array<{ open: string; close: string }> | null;
 }
 
 /** Date-scoped overrides merged onto booking_restrictions for matching slots/days. */
