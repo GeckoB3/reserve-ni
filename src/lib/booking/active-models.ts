@@ -66,7 +66,14 @@ export interface ResolveActiveBookingModelsInput {
 export function resolveActiveBookingModels(input: ResolveActiveBookingModelsInput): BookingModel[] {
   const explicit = normalizeActiveBookingModels(input.activeBookingModels);
   if (Array.isArray(input.activeBookingModels)) {
-    return explicit;
+    if (explicit.length > 0) {
+      return explicit;
+    }
+    // Empty array: appointments tier means "models not chosen yet" after payment.
+    if (isAppointmentPlanTier(input.pricingTier)) {
+      return [];
+    }
+    // Otherwise treat as unset (e.g. DB default [] before backfill) and derive from legacy fields.
   }
 
   const normalizedPrimary = normalizeActiveBookingModelValue(input.bookingModel) ?? 'table_reservation';

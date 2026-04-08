@@ -35,6 +35,27 @@ describe('resolveActiveBookingModels', () => {
     ).toEqual(['table_reservation', 'event_ticket', 'resource_booking']);
   });
 
+  it('returns empty when active_booking_models is empty for appointments tier', () => {
+    expect(
+      resolveActiveBookingModels({
+        pricingTier: 'appointments',
+        bookingModel: 'unified_scheduling',
+        activeBookingModels: [],
+      }),
+    ).toEqual([]);
+  });
+
+  it('derives from booking_model when active_booking_models is empty for restaurant tier', () => {
+    expect(
+      resolveActiveBookingModels({
+        pricingTier: 'restaurant',
+        bookingModel: 'table_reservation',
+        enabledModels: ['resource_booking'],
+        activeBookingModels: [],
+      }),
+    ).toEqual(['table_reservation', 'resource_booking']);
+  });
+
   it('treats practitioner_appointment as unified_scheduling', () => {
     expect(
       resolveActiveBookingModels({

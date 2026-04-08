@@ -97,6 +97,9 @@ export async function POST(request: Request) {
 
     const slug = `venue-${Date.now()}`;
 
+    // Do not send active_booking_models here: older databases may not have the column yet.
+    // When the column exists (migration applied), NOT NULL DEFAULT '[]'::jsonb matches
+    // appointments post-payment (choose models next) and resolves correctly for restaurant via booking_model.
     const { data: venue, error: venueError } = await admin
       .from('venues')
       .insert({
@@ -108,7 +111,6 @@ export async function POST(request: Request) {
         terminology: config.terms,
         pricing_tier: plan,
         plan_status: 'active',
-        active_booking_models: plan === 'appointments' ? [] : [config.model],
         stripe_customer_id: session.customer as string,
         stripe_subscription_id: subscriptionId,
         stripe_subscription_item_id: mainSubscriptionItemId,
