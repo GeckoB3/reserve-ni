@@ -13,6 +13,9 @@ import {
 } from '@/lib/booking/active-models';
 
 export interface SetupStatus {
+  /** Venue finished the onboarding wizard (dashboard checklist should not repeat those tasks). */
+  onboarding_completed: boolean;
+  pricing_tier: string | null;
   profile_complete: boolean;
   availability_set: boolean;
   /** True when guests can complete a booking on the public page (Model A: active services; Model B: catalog non-empty). */
@@ -41,11 +44,17 @@ async function checkAvailabilitySet(
   switch (model) {
     case 'practitioner_appointment':
     case 'unified_scheduling': {
-      const { count } = await admin
+      const { count: prCount } = await admin
         .from('practitioners')
         .select('id', { count: 'exact', head: true })
         .eq('venue_id', venueId);
-      return (count ?? 0) > 0;
+      if ((prCount ?? 0) > 0) return true;
+      const { count: ucCount } = await admin
+        .from('unified_calendars')
+        .select('id', { count: 'exact', head: true })
+        .eq('venue_id', venueId)
+        .neq('calendar_type', 'resource');
+      return (ucCount ?? 0) > 0;
     }
     case 'event_ticket': {
       const { count } = await admin
@@ -63,9 +72,10 @@ async function checkAvailabilitySet(
     }
     case 'resource_booking': {
       const { count } = await admin
-        .from('venue_resources')
+        .from('unified_calendars')
         .select('id', { count: 'exact', head: true })
-        .eq('venue_id', venueId);
+        .eq('venue_id', venueId)
+        .eq('calendar_type', 'resource');
       return (count ?? 0) > 0;
     }
     default: {
@@ -84,7 +94,9 @@ export async function GET() {
 
     const { data: venue } = await staff.db
       .from('venues')
-      .select('name, address, phone, stripe_connected_account_id, booking_model, enabled_models, active_booking_models, pricing_tier')
+      .select(
+        'name, address, phone, stripe_connected_account_id, booking_model, enabled_models, active_booking_models, pricing_tier, onboarding_completed',
+      )
       .eq('id', venueId)
       .single();
 
@@ -143,6 +155,8 @@ export async function GET() {
     const firstBookingMade = (bookingCount ?? 0) > 0;
 
     const status: SetupStatus = {
+      onboarding_completed: (venue as { onboarding_completed?: boolean }).onboarding_completed === true,
+      pricing_tier: ((venue as { pricing_tier?: string | null }).pricing_tier ?? null) as string | null,
       profile_complete: profileComplete,
       availability_set: availabilitySet,
       guest_booking_ready: guestBookingReady,

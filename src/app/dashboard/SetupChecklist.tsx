@@ -6,7 +6,15 @@ import type { SetupStatus } from '@/app/api/venue/setup-status/route';
 import type { BookingModel } from '@/types/booking-models';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 
-type SetupStepKey = keyof Omit<SetupStatus, 'is_admin' | 'booking_model' | 'active_booking_models' | 'enabled_models'>;
+type SetupStepKey = keyof Omit<
+  SetupStatus,
+  | 'is_admin'
+  | 'booking_model'
+  | 'active_booking_models'
+  | 'enabled_models'
+  | 'onboarding_completed'
+  | 'pricing_tier'
+>;
 
 interface Step {
   key: SetupStepKey;
@@ -16,16 +24,18 @@ interface Step {
   actionLabel: string;
 }
 
-function getAvailabilityStep(model: BookingModel): Step {
+function getAvailabilityStep(model: BookingModel, onboardingCompleted: boolean): Step {
   switch (model) {
     case 'practitioner_appointment':
     case 'unified_scheduling':
       return {
         key: 'availability_set',
-        label: 'Team & services',
-        description: 'Review your team members and services, or add new ones.',
+        label: onboardingCompleted ? 'Services & calendars' : 'Team & services',
+        description: onboardingCompleted
+          ? 'Adjust which services are offered on each calendar, or add more services.'
+          : 'Add team calendars, link services, and set when guests can book.',
         href: '/dashboard/appointment-services',
-        actionLabel: 'View services',
+        actionLabel: 'Appointment services',
       };
     case 'event_ticket':
       return {
@@ -75,17 +85,18 @@ function isSetupComplete(s: SetupStatus) {
   );
 }
 
-function getGuestBookingStep(model: BookingModel): Step {
+function getGuestBookingStep(model: BookingModel, onboardingCompleted: boolean): Step {
   switch (model) {
     case 'practitioner_appointment':
     case 'unified_scheduling':
       return {
         key: 'guest_booking_ready',
         label: 'Public booking page',
-        description:
-          'Guests need at least one team member with an active service. Link services under Appointment Services.',
+        description: onboardingCompleted
+          ? 'Your booking page needs at least one active service linked to a calendar. Check assignments under Appointment Services.'
+          : 'Guests need at least one calendar with an active service linked before they can book online.',
         href: '/dashboard/appointment-services',
-        actionLabel: 'Fix services',
+        actionLabel: 'Review services',
       };
     default:
       return {
@@ -99,65 +110,78 @@ function getGuestBookingStep(model: BookingModel): Step {
   }
 }
 
-function getSecondaryCatalogSteps(enabledModels: BookingModel[]): Step[] {
+function getSecondaryCatalogSteps(enabledModels: BookingModel[], onboardingCompleted: boolean): Step[] {
   const steps: Step[] = [];
   if (enabledModels.includes('event_ticket')) {
     steps.push({
       key: 'secondary_event_catalog_ready',
-      label: 'Events (add-on)',
-      description: 'Add at least one ticketed event so guests can book it from the Events tab.',
+      label: 'Events',
+      description: onboardingCompleted
+        ? 'Optional: add another ticketed event or edit existing ones in Event manager.'
+        : 'Add a ticketed event so guests can book from your Events tab.',
       href: '/dashboard/event-manager',
-      actionLabel: 'View events',
+      actionLabel: 'Event manager',
     });
   }
   if (enabledModels.includes('class_session')) {
     steps.push({
       key: 'secondary_class_catalog_ready',
-      label: 'Classes & timetable (add-on)',
-      description: 'Add at least one class type and schedule so guests can book classes.',
+      label: 'Classes',
+      description: onboardingCompleted
+        ? 'Optional: add a timetable rule or more class types under Class timetable.'
+        : 'Add a class type and schedule so guests can book classes.',
       href: '/dashboard/class-timetable',
-      actionLabel: 'View timetable',
+      actionLabel: 'Class timetable',
     });
   }
   if (enabledModels.includes('resource_booking')) {
     steps.push({
       key: 'secondary_resource_catalog_ready',
-      label: 'Resources (add-on)',
-      description: 'Add at least one resource so guests can book it from the Resources tab.',
+      label: 'Resources',
+      description: onboardingCompleted
+        ? 'Optional: add another bookable resource or edit slots under Resource timeline.'
+        : 'Add a bookable resource so guests can book it from the Resources tab.',
       href: '/dashboard/resource-timeline',
-      actionLabel: 'View resources',
+      actionLabel: 'Resource timeline',
     });
   }
   return steps;
 }
 
-function getSteps(model: BookingModel, enabledModels: BookingModel[]): Step[] {
+function getSteps(status: SetupStatus): Step[] {
+  const model = status.booking_model;
+  const enabledModels = status.enabled_models;
+  const onboardingDone = status.onboarding_completed;
+
   const base: Step[] = [
     {
       key: 'profile_complete',
       label: 'Business profile',
-      description: 'Add your business name, address, phone number, and cover photo.',
+      description: onboardingDone
+        ? 'Review logo, contact details, and venue settings.'
+        : 'Add your business name, address, phone number, and cover photo.',
       href: '/dashboard/settings',
-      actionLabel: 'Complete profile',
+      actionLabel: onboardingDone ? 'Venue settings' : 'Complete profile',
     },
-    getAvailabilityStep(model),
+    getAvailabilityStep(model, onboardingDone),
   ];
   if (model === 'table_reservation' || isUnifiedSchedulingVenue(model)) {
-    base.push(getGuestBookingStep(model));
+    base.push(getGuestBookingStep(model, onboardingDone));
   }
-  base.push(...getSecondaryCatalogSteps(enabledModels));
+  base.push(...getSecondaryCatalogSteps(enabledModels, onboardingDone));
   base.push(
     {
       key: 'stripe_connected',
       label: 'Stripe payments',
-      description: 'Connect Stripe to collect payments directly into your bank account.',
+      description:
+        'Connect Stripe so you can take deposits and card payments (Connect pays out to your bank).',
       href: '/dashboard/settings?tab=payments',
       actionLabel: 'Connect Stripe',
     },
     {
       key: 'first_booking_made',
       label: 'First test booking',
-      description: 'Make a test booking to confirm everything is working end-to-end.',
+      description: 'Try the guest flow once to confirm booking and emails look right.',
       href: '/dashboard/bookings/new',
       actionLabel: 'Create booking',
     },
@@ -195,10 +219,9 @@ export function SetupChecklist() {
     return () => cancelAnimationFrame(id);
   }, []);
 
-  const steps = useMemo(
-    () => getSteps(status?.booking_model ?? 'table_reservation', status?.enabled_models ?? []),
-    [status?.booking_model, status?.enabled_models],
-  );
+  const steps = useMemo(() => (status ? getSteps(status) : []), [status]);
+
+  const incompleteSteps = useMemo(() => steps.filter((s) => !status?.[s.key]), [steps, status]);
 
   function dismiss() {
     sessionStorage.setItem('setup_checklist_dismissed', '1');
@@ -219,12 +242,20 @@ export function SetupChecklist() {
         <div className="flex-1">
           <div className="flex items-center gap-2">
             <span className="text-sm font-semibold text-slate-900">
-              Get your venue ready - {completedCount}/{totalCount} steps complete
+              {status.onboarding_completed ? 'What’s next' : 'Get your venue ready'} — {completedCount}/
+              {totalCount} complete
             </span>
             <span className="rounded-full bg-brand-100 px-2 py-0.5 text-xs font-medium text-brand-700">
               {progressPct}%
             </span>
           </div>
+          {status.onboarding_completed ? (
+            <p className="mt-1 text-xs text-slate-500">
+              Showing only what still needs attention (steps you finished in onboarding are not listed again).
+            </p>
+          ) : (
+            <p className="mt-1 text-xs text-slate-500">Outstanding tasks to get your venue live for guests.</p>
+          )}
           <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
             <div
               className="h-full rounded-full bg-brand-500 transition-all duration-500"
@@ -244,40 +275,23 @@ export function SetupChecklist() {
       </div>
 
       <ul className="divide-y divide-slate-50">
-        {steps.map((step) => {
-          const done = status[step.key];
-          return (
-            <li key={step.key} className={`flex items-center gap-4 px-5 py-3 ${done ? 'opacity-60' : ''}`}>
-              {done ? (
-                <div className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-green-100">
-                  <svg className="h-3.5 w-3.5 text-green-600" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
-                  </svg>
-                </div>
-              ) : (
-                <div className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full border-2 border-slate-200 bg-white">
-                  <div className="h-2 w-2 rounded-full bg-slate-300" />
-                </div>
-              )}
-              <div className="flex-1 min-w-0">
-                <p className={`text-sm font-medium ${done ? 'text-slate-400 line-through' : 'text-slate-800'}`}>
-                  {step.label}
-                </p>
-                {!done && (
-                  <p className="text-xs text-slate-500">{step.description}</p>
-                )}
-              </div>
-              {!done && (
-                <Link
-                  href={step.href}
-                  className="flex-shrink-0 rounded-lg border border-brand-200 bg-brand-50 px-3 py-1 text-xs font-medium text-brand-700 hover:bg-brand-100 transition-colors"
-                >
-                  {step.actionLabel}
-                </Link>
-              )}
-            </li>
-          );
-        })}
+        {incompleteSteps.map((step) => (
+          <li key={step.key} className="flex items-center gap-4 px-5 py-3">
+            <div className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full border-2 border-slate-200 bg-white">
+              <div className="h-2 w-2 rounded-full bg-slate-300" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-medium text-slate-800">{step.label}</p>
+              <p className="text-xs text-slate-500">{step.description}</p>
+            </div>
+            <Link
+              href={step.href}
+              className="flex-shrink-0 rounded-lg border border-brand-200 bg-brand-50 px-3 py-1 text-xs font-medium text-brand-700 transition-colors hover:bg-brand-100"
+            >
+              {step.actionLabel}
+            </Link>
+          </li>
+        ))}
       </ul>
     </div>
   );
