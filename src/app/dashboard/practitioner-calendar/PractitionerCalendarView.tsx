@@ -52,9 +52,7 @@ import {
   addCalendarDays,
   monthGridDateRange,
   groupScheduleBlocksByDate,
-  filterScheduleBlocksByModel,
   buildMonthDayScheduleCounts,
-  type ScheduleModelFilter,
 } from '@/lib/calendar/schedule-blocks-grouping';
 import { formatEventUptakeLine } from '@/lib/calendar/event-block-label';
 import {
@@ -64,7 +62,7 @@ import {
 import { bookingStatusDisplayLabel, isTableReservationBooking } from '@/lib/booking/infer-booking-row-model';
 import { ScheduleFeedColumn } from './ScheduleFeedColumn';
 import { WeekScheduleCdeStrip } from './WeekScheduleCdeStrip';
-import { ScheduleCalendarLegend } from './ScheduleCalendarLegend';
+import { CalendarColumnsFilter } from './CalendarColumnsFilter';
 import { MonthScheduleGrid } from './MonthScheduleGrid';
 import { PractitionerCalendarToolbar } from './PractitionerCalendarToolbar';
 
@@ -647,7 +645,9 @@ export function PractitionerCalendarView({
     eventId: string;
     block: ScheduleBlockDTO;
   } | null>(null);
-  const [filterPractitioner, setFilterPractitioner] = useState<string>(defaultPractitionerFilter);
+  const [visibleCalendarIdsState, setVisibleCalendarIdsState] = useState<string[] | null>(() =>
+    defaultPractitionerFilter === 'all' ? null : [defaultPractitionerFilter],
+  );
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [staffBookingModal, setStaffBookingModal] = useState<null | 'new' | 'walk-in'>(null);
@@ -677,7 +677,6 @@ export function PractitionerCalendarView({
   const [quickActionId, setQuickActionId] = useState<string | null>(null);
   const [noShowGraceMinutes, setNoShowGraceMinutes] = useState(15);
   const [scheduleBlocks, setScheduleBlocks] = useState<ScheduleBlockDTO[]>([]);
-  const [scheduleModelFilter, setScheduleModelFilter] = useState<ScheduleModelFilter>('all');
   const scrollRef = useRef<HTMLDivElement>(null);
   const touchX = useRef<number | null>(null);
   /** Snapshot when a touch starts; if scrollLeft/scrollTop move during the gesture, it was scrolling, not a day swipe. */
@@ -883,6 +882,22 @@ export function PractitionerCalendarView({
     [activePractitioners],
   );
 
+  /** `null` = all calendars; non-null = restrict to these column ids (may be a full explicit selection). */
+  const calendarFilterIds = useMemo(() => {
+    if (visibleCalendarIdsState === null) return null;
+    const ids = columnPractitioners.map((p) => p.id);
+    const valid = new Set(ids);
+    const filtered = visibleCalendarIdsState.filter((id) => valid.has(id));
+    if (filtered.length === 0) return null;
+    return filtered;
+  }, [visibleCalendarIdsState, columnPractitioners]);
+
+  const filteredPractitioners = useMemo(() => {
+    if (calendarFilterIds === null) return columnPractitioners;
+    const allowed = new Set(calendarFilterIds);
+    return columnPractitioners.filter((p) => allowed.has(p.id));
+  }, [columnPractitioners, calendarFilterIds]);
+
   const resourceParentById = useMemo(() => {
     const m = new Map<string, string>();
     for (const r of venueResources) {
@@ -903,7 +918,7 @@ export function PractitionerCalendarView({
       return new Map<string, Array<{ top: number; height: number; resourceName: string }>>();
     }
     const out = new Map<string, Array<{ top: number; height: number; resourceName: string }>>();
-    for (const prac of columnPractitioners) {
+    for (const prac of filteredPractitioners) {
       const onColumn = venueResources.filter((r) => r.display_on_calendar_id === prac.id && r.is_active);
       if (onColumn.length === 0) continue;
       const mint: Array<{ top: number; height: number; resourceName: string }> = [];
@@ -944,15 +959,7 @@ export function PractitionerCalendarView({
       if (mint.length > 0) out.set(prac.id, mint);
     }
     return out;
-  }, [viewMode, date, columnPractitioners, venueResources, bookings, startHour, venueId, venueTimezone]);
-
-  const filteredPractitioners = useMemo(
-    () =>
-      filterPractitioner === 'all'
-        ? columnPractitioners
-        : columnPractitioners.filter((p) => p.id === filterPractitioner),
-    [columnPractitioners, filterPractitioner],
-  );
+  }, [viewMode, date, filteredPractitioners, venueResources, bookings, startHour, venueId, venueTimezone]);
 
   const serviceMap = useMemo(() => new Map(services.map((s) => [s.id, s])), [services]);
 
@@ -1214,12 +1221,14 @@ export function PractitionerCalendarView({
 
   const bookingsMatchingFilters = useMemo(() => {
     return bookings.filter((b) => {
-      if (filterPractitioner !== 'all' && resolveBookingColumnId(b, resourceParentById) !== filterPractitioner)
-        return false;
+      if (calendarFilterIds !== null) {
+        const colId = resolveBookingColumnId(b, resourceParentById);
+        if (!colId || !calendarFilterIds.includes(colId)) return false;
+      }
       if (filterStatus !== 'all' && b.status !== filterStatus) return false;
       return true;
     });
-  }, [bookings, filterPractitioner, filterStatus, resourceParentById]);
+  }, [bookings, calendarFilterIds, filterStatus, resourceParentById]);
 
   /** Toolbar + status counts: team-column bookings only (matches day/week grid), scoped to the visible period - not the 6-week fetch padding in month view. */
   const bookingsForToolbarStats = useMemo(() => {
@@ -1249,39 +1258,40 @@ export function PractitionerCalendarView({
     return Array.from({ length: 42 }, (_, i) => addCalendarDays(from, i));
   }, [monthAnchor]);
 
-  const filteredScheduleBlocks = useMemo(
-    () => filterScheduleBlocksByModel(scheduleBlocks, scheduleModelFilter),
-    [scheduleBlocks, scheduleModelFilter],
-  );
+  const scheduleBlocksInVisibleColumns = useMemo(() => {
+    if (calendarFilterIds === null) return scheduleBlocks;
+    const allowed = new Set(calendarFilterIds);
+    return scheduleBlocks.filter((b) => !b.calendar_id || allowed.has(b.calendar_id));
+  }, [scheduleBlocks, calendarFilterIds]);
 
   /** Week strip: class sessions use instructor columns; events with a calendar column are on the grid. */
   const stripScheduleBlocksByDate = useMemo(
     () =>
       groupScheduleBlocksByDate(
-        filteredScheduleBlocks.filter(
+        scheduleBlocks.filter(
           (b) =>
             b.kind !== 'class_session' &&
             b.kind !== 'resource_booking' &&
             !(b.kind === 'event_ticket' && b.calendar_id),
         ),
       ),
-    [filteredScheduleBlocks],
+    [scheduleBlocks],
   );
 
   const classBlocksForGrid = useMemo(
     () =>
-      filteredScheduleBlocks.filter(
+      scheduleBlocksInVisibleColumns.filter(
         (b) => b.kind === 'class_session' && b.status !== 'Cancelled' && b.calendar_id,
       ),
-    [filteredScheduleBlocks],
+    [scheduleBlocksInVisibleColumns],
   );
 
   const eventBlocksForGrid = useMemo(
     () =>
-      filteredScheduleBlocks.filter(
+      scheduleBlocksInVisibleColumns.filter(
         (b) => b.kind === 'event_ticket' && b.status !== 'Cancelled' && b.calendar_id,
       ),
-    [filteredScheduleBlocks],
+    [scheduleBlocksInVisibleColumns],
   );
 
   const stripHasBlocks = useMemo(() => {
@@ -1291,17 +1301,17 @@ export function PractitionerCalendarView({
     return false;
   }, [stripScheduleBlocksByDate]);
 
-  const showWeekStripRow = showEventsColumn && scheduleModelFilter !== 'appointments' && stripHasBlocks;
+  const showWeekStripRow = showEventsColumn && stripHasBlocks;
 
   const monthDayScheduleCounts = useMemo(
     () =>
       buildMonthDayScheduleCounts(
         bookingsMatchingFilters,
-        scheduleBlocks,
+        scheduleBlocksInVisibleColumns,
         monthCells,
-        scheduleModelFilter,
+        'all',
       ),
-    [bookingsMatchingFilters, scheduleBlocks, monthCells, scheduleModelFilter],
+    [bookingsMatchingFilters, scheduleBlocksInVisibleColumns, monthCells],
   );
 
   const openBookingDetail = useCallback((id: string) => {
@@ -1351,47 +1361,13 @@ export function PractitionerCalendarView({
 
         <div className="text-sm text-slate-500">{headerTitle}</div>
 
-        {showMergedFeeds ? (
-          <ScheduleCalendarLegend
-            showMergedFeeds={showMergedFeeds}
-            showEventsColumn={showEventsColumn}
-            scheduleModelFilter={scheduleModelFilter}
-            onScheduleModelFilterChange={setScheduleModelFilter}
-            viewMode={viewMode}
-          />
-        ) : null}
-
         <div className="flex flex-wrap items-center gap-3">
-            <select
-              value={filterPractitioner}
-              onChange={(e) => setFilterPractitioner(e.target.value)}
-              className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
-            >
-              <option value="all">All calendars</option>
-              {columnPractitioners.length > 0 && (
-                <optgroup label="Team">
-                  {myCalendarIds.map((cid) => {
-                    const p = columnPractitioners.find((x) => x.id === cid);
-                    const label =
-                      myCalendarIds.length === 1
-                        ? 'My appointments'
-                        : `Mine — ${p?.name ?? 'Calendar'}`;
-                    return (
-                      <option key={cid} value={cid}>
-                        {label}
-                      </option>
-                    );
-                  })}
-                  {columnPractitioners
-                    .filter((p) => !myCalendarIds.includes(p.id))
-                    .map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name}
-                      </option>
-                    ))}
-                </optgroup>
-              )}
-            </select>
+            <CalendarColumnsFilter
+              columns={columnPractitioners.map((p) => ({ id: p.id, name: p.name }))}
+              myCalendarIds={myCalendarIds}
+              value={calendarFilterIds}
+              onChange={setVisibleCalendarIdsState}
+            />
             <select
               value={filterStatus}
               onChange={(e) => setFilterStatus(e.target.value)}
@@ -1412,7 +1388,9 @@ export function PractitionerCalendarView({
                 onClick={() => {
                   setPrefillDate(viewMode === 'day' ? date : undefined);
                   setPrefillTime(undefined);
-                  setPrefillPractitionerId(filterPractitioner === 'all' ? undefined : filterPractitioner);
+                  setPrefillPractitionerId(
+                    calendarFilterIds?.length === 1 ? calendarFilterIds[0] : undefined,
+                  );
                   setStaffBookingModal('new');
                 }}
                 className="flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-brand-700"
@@ -2100,16 +2078,16 @@ export function PractitionerCalendarView({
                   </div>
                 );
               })}
-              {viewMode === 'day' && showMergedFeeds && scheduleModelFilter !== 'appointments' ? (
+              {viewMode === 'day' && showMergedFeeds ? (
                 <>
                   {showEventsColumn &&
-                  filteredScheduleBlocks.some(
+                  scheduleBlocks.some(
                     (b) => b.kind === 'event_ticket' && !b.calendar_id && b.status !== 'Cancelled',
                   ) ? (
                     <ScheduleFeedColumn
                       label="Events (unassigned)"
                       date={date}
-                      blocks={filteredScheduleBlocks.filter(
+                      blocks={scheduleBlocks.filter(
                         (b) => b.kind === 'event_ticket' && !b.calendar_id,
                       )}
                       startHour={startHour}
@@ -2259,7 +2237,9 @@ export function PractitionerCalendarView({
           onClick={() => {
             setPrefillDate(date);
             setPrefillTime(undefined);
-            setPrefillPractitionerId(filterPractitioner === 'all' ? undefined : filterPractitioner);
+            setPrefillPractitionerId(
+              calendarFilterIds?.length === 1 ? calendarFilterIds[0] : undefined,
+            );
             setStaffBookingModal('new');
           }}
           className="fixed bottom-6 right-6 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-brand-600 text-white shadow-lg hover:bg-brand-700 md:hidden"
