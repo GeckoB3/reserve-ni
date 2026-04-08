@@ -10,6 +10,7 @@ import { normalizeEnabledModels } from '@/lib/booking/enabled-models';
 import { APPOINTMENTS_ACTIVE_MODEL_ORDER } from '@/lib/booking/active-models';
 import { buildAddress, parseAddress } from '@/lib/venue/address-format';
 import { defaultPractitionerWorkingHours } from '@/lib/availability/practitioner-defaults';
+import { DEFAULT_ENTITY_BOOKING_WINDOW } from '@/lib/booking/entity-booking-window';
 import type { WorkingHours } from '@/types/booking-models';
 import type { OpeningHoursSettings } from '@/app/dashboard/settings/types';
 import { OpeningHoursControl, defaultOpeningHoursSettings } from '@/components/scheduling/OpeningHoursControl';
@@ -84,9 +85,55 @@ interface ClassDraft {
   price: string;
 }
 
+type ResourcePaymentRequirement = 'none' | 'deposit' | 'full_payment';
+
+/** Aligned with dashboard Resource timeline Add Resource (exceptions omitted in onboarding). */
 interface ResourceDraft {
   name: string;
+  resource_type: string;
+  /** Host team calendar (non-resource) — required by POST /api/venue/resources */
+  display_on_calendar_id: string;
+  slot_interval_minutes: number;
+  min_booking_minutes: number;
+  max_booking_minutes: number;
   pricePerSlot: string;
+  payment_requirement: ResourcePaymentRequirement;
+  depositPounds: string;
+  availability_hours: WorkingHours;
+}
+
+const RESOURCE_TYPE_SUGGESTIONS = [
+  'Tennis court',
+  'Meeting room',
+  'Studio',
+  'Pitch',
+  'Equipment',
+  'Desk',
+  'Bay',
+  'Lane',
+  'Pod',
+] as const;
+
+const RES_SLOT_MIN = 5;
+const RES_SLOT_MAX = 480;
+const RES_MIN_BOOK_MIN = 15;
+const RES_MIN_BOOK_MAX = 480;
+const RES_MAX_BOOK_MIN = 15;
+const RES_MAX_BOOK_MAX = 1440;
+
+function createEmptyResourceDraft(hostCalendarId: string): ResourceDraft {
+  return {
+    name: '',
+    resource_type: '',
+    display_on_calendar_id: hostCalendarId,
+    slot_interval_minutes: 60,
+    min_booking_minutes: 60,
+    max_booking_minutes: 480,
+    pricePerSlot: '',
+    payment_requirement: 'none',
+    depositPounds: '',
+    availability_hours: defaultPractitionerWorkingHours(),
+  };
 }
 
 type AppointmentPlanModel = 'unified_scheduling' | 'event_ticket' | 'class_session' | 'resource_booking';
@@ -159,7 +206,7 @@ export default function OnboardingPage() {
   ]);
 
   // Model E: Resources
-  const [resources, setResources] = useState<ResourceDraft[]>([{ name: '', pricePerSlot: '0.00' }]);
+  const [resources, setResources] = useState<ResourceDraft[]>(() => [createEmptyResourceDraft('')]);
   const [staffInvites, setStaffInvites] = useState<StaffInviteDraft[]>([{ email: '', role: 'staff' }]);
 
   useEffect(() => {
@@ -252,7 +299,7 @@ export default function OnboardingPage() {
 
         // Model E: start with one empty resource row
         if (v.booking_model === 'resource_booking') {
-          setResources([{ name: '', pricePerSlot: '0.00' }]);
+          setResources([createEmptyResourceDraft('')]);
         }
       } catch {
         setError('Failed to load venue data.');
@@ -349,23 +396,28 @@ export default function OnboardingPage() {
 
   const rosterIds = useMemo(() => rosterList.map((r) => r.id), [rosterList]);
 
-  /** Default class calendar to first team column when roster loads (matches dashboard class form). */
+  /** Default class / resource host calendar when roster loads (matches dashboard forms). */
   useEffect(() => {
     if (rosterList.length === 0) return;
     const firstId = rosterList[0]!.id;
     setClasses((prev) =>
       prev.map((c) => (c.instructor_id.trim() ? c : { ...c, instructor_id: firstId })),
     );
+    setResources((prev) =>
+      prev.map((r) => (r.display_on_calendar_id.trim() ? r : { ...r, display_on_calendar_id: firstId })),
+    );
   }, [rosterList]);
 
   useEffect(() => {
     if (!venue) return;
+    if (!['team', 'services', 'hours', 'classes', 'resources'].includes(currentStepKey)) return;
     const needsTeamRoster =
-      isUnifiedSchedulingVenue(venue.booking_model) || venue.booking_model === 'class_session';
+      currentStepKey === 'resources' ||
+      isUnifiedSchedulingVenue(venue.booking_model) ||
+      venue.booking_model === 'class_session';
     if (!needsTeamRoster) {
       return;
     }
-    if (!['team', 'services', 'hours', 'classes'].includes(currentStepKey)) return;
     let cancelled = false;
     (async () => {
       try {
@@ -934,32 +986,116 @@ export default function OnboardingPage() {
         return;
       }
       const validResources = resources.filter((r) => r.name.trim());
-      if (validResources.length === 0) {
-        setError('Please add at least one resource.');
-        return;
-      }
-      setSaving(true);
-      try {
-        for (const r of validResources) {
-          const res = await fetch('/api/venue/resources', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              name: r.name.trim(),
-              price_per_slot_pence: poundsToMinor(r.pricePerSlot),
-              availability_hours: defaultPractitionerWorkingHours(),
-            }),
-          });
-          if (!res.ok) throw new Error('Failed to create resource');
+      if (isAppointmentsPlanVenue && validResources.length === 0) {
+        setSaving(true);
+        try {
+          await saveProgress(step + 1);
+          setMaxCompletedStep((prev) => Math.max(prev, step + 1));
+        } catch {
+          setError('Failed to save progress. Please try again.');
+          setSaving(false);
+          return;
         }
-        await saveProgress(step + 1);
-        setMaxCompletedStep((prev) => Math.max(prev, step + 1));
-      } catch {
-        setError('Failed to save resources. Please try again.');
         setSaving(false);
-        return;
+      } else {
+        if (validResources.length === 0) {
+          setError('Please add at least one resource.');
+          return;
+        }
+        if (rosterList.length === 0) {
+          setError('No team calendars found. Go back and complete the Calendars step first.');
+          return;
+        }
+        for (const r of validResources) {
+          if (!r.display_on_calendar_id.trim()) {
+            setError('Choose which calendar column each resource appears on.');
+            return;
+          }
+          const slot = r.slot_interval_minutes;
+          const minB = r.min_booking_minutes;
+          const maxB = r.max_booking_minutes;
+          if (!Number.isFinite(slot) || slot < RES_SLOT_MIN || slot > RES_SLOT_MAX) {
+            setError(`Slot interval must be between ${RES_SLOT_MIN} and ${RES_SLOT_MAX} minutes.`);
+            return;
+          }
+          if (!Number.isFinite(minB) || minB < RES_MIN_BOOK_MIN || minB > RES_MIN_BOOK_MAX) {
+            setError(`Min booking must be between ${RES_MIN_BOOK_MIN} and ${RES_MIN_BOOK_MAX} minutes.`);
+            return;
+          }
+          if (!Number.isFinite(maxB) || maxB < RES_MAX_BOOK_MIN || maxB > RES_MAX_BOOK_MAX) {
+            setError(`Max booking must be between ${RES_MAX_BOOK_MIN} and ${RES_MAX_BOOK_MAX} minutes.`);
+            return;
+          }
+          if (minB > maxB) {
+            setError('Min booking duration cannot exceed max booking duration.');
+            return;
+          }
+          const priceRaw = r.pricePerSlot.trim();
+          const pricePence = priceRaw === '' ? 0 : poundsToMinor(priceRaw);
+          if (
+            (r.payment_requirement === 'deposit' || r.payment_requirement === 'full_payment') &&
+            pricePence <= 0
+          ) {
+            setError('Set a price per slot before choosing deposit or full payment online.');
+            return;
+          }
+          if (r.payment_requirement === 'deposit') {
+            const dep = parseFloat(r.depositPounds);
+            if (!Number.isFinite(dep) || dep <= 0) {
+              setError('Enter a deposit amount greater than zero.');
+              return;
+            }
+            const depPence = Math.round(dep * 100);
+            const maxSlots = Math.max(1, Math.ceil(maxB / slot));
+            const maxTotal = pricePence * maxSlots;
+            if (pricePence > 0 && depPence > maxTotal) {
+              setError('Deposit cannot exceed the maximum possible booking total for this resource.');
+              return;
+            }
+          }
+        }
+        setSaving(true);
+        try {
+          for (const r of validResources) {
+            const priceRaw = r.pricePerSlot.trim();
+            const pricePence = priceRaw === '' ? 0 : poundsToMinor(priceRaw);
+            const payReq = r.payment_requirement;
+            const depPence =
+              payReq === 'deposit' && r.depositPounds.trim() !== ''
+                ? Math.round(parseFloat(r.depositPounds) * 100)
+                : null;
+            const res = await fetch('/api/venue/resources', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                name: r.name.trim(),
+                ...(r.resource_type.trim() && { resource_type: r.resource_type.trim() }),
+                display_on_calendar_id: r.display_on_calendar_id.trim(),
+                slot_interval_minutes: r.slot_interval_minutes,
+                min_booking_minutes: r.min_booking_minutes,
+                max_booking_minutes: r.max_booking_minutes,
+                ...(pricePence > 0 && { price_per_slot_pence: pricePence }),
+                payment_requirement: payReq,
+                deposit_amount_pence: payReq === 'deposit' ? depPence : null,
+                availability_hours: r.availability_hours,
+                is_active: true,
+                ...DEFAULT_ENTITY_BOOKING_WINDOW,
+              }),
+            });
+            const errBody = (await res.json().catch(() => ({}))) as { error?: string };
+            if (!res.ok) {
+              throw new Error(errBody.error ?? 'Failed to create resource');
+            }
+          }
+          await saveProgress(step + 1);
+          setMaxCompletedStep((prev) => Math.max(prev, step + 1));
+        } catch (e) {
+          setError(e instanceof Error ? e.message : 'Failed to save resources. Please try again.');
+          setSaving(false);
+          return;
+        }
+        setSaving(false);
       }
-      setSaving(false);
     }
 
     if (currentStepKey === 'restaurant_setup') {
@@ -1690,18 +1826,38 @@ export default function OnboardingPage() {
           </div>
         )}
 
-        {/* Model E: Resources */}
+        {/* Model E: Resources — aligned with dashboard Resource timeline (no date-exception calendar) */}
         {currentStepKey === 'resources' && (
           <div>
-            <h2 className="mb-1 text-lg font-bold text-slate-900">Set up your resources</h2>
-            <p className="mb-6 text-sm text-slate-500">
-              Each resource is a bookable unit ({terms.client.toLowerCase()}s select one when booking). You can fine-tune
-              slot rules later from the Resources area in the dashboard.
+            <h2 className="mb-1 text-lg font-bold text-slate-900">
+              {isAppointmentsPlanVenue ? 'Bookable resources (optional)' : 'Set up your resources'}
+            </h2>
+            <p className="mb-3 text-sm text-slate-600">
+              A <strong>resource</strong> is something guests book by the slot — for example a court, room, lane, desk, or
+              piece of equipment. Each resource has its own weekly availability, slot length, and pricing. Resources appear
+              on a <strong>team calendar column</strong> you choose so staff see them alongside appointments; guests book
+              from your public <strong>Resources</strong> tab.
             </p>
-            <div className="space-y-3">
+            <p className="mb-4 text-sm text-slate-500">
+              This step matches the fields in{' '}
+              <Link href="/dashboard/resource-timeline" className="font-medium text-brand-600 underline hover:text-brand-700">
+                Dashboard → Resource timeline
+              </Link>{' '}
+              → Add resource. Date-specific exceptions (closures or custom hours) can be added there later — they are not
+              required here.
+            </p>
+            {isAppointmentsPlanVenue && (
+              <div className="mb-6 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                <p className="font-medium text-slate-800">Optional step</p>
+                <p className="mt-1">
+                  Leave the form below empty and click Continue to skip — or add one or more resources now.
+                </p>
+              </div>
+            )}
+            <div className="space-y-4">
               {resources.map((r, i) => (
-                <div key={i} className="rounded-xl border border-slate-200 p-4 space-y-2">
-                  <div className="flex items-center justify-between">
+                <div key={i} className="rounded-xl border border-slate-200 p-4 space-y-4">
+                  <div className="flex items-center justify-between gap-2">
                     <input
                       type="text"
                       value={r.name}
@@ -1710,47 +1866,210 @@ export default function OnboardingPage() {
                         updated[i] = { ...r, name: e.target.value };
                         setResources(updated);
                       }}
-                      placeholder="Resource name (e.g. Room 1, Lane A)"
-                      className="flex-1 border-0 bg-transparent p-0 text-sm font-medium text-slate-900 focus:ring-0"
+                      placeholder="Resource name (e.g. Court 1, Studio A)"
+                      className="min-w-0 flex-1 border-0 bg-transparent p-0 text-sm font-medium text-slate-900 focus:ring-0"
                     />
                     {resources.length > 1 && (
                       <button
                         type="button"
                         onClick={() => setResources(resources.filter((_, j) => j !== i))}
-                        className="text-xs text-slate-400 hover:text-red-500"
+                        className="shrink-0 text-xs text-slate-400 hover:text-red-500"
                       >
                         Remove
                       </button>
                     )}
                   </div>
-                  <div className="max-w-[200px]">
-                    <label className="block text-[10px] font-medium text-slate-500">
-                      Price per slot ({currencySymbol(currency)})
-                    </label>
-                    <div className="relative">
-                      <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-slate-400">
-                        {currencySymbol(currency)}
-                      </span>
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-slate-600">Type (optional)</label>
+                    <input
+                      type="text"
+                      value={r.resource_type}
+                      onChange={(e) => {
+                        const updated = [...resources];
+                        updated[i] = { ...r, resource_type: e.target.value };
+                        setResources(updated);
+                      }}
+                      placeholder="e.g. Tennis court, Meeting room"
+                      list={`resource-type-suggestions-${i}`}
+                      className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                    />
+                    <datalist id={`resource-type-suggestions-${i}`}>
+                      {RESOURCE_TYPE_SUGGESTIONS.map((s) => (
+                        <option key={s} value={s} />
+                      ))}
+                    </datalist>
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-slate-600">Show on calendar</label>
+                    <select
+                      value={r.display_on_calendar_id}
+                      onChange={(e) => {
+                        const updated = [...resources];
+                        updated[i] = { ...r, display_on_calendar_id: e.target.value };
+                        setResources(updated);
+                      }}
+                      className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                    >
+                      {rosterList.length === 0 ? (
+                        <option value="">Loading team calendars…</option>
+                      ) : (
+                        rosterList.map((cal) => (
+                          <option key={cal.id} value={cal.id}>
+                            {cal.name}
+                          </option>
+                        ))
+                      )}
+                    </select>
+                    <p className="mt-1 text-xs text-slate-500">
+                      The resource appears on this staff calendar column (same as Resource timeline).
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                    <div>
+                      <label className="mb-1 block text-[10px] font-medium text-slate-500">Slot interval (min)</label>
                       <input
                         type="number"
-                        value={r.pricePerSlot}
+                        value={r.slot_interval_minutes}
                         onChange={(e) => {
                           const updated = [...resources];
-                          updated[i] = { ...r, pricePerSlot: e.target.value };
+                          updated[i] = {
+                            ...r,
+                            slot_interval_minutes: parseInt(e.target.value, 10) || RES_SLOT_MIN,
+                          };
                           setResources(updated);
                         }}
-                        min={0}
-                        step={0.01}
-                        placeholder="0.00"
-                        className="w-full rounded border border-slate-200 py-1.5 pl-5 pr-2 text-xs"
+                        min={RES_SLOT_MIN}
+                        max={RES_SLOT_MAX}
+                        className="w-full rounded border border-slate-200 px-2 py-1.5 text-xs"
                       />
                     </div>
+                    <div>
+                      <label className="mb-1 block text-[10px] font-medium text-slate-500">Min booking (min)</label>
+                      <input
+                        type="number"
+                        value={r.min_booking_minutes}
+                        onChange={(e) => {
+                          const updated = [...resources];
+                          updated[i] = {
+                            ...r,
+                            min_booking_minutes: parseInt(e.target.value, 10) || RES_MIN_BOOK_MIN,
+                          };
+                          setResources(updated);
+                        }}
+                        min={RES_MIN_BOOK_MIN}
+                        max={RES_MIN_BOOK_MAX}
+                        className="w-full rounded border border-slate-200 px-2 py-1.5 text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-[10px] font-medium text-slate-500">Max booking (min)</label>
+                      <input
+                        type="number"
+                        value={r.max_booking_minutes}
+                        onChange={(e) => {
+                          const updated = [...resources];
+                          updated[i] = {
+                            ...r,
+                            max_booking_minutes: parseInt(e.target.value, 10) || RES_MAX_BOOK_MIN,
+                          };
+                          setResources(updated);
+                        }}
+                        min={RES_MAX_BOOK_MIN}
+                        max={RES_MAX_BOOK_MAX}
+                        className="w-full rounded border border-slate-200 px-2 py-1.5 text-xs"
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-slate-600">
+                        Price per slot ({currencySymbol(currency)})
+                      </label>
+                      <div className="relative">
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-400">
+                          {currencySymbol(currency)}
+                        </span>
+                        <input
+                          type="number"
+                          value={r.pricePerSlot}
+                          onChange={(e) => {
+                            const updated = [...resources];
+                            updated[i] = { ...r, pricePerSlot: e.target.value };
+                            setResources(updated);
+                          }}
+                          min={0}
+                          step={0.01}
+                          placeholder="0.00"
+                          className="w-full rounded-lg border border-slate-200 py-2 pl-7 pr-3 text-sm"
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-slate-600">Payment</label>
+                      <select
+                        value={r.payment_requirement}
+                        onChange={(e) => {
+                          const updated = [...resources];
+                          updated[i] = {
+                            ...r,
+                            payment_requirement: e.target.value as ResourcePaymentRequirement,
+                          };
+                          setResources(updated);
+                        }}
+                        className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                      >
+                        <option value="none">Pay at venue</option>
+                        <option value="deposit">Deposit online</option>
+                        <option value="full_payment">Full payment online</option>
+                      </select>
+                    </div>
+                  </div>
+                  {r.payment_requirement === 'deposit' && (
+                    <div className="max-w-xs">
+                      <label className="mb-1 block text-xs font-medium text-slate-600">
+                        Deposit ({currencySymbol(currency)})
+                      </label>
+                      <div className="relative">
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-400">
+                          {currencySymbol(currency)}
+                        </span>
+                        <input
+                          type="number"
+                          value={r.depositPounds}
+                          onChange={(e) => {
+                            const updated = [...resources];
+                            updated[i] = { ...r, depositPounds: e.target.value };
+                            setResources(updated);
+                          }}
+                          min={0}
+                          step={0.01}
+                          className="w-full rounded-lg border border-slate-200 py-2 pl-7 pr-3 text-sm"
+                        />
+                      </div>
+                    </div>
+                  )}
+                  <div>
+                    <h3 className="mb-2 text-xs font-semibold text-slate-800">Weekly availability</h3>
+                    <p className="mb-2 text-xs text-slate-500">
+                      When this resource can be booked (must overlap your team calendar hours — adjust in Availability if
+                      needed).
+                    </p>
+                    <WorkingHoursControl
+                      value={r.availability_hours}
+                      onChange={(wh) => {
+                        const updated = [...resources];
+                        updated[i] = { ...r, availability_hours: wh };
+                        setResources(updated);
+                      }}
+                    />
                   </div>
                 </div>
               ))}
               <button
                 type="button"
-                onClick={() => setResources([...resources, { name: '', pricePerSlot: '0.00' }])}
+                onClick={() =>
+                  setResources([...resources, createEmptyResourceDraft(rosterList[0]?.id ?? '')])
+                }
                 className="w-full rounded-xl border-2 border-dashed border-slate-200 py-3 text-sm text-slate-500 hover:border-brand-300 hover:text-brand-600"
               >
                 + Add another resource
