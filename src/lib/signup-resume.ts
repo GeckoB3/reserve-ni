@@ -6,6 +6,7 @@ export function getSignupResumePath(): string {
   if (typeof window === 'undefined') return '/signup/business-type';
   const bt = sessionStorage.getItem('signup_business_type');
   const p = sessionStorage.getItem('signup_plan');
+  if (p === 'appointments') return '/signup/payment';
   if (bt && p) return '/signup/payment';
   return '/signup/business-type';
 }

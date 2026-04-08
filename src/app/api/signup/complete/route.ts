@@ -49,11 +49,29 @@ export async function POST(request: Request) {
       .limit(1);
 
     if (existingStaff && existingStaff.length > 0) {
+      const venueId = existingStaff[0]?.venue_id;
+      if (venueId) {
+        const { data: existingVenue } = await admin
+          .from('venues')
+          .select('pricing_tier, active_booking_models, onboarding_completed')
+          .eq('id', venueId)
+          .maybeSingle();
+        const activeModels = Array.isArray(existingVenue?.active_booking_models)
+          ? existingVenue.active_booking_models
+          : [];
+        if (
+          existingVenue?.pricing_tier === 'appointments' &&
+          activeModels.length === 0 &&
+          existingVenue.onboarding_completed !== true
+        ) {
+          return NextResponse.json({ redirect_url: '/signup/booking-models' });
+        }
+      }
       return NextResponse.json({ redirect_url: '/onboarding' });
     }
 
     const metadata = session.metadata ?? {};
-    const businessType = metadata.business_type ?? 'other';
+    const businessType = metadata.business_type ?? (metadata.plan === 'appointments' ? 'other' : 'other');
     const plan = metadata.plan ?? 'appointments';
     const config = getBusinessConfig(businessType);
 
@@ -90,6 +108,7 @@ export async function POST(request: Request) {
         terminology: config.terms,
         pricing_tier: plan,
         plan_status: 'active',
+        active_booking_models: plan === 'appointments' ? [] : [config.model],
         stripe_customer_id: session.customer as string,
         stripe_subscription_id: subscriptionId,
         stripe_subscription_item_id: mainSubscriptionItemId,
@@ -132,7 +151,9 @@ export async function POST(request: Request) {
       }
     }
 
-    return NextResponse.json({ redirect_url: '/onboarding' });
+    return NextResponse.json({
+      redirect_url: plan === 'appointments' ? '/signup/booking-models' : '/onboarding',
+    });
   } catch (err) {
     console.error('[signup/complete] Error:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

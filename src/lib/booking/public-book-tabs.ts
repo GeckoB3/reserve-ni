@@ -4,7 +4,11 @@
  */
 
 import type { BookingModel } from '@/types/booking-models';
-import { BOOKING_MODEL_ORDER } from '@/lib/booking/enabled-models';
+import {
+  getDefaultBookingModelFromActive,
+  resolveActiveBookingModels,
+  VENUE_ACTIVE_MODEL_ORDER,
+} from '@/lib/booking/active-models';
 import type { VenueTerminology } from '@/types/booking-models';
 import { DEFAULT_TERMINOLOGY } from '@/types/booking-models';
 
@@ -80,17 +84,16 @@ function labelForModel(m: BookingModel, terminology: Partial<VenueTerminology> |
 }
 
 /**
- * Ordered tab definitions for a venue (primary + enabled_models). Stable order: enum order.
+ * Ordered tab definitions for a venue. Stable order follows the canonical active-model order.
  */
 export function publicBookTabsForVenue(
-  primary: BookingModel,
-  enabledModels: BookingModel[],
+  activeModels: BookingModel[],
   terminology?: Partial<VenueTerminology> | null
 ): PublicBookTabDef[] {
   const venueTermOverrides =
     terminology && typeof terminology === 'object' ? terminology : undefined;
-  const models = new Set<BookingModel>([primary, ...enabledModels]);
-  const ordered = BOOKING_MODEL_ORDER.filter((m) => models.has(m));
+  const models = new Set<BookingModel>(activeModels);
+  const ordered = VENUE_ACTIVE_MODEL_ORDER.filter((m) => models.has(m));
   const out: PublicBookTabDef[] = [];
   for (const m of ordered) {
     out.push({
@@ -102,26 +105,42 @@ export function publicBookTabsForVenue(
   return out;
 }
 
-/** Default tab slug for a venue (always the primary model’s slug). */
-export function primaryPublicBookTabSlug(primary: BookingModel): PublicBookTabSlug {
-  return BOOKING_MODEL_TO_PUBLIC_TAB[primary] ?? 'tables';
+/** Default tab slug for a venue (first active model in canonical order). */
+export function defaultPublicBookTabSlug(activeModels: BookingModel[]): PublicBookTabSlug {
+  const model = getDefaultBookingModelFromActive(activeModels);
+  return BOOKING_MODEL_TO_PUBLIC_TAB[model] ?? 'tables';
 }
 
 /**
- * Validates `?tab=` against exposed models; falls back to primary slug.
+ * Validates `?tab=` against exposed models; falls back to the venue default.
  */
 export function resolvePublicBookTabFromQuery(
   tabParam: string | null | undefined,
-  primary: BookingModel,
-  enabledModels: BookingModel[],
+  activeModels: BookingModel[],
   terminology?: Partial<VenueTerminology> | null
 ): PublicBookTabSlug {
-  const tabs = publicBookTabsForVenue(primary, enabledModels, terminology);
+  const tabs = publicBookTabsForVenue(activeModels, terminology);
   if (tabs.length <= 1) {
-    return primaryPublicBookTabSlug(primary);
+    return defaultPublicBookTabSlug(activeModels);
   }
   if (tabParam && tabs.some((t) => t.slug === tabParam) && isPublicBookTabSlug(tabParam)) {
     return tabParam;
   }
-  return primaryPublicBookTabSlug(primary);
+  return defaultPublicBookTabSlug(activeModels);
+}
+
+export function publicBookTabsFromVenueShape(venue: {
+  booking_model?: string | null;
+  enabled_models?: unknown;
+  active_booking_models?: unknown;
+  pricing_tier?: string | null;
+  terminology?: Partial<VenueTerminology> | null;
+}): PublicBookTabDef[] {
+  const activeModels = resolveActiveBookingModels({
+    pricingTier: venue.pricing_tier,
+    bookingModel: venue.booking_model,
+    enabledModels: venue.enabled_models,
+    activeBookingModels: venue.active_booking_models,
+  });
+  return publicBookTabsForVenue(activeModels, venue.terminology);
 }

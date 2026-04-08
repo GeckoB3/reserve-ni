@@ -20,12 +20,13 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json();
-    const { business_type, plan } = body as {
-      business_type: string;
+    const { business_type: rawBusinessType, plan } = body as {
+      business_type?: string | null;
       plan: 'appointments' | 'restaurant' | 'founding';
     };
+    const business_type = rawBusinessType?.trim() || (plan === 'appointments' ? 'other' : '');
 
-    if (!business_type || !plan) {
+    if (!plan || (plan !== 'appointments' && !business_type)) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
     }
 
@@ -41,6 +42,13 @@ export async function POST(request: Request) {
           { error: SIGNUP_PLAN_CONFLICT_MESSAGE, code: 'PLAN_FAMILY_MISMATCH' },
           { status: 409 },
         );
+      }
+      if (
+        existingVenue.pricing_tier === 'appointments' &&
+        Array.isArray((existingVenue as { active_booking_models?: unknown }).active_booking_models) &&
+        ((existingVenue as { active_booking_models?: unknown[] }).active_booking_models?.length ?? 0) === 0
+      ) {
+        return NextResponse.json({ redirect_url: '/signup/booking-models' });
       }
       return NextResponse.json({ redirect_url: '/onboarding' });
     }

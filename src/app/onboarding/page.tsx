@@ -7,12 +7,14 @@ import type { BookingModel } from '@/types/booking-models';
 import { getBusinessConfig } from '@/lib/business-config';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 import { normalizeEnabledModels } from '@/lib/booking/enabled-models';
+import { APPOINTMENTS_ACTIVE_MODEL_ORDER } from '@/lib/booking/active-models';
 import { buildAddress, parseAddress } from '@/lib/venue/address-format';
 import { defaultPractitionerWorkingHours } from '@/lib/availability/practitioner-defaults';
 import type { WorkingHours } from '@/types/booking-models';
 import type { OpeningHoursSettings } from '@/app/dashboard/settings/types';
 import { OpeningHoursControl, defaultOpeningHoursSettings } from '@/components/scheduling/OpeningHoursControl';
 import { WorkingHoursControl } from '@/components/scheduling/WorkingHoursControl';
+import { OnboardingStaffInviteStep, type StaffInviteDraft } from '@/components/onboarding/OnboardingStaffInviteStep';
 import {
   OnboardingAppointmentServiceList,
   appointmentServiceDraftFromBusinessDefault,
@@ -38,10 +40,6 @@ function poundsToMinor(pounds: string): number {
   return Math.round(parsed * 100);
 }
 
-function minorToPounds(pence: number): string {
-  return (pence / 100).toFixed(2);
-}
-
 interface VenueOnboarding {
   id: string;
   name: string;
@@ -49,6 +47,7 @@ interface VenueOnboarding {
   address: string | null;
   phone: string | null;
   booking_model: BookingModel;
+  active_booking_models?: BookingModel[] | null;
   /** Secondary C/D/E models; onboarding wizard stays primary-first - full setup for add-ons is on the dashboard checklist. */
   enabled_models?: BookingModel[] | null;
   business_type: string | null;
@@ -89,6 +88,17 @@ interface ResourceDraft {
 }
 
 const DAY_LABELS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+type AppointmentPlanModel = 'unified_scheduling' | 'event_ticket' | 'class_session' | 'resource_booking';
+const APPOINTMENTS_MODEL_LABEL: Record<AppointmentPlanModel, string> = {
+  unified_scheduling: 'Appointments',
+  class_session: 'Classes',
+  event_ticket: 'Events',
+  resource_booking: 'Bookable resources',
+};
+
+function isAppointmentPlanModel(model: BookingModel): model is AppointmentPlanModel {
+  return APPOINTMENTS_ACTIVE_MODEL_ORDER.includes(model as AppointmentPlanModel);
+}
 
 /** Plan §8.2 Step 2: heading adapts to terminology (team / calendars). */
 function unifiedTeamStepLabel(terms: { staff: string }): string {
@@ -142,6 +152,7 @@ export default function OnboardingPage() {
 
   // Model E: Resources
   const [resources, setResources] = useState<ResourceDraft[]>([{ name: '', pricePerSlot: '0.00' }]);
+  const [staffInvites, setStaffInvites] = useState<StaffInviteDraft[]>([{ email: '', role: 'staff' }]);
 
   useEffect(() => {
     async function loadVenue() {
@@ -174,6 +185,11 @@ export default function OnboardingPage() {
 
         if (v.onboarding_completed) {
           router.push('/dashboard');
+          return;
+        }
+
+        if (v.pricing_tier === 'appointments' && (!v.active_booking_models || v.active_booking_models.length === 0)) {
+          router.push('/signup/booking-models');
           return;
         }
 
@@ -244,6 +260,12 @@ export default function OnboardingPage() {
     [venue?.terminology],
   );
 
+  const isAppointmentsPlanVenue = venue?.pricing_tier === 'appointments';
+  const activeAppointmentsModels: AppointmentPlanModel[] = useMemo(
+    () => (venue?.active_booking_models ?? []).filter(isAppointmentPlanModel),
+    [venue?.active_booking_models],
+  );
+
   /** Normalised secondaries (e.g. restaurant + events). Primary flow is unchanged; checklist on dashboard covers catalogue for each enabled add-on. */
   const enabledSecondaryModels = useMemo(
     () =>
@@ -255,6 +277,36 @@ export default function OnboardingPage() {
 
   const modelSteps = useMemo(() => {
     if (!venue) return [];
+    if (venue.pricing_tier === 'appointments') {
+      const steps: Array<{ key: string; label: string }> = [
+        { key: 'welcome', label: 'Welcome' },
+        { key: 'profile', label: 'Business Details' },
+        { key: 'opening_hours', label: 'Opening Hours' },
+        { key: 'team', label: 'Calendars' },
+        { key: 'users', label: 'Other Users' },
+      ];
+
+      for (const model of APPOINTMENTS_ACTIVE_MODEL_ORDER.filter(isAppointmentPlanModel)) {
+        if (!activeAppointmentsModels.includes(model)) continue;
+        if (model === 'unified_scheduling') {
+          steps.push({ key: 'services', label: 'Appointments Setup' });
+          steps.push({ key: 'hours', label: 'Calendar Availability' });
+        }
+        if (model === 'class_session') {
+          steps.push({ key: 'classes', label: 'Classes Setup' });
+        }
+        if (model === 'event_ticket') {
+          steps.push({ key: 'first_event', label: 'Events Setup' });
+        }
+        if (model === 'resource_booking') {
+          steps.push({ key: 'resources', label: 'Resources Setup' });
+        }
+      }
+
+      steps.push({ key: 'preview', label: 'Review & Go Live' });
+      return steps;
+    }
+
     const steps: Array<{ key: string; label: string }> = [
       { key: 'profile', label: 'Business Profile' },
     ];
@@ -282,7 +334,7 @@ export default function OnboardingPage() {
 
     steps.push({ key: 'preview', label: 'Preview & Go Live' });
     return steps;
-  }, [venue, terms]);
+  }, [activeAppointmentsModels, venue, terms]);
 
   const currentStepKey = modelSteps[step]?.key ?? 'profile';
   const totalSteps = modelSteps.length;
@@ -294,7 +346,7 @@ export default function OnboardingPage() {
     if (!isUnifiedSchedulingVenue(venue.booking_model)) {
       return;
     }
-    if (currentStepKey !== 'services' && currentStepKey !== 'hours') return;
+    if (currentStepKey !== 'services' && currentStepKey !== 'hours' && currentStepKey !== 'team') return;
     let cancelled = false;
     (async () => {
       try {
@@ -321,11 +373,16 @@ export default function OnboardingPage() {
 
   useEffect(() => {
     if (!venue || !isUnifiedSchedulingVenue(venue.booking_model)) return;
-    if (currentStepKey !== 'hours') return;
+    if (currentStepKey !== 'hours' && currentStepKey !== 'opening_hours') return;
     let cancelled = false;
     (async () => {
       try {
-        const [vRes, pRes] = await Promise.all([fetch('/api/venue'), fetch('/api/venue/practitioners?roster=1')]);
+        const venueRequest = fetch('/api/venue');
+        const practitionerRequest =
+          currentStepKey === 'opening_hours'
+            ? Promise.resolve(new Response(JSON.stringify({ practitioners: [] }), { status: 200 }))
+            : fetch('/api/venue/practitioners?roster=1');
+        const [vRes, pRes] = await Promise.all([venueRequest, practitionerRequest]);
         if (!vRes.ok || !pRes.ok || cancelled) return;
         const venueRow = (await vRes.json()) as { opening_hours?: OpeningHoursSettings | null };
         const prBody = (await pRes.json()) as {
@@ -374,6 +431,23 @@ export default function OnboardingPage() {
 
   async function handleNext() {
     setError(null);
+
+    if (currentStepKey === 'welcome') {
+      if (step < maxCompletedStep) {
+        setStep((s) => s + 1);
+        return;
+      }
+      setSaving(true);
+      try {
+        await saveProgress(step + 1);
+        setMaxCompletedStep((prev) => Math.max(prev, step + 1));
+      } catch {
+        setError('Failed to save your progress. Please try again.');
+        setSaving(false);
+        return;
+      }
+      setSaving(false);
+    }
 
     if (currentStepKey === 'profile') {
       if (!name.trim()) {
@@ -429,6 +503,39 @@ export default function OnboardingPage() {
         );
       } catch {
         setError('Failed to save. Please try again.');
+        setSaving(false);
+        return;
+      }
+      setSaving(false);
+    }
+
+    if (currentStepKey === 'opening_hours') {
+      if (step < maxCompletedStep) {
+        setStep((s) => s + 1);
+        return;
+      }
+      const hasVenueOpenDay = Object.values(openingHoursDraft).some((d) => {
+        if (!d) return false;
+        if ('closed' in d && d.closed === true) return false;
+        if ('periods' in d && Array.isArray(d.periods) && d.periods.length > 0) return true;
+        return false;
+      });
+      if (!hasVenueOpenDay) {
+        setError('Choose at least one day when the business is open.');
+        return;
+      }
+      setSaving(true);
+      try {
+        const ohRes = await fetch('/api/venue/opening-hours', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(openingHoursDraft),
+        });
+        if (!ohRes.ok) throw new Error('Failed to save opening hours');
+        await saveProgress(step + 1);
+        setMaxCompletedStep((prev) => Math.max(prev, step + 1));
+      } catch {
+        setError('Failed to save opening hours. Please try again.');
         setSaving(false);
         return;
       }
@@ -541,6 +648,45 @@ export default function OnboardingPage() {
       setSaving(false);
     }
 
+    if (currentStepKey === 'users') {
+      if (step < maxCompletedStep) {
+        setStep((s) => s + 1);
+        return;
+      }
+      const validInvites = staffInvites
+        .map((invite) => ({ email: invite.email.trim().toLowerCase(), role: invite.role }))
+        .filter((invite) => invite.email.length > 0);
+      for (const invite of validInvites) {
+        const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(invite.email);
+        if (!emailOk) {
+          setError(`Enter a valid email address for ${invite.email || 'each user'}.`);
+          return;
+        }
+      }
+      setSaving(true);
+      try {
+        for (const invite of validInvites) {
+          const res = await fetch('/api/venue/staff/invite', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(invite),
+          });
+          if (!res.ok) {
+            const body = (await res.json().catch(() => ({}))) as { error?: string };
+            throw new Error(body.error ?? `Failed to invite ${invite.email}`);
+          }
+        }
+        setStaffInvites([{ email: '', role: 'staff' }]);
+        await saveProgress(step + 1);
+        setMaxCompletedStep((prev) => Math.max(prev, step + 1));
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Failed to save users. Please try again.');
+        setSaving(false);
+        return;
+      }
+      setSaving(false);
+    }
+
     if (currentStepKey === 'services') {
       if (step < maxCompletedStep) {
         setStep((s) => s + 1);
@@ -609,12 +755,14 @@ export default function OnboardingPage() {
 
       setSaving(true);
       try {
-        const ohRes = await fetch('/api/venue/opening-hours', {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(openingHoursDraft),
-        });
-        if (!ohRes.ok) throw new Error('Failed to save opening hours');
+        if (!isAppointmentsPlanVenue) {
+          const ohRes = await fetch('/api/venue/opening-hours', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(openingHoursDraft),
+          });
+          if (!ohRes.ok) throw new Error('Failed to save opening hours');
+        }
         for (const cal of rosterList) {
           const wh = calendarWorkingDraft[cal.id] ?? defaultPractitionerWorkingHours();
           const hasDay = Object.values(wh).some((ranges) => Array.isArray(ranges) && ranges.length > 0);
@@ -864,6 +1012,36 @@ export default function OnboardingPage() {
           </div>
         )}
 
+        {currentStepKey === 'welcome' && (
+          <div>
+            <h2 className="mb-1 text-lg font-bold text-slate-900">Welcome to your Appointments plan</h2>
+            <p className="mb-6 text-sm text-slate-500">
+              Reserve NI supports appointments, classes, events, and bookable resources from one venue. This setup will
+              guide you through your business details, opening hours, calendars, users, and the booking models you
+              enabled.
+            </p>
+            <div className="mb-6 rounded-xl border border-brand-200 bg-brand-50/60 p-4">
+              <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-brand-800">
+                Booking models enabled
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {activeAppointmentsModels.map((model) => (
+                  <span
+                    key={model}
+                    className="rounded-full border border-brand-200 bg-white px-3 py-1 text-sm font-medium text-slate-700"
+                  >
+                    {APPOINTMENTS_MODEL_LABEL[model as AppointmentPlanModel]}
+                  </span>
+                ))}
+              </div>
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-4 text-sm text-slate-600">
+              You can enable or disable booking models later from Settings, but this onboarding flow will make sure the
+              ones above are ready to use straight away.
+            </div>
+          </div>
+        )}
+
         {/* Profile step */}
         {currentStepKey === 'profile' && (
           <div>
@@ -965,6 +1143,28 @@ export default function OnboardingPage() {
           </div>
         )}
 
+        {currentStepKey === 'opening_hours' && (
+          <div>
+            <h2 className="mb-1 text-lg font-bold text-slate-900">Set your opening hours</h2>
+            <p className="mb-6 text-sm text-slate-500">
+              These are the broad hours when your business accepts bookings at all.
+            </p>
+            <div className="mb-6 rounded-xl border border-slate-200 bg-slate-50/80 p-4">
+              <p className="text-sm font-medium text-slate-800">How booking availability works</p>
+              <ul className="mt-3 list-inside list-disc space-y-1.5 text-sm text-slate-600">
+                <li>Business opening hours are the outer limit for online booking.</li>
+                <li>Calendar availability narrows that down for each person, room, or resource.</li>
+                <li>A time is bookable only when both the business and the relevant calendar are available.</li>
+              </ul>
+              <div className="mt-4 space-y-2 rounded-lg border border-slate-200 bg-white p-3 text-xs text-slate-500">
+                <p>Example: if the business is open `09:00-18:00` but a therapist works `10:00-16:00`, the earliest bookable slot is `10:00`.</p>
+                <p>Example: if the business is open all day but a room is blocked at `14:00`, that room is not bookable then.</p>
+              </div>
+            </div>
+            <OpeningHoursControl value={openingHoursDraft} onChange={setOpeningHoursDraft} />
+          </div>
+        )}
+
         {currentStepKey === 'restaurant_setup' && (
           <div className="text-center">
             <h2 className="mb-2 text-lg font-bold text-slate-900">Restaurant setup</h2>
@@ -979,7 +1179,9 @@ export default function OnboardingPage() {
         {/* Model B: Team / calendars (all appointment-style plans: unlimited calendars — same add/remove UI) */}
         {currentStepKey === 'team' && venue && (
           <div>
-            <h2 className="mb-1 text-lg font-bold text-slate-900">{unifiedTeamStepLabel(terms)}</h2>
+            <h2 className="mb-1 text-lg font-bold text-slate-900">
+              {isAppointmentsPlanVenue ? 'Set up your calendars' : unifiedTeamStepLabel(terms)}
+            </h2>
             {venue.pricing_tier === 'founding' ? (
               <p className="mb-4 text-sm text-slate-500">
                 Your Founding Partner plan includes <strong>unlimited bookable calendars</strong> and{' '}
@@ -1090,9 +1292,15 @@ export default function OnboardingPage() {
           </div>
         )}
 
+        {currentStepKey === 'users' && (
+          <OnboardingStaffInviteStep invites={staffInvites} setInvites={setStaffInvites} />
+        )}
+
         {currentStepKey === 'services' && isUnifiedSchedulingVenue(venue.booking_model) && (
             <div>
-              <h2 className="mb-1 text-lg font-bold text-slate-900">Your services</h2>
+              <h2 className="mb-1 text-lg font-bold text-slate-900">
+                {isAppointmentsPlanVenue ? 'Set up appointments' : 'Your services'}
+              </h2>
               <p className="mb-6 text-sm text-slate-500">
                 Add each service with the same detail as in the dashboard: duration, buffer, price, deposits, which{' '}
                 {terms.staff.toLowerCase()} offers it, and optional staff customisation rules. You can refine services
@@ -1118,18 +1326,24 @@ export default function OnboardingPage() {
 
         {currentStepKey === 'hours' && isUnifiedSchedulingVenue(venue.booking_model) && (
           <div>
-            <h2 className="mb-1 text-lg font-bold text-slate-900">Opening hours & schedules</h2>
+            <h2 className="mb-1 text-lg font-bold text-slate-900">
+              {isAppointmentsPlanVenue ? 'Set calendar availability' : 'Opening hours & schedules'}
+            </h2>
             <p className="mb-6 text-sm text-slate-500">
-              Set when the business accepts appointments and when each {terms.staff.toLowerCase()} is available to
-              take bookings. You can adjust breaks and time off later under Availability.
+              {isAppointmentsPlanVenue
+                ? `Set when each ${terms.staff.toLowerCase()} or calendar can take bookings. A booking is available only where these hours overlap with your business opening hours.`
+                : `Set when the business accepts appointments and when each ${terms.staff.toLowerCase()} is available to take bookings. You can adjust breaks and time off later under Availability.`
+              }
             </p>
-            <div className="mb-8">
-              <h3 className="mb-3 text-sm font-semibold text-slate-800">Business opening hours</h3>
-              <p className="mb-4 text-xs text-slate-500">
-                Guest booking slots are limited to times when you are open and when staff are working.
-              </p>
-              <OpeningHoursControl value={openingHoursDraft} onChange={setOpeningHoursDraft} />
-            </div>
+            {!isAppointmentsPlanVenue && (
+              <div className="mb-8">
+                <h3 className="mb-3 text-sm font-semibold text-slate-800">Business opening hours</h3>
+                <p className="mb-4 text-xs text-slate-500">
+                  Guest booking slots are limited to times when you are open and when staff are working.
+                </p>
+                <OpeningHoursControl value={openingHoursDraft} onChange={setOpeningHoursDraft} />
+              </div>
+            )}
             <div className="space-y-10">
               {rosterList.map((cal) => (
                 <div key={cal.id}>
@@ -1154,9 +1368,9 @@ export default function OnboardingPage() {
         {/* Model C: First event */}
         {currentStepKey === 'first_event' && (
           <div>
-            <h2 className="mb-1 text-lg font-bold text-slate-900">Create your first event</h2>
+            <h2 className="mb-1 text-lg font-bold text-slate-900">Set up your first event</h2>
             <p className="mb-6 text-sm text-slate-500">
-              Set up an event so {terms.client.toLowerCase()}s can start booking.
+              Create one event now so guests can start booking from your Events tab straight away.
             </p>
             <div className="space-y-4">
               <div>
@@ -1250,7 +1464,7 @@ export default function OnboardingPage() {
           <div>
             <h2 className="mb-1 text-lg font-bold text-slate-900">Set up your classes</h2>
             <p className="mb-6 text-sm text-slate-500">
-              Define class types and their schedule.
+              Define class types and their schedule so upcoming sessions can be generated automatically.
             </p>
             <div className="space-y-3">
               {classes.map((c, i) => (
@@ -1390,9 +1604,10 @@ export default function OnboardingPage() {
         {/* Model E: Resources */}
         {currentStepKey === 'resources' && (
           <div>
-            <h2 className="mb-1 text-lg font-bold text-slate-900">Add your resources</h2>
+            <h2 className="mb-1 text-lg font-bold text-slate-900">Set up your resources</h2>
             <p className="mb-6 text-sm text-slate-500">
-              Each resource is a bookable unit ({terms.client.toLowerCase()}s select one when booking).
+              Each resource is a bookable unit ({terms.client.toLowerCase()}s select one when booking). You can fine-tune
+              slot rules later from the Resources area in the dashboard.
             </p>
             <div className="space-y-3">
               {resources.map((r, i) => (
@@ -1478,12 +1693,37 @@ export default function OnboardingPage() {
                   Your public booking link is below. Next, finish table and sitting setup on your dashboard so guests
                   can reserve covers and pay deposits as you configure.
                 </>
+              ) : isAppointmentsPlanVenue ? (
+                <>
+                  Your business is configured and your selected booking models are ready to review in the dashboard.
+                  Share the booking link below once you&apos;re happy with how each model looks.
+                </>
               ) : (
                 <>
                   Your booking page is ready. Share the link below with your {terms.client.toLowerCase()}s.
                 </>
               )}
             </p>
+            {isAppointmentsPlanVenue && (
+              <div className="mb-6 rounded-xl border border-slate-200 bg-slate-50/90 p-4 text-left">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  Ready in this venue
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {activeAppointmentsModels.map((model) => (
+                    <span
+                      key={model}
+                      className="rounded-full border border-slate-200 bg-white px-3 py-1 text-sm font-medium text-slate-700"
+                    >
+                      {APPOINTMENTS_MODEL_LABEL[model as AppointmentPlanModel]}
+                    </span>
+                  ))}
+                </div>
+                <p className="mt-3 text-sm text-slate-600">
+                  You can add or remove booking models later from Settings if your business needs change.
+                </p>
+              </div>
+            )}
             {venue.booking_model === 'table_reservation' && (
               <div className="mb-6 rounded-xl border border-amber-100 bg-amber-50/80 p-4 text-left">
                 <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-amber-900/80">
@@ -1501,8 +1741,8 @@ export default function OnboardingPage() {
                   Before you go live
                 </p>
                 <p className="mb-3 text-sm text-slate-700">
-                  You have already set services, opening hours, and working hours. Complete payment setup in the
-                  dashboard:
+                  You have already set services, opening hours, and working hours. Before taking paid bookings, finish
+                  Stripe Connect and any advanced availability rules in the dashboard:
                 </p>
                 <ul className="list-inside list-disc space-y-1.5 text-sm text-slate-600">
                   <li>
@@ -1520,7 +1760,7 @@ export default function OnboardingPage() {
                 </ul>
               </div>
             )}
-            {enabledSecondaryModels.length > 0 && (
+            {!isAppointmentsPlanVenue && enabledSecondaryModels.length > 0 && (
               <div className="mb-6 rounded-xl border border-slate-200 bg-slate-50/90 p-4 text-left">
                 <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-600">
                   Additional booking types enabled

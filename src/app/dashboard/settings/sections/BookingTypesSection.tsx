@@ -5,8 +5,13 @@ import { useRouter } from 'next/navigation';
 import type { VenueSettings } from '../types';
 import type { BookingModel } from '@/types/booking-models';
 import { normalizeEnabledModels } from '@/lib/booking/enabled-models';
+import {
+  appointmentPlanDefaultModels,
+  resolveActiveBookingModels,
+} from '@/lib/booking/active-models';
+import { isAppointmentPlanTier } from '@/lib/tier-enforcement';
 
-const OPTIONAL_SECONDARIES: Array<{
+const APPOINTMENTS_PLAN_MODELS: Array<{
   model: Extract<BookingModel, 'unified_scheduling' | 'event_ticket' | 'class_session' | 'resource_booking'>;
   title: string;
   description: string;
@@ -15,7 +20,7 @@ const OPTIONAL_SECONDARIES: Array<{
   {
     model: 'unified_scheduling',
     title: 'Appointments & services',
-    description: 'Offer appointment-based bookings alongside table reservations.',
+    description: 'Take bookings against calendars, people, or rooms with services and durations.',
     href: '/dashboard/calendar',
   },
   {
@@ -47,15 +52,28 @@ interface Props {
 export function BookingTypesSection({ venue, onUpdate, isAdmin }: Props) {
   const router = useRouter();
   const primary = (venue.booking_model as BookingModel) ?? 'table_reservation';
-  const [draft, setDraft] = useState<BookingModel[]>(normalizeEnabledModels(venue.enabled_models, primary));
+  const appointmentsPlan = isAppointmentPlanTier(venue.pricing_tier ?? null);
+  const deriveDraft = useCallback(
+    () =>
+      appointmentsPlan
+        ? resolveActiveBookingModels({
+            pricingTier: venue.pricing_tier,
+            bookingModel: primary,
+            enabledModels: venue.enabled_models,
+            activeBookingModels: venue.active_booking_models,
+          })
+        : normalizeEnabledModels(venue.enabled_models, primary),
+    [appointmentsPlan, primary, venue.active_booking_models, venue.enabled_models, venue.pricing_tier],
+  );
+  const [draft, setDraft] = useState<BookingModel[]>(deriveDraft);
   const [saving, setSaving] = useState(false);
   const [setupNavigating, setSetupNavigating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
 
   useEffect(() => {
-    setDraft(normalizeEnabledModels(venue.enabled_models, primary));
-  }, [venue.enabled_models, primary]);
+    setDraft(deriveDraft());
+  }, [deriveDraft]);
 
   useEffect(() => {
     if (!saveSuccess) return;
@@ -63,22 +81,31 @@ export function BookingTypesSection({ venue, onUpdate, isAdmin }: Props) {
     return () => clearTimeout(t);
   }, [saveSuccess]);
 
-  const toggle = useCallback((m: (typeof OPTIONAL_SECONDARIES)[number]['model']) => {
-    setDraft((prev) => (prev.includes(m) ? prev.filter((x) => x !== m) : [...prev, m]));
-  }, []);
+  const toggle = useCallback((m: (typeof APPOINTMENTS_PLAN_MODELS)[number]['model']) => {
+    setDraft((prev) => {
+      if (appointmentsPlan) {
+        const next = prev.includes(m) ? prev.filter((x) => x !== m) : [...prev, m];
+        return next.length > 0 ? next : appointmentPlanDefaultModels();
+      }
+      return prev.includes(m) ? prev.filter((x) => x !== m) : [...prev, m];
+    });
+  }, [appointmentsPlan]);
 
   const dirty =
     JSON.stringify([...draft].sort()) !==
-    JSON.stringify([...normalizeEnabledModels(venue.enabled_models, primary)].sort());
+    JSON.stringify([...deriveDraft()].sort());
 
   const persistDraft = useCallback(async (): Promise<boolean> => {
     if (!isAdmin) return false;
-    const normalized = normalizeEnabledModels(draft, primary);
+    const normalizedEnabled = normalizeEnabledModels(draft, primary);
+    const payload = appointmentsPlan
+      ? { active_booking_models: draft }
+      : { enabled_models: normalizedEnabled };
     try {
       const res = await fetch('/api/venue', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabled_models: normalized }),
+        body: JSON.stringify(payload),
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -86,15 +113,25 @@ export function BookingTypesSection({ venue, onUpdate, isAdmin }: Props) {
         return false;
       }
       onUpdate({
-        enabled_models: (json as { enabled_models?: BookingModel[] }).enabled_models ?? normalized,
+        active_booking_models: (json as { active_booking_models?: BookingModel[] }).active_booking_models,
+        enabled_models: (json as { enabled_models?: BookingModel[] }).enabled_models ?? normalizedEnabled,
       });
-      setDraft(normalizeEnabledModels((json as { enabled_models?: unknown }).enabled_models, primary));
+      setDraft(
+        appointmentsPlan
+          ? resolveActiveBookingModels({
+              pricingTier: venue.pricing_tier,
+              bookingModel: primary,
+              enabledModels: (json as { enabled_models?: unknown }).enabled_models,
+              activeBookingModels: (json as { active_booking_models?: unknown }).active_booking_models,
+            })
+          : normalizeEnabledModels((json as { enabled_models?: unknown }).enabled_models, primary),
+      );
       return true;
     } catch {
       setError('Save failed');
       return false;
     }
-  }, [draft, isAdmin, onUpdate, primary]);
+  }, [appointmentsPlan, draft, isAdmin, onUpdate, primary, venue.pricing_tier]);
 
   const save = useCallback(async () => {
     setSaving(true);
@@ -133,7 +170,9 @@ export function BookingTypesSection({ venue, onUpdate, isAdmin }: Props) {
 
   if (!isAdmin) return null;
 
-  const visible = OPTIONAL_SECONDARIES.filter((o) => o.model !== primary);
+  const visible = appointmentsPlan
+    ? APPOINTMENTS_PLAN_MODELS
+    : APPOINTMENTS_PLAN_MODELS.filter((o) => o.model !== primary);
 
   if (visible.length === 0) return null;
 
@@ -144,10 +183,22 @@ export function BookingTypesSection({ venue, onUpdate, isAdmin }: Props) {
       id="additional-booking-types"
       className="scroll-mt-24 rounded-xl border border-slate-200 bg-white p-5 shadow-sm"
     >
-      <h2 className="text-base font-semibold text-slate-900">Additional booking types</h2>
+      <h2 className="text-base font-semibold text-slate-900">
+        {appointmentsPlan ? 'Booking models' : 'Additional booking types'}
+      </h2>
       <p className="mt-1 text-sm text-slate-500">
-        Your main booking type is set at signup. Enable extra types to show them on your public booking page and in the
-        dashboard. Guests use the <span className="font-medium text-slate-700">?tab=</span> links on your booking URL.
+        {appointmentsPlan ? (
+          <>
+            Your Appointments plan includes appointments, classes, events, and resources. Choose which models are active
+            on your booking page and in the dashboard.
+          </>
+        ) : (
+          <>
+            Your main booking type is set at signup. Enable extra types to show them on your public booking page and in
+            the dashboard. Guests use the <span className="font-medium text-slate-700">?tab=</span> links on your
+            booking URL.
+          </>
+        )}
       </p>
       <ul className="mt-4 space-y-3">
         {visible.map((opt) => {
@@ -193,7 +244,7 @@ export function BookingTypesSection({ venue, onUpdate, isAdmin }: Props) {
           onClick={() => void save()}
           className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
         >
-          {saving ? 'Saving…' : 'Save booking types'}
+          {saving ? 'Saving…' : appointmentsPlan ? 'Save booking models' : 'Save booking types'}
         </button>
         {saveSuccess && (
           <span className="text-sm font-medium text-green-700" role="status">

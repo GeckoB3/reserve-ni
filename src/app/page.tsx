@@ -51,9 +51,9 @@ const steps = [
     number: "1",
     title: "Pick your plan",
     description:
-      "Choose Appointments or Restaurant, then tell us about your business. Founding Partner spots available for restaurants.",
+      "Choose Appointments or Restaurant and create your account. Founding Partner spots are available for restaurants.",
   },
-  { number: "2", title: "Set up in minutes", description: "Our model-aware wizard walks you through the setup for your specific business type." },
+  { number: "2", title: "Choose your booking models", description: "Appointments includes appointments, classes, events, and resources. Enable the ones you want to start with." },
   { number: "3", title: "Start taking bookings", description: "Share your booking page link, embed the widget, or print a QR code so your clients can book instantly." },
 ];
 
@@ -176,7 +176,7 @@ export default function Home() {
                 <PricingFeature text="Email and SMS communications" />
                 <PricingFeature text="Email support" />
               </ul>
-              <Link href="/signup/business-type?plan=appointments" className="mt-8 inline-flex h-11 w-full items-center justify-center rounded-xl bg-brand-600 text-sm font-semibold text-white shadow-lg shadow-brand-600/20 transition-colors hover:bg-brand-700">
+              <Link href="/signup/plan?plan=appointments" className="mt-8 inline-flex h-11 w-full items-center justify-center rounded-xl bg-brand-600 text-sm font-semibold text-white shadow-lg shadow-brand-600/20 transition-colors hover:bg-brand-700">
                 Get started
               </Link>
             </div>

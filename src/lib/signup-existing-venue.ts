@@ -3,6 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 export interface ExistingVenueRow {
   venue_id: string;
   pricing_tier: string | null;
+  active_booking_models?: unknown;
 }
 
 /**
@@ -26,7 +27,7 @@ export async function getExistingVenueForUserEmail(
   const venueId = staffRows[0]!.venue_id as string;
   const { data: venue, error: venueErr } = await admin
     .from('venues')
-    .select('pricing_tier')
+    .select('pricing_tier, active_booking_models')
     .eq('id', venueId)
     .maybeSingle();
 
@@ -35,5 +36,6 @@ export async function getExistingVenueForUserEmail(
   return {
     venue_id: venueId,
     pricing_tier: (venue as { pricing_tier?: string | null }).pricing_tier ?? null,
+    active_booking_models: (venue as { active_booking_models?: unknown }).active_booking_models,
   };
 }

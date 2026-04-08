@@ -11,7 +11,7 @@ export async function buildVenuePublicForBookingById(venueId: string): Promise<V
   const { data: venue, error } = await supabase
     .from('venues')
     .select(
-      'id, name, slug, cover_photo_url, address, phone, website_url, deposit_config, booking_rules, opening_hours, timezone, booking_model, enabled_models, terminology, currency',
+      'id, name, slug, cover_photo_url, address, phone, website_url, deposit_config, booking_rules, opening_hours, timezone, booking_model, enabled_models, active_booking_models, terminology, currency',
     )
     .eq('id', venueId)
     .single();
@@ -46,6 +46,7 @@ export async function buildVenuePublicForBookingById(venueId: string): Promise<V
     ...(venue as unknown as VenuePublic),
     booking_rules,
     booking_model: venueMode.bookingModel,
+    active_booking_models: venueMode.activeBookingModels,
     enabled_models: venueMode.enabledModels,
     terminology: venueMode.terminology,
   };

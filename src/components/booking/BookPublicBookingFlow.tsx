@@ -8,6 +8,7 @@ import {
   resolvePublicBookTabFromQuery,
   type PublicBookTabSlug,
 } from '@/lib/booking/public-book-tabs';
+import { resolveActiveBookingModels } from '@/lib/booking/active-models';
 import { BookingFlowRouter, type LockedPractitionerBooking } from '@/components/booking/BookingFlowRouter';
 import type { VenuePublic } from '@/components/booking/types';
 
@@ -35,24 +36,31 @@ export function BookPublicBookingFlow({
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const [tabPending, startTabTransition] = useTransition();
-  const primary = (venue.booking_model as BookingModel) ?? 'table_reservation';
-  const enabled = venue.enabled_models ?? [];
+  const activeModels = useMemo(
+    () =>
+      resolveActiveBookingModels({
+        bookingModel: venue.booking_model,
+        enabledModels: venue.enabled_models ?? EMPTY_ENABLED,
+        activeBookingModels: venue.active_booking_models,
+      }),
+    [venue.active_booking_models, venue.booking_model, venue.enabled_models],
+  );
 
   const tabs = useMemo(
-    () => publicBookTabsForVenue(primary, enabled, venue.terminology),
-    [primary, enabled, venue.terminology],
+    () => publicBookTabsForVenue(activeModels, venue.terminology),
+    [activeModels, venue.terminology],
   );
 
   const tabParam = searchParams.get('tab');
   const activeSlug = useMemo(
-    () => resolvePublicBookTabFromQuery(tabParam, primary, enabled, venue.terminology),
-    [tabParam, primary, enabled, venue.terminology],
+    () => resolvePublicBookTabFromQuery(tabParam, activeModels, venue.terminology),
+    [tabParam, activeModels, venue.terminology],
   );
 
   const activeModel = useMemo(() => {
     const found = tabs.find((t) => t.slug === activeSlug);
-    return found?.bookingModel ?? primary;
-  }, [tabs, activeSlug, primary]);
+    return found?.bookingModel ?? activeModels[0] ?? 'table_reservation';
+  }, [tabs, activeSlug, activeModels]);
 
   const replaceTabInUrl = useCallback(
     (slug: PublicBookTabSlug) => {
@@ -67,13 +75,13 @@ export function BookPublicBookingFlow({
 
   useEffect(() => {
     if (tabs.length <= 1) return;
-    const resolved = resolvePublicBookTabFromQuery(tabParam, primary, enabled, venue.terminology);
+    const resolved = resolvePublicBookTabFromQuery(tabParam, activeModels, venue.terminology);
     if (tabParam === resolved) return;
     const next = new URLSearchParams(searchParams.toString());
     next.set('tab', resolved);
     router.replace(`${pathname}?${next.toString()}`, { scroll: false });
     // Intentionally omit `searchParams` object identity - use tabParam + pathname only.
-  }, [tabs.length, tabParam, primary, enabled, venue.terminology, pathname, router]);
+  }, [tabs.length, tabParam, activeModels, venue.terminology, pathname, router]);
 
   return (
     <div className="space-y-6">

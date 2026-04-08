@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { getBusinessConfig, formatSignupBusinessTypeLabel } from '@/lib/business-config';
+import { formatSignupBusinessTypeLabel } from '@/lib/business-config';
 import { APPOINTMENTS_PRICE, RESTAURANT_PRICE, FOUNDING_PARTNER_CAP, SMS_OVERAGE_GBP_PER_MESSAGE } from '@/lib/pricing-constants';
 import { SMS_INCLUDED_APPOINTMENTS, SMS_INCLUDED_RESTAURANT } from '@/lib/billing/sms-allowance';
 
@@ -18,21 +18,22 @@ export default function PlanPage() {
   useEffect(() => {
     const id = requestAnimationFrame(() => {
       const bt = sessionStorage.getItem('signup_business_type');
-      const p = sessionStorage.getItem('signup_plan') as PlanType | null;
-      if (!bt) {
+      const queryPlan = searchParams.get('plan') as PlanType | null;
+      const storedPlan = sessionStorage.getItem('signup_plan') as PlanType | null;
+      const p = queryPlan ?? storedPlan;
+      if (!p) {
+        router.push('/signup/business-type');
+        return;
+      }
+      if (p !== 'appointments' && !bt) {
         router.push('/signup/business-type');
         return;
       }
       setBusinessType(bt);
-      setPlan(p ?? 'appointments');
+      setPlan(p);
     });
     return () => cancelAnimationFrame(id);
-  }, [router]);
-
-  const config = useMemo(
-    () => (businessType ? getBusinessConfig(businessType) : null),
-    [businessType],
-  );
+  }, [router, searchParams]);
 
   // Founding partner: check spots
   useEffect(() => {
@@ -63,7 +64,7 @@ export default function PlanPage() {
     router.push('/signup');
   }
 
-  if (!businessType || !config || !plan) {
+  if (!plan) {
     return (
       <div className="flex min-h-[40vh] items-center justify-center">
         <div className="h-8 w-8 animate-spin rounded-full border-4 border-brand-200 border-t-brand-600" />
@@ -89,7 +90,7 @@ export default function PlanPage() {
         <div className="mb-8 text-center">
           <h1 className="text-2xl font-bold text-slate-900">Founding Partner</h1>
           <p className="mt-2 text-sm text-slate-500">
-            Your selection: {formatSignupBusinessTypeLabel(businessType)}
+            {businessType ? `Your selection: ${formatSignupBusinessTypeLabel(businessType)}` : 'Restaurant plan for early founding venues'}
           </p>
         </div>
         <div className="rounded-2xl border border-emerald-200 bg-emerald-50/40 p-6 shadow-sm">
@@ -133,9 +134,15 @@ export default function PlanPage() {
     <div className="w-full max-w-xl">
       <div className="mb-8 text-center">
         <h1 className="text-2xl font-bold text-slate-900">Your plan</h1>
-        <p className="mt-2 text-sm text-slate-500">
-          Your selection: {formatSignupBusinessTypeLabel(businessType)}
-        </p>
+        {businessType ? (
+          <p className="mt-2 text-sm text-slate-500">
+            Your selection: {formatSignupBusinessTypeLabel(businessType)}
+          </p>
+        ) : (
+          <p className="mt-2 text-sm text-slate-500">
+            Appointments includes appointments, classes, events, and resources.
+          </p>
+        )}
       </div>
       <div className="rounded-2xl border border-brand-200 bg-brand-50/30 p-6 shadow-sm">
         <h2 className="text-lg font-bold text-slate-900">{planLabel}</h2>
@@ -157,6 +164,7 @@ export default function PlanPage() {
             <>
               <FeatureItem text="All booking types: appointments, classes, events, resources" />
               <FeatureItem text="Unlimited calendars and team members" />
+              <FeatureItem text="Choose which booking models to enable after payment" />
               <FeatureItem text={`${smsIncluded} SMS messages included per month`} />
               <FeatureItem text={`Additional SMS at ${overagePence}p each`} />
               <FeatureItem text="Bookings, deposits, reminders, client records, reporting" />

@@ -6,7 +6,7 @@ import type { SetupStatus } from '@/app/api/venue/setup-status/route';
 import type { BookingModel } from '@/types/booking-models';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 
-type SetupStepKey = keyof Omit<SetupStatus, 'is_admin' | 'booking_model' | 'enabled_models'>;
+type SetupStepKey = keyof Omit<SetupStatus, 'is_admin' | 'booking_model' | 'active_booking_models' | 'enabled_models'>;
 
 interface Step {
   key: SetupStepKey;
@@ -122,11 +122,10 @@ function getSecondaryCatalogSteps(enabledModels: BookingModel[]): Step[] {
   if (enabledModels.includes('resource_booking')) {
     steps.push({
       key: 'secondary_resource_catalog_ready',
-      label: 'Additional Booking Models',
-      description:
-        'Enable additional booking options including Appointments, Classes, Events, and Resources.',
-      href: '/dashboard/settings?tab=profile#additional-booking-types',
-      actionLabel: 'Configure booking types',
+      label: 'Resources (add-on)',
+      description: 'Add at least one resource so guests can book it from the Resources tab.',
+      href: '/dashboard/resource-timeline',
+      actionLabel: 'View resources',
     });
   }
   return steps;

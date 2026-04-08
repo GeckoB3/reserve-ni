@@ -6,7 +6,11 @@ import { stripe } from '@/lib/stripe';
 import { hasServiceConfig } from '@/lib/availability';
 import { computeGuestBookingReady } from '@/lib/setup-guest-booking-ready';
 import type { BookingModel } from '@/types/booking-models';
-import { normalizeEnabledModels } from '@/lib/booking/enabled-models';
+import {
+  activeModelsToLegacyEnabledModels,
+  getDefaultBookingModelFromActive,
+  resolveActiveBookingModels,
+} from '@/lib/booking/active-models';
 
 export interface SetupStatus {
   profile_complete: boolean;
@@ -17,6 +21,7 @@ export interface SetupStatus {
   first_booking_made: boolean;
   is_admin: boolean;
   booking_model: BookingModel;
+  active_booking_models: BookingModel[];
   /** Normalised secondary models (C/D/E). */
   enabled_models: BookingModel[];
   /**
@@ -79,17 +84,23 @@ export async function GET() {
 
     const { data: venue } = await staff.db
       .from('venues')
-      .select('name, address, phone, stripe_connected_account_id, booking_model, enabled_models')
+      .select('name, address, phone, stripe_connected_account_id, booking_model, enabled_models, active_booking_models, pricing_tier')
       .eq('id', venueId)
       .single();
 
     if (!venue) return NextResponse.json({ error: 'Venue not found' }, { status: 404 });
 
-    const bookingModel = (venue.booking_model as BookingModel) ?? 'table_reservation';
-    const enabledModels = normalizeEnabledModels(
-      (venue as { enabled_models?: unknown }).enabled_models,
-      bookingModel,
+    const activeModels = resolveActiveBookingModels({
+      pricingTier: (venue as { pricing_tier?: string | null }).pricing_tier,
+      bookingModel: venue.booking_model as BookingModel | undefined,
+      enabledModels: (venue as { enabled_models?: unknown }).enabled_models,
+      activeBookingModels: (venue as { active_booking_models?: unknown }).active_booking_models,
+    });
+    const bookingModel = getDefaultBookingModelFromActive(
+      activeModels,
+      (venue.booking_model as BookingModel) ?? 'table_reservation',
     );
+    const enabledModels = activeModelsToLegacyEnabledModels(activeModels, bookingModel);
     const profileComplete = Boolean(venue.name && venue.address && venue.phone);
 
     const admin = getSupabaseAdminClient();
@@ -139,6 +150,7 @@ export async function GET() {
       first_booking_made: firstBookingMade,
       is_admin: staff.role === 'admin',
       booking_model: bookingModel,
+      active_booking_models: activeModels,
       enabled_models: enabledModels,
       secondary_event_catalog_ready: secondaryEventCatalogReady,
       secondary_class_catalog_ready: secondaryClassCatalogReady,

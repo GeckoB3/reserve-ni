@@ -20,6 +20,8 @@ export interface VenuePublic {
   opening_hours: OpeningHours | null;
   timezone: string;
   booking_model?: string;
+  /** Canonical active booking model set for the venue. */
+  active_booking_models?: BookingModel[];
   /** Normalised secondary models (C/D/E); from `venues.enabled_models`. */
   enabled_models?: BookingModel[];
   terminology?: { client: string; booking: string; staff: string };

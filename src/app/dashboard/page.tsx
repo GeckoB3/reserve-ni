@@ -6,13 +6,18 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import { SetupChecklist } from './SetupChecklist';
 import { DashboardStatCard } from '@/components/dashboard/DashboardStatCard';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
-import { normalizeEnabledModels } from '@/lib/booking/enabled-models';
+import {
+  activeModelsToLegacyEnabledModels,
+  getDefaultBookingModelFromActive,
+  resolveActiveBookingModels,
+} from '@/lib/booking/active-models';
 import { isVenueScheduleCalendarEligible } from '@/lib/booking/schedule-calendar-eligibility';
-import { bookingModelShortLabel } from '@/lib/booking/infer-booking-row-model';
+import { bookingModelShortLabel, bookingStatusDisplayLabel } from '@/lib/booking/infer-booking-row-model';
 import type { BookingModel } from '@/types/booking-models';
 
 interface DashboardData {
   booking_model?: string;
+  active_booking_models?: unknown;
   enabled_models?: unknown;
   today_by_booking_model?: Record<string, number>;
   today: {
@@ -162,9 +167,17 @@ export default function DashboardHomePage() {
   }
 
   const t = data.today;
-  const primaryModel = (data.booking_model as BookingModel) ?? 'table_reservation';
-  const enabledNorm = normalizeEnabledModels(data.enabled_models, primaryModel);
-  const isAppointment = isUnifiedSchedulingVenue(data.booking_model);
+  const activeModels = resolveActiveBookingModels({
+    bookingModel: data.booking_model as BookingModel | undefined,
+    enabledModels: data.enabled_models,
+    activeBookingModels: data.active_booking_models,
+  });
+  const primaryModel = getDefaultBookingModelFromActive(
+    activeModels,
+    (data.booking_model as BookingModel) ?? 'table_reservation',
+  );
+  const enabledNorm = activeModelsToLegacyEnabledModels(activeModels, primaryModel);
+  const isAppointment = isUnifiedSchedulingVenue(primaryModel);
   const calendarEligible = isVenueScheduleCalendarEligible(primaryModel, enabledNorm);
   const scheduleHref = calendarEligible ? '/dashboard/calendar' : '/dashboard/day-sheet';
   const hasSecondaryModels = enabledNorm.length > 0;
@@ -495,7 +508,7 @@ export default function DashboardHomePage() {
                     )}
                     <td className="whitespace-nowrap px-5 py-3">
                       <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset ${getStatusBadge(b.status)}`}>
-                        {b.status}
+                        {bookingStatusDisplayLabel(b.status, !isAppointment)}
                       </span>
                     </td>
                     <td className="whitespace-nowrap px-5 py-3">

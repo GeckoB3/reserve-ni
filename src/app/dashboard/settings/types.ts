@@ -33,6 +33,8 @@ export interface VenueSettings {
   subscription_current_period_end?: string | null;
   calendar_count?: number | null;
   booking_model?: string;
+  /** Canonical active booking model set for the venue. */
+  active_booking_models?: BookingModel[];
   /** Secondary bookable models (C/D/E); admin-only. */
   enabled_models?: BookingModel[];
   /** Included SMS per billing month (unified scheduling / tier). */

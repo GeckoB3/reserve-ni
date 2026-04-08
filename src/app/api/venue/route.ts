@@ -4,8 +4,13 @@ import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 import { z } from 'zod';
 import { normalizeToE164 } from '@/lib/phone/e164';
 import { normalizeWebsiteUrlForStorage } from '@/lib/urls/website-url';
-import { normalizeEnabledModels } from '@/lib/booking/enabled-models';
+import {
+  activeModelsToLegacyEnabledModels,
+  appointmentPlanDefaultModels,
+  resolveActiveBookingModels,
+} from '@/lib/booking/active-models';
 import type { BookingModel } from '@/types/booking-models';
+import { isAppointmentPlanTier } from '@/lib/tier-enforcement';
 
 const venueProfileSchema = z.object({
   name: z.string().min(1).max(200).optional(),
@@ -21,6 +26,8 @@ const venueProfileSchema = z.object({
   timezone: z.string().max(50).optional(),
   /** Public booking page link; empty clears. Stored as https URL or null. */
   website_url: z.string().max(2000).optional(),
+  /** Canonical active booking models; appointments plan uses this as the editable source of truth. */
+  active_booking_models: z.array(z.string()).optional(),
   /** Secondary bookable models (C/D/E); normalised with {@link normalizeEnabledModels}. */
   enabled_models: z.array(z.string()).optional(),
 }).refine((data) => Object.keys(data).filter((k) => data[k as keyof typeof data] !== undefined).length > 0, { message: 'At least one field required' });
@@ -37,7 +44,7 @@ export async function GET() {
     let venue = null;
     const { data: fullVenue, error } = await staff.db
       .from('venues')
-      .select('id, name, slug, address, phone, email, cover_photo_url, cuisine_type, price_band, no_show_grace_minutes, kitchen_email, communication_templates, opening_hours, booking_rules, deposit_config, availability_config, stripe_connected_account_id, timezone, currency, website_url, booking_model, enabled_models, terminology')
+      .select('id, name, slug, address, phone, email, cover_photo_url, cuisine_type, price_band, no_show_grace_minutes, kitchen_email, communication_templates, opening_hours, booking_rules, deposit_config, availability_config, stripe_connected_account_id, timezone, currency, website_url, booking_model, enabled_models, active_booking_models, pricing_tier, terminology')
       .eq('id', staff.venue_id)
       .single();
 
@@ -46,7 +53,7 @@ export async function GET() {
     } else {
       const { data: basicVenue } = await staff.db
         .from('venues')
-        .select('id, name, slug, address, phone, email, cover_photo_url, opening_hours, booking_rules, deposit_config, availability_config, stripe_connected_account_id, timezone, currency, website_url, booking_model, enabled_models, terminology')
+        .select('id, name, slug, address, phone, email, cover_photo_url, opening_hours, booking_rules, deposit_config, availability_config, stripe_connected_account_id, timezone, currency, website_url, booking_model, enabled_models, active_booking_models, pricing_tier, terminology')
         .eq('id', staff.venue_id)
         .single();
       if (basicVenue) {
@@ -60,10 +67,17 @@ export async function GET() {
     }
 
     const v = venue as Record<string, unknown>;
-    const primary = (v.booking_model as BookingModel) ?? 'table_reservation';
-    const enabledModels = normalizeEnabledModels(v.enabled_models, primary);
+    const activeModels = resolveActiveBookingModels({
+      pricingTier: v.pricing_tier as string | null | undefined,
+      bookingModel: v.booking_model as BookingModel | undefined,
+      enabledModels: v.enabled_models,
+      activeBookingModels: v.active_booking_models,
+    });
+    const primary = activeModels[0] ?? ((v.booking_model as BookingModel) ?? 'table_reservation');
+    const enabledModels = activeModelsToLegacyEnabledModels(activeModels, primary);
     return NextResponse.json({
       ...venue,
+      active_booking_models: activeModels,
       enabled_models: enabledModels,
       current_user_role: staff.role,
     });
@@ -127,18 +141,64 @@ export async function PATCH(request: NextRequest) {
       update.website_url = normalized;
     }
 
-    if (data.enabled_models !== undefined) {
+    let nextActiveModels: BookingModel[] | null = null;
+
+    if (data.active_booking_models !== undefined || data.enabled_models !== undefined) {
       const { data: venueRow, error: primaryErr } = await staff.db
         .from('venues')
-        .select('booking_model')
+        .select('booking_model, enabled_models, active_booking_models, pricing_tier')
         .eq('id', staff.venue_id)
         .single();
       if (primaryErr || !venueRow) {
-        console.error('PATCH /api/venue: could not load booking_model for enabled_models', primaryErr);
+        console.error('PATCH /api/venue: could not load booking models', primaryErr);
         return NextResponse.json({ error: 'Failed to validate venue' }, { status: 500 });
       }
-      const primary = ((venueRow as { booking_model?: BookingModel }).booking_model as BookingModel) ?? 'table_reservation';
-      update.enabled_models = normalizeEnabledModels(data.enabled_models, primary);
+      const row = venueRow as {
+        booking_model?: BookingModel;
+        enabled_models?: unknown;
+        active_booking_models?: unknown;
+        pricing_tier?: string | null;
+      };
+      const existingActive = resolveActiveBookingModels({
+        pricingTier: row.pricing_tier,
+        bookingModel: row.booking_model,
+        enabledModels: row.enabled_models,
+        activeBookingModels: row.active_booking_models,
+      });
+      const basePrimary = existingActive[0] ?? (row.booking_model ?? 'table_reservation');
+
+      if (data.active_booking_models !== undefined) {
+        nextActiveModels = resolveActiveBookingModels({
+          pricingTier: row.pricing_tier,
+          bookingModel: basePrimary,
+          activeBookingModels: data.active_booking_models,
+        });
+      } else if (data.enabled_models !== undefined) {
+        if (isAppointmentPlanTier(row.pricing_tier)) {
+          nextActiveModels = resolveActiveBookingModels({
+            pricingTier: row.pricing_tier,
+            bookingModel: basePrimary,
+            activeBookingModels: data.enabled_models,
+          });
+        } else {
+          nextActiveModels = resolveActiveBookingModels({
+            pricingTier: row.pricing_tier,
+            bookingModel: row.booking_model,
+            enabledModels: data.enabled_models,
+            activeBookingModels: row.active_booking_models,
+          });
+        }
+      }
+
+      if (nextActiveModels !== null) {
+        if (isAppointmentPlanTier(row.pricing_tier) && nextActiveModels.length === 0) {
+          nextActiveModels = appointmentPlanDefaultModels();
+        }
+        const nextPrimary = nextActiveModels[0] ?? basePrimary;
+        update.booking_model = nextPrimary;
+        update.active_booking_models = nextActiveModels;
+        update.enabled_models = activeModelsToLegacyEnabledModels(nextActiveModels, nextPrimary);
+      }
     }
 
     const { data: venue, error } = await staff.db
@@ -146,7 +206,7 @@ export async function PATCH(request: NextRequest) {
       .update(update)
       .eq('id', staff.venue_id)
       .select(
-        'id, name, slug, address, phone, email, cover_photo_url, cuisine_type, price_band, no_show_grace_minutes, kitchen_email, timezone, website_url, booking_model, enabled_models',
+        'id, name, slug, address, phone, email, cover_photo_url, cuisine_type, price_band, no_show_grace_minutes, kitchen_email, timezone, website_url, booking_model, enabled_models, active_booking_models, pricing_tier',
       )
       .single();
 
@@ -159,9 +219,15 @@ export async function PATCH(request: NextRequest) {
     }
 
     const v = venue as Record<string, unknown>;
-    const primary = (v.booking_model as BookingModel) ?? 'table_reservation';
-    const enabledModels = normalizeEnabledModels(v.enabled_models, primary);
-    return NextResponse.json({ ...venue, enabled_models: enabledModels });
+    const activeModels = resolveActiveBookingModels({
+      pricingTier: v.pricing_tier as string | null | undefined,
+      bookingModel: v.booking_model as BookingModel | undefined,
+      enabledModels: v.enabled_models,
+      activeBookingModels: v.active_booking_models,
+    });
+    const primary = activeModels[0] ?? ((v.booking_model as BookingModel) ?? 'table_reservation');
+    const enabledModels = activeModelsToLegacyEnabledModels(activeModels, primary);
+    return NextResponse.json({ ...venue, active_booking_models: activeModels, enabled_models: enabledModels });
   } catch (err) {
     console.error('PATCH /api/venue failed:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

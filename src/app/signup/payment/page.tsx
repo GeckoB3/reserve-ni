@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/browser';
-import { getBusinessConfig, formatSignupBusinessTypeLabel, isDirectModelBusinessType } from '@/lib/business-config';
+import { formatSignupBusinessTypeLabel, isDirectModelBusinessType } from '@/lib/business-config';
 import { APPOINTMENTS_PRICE, RESTAURANT_PRICE, SMS_OVERAGE_GBP_PER_MESSAGE } from '@/lib/pricing-constants';
 import { SMS_INCLUDED_APPOINTMENTS, SMS_INCLUDED_RESTAURANT } from '@/lib/billing/sms-allowance';
 import { signupPlanToFamily, SIGNUP_PLAN_CONFLICT_MESSAGE } from '@/lib/signup-plan-family';
@@ -27,7 +27,7 @@ export default function PaymentPage() {
     const id = requestAnimationFrame(() => {
       const bt = sessionStorage.getItem('signup_business_type');
       const p = sessionStorage.getItem('signup_plan') as PlanType | null;
-      if (!bt || !p) {
+      if (!p || (p !== 'appointments' && !bt)) {
         router.push('/signup/business-type');
         return;
       }
@@ -62,11 +62,6 @@ export default function PaymentPage() {
       cancelled = true;
     };
   }, [sessionChecked, hasSession, plan]);
-
-  const config = useMemo(
-    () => (businessType ? getBusinessConfig(businessType) : null),
-    [businessType]
-  );
 
   const totalPrice = useMemo(() => {
     if (plan === 'appointments') return APPOINTMENTS_PRICE;
@@ -127,7 +122,7 @@ export default function PaymentPage() {
     setLoading(false);
   }
 
-  if (!businessType || !plan || !config || !sessionChecked) {
+  if (!plan || !sessionChecked) {
     return (
       <div className="flex min-h-[40vh] items-center justify-center">
         <div className="h-8 w-8 animate-spin rounded-full border-4 border-brand-200 border-t-brand-600" />
@@ -152,19 +147,28 @@ export default function PaymentPage() {
 
       <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
         <div className="space-y-4">
-          <div className="flex justify-between text-sm">
-            <span className="text-slate-500">
-              {isDirectModelBusinessType(businessType) ? 'Booking type' : 'Business type'}
-            </span>
-            <span className="max-w-[60%] text-right font-medium text-slate-900">
-              {formatSignupBusinessTypeLabel(businessType)}
-            </span>
-          </div>
-          {isDirectModelBusinessType(businessType) && (
-            <p className="text-xs text-slate-500">
-              You chose a general booking pattern. Labels and services can be customised in onboarding and
-              settings.
-            </p>
+          {businessType ? (
+            <>
+              <div className="flex justify-between text-sm">
+                <span className="text-slate-500">
+                  {isDirectModelBusinessType(businessType) ? 'Booking type' : 'Business type'}
+                </span>
+                <span className="max-w-[60%] text-right font-medium text-slate-900">
+                  {formatSignupBusinessTypeLabel(businessType)}
+                </span>
+              </div>
+              {isDirectModelBusinessType(businessType) && (
+                <p className="text-xs text-slate-500">
+                  You chose a general booking pattern. Labels and services can be customised in onboarding and
+                  settings.
+                </p>
+              )}
+            </>
+          ) : (
+            <div className="rounded-lg border border-brand-100 bg-brand-50/60 px-3 py-2 text-xs text-brand-900">
+              Appointments includes appointments, classes, events, and resources. After payment, you&apos;ll choose
+              which booking models to enable first and can change them later in Settings.
+            </div>
           )}
           <div className="flex justify-between text-sm">
             <span className="text-slate-500">Plan</span>
@@ -189,7 +193,7 @@ export default function PaymentPage() {
               <p className="mt-1 leading-relaxed">
                 {isRestaurant
                   ? `Table management, floor plan, all booking types. ${smsIncluded} SMS per month included. Priority support.`
-                  : `All booking types: appointments, classes, events, resources. Unlimited calendars and team members. ${smsIncluded} SMS per month included.`
+                  : `All booking types: appointments, classes, events, resources. Unlimited calendars and team members. You'll choose which models to enable first after payment. ${smsIncluded} SMS per month included.`
                 }
                 {' '}Additional SMS at {overagePence}p each.
               </p>

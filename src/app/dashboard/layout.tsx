@@ -4,7 +4,11 @@ import { getSupabaseAdminClient } from '@/lib/supabase';
 import { isPlatformSuperuser } from '@/lib/platform-auth';
 import { DashboardSidebar } from './DashboardSidebar';
 import { SessionTimeoutGuard } from '@/components/SessionTimeoutGuard';
-import { normalizeEnabledModels } from '@/lib/booking/enabled-models';
+import {
+  activeModelsToLegacyEnabledModels,
+  getDefaultBookingModelFromActive,
+  resolveActiveBookingModels,
+} from '@/lib/booking/active-models';
 import type { BookingModel } from '@/types/booking-models';
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -51,7 +55,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
       const { data: venue } = await admin
         .from('venues')
         .select(
-          'name, slug, table_management_enabled, booking_model, enabled_models, plan_status, onboarding_completed, pricing_tier, terminology',
+          'name, slug, table_management_enabled, booking_model, enabled_models, active_booking_models, plan_status, onboarding_completed, pricing_tier, terminology',
         )
         .eq('id', venueId)
         .single();
@@ -59,11 +63,17 @@ export default async function DashboardLayout({ children }: { children: React.Re
       venueSlug = venue?.slug ?? undefined;
       tableManagementEnabled = venue?.table_management_enabled ?? false;
       pricingTier = (venue?.pricing_tier as string) ?? 'appointments';
-      bookingModel = (venue?.booking_model as BookingModel) ?? 'table_reservation';
-      enabledModels = normalizeEnabledModels(
-        (venue as { enabled_models?: unknown } | null)?.enabled_models,
-        bookingModel,
+      const activeModels = resolveActiveBookingModels({
+        pricingTier,
+        bookingModel: venue?.booking_model as BookingModel | undefined,
+        enabledModels: (venue as { enabled_models?: unknown } | null)?.enabled_models,
+        activeBookingModels: (venue as { active_booking_models?: unknown } | null)?.active_booking_models,
+      });
+      bookingModel = getDefaultBookingModelFromActive(
+        activeModels,
+        (venue?.booking_model as BookingModel) ?? 'table_reservation',
       );
+      enabledModels = activeModelsToLegacyEnabledModels(activeModels, bookingModel);
       planStatus = (venue?.plan_status as string) ?? 'active';
       onboardingCompleted = (venue?.onboarding_completed as boolean) ?? true;
       const rawTerms = (venue as { terminology?: unknown } | null)?.terminology;

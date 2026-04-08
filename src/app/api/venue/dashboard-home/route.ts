@@ -22,7 +22,7 @@ import type { AvailabilityConfig, EngineInput, OpeningHours } from '@/types/avai
 import type { BookingModel } from '@/types/booking-models';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 import { inferBookingRowModel, bookingModelShortLabel } from '@/lib/booking/infer-booking-row-model';
-import { BOOKING_MODEL_ORDER, normalizeEnabledModels } from '@/lib/booking/enabled-models';
+import { BOOKING_MODEL_ORDER } from '@/lib/booking/enabled-models';
 const WEEKDAYS_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 function addDaysToDateStr(dateStr: string, delta: number): string {
@@ -86,7 +86,7 @@ export async function GET() {
 
     const { data: venueRow, error: venueErr } = await admin
       .from('venues')
-      .select('availability_config, opening_hours, timezone, booking_model, enabled_models')
+      .select('availability_config, opening_hours, timezone, booking_model, enabled_models, active_booking_models, pricing_tier')
       .eq('id', staff.venue_id)
       .single();
 
@@ -246,7 +246,7 @@ export async function GET() {
     const coversInHouseNow = coversOverlappingNow(todayLoadBookings, nowMinutes, todayDefaultDur);
     const arrivingWithin30 = coversArrivingWithin(todayLoadBookings, nowMinutes, 30, todayDefaultDur);
 
-    const venueBookingModel = ((venueRow as Record<string, unknown>).booking_model as string) ?? 'table_reservation';
+    const venueBookingModel = venueMode.bookingModel;
     const isAppt = isUnifiedSchedulingVenue(venueBookingModel as BookingModel);
     const alerts: Array<{ type: string; message: string }> = [];
 
@@ -302,15 +302,13 @@ export async function GET() {
       String(a.booking_time).localeCompare(String(b.booking_time)),
     );
 
-    const primaryBm = ((venueRow as Record<string, unknown>).booking_model as BookingModel) ?? 'table_reservation';
-    const enabledModelsNorm = normalizeEnabledModels(
-      (venueRow as { enabled_models?: unknown }).enabled_models,
-      primaryBm,
-    );
+    const primaryBm = venueMode.bookingModel;
+    const enabledModelsNorm = venueMode.enabledModels;
     const todayByModelMerged = mergeTodayByModelWithActiveModels(todayByModel, primaryBm, enabledModelsNorm);
 
     return NextResponse.json({
-      booking_model: (venueRow as Record<string, unknown>).booking_model ?? 'table_reservation',
+      booking_model: venueMode.bookingModel,
+      active_booking_models: venueMode.activeBookingModels,
       enabled_models: enabledModelsNorm,
       today_by_booking_model: todayByModelMerged,
       today: {

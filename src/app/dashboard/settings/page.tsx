@@ -5,7 +5,11 @@ import { StaffPersonalSettingsSection } from './sections/StaffPersonalSettingsSe
 import { getDashboardStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
-import { normalizeEnabledModels } from '@/lib/booking/enabled-models';
+import {
+  activeModelsToLegacyEnabledModels,
+  getDefaultBookingModelFromActive,
+  resolveActiveBookingModels,
+} from '@/lib/booking/active-models';
 import type { BookingModel } from '@/types/booking-models';
 import { computeSmsMonthlyAllowance, updateVenueSmsMonthlyAllowance } from '@/lib/billing/sms-allowance';
 import { parseVenueOpeningExceptions } from '@/types/venue-opening-exceptions';
@@ -63,7 +67,7 @@ export default async function SettingsPage({
   let hasServiceConfig = false;
   const { data: fullVenue, error: fullErr } = await staff.db
     .from('venues')
-    .select('id, name, slug, address, phone, email, website_url, cover_photo_url, cuisine_type, price_band, no_show_grace_minutes, kitchen_email, communication_templates, opening_hours, venue_opening_exceptions, booking_rules, deposit_config, availability_config, stripe_connected_account_id, timezone, table_management_enabled, combination_threshold, pricing_tier, plan_status, subscription_current_period_end, calendar_count, booking_model, enabled_models, sms_monthly_allowance')
+    .select('id, name, slug, address, phone, email, website_url, cover_photo_url, cuisine_type, price_band, no_show_grace_minutes, kitchen_email, communication_templates, opening_hours, venue_opening_exceptions, booking_rules, deposit_config, availability_config, stripe_connected_account_id, timezone, table_management_enabled, combination_threshold, pricing_tier, plan_status, subscription_current_period_end, calendar_count, booking_model, enabled_models, active_booking_models, sms_monthly_allowance')
     .eq('id', venueId)
     .single();
 
@@ -86,11 +90,20 @@ export default async function SettingsPage({
     console.error('Settings page full venue query failed, trying basic columns:', fullErr?.message);
     const { data: basicVenue } = await staff.db
       .from('venues')
-      .select('id, name, slug, address, phone, email, website_url, cover_photo_url, opening_hours, booking_rules, deposit_config, availability_config, timezone, table_management_enabled, combination_threshold, booking_model, enabled_models')
+      .select('id, name, slug, address, phone, email, website_url, cover_photo_url, opening_hours, booking_rules, deposit_config, availability_config, timezone, table_management_enabled, combination_threshold, booking_model, enabled_models, active_booking_models, pricing_tier')
       .eq('id', venueId)
       .single();
     if (basicVenue) {
-      const bm = (basicVenue.booking_model as BookingModel) ?? 'table_reservation';
+      const activeModels = resolveActiveBookingModels({
+        pricingTier: (basicVenue as { pricing_tier?: string | null }).pricing_tier,
+        bookingModel: basicVenue.booking_model as BookingModel | undefined,
+        enabledModels: (basicVenue as { enabled_models?: unknown }).enabled_models,
+        activeBookingModels: (basicVenue as { active_booking_models?: unknown }).active_booking_models,
+      });
+      const bm = getDefaultBookingModelFromActive(
+        activeModels,
+        (basicVenue.booking_model as BookingModel) ?? 'table_reservation',
+      );
       venue = {
         ...basicVenue,
         cuisine_type: null,
@@ -102,25 +115,29 @@ export default async function SettingsPage({
         table_management_enabled: basicVenue.table_management_enabled ?? false,
         combination_threshold: basicVenue.combination_threshold ?? 80,
         venue_opening_exceptions: [],
-        enabled_models: normalizeEnabledModels(
-          (basicVenue as { enabled_models?: unknown }).enabled_models,
-          bm,
-        ),
+        booking_model: bm,
+        active_booking_models: activeModels,
+        enabled_models: activeModelsToLegacyEnabledModels(activeModels, bm),
       } as VenueSettings;
     }
   }
 
-  const bookingModel = ((venue as Record<string, unknown>)?.booking_model as string) ?? 'table_reservation';
   if (venue) {
-    const bm = (venue.booking_model as BookingModel) ?? 'table_reservation';
+    const activeModels = resolveActiveBookingModels({
+      pricingTier: (venue as { pricing_tier?: string | null }).pricing_tier,
+      bookingModel: venue.booking_model as BookingModel | undefined,
+      enabledModels: (venue as { enabled_models?: unknown }).enabled_models,
+      activeBookingModels: (venue as { active_booking_models?: unknown }).active_booking_models,
+    });
+    const bm = getDefaultBookingModelFromActive(activeModels, (venue.booking_model as BookingModel) ?? 'table_reservation');
     venue = {
       ...venue,
-      enabled_models: normalizeEnabledModels(
-        (venue as { enabled_models?: unknown }).enabled_models,
-        bm,
-      ),
+      booking_model: bm,
+      active_booking_models: activeModels,
+      enabled_models: activeModelsToLegacyEnabledModels(activeModels, bm),
     };
   }
+  const bookingModel = ((venue as Record<string, unknown>)?.booking_model as string) ?? 'table_reservation';
   if (venueId) {
     if (isUnifiedSchedulingVenue(bookingModel)) {
       const { count } = await staff.db

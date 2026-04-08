@@ -1,59 +1,14 @@
 'use client';
 
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { getBusinessTypesByCategory, BOOKING_MODEL_SIGNUP_CARDS, BOOKING_MODEL_CHIP_LABEL } from '@/lib/business-config';
-
-const CATEGORY_LABELS: Record<string, string> = {
-  hospitality: 'Restaurants & hospitality',
-  beauty_grooming: 'Beauty & grooming',
-  health_wellness: 'Health & wellness',
-  fitness: 'Fitness',
-  education: 'Education',
-  creative: 'Creative',
-  professional: 'Professional services',
-  pets: 'Pets',
-  experiences: 'Experiences & activities',
-  entertainment: 'Entertainment',
-  family: 'Family',
-  sports: 'Sports',
-  business: 'Business',
-  leisure: 'Leisure',
-  accommodation: 'Accommodation',
-};
-
-/** Categories to show for Appointments plan (exclude hospitality). */
-const APPOINTMENTS_CATEGORY_ORDER = [
-  'beauty_grooming',
-  'health_wellness',
-  'fitness',
-  'education',
-  'creative',
-  'professional',
-  'pets',
-  'experiences',
-  'entertainment',
-  'family',
-  'sports',
-  'business',
-  'leisure',
-  'accommodation',
-];
-
-/** Categories for Restaurant plan. */
-const RESTAURANT_CATEGORY_ORDER = ['hospitality'];
-
-/** All categories for fallback. */
-const ALL_CATEGORY_ORDER = [
-  'hospitality',
-  ...APPOINTMENTS_CATEGORY_ORDER,
-];
+import { APPOINTMENTS_ACTIVE_MODEL_ORDER } from '@/lib/booking/active-models';
+import { BOOKING_MODEL_SIGNUP_CARDS } from '@/lib/business-config';
 
 type PlanType = 'appointments' | 'restaurant' | 'founding';
 
 export default function BusinessTypePage() {
   const [selected, setSelected] = useState<string | null>(null);
-  const [search, setSearch] = useState('');
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -62,28 +17,21 @@ export default function BusinessTypePage() {
 
   useEffect(() => {
     sessionStorage.setItem('signup_plan', plan);
-  }, [plan]);
-
-  const grouped = useMemo(() => getBusinessTypesByCategory(), []);
-
-  const categoryOrder = useMemo(() => {
-    if (isRestaurantPlan) return RESTAURANT_CATEGORY_ORDER;
-    return APPOINTMENTS_CATEGORY_ORDER;
-  }, [isRestaurantPlan]);
-
-  const filteredCategories = useMemo(() => {
-    const q = search.toLowerCase().trim();
-    if (!q) return categoryOrder.filter((cat) => grouped[cat]?.length);
-    return categoryOrder.filter((cat) =>
-      grouped[cat]?.some((bt) => bt.label.toLowerCase().includes(q)),
-    );
-  }, [search, grouped, categoryOrder]);
+    if (!isRestaurantPlan) {
+      sessionStorage.removeItem('signup_business_type');
+    }
+  }, [isRestaurantPlan, plan]);
 
   function handleContinue() {
-    if (!selected) return;
-    sessionStorage.setItem('signup_business_type', selected);
+    if (isRestaurantPlan) {
+      if (!selected) return;
+      sessionStorage.setItem('signup_business_type', selected);
+      sessionStorage.setItem('signup_plan', plan);
+      router.push('/signup/plan');
+      return;
+    }
     sessionStorage.setItem('signup_plan', plan);
-    router.push('/signup/plan');
+    router.push('/signup/plan?plan=appointments');
   }
 
   // For restaurant plan, show a simplified picker
@@ -136,146 +84,42 @@ export default function BusinessTypePage() {
     );
   }
 
-  // Appointments plan: show full directory minus hospitality
+  const appointmentCards = BOOKING_MODEL_SIGNUP_CARDS.filter((card) =>
+    APPOINTMENTS_ACTIVE_MODEL_ORDER.includes(card.model),
+  );
+
   return (
     <div className="w-full max-w-2xl">
       <div className="mb-8 text-center">
-        <h1 className="text-2xl font-bold text-slate-900">What kind of business are you?</h1>
+        <h1 className="text-2xl font-bold text-slate-900">Appointments plan</h1>
         <p className="mt-2 text-sm text-slate-500">
-          Pick the booking type that fits your business. We&apos;ll tailor wording,
-          dashboard views, and defaults to your trade.
+          Appointments includes appointments, classes, events, and bookable resources from the start.
+        </p>
+      </div>
+
+      <div className="mb-6 rounded-2xl border border-brand-200 bg-brand-50/40 p-5">
+        <p className="text-sm font-medium text-slate-800">
+          You&apos;ll choose which booking models to enable for your venue after payment, then the onboarding flow will
+          guide you through setting them up.
+        </p>
+        <p className="mt-2 text-sm text-slate-600">
+          You can enable or disable booking models later at any time from Settings.
         </p>
       </div>
 
       <div className="mb-8 grid gap-3 sm:grid-cols-2">
-        <button
-          type="button"
-          onClick={() => setSelected('model_unified_scheduling')}
-          className={`rounded-2xl border px-4 py-4 text-left transition-all ${
-            selected === 'model_unified_scheduling'
-              ? 'border-brand-500 bg-brand-50 ring-1 ring-brand-500'
-              : 'border-slate-200 bg-white hover:border-slate-300'
-          }`}
-        >
-          <p className="text-sm font-semibold text-slate-900">Appointments &amp; services</p>
-          <p className="mt-1 text-xs text-slate-600">Clients book with a calendar or team member for a set duration.</p>
-        </button>
-        <button
-          type="button"
-          onClick={() => setSelected('model_event_ticket')}
-          className={`rounded-2xl border px-4 py-4 text-left transition-all ${
-            selected === 'model_event_ticket'
-              ? 'border-brand-500 bg-brand-50 ring-1 ring-brand-500'
-              : 'border-slate-200 bg-white hover:border-slate-300'
-          }`}
-        >
-          <p className="text-sm font-semibold text-slate-900">Events &amp; experiences</p>
-          <p className="mt-1 text-xs text-slate-600">Guests buy tickets for events - escape rooms, tours, shows.</p>
-        </button>
-        <button
-          type="button"
-          onClick={() => setSelected('model_class_session')}
-          className={`rounded-2xl border px-4 py-4 text-left transition-all ${
-            selected === 'model_class_session'
-              ? 'border-brand-500 bg-brand-50 ring-1 ring-brand-500'
-              : 'border-slate-200 bg-white hover:border-slate-300'
-          }`}
-        >
-          <p className="text-sm font-semibold text-slate-900">Classes &amp; group sessions</p>
-          <p className="mt-1 text-xs text-slate-600">Members book spots in recurring classes from a timetable.</p>
-        </button>
-        <button
-          type="button"
-          onClick={() => setSelected('model_resource_booking')}
-          className={`rounded-2xl border px-4 py-4 text-left transition-all ${
-            selected === 'model_resource_booking'
-              ? 'border-brand-500 bg-brand-50 ring-1 ring-brand-500'
-              : 'border-slate-200 bg-white hover:border-slate-300'
-          }`}
-        >
-          <p className="text-sm font-semibold text-slate-900">Spaces &amp; facilities</p>
-          <p className="mt-1 text-xs text-slate-600">Customers book a named space or resource by the slot.</p>
-        </button>
-      </div>
-
-      <details className="mb-6 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm shadow-sm open:pb-4">
-        <summary className="cursor-pointer font-semibold text-slate-800">Our booking types</summary>
-        <ul className="mt-3 space-y-3 border-t border-slate-100 pt-3">
-          {BOOKING_MODEL_SIGNUP_CARDS.filter((c) => c.model !== 'table_reservation').map((card) => (
-            <li key={card.model}>
-              <p className="font-medium text-slate-900">{card.title}</p>
-              <p className="text-slate-600">{card.summary}</p>
-              <p className="mt-1 text-xs text-slate-500">Examples: {card.examples}</p>
-            </li>
-          ))}
-        </ul>
-      </details>
-
-      <p className="mb-3 text-center text-xs font-medium uppercase tracking-wide text-slate-400">
-        Or choose a specific trade
-      </p>
-
-      <div className="mb-6">
-        <input
-          type="text"
-          placeholder="Search trades…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm placeholder:text-slate-400 focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
-        />
-      </div>
-
-      <div className="space-y-6 max-h-[46vh] overflow-y-auto pr-2">
-        {filteredCategories.map((category) => {
-          const items = grouped[category]?.filter((bt) =>
-            bt.label.toLowerCase().includes(search.toLowerCase().trim()),
-          );
-          if (!items?.length) return null;
-          return (
-            <div key={category}>
-              <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-400">
-                {CATEGORY_LABELS[category] ?? category}
-              </h2>
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                {items.map((bt) => (
-                  <button
-                    key={bt.key}
-                    type="button"
-                    onClick={() => setSelected(bt.key)}
-                    className={`rounded-xl border px-4 py-3 text-left text-sm font-medium transition-all ${
-                      selected === bt.key
-                        ? 'border-brand-500 bg-brand-50 text-brand-700 ring-1 ring-brand-500'
-                        : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50'
-                    }`}
-                  >
-                    <span className="block">{bt.label}</span>
-                    <span className="mt-1 block text-xs font-normal text-slate-500">
-                      {BOOKING_MODEL_CHIP_LABEL[bt.model]}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      <div className="mt-4 flex flex-col items-center gap-2 border-t border-slate-100 pt-4 text-center">
-        <button
-          type="button"
-          onClick={() => setSelected('other')}
-          className={`text-sm font-medium transition-colors ${
-            selected === 'other' ? 'text-brand-600' : 'text-slate-500 hover:text-slate-700'
-          }`}
-        >
-          My trade isn&apos;t listed: use flexible appointments
-        </button>
+        {appointmentCards.map((card) => (
+          <div key={card.model} className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
+            <p className="text-sm font-semibold text-slate-900">{card.title}</p>
+            <p className="mt-1 text-xs text-slate-600">{card.summary}</p>
+            <p className="mt-2 text-xs text-slate-500">Examples: {card.examples}</p>
+          </div>
+        ))}
       </div>
 
       <div className="mt-8 flex justify-center">
         <button
           type="button"
-          disabled={!selected}
           onClick={handleContinue}
           className="rounded-xl bg-brand-600 px-8 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 disabled:opacity-50 transition-colors"
         >
