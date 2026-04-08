@@ -40,6 +40,13 @@ function poundsToMinor(pounds: string): number {
   return Math.round(parsed * 100);
 }
 
+/** Class timetable API expects `HH:MM` (two-digit hour). */
+function normalizeTimetableHHMM(t: string): string {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(t.trim());
+  if (!m) return t.trim();
+  return `${m[1]!.padStart(2, '0')}:${m[2]}`;
+}
+
 interface VenueOnboarding {
   id: string;
   name: string;
@@ -75,6 +82,8 @@ interface EventDraft {
 
 interface ClassDraft {
   name: string;
+  /** Team calendar column id (`unified_calendars.id`); required by POST /api/venue/classes. */
+  instructor_id: string;
   day_of_week: number;
   start_time: string;
   duration_minutes: number;
@@ -147,7 +156,15 @@ export default function OnboardingPage() {
 
   // Model D: Classes
   const [classes, setClasses] = useState<ClassDraft[]>([
-    { name: '', day_of_week: 1, start_time: '09:00', duration_minutes: 60, capacity: 15, price: '0.00' },
+    {
+      name: '',
+      instructor_id: '',
+      day_of_week: 1,
+      start_time: '09:00',
+      duration_minutes: 60,
+      capacity: 15,
+      price: '0.00',
+    },
   ]);
 
   // Model E: Resources
@@ -341,19 +358,34 @@ export default function OnboardingPage() {
 
   const rosterIds = useMemo(() => rosterList.map((r) => r.id), [rosterList]);
 
+  /** Default class calendar to first team column when roster loads (matches dashboard class form). */
+  useEffect(() => {
+    if (rosterList.length === 0) return;
+    const firstId = rosterList[0]!.id;
+    setClasses((prev) =>
+      prev.map((c) => (c.instructor_id.trim() ? c : { ...c, instructor_id: firstId })),
+    );
+  }, [rosterList]);
+
   useEffect(() => {
     if (!venue) return;
-    if (!isUnifiedSchedulingVenue(venue.booking_model)) {
+    const needsTeamRoster =
+      isUnifiedSchedulingVenue(venue.booking_model) || venue.booking_model === 'class_session';
+    if (!needsTeamRoster) {
       return;
     }
-    if (currentStepKey !== 'services' && currentStepKey !== 'hours' && currentStepKey !== 'team') return;
+    if (!['team', 'services', 'hours', 'classes'].includes(currentStepKey)) return;
     let cancelled = false;
     (async () => {
       try {
         const prRes = await fetch('/api/venue/practitioners?roster=1');
         if (!prRes.ok || cancelled) return;
-        const body = (await prRes.json()) as { practitioners?: Array<{ id: string; name: string }> };
-        const list = (body.practitioners ?? []).map((p) => ({ id: p.id, name: p.name }));
+        const body = (await prRes.json()) as {
+          practitioners?: Array<{ id: string; name: string; calendar_type?: string | null }>;
+        };
+        const list = (body.practitioners ?? [])
+          .filter((p) => (p.calendar_type ?? 'practitioner') !== 'resource')
+          .map((p) => ({ id: p.id, name: p.name }));
         if (!cancelled) setRosterList(list);
       } catch {
         /* non-blocking */
@@ -833,14 +865,26 @@ export default function OnboardingPage() {
         setStep((s) => s + 1);
         return;
       }
+      if (rosterList.length === 0) {
+        setError('No calendars found. Go back and complete the Calendars step first.');
+        return;
+      }
       const validClasses = classes.filter((c) => c.name.trim());
       if (validClasses.length === 0) {
         setError('Please add at least one class.');
         return;
       }
+      for (const c of validClasses) {
+        if (!c.instructor_id.trim()) {
+          setError('Select a calendar for each class.');
+          return;
+        }
+      }
       setSaving(true);
       try {
         for (const c of validClasses) {
+          const startTime = normalizeTimetableHHMM(c.start_time);
+
           const typeRes = await fetch('/api/venue/classes', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -849,10 +893,13 @@ export default function OnboardingPage() {
               duration_minutes: c.duration_minutes,
               capacity: c.capacity,
               price_pence: poundsToMinor(c.price),
+              instructor_id: c.instructor_id.trim(),
             }),
           });
-          if (!typeRes.ok) throw new Error('Failed to create class type');
-          const typeBody = await typeRes.json();
+          const typeBody = (await typeRes.json()) as { data?: { id?: string }; error?: string };
+          if (!typeRes.ok) {
+            throw new Error(typeBody.error ?? 'Failed to create class type');
+          }
           const classTypeId = typeBody.data?.id;
           if (!classTypeId) throw new Error('Class type ID missing from response');
 
@@ -862,10 +909,13 @@ export default function OnboardingPage() {
             body: JSON.stringify({
               class_type_id: classTypeId,
               day_of_week: c.day_of_week,
-              start_time: c.start_time,
+              start_time: startTime,
             }),
           });
-          if (!ttRes.ok) throw new Error('Failed to create timetable entry');
+          if (!ttRes.ok) {
+            const ttErr = (await ttRes.json().catch(() => ({}))) as { error?: string };
+            throw new Error(ttErr.error ?? 'Failed to create timetable entry');
+          }
         }
 
         const genRes = await fetch('/api/venue/classes/generate-instances', {
@@ -1491,6 +1541,33 @@ export default function OnboardingPage() {
                       </button>
                     )}
                   </div>
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    <div className="sm:col-span-2">
+                      <label className="block text-[10px] font-medium text-slate-500">Calendar</label>
+                      <select
+                        value={c.instructor_id}
+                        onChange={(e) => {
+                          const updated = [...classes];
+                          updated[i] = { ...c, instructor_id: e.target.value };
+                          setClasses(updated);
+                        }}
+                        className="mt-0.5 w-full rounded border border-slate-200 px-2 py-1.5 text-xs"
+                      >
+                        {rosterList.length === 0 ? (
+                          <option value="">Loading calendars…</option>
+                        ) : (
+                          rosterList.map((cal) => (
+                            <option key={cal.id} value={cal.id}>
+                              {cal.name}
+                            </option>
+                          ))
+                        )}
+                      </select>
+                      <p className="mt-1 text-[10px] text-slate-400">
+                        Sessions are scheduled on this team calendar (same as Class timetable in the dashboard).
+                      </p>
+                    </div>
+                  </div>
                   <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
                     <div>
                       <label className="block text-[10px] font-medium text-slate-500">Day</label>
@@ -1590,7 +1667,15 @@ export default function OnboardingPage() {
                 onClick={() =>
                   setClasses([
                     ...classes,
-                    { name: '', day_of_week: 1, start_time: '09:00', duration_minutes: 60, capacity: 15, price: '0.00' },
+                    {
+                      name: '',
+                      instructor_id: rosterList[0]?.id ?? '',
+                      day_of_week: 1,
+                      start_time: '09:00',
+                      duration_minutes: 60,
+                      capacity: 15,
+                      price: '0.00',
+                    },
                   ])
                 }
                 className="w-full rounded-xl border-2 border-dashed border-slate-200 py-3 text-sm text-slate-500 hover:border-brand-300 hover:text-brand-600"
