@@ -90,3 +90,17 @@ export function getVenueLocalDateAndMinutes(timezone: string, at: Date = new Dat
     minutesSinceMidnight: Number(get('hour')) * 60 + Number(get('minute')),
   };
 }
+
+/**
+ * When `bookingDateYmd` is "today" in the venue timezone, slot generation should exclude starts
+ * with minute-of-day ≤ this value (same clock as {@link getVenueLocalDateAndMinutes}).
+ */
+export function sameDaySlotCutoffForBookingDate(
+  bookingDateYmd: string,
+  venueTimezone: string,
+  at: Date = new Date(),
+): { venueDateYmd: string; minutesNow: number } | undefined {
+  const { dateYmd, minutesSinceMidnight } = getVenueLocalDateAndMinutes(venueTimezone, at);
+  if (bookingDateYmd !== dateYmd) return undefined;
+  return { venueDateYmd: dateYmd, minutesNow: minutesSinceMidnight };
+}

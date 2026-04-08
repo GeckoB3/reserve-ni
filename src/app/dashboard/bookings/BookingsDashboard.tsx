@@ -23,7 +23,12 @@ import { useToast } from '@/components/ui/Toast';
 import { DashboardStatCard } from '@/components/dashboard/DashboardStatCard';
 import type { BookingModel } from '@/types/booking-models';
 import { BOOKING_MODEL_ORDER } from '@/lib/booking/enabled-models';
-import { inferBookingRowModel, bookingModelShortLabel } from '@/lib/booking/infer-booking-row-model';
+import {
+  inferBookingRowModel,
+  bookingModelShortLabel,
+  isTableReservationBooking,
+  bookingStatusDisplayLabel,
+} from '@/lib/booking/infer-booking-row-model';
 
 interface BookingRow {
   id: string;
@@ -469,10 +474,12 @@ export function BookingsDashboard({
       if (!res.ok) {
         throw new Error('Failed to update booking status');
       }
+      const row = bookings.find((x) => x.id === bookingId);
+      const displayNew = bookingStatusDisplayLabel(newStatus, row ? isTableReservationBooking(row) : true);
       setUndoAction({
         id: crypto.randomUUID(),
         type: 'change_status',
-        description: `Status changed to ${newStatus}`,
+        description: `Status changed to ${displayNew}`,
         timestamp: Date.now(),
         previous_state: { bookingId, status: previous },
         current_state: { bookingId, status: newStatus },
@@ -624,10 +631,15 @@ export function BookingsDashboard({
     }
     if (isRevertTransition(booking.status, nextStatus)) {
       const revertAction = BOOKING_REVERT_ACTIONS[booking.status as BookingStatus];
+      const tableStyle = isTableReservationBooking(booking);
+      const confirmLabel =
+        booking.status === 'Seated' && nextStatus === 'Confirmed' && !tableStyle
+          ? 'Undo Start'
+          : revertAction?.label ?? `Revert to ${nextStatus}`;
       setConfirmDialog({
-        title: revertAction?.label ?? `Revert to ${nextStatus}`,
+        title: confirmLabel,
         message: `${booking.guest_name} (${booking.party_size}) at ${booking.booking_time.slice(0, 5)} will be changed from ${booking.status} back to ${nextStatus}.`,
-        confirmLabel: revertAction?.label ?? `Revert to ${nextStatus}`,
+        confirmLabel,
         onConfirm: () => { void updateBookingStatus(booking.id, nextStatus); },
       });
       return;
@@ -1094,7 +1106,7 @@ export function BookingsDashboard({
   );
 }
 
-function statusBadge(s: string) {
+function statusBadge(s: string, tableStyle: boolean) {
   const map: Record<string, { dot: string; bg: string; text: string }> = {
     Confirmed: { dot: 'bg-emerald-500', bg: 'bg-emerald-50', text: 'text-emerald-700' },
     Pending: { dot: 'bg-amber-500', bg: 'bg-amber-50', text: 'text-amber-700' },
@@ -1104,10 +1116,11 @@ function statusBadge(s: string) {
     'No-Show': { dot: 'bg-red-600', bg: 'bg-red-50', text: 'text-red-700' },
   };
   const style = map[s] ?? { dot: 'bg-slate-400', bg: 'bg-slate-50', text: 'text-slate-600' };
+  const label = bookingStatusDisplayLabel(s, tableStyle);
   return (
     <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${style.bg} ${style.text}`}>
       <span className={`h-1.5 w-1.5 rounded-full ${style.dot}`} />
-      {s}
+      {label}
     </span>
   );
 }
@@ -1240,7 +1253,7 @@ function BookingsAccordionList({
                         {bookingModelShortLabel(inferBookingRowModel(booking))}
                       </span>
                     )}
-                    {statusBadge(booking.status)}
+                    {statusBadge(booking.status, isTableReservationBooking(booking))}
                     {booking.dietary_notes && (
                       <span className="hidden rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700 sm:inline-block" title={booking.dietary_notes}>
                         Dietary
@@ -1268,8 +1281,13 @@ function BookingsAccordionList({
                 </div>
                 {(() => {
                   const action = BOOKING_PRIMARY_ACTIONS[booking.status as BookingStatus];
+                  const tableStyle = isTableReservationBooking(booking);
+                  const primaryLabel =
+                    action && action.target === 'Seated' && !tableStyle ? 'Start' : action?.label;
+                  const showUndoStart =
+                    booking.status === 'Seated' && !tableStyle;
                   const showChangeTable = coversChangeTableEnabled && booking.status === 'Seated';
-                  if (!action && !showChangeTable) return null;
+                  if (!action && !showChangeTable && !showUndoStart) return null;
                   return (
                      
                     <div onClick={(e) => e.stopPropagation()} className="flex flex-shrink-0 flex-wrap items-center justify-end gap-1.5">
@@ -1278,9 +1296,19 @@ function BookingsAccordionList({
                           type="button"
                           onClick={() => onStatusAction(booking, action.target)}
                           className="inline-flex items-center rounded-lg bg-brand-600 px-2.5 py-1 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
-                          aria-label={`${action.label} booking for ${booking.guest_name}`}
+                          aria-label={`${primaryLabel ?? action.label} booking for ${booking.guest_name}`}
                         >
-                          {action.label}
+                          {primaryLabel}
+                        </button>
+                      )}
+                      {showUndoStart && (
+                        <button
+                          type="button"
+                          onClick={() => onStatusAction(booking, 'Confirmed')}
+                          className="inline-flex items-center rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-900 shadow-sm transition-colors hover:bg-amber-100 focus:outline-none focus:ring-2 focus:ring-amber-400/30"
+                          aria-label={`Undo start for ${booking.guest_name}`}
+                        >
+                          Undo Start
                         </button>
                       )}
                       {showChangeTable && (

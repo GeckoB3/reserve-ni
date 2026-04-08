@@ -16,6 +16,7 @@ import { ViewToolbar } from '@/components/dashboard/ViewToolbar';
 import type { ViewToolbarSummary } from '@/components/dashboard/ViewToolbar';
 import { coversInUseAtTime } from '@/lib/table-management/covers-at-time';
 import { computeNextBookingsSlot } from '@/lib/table-management/next-bookings-slot';
+import { bookingStatusDisplayLabel } from '@/lib/booking/infer-booking-row-model';
 
 function formatDateInput(d: Date): string {
   const y = d.getFullYear();
@@ -751,7 +752,7 @@ export function TableGridView({
       const action: UndoAction = {
         id: crypto.randomUUID(),
         type: 'change_status',
-        description: `Status changed to ${nextStatus}`,
+        description: `Status changed to ${bookingStatusDisplayLabel(nextStatus, true)}`,
         timestamp: Date.now(),
         previous_state: { bookingId, status: currentStatus },
         current_state: { bookingId, status: nextStatus },

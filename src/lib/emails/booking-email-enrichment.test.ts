@@ -118,7 +118,7 @@ describe('enrichBookingEmailForComms', () => {
     expect(out.appointment_service_name).toBe('Vinyasa Flow');
   });
 
-  it('adds resource name and end time label for resource_booking rows', async () => {
+  it('adds resource name and host calendar name for resource_booking rows', async () => {
     const client = makeMockClient([
       {
         table: 'bookings',
@@ -143,7 +143,11 @@ describe('enrichBookingEmailForComms', () => {
       },
       {
         table: 'venue_resources',
-        data: { name: 'Court 2' },
+        data: { name: 'Court 2', display_on_calendar_id: 'host-cal-uuid' },
+      },
+      {
+        table: 'unified_calendars',
+        data: { name: 'Reception' },
       },
     ]);
 
@@ -151,6 +155,6 @@ describe('enrichBookingEmailForComms', () => {
 
     expect(out.booking_model).toBe('resource_booking');
     expect(out.appointment_service_name).toBe('Court 2');
-    expect(out.practitioner_name).toBe('Until 16:30');
+    expect(out.practitioner_name).toBe('Reception');
   });
 });

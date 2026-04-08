@@ -109,7 +109,12 @@ export function resourceSlotsUrl(
   resourceId: string,
 ): string {
   if (audience === 'staff') {
-    return `/api/venue/resource-availability?date=${encodeURIComponent(date)}&duration=${durationMinutes}`;
+    const qs = new URLSearchParams({
+      date,
+      duration: String(durationMinutes),
+      resource_id: resourceId,
+    });
+    return `/api/venue/resource-availability?${qs}`;
   }
   const params = new URLSearchParams({
     venue_id: venueId,

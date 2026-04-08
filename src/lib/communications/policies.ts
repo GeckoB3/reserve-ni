@@ -1,0 +1,385 @@
+import { getSupabaseAdminClient } from '@/lib/supabase';
+import type { BookingModel } from '@/types/booking-models';
+import { isCdeBookingModel } from '@/lib/booking/cde-booking';
+import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
+import { isAppointmentPlanTier } from '@/lib/tier-enforcement';
+
+export type CommunicationLane = 'table' | 'appointments_other';
+export type CommunicationChannel = 'email' | 'sms';
+
+export type CommunicationMessageKey =
+  | 'booking_confirmation'
+  | 'deposit_payment_request'
+  | 'deposit_confirmation'
+  | 'confirm_or_cancel_prompt'
+  | 'deposit_payment_reminder'
+  | 'pre_visit_reminder'
+  | 'booking_modification'
+  | 'cancellation_confirmation'
+  | 'auto_cancel_notification'
+  | 'custom_message'
+  | 'no_show_notification'
+  | 'post_visit_thankyou';
+
+export interface LaneMessagePolicy {
+  enabled: boolean;
+  channels: CommunicationChannel[];
+  emailCustomMessage: string | null;
+  smsCustomMessage: string | null;
+  hoursBefore: number | null;
+  hoursAfter: number | null;
+}
+
+export type LaneCommunicationPolicies = Record<CommunicationMessageKey, LaneMessagePolicy>;
+
+export interface VenueCommunicationPolicies {
+  table: LaneCommunicationPolicies;
+  appointments_other: LaneCommunicationPolicies;
+}
+
+const SETTINGS_CACHE = new Map<
+  string,
+  { data: VenueCommunicationPolicies; ts: number }
+>();
+const CACHE_TTL_MS = 60_000;
+
+const EMAIL_AND_SMS: CommunicationChannel[] = ['email', 'sms'];
+const EMAIL_ONLY: CommunicationChannel[] = ['email'];
+
+function buildDefaultLanePolicies(): LaneCommunicationPolicies {
+  return {
+    booking_confirmation: {
+      enabled: true,
+      channels: ['email'],
+      emailCustomMessage: null,
+      smsCustomMessage: null,
+      hoursBefore: null,
+      hoursAfter: null,
+    },
+    deposit_payment_request: {
+      enabled: true,
+      channels: ['email', 'sms'],
+      emailCustomMessage: null,
+      smsCustomMessage: null,
+      hoursBefore: null,
+      hoursAfter: null,
+    },
+    deposit_confirmation: {
+      enabled: true,
+      channels: ['email'],
+      emailCustomMessage: null,
+      smsCustomMessage: null,
+      hoursBefore: null,
+      hoursAfter: null,
+    },
+    confirm_or_cancel_prompt: {
+      enabled: true,
+      channels: ['email', 'sms'],
+      emailCustomMessage: null,
+      smsCustomMessage: null,
+      hoursBefore: 24,
+      hoursAfter: null,
+    },
+    deposit_payment_reminder: {
+      enabled: true,
+      channels: ['sms'],
+      emailCustomMessage: null,
+      smsCustomMessage: null,
+      hoursBefore: 2,
+      hoursAfter: null,
+    },
+    pre_visit_reminder: {
+      enabled: true,
+      channels: ['email', 'sms'],
+      emailCustomMessage: null,
+      smsCustomMessage: null,
+      hoursBefore: 2,
+      hoursAfter: null,
+    },
+    booking_modification: {
+      enabled: true,
+      channels: ['email'],
+      emailCustomMessage: null,
+      smsCustomMessage: null,
+      hoursBefore: null,
+      hoursAfter: null,
+    },
+    cancellation_confirmation: {
+      enabled: true,
+      channels: ['email'],
+      emailCustomMessage: null,
+      smsCustomMessage: null,
+      hoursBefore: null,
+      hoursAfter: null,
+    },
+    auto_cancel_notification: {
+      enabled: true,
+      channels: ['email', 'sms'],
+      emailCustomMessage: null,
+      smsCustomMessage: null,
+      hoursBefore: null,
+      hoursAfter: null,
+    },
+    custom_message: {
+      enabled: true,
+      channels: ['email', 'sms'],
+      emailCustomMessage: null,
+      smsCustomMessage: null,
+      hoursBefore: null,
+      hoursAfter: null,
+    },
+    no_show_notification: {
+      enabled: false,
+      channels: ['email'],
+      emailCustomMessage: null,
+      smsCustomMessage: null,
+      hoursBefore: null,
+      hoursAfter: null,
+    },
+    post_visit_thankyou: {
+      enabled: true,
+      channels: ['email'],
+      emailCustomMessage: null,
+      smsCustomMessage: null,
+      hoursBefore: null,
+      hoursAfter: 4,
+    },
+  };
+}
+
+export function defaultCommunicationPolicies(): VenueCommunicationPolicies {
+  return {
+    table: buildDefaultLanePolicies(),
+    appointments_other: buildDefaultLanePolicies(),
+  };
+}
+
+const ALLOWED_CHANNELS_BY_MESSAGE: Record<
+  CommunicationMessageKey,
+  CommunicationChannel[]
+> = {
+  booking_confirmation: EMAIL_AND_SMS,
+  deposit_payment_request: EMAIL_AND_SMS,
+  deposit_confirmation: EMAIL_ONLY,
+  confirm_or_cancel_prompt: EMAIL_AND_SMS,
+  deposit_payment_reminder: EMAIL_AND_SMS,
+  pre_visit_reminder: EMAIL_AND_SMS,
+  booking_modification: EMAIL_AND_SMS,
+  cancellation_confirmation: EMAIL_AND_SMS,
+  auto_cancel_notification: EMAIL_AND_SMS,
+  custom_message: EMAIL_AND_SMS,
+  no_show_notification: EMAIL_ONLY,
+  post_visit_thankyou: EMAIL_ONLY,
+};
+
+function sanitizeChannels(
+  messageKey: CommunicationMessageKey,
+  raw: unknown,
+  fallback: CommunicationChannel[],
+): CommunicationChannel[] {
+  if (!Array.isArray(raw)) return [...fallback];
+  const allowed = new Set(ALLOWED_CHANNELS_BY_MESSAGE[messageKey]);
+  const next = raw.filter(
+    (value): value is CommunicationChannel =>
+      (value === 'email' || value === 'sms') && allowed.has(value),
+  );
+  return next.length > 0 ? next : [...fallback];
+}
+
+function sanitizeNumber(
+  raw: unknown,
+  fallback: number | null,
+  opts?: { min?: number; max?: number },
+): number | null {
+  if (raw == null) return fallback;
+  if (typeof raw !== 'number' || !Number.isFinite(raw)) return fallback;
+  let value = Math.round(raw);
+  if (opts?.min != null) value = Math.max(opts.min, value);
+  if (opts?.max != null) value = Math.min(opts.max, value);
+  return value;
+}
+
+function sanitizeMessagePolicy(
+  messageKey: CommunicationMessageKey,
+  raw: unknown,
+  fallback: LaneMessagePolicy,
+): LaneMessagePolicy {
+  if (!raw || typeof raw !== 'object') return { ...fallback };
+  const row = raw as Record<string, unknown>;
+  return {
+    enabled: row.enabled !== false,
+    channels: sanitizeChannels(messageKey, row.channels, fallback.channels),
+    emailCustomMessage:
+      typeof row.emailCustomMessage === 'string' ? row.emailCustomMessage : null,
+    smsCustomMessage:
+      typeof row.smsCustomMessage === 'string' ? row.smsCustomMessage : null,
+    hoursBefore: sanitizeNumber(row.hoursBefore, fallback.hoursBefore, {
+      min: 1,
+      max: 168,
+    }),
+    hoursAfter: sanitizeNumber(row.hoursAfter, fallback.hoursAfter, {
+      min: 1,
+      max: 168,
+    }),
+  };
+}
+
+function sanitizeLanePolicies(
+  raw: unknown,
+  fallback: LaneCommunicationPolicies,
+): LaneCommunicationPolicies {
+  const row = raw && typeof raw === 'object'
+    ? (raw as Record<string, unknown>)
+    : {};
+  return {
+    booking_confirmation: sanitizeMessagePolicy(
+      'booking_confirmation',
+      row.booking_confirmation,
+      fallback.booking_confirmation,
+    ),
+    deposit_payment_request: sanitizeMessagePolicy(
+      'deposit_payment_request',
+      row.deposit_payment_request,
+      fallback.deposit_payment_request,
+    ),
+    deposit_confirmation: sanitizeMessagePolicy(
+      'deposit_confirmation',
+      row.deposit_confirmation,
+      fallback.deposit_confirmation,
+    ),
+    confirm_or_cancel_prompt: sanitizeMessagePolicy(
+      'confirm_or_cancel_prompt',
+      row.confirm_or_cancel_prompt,
+      fallback.confirm_or_cancel_prompt,
+    ),
+    deposit_payment_reminder: sanitizeMessagePolicy(
+      'deposit_payment_reminder',
+      row.deposit_payment_reminder,
+      fallback.deposit_payment_reminder,
+    ),
+    pre_visit_reminder: sanitizeMessagePolicy(
+      'pre_visit_reminder',
+      row.pre_visit_reminder,
+      fallback.pre_visit_reminder,
+    ),
+    booking_modification: sanitizeMessagePolicy(
+      'booking_modification',
+      row.booking_modification,
+      fallback.booking_modification,
+    ),
+    cancellation_confirmation: sanitizeMessagePolicy(
+      'cancellation_confirmation',
+      row.cancellation_confirmation,
+      fallback.cancellation_confirmation,
+    ),
+    auto_cancel_notification: sanitizeMessagePolicy(
+      'auto_cancel_notification',
+      row.auto_cancel_notification,
+      fallback.auto_cancel_notification,
+    ),
+    custom_message: sanitizeMessagePolicy(
+      'custom_message',
+      row.custom_message,
+      fallback.custom_message,
+    ),
+    no_show_notification: sanitizeMessagePolicy(
+      'no_show_notification',
+      row.no_show_notification,
+      fallback.no_show_notification,
+    ),
+    post_visit_thankyou: sanitizeMessagePolicy(
+      'post_visit_thankyou',
+      row.post_visit_thankyou,
+      fallback.post_visit_thankyou,
+    ),
+  };
+}
+
+export function parseCommunicationPolicies(
+  raw: unknown,
+): VenueCommunicationPolicies {
+  const fallback = defaultCommunicationPolicies();
+  if (!raw || typeof raw !== 'object') return fallback;
+  const row = raw as Record<string, unknown>;
+  return {
+    table: sanitizeLanePolicies(row.table, fallback.table),
+    appointments_other: sanitizeLanePolicies(
+      row.appointments_other,
+      fallback.appointments_other,
+    ),
+  };
+}
+
+export function clearCommunicationPoliciesCache(venueId?: string): void {
+  if (venueId) {
+    SETTINGS_CACHE.delete(venueId);
+    return;
+  }
+  SETTINGS_CACHE.clear();
+}
+
+export async function getVenueCommunicationPolicies(
+  venueId: string,
+): Promise<VenueCommunicationPolicies> {
+  const cached = SETTINGS_CACHE.get(venueId);
+  if (cached && Date.now() - cached.ts < CACHE_TTL_MS) {
+    return cached.data;
+  }
+
+  const admin = getSupabaseAdminClient();
+  const { data } = await admin
+    .from('venues')
+    .select('communication_policies')
+    .eq('id', venueId)
+    .maybeSingle();
+
+  const parsed = parseCommunicationPolicies(
+    (data as { communication_policies?: unknown } | null)?.communication_policies,
+  );
+  SETTINGS_CACHE.set(venueId, { data: parsed, ts: Date.now() });
+  return parsed;
+}
+
+export function mergeCommunicationPoliciesPatch(
+  current: VenueCommunicationPolicies,
+  patch: Partial<Record<CommunicationLane, Partial<Record<CommunicationMessageKey, Partial<LaneMessagePolicy>>>>>,
+): VenueCommunicationPolicies {
+  const next: VenueCommunicationPolicies = {
+    table: { ...current.table },
+    appointments_other: { ...current.appointments_other },
+  };
+
+  for (const lane of ['table', 'appointments_other'] as const) {
+    const lanePatch = patch[lane];
+    if (!lanePatch) continue;
+    for (const messageKey of Object.keys(lanePatch) as CommunicationMessageKey[]) {
+      const existing = next[lane][messageKey];
+      const messagePatch = lanePatch[messageKey];
+      if (!messagePatch) continue;
+      next[lane][messageKey] = sanitizeMessagePolicy(messageKey, {
+        ...existing,
+        ...messagePatch,
+      }, existing);
+    }
+  }
+
+  return parseCommunicationPolicies(next);
+}
+
+export function inferCommunicationLaneFromBookingModel(
+  bookingModel: BookingModel | string | null | undefined,
+): CommunicationLane {
+  if (bookingModel === 'table_reservation') return 'table';
+  return 'appointments_other';
+}
+
+export function shouldShowAppointmentsOtherLane(opts: {
+  pricingTier?: string | null;
+  bookingModel?: BookingModel | string | null;
+  enabledModels?: BookingModel[];
+}): boolean {
+  const primary = (opts.bookingModel as BookingModel | undefined) ?? 'table_reservation';
+  if (isAppointmentPlanTier(opts.pricingTier)) return true;
+  if (isUnifiedSchedulingVenue(primary) || isCdeBookingModel(primary)) return true;
+  return primary === 'table_reservation' && (opts.enabledModels?.length ?? 0) > 0;
+}

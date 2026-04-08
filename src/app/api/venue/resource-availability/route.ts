@@ -6,8 +6,9 @@ import { resolveVenueMode } from '@/lib/venue-mode';
 import { fetchResourceInput, computeResourceAvailability } from '@/lib/availability/resource-booking-engine';
 
 /**
- * GET /api/venue/resource-availability?date=YYYY-MM-DD&duration=60
+ * GET /api/venue/resource-availability?date=YYYY-MM-DD&duration=60&resource_id=<optional uuid>
  * Staff-only resource slots for the signed-in venue (primary or secondary `resource_booking`).
+ * When `resource_id` is set, only that resource is computed (faster than loading all resources).
  */
 export async function GET(request: NextRequest) {
   try {
@@ -26,6 +27,12 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'duration must be between 5 and 1440 minutes' }, { status: 400 });
     }
 
+    const resourceIdParam = request.nextUrl.searchParams.get('resource_id');
+    const resourceId =
+      resourceIdParam && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(resourceIdParam)
+        ? resourceIdParam
+        : undefined;
+
     const admin = getSupabaseAdminClient();
     const venueMode = await resolveVenueMode(admin, staff.venue_id);
     const canResource =
@@ -35,7 +42,12 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'This venue does not offer resource bookings' }, { status: 403 });
     }
 
-    const input = await fetchResourceInput({ supabase: admin, venueId: staff.venue_id, date });
+    const input = await fetchResourceInput({
+      supabase: admin,
+      venueId: staff.venue_id,
+      date,
+      resourceId,
+    });
     const result = computeResourceAvailability(input, durationMinutes);
 
     return NextResponse.json({

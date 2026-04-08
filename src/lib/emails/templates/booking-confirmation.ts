@@ -155,7 +155,7 @@ export function renderBookingConfirmation(
         if (booking.appointment_service_name)
           textParts.push(`Service: ${booking.appointment_service_name}`);
         if (booking.practitioner_name)
-          textParts.push(`Staff: ${booking.practitioner_name}`);
+          textParts.push(`With: ${booking.practitioner_name}`);
       }
       if (booking.appointment_price_display)
         textParts.push(`Price: ${booking.appointment_price_display}`);

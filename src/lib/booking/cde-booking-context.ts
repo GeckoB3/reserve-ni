@@ -4,6 +4,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { BookingModel } from '@/types/booking-models';
+import { getResourceBookingEmailLabels } from '@/lib/booking/resource-booking-email-labels';
 
 export interface CdeBookingContext {
   inferred_model: BookingModel;
@@ -61,12 +62,11 @@ export async function resolveCdeBookingContext(
 
   const rid = booking.resource_id;
   if (rid) {
-    const { data: res } = await supabase.from('venue_resources').select('name').eq('id', rid).maybeSingle();
-    const end = booking.booking_end_time != null ? String(booking.booking_end_time).slice(0, 5) : null;
+    const { resourceName, hostCalendarName } = await getResourceBookingEmailLabels(supabase, rid);
     return {
       inferred_model: 'resource_booking',
-      title: (res as { name?: string } | null)?.name ?? 'Resource',
-      subtitle: end ? `Until ${end}` : null,
+      title: resourceName ?? 'Resource',
+      subtitle: hostCalendarName ?? null,
     };
   }
 

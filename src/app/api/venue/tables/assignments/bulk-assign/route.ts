@@ -6,6 +6,7 @@ import { BOOKING_ACTIVE_STATUSES } from '@/lib/table-management/constants';
 import { autoAssignTable } from '@/lib/table-availability';
 import { syncTableStatusesForBooking } from '@/lib/table-management/lifecycle';
 import { resolveTableAssignmentDurationBuffer } from '@/lib/table-management/booking-table-duration';
+import { isTableReservationBooking } from '@/lib/booking/infer-booking-row-model';
 
 const bodySchema = z.object({
   dry_run: z.boolean().optional(),
@@ -34,6 +35,14 @@ type BookingRow = {
   party_size: number;
   status: string;
   service_id: string | null;
+  experience_event_id?: string | null;
+  class_instance_id?: string | null;
+  resource_id?: string | null;
+  event_session_id?: string | null;
+  calendar_id?: string | null;
+  service_item_id?: string | null;
+  practitioner_id?: string | null;
+  appointment_service_id?: string | null;
   guest: { name: string } | { name: string }[] | null;
 };
 
@@ -59,7 +68,9 @@ export async function POST(request: NextRequest) {
 
   const { data: rawBookings, error: bookingsError } = await staff.db
     .from('bookings')
-    .select('id, booking_date, booking_time, estimated_end_time, party_size, status, guest:guests(name)')
+    .select(
+      'id, booking_date, booking_time, estimated_end_time, party_size, status, service_id, experience_event_id, class_instance_id, resource_id, event_session_id, calendar_id, service_item_id, practitioner_id, appointment_service_id, guest:guests(name)',
+    )
     .eq('venue_id', staff.venue_id)
     .gte('booking_date', today)
     .in('status', [...BOOKING_ACTIVE_STATUSES])
@@ -94,7 +105,9 @@ export async function POST(request: NextRequest) {
   }
 
   const assignedIds = new Set((assignmentRows ?? []).map((row) => row.booking_id));
-  const unassignedBookings = bookings.filter((booking) => !assignedIds.has(booking.id));
+  const unassignedBookings = bookings.filter(
+    (booking) => !assignedIds.has(booking.id) && isTableReservationBooking(booking),
+  );
 
   if (dryRun) {
     return NextResponse.json({

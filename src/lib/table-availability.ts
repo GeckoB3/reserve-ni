@@ -11,6 +11,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type { VenueTable, TableAvailabilityCandidate, TableGridData, TableGridCell } from '@/types/table-management';
 import { timeToMinutes, minutesToTime } from '@/lib/availability';
 import { BOOKING_ACTIVE_STATUSES } from '@/lib/table-management/constants';
+import { isTableReservationBooking } from '@/lib/booking/infer-booking-row-model';
 import {
   detectAdjacentTables,
   findValidCombinations,
@@ -239,7 +240,9 @@ export async function getTableAvailabilityGrid(
       .order('sort_order'),
     supabase
       .from('bookings')
-      .select('id, booking_time, estimated_end_time, party_size, status, deposit_status, dietary_notes, occasion, guest:guests!inner(name)')
+      .select(
+        'id, booking_time, estimated_end_time, party_size, status, deposit_status, dietary_notes, occasion, experience_event_id, class_instance_id, resource_id, event_session_id, calendar_id, service_item_id, practitioner_id, appointment_service_id, guest:guests!inner(name)',
+      )
       .eq('venue_id', venueId)
       .eq('booking_date', date)
       .in('status', [...BOOKING_ACTIVE_STATUSES]),
@@ -262,6 +265,14 @@ export async function getTableAvailabilityGrid(
     deposit_status?: string | null;
     dietary_notes: string | null;
     occasion: string | null;
+    experience_event_id?: string | null;
+    class_instance_id?: string | null;
+    resource_id?: string | null;
+    event_session_id?: string | null;
+    calendar_id?: string | null;
+    service_item_id?: string | null;
+    practitioner_id?: string | null;
+    appointment_service_id?: string | null;
     guest: { name: string } | { name: string }[];
   }>;
   const blocks = (blocksRes.data ?? []) as TableBlock[];
@@ -380,8 +391,12 @@ export async function getTableAvailabilityGrid(
     Array.from(bookingToTables.keys()),
   );
   const comboBookingsInUse = Array.from(bookingToTables.values()).filter((tableIds) => tableIds.length > 1).length;
+  /** Only Model A table reservations need a physical table; appointments/C/D/E do not. */
+  const tableReservationIds = new Set(
+    rawBookings.filter((row) => isTableReservationBooking(row)).map((row) => row.id),
+  );
   const unassigned = bookings
-    .filter((b) => !assignedBookingIds.has(b.id))
+    .filter((b) => !assignedBookingIds.has(b.id) && tableReservationIds.has(b.id))
     .map((b) => {
       const range = getBookingTimeRange(b);
       return {

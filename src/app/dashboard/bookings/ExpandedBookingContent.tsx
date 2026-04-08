@@ -13,7 +13,11 @@ import { ModifyBookingInline } from '@/components/booking/ModifyBookingInline';
 import { BookingNotesEditablePanel } from '@/components/booking/BookingNotesEditablePanel';
 import type { BookingNotesVariant } from '@/components/booking/BookingNotesEditablePanel';
 import type { BookingModel } from '@/types/booking-models';
-import { bookingModelShortLabel, inferBookingRowModel } from '@/lib/booking/infer-booking-row-model';
+import {
+  bookingModelShortLabel,
+  inferBookingRowModel,
+  isTableReservationBooking,
+} from '@/lib/booking/infer-booking-row-model';
 
 interface BookingRow {
   id: string;
@@ -169,6 +173,24 @@ export function ExpandedBookingContent({
   const canCancel = canTransitionBookingStatus(booking.status, 'Cancelled');
   const canNoShow = canTransitionBookingStatus(booking.status, 'No-Show');
   const revertAction = BOOKING_REVERT_ACTIONS[booking.status as BookingStatus];
+  const tableStyle = isTableReservationBooking(booking);
+
+  const forwardPrimaryLabel = (target: BookingStatus, defaultLabel: string) => {
+    if (target === 'Seated' && !tableStyle) return 'Start';
+    return defaultLabel;
+  };
+
+  const revertButtonLabel = () => {
+    if (!revertAction) return '';
+    if (
+      revertAction.target === 'Confirmed' &&
+      booking.status === 'Seated' &&
+      !tableStyle
+    ) {
+      return 'Undo Start';
+    }
+    return revertAction.label;
+  };
 
   const forwardActions = (
     [
@@ -324,16 +346,24 @@ export function ExpandedBookingContent({
           <button
             key={action.target}
             type="button"
-            onClick={() => handleStatusClick(action.target, action.label)}
+            onClick={() =>
+              handleStatusClick(
+                action.target,
+                forwardPrimaryLabel(action.target, action.label),
+              )
+            }
             className="inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-medium text-white shadow-sm transition-colors hover:bg-brand-700"
           >
             {action.target === 'Confirmed' && (
               <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" /></svg>
             )}
-            {action.target === 'Seated' && (
+            {action.target === 'Seated' && tableStyle && (
               <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z" /></svg>
             )}
-            {action.label}
+            {action.target === 'Seated' && !tableStyle && (
+              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 0 1 0 1.972l-11.54 6.347a1.125 1.125 0 0 1-1.667-.986V5.653Z" /></svg>
+            )}
+            {forwardPrimaryLabel(action.target, action.label)}
           </button>
         ))}
 
@@ -350,11 +380,13 @@ export function ExpandedBookingContent({
         {revertAction && (
           <button
             type="button"
-            onClick={() => handleStatusClick(revertAction.target, revertAction.label)}
+            onClick={() =>
+              handleStatusClick(revertAction.target, revertButtonLabel())
+            }
             className="inline-flex items-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-800 transition-colors hover:bg-amber-100"
           >
             <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M9 15 3 9m0 0 6-6M3 9h12a6 6 0 0 1 0 12h-3" /></svg>
-            {revertAction.label}
+            {revertButtonLabel()}
           </button>
         )}
 

@@ -45,6 +45,7 @@ import {
   computeResourceAvailability,
   type ResourceBooking as EngineResourceBooking,
 } from '@/lib/availability/resource-booking-engine';
+import { sameDaySlotCutoffForBookingDate } from '@/lib/venue/venue-local-clock';
 import type { ClassPaymentRequirement, VenueResource, WorkingHours } from '@/types/booking-models';
 import type { ScheduleBlockDTO } from '@/types/schedule-blocks';
 import {
@@ -632,6 +633,7 @@ export function PractitionerCalendarView({
   });
 
   const [openingHours, setOpeningHours] = useState<OpeningHours | null>(null);
+  const [venueTimezone, setVenueTimezone] = useState<string>('Europe/London');
   const [practitioners, setPractitioners] = useState<Practitioner[]>([]);
   const [services, setServices] = useState<AppointmentService[]>([]);
   const [bookings, setBookings] = useState<Booking[]>([]);
@@ -799,6 +801,8 @@ export function PractitionerCalendarView({
       .then((r) => (r.ok ? r.json() : null))
       .then((v) => {
         if (v?.opening_hours) setOpeningHours(v.opening_hours as OpeningHours);
+        const tz = (v as { timezone?: string | null } | null)?.timezone;
+        if (typeof tz === 'string' && tz.trim() !== '') setVenueTimezone(tz.trim());
         const g = (v as { no_show_grace_minutes?: number } | null)?.no_show_grace_minutes;
         if (typeof g === 'number' && g >= 10 && g <= 60) setNoShowGraceMinutes(g);
       })
@@ -921,8 +925,9 @@ export function PractitionerCalendarView({
             booking_end_time: (b.booking_end_time ?? b.booking_time).slice(0, 5),
             status: b.status,
           }));
+        const sameDaySlotCutoff = sameDaySlotCutoffForBookingDate(date, venueTimezone) ?? undefined;
         const results = computeResourceAvailability(
-          { date, resources: [vr], existingBookings },
+          { date, resources: [vr], existingBookings, sameDaySlotCutoff },
           vr.min_booking_minutes,
         );
         const res0 = results[0];
@@ -941,7 +946,7 @@ export function PractitionerCalendarView({
       if (mint.length > 0) out.set(prac.id, mint);
     }
     return out;
-  }, [viewMode, date, columnPractitioners, venueResources, bookings, startHour, venueId]);
+  }, [viewMode, date, columnPractitioners, venueResources, bookings, startHour, venueId, venueTimezone]);
 
   const filteredPractitioners = useMemo(
     () =>

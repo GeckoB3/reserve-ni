@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff } from '@/lib/venue-auth';
 import { BOOKING_ACTIVE_STATUSES } from '@/lib/table-management/constants';
+import { isTableReservationBooking } from '@/lib/booking/infer-booking-row-model';
 
 /**
  * GET /api/venue/bookings/list?date=YYYY-MM-DD&status=Confirmed|Pending|...
@@ -161,13 +162,19 @@ export async function GET(request: NextRequest) {
         const active = new Set<string>(BOOKING_ACTIVE_STATUSES);
         enriched = enriched.filter((b: Record<string, unknown>) => {
           const assigns = (b.table_assignments as Array<unknown>) ?? [];
-          return (
-            !b.practitioner_id &&
-            !b.calendar_id &&
-            typeof b.status === 'string' &&
-            active.has(b.status as string) &&
-            assigns.length === 0
-          );
+          if (typeof b.status !== 'string' || !active.has(b.status as string) || assigns.length > 0) {
+            return false;
+          }
+          return isTableReservationBooking({
+            experience_event_id: b.experience_event_id as string | null | undefined,
+            class_instance_id: b.class_instance_id as string | null | undefined,
+            resource_id: b.resource_id as string | null | undefined,
+            event_session_id: b.event_session_id as string | null | undefined,
+            calendar_id: b.calendar_id as string | null | undefined,
+            service_item_id: b.service_item_id as string | null | undefined,
+            practitioner_id: b.practitioner_id as string | null | undefined,
+            appointment_service_id: b.appointment_service_id as string | null | undefined,
+          });
         });
       }
     }

@@ -17,6 +17,7 @@ import { coversInUseAtTime } from '@/lib/table-management/covers-at-time';
 import { computeNextBookingsSlot } from '@/lib/table-management/next-bookings-slot';
 import { computeValidMoveTargets, resolveDropTarget, type CombinationInfo, type BookingMoveContext } from '@/lib/table-management/move-validation';
 import type { FloorDragEvent } from './LiveFloorCanvas';
+import { bookingStatusDisplayLabel } from '@/lib/booking/infer-booking-row-model';
 
 const LiveFloorCanvas = dynamic(() => import('./LiveFloorCanvas'), { ssr: false });
 
@@ -383,7 +384,7 @@ export function FloorPlanLiveView({
       }
       setUndoAction({
         id: crypto.randomUUID(), type: 'change_status',
-        description: `Status changed to ${newStatus}`, timestamp: Date.now(),
+        description: `Status changed to ${bookingStatusDisplayLabel(newStatus, true)}`, timestamp: Date.now(),
         previous_state: { bookingId, status: currentStatus },
         current_state: { bookingId, status: newStatus },
       });

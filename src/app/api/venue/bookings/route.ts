@@ -29,7 +29,12 @@ import { getCancellationNoticeHoursForBooking, parseExtendedBookingRules } from 
 import { resolveCancellationNoticeHoursForCreate } from '@/lib/booking/resolve-cancellation-notice-hours';
 import { applyStaffBookingPaymentAndComms } from '@/lib/booking/staff-booking-payment-comms';
 import { fetchClassInput, computeClassAvailability } from '@/lib/availability/class-session-engine';
-import { fetchResourceInput, computeResourceAvailability } from '@/lib/availability/resource-booking-engine';
+import { getResourceBookingEmailLabels } from '@/lib/booking/resource-booking-email-labels';
+import {
+  fetchResourceInput,
+  computeResourceAvailability,
+  isResourceBookingStartInPast,
+} from '@/lib/availability/resource-booking-engine';
 import { mergeAppointmentServiceWithPractitionerLink } from '@/lib/appointments/merge-service-with-overrides';
 import { resolveAppointmentServiceOnlineCharge } from '@/lib/appointments/appointment-service-payment';
 import { isGuestBookingDateAllowed, loadServiceEntityBookingWindow } from '@/lib/booking/entity-booking-window';
@@ -555,26 +560,49 @@ export async function POST(request: NextRequest) {
           { status: 400 },
         );
       }
+      const venueTzResource =
+        typeof venue.timezone === 'string' && venue.timezone.trim() !== ''
+          ? venue.timezone.trim()
+          : 'Europe/London';
+      if (isResourceBookingStartInPast(booking_date, timeStr, venueTzResource)) {
+        return NextResponse.json(
+          { error: 'Choose a start time in the future for today.' },
+          { status: 400 },
+        );
+      }
+
       const slotAvailable = resRow.slots.some((s) => s.start_time === timeStr);
       if (!slotAvailable) {
         return NextResponse.json({ error: 'This resource slot is no longer available' }, { status: 409 });
       }
 
-      let depositAmountPenceRes = 0;
+      const numSlotsRes = Math.ceil(durationMinutes / resRow.slot_interval_minutes);
+      const totalPricePenceRes = (resRow.price_per_slot_pence ?? 0) * numSlotsRes;
+      const payReqRes = resRow.payment_requirement ?? 'none';
+      const depConfiguredRes = resRow.deposit_amount_pence ?? 0;
+
+      let depositAmountPenceRes: number | null = null;
       let requiresDepositRes = false;
-      if (resRow.price_per_slot_pence != null) {
-        const numSlots = Math.ceil(durationMinutes / resRow.slot_interval_minutes);
-        depositAmountPenceRes = resRow.price_per_slot_pence * numSlots;
-        if (depositAmountPenceRes > 0) requiresDepositRes = true;
+      if (payReqRes === 'full_payment' && totalPricePenceRes > 0) {
+        requiresDepositRes = true;
+        depositAmountPenceRes = totalPricePenceRes;
+      } else if (payReqRes === 'deposit' && depConfiguredRes > 0) {
+        requiresDepositRes = true;
+        depositAmountPenceRes = depConfiguredRes;
       }
-      const endHmRes = booking_end_time.length === 5 ? booking_end_time + ':00' : booking_end_time;
+
+      const resourceLabels = await getResourceBookingEmailLabels(admin, parsed.data.resource_id);
       const resourcePriceDisplay =
-        depositAmountPenceRes > 0 ? `£${(depositAmountPenceRes / 100).toFixed(2)}` : null;
+        requiresDepositRes && depositAmountPenceRes != null && depositAmountPenceRes > 0
+          ? `£${(depositAmountPenceRes / 100).toFixed(2)}`
+          : totalPricePenceRes > 0 && payReqRes === 'none'
+            ? `£${(totalPricePenceRes / 100).toFixed(2)} (pay at venue)`
+            : null;
       const resourceEmailExtras = {
         email_variant: 'appointment' as const,
         booking_model: 'resource_booking' as const,
-        appointment_service_name: resRow.name,
-        practitioner_name: `Until ${endHmRes.slice(0, 5)}`,
+        appointment_service_name: resourceLabels.resourceName ?? resRow.name,
+        practitioner_name: resourceLabels.hostCalendarName,
         appointment_price_display: resourcePriceDisplay,
       };
 
@@ -622,10 +650,13 @@ export async function POST(request: NextRequest) {
         guest_email: guest.email || null,
         deposit_amount_pence: requiresDepositRes ? depositAmountPenceRes : null,
         deposit_status: requiresDepositRes ? ('Pending' as const) : ('Not Required' as const),
+        resource_payment_requirement: payReqRes,
         cancellation_deadline: cancellation_deadline_res,
         cancellation_policy_snapshot: cancellationPolicySnapshotRes,
         estimated_end_time: estimatedEndTimeRes,
         resource_id: parsed.data.resource_id,
+        /** Same anchor as public /api/booking/create — resource rows live on unified_calendars. */
+        calendar_id: parsed.data.resource_id,
         dietary_notes: dietary_notes?.trim() || null,
         occasion: occasion?.trim() || null,
         special_requests: special_requests?.trim() || null,
@@ -660,8 +691,10 @@ export async function POST(request: NextRequest) {
           party_size,
           special_requests: special_requests ?? null,
           dietary_notes: dietary_notes ?? null,
-          requiresDeposit: Boolean(requiresDepositRes && depositAmountPenceRes > 0),
-          depositAmountPence: depositAmountPenceRes,
+          requiresDeposit: Boolean(
+            requiresDepositRes && depositAmountPenceRes != null && depositAmountPenceRes > 0,
+          ),
+          depositAmountPence: depositAmountPenceRes ?? 0,
           emailExtras: resourceEmailExtras,
           logContext: 'staff resource booking',
         });

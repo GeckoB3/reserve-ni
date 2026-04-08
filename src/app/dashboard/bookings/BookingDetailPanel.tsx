@@ -12,6 +12,7 @@ import { BookingNotesEditablePanel } from '@/components/booking/BookingNotesEdit
 import { GuestTagEditor } from '@/components/dashboard/GuestTagEditor';
 import type { BookingNotesVariant } from '@/components/booking/BookingNotesEditablePanel';
 import type { BookingModel } from '@/types/booking-models';
+import { bookingStatusDisplayLabel } from '@/lib/booking/infer-booking-row-model';
 
 interface Guest {
   id: string;
@@ -128,6 +129,17 @@ function formatDateNice(value: string): string {
   if (d.toDateString() === today.toDateString()) return 'Today';
   if (d.toDateString() === tomorrow.toDateString()) return 'Tomorrow';
   return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+}
+
+/** Seat/Unseat vs Start/Undo Start: table reservations vs appointments & C/D/E. */
+function isTableStyleBookingDetail(
+  d: BookingDetail | null | undefined,
+  isAppointmentFlag: boolean,
+): boolean {
+  const m = d?.inferred_booking_model;
+  if (m === 'table_reservation') return true;
+  if (m != null) return false;
+  return !isAppointmentFlag;
 }
 
 function buildPlaceholderDetail(
@@ -368,10 +380,15 @@ export function BookingDetailPanel({
     const revert = isRevertTransition(currentStatus, newStatus);
     if (revert) {
       const revertAction = BOOKING_REVERT_ACTIONS[currentStatus];
+      const tableStyle = isTableStyleBookingDetail(detail, isAppointment);
+      const confirmLabel =
+        currentStatus === 'Seated' && newStatus === 'Confirmed' && !tableStyle
+          ? 'Undo Start'
+          : revertAction?.label ?? `Revert to ${newStatus}`;
       setConfirmDialog({
-        title: revertAction?.label ?? `Revert to ${newStatus}`,
+        title: confirmLabel,
         message: `${detail.guest?.name ?? 'Guest'} (${detail.party_size}) at ${detail.booking_time?.slice(0, 5) ?? ''} on ${detail.booking_date} will be changed from ${detail.status} back to ${newStatus}.`,
-        confirmLabel: revertAction?.label ?? `Revert to ${newStatus}`,
+        confirmLabel,
         onConfirm: () => { void executeStatusChange(newStatus); },
       });
       return;
@@ -386,7 +403,7 @@ export function BookingDetailPanel({
       return;
     }
     void executeStatusChange(newStatus);
-  }, [detail, executeStatusChange]);
+  }, [detail, executeStatusChange, isAppointment]);
 
   const submitModify = useCallback(async () => {
     if (!detail) return;
@@ -563,7 +580,12 @@ export function BookingDetailPanel({
   const depositAmountStr = d.deposit_amount_pence ? `£${(d.deposit_amount_pence / 100).toFixed(2)}` : null;
   const nextStatuses = BOOKING_STATUS_TRANSITIONS[d.status as BookingStatus] ?? [];
   const canChangeStatus = nextStatuses.length > 0;
-  const confirmationSentAt = d.communications.find((comm) => comm.message_type === 'booking_confirmation')?.created_at;
+  const bookingStyleIsTable = isTableStyleBookingDetail(d, isAppointment);
+  const confirmationSentAt = d.communications.find(
+    (comm) =>
+      comm.message_type === 'booking_confirmation_email' ||
+      comm.message_type === 'booking_confirmation_sms',
+  )?.created_at;
   const startTime = d.booking_time?.slice(0, 5) ?? '00:00';
   const endTime = endHHMMOrFallback(d.estimated_end_time, startTime, 90);
   const durationMinutes = Math.max(15, timeToMinutes(endTime) - timeToMinutes(startTime));
@@ -598,7 +620,7 @@ export function BookingDetailPanel({
                               : 'bg-slate-100 text-slate-600'
                   }`}
                 >
-                  {d.status}
+                  {bookingStatusDisplayLabel(d.status, bookingStyleIsTable)}
                 </span>
                 {loading && optimisticDetail != null && (
                   <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-500">
@@ -960,6 +982,19 @@ export function BookingDetailPanel({
             const currentStatus = d.status as BookingStatus;
             const forwardStatuses = nextStatuses.filter((s) => !isRevertTransition(currentStatus, s));
             const revertAction = BOOKING_REVERT_ACTIONS[currentStatus];
+            const forwardLabel = (status: BookingStatus) => {
+              if (status === 'Seated') return bookingStyleIsTable ? 'Seat' : 'Start';
+              if (status === 'Completed') return 'Complete';
+              if (status === 'Cancelled') return 'Cancel';
+              return status;
+            };
+            const revertLabel =
+              revertAction &&
+              currentStatus === 'Seated' &&
+              revertAction.target === 'Confirmed' &&
+              !bookingStyleIsTable
+                ? 'Undo Start'
+                : revertAction?.label;
             return (
               <div className="rounded-xl border border-slate-200 bg-slate-50/60 px-3 py-2.5">
                 <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Actions</p>
@@ -971,7 +1006,7 @@ export function BookingDetailPanel({
                       disabled={actionLoading || !isHydrated}
                       variant={status === 'Cancelled' ? 'outline-danger' : status === 'No-Show' ? 'danger' : 'primary'}
                     >
-                      {status === 'Seated' ? 'Seat' : status === 'Completed' ? 'Complete' : status === 'Cancelled' ? 'Cancel' : status}
+                      {forwardLabel(status)}
                     </ActionButton>
                   ))}
                 </div>
@@ -982,7 +1017,7 @@ export function BookingDetailPanel({
                       disabled={actionLoading || !isHydrated}
                       variant="secondary"
                     >
-                      {revertAction.label}
+                      {revertLabel}
                     </ActionButton>
                   </div>
                 )}

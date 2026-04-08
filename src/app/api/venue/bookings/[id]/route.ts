@@ -27,7 +27,6 @@ import { resolveTableAssignmentDurationBuffer } from '@/lib/table-management/boo
 import { resolveVenueMode } from '@/lib/venue-mode';
 import { z } from 'zod';
 import { normalizeToE164 } from '@/lib/phone/e164';
-import { getVenueNotificationSettings } from '@/lib/notifications/notification-settings';
 import { communicationService } from '@/lib/communications';
 import { inferBookingRowModel } from '@/lib/booking/infer-booking-row-model';
 import { logBookingOp } from '@/lib/observability/booking-ops-log';
@@ -369,8 +368,7 @@ export async function PATCH(
           .eq('id', booking.guest_id)
           .maybeSingle();
         const { data: venueNoShow } = await admin.from('venues').select('name').eq('id', staff.venue_id).maybeSingle();
-        const nsNoShow = await getVenueNotificationSettings(staff.venue_id);
-        if (guestNoShow?.email && venueNoShow?.name && nsNoShow.no_show_notification_enabled) {
+        if (guestNoShow?.email && venueNoShow?.name) {
           const bookingTimeNs = typeof booking.booking_time === 'string' ? booking.booking_time.slice(0, 5) : '';
           const venueIdNs = staff.venue_id;
           const bookingIdNs = id;

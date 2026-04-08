@@ -1,12 +1,11 @@
-import type { MessageType, Recipient, TemplateVariables, MessageChannel } from './types';
-import { compileEmailTemplate, compileSmsTemplate } from './templates';
-import { EmailChannel } from './channels/email';
-import { SMSChannel } from './channels/sms';
 import { getSupabaseAdminClient } from '@/lib/supabase';
-import { isSmsAllowed } from '@/lib/tier-enforcement';
-import { getChannelsForMessage } from '@/lib/communications/tier-message-channels';
-import type { CommMessageType } from '@/lib/emails/types';
-import { recordOutboundSms, estimateSmsSegments } from '@/lib/sms-usage';
+import type { BookingEmailData, VenueEmailData } from '@/lib/emails/types';
+import { sendPolicyMessage } from './outbound';
+import type { MessageType, Recipient, TemplateVariables } from './types';
+import { sendEmail } from '@/lib/emails/send-email';
+import { sendSmsWithSegments } from '@/lib/emails/send-sms';
+import { recordOutboundSms } from '@/lib/sms-usage';
+import type { BookingModel } from '@/types/booking-models';
 
 interface LogContext {
   venue_id?: string;
@@ -14,168 +13,27 @@ interface LogContext {
   guest_id?: string;
 }
 
-export interface CommunicationSettings {
-  confirmation_email_enabled: boolean;
-  confirmation_email_custom_message: string | null;
-  deposit_request_email_enabled: boolean;
-  deposit_request_email_custom_message: string | null;
-  deposit_sms_enabled: boolean;
-  deposit_sms_custom_message: string | null;
-  deposit_confirmation_email_enabled: boolean;
-  deposit_confirmation_email_custom_message: string | null;
-  reminder_email_enabled: boolean;
-  reminder_email_custom_message: string | null;
-  reminder_hours_before: number;
-  day_of_reminder_enabled: boolean;
-  day_of_reminder_time: string;
-  day_of_reminder_sms_enabled: boolean;
-  day_of_reminder_email_enabled: boolean;
-  /** Optional line for day-of reminder email (and fallback for SMS when SMS-specific line is unset). */
-  day_of_reminder_custom_message: string | null;
-  /** Optional line for day-of reminder SMS only; when null, `day_of_reminder_custom_message` is used. */
-  day_of_reminder_sms_custom_message: string | null;
-  /** Optional line for Confirm or Cancel Reminder SMS (56h / first reminder SMS), not day-of. */
-  confirm_cancel_reminder_sms_custom_message: string | null;
-  post_visit_email_enabled: boolean;
-  post_visit_email_time: string;
-  post_visit_email_custom_message: string | null;
-  modification_email_enabled: boolean;
-  modification_sms_enabled: boolean;
-  modification_custom_message: string | null;
-  cancellation_email_enabled: boolean;
-  cancellation_sms_enabled: boolean;
-  cancellation_custom_message: string | null;
-}
-
-const SETTINGS_CACHE = new Map<string, { data: CommunicationSettings; ts: number }>();
-const CACHE_TTL = 60_000;
-
-export async function getCommSettings(venueId: string): Promise<CommunicationSettings> {
-  const cached = SETTINGS_CACHE.get(venueId);
-  if (cached && Date.now() - cached.ts < CACHE_TTL) return cached.data;
-
-  const supabase = getSupabaseAdminClient();
-  const { data } = await supabase
-    .from('communication_settings')
-    .select('*')
-    .eq('venue_id', venueId)
-    .maybeSingle();
-
-  if (data) {
-    const row = data as Record<string, unknown>;
-    const normalized: CommunicationSettings = {
-      ...(data as CommunicationSettings),
-      deposit_request_email_enabled: row.deposit_request_email_enabled !== false,
-      deposit_request_email_custom_message:
-        (row.deposit_request_email_custom_message as string | null | undefined) ?? null,
-    };
-    SETTINGS_CACHE.set(venueId, { data: normalized, ts: Date.now() });
-    return normalized;
-  }
-
-  // Auto-create with defaults if not found
-  const { data: created } = await supabase
-    .from('communication_settings')
-    .insert({ venue_id: venueId })
-    .select('*')
-    .single();
-
-  if (created) {
-    const row = created as Record<string, unknown>;
-    const normalized: CommunicationSettings = {
-      ...(created as CommunicationSettings),
-      deposit_request_email_enabled: row.deposit_request_email_enabled !== false,
-      deposit_request_email_custom_message:
-        (row.deposit_request_email_custom_message as string | null | undefined) ?? null,
-    };
-    SETTINGS_CACHE.set(venueId, { data: normalized, ts: Date.now() });
-    return normalized;
-  }
-
-  const fallback: CommunicationSettings = {
-    confirmation_email_enabled: true,
-    confirmation_email_custom_message: null,
-    deposit_request_email_enabled: true,
-    deposit_request_email_custom_message: null,
-    deposit_sms_enabled: true,
-    deposit_sms_custom_message: null,
-    deposit_confirmation_email_enabled: true,
-    deposit_confirmation_email_custom_message: null,
-    reminder_email_enabled: true,
-    reminder_email_custom_message: null,
-    reminder_hours_before: 56,
-    day_of_reminder_enabled: true,
-    day_of_reminder_time: '09:00:00',
-    day_of_reminder_sms_enabled: true,
-    day_of_reminder_email_enabled: true,
-    day_of_reminder_custom_message: null,
-    day_of_reminder_sms_custom_message: null,
-    confirm_cancel_reminder_sms_custom_message: null,
-    post_visit_email_enabled: true,
-    post_visit_email_time: '09:00:00',
-    post_visit_email_custom_message: null,
-    modification_email_enabled: true,
-    modification_sms_enabled: false,
-    modification_custom_message: null,
-    cancellation_email_enabled: true,
-    cancellation_sms_enabled: false,
-    cancellation_custom_message: null,
-  };
-
-  SETTINGS_CACHE.set(venueId, { data: fallback, ts: Date.now() });
-  return fallback;
-}
-
-export function clearSettingsCache(venueId?: string): void {
-  if (venueId) SETTINGS_CACHE.delete(venueId);
-  else SETTINGS_CACHE.clear();
-}
-
-/** Merge API row with safe defaults when columns are missing (pre-migration or partial select). */
-export function normalizeCommunicationSettingsRow(data: Record<string, unknown>): Record<string, unknown> {
-  return {
-    ...data,
-    deposit_request_email_enabled: data.deposit_request_email_enabled !== false,
-    deposit_request_email_custom_message:
-      (data.deposit_request_email_custom_message as string | null | undefined) ?? null,
-    confirm_cancel_reminder_sms_custom_message:
-      (data.confirm_cancel_reminder_sms_custom_message as string | null | undefined) ?? null,
-    day_of_reminder_sms_custom_message:
-      (data.day_of_reminder_sms_custom_message as string | null | undefined) ?? null,
-  };
-}
-
-/** Line prepended to day-of reminder SMS (table restaurants). */
-export function dayOfReminderSmsCustomLine(comm: CommunicationSettings): string | null {
-  return comm.day_of_reminder_sms_custom_message ?? comm.day_of_reminder_custom_message;
-}
-
-/** SMS optional line for Confirm or Cancel / first & second reminder texts (not day-of). */
-export function confirmCancelReminderSmsCustomLine(comm: CommunicationSettings): string | null {
-  return comm.confirm_cancel_reminder_sms_custom_message ?? comm.day_of_reminder_custom_message;
-}
-
-/**
- * Log to the new communication_logs table using INSERT ON CONFLICT DO NOTHING.
- * Returns true if the insert succeeded (i.e. no duplicate existed), false otherwise.
- */
-export async function logToCommLogs(opts: {
+interface LegacyCommLogOpts {
   venue_id: string;
   booking_id: string;
-  message_type: CommMessageType;
+  message_type: string;
   channel: 'email' | 'sms';
   recipient: string;
   status: 'pending' | 'sent' | 'failed';
   external_id?: string | null;
   error_message?: string | null;
-}): Promise<boolean> {
+  communication_lane?: 'table' | 'appointments_other';
+}
+
+export async function logToCommLogs(opts: LegacyCommLogOpts): Promise<boolean> {
   try {
-    const supabase = getSupabaseAdminClient();
-    const { data, error } = await supabase
+    const admin = getSupabaseAdminClient();
+    const { data, error } = await admin
       .from('communication_logs')
       .insert({
         venue_id: opts.venue_id,
         booking_id: opts.booking_id,
+        communication_lane: opts.communication_lane ?? 'table',
         message_type: opts.message_type,
         channel: opts.channel,
         recipient: opts.recipient,
@@ -188,31 +46,28 @@ export async function logToCommLogs(opts: {
       .maybeSingle();
 
     if (error) {
-      if (error.code === '23505') return false; // unique_message_per_booking violated = duplicate
+      if (error.code === '23505') return false;
       console.error('[logToCommLogs] insert error:', error);
       return false;
     }
     return Boolean(data);
-  } catch (err) {
-    console.error('[logToCommLogs] failed:', err);
+  } catch (error) {
+    console.error('[logToCommLogs] failed:', error);
     return false;
   }
 }
 
-/**
- * Update an existing communication_logs row status (e.g. pending → sent or failed).
- */
 export async function updateCommLogStatus(opts: {
   venue_id: string;
   booking_id: string;
-  message_type: CommMessageType;
+  message_type: string;
   status: 'sent' | 'failed';
   external_id?: string | null;
   error_message?: string | null;
+  communication_lane?: 'table' | 'appointments_other';
 }): Promise<void> {
   try {
-    const supabase = getSupabaseAdminClient();
-    await supabase
+    await getSupabaseAdminClient()
       .from('communication_logs')
       .update({
         status: opts.status,
@@ -221,174 +76,294 @@ export async function updateCommLogStatus(opts: {
         sent_at: opts.status === 'sent' ? new Date().toISOString() : null,
       })
       .eq('booking_id', opts.booking_id)
-      .eq('message_type', opts.message_type);
-  } catch (err) {
-    console.error('[updateCommLogStatus] failed:', err);
+      .eq('message_type', opts.message_type)
+      .eq('communication_lane', opts.communication_lane ?? 'table');
+  } catch (error) {
+    console.error('[updateCommLogStatus] failed:', error);
   }
 }
 
-/** Which channels each message type uses. */
-const MESSAGE_CHANNELS: Record<MessageType, Array<'email' | 'sms'>> = {
-  booking_confirmation: [],
-  deposit_payment_request: [],
-  deposit_payment_reminder: [],
-  pre_visit_reminder: [],
-  confirm_or_cancel_prompt: [],
-  dietary_digest: ['email'],
-  post_visit_thankyou: [],
-  auto_cancel_notification: ['email', 'sms'],
-  booking_modification: [],
-  cancellation_confirmation: [],
-  no_show_notification: ['email'],
-  custom_message: ['email', 'sms'],
-};
-
-const emailChannel: MessageChannel = new EmailChannel();
-const smsChannel: MessageChannel = new SMSChannel();
-const DEDUPED_MESSAGE_TYPES = new Set<MessageType>([
-  'booking_confirmation',
-  'deposit_payment_reminder',
-  'pre_visit_reminder',
-  'confirm_or_cancel_prompt',
-  'auto_cancel_notification',
-  'cancellation_confirmation',
-  'no_show_notification',
-]);
-
-function getChannel(ch: 'email' | 'sms'): MessageChannel {
-  return ch === 'email' ? emailChannel : smsChannel;
+function coercePartySize(value: string | number | undefined): number {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string') {
+    const parsed = parseInt(value, 10);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return 1;
 }
 
-function normalisePayload(payload: TemplateVariables): Record<string, string | number | undefined> {
-  const p = { ...payload } as Record<string, string | number | undefined>;
-  if (p.deposit_amount_pence != null && p.deposit_amount == null) {
-    p.deposit_amount = (Number(p.deposit_amount_pence) / 100).toFixed(2);
+function coerceDepositPence(payload: TemplateVariables): number | null {
+  const raw = payload.deposit_amount_pence ?? payload.deposit_amount;
+  if (typeof raw === 'number' && Number.isFinite(raw)) {
+    return raw > 1000 ? raw : Math.round(raw * 100);
   }
-  if (p.booking_time != null && typeof p.booking_time === 'string' && p.booking_time.length > 5) {
-    p.booking_time = p.booking_time.slice(0, 5);
-  }
-  if (typeof p.booking_date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(p.booking_date)) {
-    const [y, m, d] = p.booking_date.split('-');
-    p.booking_date = `${d}/${m}/${y}`;
-  }
-  if (typeof p.cancellation_deadline === 'string' && p.cancellation_deadline.includes('T')) {
-    try {
-      const dt = new Date(p.cancellation_deadline);
-      const dd = String(dt.getDate()).padStart(2, '0');
-      const mm = String(dt.getMonth() + 1).padStart(2, '0');
-      const yyyy = dt.getFullYear();
-      const hh = String(dt.getHours()).padStart(2, '0');
-      const min = String(dt.getMinutes()).padStart(2, '0');
-      p.cancellation_deadline = `${dd}/${mm}/${yyyy} at ${hh}:${min}`;
-    } catch {
-      // leave as-is
+  if (typeof raw === 'string') {
+    const parsed = parseFloat(raw);
+    if (Number.isFinite(parsed)) {
+      return raw.includes('.') ? Math.round(parsed * 100) : parsed > 1000 ? Math.round(parsed) : Math.round(parsed * 100);
     }
   }
-  return p;
+  return null;
+}
+
+async function buildGuestBookingContext(
+  payload: TemplateVariables,
+  recipient: Recipient,
+  ctx: LogContext,
+): Promise<{ booking: BookingEmailData; venue: VenueEmailData } | null> {
+  if (!ctx.venue_id) return null;
+
+  const admin = getSupabaseAdminClient();
+  const bookingRow = ctx.booking_id
+    ? await admin
+        .from('bookings')
+        .select(
+          'id, venue_id, guest_id, guest_email, booking_date, booking_time, party_size, special_requests, dietary_notes, deposit_amount_pence, deposit_status, cancellation_deadline, experience_event_id, class_instance_id, resource_id',
+        )
+        .eq('id', ctx.booking_id)
+        .maybeSingle()
+    : null;
+
+  const bookingData = bookingRow?.data as
+    | {
+        id: string;
+        venue_id: string;
+        guest_id: string | null;
+        guest_email: string | null;
+        booking_date: string;
+        booking_time: string;
+        party_size: number;
+        special_requests: string | null;
+        dietary_notes: string | null;
+        deposit_amount_pence: number | null;
+        deposit_status: string | null;
+        cancellation_deadline: string | null;
+        experience_event_id?: string | null;
+        class_instance_id?: string | null;
+        resource_id?: string | null;
+      }
+    | null;
+
+  const guestId = ctx.guest_id ?? bookingData?.guest_id ?? null;
+  const guestRow = guestId
+    ? await admin
+        .from('guests')
+        .select('name, email, phone')
+        .eq('id', guestId)
+        .maybeSingle()
+    : null;
+
+  const venueRow = await admin
+    .from('venues')
+    .select('name, address, phone, booking_page_url, booking_model')
+    .eq('id', ctx.venue_id)
+    .maybeSingle();
+
+  const venue = venueRow.data as
+    | {
+        name?: string | null;
+        address?: string | null;
+        phone?: string | null;
+        booking_page_url?: string | null;
+        booking_model?: string | null;
+      }
+    | null;
+
+  if (!venue?.name) return null;
+
+  const bookingModel =
+    bookingData?.experience_event_id
+      ? 'event_ticket'
+      : bookingData?.class_instance_id
+        ? 'class_session'
+        : bookingData?.resource_id
+          ? 'resource_booking'
+          : (venue.booking_model ?? 'table_reservation');
+
+  return {
+    booking: {
+      id: ctx.booking_id ?? bookingData?.id ?? crypto.randomUUID(),
+      guest_name:
+        (guestRow?.data as { name?: string | null } | null)?.name ??
+        (typeof payload.guest_name === 'string' ? payload.guest_name : 'Guest'),
+      guest_email:
+        recipient.email ??
+        (guestRow?.data as { email?: string | null } | null)?.email ??
+        bookingData?.guest_email ??
+        null,
+      guest_phone:
+        recipient.phone ??
+        (guestRow?.data as { phone?: string | null } | null)?.phone ??
+        null,
+      booking_date:
+        (typeof payload.booking_date === 'string' ? payload.booking_date : null) ??
+        bookingData?.booking_date ??
+        new Date().toISOString().slice(0, 10),
+      booking_time:
+        (typeof payload.booking_time === 'string' ? payload.booking_time.slice(0, 5) : null) ??
+        bookingData?.booking_time?.slice(0, 5) ??
+        '00:00',
+      party_size:
+        payload.party_size != null
+          ? coercePartySize(payload.party_size)
+          : bookingData?.party_size ?? 1,
+      special_requests:
+        (typeof payload.special_requests === 'string'
+          ? payload.special_requests
+          : null) ?? bookingData?.special_requests ?? null,
+      dietary_notes:
+        (typeof payload.dietary_notes === 'string'
+          ? payload.dietary_notes
+          : null) ?? bookingData?.dietary_notes ?? null,
+      deposit_amount_pence:
+        coerceDepositPence(payload) ?? bookingData?.deposit_amount_pence ?? null,
+      deposit_status:
+        (typeof payload.deposit_status === 'string' ? payload.deposit_status : null) ??
+        bookingData?.deposit_status ??
+        null,
+      refund_cutoff:
+        (typeof payload.cancellation_deadline === 'string'
+          ? payload.cancellation_deadline
+          : null) ?? bookingData?.cancellation_deadline ?? null,
+      manage_booking_link:
+        (typeof payload.manage_booking_link === 'string'
+          ? payload.manage_booking_link
+          : null) ??
+        (typeof payload.short_manage_link === 'string'
+          ? payload.short_manage_link
+          : null) ??
+        null,
+      booking_model: bookingModel as BookingModel,
+    },
+    venue: {
+      name: venue.name,
+      address: venue.address ?? null,
+      phone: venue.phone ?? null,
+      booking_page_url: venue.booking_page_url ?? undefined,
+    },
+  };
+}
+
+function renderInternalEmail(subject: string, body: string) {
+  return {
+    subject,
+    text: body,
+    html: `<html><body style="font-family:Arial,sans-serif;line-height:1.5"><p>${body.replace(/\n/g, '<br/>')}</p></body></html>`,
+  };
+}
+
+async function sendInternalCustomMessage(
+  recipient: Recipient,
+  payload: TemplateVariables,
+  ctx: LogContext,
+): Promise<void> {
+  const message = typeof payload.message === 'string' ? payload.message : '';
+  const venueName =
+    typeof payload.venue_name === 'string' ? payload.venue_name : 'Venue';
+
+  if (recipient.email) {
+    const rendered = renderInternalEmail(
+      `A message from ${venueName}`,
+      message,
+    );
+    await sendEmail({ to: recipient.email, ...rendered });
+  }
+  if (recipient.phone) {
+    const { sid, segmentCount } = await sendSmsWithSegments(
+      recipient.phone,
+      `${venueName}: ${message}`,
+    );
+    if (sid && ctx.venue_id) {
+      await recordOutboundSms({
+        venueId: ctx.venue_id,
+        bookingId: ctx.booking_id,
+        messageType: 'custom_message_sms',
+        recipientPhone: recipient.phone,
+        twilioSid: sid,
+        segmentCount,
+      });
+    }
+  }
+}
+
+async function sendDietaryDigest(
+  recipient: Recipient,
+  payload: TemplateVariables,
+): Promise<void> {
+  if (!recipient.email) return;
+  const venueName =
+    typeof payload.venue_name === 'string' ? payload.venue_name : 'Venue';
+  const date =
+    typeof payload.booking_date === 'string' ? payload.booking_date : 'today';
+  const summary =
+    typeof payload.dietary_summary === 'string' ? payload.dietary_summary : '';
+  const rendered = renderInternalEmail(
+    `Dietary summary for ${venueName} on ${date}`,
+    summary || 'No dietary notes.',
+  );
+  await sendEmail({ to: recipient.email, ...rendered });
+}
+
+function mapMessageType(type: MessageType) {
+  switch (type) {
+    case 'deposit_payment_reminder':
+      return { key: 'deposit_payment_reminder' as const, mode: 'dedupe' as const };
+    case 'auto_cancel_notification':
+      return { key: 'auto_cancel_notification' as const, mode: 'dedupe' as const };
+    case 'no_show_notification':
+      return { key: 'no_show_notification' as const, mode: 'dedupe' as const };
+    case 'custom_message':
+      return { key: 'custom_message' as const, mode: 'upsert' as const };
+    default:
+      return null;
+  }
 }
 
 export class CommunicationService {
-  private async isDuplicateSend(
+  async send(
     type: MessageType,
-    channel: 'email' | 'sms',
-    ctx: LogContext
-  ): Promise<boolean> {
-    if (!ctx.venue_id) return false;
-    if (!ctx.booking_id && !ctx.guest_id) return false;
-    try {
-      const supabase = getSupabaseAdminClient();
-      let query = supabase
-        .from('communications')
-        .select('id')
-        .eq('venue_id', ctx.venue_id)
-        .eq('message_type', type)
-        .eq('channel', channel)
-        .eq('status', 'sent')
-        .limit(1);
-      if (ctx.booking_id) {
-        query = query.eq('booking_id', ctx.booking_id);
-      } else if (ctx.guest_id) {
-        query = query.eq('guest_id', ctx.guest_id);
-      }
-      const { data } = await query.maybeSingle();
-      return Boolean(data);
-    } catch (err) {
-      console.error('[CommunicationService] dedupe check failed, continuing send:', err);
-      return false;
-    }
-  }
-
-  private async logCommunication(
-    type: MessageType,
-    channel: string,
     recipient: Recipient,
-    status: 'sent' | 'failed',
-    ctx: LogContext,
+    payload: TemplateVariables,
+    ctx: LogContext = {},
   ): Promise<void> {
-    try {
-      if (!ctx.venue_id) return;
-      const supabase = getSupabaseAdminClient();
-      await supabase.from('communications').insert({
-        venue_id: ctx.venue_id,
-        booking_id: ctx.booking_id ?? null,
-        guest_id: ctx.guest_id ?? null,
-        message_type: type,
-        channel,
-        recipient_email: recipient.email ?? null,
-        recipient_phone: recipient.phone ?? null,
-        status,
-      });
-    } catch (logErr) {
-      console.error('[CommunicationService] Failed to log communication:', logErr);
-    }
-  }
-
-  async send(type: MessageType, recipient: Recipient, payload: TemplateVariables, ctx: LogContext = {}): Promise<void> {
-    const tierChannels = await getChannelsForMessage(type, ctx.venue_id);
-    const channels = tierChannels ?? MESSAGE_CHANNELS[type];
-    if (!channels?.length) {
-      console.warn('[CommunicationService] No channels for type', type);
+    if (type === 'dietary_digest') {
+      await sendDietaryDigest(recipient, payload);
       return;
     }
 
-    const smsAllowed = ctx.venue_id ? await isSmsAllowed(ctx.venue_id) : false;
+    const mapped = mapMessageType(type);
+    if (!mapped) return;
 
-    const vars = normalisePayload(payload);
+    if (type === 'custom_message' && !ctx.guest_id) {
+      await sendInternalCustomMessage(recipient, payload, ctx);
+      return;
+    }
 
-    for (const ch of channels) {
-      if (ch === 'sms' && !smsAllowed) continue;
+    const context = await buildGuestBookingContext(payload, recipient, ctx);
+    if (!context || !ctx.venue_id) return;
 
-      try {
-        if (DEDUPED_MESSAGE_TYPES.has(type)) {
-          const duplicate = await this.isDuplicateSend(type, ch, ctx);
-          if (duplicate) continue;
-        }
-        if (ch === 'email') {
-          const compiled = compileEmailTemplate(type, vars);
-          if (compiled && recipient.email) {
-            await getChannel('email').send(recipient, { subject: compiled.subject, body: compiled.body }, payload);
-            await this.logCommunication(type, 'email', recipient, 'sent', ctx);
-          }
-        } else {
-          const body = compileSmsTemplate(type, vars);
-          if (body && recipient.phone) {
-            await getChannel('sms').send(recipient, { body }, payload);
-            await this.logCommunication(type, 'sms', recipient, 'sent', ctx);
-            if (ctx.venue_id) {
-              await recordOutboundSms({
-                venueId: ctx.venue_id,
-                bookingId: ctx.booking_id,
-                messageType: type,
-                recipientPhone: recipient.phone,
-                segmentCount: estimateSmsSegments(body),
-              });
-            }
-          }
-        }
-      } catch (err) {
-        console.error(`[CommunicationService] ${ch} failed for ${type}:`, err);
-        await this.logCommunication(type, ch, recipient, 'failed', ctx);
-      }
+    const channels: Array<'email' | 'sms'> = [];
+    if (recipient.email) channels.push('email');
+    if (recipient.phone) channels.push('sms');
+
+    for (const channel of channels) {
+      await sendPolicyMessage({
+        venueId: ctx.venue_id,
+        booking: context.booking,
+        venue: context.venue,
+        messageKey: mapped.key,
+        channel,
+        mode: mapped.mode,
+        paymentLink:
+          typeof payload.payment_link === 'string' ? payload.payment_link : null,
+        confirmLink:
+          typeof payload.confirm_link === 'string' ? payload.confirm_link : null,
+        cancelLink:
+          typeof payload.cancel_link === 'string' ? payload.cancel_link : null,
+        message: typeof payload.message === 'string' ? payload.message : null,
+        rebookLink:
+          context.venue.booking_page_url ?? null,
+      });
     }
   }
 }

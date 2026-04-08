@@ -28,6 +28,14 @@ interface DaySheetBookingRow {
   guest_id: string;
   created_at: string;
   booking_date: string;
+  experience_event_id: string | null;
+  class_instance_id: string | null;
+  resource_id: string | null;
+  event_session_id: string | null;
+  calendar_id: string | null;
+  service_item_id: string | null;
+  practitioner_id: string | null;
+  appointment_service_id: string | null;
 }
 
 export interface DaySheetBooking {
@@ -52,6 +60,14 @@ export interface DaySheetBooking {
   last_visit_date: string | null;
   created_at: string;
   guest_tags: string[];
+  experience_event_id: string | null;
+  class_instance_id: string | null;
+  resource_id: string | null;
+  event_session_id: string | null;
+  calendar_id: string | null;
+  service_item_id: string | null;
+  practitioner_id: string | null;
+  appointment_service_id: string | null;
 }
 
 export interface DaySheetPeriod {
@@ -128,6 +144,14 @@ export async function GET(request: NextRequest) {
       guest_id: b.guest_id as string,
       created_at: b.created_at as string,
       booking_date: b.booking_date as string,
+      experience_event_id: (b.experience_event_id as string | null) ?? null,
+      class_instance_id: (b.class_instance_id as string | null) ?? null,
+      resource_id: (b.resource_id as string | null) ?? null,
+      event_session_id: (b.event_session_id as string | null) ?? null,
+      calendar_id: (b.calendar_id as string | null) ?? null,
+      service_item_id: (b.service_item_id as string | null) ?? null,
+      practitioner_id: (b.practitioner_id as string | null) ?? null,
+      appointment_service_id: (b.appointment_service_id as string | null) ?? null,
     }));
 
     // Fetch guest details with visit history
@@ -175,6 +199,14 @@ export async function GET(request: NextRequest) {
         last_visit_date: guest?.last_visit_date ?? null,
         created_at: row.created_at,
         guest_tags: Array.isArray(guest?.tags) ? guest.tags : [],
+        experience_event_id: row.experience_event_id,
+        class_instance_id: row.class_instance_id,
+        resource_id: row.resource_id,
+        event_session_id: row.event_session_id,
+        calendar_id: row.calendar_id,
+        service_item_id: row.service_item_id,
+        practitioner_id: row.practitioner_id,
+        appointment_service_id: row.appointment_service_id,
       };
     }
 

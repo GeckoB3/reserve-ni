@@ -7,7 +7,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { OpeningHours } from '@/types/availability';
+import type { AvailabilityBlock, OpeningHours } from '@/types/availability';
 import type { ClassPaymentRequirement, VenueResource, WorkingHours } from '@/types/booking-models';
 import { timeToMinutes, minutesToTime } from '@/lib/availability';
 import { bookingRowEndMinutes, unionMinuteRanges } from '@/lib/availability/calendar-resource-occupancy';
@@ -18,7 +18,9 @@ import {
 import {
   rowsToVenueWideBlocks,
   venueWideBlocksQueryForDate,
+  venueWideBlocksQueryForRange,
 } from '@/lib/availability/venue-wide-blocks-fetch';
+import { sameDaySlotCutoffForBookingDate } from '@/lib/venue/venue-local-clock';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -33,6 +35,11 @@ export interface ResourceEngineInput {
    * If absent, computeResourceAvailability derives ranges from each resource row.
    */
   effectiveAvailabilityRangesByResourceId?: Map<string, Array<{ start: number; end: number }>>;
+  /**
+   * When the booking `date` is "today" in the venue timezone, slots with start minute t where
+   * t <= minutesNow are excluded so guests cannot book times that have already passed.
+   */
+  sameDaySlotCutoff?: { venueDateYmd: string; minutesNow: number };
 }
 
 export interface ResourceBooking {
@@ -252,11 +259,25 @@ export function mergedResourceEffectiveRangesForHost(
 // Core engine
 // ---------------------------------------------------------------------------
 
+/** True if this start time is today in the venue TZ and not strictly after "now" (minute precision). */
+export function isResourceBookingStartInPast(
+  bookingDateYmd: string,
+  bookingTimeHhMm: string,
+  venueTimezone: string,
+  at: Date = new Date(),
+): boolean {
+  const cutoff = sameDaySlotCutoffForBookingDate(bookingDateYmd, venueTimezone, at);
+  if (!cutoff) return false;
+  const startM = timeToMinutes(bookingTimeHhMm.slice(0, 5));
+  return startM <= cutoff.minutesNow;
+}
+
 export function computeResourceAvailability(
   input: ResourceEngineInput,
   requestedDurationMinutes: number,
 ): ResourceAvailabilityResult[] {
-  const { date, resources, existingBookings, effectiveAvailabilityRangesByResourceId } = input;
+  const { date, resources, existingBookings, effectiveAvailabilityRangesByResourceId, sameDaySlotCutoff } =
+    input;
   const results: ResourceAvailabilityResult[] = [];
 
   for (const resource of resources) {
@@ -280,6 +301,14 @@ export function computeResourceAvailability(
 
     for (const range of ranges) {
       for (let t = range.start; t + duration <= range.end; t += resource.slot_interval_minutes) {
+        if (
+          sameDaySlotCutoff &&
+          date === sameDaySlotCutoff.venueDateYmd &&
+          t <= sameDaySlotCutoff.minutesNow
+        ) {
+          continue;
+        }
+
         const slotEnd = t + duration;
 
         const conflict = resourceBookings.some((b) => {
@@ -336,9 +365,213 @@ export function resourceDurationCandidatesMinutes(
 }
 
 /**
+ * Assembles the same {@link ResourceEngineInput} as {@link fetchResourceInput} for one date,
+ * from pre-fetched rows (used to avoid dozens of DB round-trips per calendar month).
+ */
+function resolveVenueTimezone(row: { timezone?: unknown } | null | undefined): string {
+  const t = row?.timezone;
+  return typeof t === 'string' && t.trim() !== '' ? t.trim() : 'Europe/London';
+}
+
+function buildResourceEngineInputFromParts(params: {
+  date: string;
+  resources: VenueResource[];
+  conflictResources: VenueResource[];
+  bookingsForDate: Record<string, unknown>[];
+  venueOpeningHours: OpeningHours | null;
+  venueWideBlocks: AvailabilityBlock[];
+  venueTimezone?: string;
+}): ResourceEngineInput {
+  const { date, resources, conflictResources, bookingsForDate, venueOpeningHours, venueWideBlocks, venueTimezone } =
+    params;
+
+  const resourceIdSet = new Set(resources.map((r) => r.id));
+
+  const existingBookings: ResourceBooking[] = bookingsForDate
+    .filter((b) => {
+      const rid = b.resource_id as string | null;
+      const cid = b.calendar_id as string | null;
+      return (rid && resourceIdSet.has(rid)) || (cid && resourceIdSet.has(cid));
+    })
+    .map((row) => {
+      const rid = (row.resource_id as string | null) ?? (row.calendar_id as string | null) ?? '';
+      return {
+        id: row.id as string,
+        resource_id: rid,
+        booking_time: ((row.booking_time as string) ?? '00:00').slice(0, 5),
+        booking_end_time: ((row.booking_end_time as string) ?? '00:00').slice(0, 5),
+        status: row.status as string,
+      };
+    });
+
+  const resourcesByHost = new Map<string, VenueResource[]>();
+  for (const r of conflictResources) {
+    const h = r.display_on_calendar_id;
+    if (!h) continue;
+    const list = resourcesByHost.get(h) ?? [];
+    list.push(r);
+    resourcesByHost.set(h, list);
+  }
+
+  const occupancyByHost = new Map<string, Array<{ start: number; end: number }>>();
+  const hostIds = [...resourcesByHost.keys()];
+  const dayRows = bookingsForDate;
+
+  for (const hostId of hostIds) {
+    const occ: Array<{ start: number; end: number }> = [];
+    for (const raw of dayRows) {
+      const row = raw;
+      if (row.resource_id) continue;
+      const cal = row.calendar_id as string | null | undefined;
+      const pid = row.practitioner_id as string | null | undefined;
+      if (cal !== hostId && pid !== hostId) continue;
+      const bt = row.booking_time as string;
+      const start = timeToMinutes(String(bt).slice(0, 5));
+      const end = bookingRowEndMinutes({
+        booking_time: String(bt).slice(0, 5),
+        booking_end_time: (row.booking_end_time as string | null) ?? null,
+        estimated_end_time: (row.estimated_end_time as string | null) ?? null,
+      });
+      if (end > start) occ.push({ start, end });
+    }
+    occupancyByHost.set(hostId, unionMinuteRanges(occ));
+  }
+
+  const venueWideResolution = resolveVenueWideAllowedMinuteRanges(venueOpeningHours, date, venueWideBlocks);
+
+  const effectiveAvailabilityRangesByResourceId = new Map<string, Array<{ start: number; end: number }>>();
+  for (const res of resources) {
+    let ranges = getEffectiveAvailabilityRanges(res, date);
+    const hostId = res.display_on_calendar_id;
+    if (hostId) {
+      ranges = subtractRangesFromRanges(ranges, occupancyByHost.get(hostId) ?? []);
+      const siblings = resourcesByHost.get(hostId) ?? [];
+      const siblingExcl = mergedSiblingResourceRangesExcluding(siblings, res.id, date);
+      ranges = subtractRangesFromRanges(ranges, siblingExcl);
+    }
+    ranges = intersectRangesWithVenueWideResolution(ranges, venueWideResolution);
+    effectiveAvailabilityRangesByResourceId.set(res.id, ranges);
+  }
+
+  const tz = venueTimezone ?? 'Europe/London';
+  const sameDaySlotCutoff = sameDaySlotCutoffForBookingDate(date, tz);
+
+  return {
+    date,
+    resources,
+    existingBookings,
+    effectiveAvailabilityRangesByResourceId,
+    ...(sameDaySlotCutoff ? { sameDaySlotCutoff } : {}),
+  };
+}
+
+/** Merge sibling resources on the same host column (same rules as fetchResourceInput). */
+async function expandResourcesWithSiblings(
+  supabase: SupabaseClient,
+  venueId: string,
+  resources: VenueResource[],
+): Promise<VenueResource[]> {
+  const hostIdsForSiblings = [...new Set(resources.map((r) => r.display_on_calendar_id).filter(Boolean))] as string[];
+  let conflictResources = resources;
+  if (hostIdsForSiblings.length === 0) {
+    return conflictResources;
+  }
+
+  const { data: sibRows, error: sibErr } = await supabase
+    .from('unified_calendars')
+    .select('*')
+    .eq('venue_id', venueId)
+    .eq('calendar_type', 'resource')
+    .eq('is_active', true)
+    .in('display_on_calendar_id', hostIdsForSiblings);
+  if (sibErr) {
+    console.warn('[expandResourcesWithSiblings] sibling resources:', sibErr.message);
+  }
+  const byId = new Map(resources.map((r) => [r.id, r] as const));
+  for (const row of sibRows ?? []) {
+    const r = mapCalendarToResource(row as Record<string, unknown>);
+    if (!byId.has(r.id)) byId.set(r.id, r);
+  }
+  conflictResources = [...byId.values()];
+  return attachHostCalendarsToResources(supabase, venueId, conflictResources);
+}
+
+/**
+ * One batch of DB reads for a resource calendar month (vs one fetchResourceInput per day).
+ */
+async function prefetchResourceMonthForAvailability(
+  supabase: SupabaseClient,
+  venueId: string,
+  resource: VenueResource,
+  year: number,
+  month: number,
+): Promise<{
+  resources: VenueResource[];
+  conflictResources: VenueResource[];
+  venueOpeningHours: OpeningHours | null;
+  venueWideBlocks: AvailabilityBlock[];
+  bookingsByDate: Map<string, Record<string, unknown>[]>;
+  venueTimezone: string;
+}> {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const lastDay = new Date(year, month, 0).getDate();
+  const monthStart = `${year}-${pad(month)}-01`;
+  const monthEnd = `${year}-${pad(month)}-${pad(lastDay)}`;
+
+  const resourcesRes = await supabase
+    .from('unified_calendars')
+    .select('*')
+    .eq('venue_id', venueId)
+    .eq('calendar_type', 'resource')
+    .eq('is_active', true)
+    .eq('id', resource.id)
+    .order('sort_order');
+
+  let resources = (resourcesRes.data ?? []).map((r) => mapCalendarToResource(r as Record<string, unknown>));
+  resources = await attachHostCalendarsToResources(supabase, venueId, resources);
+  const conflictResources = await expandResourcesWithSiblings(supabase, venueId, resources);
+
+  const [venueRes, blocksRes, bookingsRes] = await Promise.all([
+    supabase.from('venues').select('opening_hours, timezone').eq('id', venueId).maybeSingle(),
+    venueWideBlocksQueryForRange(supabase, venueId, monthStart, monthEnd),
+    supabase
+      .from('bookings')
+      .select(
+        'id, booking_date, resource_id, calendar_id, booking_time, booking_end_time, estimated_end_time, status, practitioner_id',
+      )
+      .eq('venue_id', venueId)
+      .gte('booking_date', monthStart)
+      .lte('booking_date', monthEnd)
+      .in('status', CAPACITY_CONSUMING_STATUSES),
+  ]);
+
+  if (blocksRes.error) {
+    console.warn('[prefetchResourceMonthForAvailability] availability_blocks:', blocksRes.error.message);
+  }
+
+  const bookingsByDate = new Map<string, Record<string, unknown>[]>();
+  for (const raw of bookingsRes.data ?? []) {
+    const row = raw as Record<string, unknown>;
+    const bd = row.booking_date as string;
+    const list = bookingsByDate.get(bd) ?? [];
+    list.push(row);
+    bookingsByDate.set(bd, list);
+  }
+
+  return {
+    resources,
+    conflictResources,
+    venueOpeningHours: (venueRes.data?.opening_hours as OpeningHours | null) ?? null,
+    venueWideBlocks: rowsToVenueWideBlocks(blocksRes.data),
+    bookingsByDate,
+    venueTimezone: resolveVenueTimezone(venueRes.data),
+  };
+}
+
+/**
  * Dates in the given month (YYYY-MM-DD) where the resource has at least one bookable slot
  * for the requested duration (after min/max clamping inside the engine).
- * Uses fetchResourceInput per day so host/sibling conflict rules match single-day availability.
+ * Batches DB reads for the month then evaluates each day in memory (same rules as single-day availability).
  */
 export async function computeResourceAvailableDatesInMonth(
   supabase: SupabaseClient,
@@ -351,13 +584,19 @@ export async function computeResourceAvailableDatesInMonth(
   const pad = (n: number) => String(n).padStart(2, '0');
   const out: string[] = [];
   const lastDay = new Date(year, month, 0).getDate();
+
+  const prefetch = await prefetchResourceMonthForAvailability(supabase, venueId, resource, year, month);
+
   for (let d = 1; d <= lastDay; d++) {
     const dateStr = `${year}-${pad(month)}-${pad(d)}`;
-    const input = await fetchResourceInput({
-      supabase,
-      venueId,
+    const input = buildResourceEngineInputFromParts({
       date: dateStr,
-      resourceId: resource.id,
+      resources: prefetch.resources,
+      conflictResources: prefetch.conflictResources,
+      bookingsForDate: prefetch.bookingsByDate.get(dateStr) ?? [],
+      venueOpeningHours: prefetch.venueOpeningHours,
+      venueWideBlocks: prefetch.venueWideBlocks,
+      venueTimezone: prefetch.venueTimezone,
     });
     const results = computeResourceAvailability(input, durationMinutes);
     const row = results.find((r) => r.id === resource.id);
@@ -381,13 +620,19 @@ export async function computeResourceAvailableDatesInMonthAnyDuration(
   const pad = (n: number) => String(n).padStart(2, '0');
   const out: string[] = [];
   const lastDay = new Date(year, month, 0).getDate();
+
+  const prefetch = await prefetchResourceMonthForAvailability(supabase, venueId, resource, year, month);
+
   for (let day = 1; day <= lastDay; day++) {
     const dateStr = `${year}-${pad(month)}-${pad(day)}`;
-    const input = await fetchResourceInput({
-      supabase,
-      venueId,
+    const input = buildResourceEngineInputFromParts({
       date: dateStr,
-      resourceId: resource.id,
+      resources: prefetch.resources,
+      conflictResources: prefetch.conflictResources,
+      bookingsForDate: prefetch.bookingsByDate.get(dateStr) ?? [],
+      venueOpeningHours: prefetch.venueOpeningHours,
+      venueWideBlocks: prefetch.venueWideBlocks,
+      venueTimezone: prefetch.venueTimezone,
     });
     let hasSlot = false;
     for (const dur of durations) {
@@ -548,125 +793,37 @@ export async function fetchResourceInput(params: {
     resourcesQuery = resourcesQuery.eq('id', resourceId);
   }
 
-  const [resourcesRes, bookingsRes, hostDayBookingsRes, venueRes, venueBlocksRes] = await Promise.all([
+  const [resourcesRes, bookingsRes, venueRes, venueBlocksRes] = await Promise.all([
     resourcesQuery,
     supabase
       .from('bookings')
-      .select('id, resource_id, calendar_id, booking_time, booking_end_time, status')
-      .eq('venue_id', venueId)
-      .eq('booking_date', date)
-      .or('resource_id.not.is.null,calendar_id.not.is.null')
-      .in('status', CAPACITY_CONSUMING_STATUSES),
-    supabase
-      .from('bookings')
       .select(
-        'booking_time, booking_end_time, estimated_end_time, resource_id, calendar_id, practitioner_id',
+        'id, booking_date, resource_id, calendar_id, booking_time, booking_end_time, estimated_end_time, status, practitioner_id',
       )
       .eq('venue_id', venueId)
       .eq('booking_date', date)
       .in('status', CAPACITY_CONSUMING_STATUSES),
-    supabase.from('venues').select('opening_hours').eq('id', venueId).maybeSingle(),
+    supabase.from('venues').select('opening_hours, timezone').eq('id', venueId).maybeSingle(),
     venueWideBlocksQueryForDate(supabase, venueId, date),
   ]);
 
   let resources = (resourcesRes.data ?? []).map((r) => mapCalendarToResource(r as Record<string, unknown>));
   resources = await attachHostCalendarsToResources(supabase, venueId, resources);
-
-  const hostIdsForSiblings = [...new Set(resources.map((r) => r.display_on_calendar_id).filter(Boolean))] as string[];
-  let conflictResources = resources;
-  if (hostIdsForSiblings.length > 0) {
-    const { data: sibRows, error: sibErr } = await supabase
-      .from('unified_calendars')
-      .select('*')
-      .eq('venue_id', venueId)
-      .eq('calendar_type', 'resource')
-      .eq('is_active', true)
-      .in('display_on_calendar_id', hostIdsForSiblings);
-    if (sibErr) {
-      console.warn('[fetchResourceInput] sibling resources:', sibErr.message);
-    }
-    const byId = new Map(resources.map((r) => [r.id, r] as const));
-    for (const row of sibRows ?? []) {
-      const r = mapCalendarToResource(row as Record<string, unknown>);
-      if (!byId.has(r.id)) byId.set(r.id, r);
-    }
-    conflictResources = [...byId.values()];
-    conflictResources = await attachHostCalendarsToResources(supabase, venueId, conflictResources);
-  }
-
-  const resourceIdSet = new Set(resources.map((r) => r.id));
-
-  const existingBookings: ResourceBooking[] = (bookingsRes.data ?? [])
-    .filter((b) => {
-      const rid = (b as Record<string, unknown>).resource_id as string | null;
-      const cid = (b as Record<string, unknown>).calendar_id as string | null;
-      return (rid && resourceIdSet.has(rid)) || (cid && resourceIdSet.has(cid));
-    })
-    .map((b) => {
-      const row = b as Record<string, unknown>;
-      const rid = (row.resource_id as string | null) ?? (row.calendar_id as string | null) ?? '';
-      return {
-        id: row.id as string,
-        resource_id: rid,
-        booking_time: ((row.booking_time as string) ?? '00:00').slice(0, 5),
-        booking_end_time: ((row.booking_end_time as string) ?? '00:00').slice(0, 5),
-        status: row.status as string,
-      };
-    });
-
-  const resourcesByHost = new Map<string, VenueResource[]>();
-  for (const r of conflictResources) {
-    const h = r.display_on_calendar_id;
-    if (!h) continue;
-    const list = resourcesByHost.get(h) ?? [];
-    list.push(r);
-    resourcesByHost.set(h, list);
-  }
-
-  const occupancyByHost = new Map<string, Array<{ start: number; end: number }>>();
-  const hostIds = [...resourcesByHost.keys()];
-  const dayRows = hostDayBookingsRes.data ?? [];
-
-  for (const hostId of hostIds) {
-    const occ: Array<{ start: number; end: number }> = [];
-    for (const raw of dayRows) {
-      const row = raw as Record<string, unknown>;
-      if (row.resource_id) continue;
-      const cal = row.calendar_id as string | null | undefined;
-      const pid = row.practitioner_id as string | null | undefined;
-      if (cal !== hostId && pid !== hostId) continue;
-      const bt = row.booking_time as string;
-      const start = timeToMinutes(String(bt).slice(0, 5));
-      const end = bookingRowEndMinutes({
-        booking_time: String(bt).slice(0, 5),
-        booking_end_time: (row.booking_end_time as string | null) ?? null,
-        estimated_end_time: (row.estimated_end_time as string | null) ?? null,
-      });
-      if (end > start) occ.push({ start, end });
-    }
-    occupancyByHost.set(hostId, unionMinuteRanges(occ));
-  }
+  const conflictResources = await expandResourcesWithSiblings(supabase, venueId, resources);
 
   if (venueBlocksRes.error) {
     console.warn('[fetchResourceInput] availability_blocks:', venueBlocksRes.error.message);
   }
   const venueOpeningHours = (venueRes.data?.opening_hours as OpeningHours | null) ?? null;
   const venueWideBlocks = rowsToVenueWideBlocks(venueBlocksRes.data);
-  const venueWideResolution = resolveVenueWideAllowedMinuteRanges(venueOpeningHours, date, venueWideBlocks);
 
-  const effectiveAvailabilityRangesByResourceId = new Map<string, Array<{ start: number; end: number }>>();
-  for (const resource of resources) {
-    let ranges = getEffectiveAvailabilityRanges(resource, date);
-    const hostId = resource.display_on_calendar_id;
-    if (hostId) {
-      ranges = subtractRangesFromRanges(ranges, occupancyByHost.get(hostId) ?? []);
-      const siblings = resourcesByHost.get(hostId) ?? [];
-      const siblingExcl = mergedSiblingResourceRangesExcluding(siblings, resource.id, date);
-      ranges = subtractRangesFromRanges(ranges, siblingExcl);
-    }
-    ranges = intersectRangesWithVenueWideResolution(ranges, venueWideResolution);
-    effectiveAvailabilityRangesByResourceId.set(resource.id, ranges);
-  }
-
-  return { date, resources, existingBookings, effectiveAvailabilityRangesByResourceId };
+  return buildResourceEngineInputFromParts({
+    date,
+    resources,
+    conflictResources,
+    bookingsForDate: (bookingsRes.data ?? []) as Record<string, unknown>[],
+    venueOpeningHours,
+    venueWideBlocks,
+    venueTimezone: resolveVenueTimezone(venueRes.data),
+  });
 }

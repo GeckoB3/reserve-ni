@@ -25,7 +25,11 @@ import { mergeAppointmentServiceWithPractitionerLink } from '@/lib/appointments/
 import { resolveAppointmentServiceOnlineCharge } from '@/lib/appointments/appointment-service-payment';
 import { fetchEventInput, computeEventAvailability } from '@/lib/availability/event-ticket-engine';
 import { fetchClassInput, computeClassAvailability } from '@/lib/availability/class-session-engine';
-import { fetchResourceInput, computeResourceAvailability } from '@/lib/availability/resource-booking-engine';
+import {
+  fetchResourceInput,
+  computeResourceAvailability,
+  isResourceBookingStartInPast,
+} from '@/lib/availability/resource-booking-engine';
 import { cancellationDeadlineHoursBefore } from '@/lib/booking/cancellation-deadline';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 import { resolveCancellationNoticeHoursForCreate } from '@/lib/booking/resolve-cancellation-notice-hours';
@@ -42,6 +46,7 @@ import { logBookingOp } from '@/lib/observability/booking-ops-log';
 import { timeToMinutes } from '@/lib/availability';
 import { venueWideBlocksRejectBookingWindow } from '@/lib/availability/venue-wide-business-hours';
 import { fetchVenueOpeningHoursAndWideBlocksForDate } from '@/lib/availability/venue-wide-blocks-fetch';
+import { getResourceBookingEmailLabels } from '@/lib/booking/resource-booking-email-labels';
 
 function hhMmAfterAddingMinutes(startHhMm: string, durationMinutes: number): string {
   const base = timeToMinutes(startHhMm.slice(0, 5));
@@ -737,6 +742,17 @@ async function handleNonTableBooking(
     if (!resource_id || !booking_end_time) {
       return NextResponse.json({ error: 'resource_id and booking_end_time are required' }, { status: 400 });
     }
+    const venueTzResource =
+      typeof (venue as { timezone?: string | null }).timezone === 'string' &&
+      String((venue as { timezone?: string | null }).timezone).trim() !== ''
+        ? String((venue as { timezone?: string | null }).timezone).trim()
+        : 'Europe/London';
+    if (isResourceBookingStartInPast(booking_date, timeStr, venueTzResource)) {
+      return NextResponse.json(
+        { error: 'Choose a start time in the future for today.' },
+        { status: 400 },
+      );
+    }
     const endTimeStr = booking_end_time.length === 5 ? booking_end_time + ':00' : booking_end_time;
     const durationMinutes = (
       ((parseInt(endTimeStr.slice(0, 2)) * 60) + parseInt(endTimeStr.slice(3, 5))) -
@@ -772,7 +788,7 @@ async function handleNonTableBooking(
       requiresDeposit = true;
       depositAmountPence = depConfigured;
     }
-    const endHm = booking_end_time ? (booking_end_time.length === 5 ? booking_end_time + ':00' : booking_end_time) : '';
+    const resourceLabels = await getResourceBookingEmailLabels(supabase, resource_id);
     const resourcePriceDisplay =
       depositAmountPence != null && depositAmountPence > 0
         ? `£${(depositAmountPence / 100).toFixed(2)}`
@@ -782,8 +798,8 @@ async function handleNonTableBooking(
     appointmentEmailExtras = {
       email_variant: 'appointment',
       booking_model: 'resource_booking',
-      appointment_service_name: res?.name ?? 'Resource',
-      practitioner_name: endHm ? `Until ${endHm.slice(0, 5)}` : null,
+      appointment_service_name: resourceLabels.resourceName ?? res?.name ?? 'Resource',
+      practitioner_name: resourceLabels.hostCalendarName,
       appointment_price_display: resourcePriceDisplay,
     };
   }

@@ -46,12 +46,12 @@ export async function POST(
 
   const manageBookingLink = createShortManageLink(booking.id);
 
-  // Clear any existing dedup entry so the resend actually fires
+  // Clear any existing dedup entries so the resend actually fires (email + SMS use separate message types)
   await admin
     .from('communication_logs')
     .delete()
     .eq('booking_id', booking.id)
-    .eq('message_type', 'booking_confirmation_email');
+    .in('message_type', ['booking_confirmation_email', 'booking_confirmation_sms']);
 
   const basePayload = {
     id: booking.id,

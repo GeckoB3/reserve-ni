@@ -2,49 +2,17 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
-import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
-import type { BookingEmailData, VenueEmailData, CommMessageType } from '@/lib/emails/types';
-import { renderBookingConfirmation } from '@/lib/emails/templates/booking-confirmation';
-import { renderDepositRequestSms } from '@/lib/emails/templates/deposit-request-sms';
-import { renderDepositRequestEmail } from '@/lib/emails/templates/deposit-request-email';
-import { renderDepositConfirmation } from '@/lib/emails/templates/deposit-confirmation';
-import { renderReminder56h } from '@/lib/emails/templates/reminder-56h';
-import { renderDayOfReminderEmail } from '@/lib/emails/templates/day-of-reminder-email';
-import { renderDayOfReminderSms } from '@/lib/emails/templates/day-of-reminder-sms';
-import { renderPostVisitEmail } from '@/lib/emails/templates/post-visit';
-import { renderBookingModification } from '@/lib/emails/templates/booking-modification';
-import { renderBookingCancellation } from '@/lib/emails/templates/booking-cancellation';
-import { renderBookingConfirmationSms } from '@/lib/emails/templates/booking-confirmation-sms';
-
-const SAMPLE_BOOKING: BookingEmailData = {
-  id: '00000000-0000-0000-0000-000000000000',
-  guest_name: 'Sarah Connor',
-  guest_email: 'sarah@example.com',
-  guest_phone: '+447700900123',
-  booking_date: '2026-03-20',
-  booking_time: '19:00',
-  party_size: 4,
-  special_requests: 'Birthday celebration, window table if possible',
-  dietary_notes: '1 vegetarian, 1 gluten-free',
-  deposit_amount_pence: 2000,
-  deposit_status: 'Paid',
-  refund_cutoff: '2026-03-18T19:00:00Z',
-  manage_booking_link: 'https://www.reserveni.com/m/AAAAAAAAAAAAAAAAAAAAAA.aaaaaaaaaaaa',
-  confirm_cancel_link: 'https://www.reserveni.com/c/AAAAAAAAAAAAAAAAAAAAAA.bbbbbbbbbbbb',
-};
-
-/** Appointment-style sample for unified scheduling previews (reminders, post-visit, confirmation SMS). */
-const SAMPLE_APPOINTMENT_BOOKING: BookingEmailData = {
-  ...SAMPLE_BOOKING,
-  party_size: 1,
-  email_variant: 'appointment',
-  guest_name: 'Alex Morgan',
-  appointment_service_name: 'Initial consultation',
-  practitioner_name: 'Dr. Jordan Smith',
-  appointment_price_display: '£45',
-  dietary_notes: null,
-  special_requests: null,
-};
+import type { CommunicationChannel, CommunicationLane, CommunicationMessageKey } from '@/lib/communications/policies';
+import { resolveCommPolicy } from '@/lib/communications/policy-resolver';
+import {
+  getPreviewBookingSample,
+  getPreviewVenueSample,
+  type CommunicationPreviewSampleVariant,
+} from '@/lib/communications/preview-samples';
+import {
+  renderCommunicationEmail,
+  renderCommunicationSms,
+} from '@/lib/communications/renderer';
 
 /**
  * POST /api/venue/communication-preview
@@ -57,11 +25,19 @@ export async function POST(request: NextRequest) {
     if (!staff) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
 
     const body = await request.json();
-    const messageType = body.messageType as CommMessageType;
+    const messageKey = body.messageKey as CommunicationMessageKey;
+    const channel = body.channel as CommunicationChannel | undefined;
+    const lane = body.lane as CommunicationLane | undefined;
     const customMessage = (body.customMessage as string | undefined) ?? null;
+    const sampleVariant = body.sampleVariant as
+      | CommunicationPreviewSampleVariant
+      | undefined;
 
-    if (!messageType) {
-      return NextResponse.json({ error: 'Missing messageType' }, { status: 400 });
+    if (!messageKey || !channel || !lane) {
+      return NextResponse.json(
+        { error: 'Missing messageKey, channel, or lane' },
+        { status: 400 },
+      );
     }
 
     const admin = getSupabaseAdminClient();
@@ -71,124 +47,89 @@ export async function POST(request: NextRequest) {
       .eq('id', staff.venue_id)
       .single();
 
-    const bookingModel = (venue as { booking_model?: string | null } | null)?.booking_model ?? null;
-    const useAppointmentSample = isUnifiedSchedulingVenue(bookingModel);
+    const bookingModel =
+      (venue as { booking_model?: string | null } | null)?.booking_model ?? null;
+    const resolved = await resolveCommPolicy({
+      venueId: staff.venue_id,
+      messageKey,
+      bookingModel,
+      lane,
+      requestedChannels: [channel],
+    });
 
-    const venueData: VenueEmailData = {
-      name: venue?.name ?? 'Your venue',
-      address: venue?.address ?? '123 Main Street, Belfast BT1 1AA',
-    };
+    const venueData = getPreviewVenueSample(venue?.name ?? undefined, venue?.address ?? undefined);
+    const booking = getPreviewBookingSample(
+      lane,
+      sampleVariant,
+    );
+    const emailCustomMessage =
+      channel === 'email'
+        ? customMessage
+        : resolved.emailCustomMessage;
+    const smsCustomMessage =
+      channel === 'sms'
+        ? customMessage
+        : resolved.smsCustomMessage;
 
-    const apptBooking = SAMPLE_APPOINTMENT_BOOKING;
-    const tableBooking = SAMPLE_BOOKING;
-    /** Most previews: match the venue’s booking model so unified/practitioner venues see appointment-style samples. */
-    const primarySample = useAppointmentSample ? apptBooking : tableBooking;
-
-    let preview: { subject?: string; html?: string; text?: string; body?: string } = {};
-    /** Describes which synthetic booking profile was used (matches modal footnote). */
-    let previewSampleKind: 'table' | 'appointment' = useAppointmentSample
-      ? 'appointment'
-      : 'table';
-
-    switch (messageType) {
-      case 'booking_confirmation_email':
-        preview = renderBookingConfirmation(primarySample, venueData, customMessage);
-        previewSampleKind = useAppointmentSample ? 'appointment' : 'table';
-        break;
-      case 'deposit_request_sms':
-        preview = renderDepositRequestSms(
-          primarySample,
-          venueData,
-          'https://www.reserveni.com/pay?t=preview',
-          customMessage,
-        );
-        previewSampleKind = useAppointmentSample ? 'appointment' : 'table';
-        break;
-      case 'deposit_request_email':
-        preview = renderDepositRequestEmail(
-          primarySample,
-          venueData,
-          'https://www.reserveni.com/pay?t=preview',
-          customMessage,
-        );
-        previewSampleKind = useAppointmentSample ? 'appointment' : 'table';
-        break;
-      case 'deposit_confirmation_email':
-        preview = renderDepositConfirmation(primarySample, venueData, customMessage);
-        previewSampleKind = useAppointmentSample ? 'appointment' : 'table';
-        break;
-      case 'reminder_56h_email':
-        preview = renderReminder56h(SAMPLE_BOOKING, venueData, customMessage);
-        previewSampleKind = 'table';
-        break;
-      case 'reminder_1_email':
-        preview = renderReminder56h(apptBooking, venueData, customMessage);
-        previewSampleKind = 'appointment';
-        break;
-      case 'reminder_1_sms':
-        /** Same template as live sends; sample must match channel (table vs appointments). */
-        preview = renderDayOfReminderSms(primarySample, venueData, customMessage);
-        previewSampleKind = useAppointmentSample ? 'appointment' : 'table';
-        break;
-      case 'reminder_2_email':
-        preview = renderDayOfReminderEmail(apptBooking, venueData, customMessage);
-        previewSampleKind = 'appointment';
-        break;
-      case 'reminder_2_sms':
-        preview = renderDayOfReminderSms(apptBooking, venueData, customMessage);
-        previewSampleKind = 'appointment';
-        break;
-      case 'unified_post_visit_email':
-        preview = renderPostVisitEmail(apptBooking, venueData, customMessage);
-        previewSampleKind = 'appointment';
-        break;
-      case 'booking_confirmation_sms':
-        preview = renderBookingConfirmationSms(primarySample, venueData, customMessage);
-        previewSampleKind = useAppointmentSample ? 'appointment' : 'table';
-        break;
-      case 'day_of_reminder_email':
-        preview = renderDayOfReminderEmail(
-          useAppointmentSample ? apptBooking : tableBooking,
-          venueData,
-          customMessage,
-        );
-        previewSampleKind = useAppointmentSample ? 'appointment' : 'table';
-        break;
-      case 'day_of_reminder_sms':
-        preview = renderDayOfReminderSms(
-          useAppointmentSample ? apptBooking : tableBooking,
-          venueData,
-          customMessage,
-        );
-        previewSampleKind = useAppointmentSample ? 'appointment' : 'table';
-        break;
-      case 'post_visit_email':
-        preview = renderPostVisitEmail(SAMPLE_BOOKING, venueData, customMessage);
-        previewSampleKind = 'table';
-        break;
-      case 'booking_modification_email':
-        preview = renderBookingModification(primarySample, venueData, customMessage);
-        previewSampleKind = useAppointmentSample ? 'appointment' : 'table';
-        break;
-      case 'cancellation_email':
-        preview = renderBookingCancellation(
-          primarySample,
-          venueData,
-          'Your deposit of £20.00 will be refunded to your original payment method within 5–10 business days.',
-          customMessage,
-        );
-        previewSampleKind = useAppointmentSample ? 'appointment' : 'table';
-        break;
-      default:
-        return NextResponse.json({ error: 'Unknown message type' }, { status: 400 });
-    }
+    const emailPreview =
+      channel === 'email'
+        ? renderCommunicationEmail({
+            lane,
+            messageKey,
+            booking,
+            venue: venueData,
+            emailCustomMessage,
+            smsCustomMessage,
+            paymentLink: 'https://www.reserveni.com/pay?t=preview',
+            confirmLink: 'https://www.reserveni.com/confirm/preview',
+            cancelLink: 'https://www.reserveni.com/cancel/preview',
+            refundMessage: '£20 deposit refunded',
+            rebookLink: venueData.booking_page_url ?? null,
+            paymentDeadline: '20 March at 17:00',
+            paymentDeadlineHours: 24,
+            durationText: '45 minutes',
+            preAppointmentInstructions: 'Please arrive 10 minutes early.',
+            cancellationPolicy:
+              'Full refund if you cancel before the cutoff. No refund after that.',
+            changeSummary: 'Time moved by 30 minutes.',
+            message:
+              'We have a quick update about your booking. Please contact us if you need anything else.',
+          })
+        : null;
+    const smsPreview =
+      channel === 'sms'
+        ? renderCommunicationSms({
+            lane,
+            messageKey,
+            booking,
+            venue: venueData,
+            emailCustomMessage,
+            smsCustomMessage,
+            paymentLink: 'https://www.reserveni.com/pay?t=preview',
+            confirmLink: 'https://www.reserveni.com/confirm/preview',
+            cancelLink: 'https://www.reserveni.com/cancel/preview',
+            refundMessage: '£20 deposit refunded.',
+            rebookLink: venueData.booking_page_url ?? null,
+            paymentDeadline: '20 March at 17:00',
+            paymentDeadlineHours: 24,
+            durationText: '45 minutes',
+            preAppointmentInstructions: 'Please arrive 10 minutes early.',
+            cancellationPolicy:
+              'Full refund if you cancel before the cutoff. No refund after that.',
+            changeSummary: 'Time moved by 30 minutes.',
+            message:
+              'We have a quick update about your booking. Please contact us if you need anything else.',
+          })
+        : null;
 
     return NextResponse.json({
-      messageType,
-      subject: preview.subject ?? null,
-      html: preview.html ?? null,
-      text: preview.text ?? preview.body ?? null,
-      previewSampleKind,
+      messageKey,
+      channel,
+      lane,
+      subject: emailPreview?.subject ?? null,
+      html: emailPreview?.html ?? null,
+      text: emailPreview?.text ?? smsPreview?.body ?? null,
+      previewSampleKind: sampleVariant ?? lane,
     });
   } catch (err) {
     console.error('Preview render failed:', err);

@@ -5,7 +5,6 @@
 
 export type { MessageType, CommunicationRequest, Recipient, TemplateVariables, MessageChannel } from './types';
 export { communicationService } from './service';
-export { mergeVariables, getEmailTemplate, getSmsTemplate } from './templates';
 export { EmailChannel } from './channels/email';
 export { SMSChannel } from './channels/sms';
 

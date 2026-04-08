@@ -130,7 +130,7 @@ export function renderReminder56h(
   if (appt && booking.appointment_service_name)
     textParts.push(`Service: ${booking.appointment_service_name}`);
   if (appt && booking.practitioner_name)
-    textParts.push(`Staff: ${booking.practitioner_name}`);
+    textParts.push(`With: ${booking.practitioner_name}`);
   if (venue.address) textParts.push(`Address: ${venue.address}`);
   if (hasDeposit && booking.refund_cutoff) {
     const fmt = formatRefundDeadlineIso(booking.refund_cutoff);

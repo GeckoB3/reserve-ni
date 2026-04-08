@@ -6,6 +6,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { BookingEmailData, GroupAppointmentLine } from '@/lib/emails/types';
 import { formatDepositAmount } from '@/lib/emails/templates/base-template';
+import { getResourceBookingEmailLabels } from '@/lib/booking/resource-booking-email-labels';
 
 function priceDisplayFromPence(pricePence: number | null | undefined): string | null {
   if (pricePence == null) return null;
@@ -244,18 +245,16 @@ export async function enrichBookingEmailForSecondaryModels(
   }
 
   if (r.resource_id) {
-    const { data: res } = await supabase
-      .from('venue_resources')
-      .select('name')
-      .eq('id', r.resource_id)
-      .maybeSingle();
-    const end = r.booking_end_time ? String(r.booking_end_time).slice(0, 5) : null;
+    const { resourceName, hostCalendarName } = await getResourceBookingEmailLabels(
+      supabase,
+      r.resource_id,
+    );
     return {
       ...base,
       email_variant: 'appointment',
       booking_model: 'resource_booking',
-      appointment_service_name: res?.name ?? base.appointment_service_name ?? null,
-      practitioner_name: end ? `Until ${end}` : base.practitioner_name ?? null,
+      appointment_service_name: resourceName ?? base.appointment_service_name ?? null,
+      practitioner_name: hostCalendarName ?? base.practitioner_name ?? null,
     };
   }
 

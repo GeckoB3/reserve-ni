@@ -20,6 +20,7 @@ import type { BookingModel } from '@/types/booking-models';
 import { ModifyBookingInline } from '@/components/booking/ModifyBookingInline';
 import { BookingNotesEditablePanel } from '@/components/booking/BookingNotesEditablePanel';
 import { DashboardStatCard } from '@/components/dashboard/DashboardStatCard';
+import { bookingStatusDisplayLabel, isTableReservationBooking } from '@/lib/booking/infer-booking-row-model';
 import {
   computeNextBookingsSlotFromBookingRows,
   nextBookingsTileContent,
@@ -57,6 +58,14 @@ interface DaySheetBooking {
   created_at: string;
   guest_tags?: string[];
   table_assignments?: Array<{ id: string; name: string }>;
+  experience_event_id?: string | null;
+  class_instance_id?: string | null;
+  resource_id?: string | null;
+  event_session_id?: string | null;
+  calendar_id?: string | null;
+  service_item_id?: string | null;
+  practitioner_id?: string | null;
+  appointment_service_id?: string | null;
 }
 
 interface ActiveTable {
@@ -893,10 +902,11 @@ export function DaySheetView({
                      newStatus === 'No-Show' ? 'Marked as no-show' :
                      newStatus === 'Cancelled' ? 'Booking cancelled' : 'Status updated';
       addToast(label, 'success');
+      const tableStyle = isTableReservationBooking(currentBooking);
       setUndoAction({
         id: crypto.randomUUID(),
         type: 'change_status',
-        description: `${currentBooking.guest_name}: ${fromStatus} -> ${newStatus}`,
+        description: `${currentBooking.guest_name}: ${bookingStatusDisplayLabel(fromStatus, tableStyle)} -> ${bookingStatusDisplayLabel(newStatus, tableStyle)}`,
         timestamp: Date.now(),
         previous_state: { bookingId, status: fromStatus },
         current_state: { bookingId, status: newStatus },
@@ -1352,7 +1362,7 @@ export function DaySheetView({
                           {/* Status badge */}
                           <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${sStyle.bg} ${sStyle.text}`}>
                             <span className={`h-1.5 w-1.5 rounded-full ${sStyle.dot}`} />
-                            {b.status}
+                            {bookingStatusDisplayLabel(b.status, isTableReservationBooking(b))}
                           </span>
 
                           {/* Time */}
@@ -1646,7 +1656,7 @@ export function DaySheetView({
                                         const ra = BOOKING_REVERT_ACTIONS[b.status as BookingStatus]!;
                                         setConfirmDialog({
                                           title: ra.label,
-                                          message: `${b.guest_name} (${b.party_size}) at ${b.booking_time.slice(0, 5)} will be changed from ${b.status} back to ${ra.target}.`,
+                                          message: `${b.guest_name} (${b.party_size}) at ${b.booking_time.slice(0, 5)} will be changed from ${bookingStatusDisplayLabel(b.status, isTableReservationBooking(b))} back to ${bookingStatusDisplayLabel(ra.target, isTableReservationBooking(b))}.`,
                                           confirmLabel: ra.label,
                                           onConfirm: () => void changeStatus(b.id, ra.target),
                                         });

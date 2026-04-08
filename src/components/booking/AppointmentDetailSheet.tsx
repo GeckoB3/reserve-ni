@@ -10,7 +10,11 @@ import {
   type BookingStatus,
 } from '@/lib/table-management/booking-status';
 import type { BookingModel, ClassPaymentRequirement } from '@/types/booking-models';
-import { inferBookingRowModel, bookingModelShortLabel } from '@/lib/booking/infer-booking-row-model';
+import {
+  inferBookingRowModel,
+  bookingModelShortLabel,
+  isTableReservationBooking,
+} from '@/lib/booking/infer-booking-row-model';
 import { formatBookablePricePence } from '@/lib/booking/format-price-display';
 
 export interface DetailPractitionerOption {
@@ -702,7 +706,9 @@ export function AppointmentDetailSheet({
                       onClick={() => void setStatus(primary.target)}
                       className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-700 disabled:opacity-50"
                     >
-                      {primary.label === 'Seat' ? 'Start' : primary.label}
+                      {primary.label === 'Seat'
+                        ? (isTableReservationBooking(detail) ? 'Seat' : 'Start')
+                        : primary.label}
                     </button>
                   )}
                   {revert && (
@@ -712,12 +718,16 @@ export function AppointmentDetailSheet({
                       onClick={() => void setStatus(revert.target)}
                       className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
                       title={
-                        detail.status === 'Seated' && detail.practitioner_id
+                        detail.status === 'Seated' && !isTableReservationBooking(detail)
                           ? 'Return to confirmed; if they were marked arrived, waiting is restored'
                           : undefined
                       }
                     >
-                      {detail.status === 'Seated' && detail.practitioner_id ? 'Undo start' : revert.label}
+                      {detail.status === 'Seated' &&
+                      revert.target === 'Confirmed' &&
+                      !isTableReservationBooking(detail)
+                        ? 'Undo Start'
+                        : revert.label}
                     </button>
                   )}
                   {detail.status === 'Confirmed' && canNoShow && (

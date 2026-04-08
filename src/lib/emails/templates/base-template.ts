@@ -99,7 +99,7 @@ export function buildBookingDetailsCard(opts: {
     }
     if (opts.practitionerName) {
       rows.push(
-        `<tr><td style="padding:8px 0;border-bottom:1px solid #e2e8f0"><span style="display:block;font-size:11px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:0.04em">Staff</span><span style="display:block;margin-top:4px;font-size:15px;color:#0f172a;font-weight:500">${escapeHtml(opts.practitionerName)}</span></td></tr>`,
+        `<tr><td style="padding:8px 0;border-bottom:1px solid #e2e8f0"><span style="display:block;font-size:11px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:0.04em">With</span><span style="display:block;margin-top:4px;font-size:15px;color:#0f172a;font-weight:500">${escapeHtml(opts.practitionerName)}</span></td></tr>`,
       );
     }
     if (opts.priceDisplay) {
