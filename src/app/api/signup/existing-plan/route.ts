@@ -31,6 +31,7 @@ export async function GET() {
       hasVenue: true,
       pricing_tier: existing.pricing_tier,
       planFamily,
+      onboarding_completed: existing.onboarding_completed === true,
     });
   } catch (err) {
     console.error('[signup/existing-plan] GET failed:', err);

@@ -39,6 +39,7 @@ export function SignupPlanConflictBanner() {
       const data = (await res.json()) as {
         hasVenue?: boolean;
         planFamily?: SignupPlanFamily;
+        onboarding_completed?: boolean;
       };
 
       if (!data.hasVenue || !data.planFamily) {
@@ -54,6 +55,12 @@ export function SignupPlanConflictBanner() {
 
       if (attemptedFamily !== data.planFamily) {
         setState('mismatch');
+        return;
+      }
+      // New signups have a venue and subscription but have not finished onboarding yet — do not
+      // tell them to "use the dashboard" while they are still in the signup/onboarding funnel.
+      if (data.onboarding_completed !== true) {
+        setState('hidden');
         return;
       }
       setState('same_family');
