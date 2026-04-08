@@ -40,13 +40,6 @@ function poundsToMinor(pounds: string): number {
   return Math.round(parsed * 100);
 }
 
-/** Class timetable API expects `HH:MM` (two-digit hour). */
-function normalizeTimetableHHMM(t: string): string {
-  const m = /^(\d{1,2}):(\d{2})$/.exec(t.trim());
-  if (!m) return t.trim();
-  return `${m[1]!.padStart(2, '0')}:${m[2]}`;
-}
-
 interface VenueOnboarding {
   id: string;
   name: string;
@@ -82,10 +75,10 @@ interface EventDraft {
 
 interface ClassDraft {
   name: string;
+  /** Shown to guests; optional like dashboard Add Class Type. */
+  description: string;
   /** Team calendar column id (`unified_calendars.id`); required by POST /api/venue/classes. */
   instructor_id: string;
-  day_of_week: number;
-  start_time: string;
   duration_minutes: number;
   capacity: number;
   price: string;
@@ -96,7 +89,6 @@ interface ResourceDraft {
   pricePerSlot: string;
 }
 
-const DAY_LABELS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 type AppointmentPlanModel = 'unified_scheduling' | 'event_ticket' | 'class_session' | 'resource_booking';
 const APPOINTMENTS_MODEL_LABEL: Record<AppointmentPlanModel, string> = {
   unified_scheduling: 'Appointments',
@@ -158,9 +150,8 @@ export default function OnboardingPage() {
   const [classes, setClasses] = useState<ClassDraft[]>([
     {
       name: '',
+      description: '',
       instructor_id: '',
-      day_of_week: 1,
-      start_time: '09:00',
       duration_minutes: 60,
       capacity: 15,
       price: '0.00',
@@ -825,39 +816,63 @@ export default function OnboardingPage() {
         setStep((s) => s + 1);
         return;
       }
-      if (!eventDraft.name.trim() || !eventDraft.date) {
-        setError('Please enter an event name and date.');
-        return;
-      }
-      if (eventDraft.end_time <= eventDraft.start_time) {
-        setError('End time must be after start time.');
-        return;
-      }
-      setSaving(true);
-      try {
-        const res = await fetch('/api/venue/experience-events', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            name: eventDraft.name.trim(),
-            event_date: eventDraft.date,
-            start_time: eventDraft.start_time,
-            end_time: eventDraft.end_time,
-            capacity: eventDraft.capacity,
-            ticket_types: [
-              { name: 'General Admission', price_pence: poundsToMinor(eventDraft.ticketPrice), capacity: eventDraft.capacity },
-            ],
-          }),
-        });
-        if (!res.ok) throw new Error('Failed to create event');
-        await saveProgress(step + 1);
-        setMaxCompletedStep((prev) => Math.max(prev, step + 1));
-      } catch {
-        setError('Failed to save event. Please try again.');
+      const eventName = eventDraft.name.trim();
+      const eventDate = eventDraft.date.trim();
+
+      if (isAppointmentsPlanVenue && !eventName && !eventDate) {
+        setSaving(true);
+        try {
+          await saveProgress(step + 1);
+          setMaxCompletedStep((prev) => Math.max(prev, step + 1));
+        } catch {
+          setError('Failed to save progress. Please try again.');
+          setSaving(false);
+          return;
+        }
         setSaving(false);
-        return;
+      } else {
+        if (!eventName || !eventDate) {
+          setError(
+            isAppointmentsPlanVenue
+              ? 'Enter both an event name and date, or leave both empty to skip this step.'
+              : 'Please enter an event name and date.',
+          );
+          return;
+        }
+        if (eventDraft.end_time <= eventDraft.start_time) {
+          setError('End time must be after start time.');
+          return;
+        }
+        setSaving(true);
+        try {
+          const res = await fetch('/api/venue/experience-events', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              name: eventName,
+              event_date: eventDate,
+              start_time: eventDraft.start_time,
+              end_time: eventDraft.end_time,
+              capacity: eventDraft.capacity,
+              ticket_types: [
+                {
+                  name: 'General Admission',
+                  price_pence: poundsToMinor(eventDraft.ticketPrice),
+                  capacity: eventDraft.capacity,
+                },
+              ],
+            }),
+          });
+          if (!res.ok) throw new Error('Failed to create event');
+          await saveProgress(step + 1);
+          setMaxCompletedStep((prev) => Math.max(prev, step + 1));
+        } catch {
+          setError('Failed to save event. Please try again.');
+          setSaving(false);
+          return;
+        }
+        setSaving(false);
       }
-      setSaving(false);
     }
 
     if (currentStepKey === 'classes') {
@@ -883,13 +898,12 @@ export default function OnboardingPage() {
       setSaving(true);
       try {
         for (const c of validClasses) {
-          const startTime = normalizeTimetableHHMM(c.start_time);
-
           const typeRes = await fetch('/api/venue/classes', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               name: c.name.trim(),
+              description: c.description.trim() || null,
               duration_minutes: c.duration_minutes,
               capacity: c.capacity,
               price_pence: poundsToMinor(c.price),
@@ -902,30 +916,6 @@ export default function OnboardingPage() {
           }
           const classTypeId = typeBody.data?.id;
           if (!classTypeId) throw new Error('Class type ID missing from response');
-
-          const ttRes = await fetch('/api/venue/classes', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              class_type_id: classTypeId,
-              day_of_week: c.day_of_week,
-              start_time: startTime,
-            }),
-          });
-          if (!ttRes.ok) {
-            const ttErr = (await ttRes.json().catch(() => ({}))) as { error?: string };
-            throw new Error(ttErr.error ?? 'Failed to create timetable entry');
-          }
-        }
-
-        const genRes = await fetch('/api/venue/classes/generate-instances', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ weeks: 8 }),
-        });
-        if (!genRes.ok) {
-          const errBody = (await genRes.json().catch(() => ({}))) as { error?: string };
-          throw new Error(errBody.error ?? 'Failed to generate class sessions from your timetable');
         }
 
         await saveProgress(step + 1);
@@ -1418,10 +1408,32 @@ export default function OnboardingPage() {
         {/* Model C: First event */}
         {currentStepKey === 'first_event' && (
           <div>
-            <h2 className="mb-1 text-lg font-bold text-slate-900">Set up your first event</h2>
-            <p className="mb-6 text-sm text-slate-500">
-              Create one event now so guests can start booking from your Events tab straight away.
+            <h2 className="mb-1 text-lg font-bold text-slate-900">
+              {isAppointmentsPlanVenue ? 'Events (optional)' : 'Set up your first event'}
+            </h2>
+            <p className="mb-4 text-sm text-slate-500">
+              {isAppointmentsPlanVenue ? (
+                <>
+                  You can skip this step and add events later. Events are ticketed experiences with a date and time;
+                  you create and manage them in the dashboard under{' '}
+                  <Link href="/dashboard/event-manager" className="font-medium text-brand-600 underline hover:text-brand-700">
+                    Event manager
+                  </Link>
+                  , where you set capacity, ticket types, and pricing. Guests book from your public Events tab when you
+                  publish an event.
+                </>
+              ) : (
+                <>Create one event now so guests can start booking from your Events tab straight away.</>
+              )}
             </p>
+            {isAppointmentsPlanVenue && (
+              <div className="mb-6 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                <p className="font-medium text-slate-800">Optional step</p>
+                <p className="mt-1">
+                  Leave the fields below empty and click Continue to go on — or fill them in to create a first event now.
+                </p>
+              </div>
+            )}
             <div className="space-y-4">
               <div>
                 <label className="mb-1.5 block text-sm font-medium text-slate-700">
@@ -1509,12 +1521,22 @@ export default function OnboardingPage() {
           </div>
         )}
 
-        {/* Model D: Classes */}
+        {/* Model D: Classes — class types only (timetable & sessions: dashboard → Class timetable) */}
         {currentStepKey === 'classes' && (
           <div>
-            <h2 className="mb-1 text-lg font-bold text-slate-900">Set up your classes</h2>
+            <h2 className="mb-1 text-lg font-bold text-slate-900">Class types</h2>
+            <p className="mb-2 text-sm text-slate-500">
+              You are adding <strong>class types</strong> — the template for a class (name, description, duration,
+              price, which calendar it runs on). This matches <strong>Add class type</strong> on{' '}
+              <Link href="/dashboard/class-timetable" className="font-medium text-brand-600 underline hover:text-brand-700">
+                Class timetable
+              </Link>{' '}
+              in the dashboard.
+            </p>
             <p className="mb-6 text-sm text-slate-500">
-              Define class types and their schedule so upcoming sessions can be generated automatically.
+              <strong>Scheduling:</strong> day, time, and recurring sessions are set in the dashboard under the{' '}
+              <strong>Classes</strong> tab (class timetable). There you can add timetable rules and generate bookable
+              sessions for guests.
             </p>
             <div className="space-y-3">
               {classes.map((c, i) => (
@@ -1528,7 +1550,7 @@ export default function OnboardingPage() {
                         updated[i] = { ...c, name: e.target.value };
                         setClasses(updated);
                       }}
-                      placeholder="e.g. Weekly session, Open class"
+                      placeholder="Class name (e.g. Beginners yoga, Open studio)"
                       className="border-0 bg-transparent p-0 text-sm font-medium text-slate-900 focus:ring-0"
                     />
                     {classes.length > 1 && (
@@ -1540,6 +1562,20 @@ export default function OnboardingPage() {
                         Remove
                       </button>
                     )}
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-slate-600">Description (optional)</label>
+                    <textarea
+                      value={c.description}
+                      onChange={(e) => {
+                        const updated = [...classes];
+                        updated[i] = { ...c, description: e.target.value };
+                        setClasses(updated);
+                      }}
+                      placeholder="Short description for guests (shown on your booking page when you publish sessions)."
+                      rows={3}
+                      className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
+                    />
                   </div>
                   <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                     <div className="sm:col-span-2">
@@ -1564,42 +1600,11 @@ export default function OnboardingPage() {
                         )}
                       </select>
                       <p className="mt-1 text-[10px] text-slate-400">
-                        Sessions are scheduled on this team calendar (same as Class timetable in the dashboard).
+                        Default calendar for this class type (same field as “calendar” in Add class type).
                       </p>
                     </div>
                   </div>
                   <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                    <div>
-                      <label className="block text-[10px] font-medium text-slate-500">Day</label>
-                      <select
-                        value={c.day_of_week}
-                        onChange={(e) => {
-                          const updated = [...classes];
-                          updated[i] = { ...c, day_of_week: parseInt(e.target.value) };
-                          setClasses(updated);
-                        }}
-                        className="w-full rounded border border-slate-200 px-2 py-1.5 text-xs"
-                      >
-                        {DAY_LABELS.map((label, d) => (
-                          <option key={d} value={d}>
-                            {label}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-[10px] font-medium text-slate-500">Time</label>
-                      <input
-                        type="time"
-                        value={c.start_time}
-                        onChange={(e) => {
-                          const updated = [...classes];
-                          updated[i] = { ...c, start_time: e.target.value };
-                          setClasses(updated);
-                        }}
-                        className="w-full rounded border border-slate-200 px-2 py-1.5 text-xs"
-                      />
-                    </div>
                     <div>
                       <label className="block text-[10px] font-medium text-slate-500">
                         Duration (min)
@@ -1669,9 +1674,8 @@ export default function OnboardingPage() {
                     ...classes,
                     {
                       name: '',
+                      description: '',
                       instructor_id: rosterList[0]?.id ?? '',
-                      day_of_week: 1,
-                      start_time: '09:00',
                       duration_minutes: 60,
                       capacity: 15,
                       price: '0.00',
@@ -1680,7 +1684,7 @@ export default function OnboardingPage() {
                 }
                 className="w-full rounded-xl border-2 border-dashed border-slate-200 py-3 text-sm text-slate-500 hover:border-brand-300 hover:text-brand-600"
               >
-                + Add another class
+                + Add another class type
               </button>
             </div>
           </div>
