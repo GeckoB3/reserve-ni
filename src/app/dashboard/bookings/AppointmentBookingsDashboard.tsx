@@ -590,6 +590,11 @@ export function AppointmentBookingsDashboard({
     return !['Cancelled', 'No-Show', 'Completed'].includes(b.status);
   }
 
+  function canShowCancelStaffAttendanceConfirmation(b: RegistryAppointment): boolean {
+    if (!b.staff_attendance_confirmed_at) return false;
+    return !['Cancelled', 'No-Show', 'Completed'].includes(b.status);
+  }
+
   async function confirmBookingAttendance(bookingId: string) {
     setConfirmAttendanceLoadingId(bookingId);
     try {
@@ -608,6 +613,29 @@ export function AppointmentBookingsDashboard({
       void fetchBookingsForStats();
     } catch {
       addToast('Could not confirm attendance', 'error');
+    } finally {
+      setConfirmAttendanceLoadingId(null);
+    }
+  }
+
+  async function cancelStaffAttendanceConfirmation(bookingId: string) {
+    setConfirmAttendanceLoadingId(bookingId);
+    try {
+      const res = await fetch(`/api/venue/bookings/${bookingId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ staff_attendance_confirmed: false }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        addToast((j as { error?: string }).error ?? 'Could not cancel confirmation', 'error');
+        return;
+      }
+      addToast('Confirmation cancelled', 'success');
+      void fetchBookings({ silent: true });
+      void fetchBookingsForStats();
+    } catch {
+      addToast('Could not cancel confirmation', 'error');
     } finally {
       setConfirmAttendanceLoadingId(null);
     }
@@ -850,6 +878,16 @@ export function AppointmentBookingsDashboard({
                   {confirmAttendanceLoadingId === b.id ? '…' : 'Confirm Booking'}
                 </button>
               )}
+              {canShowCancelStaffAttendanceConfirmation(b) && (
+                <button
+                  type="button"
+                  disabled={confirmAttendanceLoadingId === b.id}
+                  onClick={() => void cancelStaffAttendanceConfirmation(b.id)}
+                  className="rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                >
+                  {confirmAttendanceLoadingId === b.id ? '…' : 'Cancel confirmation'}
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => setDetailBookingId(b.id)}
@@ -930,6 +968,16 @@ export function AppointmentBookingsDashboard({
                   className="mt-3 flex min-h-[48px] w-full touch-manipulation items-center justify-center rounded-lg border border-teal-200 bg-teal-50 px-4 text-sm font-semibold text-teal-900 active:bg-teal-100 disabled:opacity-50 sm:min-h-[44px]"
                 >
                   {confirmAttendanceLoadingId === b.id ? 'Confirming…' : 'Confirm Booking'}
+                </button>
+              )}
+              {canShowCancelStaffAttendanceConfirmation(b) && (
+                <button
+                  type="button"
+                  disabled={confirmAttendanceLoadingId === b.id}
+                  onClick={() => void cancelStaffAttendanceConfirmation(b.id)}
+                  className="mt-3 flex min-h-[48px] w-full touch-manipulation items-center justify-center rounded-lg border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-800 active:bg-slate-50 disabled:opacity-50 sm:min-h-[44px]"
+                >
+                  {confirmAttendanceLoadingId === b.id ? '…' : 'Cancel confirmation'}
                 </button>
               )}
               <button

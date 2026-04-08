@@ -490,6 +490,31 @@ export function BookingsDashboard({
     [addToast, fetchBookings],
   );
 
+  const cancelStaffAttendanceConfirmation = useCallback(
+    async (bookingId: string) => {
+      setConfirmAttendanceLoadingId(bookingId);
+      try {
+        const res = await fetch(`/api/venue/bookings/${bookingId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ staff_attendance_confirmed: false }),
+        });
+        if (!res.ok) {
+          const j = await res.json().catch(() => ({}));
+          addToast((j as { error?: string }).error ?? 'Could not cancel confirmation', 'error');
+          return;
+        }
+        addToast('Confirmation cancelled', 'success');
+        void fetchBookings({ silent: true, ids: [bookingId] });
+      } catch {
+        addToast('Could not cancel confirmation', 'error');
+      } finally {
+        setConfirmAttendanceLoadingId(null);
+      }
+    },
+    [addToast, fetchBookings],
+  );
+
   const updateBookingStatus = useCallback(async (bookingId: string, newStatus: BookingStatus) => {
     const previous = bookings.find((b) => b.id === bookingId)?.status;
     if (!previous || previous === newStatus || !canTransitionBookingStatus(previous, newStatus)) return;
@@ -970,6 +995,7 @@ export function BookingsDashboard({
           showModelBadges={showModelFilters}
           confirmAttendanceLoadingId={confirmAttendanceLoadingId}
           onConfirmBookingAttendance={confirmBookingAttendance}
+          onCancelStaffAttendanceConfirmation={cancelStaffAttendanceConfirmation}
         />
       ) : (
         <div className="space-y-4">
@@ -1006,6 +1032,7 @@ export function BookingsDashboard({
                 showModelBadges={showModelFilters}
                 confirmAttendanceLoadingId={confirmAttendanceLoadingId}
                 onConfirmBookingAttendance={confirmBookingAttendance}
+                onCancelStaffAttendanceConfirmation={cancelStaffAttendanceConfirmation}
               />
             </div>
           ))}
@@ -1193,6 +1220,11 @@ function canShowConfirmBookingAttendanceRow(b: BookingRow): boolean {
   return !['Cancelled', 'No-Show', 'Completed'].includes(b.status);
 }
 
+function canShowCancelStaffAttendanceConfirmationRow(b: BookingRow): boolean {
+  if (!b.staff_attendance_confirmed_at) return false;
+  return !['Cancelled', 'No-Show', 'Completed'].includes(b.status);
+}
+
 function BookingsAccordionList({
   bookings,
   selectedIds,
@@ -1215,6 +1247,7 @@ function BookingsAccordionList({
   showModelBadges = false,
   confirmAttendanceLoadingId,
   onConfirmBookingAttendance,
+  onCancelStaffAttendanceConfirmation,
 }: {
   bookings: BookingRow[];
   selectedIds: string[];
@@ -1237,6 +1270,7 @@ function BookingsAccordionList({
   showModelBadges?: boolean;
   confirmAttendanceLoadingId: string | null;
   onConfirmBookingAttendance: (bookingId: string) => void;
+  onCancelStaffAttendanceConfirmation: (bookingId: string) => void;
 }) {
   const allSelected = bookings.length > 0 && bookings.every((b) => selectedIds.includes(b.id));
   return (
@@ -1345,11 +1379,15 @@ function BookingsAccordionList({
                   const showUndoStart =
                     booking.status === 'Seated' && !tableStyle;
                   const showChangeTable = coversChangeTableEnabled && booking.status === 'Seated';
-                  if (!action && !showChangeTable && !showUndoStart) return null;
+                  const showAttendanceConfirm = canShowConfirmBookingAttendanceRow(booking);
+                  const showAttendanceCancel = canShowCancelStaffAttendanceConfirmationRow(booking);
+                  if (!action && !showChangeTable && !showUndoStart && !showAttendanceConfirm && !showAttendanceCancel) {
+                    return null;
+                  }
                   return (
                      
                     <div onClick={(e) => e.stopPropagation()} className="flex flex-shrink-0 flex-wrap items-center justify-end gap-1.5">
-                      {canShowConfirmBookingAttendanceRow(booking) && (
+                      {showAttendanceConfirm && (
                         <button
                           type="button"
                           disabled={confirmAttendanceLoadingId === booking.id}
@@ -1358,6 +1396,17 @@ function BookingsAccordionList({
                           aria-label={`Confirm attendance for ${booking.guest_name}`}
                         >
                           {confirmAttendanceLoadingId === booking.id ? '…' : 'Confirm Booking'}
+                        </button>
+                      )}
+                      {showAttendanceCancel && (
+                        <button
+                          type="button"
+                          disabled={confirmAttendanceLoadingId === booking.id}
+                          onClick={() => onCancelStaffAttendanceConfirmation(booking.id)}
+                          className="inline-flex items-center rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 shadow-sm transition-colors hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-400/30 disabled:opacity-50"
+                          aria-label={`Cancel staff attendance confirmation for ${booking.guest_name}`}
+                        >
+                          {confirmAttendanceLoadingId === booking.id ? '…' : 'Cancel confirmation'}
                         </button>
                       )}
                       {action && (

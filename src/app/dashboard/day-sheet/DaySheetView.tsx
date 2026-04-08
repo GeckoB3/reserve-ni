@@ -206,7 +206,7 @@ function formatPence(pence: number): string {
 }
 
 /**
- * Confirm Booking when no attendance yet; Clear staff attendance when staff timestamp is set.
+ * Confirm Booking when no attendance yet; Cancel confirmation clears staff timestamp when set.
  * (Guest-only confirmation hides the button — same as bookings list; clear still available when staff marked.)
  */
 function canShowDaySheetStaffAttendanceToggle(b: {
@@ -1530,7 +1530,7 @@ export function DaySheetView({
                               {staffAttendanceLoadingId === b.id
                                 ? '…'
                                 : b.staff_attendance_confirmed_at
-                                  ? 'Clear staff attendance'
+                                  ? 'Cancel confirmation'
                                   : 'Confirm Booking'}
                             </button>
                           )}
@@ -1743,7 +1743,7 @@ export function DaySheetView({
                                           {staffAttendanceLoadingId === b.id
                                             ? '…'
                                             : b.staff_attendance_confirmed_at
-                                              ? 'Clear staff attendance'
+                                              ? 'Cancel confirmation'
                                               : 'Confirm Booking'}
                                         </button>
                                       )}
