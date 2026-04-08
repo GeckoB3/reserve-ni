@@ -13,8 +13,14 @@ import type { BookingModel, ClassPaymentRequirement } from '@/types/booking-mode
 import {
   inferBookingRowModel,
   bookingModelShortLabel,
+  bookingStatusDisplayLabel,
   isTableReservationBooking,
 } from '@/lib/booking/infer-booking-row-model';
+import {
+  attendanceConfirmationSources,
+  showAttendanceConfirmedPill,
+  showDepositPendingPill,
+} from '@/lib/booking/booking-staff-indicators';
 import { formatBookablePricePence } from '@/lib/booking/format-price-display';
 
 export interface DetailPractitionerOption {
@@ -44,6 +50,7 @@ export interface AppointmentDetailPrefetch {
   internal_notes: string | null;
   client_arrived_at: string | null;
   guest_attendance_confirmed_at?: string | null;
+  staff_attendance_confirmed_at?: string | null;
   deposit_amount_pence: number | null;
   deposit_status: string | null;
   resource_payment_requirement?: ClassPaymentRequirement | null;
@@ -74,6 +81,7 @@ export interface BookingDetailRecord {
   internal_notes: string | null;
   client_arrived_at: string | null;
   guest_attendance_confirmed_at?: string | null;
+  staff_attendance_confirmed_at?: string | null;
   deposit_amount_pence: number | null;
   deposit_status: string | null;
   resource_payment_requirement?: ClassPaymentRequirement | null;
@@ -109,6 +117,7 @@ function prefetchToDetailRecord(p: AppointmentDetailPrefetch): BookingDetailReco
     internal_notes: p.internal_notes,
     client_arrived_at: p.client_arrived_at,
     guest_attendance_confirmed_at: p.guest_attendance_confirmed_at ?? null,
+    staff_attendance_confirmed_at: p.staff_attendance_confirmed_at ?? null,
     deposit_amount_pence: p.deposit_amount_pence,
     deposit_status: p.deposit_status,
     resource_payment_requirement: p.resource_payment_requirement ?? null,
@@ -339,6 +348,12 @@ export function AppointmentDetailSheet({
     await patchJson({ client_arrived: arrived });
   }
 
+  async function toggleStaffAttendance() {
+    if (!detail) return;
+    const next = !detail.staff_attendance_confirmed_at;
+    await patchJson({ staff_attendance_confirmed: next });
+  }
+
   async function saveNotes() {
     await patchJson({ internal_notes: notesDraft.trim() || null });
   }
@@ -457,7 +472,10 @@ export function AppointmentDetailSheet({
                       STATUS_STYLES[detail.status] ?? 'bg-slate-100 text-slate-700 ring-1 ring-slate-200'
                     }`}
                   >
-                    {STATUS_LABELS[detail.status] ?? detail.status}
+                    {bookingStatusDisplayLabel(
+                      detail.status,
+                      isTableReservationBooking(detail),
+                    )}
                   </span>
                   {isApptStyle &&
                     arrived &&
@@ -469,10 +487,29 @@ export function AppointmentDetailSheet({
                     </span>
                   )}
                   {isApptStyle &&
-                    detail.guest_attendance_confirmed_at &&
+                    showDepositPendingPill(detail) &&
                     ['Pending', 'Confirmed'].includes(detail.status) && (
-                    <span className="inline-flex items-center gap-1 rounded-full bg-teal-100 px-2 py-0.5 text-xs font-semibold text-teal-900 ring-1 ring-teal-200/80">
-                      Guest confirmed
+                    <span
+                      className="inline-flex items-center gap-1 rounded-full bg-orange-100 px-2 py-0.5 text-xs font-semibold text-orange-950 ring-1 ring-orange-200/80"
+                      title="Deposit not yet paid"
+                    >
+                      Deposit pending
+                    </span>
+                  )}
+                  {isApptStyle &&
+                    showAttendanceConfirmedPill(detail) &&
+                    ['Pending', 'Confirmed'].includes(detail.status) && (
+                    <span
+                      className="inline-flex items-center gap-1 rounded-full bg-teal-100 px-2 py-0.5 text-xs font-semibold text-teal-900 ring-1 ring-teal-200/80"
+                      title={(() => {
+                        const src = attendanceConfirmationSources(detail);
+                        const parts: string[] = [];
+                        if (src.guestAt) parts.push(`Guest: ${new Date(src.guestAt).toLocaleString('en-GB')}`);
+                        if (src.staffAt) parts.push(`Staff: ${new Date(src.staffAt).toLocaleString('en-GB')}`);
+                        return parts.length ? parts.join(' · ') : 'Attendance confirmed';
+                      })()}
+                    >
+                      Attendance confirmed
                     </span>
                   )}
                 </div>
@@ -585,6 +622,26 @@ export function AppointmentDetailSheet({
                     <dd className="mt-0.5 text-slate-700">{detail.occasion}</dd>
                   </div>
                 ) : null}
+                {isApptStyle &&
+                  (detail.guest_attendance_confirmed_at || detail.staff_attendance_confirmed_at) && (
+                    <div className="sm:col-span-2 rounded-lg border border-slate-100 bg-slate-50/80 p-3">
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                        Attendance confirmation
+                      </p>
+                      {detail.guest_attendance_confirmed_at ? (
+                        <p className="mt-1 text-sm text-slate-800">
+                          Guest (link/SMS/email):{' '}
+                          {new Date(detail.guest_attendance_confirmed_at).toLocaleString('en-GB')}
+                        </p>
+                      ) : null}
+                      {detail.staff_attendance_confirmed_at ? (
+                        <p className="mt-1 text-sm text-slate-800">
+                          Staff:{' '}
+                          {new Date(detail.staff_attendance_confirmed_at).toLocaleString('en-GB')}
+                        </p>
+                      ) : null}
+                    </div>
+                  )}
                 <div className="sm:col-span-2">
                   <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">Customer comments</dt>
                   <dd className="mt-0.5 whitespace-pre-wrap text-slate-700">
@@ -697,6 +754,18 @@ export function AppointmentDetailSheet({
                       className="rounded-lg bg-amber-100 px-3 py-1.5 text-xs font-medium text-amber-900 hover:bg-amber-200 disabled:opacity-50"
                     >
                       {arrived ? 'Clear waiting' : 'Arrived'}
+                    </button>
+                  )}
+                  {isApptStyle && ['Pending', 'Confirmed'].includes(detail.status) && (
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => void toggleStaffAttendance()}
+                      className="rounded-lg border border-teal-200 bg-teal-50 px-3 py-1.5 text-xs font-medium text-teal-900 hover:bg-teal-100 disabled:opacity-50"
+                    >
+                      {detail.staff_attendance_confirmed_at
+                        ? 'Clear staff attendance confirmation'
+                        : 'Mark attendance confirmed (staff)'}
                     </button>
                   )}
                   {primary && (

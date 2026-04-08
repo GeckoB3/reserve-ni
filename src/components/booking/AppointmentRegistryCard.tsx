@@ -1,5 +1,11 @@
 'use client';
 
+import {
+  showAttendanceConfirmedPill,
+  showDepositPendingPill,
+} from '@/lib/booking/booking-staff-indicators';
+import { bookingStatusDisplayLabel, isTableReservationBooking } from '@/lib/booking/infer-booking-row-model';
+
 export interface RegistryAppointment {
   id: string;
   booking_date: string;
@@ -24,6 +30,7 @@ export interface RegistryAppointment {
   client_arrived_at: string | null;
   /** Guest tapped "I'll be there" on the reminder link */
   guest_attendance_confirmed_at?: string | null;
+  staff_attendance_confirmed_at?: string | null;
   /** For inferring booking model (list API includes these when present). */
   experience_event_id?: string | null;
   class_instance_id?: string | null;
@@ -38,15 +45,6 @@ const STATUS_BADGE: Record<string, string> = {
   Completed: 'bg-emerald-100 text-emerald-900 ring-1 ring-emerald-200/80',
   'No-Show': 'bg-red-100 text-red-900 ring-1 ring-red-200/70',
   Cancelled: 'bg-slate-100 text-slate-500 ring-1 ring-slate-200/80',
-};
-
-const STATUS_LABEL: Record<string, string> = {
-  Pending: 'Pending',
-  Confirmed: 'Confirmed',
-  Seated: 'In progress',
-  Completed: 'Completed',
-  'No-Show': 'No show',
-  Cancelled: 'Cancelled',
 };
 
 function rowTint(status: string, arrived: boolean): string {
@@ -101,9 +99,8 @@ export function AppointmentRegistryCard({
   sym,
 }: Props) {
   const arrived = Boolean(booking.client_arrived_at);
-  const guestConfirmedAttendance = Boolean(booking.guest_attendance_confirmed_at);
   const shortRef = booking.id.slice(0, 8).toUpperCase();
-  const statusLabel = STATUS_LABEL[booking.status] ?? booking.status;
+  const statusLabel = bookingStatusDisplayLabel(booking.status, isTableReservationBooking(booking));
   const panelId = `appointment-registry-panel-${booking.id}`;
 
   return (
@@ -142,12 +139,20 @@ export function AppointmentRegistryCard({
                 Arrived
               </span>
             )}
-            {guestConfirmedAttendance && (booking.status === 'Confirmed' || booking.status === 'Pending') && (
+            {showDepositPendingPill(booking) && (
+              <span
+                className="inline-flex rounded-full bg-orange-100 px-2 py-0.5 text-xs font-medium text-orange-950 ring-1 ring-orange-200/80"
+                title="Deposit not yet paid"
+              >
+                Deposit pending
+              </span>
+            )}
+            {showAttendanceConfirmedPill(booking) && (
               <span
                 className="inline-flex rounded-full bg-teal-100 px-2 py-0.5 text-xs font-medium text-teal-900 ring-1 ring-teal-200/80"
-                title="Guest confirmed via reminder email"
+                title="Attendance confirmed"
               >
-                Guest confirmed
+                Attendance confirmed
               </span>
             )}
           </div>
@@ -184,11 +189,22 @@ export function AppointmentRegistryCard({
                 <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">Status</dt>
                 <dd className="mt-0.5 text-slate-800">{statusLabel}</dd>
               </div>
-              {guestConfirmedAttendance && booking.guest_attendance_confirmed_at && (
+              {booking.guest_attendance_confirmed_at && (
                 <div className="sm:col-span-2">
-                  <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">Guest confirmed attendance</dt>
+                  <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">Guest attendance confirmation</dt>
                   <dd className="mt-0.5 text-slate-800">
                     {new Date(booking.guest_attendance_confirmed_at).toLocaleString('en-GB', {
+                      dateStyle: 'medium',
+                      timeStyle: 'short',
+                    })}
+                  </dd>
+                </div>
+              )}
+              {booking.staff_attendance_confirmed_at && (
+                <div className="sm:col-span-2">
+                  <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">Staff attendance confirmation</dt>
+                  <dd className="mt-0.5 text-slate-800">
+                    {new Date(booking.staff_attendance_confirmed_at).toLocaleString('en-GB', {
                       dateStyle: 'medium',
                       timeStyle: 'short',
                     })}

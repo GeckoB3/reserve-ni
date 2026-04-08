@@ -36,6 +36,8 @@ interface DaySheetBookingRow {
   service_item_id: string | null;
   practitioner_id: string | null;
   appointment_service_id: string | null;
+  guest_attendance_confirmed_at: string | null;
+  staff_attendance_confirmed_at: string | null;
 }
 
 export interface DaySheetBooking {
@@ -68,6 +70,8 @@ export interface DaySheetBooking {
   service_item_id: string | null;
   practitioner_id: string | null;
   appointment_service_id: string | null;
+  guest_attendance_confirmed_at: string | null;
+  staff_attendance_confirmed_at: string | null;
 }
 
 export interface DaySheetPeriod {
@@ -152,6 +156,8 @@ export async function GET(request: NextRequest) {
       service_item_id: (b.service_item_id as string | null) ?? null,
       practitioner_id: (b.practitioner_id as string | null) ?? null,
       appointment_service_id: (b.appointment_service_id as string | null) ?? null,
+      guest_attendance_confirmed_at: (b.guest_attendance_confirmed_at as string | null) ?? null,
+      staff_attendance_confirmed_at: (b.staff_attendance_confirmed_at as string | null) ?? null,
     }));
 
     // Fetch guest details with visit history
@@ -207,6 +213,8 @@ export async function GET(request: NextRequest) {
         service_item_id: row.service_item_id,
         practitioner_id: row.practitioner_id,
         appointment_service_id: row.appointment_service_id,
+        guest_attendance_confirmed_at: row.guest_attendance_confirmed_at,
+        staff_attendance_confirmed_at: row.staff_attendance_confirmed_at,
       };
     }
 

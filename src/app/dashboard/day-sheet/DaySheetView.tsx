@@ -22,6 +22,11 @@ import { BookingNotesEditablePanel } from '@/components/booking/BookingNotesEdit
 import { DashboardStatCard } from '@/components/dashboard/DashboardStatCard';
 import { bookingStatusDisplayLabel, isTableReservationBooking } from '@/lib/booking/infer-booking-row-model';
 import {
+  attendanceConfirmationSources,
+  showAttendanceConfirmedPill,
+  showDepositPendingPill,
+} from '@/lib/booking/booking-staff-indicators';
+import {
   computeNextBookingsSlotFromBookingRows,
   nextBookingsTileContent,
 } from '@/lib/table-management/next-bookings-slot';
@@ -66,6 +71,8 @@ interface DaySheetBooking {
   service_item_id?: string | null;
   practitioner_id?: string | null;
   appointment_service_id?: string | null;
+  guest_attendance_confirmed_at?: string | null;
+  staff_attendance_confirmed_at?: string | null;
 }
 
 interface ActiveTable {
@@ -197,6 +204,21 @@ function minutesToTime(m: number): string {
 function formatPence(pence: number): string {
   return `£${(pence / 100).toFixed(2)}`;
 }
+
+/**
+ * Confirm Booking when no attendance yet; Clear staff attendance when staff timestamp is set.
+ * (Guest-only confirmation hides the button — same as bookings list; clear still available when staff marked.)
+ */
+function canShowDaySheetStaffAttendanceToggle(b: {
+  status: string;
+  guest_attendance_confirmed_at?: string | null;
+  staff_attendance_confirmed_at?: string | null;
+}): boolean {
+  if (['Cancelled', 'No-Show', 'Completed'].includes(b.status)) return false;
+  if (b.staff_attendance_confirmed_at) return true;
+  return !showAttendanceConfirmedPill(b);
+}
+
 const isTerminal = isDestructiveBookingStatus;
 
 function ordinal(n: number): string {
@@ -706,6 +728,7 @@ export function DaySheetView({
   const [changeTableBookingId, setChangeTableBookingId] = useState<string | null>(null);
   const [changeTableSelectedIds, setChangeTableSelectedIds] = useState<string[]>([]);
   const [highlightBookingId, setHighlightBookingId] = useState<string | null>(null);
+  const [staffAttendanceLoadingId, setStaffAttendanceLoadingId] = useState<string | null>(null);
 
   useEffect(() => {
     void (async () => {
@@ -831,6 +854,30 @@ export function DaySheetView({
     })();
     return () => { cancelled = true; };
   }, [expandedId]);
+
+  const patchStaffAttendance = useCallback(
+    async (bookingId: string, hasStaffAttendance: boolean) => {
+      setStaffAttendanceLoadingId(bookingId);
+      try {
+        const res = await fetch(`/api/venue/bookings/${bookingId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ staff_attendance_confirmed: !hasStaffAttendance }),
+        });
+        if (!res.ok) {
+          const j = await res.json().catch(() => ({}));
+          addToast((j as { error?: string }).error ?? 'Update failed', 'error');
+          return;
+        }
+        await fetchDaySheet();
+      } catch {
+        addToast('Update failed', 'error');
+      } finally {
+        setStaffAttendanceLoadingId(null);
+      }
+    },
+    [addToast, fetchDaySheet],
+  );
 
   // Status change with optimistic update
   const changeStatus = useCallback(async (bookingId: string, newStatus: BookingStatus) => {
@@ -1379,6 +1426,22 @@ export function DaySheetView({
                             {b.source === 'Online' && <span className="rounded bg-blue-50 px-1 py-0.5 text-[9px] font-medium text-blue-600 print:hidden">Online</span>}
                             {b.source === 'Phone' && <span className="rounded bg-slate-100 px-1 py-0.5 text-[9px] font-medium text-slate-500 print:hidden">Phone</span>}
                             {b.source === 'Staff' && <span className="rounded bg-purple-50 px-1 py-0.5 text-[9px] font-medium text-purple-600 print:hidden">Staff</span>}
+                            {showDepositPendingPill(b) && (
+                              <span
+                                className="rounded-full bg-orange-100 px-2 py-0.5 text-[9px] font-semibold text-orange-950 ring-1 ring-orange-200/80 print:hidden"
+                                title="Deposit not yet paid"
+                              >
+                                Deposit pending
+                              </span>
+                            )}
+                            {showAttendanceConfirmedPill(b) && (
+                              <span
+                                className="rounded-full bg-teal-100 px-2 py-0.5 text-[9px] font-semibold text-teal-900 ring-1 ring-teal-200/80 print:hidden"
+                                title="Attendance confirmed"
+                              >
+                                Attendance confirmed
+                              </span>
+                            )}
                           </div>
 
                           {/* Party size */}
@@ -1452,6 +1515,23 @@ export function DaySheetView({
                               className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-50 print:hidden"
                             >
                               Change table
+                            </button>
+                          )}
+                          {canShowDaySheetStaffAttendanceToggle(b) && (
+                            <button
+                              type="button"
+                              disabled={staffAttendanceLoadingId === b.id}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void patchStaffAttendance(b.id, Boolean(b.staff_attendance_confirmed_at));
+                              }}
+                              className="rounded-lg border border-teal-200 bg-teal-50 px-2.5 py-1 text-xs font-semibold text-teal-900 shadow-sm hover:bg-teal-100 disabled:opacity-50 print:hidden"
+                            >
+                              {staffAttendanceLoadingId === b.id
+                                ? '…'
+                                : b.staff_attendance_confirmed_at
+                                  ? 'Clear staff attendance'
+                                  : 'Confirm Booking'}
                             </button>
                           )}
 
@@ -1613,6 +1693,60 @@ export function DaySheetView({
                                     <div className="mt-2.5 border-t border-slate-100 pt-2">
                                       <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Deposit actions</p>
                                       <DepositActions booking={b} onAction={() => void fetchDaySheet()} />
+                                    </div>
+                                    <div className="mt-2.5 border-t border-slate-100 pt-2">
+                                      <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Attendance</p>
+                                      <div className="flex flex-wrap items-center gap-2">
+                                        {showDepositPendingPill(b) && (
+                                          <span className="inline-flex rounded-full bg-orange-100 px-2 py-0.5 text-xs font-medium text-orange-950 ring-1 ring-orange-200/80">
+                                            Deposit pending
+                                          </span>
+                                        )}
+                                        {showAttendanceConfirmedPill(b) && (
+                                          <span className="inline-flex rounded-full bg-teal-100 px-2 py-0.5 text-xs font-medium text-teal-900 ring-1 ring-teal-200/80">
+                                            Attendance confirmed
+                                          </span>
+                                        )}
+                                        {!showDepositPendingPill(b) && !showAttendanceConfirmedPill(b) && (
+                                          <span className="text-xs text-slate-500">No attendance flags yet</span>
+                                        )}
+                                      </div>
+                                      {(() => {
+                                        const { guestAt, staffAt } = attendanceConfirmationSources(b);
+                                        if (!guestAt && !staffAt) return null;
+                                        return (
+                                          <ul className="mt-2 space-y-0.5 text-xs text-slate-600">
+                                            {guestAt && (
+                                              <li>
+                                                Guest confirmed:{' '}
+                                                {new Date(guestAt).toLocaleString('en-GB')}
+                                              </li>
+                                            )}
+                                            {staffAt && (
+                                              <li>
+                                                Staff marked:{' '}
+                                                {new Date(staffAt).toLocaleString('en-GB')}
+                                              </li>
+                                            )}
+                                          </ul>
+                                        );
+                                      })()}
+                                      {canShowDaySheetStaffAttendanceToggle(b) && (
+                                        <button
+                                          type="button"
+                                          disabled={staffAttendanceLoadingId === b.id}
+                                          onClick={() =>
+                                            void patchStaffAttendance(b.id, Boolean(b.staff_attendance_confirmed_at))
+                                          }
+                                          className="mt-2 rounded-lg border border-teal-200 bg-teal-50 px-3 py-1.5 text-xs font-semibold text-teal-900 hover:bg-teal-100 disabled:opacity-50"
+                                        >
+                                          {staffAttendanceLoadingId === b.id
+                                            ? '…'
+                                            : b.staff_attendance_confirmed_at
+                                              ? 'Clear staff attendance'
+                                              : 'Confirm Booking'}
+                                        </button>
+                                      )}
                                     </div>
                                   </div>
 

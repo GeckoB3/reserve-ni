@@ -19,6 +19,7 @@ import { OnboardingStaffInviteStep, type StaffInviteDraft } from '@/components/o
 import {
   OnboardingAppointmentServiceList,
   appointmentServiceDraftFromBusinessDefault,
+  appointmentServiceDraftsFromApiResponse,
   createEmptyAppointmentServiceDraft,
   serviceDraftToApiPayload,
   type AppointmentServiceFormDraft,
@@ -178,6 +179,8 @@ export default function OnboardingPage() {
   // Model B: Practitioners + services
   const [practitioners, setPractitioners] = useState<PractitionerDraft[]>([{ name: '', email: '' }]);
   const [services, setServices] = useState<AppointmentServiceFormDraft[]>([]);
+  /** When revisiting the services step, we sync from the server before saving (avoids skipping POST and duplicate rows). */
+  const [servicesSyncReady, setServicesSyncReady] = useState(true);
   /** Unified onboarding: calendar roster for service assignment + hours step */
   const [rosterList, setRosterList] = useState<Array<{ id: string; name: string }>>([]);
   const [openingHoursDraft, setOpeningHoursDraft] = useState<OpeningHoursSettings>(() => defaultOpeningHoursSettings());
@@ -445,6 +448,44 @@ export default function OnboardingPage() {
       prev.map((s) => (s.practitioner_ids.length === 0 ? { ...s, practitioner_ids: [...rosterIds] } : s)),
     );
   }, [rosterIds]);
+
+  useEffect(() => {
+    if (!venue || currentStepKey !== 'services') {
+      setServicesSyncReady(true);
+      return;
+    }
+    if (!isUnifiedSchedulingVenue(venue.booking_model)) return;
+    if (!(step < maxCompletedStep)) {
+      setServicesSyncReady(true);
+      return;
+    }
+    let cancelled = false;
+    setServicesSyncReady(false);
+    (async () => {
+      try {
+        const res = await fetch('/api/venue/appointment-services');
+        if (!res.ok || cancelled) {
+          if (!cancelled) setServicesSyncReady(true);
+          return;
+        }
+        const body = (await res.json()) as {
+          services?: unknown[];
+          practitioner_services?: Array<{ practitioner_id: string; service_id: string }>;
+        };
+        const drafts = appointmentServiceDraftsFromApiResponse(body);
+        if (drafts.length > 0 && !cancelled) {
+          setServices(drafts);
+        }
+      } catch {
+        /* non-blocking */
+      } finally {
+        if (!cancelled) setServicesSyncReady(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [venue, currentStepKey, step, maxCompletedStep]);
 
   useEffect(() => {
     if (!venue || !isUnifiedSchedulingVenue(venue.booking_model)) return;
@@ -763,49 +804,87 @@ export default function OnboardingPage() {
     }
 
     if (currentStepKey === 'services') {
-      if (step < maxCompletedStep) {
-        setStep((s) => s + 1);
-        return;
-      }
+      if (!servicesSyncReady) return;
       const validServices = services.filter((s) => s.name.trim());
       if (validServices.length === 0) {
-        setError('Please add at least one service.');
-        return;
-      }
-      const needsRoster = venue ? isUnifiedSchedulingVenue(venue.booking_model) : false;
-      if (needsRoster && rosterIds.length === 0) {
-        setError('Your team could not be loaded. Go back one step and save your team again.');
-        return;
-      }
-      for (const s of validServices) {
-        if (needsRoster && s.practitioner_ids.length === 0) {
-          setError(`Select at least one ${terms.staff.toLowerCase()} for each service, or re-save your team step.`);
+        if (step < maxCompletedStep) {
+          setStep((s) => s + 1);
           return;
         }
-        if (s.duration_minutes < 5) {
-          setError('Each service must have a duration of at least 5 minutes.');
+        setSaving(true);
+        try {
+          await saveProgress(step + 1);
+          setMaxCompletedStep((prev) => Math.max(prev, step + 1));
+        } catch {
+          setError('Failed to save progress. Please try again.');
+          setSaving(false);
           return;
         }
-      }
-      setSaving(true);
-      try {
-        for (const s of validServices) {
-          const payload = serviceDraftToApiPayload(s);
-          const res = await fetch('/api/venue/appointment-services', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
-          });
-          if (!res.ok) throw new Error('Failed to create service');
-        }
-        await saveProgress(step + 1);
-        setMaxCompletedStep((prev) => Math.max(prev, step + 1));
-      } catch {
-        setError('Failed to save services. Please try again.');
         setSaving(false);
-        return;
+      } else {
+        const needsRoster = venue ? isUnifiedSchedulingVenue(venue.booking_model) : false;
+        if (needsRoster && rosterIds.length === 0) {
+          setError('Your team could not be loaded. Go back one step and save your team again.');
+          return;
+        }
+        for (const s of validServices) {
+          if (needsRoster && s.practitioner_ids.length === 0) {
+            setError(`Select at least one ${terms.staff.toLowerCase()} for each service, or re-save your team step.`);
+            return;
+          }
+          if (s.duration_minutes < 5) {
+            setError('Each service must have a duration of at least 5 minutes.');
+            return;
+          }
+          if (s.payment_requirement === 'deposit' && poundsToMinor(s.deposit) <= 0) {
+            setError('Enter a valid deposit amount for each service that requires a deposit.');
+            return;
+          }
+          if (s.payment_requirement === 'full_payment' && poundsToMinor(s.price) <= 0) {
+            setError('Set a price for each service that charges the full amount online.');
+            return;
+          }
+        }
+        setSaving(true);
+        try {
+          for (let i = 0; i < validServices.length; i++) {
+            const s = validServices[i];
+            const payload = { ...serviceDraftToApiPayload(s), sort_order: i };
+            if (s.serverId) {
+              const res = await fetch('/api/venue/appointment-services', {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id: s.serverId, ...payload }),
+              });
+              if (!res.ok) {
+                const errBody = (await res.json().catch(() => ({}))) as { error?: string };
+                throw new Error(
+                  typeof errBody.error === 'string' ? errBody.error : 'Failed to update service',
+                );
+              }
+            } else {
+              const res = await fetch('/api/venue/appointment-services', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+              });
+              if (!res.ok) {
+                const errBody = (await res.json().catch(() => ({}))) as { error?: string };
+                throw new Error(
+                  typeof errBody.error === 'string' ? errBody.error : 'Failed to create service',
+                );
+              }
+            }
+          }
+          await saveProgress(step + 1);
+          setMaxCompletedStep((prev) => Math.max(prev, step + 1));
+        } catch (e) {
+          setError(e instanceof Error ? e.message : 'Failed to save services. Please try again.');
+          setSaving(false);
+          return;
+        }
+        setSaving(false);
       }
-      setSaving(false);
     }
 
     if (currentStepKey === 'hours') {
@@ -1478,9 +1557,10 @@ export default function OnboardingPage() {
                 {isAppointmentsPlanVenue ? 'Set up appointments' : 'Your services'}
               </h2>
               <p className="mb-6 text-sm text-slate-500">
-                Add each service with the same detail as in the dashboard: duration, buffer, price, deposits, which{' '}
-                {terms.staff.toLowerCase()} offers it, and optional staff customisation rules. You can refine services
-                later under{' '}
+                Adding services is optional; add as many as you need using &quot;+ Add service&quot;. Use the same fields
+                as in the dashboard: duration, buffer, price, online payment, guest booking rules, which{' '}
+                {terms.staff.toLowerCase()} offers each service, and optional per-calendar customisation. You can refine
+                services later under{' '}
                 <Link
                   href="/dashboard/appointment-services"
                   className="font-medium text-brand-600 underline hover:text-brand-700"
@@ -2244,7 +2324,12 @@ export default function OnboardingPage() {
             <button
               type="button"
               onClick={handleNext}
-              disabled={saving}
+              disabled={
+                saving ||
+                (currentStepKey === 'services' &&
+                  isUnifiedSchedulingVenue(venue.booking_model) &&
+                  !servicesSyncReady)
+              }
               className="rounded-lg bg-brand-600 px-6 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
             >
               {saving ? 'Saving...' : 'Continue'}

@@ -29,6 +29,7 @@ import {
   isTableReservationBooking,
   bookingStatusDisplayLabel,
 } from '@/lib/booking/infer-booking-row-model';
+import { showAttendanceConfirmedPill, showDepositPendingPill } from '@/lib/booking/booking-staff-indicators';
 
 interface BookingRow {
   id: string;
@@ -59,6 +60,8 @@ interface BookingRow {
   event_session_id?: string | null;
   calendar_id?: string | null;
   service_item_id?: string | null;
+  guest_attendance_confirmed_at?: string | null;
+  staff_attendance_confirmed_at?: string | null;
 }
 
 interface BookingDetailLite {
@@ -213,6 +216,7 @@ export function BookingsDashboard({
   const [changeTableDayLoading, setChangeTableDayLoading] = useState(false);
   const [changeTableSelectedIds, setChangeTableSelectedIds] = useState<string[]>([]);
   const [changeTableSaving, setChangeTableSaving] = useState(false);
+  const [confirmAttendanceLoadingId, setConfirmAttendanceLoadingId] = useState<string | null>(null);
 
   const { from, to } = useMemo(() => {
     if (viewMode === 'day') return { from: anchorDate, to: anchorDate };
@@ -460,6 +464,31 @@ export function BookingsDashboard({
     void loadBookingDetail(bookingId, true);
     void fetchBookings({ silent: true, ids: [bookingId] });
   }, [loadBookingDetail, fetchBookings]);
+
+  const confirmBookingAttendance = useCallback(
+    async (bookingId: string) => {
+      setConfirmAttendanceLoadingId(bookingId);
+      try {
+        const res = await fetch(`/api/venue/bookings/${bookingId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ staff_attendance_confirmed: true }),
+        });
+        if (!res.ok) {
+          const j = await res.json().catch(() => ({}));
+          addToast((j as { error?: string }).error ?? 'Could not confirm attendance', 'error');
+          return;
+        }
+        addToast('Attendance confirmed', 'success');
+        void fetchBookings({ silent: true, ids: [bookingId] });
+      } catch {
+        addToast('Could not confirm attendance', 'error');
+      } finally {
+        setConfirmAttendanceLoadingId(null);
+      }
+    },
+    [addToast, fetchBookings],
+  );
 
   const updateBookingStatus = useCallback(async (bookingId: string, newStatus: BookingStatus) => {
     const previous = bookings.find((b) => b.id === bookingId)?.status;
@@ -939,6 +968,8 @@ export function BookingsDashboard({
           onStatusAction={requestStatusChange}
           onDetailUpdated={handleDetailUpdated}
           showModelBadges={showModelFilters}
+          confirmAttendanceLoadingId={confirmAttendanceLoadingId}
+          onConfirmBookingAttendance={confirmBookingAttendance}
         />
       ) : (
         <div className="space-y-4">
@@ -973,6 +1004,8 @@ export function BookingsDashboard({
                 onStatusAction={requestStatusChange}
                 onDetailUpdated={handleDetailUpdated}
                 showModelBadges={showModelFilters}
+                confirmAttendanceLoadingId={confirmAttendanceLoadingId}
+                onConfirmBookingAttendance={confirmBookingAttendance}
               />
             </div>
           ))}
@@ -1155,6 +1188,11 @@ function depositBadge(status: string, amountPence: number | null) {
   );
 }
 
+function canShowConfirmBookingAttendanceRow(b: BookingRow): boolean {
+  if (showAttendanceConfirmedPill(b)) return false;
+  return !['Cancelled', 'No-Show', 'Completed'].includes(b.status);
+}
+
 function BookingsAccordionList({
   bookings,
   selectedIds,
@@ -1175,6 +1213,8 @@ function BookingsAccordionList({
   onStatusAction,
   onDetailUpdated,
   showModelBadges = false,
+  confirmAttendanceLoadingId,
+  onConfirmBookingAttendance,
 }: {
   bookings: BookingRow[];
   selectedIds: string[];
@@ -1195,6 +1235,8 @@ function BookingsAccordionList({
   onStatusAction: (booking: BookingRow, status: BookingStatus) => void;
   onDetailUpdated: (bookingId: string) => void;
   showModelBadges?: boolean;
+  confirmAttendanceLoadingId: string | null;
+  onConfirmBookingAttendance: (bookingId: string) => void;
 }) {
   const allSelected = bookings.length > 0 && bookings.every((b) => selectedIds.includes(b.id));
   return (
@@ -1246,8 +1288,24 @@ function BookingsAccordionList({
                   />
                 </div>
                 <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <span className="font-semibold text-slate-900">{booking.guest_name}</span>
+                    {showDepositPendingPill(booking) && (
+                      <span
+                        className="rounded-full bg-orange-100 px-2 py-0.5 text-[10px] font-semibold text-orange-950 ring-1 ring-orange-200/80"
+                        title="Deposit not yet paid"
+                      >
+                        Deposit pending
+                      </span>
+                    )}
+                    {showAttendanceConfirmedPill(booking) && (
+                      <span
+                        className="rounded-full bg-teal-100 px-2 py-0.5 text-[10px] font-semibold text-teal-900 ring-1 ring-teal-200/80"
+                        title="Attendance confirmed"
+                      >
+                        Attendance confirmed
+                      </span>
+                    )}
                     {showModelBadges && (
                       <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-600">
                         {bookingModelShortLabel(inferBookingRowModel(booking))}
@@ -1291,6 +1349,17 @@ function BookingsAccordionList({
                   return (
                      
                     <div onClick={(e) => e.stopPropagation()} className="flex flex-shrink-0 flex-wrap items-center justify-end gap-1.5">
+                      {canShowConfirmBookingAttendanceRow(booking) && (
+                        <button
+                          type="button"
+                          disabled={confirmAttendanceLoadingId === booking.id}
+                          onClick={() => onConfirmBookingAttendance(booking.id)}
+                          className="inline-flex items-center rounded-lg border border-teal-200 bg-teal-50 px-2.5 py-1 text-xs font-semibold text-teal-900 shadow-sm transition-colors hover:bg-teal-100 focus:outline-none focus:ring-2 focus:ring-teal-400/30 disabled:opacity-50"
+                          aria-label={`Confirm attendance for ${booking.guest_name}`}
+                        >
+                          {confirmAttendanceLoadingId === booking.id ? '…' : 'Confirm Booking'}
+                        </button>
+                      )}
                       {action && (
                         <button
                           type="button"

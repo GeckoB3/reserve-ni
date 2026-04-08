@@ -167,6 +167,37 @@ export async function PATCH(
       return NextResponse.json({ error: 'Booking not found' }, { status: 404 });
     }
 
+    /** Staff attendance toggle only — any venue staff may update (table, event, class, resource, etc.). */
+    const bodyKeys = Object.keys(body as Record<string, unknown>).filter(
+      (k) => (body as Record<string, unknown>)[k] !== undefined,
+    );
+    const isStaffAttendanceOnlyPatch =
+      bodyKeys.length === 1 && bodyKeys[0] === 'staff_attendance_confirmed';
+    if (isStaffAttendanceOnlyPatch) {
+      const on = Boolean(body.staff_attendance_confirmed);
+      const { error: attErr } = await staff.db
+        .from('bookings')
+        .update({
+          staff_attendance_confirmed_at: on ? new Date().toISOString() : null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', id)
+        .eq('venue_id', staff.venue_id);
+      if (attErr) {
+        console.error('PATCH staff_attendance_confirmed failed:', attErr);
+        return NextResponse.json({ error: 'Could not update attendance' }, { status: 500 });
+      }
+      const { data: updatedAttendance, error: selErr } = await staff.db
+        .from('bookings')
+        .select('*')
+        .eq('id', id)
+        .single();
+      if (selErr || !updatedAttendance) {
+        return NextResponse.json({ error: 'Booking not found' }, { status: 404 });
+      }
+      return NextResponse.json(updatedAttendance);
+    }
+
     const admin = getSupabaseAdminClient();
     const scopedCalendarId =
       staff.role === 'admin'
@@ -483,6 +514,21 @@ export async function PATCH(
         .from('bookings')
         .update({
           client_arrived_at: arrived ? new Date().toISOString() : null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', id)
+        .eq('venue_id', staff.venue_id);
+
+      const updated = await staff.db.from('bookings').select('*').eq('id', id).single();
+      return NextResponse.json(updated.data);
+    }
+
+    if (body.staff_attendance_confirmed !== undefined) {
+      const on = Boolean(body.staff_attendance_confirmed);
+      await staff.db
+        .from('bookings')
+        .update({
+          staff_attendance_confirmed_at: on ? new Date().toISOString() : null,
           updated_at: new Date().toISOString(),
         })
         .eq('id', id)

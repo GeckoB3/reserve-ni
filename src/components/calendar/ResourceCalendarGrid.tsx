@@ -9,6 +9,7 @@ import {
   type AppointmentDetailPrefetch,
 } from '@/components/booking/AppointmentDetailSheet';
 import type { ClassPaymentRequirement } from '@/types/booking-models';
+import { showAttendanceConfirmedPill, showDepositPendingPill } from '@/lib/booking/booking-staff-indicators';
 
 const SLOT_HEIGHT = 48;
 const SLOT_MINUTES = 15;
@@ -63,6 +64,7 @@ interface ResourceBookingRow {
   internal_notes: string | null;
   client_arrived_at: string | null;
   guest_attendance_confirmed_at?: string | null;
+  staff_attendance_confirmed_at?: string | null;
   deposit_amount_pence: number | null;
   deposit_status: string;
   resource_payment_requirement?: string | null;
@@ -85,6 +87,7 @@ function resourceBookingToPrefetch(b: ResourceBookingRow): AppointmentDetailPref
     internal_notes: b.internal_notes,
     client_arrived_at: b.client_arrived_at,
     guest_attendance_confirmed_at: b.guest_attendance_confirmed_at ?? null,
+    staff_attendance_confirmed_at: b.staff_attendance_confirmed_at ?? null,
     deposit_amount_pence: b.deposit_amount_pence,
     deposit_status: b.deposit_status,
     resource_payment_requirement: (b.resource_payment_requirement as ClassPaymentRequirement | null) ?? null,
@@ -394,7 +397,23 @@ export function ResourceCalendarGrid({
                           style={{ top, height, borderLeftWidth: 3, borderLeftColor: '#0d9488' }}
                         >
                           <div className={`px-1.5 py-1 ${st.text}`}>
-                            <div className="truncate text-xs font-semibold">{b.guest_name}</div>
+                            <div className="flex flex-wrap items-center gap-1">
+                              <span className="truncate text-xs font-semibold">{b.guest_name}</span>
+                              {['Pending', 'Confirmed'].includes(b.status) && showDepositPendingPill(b) && (
+                                <span
+                                  className="inline-flex h-1.5 w-1.5 shrink-0 rounded-full bg-orange-500"
+                                  aria-hidden
+                                  title="Deposit pending"
+                                />
+                              )}
+                              {['Pending', 'Confirmed'].includes(b.status) && showAttendanceConfirmedPill(b) && (
+                                <span
+                                  className="inline-flex h-1.5 w-1.5 shrink-0 rounded-full bg-teal-500"
+                                  aria-hidden
+                                  title="Attendance confirmed"
+                                />
+                              )}
+                            </div>
                             <div className="text-[10px] text-slate-500">
                               {b.booking_time.slice(0, 5)} – {minutesToTime(timeToMinutes(b.booking_time) + dur)}
                             </div>

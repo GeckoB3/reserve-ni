@@ -16,6 +16,7 @@ import { BOOKING_MUTABLE_STATUSES } from '@/lib/table-management/constants';
 import type { BookingModel } from '@/types/booking-models';
 import { BOOKING_MODEL_ORDER, venueExposesBookingModel } from '@/lib/booking/enabled-models';
 import { inferBookingRowModel, bookingModelShortLabel } from '@/lib/booking/infer-booking-row-model';
+import { showAttendanceConfirmedPill, showDepositPendingPill } from '@/lib/booking/booking-staff-indicators';
 
 type ViewMode = 'day' | 'week' | 'month' | 'custom';
 
@@ -203,6 +204,8 @@ function registryToPrefetch(b: RegistryAppointment): AppointmentDetailPrefetch {
     special_requests: b.special_requests,
     internal_notes: b.internal_notes,
     client_arrived_at: b.client_arrived_at,
+    guest_attendance_confirmed_at: b.guest_attendance_confirmed_at ?? null,
+    staff_attendance_confirmed_at: b.staff_attendance_confirmed_at ?? null,
     deposit_amount_pence: b.deposit_amount_pence,
     deposit_status: b.deposit_status,
     party_size: b.party_size,
@@ -270,6 +273,7 @@ export function AppointmentBookingsDashboard({
   const searchParams = useSearchParams();
   const router = useRouter();
   const [statusUpdatingId, setStatusUpdatingId] = useState<string | null>(null);
+  const [confirmAttendanceLoadingId, setConfirmAttendanceLoadingId] = useState<string | null>(null);
   const [walkInOpen, setWalkInOpen] = useState(false);
   const [newBookingOpen, setNewBookingOpen] = useState(false);
   const [csvModalOpen, setCsvModalOpen] = useState(false);
@@ -581,6 +585,34 @@ export function AppointmentBookingsDashboard({
     }
   }
 
+  function canShowConfirmBookingAttendance(b: RegistryAppointment): boolean {
+    if (showAttendanceConfirmedPill(b)) return false;
+    return !['Cancelled', 'No-Show', 'Completed'].includes(b.status);
+  }
+
+  async function confirmBookingAttendance(bookingId: string) {
+    setConfirmAttendanceLoadingId(bookingId);
+    try {
+      const res = await fetch(`/api/venue/bookings/${bookingId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ staff_attendance_confirmed: true }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        addToast((j as { error?: string }).error ?? 'Could not confirm attendance', 'error');
+        return;
+      }
+      addToast('Attendance confirmed', 'success');
+      void fetchBookings({ silent: true });
+      void fetchBookingsForStats();
+    } catch {
+      addToast('Could not confirm attendance', 'error');
+    } finally {
+      setConfirmAttendanceLoadingId(null);
+    }
+  }
+
   async function updateRowStatus(bookingId: string, nextStatus: string) {
     const prev = bookings.find((x) => x.id === bookingId);
     if (!prev) return;
@@ -770,7 +802,23 @@ export function AppointmentBookingsDashboard({
               {typeLabel}
             </span>
           </td>
-          <td className="max-w-[140px] truncate px-3 py-2.5 text-sm font-medium text-slate-900">{b.guest_name}</td>
+          <td className="max-w-[min(200px,28vw)] px-3 py-2.5 text-sm text-slate-900">
+            <div className="flex min-w-0 flex-col gap-1">
+              <span className="truncate font-medium">{b.guest_name}</span>
+              <div className="flex flex-wrap items-center gap-1">
+                {showDepositPendingPill(b) && (
+                  <span className="inline-flex rounded-full bg-orange-100 px-2 py-0.5 text-[10px] font-semibold text-orange-950 ring-1 ring-orange-200/80">
+                    Deposit pending
+                  </span>
+                )}
+                {showAttendanceConfirmedPill(b) && (
+                  <span className="inline-flex rounded-full bg-teal-100 px-2 py-0.5 text-[10px] font-semibold text-teal-900 ring-1 ring-teal-200/80">
+                    Attendance confirmed
+                  </span>
+                )}
+              </div>
+            </div>
+          </td>
           <td className="hidden max-w-[120px] truncate px-3 py-2.5 text-sm text-slate-600 lg:table-cell">
             {svcName}
           </td>
@@ -791,13 +839,25 @@ export function AppointmentBookingsDashboard({
           </td>
           <td className="hidden whitespace-nowrap px-3 py-2.5 text-sm text-slate-600 md:table-cell">{dep}</td>
           <td className="whitespace-nowrap px-3 py-2.5 text-right">
-            <button
-              type="button"
-              onClick={() => setDetailBookingId(b.id)}
-              className="text-sm font-medium text-brand-600 hover:text-brand-800"
-            >
-              View
-            </button>
+            <div className="flex flex-col items-end gap-1.5 sm:flex-row sm:justify-end sm:gap-2">
+              {canShowConfirmBookingAttendance(b) && (
+                <button
+                  type="button"
+                  disabled={confirmAttendanceLoadingId === b.id}
+                  onClick={() => void confirmBookingAttendance(b.id)}
+                  className="rounded-lg border border-teal-200 bg-teal-50 px-2.5 py-1 text-xs font-semibold text-teal-900 hover:bg-teal-100 disabled:opacity-50"
+                >
+                  {confirmAttendanceLoadingId === b.id ? '…' : 'Confirm Booking'}
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setDetailBookingId(b.id)}
+                className="text-sm font-medium text-brand-600 hover:text-brand-800"
+              >
+                View
+              </button>
+            </div>
           </td>
         </tr>
       );
@@ -829,6 +889,18 @@ export function AppointmentBookingsDashboard({
                     {typeLabel}
                   </span>
                 </div>
+                <div className="mt-1 flex flex-wrap items-center gap-1">
+                  {showDepositPendingPill(b) && (
+                    <span className="inline-flex rounded-full bg-orange-100 px-2 py-0.5 text-[10px] font-semibold text-orange-950 ring-1 ring-orange-200/80">
+                      Deposit pending
+                    </span>
+                  )}
+                  {showAttendanceConfirmedPill(b) && (
+                    <span className="inline-flex rounded-full bg-teal-100 px-2 py-0.5 text-[10px] font-semibold text-teal-900 ring-1 ring-teal-200/80">
+                      Attendance confirmed
+                    </span>
+                  )}
+                </div>
                 <p className="mt-0.5 text-sm tabular-nums text-slate-600">
                   {b.booking_date} · {b.booking_time.slice(0, 5)}
                 </p>
@@ -850,6 +922,16 @@ export function AppointmentBookingsDashboard({
                   </option>
                 ))}
               </select>
+              {canShowConfirmBookingAttendance(b) && (
+                <button
+                  type="button"
+                  disabled={confirmAttendanceLoadingId === b.id}
+                  onClick={() => void confirmBookingAttendance(b.id)}
+                  className="mt-3 flex min-h-[48px] w-full touch-manipulation items-center justify-center rounded-lg border border-teal-200 bg-teal-50 px-4 text-sm font-semibold text-teal-900 active:bg-teal-100 disabled:opacity-50 sm:min-h-[44px]"
+                >
+                  {confirmAttendanceLoadingId === b.id ? 'Confirming…' : 'Confirm Booking'}
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => setDetailBookingId(b.id)}

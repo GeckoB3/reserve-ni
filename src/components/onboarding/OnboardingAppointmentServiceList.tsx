@@ -1,5 +1,8 @@
 'use client';
 
+import { DEFAULT_ENTITY_BOOKING_WINDOW, entityBookingWindowFromRow } from '@/lib/booking/entity-booking-window';
+import type { ClassPaymentRequirement } from '@/types/booking-models';
+
 export type StaffMayFlags = {
   name: boolean;
   description: boolean;
@@ -21,22 +24,38 @@ export const DEFAULT_STAFF_MAY: StaffMayFlags = {
 };
 
 export interface AppointmentServiceFormDraft {
+  /** Stable key for React lists and field identity */
+  clientKey: string;
+  /** Set after POST or when hydrating from GET — drives PATCH vs POST on save */
+  serverId?: string;
   name: string;
   description: string;
   duration_minutes: number;
   buffer_minutes: number;
   price: string;
   deposit: string;
-  require_deposit: boolean;
+  payment_requirement: ClassPaymentRequirement;
   colour: string;
   is_active: boolean;
   practitioner_ids: string[];
   staffMay: StaffMayFlags;
+  max_advance_booking_days: number;
+  min_booking_notice_hours: number;
+  cancellation_notice_hours: number;
+  allow_same_day_booking: boolean;
 }
 
 const COLOUR_OPTIONS = [
-  '#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6',
-  '#EC4899', '#06B6D4', '#84CC16', '#F97316', '#6366F1',
+  '#3B82F6',
+  '#10B981',
+  '#F59E0B',
+  '#EF4444',
+  '#8B5CF6',
+  '#EC4899',
+  '#06B6D4',
+  '#84CC16',
+  '#F97316',
+  '#6366F1',
 ];
 
 function poundsToPence(pounds: string): number | null {
@@ -47,19 +66,29 @@ function poundsToPence(pounds: string): number | null {
   return Math.round(num * 100);
 }
 
+function penceToPoundsDisplay(pence: unknown): string {
+  if (typeof pence !== 'number' || !Number.isFinite(pence)) return '';
+  return (pence / 100).toFixed(2);
+}
+
 export function createEmptyAppointmentServiceDraft(): AppointmentServiceFormDraft {
   return {
+    clientKey: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `svc-${Date.now()}-${Math.random()}`,
     name: '',
     description: '',
     duration_minutes: 30,
     buffer_minutes: 0,
     price: '',
     deposit: '',
-    require_deposit: false,
+    payment_requirement: 'none',
     colour: '#3B82F6',
     is_active: true,
     practitioner_ids: [],
     staffMay: { ...DEFAULT_STAFF_MAY },
+    max_advance_booking_days: DEFAULT_ENTITY_BOOKING_WINDOW.max_advance_booking_days,
+    min_booking_notice_hours: DEFAULT_ENTITY_BOOKING_WINDOW.min_booking_notice_hours,
+    cancellation_notice_hours: DEFAULT_ENTITY_BOOKING_WINDOW.cancellation_notice_hours,
+    allow_same_day_booking: DEFAULT_ENTITY_BOOKING_WINDOW.allow_same_day_booking,
   };
 }
 
@@ -69,23 +98,88 @@ export function appointmentServiceDraftFromBusinessDefault(ds: {
   price: number;
 }): AppointmentServiceFormDraft {
   return {
+    clientKey: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `svc-${Date.now()}-${Math.random()}`,
     name: ds.name,
     description: '',
     duration_minutes: ds.duration,
     buffer_minutes: 0,
     price: (ds.price / 100).toFixed(2),
     deposit: '',
-    require_deposit: false,
+    payment_requirement: 'none',
     colour: '#3B82F6',
     is_active: true,
     practitioner_ids: [],
     staffMay: { ...DEFAULT_STAFF_MAY },
+    max_advance_booking_days: DEFAULT_ENTITY_BOOKING_WINDOW.max_advance_booking_days,
+    min_booking_notice_hours: DEFAULT_ENTITY_BOOKING_WINDOW.min_booking_notice_hours,
+    cancellation_notice_hours: DEFAULT_ENTITY_BOOKING_WINDOW.cancellation_notice_hours,
+    allow_same_day_booking: DEFAULT_ENTITY_BOOKING_WINDOW.allow_same_day_booking,
   };
 }
 
-/** Build JSON body for POST /api/venue/appointment-services */
+function appointmentServiceDraftFromApiRow(
+  row: Record<string, unknown>,
+  practitionerIds: string[],
+): AppointmentServiceFormDraft {
+  const id = row.id as string;
+  const payment = row.payment_requirement as ClassPaymentRequirement | undefined;
+  const depositPence = row.deposit_pence as number | null | undefined;
+  const pricePence = row.price_pence as number | null | undefined;
+  const win = entityBookingWindowFromRow(row);
+  return {
+    clientKey: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `svc-${Date.now()}-${Math.random()}`,
+    serverId: id,
+    name: String(row.name ?? ''),
+    description: String(row.description ?? ''),
+    duration_minutes: typeof row.duration_minutes === 'number' ? row.duration_minutes : 30,
+    buffer_minutes: typeof row.buffer_minutes === 'number' ? row.buffer_minutes : 0,
+    price: penceToPoundsDisplay(pricePence),
+    deposit: penceToPoundsDisplay(depositPence),
+    payment_requirement:
+      payment ??
+      (typeof depositPence === 'number' && depositPence > 0 ? 'deposit' : 'none'),
+    colour: typeof row.colour === 'string' && row.colour ? row.colour : '#3B82F6',
+    is_active: Boolean(row.is_active),
+    practitioner_ids: practitionerIds,
+    staffMay: {
+      name: Boolean(row.staff_may_customize_name),
+      description: Boolean(row.staff_may_customize_description),
+      duration: Boolean(row.staff_may_customize_duration),
+      buffer: Boolean(row.staff_may_customize_buffer),
+      price: Boolean(row.staff_may_customize_price),
+      deposit: Boolean(row.staff_may_customize_deposit),
+      colour: Boolean(row.staff_may_customize_colour),
+    },
+    max_advance_booking_days: win.max_advance_booking_days,
+    min_booking_notice_hours: win.min_booking_notice_hours,
+    cancellation_notice_hours: win.cancellation_notice_hours,
+    allow_same_day_booking: win.allow_same_day_booking,
+  };
+}
+
+/** Hydrate onboarding drafts from GET /api/venue/appointment-services */
+export function appointmentServiceDraftsFromApiResponse(body: {
+  services?: unknown[];
+  practitioner_services?: Array<{ practitioner_id: string; service_id: string }>;
+}): AppointmentServiceFormDraft[] {
+  const links = body.practitioner_services ?? [];
+  const byService = new Map<string, string[]>();
+  for (const l of links) {
+    const sid = l.service_id;
+    const pid = l.practitioner_id;
+    if (!byService.has(sid)) byService.set(sid, []);
+    byService.get(sid)!.push(pid);
+  }
+  const rows = body.services ?? [];
+  return rows.map((row) =>
+    appointmentServiceDraftFromApiRow(row as Record<string, unknown>, byService.get((row as { id: string }).id) ?? []),
+  );
+}
+
+/** Build JSON body for POST /api/venue/appointment-services (same shape as dashboard Add Service) */
 export function serviceDraftToApiPayload(draft: AppointmentServiceFormDraft): Record<string, unknown> {
-  const depositPence = draft.require_deposit ? (poundsToPence(draft.deposit) ?? 0) : 0;
+  const depositPence =
+    draft.payment_requirement === 'deposit' ? (poundsToPence(draft.deposit) ?? 0) : 0;
   const ids = draft.practitioner_ids;
   return {
     name: draft.name.trim(),
@@ -93,10 +187,15 @@ export function serviceDraftToApiPayload(draft: AppointmentServiceFormDraft): Re
     duration_minutes: draft.duration_minutes,
     buffer_minutes: draft.buffer_minutes,
     price_pence: poundsToPence(draft.price) ?? undefined,
+    payment_requirement: draft.payment_requirement,
     deposit_pence: depositPence,
     colour: draft.colour,
     is_active: draft.is_active,
     practitioner_ids: ids,
+    max_advance_booking_days: draft.max_advance_booking_days,
+    min_booking_notice_hours: draft.min_booking_notice_hours,
+    cancellation_notice_hours: draft.cancellation_notice_hours,
+    allow_same_day_booking: draft.allow_same_day_booking,
     staff_may_customize_name: draft.staffMay.name,
     staff_may_customize_description: draft.staffMay.description,
     staff_may_customize_duration: draft.staffMay.duration,
@@ -127,29 +226,37 @@ export function OnboardingAppointmentServiceList({
 }: OnboardingAppointmentServiceListProps) {
   const sym = currencySymbol;
 
-  function togglePractitioner(svcIndex: number, pid: string) {
-    setServices((prev) => {
-      const copy = [...prev];
-      const row = copy[svcIndex];
-      if (!row) return prev;
-      const nextIds = row.practitioner_ids.includes(pid)
-        ? row.practitioner_ids.filter((id) => id !== pid)
-        : [...row.practitioner_ids, pid];
-      copy[svcIndex] = { ...row, practitioner_ids: nextIds };
-      return copy;
-    });
+  function togglePractitioner(clientKey: string, pid: string) {
+    setServices((prev) =>
+      prev.map((row) => {
+        if (row.clientKey !== clientKey) return row;
+        const nextIds = row.practitioner_ids.includes(pid)
+          ? row.practitioner_ids.filter((id) => id !== pid)
+          : [...row.practitioner_ids, pid];
+        return { ...row, practitioner_ids: nextIds };
+      }),
+    );
+  }
+
+  function updateRow(clientKey: string, patch: Partial<AppointmentServiceFormDraft>) {
+    setServices((prev) =>
+      prev.map((row) => (row.clientKey === clientKey ? { ...row, ...patch } : row)),
+    );
   }
 
   return (
     <div className="space-y-4">
-      {services.map((s, i) => (
-        <div key={i} className="rounded-xl border border-slate-200 p-4 space-y-4">
+      {services.map((s) => (
+        <div key={s.clientKey} className="rounded-xl border border-slate-200 p-4 space-y-4">
           <div className="flex items-start justify-between gap-2">
-            <span className="text-xs font-medium uppercase tracking-wide text-slate-400">Service {i + 1}</span>
+            <span className="text-xs font-medium uppercase tracking-wide text-slate-400">
+              Service
+              {s.serverId ? '' : ' (new)'}
+            </span>
             {services.length > 1 && (
               <button
                 type="button"
-                onClick={() => setServices(services.filter((_, j) => j !== i))}
+                onClick={() => setServices((prev) => prev.filter((row) => row.clientKey !== s.clientKey))}
                 className="text-xs font-medium text-slate-400 hover:text-red-600"
               >
                 Remove
@@ -162,14 +269,7 @@ export function OnboardingAppointmentServiceList({
             <input
               type="text"
               value={s.name}
-              onChange={(e) => {
-                const v = e.target.value;
-                setServices((prev) => {
-                  const c = [...prev];
-                  c[i] = { ...c[i]!, name: v };
-                  return c;
-                });
-              }}
+              onChange={(e) => updateRow(s.clientKey, { name: e.target.value })}
               placeholder="e.g. Standard appointment, Follow-up"
               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
             />
@@ -179,14 +279,7 @@ export function OnboardingAppointmentServiceList({
             <label className="mb-1 block text-sm font-medium text-slate-700">Description</label>
             <textarea
               value={s.description}
-              onChange={(e) => {
-                const v = e.target.value;
-                setServices((prev) => {
-                  const c = [...prev];
-                  c[i] = { ...c[i]!, description: v };
-                  return c;
-                });
-              }}
+              onChange={(e) => updateRow(s.clientKey, { description: e.target.value })}
               rows={2}
               placeholder="Brief description for guests"
               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
@@ -201,11 +294,7 @@ export function OnboardingAppointmentServiceList({
                 value={s.duration_minutes}
                 onChange={(e) => {
                   const n = parseInt(e.target.value, 10) || 0;
-                  setServices((prev) => {
-                    const c = [...prev];
-                    c[i] = { ...c[i]!, duration_minutes: n };
-                    return c;
-                  });
+                  updateRow(s.clientKey, { duration_minutes: n });
                 }}
                 min={5}
                 max={480}
@@ -219,11 +308,7 @@ export function OnboardingAppointmentServiceList({
                 value={s.buffer_minutes}
                 onChange={(e) => {
                   const n = parseInt(e.target.value, 10) || 0;
-                  setServices((prev) => {
-                    const c = [...prev];
-                    c[i] = { ...c[i]!, buffer_minutes: n };
-                    return c;
-                  });
+                  updateRow(s.clientKey, { buffer_minutes: n });
                 }}
                 min={0}
                 max={120}
@@ -240,14 +325,7 @@ export function OnboardingAppointmentServiceList({
                 type="text"
                 inputMode="decimal"
                 value={s.price}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  setServices((prev) => {
-                    const c = [...prev];
-                    c[i] = { ...c[i]!, price: v };
-                    return c;
-                  });
-                }}
+                onChange={(e) => updateRow(s.clientKey, { price: e.target.value })}
                 className="w-full rounded-lg border border-slate-300 py-2 pl-7 pr-3 text-sm"
                 placeholder="0.00"
               />
@@ -255,29 +333,40 @@ export function OnboardingAppointmentServiceList({
           </div>
 
           <div className="rounded-lg border border-slate-200 p-4 space-y-3">
-            <div className="flex items-center gap-3">
-              <button
-                type="button"
-                onClick={() => {
-                  setServices((prev) => {
-                    const c = [...prev];
-                    c[i] = { ...c[i]!, require_deposit: !c[i]!.require_deposit };
-                    return c;
-                  });
-                }}
-                className={`relative h-6 w-11 rounded-full transition-colors ${
-                  s.require_deposit ? 'bg-brand-600' : 'bg-slate-300'
-                }`}
-              >
-                <span
-                  className={`absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${
-                    s.require_deposit ? 'translate-x-5' : 'translate-x-0'
-                  }`}
+            <p className="text-sm font-medium text-slate-800">Online payment when booking</p>
+            <div className="space-y-2">
+              <label className="flex cursor-pointer items-start gap-2 text-sm text-slate-700">
+                <input
+                  type="radio"
+                  name={`payment-${s.clientKey}`}
+                  className="mt-0.5"
+                  checked={s.payment_requirement === 'none'}
+                  onChange={() => updateRow(s.clientKey, { payment_requirement: 'none' })}
                 />
-              </button>
-              <span className="text-sm font-medium text-slate-700">Require deposit for this service</span>
+                <span>No online payment (pay at venue or arrange separately)</span>
+              </label>
+              <label className="flex cursor-pointer items-start gap-2 text-sm text-slate-700">
+                <input
+                  type="radio"
+                  name={`payment-${s.clientKey}`}
+                  className="mt-0.5"
+                  checked={s.payment_requirement === 'deposit'}
+                  onChange={() => updateRow(s.clientKey, { payment_requirement: 'deposit' })}
+                />
+                <span>Custom deposit (fixed amount online)</span>
+              </label>
+              <label className="flex cursor-pointer items-start gap-2 text-sm text-slate-700">
+                <input
+                  type="radio"
+                  name={`payment-${s.clientKey}`}
+                  className="mt-0.5"
+                  checked={s.payment_requirement === 'full_payment'}
+                  onChange={() => updateRow(s.clientKey, { payment_requirement: 'full_payment' })}
+                />
+                <span>Pay full price online at booking</span>
+              </label>
             </div>
-            {s.require_deposit && (
+            {s.payment_requirement === 'deposit' && (
               <div>
                 <label className="mb-1 block text-sm text-slate-600">Deposit amount ({sym})</label>
                 <div className="relative max-w-[200px]">
@@ -286,20 +375,83 @@ export function OnboardingAppointmentServiceList({
                     type="text"
                     inputMode="decimal"
                     value={s.deposit}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      setServices((prev) => {
-                        const c = [...prev];
-                        c[i] = { ...c[i]!, deposit: v };
-                        return c;
-                      });
-                    }}
+                    onChange={(e) => updateRow(s.clientKey, { deposit: e.target.value })}
                     className="w-full rounded-lg border border-slate-300 py-2 pl-7 pr-3 text-sm"
                     placeholder="5.00"
                   />
                 </div>
               </div>
             )}
+            {s.payment_requirement === 'full_payment' && (
+              <p className="text-xs text-slate-500">
+                The full service price (above) is charged when the guest completes booking online.
+              </p>
+            )}
+          </div>
+
+          <div className="rounded-lg border border-slate-200 p-4 space-y-3">
+            <p className="text-sm font-medium text-slate-800">Guest booking rules</p>
+            <p className="text-xs text-slate-500">
+              Applies to online bookings for this service (advance window, notice, and cancellation notice).
+            </p>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="mb-1 block text-sm text-slate-700">Max advance (days)</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={365}
+                  value={s.max_advance_booking_days}
+                  onChange={(e) =>
+                    updateRow(s.clientKey, {
+                      max_advance_booking_days: parseInt(e.target.value, 10) || 1,
+                    })
+                  }
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm text-slate-700">Min booking notice (hours)</label>
+                <input
+                  type="number"
+                  min={0}
+                  max={168}
+                  value={s.min_booking_notice_hours}
+                  onChange={(e) =>
+                    updateRow(s.clientKey, {
+                      min_booking_notice_hours: parseInt(e.target.value, 10) || 0,
+                    })
+                  }
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm text-slate-700">Cancellation notice (hours)</label>
+                <input
+                  type="number"
+                  min={0}
+                  max={168}
+                  value={s.cancellation_notice_hours}
+                  onChange={(e) =>
+                    updateRow(s.clientKey, {
+                      cancellation_notice_hours: parseInt(e.target.value, 10) || 0,
+                    })
+                  }
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+                />
+              </div>
+              <div className="flex flex-col justify-end">
+                <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={s.allow_same_day_booking}
+                    onChange={(e) => updateRow(s.clientKey, { allow_same_day_booking: e.target.checked })}
+                    className="rounded border-slate-300"
+                  />
+                  Allow same-day bookings
+                </label>
+              </div>
+            </div>
           </div>
 
           <div>
@@ -309,13 +461,7 @@ export function OnboardingAppointmentServiceList({
                 <button
                   key={c}
                   type="button"
-                  onClick={() => {
-                    setServices((prev) => {
-                      const copy = [...prev];
-                      copy[i] = { ...copy[i]!, colour: c };
-                      return copy;
-                    });
-                  }}
+                  onClick={() => updateRow(s.clientKey, { colour: c })}
                   className={`h-8 w-8 rounded-full border-2 transition-all ${
                     s.colour === c ? 'border-slate-900 scale-110' : 'border-transparent'
                   }`}
@@ -328,13 +474,7 @@ export function OnboardingAppointmentServiceList({
           <div className="flex items-center gap-3">
             <button
               type="button"
-              onClick={() => {
-                setServices((prev) => {
-                  const c = [...prev];
-                  c[i] = { ...c[i]!, is_active: !c[i]!.is_active };
-                  return c;
-                });
-              }}
+              onClick={() => updateRow(s.clientKey, { is_active: !s.is_active })}
               className={`relative h-6 w-11 rounded-full transition-colors ${s.is_active ? 'bg-brand-600' : 'bg-slate-300'}`}
             >
               <span
@@ -369,11 +509,13 @@ export function OnboardingAppointmentServiceList({
                     checked={s.staffMay[key]}
                     onChange={(e) => {
                       const checked = e.target.checked;
-                      setServices((prev) => {
-                        const c = [...prev];
-                        c[i] = { ...c[i]!, staffMay: { ...c[i]!.staffMay, [key]: checked } };
-                        return c;
-                      });
+                      setServices((prev) =>
+                        prev.map((row) =>
+                          row.clientKey === s.clientKey
+                            ? { ...row, staffMay: { ...row.staffMay, [key]: checked } }
+                            : row,
+                        ),
+                      );
                     }}
                     className="h-4 w-4 rounded border-slate-300 text-blue-600"
                   />
@@ -400,7 +542,7 @@ export function OnboardingAppointmentServiceList({
                     <input
                       type="checkbox"
                       checked={s.practitioner_ids.includes(p.id)}
-                      onChange={() => togglePractitioner(i, p.id)}
+                      onChange={() => togglePractitioner(s.clientKey, p.id)}
                       className="h-4 w-4 rounded border-slate-300 text-blue-600"
                     />
                     <span className="text-sm text-slate-700">{p.name}</span>

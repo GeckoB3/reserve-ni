@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { bookingStatusDisplayLabel } from '@/lib/booking/infer-booking-row-model';
+import { showAttendanceConfirmedPill, showDepositPendingPill } from '@/lib/booking/booking-staff-indicators';
 
 export interface DayBooking {
   id: string;
@@ -22,6 +24,8 @@ export interface DayBooking {
   client_arrived_at: string | null;
   deposit_amount_pence: number | null;
   deposit_status: string;
+  guest_attendance_confirmed_at?: string | null;
+  staff_attendance_confirmed_at?: string | null;
 }
 
 /**
@@ -36,15 +40,6 @@ const STATUS_STYLES: Record<string, string> = {
   Completed: 'bg-emerald-100 text-emerald-900 ring-1 ring-emerald-200/80',
   'No-Show': 'bg-red-100 text-red-900 ring-1 ring-red-200/70',
   Cancelled: 'bg-slate-100 text-slate-500 ring-1 ring-slate-200/80',
-};
-
-const STATUS_LABELS: Record<string, string> = {
-  Pending: 'Pending',
-  Confirmed: 'Confirmed',
-  Seated: 'In Progress',
-  Completed: 'Completed',
-  'No-Show': 'No Show',
-  Cancelled: 'Cancelled',
 };
 
 /** Row bar tint - matches STATUS_STYLES; Pending vs Confirmed vs Waiting stay visually distinct. */
@@ -154,8 +149,24 @@ export function AppointmentDayBookingRow({
                 <span
                   className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_STYLES[b.status] ?? 'bg-slate-100 text-slate-600 ring-1 ring-slate-200/80'}`}
                 >
-                  {STATUS_LABELS[b.status] ?? b.status}
+                  {bookingStatusDisplayLabel(b.status, false)}
                 </span>
+                {(b.status === 'Confirmed' || b.status === 'Pending') && showDepositPendingPill(b) && (
+                  <span
+                    className="inline-flex rounded-full bg-orange-100 px-2 py-0.5 text-xs font-medium text-orange-950 ring-1 ring-orange-200/80"
+                    title="Deposit not yet paid"
+                  >
+                    Deposit pending
+                  </span>
+                )}
+                {(b.status === 'Confirmed' || b.status === 'Pending') && showAttendanceConfirmedPill(b) && (
+                  <span
+                    className="inline-flex rounded-full bg-teal-100 px-2 py-0.5 text-xs font-medium text-teal-900 ring-1 ring-teal-200/80"
+                    title="Attendance confirmed"
+                  >
+                    Attendance confirmed
+                  </span>
+                )}
                 {arrived && b.status !== 'Seated' && (
                   <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-950 ring-1 ring-amber-300/70 shadow-sm shadow-amber-900/5">
                     <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-500" aria-hidden />

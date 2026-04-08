@@ -57,6 +57,11 @@ import {
   type ScheduleModelFilter,
 } from '@/lib/calendar/schedule-blocks-grouping';
 import { formatEventUptakeLine } from '@/lib/calendar/event-block-label';
+import {
+  showAttendanceConfirmedPill,
+  showDepositPendingPill,
+} from '@/lib/booking/booking-staff-indicators';
+import { bookingStatusDisplayLabel, isTableReservationBooking } from '@/lib/booking/infer-booking-row-model';
 import { ScheduleFeedColumn } from './ScheduleFeedColumn';
 import { WeekScheduleCdeStrip } from './WeekScheduleCdeStrip';
 import { ScheduleCalendarLegend } from './ScheduleCalendarLegend';
@@ -102,6 +107,7 @@ interface Booking {
   internal_notes: string | null;
   client_arrived_at: string | null;
   guest_attendance_confirmed_at?: string | null;
+  staff_attendance_confirmed_at?: string | null;
   deposit_amount_pence: number | null;
   deposit_status: string;
   group_booking_id?: string | null;
@@ -209,15 +215,6 @@ function bookingCalendarBlockStyle(b: Booking): { bg: string; text: string; bord
   if (isArrivedWaitingDisplay(b)) return ARRIVED_WAITING_STYLE;
   return STATUS_COLOURS[b.status] ?? STATUS_COLOURS.Confirmed;
 }
-
-const STATUS_LABELS: Record<string, string> = {
-  Pending: 'Pending',
-  Confirmed: 'Confirmed',
-  Seated: 'In Progress',
-  Completed: 'Completed',
-  'No-Show': 'No Show',
-  Cancelled: 'Cancelled',
-};
 
 function timeToMinutes(t: string): number {
   const [hh, mm] = t.slice(0, 5).split(':').map(Number);
@@ -332,6 +329,7 @@ function bookingToPrefetch(b: Booking): AppointmentDetailPrefetch {
     internal_notes: b.internal_notes,
     client_arrived_at: b.client_arrived_at,
     guest_attendance_confirmed_at: b.guest_attendance_confirmed_at ?? null,
+    staff_attendance_confirmed_at: b.staff_attendance_confirmed_at ?? null,
     deposit_amount_pence: b.deposit_amount_pence,
     deposit_status: b.deposit_status,
     party_size: b.party_size,
@@ -1529,7 +1527,8 @@ export function PractitionerCalendarView({
                                 >
                                   <div className={`font-semibold truncate ${st.text}`}>{b.guest_name}</div>
                                   <div className="text-[10px] text-slate-500">
-                                    {b.booking_time.slice(0, 5)} · {STATUS_LABELS[b.status] ?? b.status}
+                                    {b.booking_time.slice(0, 5)} ·{' '}
+                                    {bookingStatusDisplayLabel(b.status, isTableReservationBooking(b))}
                                   </div>
                                 </button>
                               );
@@ -1949,12 +1948,20 @@ export function PractitionerCalendarView({
                                         {arrived && b.status !== 'Seated' && ['Pending', 'Confirmed'].includes(b.status) && (
                                           <span className="inline-flex h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-amber-500" aria-hidden title="Waiting" />
                                         )}
-                                        {b.guest_attendance_confirmed_at &&
+                                        {showDepositPendingPill(b) &&
+                                          ['Pending', 'Confirmed'].includes(b.status) && (
+                                            <span
+                                              className="inline-flex h-1.5 w-1.5 shrink-0 rounded-full bg-orange-500"
+                                              aria-hidden
+                                              title="Deposit pending"
+                                            />
+                                          )}
+                                        {showAttendanceConfirmedPill(b) &&
                                           ['Pending', 'Confirmed'].includes(b.status) && (
                                             <span
                                               className="inline-flex h-1.5 w-1.5 shrink-0 rounded-full bg-teal-500"
                                               aria-hidden
-                                              title="Guest confirmed via reminder email"
+                                              title="Attendance confirmed"
                                             />
                                           )}
                                       </div>
@@ -2047,12 +2054,21 @@ export function PractitionerCalendarView({
                                                 />
                                               )}
                                             {segIdx === 0 &&
-                                              first.guest_attendance_confirmed_at &&
+                                              showDepositPendingPill(first) &&
+                                              ['Pending', 'Confirmed'].includes(first.status) && (
+                                                <span
+                                                  className="inline-flex h-1.5 w-1.5 shrink-0 rounded-full bg-orange-500"
+                                                  aria-hidden
+                                                  title="Deposit pending"
+                                                />
+                                              )}
+                                            {segIdx === 0 &&
+                                              showAttendanceConfirmedPill(first) &&
                                               ['Pending', 'Confirmed'].includes(first.status) && (
                                                 <span
                                                   className="inline-flex h-1.5 w-1.5 shrink-0 rounded-full bg-teal-500"
                                                   aria-hidden
-                                                  title="Guest confirmed via reminder email"
+                                                  title="Attendance confirmed"
                                                 />
                                               )}
                                           </div>
