@@ -10,7 +10,16 @@ import { isTableReservationBooking } from '@/lib/booking/infer-booking-row-model
  * Optional: guest=<uuid> filters to that guest_id (with date/from-to or ids).
  * Returns bookings for the authenticated venue, with guest name.
  * Sorted by date then time.
+ *
+ * `view=calendar` — staff schedule grid: narrower row shape, skips table-assignment query (faster for wide date ranges).
  */
+const BOOKINGS_LIST_SELECT_FULL =
+  'id, booking_date, booking_time, party_size, status, source, deposit_status, deposit_amount_pence, dietary_notes, occasion, special_requests, internal_notes, client_arrived_at, guest_attendance_confirmed_at, staff_attendance_confirmed_at, estimated_end_time, created_at, guest_id, practitioner_id, appointment_service_id, calendar_id, service_item_id, experience_event_id, class_instance_id, resource_id, booking_end_time, event_session_id, group_booking_id, person_label';
+
+/** Omits columns not used by the practitioner calendar grid to reduce payload and DB I/O. */
+const BOOKINGS_LIST_SELECT_CALENDAR =
+  'id, booking_date, booking_time, party_size, status, deposit_status, deposit_amount_pence, special_requests, internal_notes, client_arrived_at, guest_attendance_confirmed_at, staff_attendance_confirmed_at, estimated_end_time, guest_id, practitioner_id, appointment_service_id, calendar_id, service_item_id, experience_event_id, class_instance_id, resource_id, booking_end_time, event_session_id, group_booking_id, person_label';
+
 export async function GET(request: NextRequest) {
   try {
     const supabase = await createClient();
@@ -18,6 +27,8 @@ export async function GET(request: NextRequest) {
     if (!staff) {
       return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
     }
+
+    const calendarView = request.nextUrl.searchParams.get('view') === 'calendar';
 
     const date = request.nextUrl.searchParams.get('date');
     const from = request.nextUrl.searchParams.get('from');
@@ -31,14 +42,20 @@ export async function GET(request: NextRequest) {
     const guestUuidRe =
       /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-    let query = staff.db
-      .from('bookings')
-      .select(
-        'id, booking_date, booking_time, party_size, status, source, deposit_status, deposit_amount_pence, dietary_notes, occasion, special_requests, internal_notes, client_arrived_at, guest_attendance_confirmed_at, staff_attendance_confirmed_at, estimated_end_time, created_at, guest_id, practitioner_id, appointment_service_id, calendar_id, service_item_id, experience_event_id, class_instance_id, resource_id, booking_end_time, event_session_id, group_booking_id, person_label',
-      )
-      .eq('venue_id', staff.venue_id)
-      .order('booking_date', { ascending: true })
-      .order('booking_time', { ascending: true });
+    /** Separate branches avoid a ternary on `.select(...)` which triggers excessively deep Supabase generics. */
+    let query = calendarView
+      ? staff.db
+          .from('bookings')
+          .select(BOOKINGS_LIST_SELECT_CALENDAR)
+          .eq('venue_id', staff.venue_id)
+          .order('booking_date', { ascending: true })
+          .order('booking_time', { ascending: true })
+      : staff.db
+          .from('bookings')
+          .select(BOOKINGS_LIST_SELECT_FULL)
+          .eq('venue_id', staff.venue_id)
+          .order('booking_date', { ascending: true })
+          .order('booking_time', { ascending: true });
 
     if (guestIdParam && guestUuidRe.test(guestIdParam)) {
       query = query.eq('guest_id', guestIdParam);
@@ -67,7 +84,9 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to load bookings' }, { status: 500 });
     }
 
-    const guestIds = [...new Set((rows ?? []).map((r: { guest_id: string }) => r.guest_id))];
+    type RawBookingRow = Record<string, unknown> & { guest_id: string };
+    const rawRows = (rows ?? []) as RawBookingRow[];
+    const guestIds = [...new Set(rawRows.map((r) => r.guest_id))];
     const { data: guestsRows } = guestIds.length
       ? await staff.db.from('guests').select('id, name, email, phone, visit_count, tags').in('id', guestIds)
       : { data: [] };
@@ -87,7 +106,7 @@ export async function GET(request: NextRequest) {
       ),
     );
 
-    let bookings = (rows ?? []).map((r: Record<string, unknown> & { guest_id: string }) => {
+    let bookings = rawRows.map((r) => {
       const guest = guestsMap.get(r.guest_id);
       return {
         id: r.id,
@@ -95,11 +114,11 @@ export async function GET(request: NextRequest) {
         booking_time: r.booking_time,
         party_size: r.party_size,
         status: r.status,
-        source: r.source,
+        source: calendarView ? null : r.source,
         deposit_status: r.deposit_status,
         deposit_amount_pence: r.deposit_amount_pence,
-        dietary_notes: r.dietary_notes,
-        occasion: r.occasion,
+        dietary_notes: calendarView ? null : r.dietary_notes,
+        occasion: calendarView ? null : r.occasion,
         special_requests: r.special_requests ?? null,
         internal_notes: r.internal_notes ?? null,
         client_arrived_at: r.client_arrived_at ?? null,
@@ -107,7 +126,7 @@ export async function GET(request: NextRequest) {
         staff_attendance_confirmed_at: r.staff_attendance_confirmed_at ?? null,
         estimated_end_time: r.estimated_end_time,
         booking_end_time: r.booking_end_time,
-        created_at: r.created_at,
+        created_at: calendarView ? null : r.created_at,
         guest_id: r.guest_id,
         guest_name: guest?.name ?? '-',
         guest_email: guest?.email ?? null,
@@ -131,10 +150,9 @@ export async function GET(request: NextRequest) {
       bookings = bookings.filter((b: Record<string, unknown>) => b.status === statusFilter);
     }
 
-    // Attach table assignments
     const bookingIds = bookings.map((b: Record<string, unknown>) => b.id as string);
     const assignmentsMap = new Map<string, Array<{ id: string; name: string }>>();
-    if (bookingIds.length > 0) {
+    if (!calendarView && bookingIds.length > 0) {
       const { data: assignRows } = await staff.db
         .from('booking_table_assignments')
         .select('booking_id, table_id, table:venue_tables(id, name)')
@@ -150,7 +168,7 @@ export async function GET(request: NextRequest) {
 
     let enriched = bookings.map((b: Record<string, unknown>) => ({
       ...b,
-      table_assignments: assignmentsMap.get(b.id as string) ?? [],
+      table_assignments: calendarView ? [] : assignmentsMap.get(b.id as string) ?? [],
     }));
 
     if (unassignedTables) {

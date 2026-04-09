@@ -87,7 +87,9 @@ export function ResourceCalendarMonth({
         ))}
       </div>
 
-      <div className="mt-1 grid grid-cols-7 gap-1">
+      <div
+        className={`mt-1 grid grid-cols-7 gap-1 transition-opacity ${loading ? 'animate-pulse opacity-90' : ''}`}
+      >
         {cells.map((d, idx) => {
           if (d === null) {
             return <div key={`e-${idx}`} className="aspect-square" aria-hidden />;

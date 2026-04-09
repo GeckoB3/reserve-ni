@@ -144,6 +144,7 @@ async function buildTableFilterByTime(
 
 /** GET /api/booking/availability?venue_id=uuid&date=YYYY-MM-DD&party_size=N [&booking_model=event_ticket|class_session|resource_booking] */
 export async function GET(request: NextRequest) {
+  const t0 = typeof performance !== 'undefined' ? performance.now() : 0;
   try {
     const { searchParams } = new URL(request.url);
     const venueId = searchParams.get('venue_id');
@@ -287,6 +288,10 @@ export async function GET(request: NextRequest) {
       { error: 'Internal server error' },
       { status: 500 }
     );
+  } finally {
+    if (process.env.DEBUG_PERF_API === '1' && typeof performance !== 'undefined') {
+      console.info('[GET /api/booking/availability]', { ms: Math.round(performance.now() - t0) });
+    }
   }
 }
 

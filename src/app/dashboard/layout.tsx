@@ -4,6 +4,7 @@ import { getSupabaseAdminClient } from '@/lib/supabase';
 import { isPlatformSuperuser } from '@/lib/platform-auth';
 import { DashboardSidebar } from './DashboardSidebar';
 import { SessionTimeoutGuard } from '@/components/SessionTimeoutGuard';
+import { DashboardSWRProvider } from '@/components/providers/DashboardSWRProvider';
 import {
   activeModelsToLegacyEnabledModels,
   getDefaultBookingModelFromActive,
@@ -143,7 +144,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
           </div>
         )}
         {venueId && <SessionTimeoutGuard venueId={venueId} />}
-        {children}
+        <DashboardSWRProvider>{children}</DashboardSWRProvider>
       </main>
     </div>
   );

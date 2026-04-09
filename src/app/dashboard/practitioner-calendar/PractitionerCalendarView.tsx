@@ -725,32 +725,70 @@ export function PractitionerCalendarView({
       try {
         const { from, to } = listFromTo;
         const params = from === to ? `date=${from}` : `from=${from}&to=${to}`;
-        const [pracRes, bookRes, svcRes, blockRes] = await Promise.all([
+        const listQuery = `${params}&view=calendar`;
+        const blockUrl =
+          from === to
+            ? `/api/venue/practitioner-calendar-blocks?date=${from}`
+            : `/api/venue/practitioner-calendar-blocks?from=${from}&to=${to}`;
+        const schQuery =
+          listFromTo.from === listFromTo.to
+            ? `date=${encodeURIComponent(listFromTo.from)}`
+            : `from=${encodeURIComponent(listFromTo.from)}&to=${encodeURIComponent(listFromTo.to)}`;
+
+        const parallel: Promise<Response>[] = [
           fetch('/api/venue/practitioners?roster=1'),
-          fetch(`/api/venue/bookings/list?${params}`),
+          fetch(`/api/venue/bookings/list?${listQuery}`),
           fetch('/api/venue/appointment-services'),
-          fetch(
-            from === to
-              ? `/api/venue/practitioner-calendar-blocks?date=${from}`
-              : `/api/venue/practitioner-calendar-blocks?from=${from}&to=${to}`,
-          ),
-        ]);
+          fetch(blockUrl),
+        ];
+        if (!silent) {
+          parallel.push(fetch('/api/venue'));
+        }
+        if (loadVenueResources) {
+          parallel.push(fetch('/api/venue/resources'));
+        }
+        if (showMergedFeeds) {
+          parallel.push(fetch(`/api/venue/schedule?${schQuery}`));
+        }
+
+        const responses = await Promise.all(parallel);
+        let i = 0;
+        const pracRes = responses[i++]!;
+        const bookRes = responses[i++]!;
+        const svcRes = responses[i++]!;
+        const blockRes = responses[i++]!;
+        const venueRes = !silent ? responses[i++] : undefined;
+        const resourcesRes = loadVenueResources ? responses[i++] : undefined;
+        const scheduleRes = showMergedFeeds ? responses[i++] : undefined;
+
         if (!pracRes.ok || !bookRes.ok || !svcRes.ok) {
           setFetchError('Failed to load calendar data. Please refresh the page.');
           return;
         }
-        const [pracData, bookData, svcData] = await Promise.all([
-          pracRes.json(),
-          bookRes.json(),
-          svcRes.json(),
+
+        const [pracData, bookData, svcData, bjson] = await Promise.all([
+          pracRes.json() as Promise<{ practitioners?: Practitioner[] }>,
+          bookRes.json() as Promise<{ bookings?: Booking[] }>,
+          svcRes.json() as Promise<{ services?: AppointmentService[] }>,
+          blockRes.ok ? blockRes.json() : Promise.resolve({ blocks: [] }),
         ]);
-        setPractitioners(pracData.practitioners ?? []);
-        setBookings((bookData.bookings ?? []) as Booking[]);
-        setServices(svcData.services ?? []);
+
+        if (!silent && venueRes?.ok) {
+          const v = (await venueRes.json()) as {
+            opening_hours?: OpeningHours;
+            timezone?: string | null;
+            no_show_grace_minutes?: number;
+          };
+          if (v.opening_hours) setOpeningHours(v.opening_hours);
+          const tz = v.timezone;
+          if (typeof tz === 'string' && tz.trim() !== '') setVenueTimezone(tz.trim());
+          const g = v.no_show_grace_minutes;
+          if (typeof g === 'number' && g >= 10 && g <= 60) setNoShowGraceMinutes(g);
+        }
+
         if (loadVenueResources) {
-          const resRes = await fetch('/api/venue/resources');
-          if (resRes.ok) {
-            const rj = await resRes.json();
+          if (resourcesRes?.ok) {
+            const rj = (await resourcesRes.json()) as { resources?: VenueResourceRow[] };
             setVenueResources((rj.resources ?? []) as VenueResourceRow[]);
           } else {
             setVenueResources([]);
@@ -758,21 +796,10 @@ export function PractitionerCalendarView({
         } else {
           setVenueResources([]);
         }
-        if (blockRes.ok) {
-          const bjson = await blockRes.json();
-          setBlocks(bjson.blocks ?? []);
-        } else {
-          setBlocks([]);
-        }
 
         if (showMergedFeeds) {
-          const schQuery =
-            listFromTo.from === listFromTo.to
-              ? `date=${encodeURIComponent(listFromTo.from)}`
-              : `from=${encodeURIComponent(listFromTo.from)}&to=${encodeURIComponent(listFromTo.to)}`;
-          const schRes = await fetch(`/api/venue/schedule?${schQuery}`);
-          if (schRes.ok) {
-            const schJson = (await schRes.json()) as { blocks?: ScheduleBlockDTO[] };
+          if (scheduleRes?.ok) {
+            const schJson = (await scheduleRes.json()) as { blocks?: ScheduleBlockDTO[] };
             setScheduleBlocks(schJson.blocks ?? []);
           } else {
             setScheduleBlocks([]);
@@ -780,6 +807,11 @@ export function PractitionerCalendarView({
         } else {
           setScheduleBlocks([]);
         }
+
+        setPractitioners(pracData.practitioners ?? []);
+        setBookings((bookData.bookings ?? []) as Booking[]);
+        setServices(svcData.services ?? []);
+        setBlocks((bjson as { blocks?: CalendarBlock[] }).blocks ?? []);
       } catch {
         setFetchError('Failed to load calendar data. Please check your connection.');
       } finally {
@@ -793,18 +825,14 @@ export function PractitionerCalendarView({
     void fetchData();
   }, [fetchData]);
 
-  useEffect(() => {
-    void fetch('/api/venue')
-      .then((r) => (r.ok ? r.json() : null))
-      .then((v) => {
-        if (v?.opening_hours) setOpeningHours(v.opening_hours as OpeningHours);
-        const tz = (v as { timezone?: string | null } | null)?.timezone;
-        if (typeof tz === 'string' && tz.trim() !== '') setVenueTimezone(tz.trim());
-        const g = (v as { no_show_grace_minutes?: number } | null)?.no_show_grace_minutes;
-        if (typeof g === 'number' && g >= 10 && g <= 60) setNoShowGraceMinutes(g);
-      })
-      .catch(() => {});
-  }, []);
+  const silentRefetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleSilentCalendarRefetch = useCallback(() => {
+    if (silentRefetchTimerRef.current) clearTimeout(silentRefetchTimerRef.current);
+    silentRefetchTimerRef.current = setTimeout(() => {
+      silentRefetchTimerRef.current = null;
+      void fetchData({ silent: true });
+    }, 400);
+  }, [fetchData]);
 
   useEffect(() => {
     if (loading || viewMode !== 'day') return;
@@ -845,28 +873,29 @@ export function PractitionerCalendarView({
               });
             }, 2200);
           }
-          void fetchData({ silent: true });
+          scheduleSilentCalendarRefetch();
         },
       )
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'practitioner_calendar_blocks', filter: `venue_id=eq.${venueId}` },
         () => {
-          void fetchData({ silent: true });
+          scheduleSilentCalendarRefetch();
         },
       )
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'calendar_blocks', filter: `venue_id=eq.${venueId}` },
         () => {
-          void fetchData({ silent: true });
+          scheduleSilentCalendarRefetch();
         },
       )
       .subscribe();
     return () => {
+      if (silentRefetchTimerRef.current) clearTimeout(silentRefetchTimerRef.current);
       void supabase.removeChannel(channel);
     };
-  }, [venueId, fetchData]);
+  }, [venueId, scheduleSilentCalendarRefetch]);
 
   const activePractitioners = useMemo(
     () => practitioners.filter((p) => p.is_active),

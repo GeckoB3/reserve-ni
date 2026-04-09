@@ -71,8 +71,16 @@ export async function GET(request: NextRequest) {
     const [enriched] = await attachHostCalendarsToResources(supabase, venueId, [resource]);
     resource = enriched ?? resource;
 
+    const prefetchOpts = { reuseEnrichedResourceRow: true as const };
     const available_dates = durationAny
-      ? await computeResourceAvailableDatesInMonthAnyDuration(supabase, venueId, resource, year, month)
+      ? await computeResourceAvailableDatesInMonthAnyDuration(
+          supabase,
+          venueId,
+          resource,
+          year,
+          month,
+          prefetchOpts,
+        )
       : await computeResourceAvailableDatesInMonth(
           supabase,
           venueId,
@@ -80,17 +88,25 @@ export async function GET(request: NextRequest) {
           year,
           month,
           durationMinutes,
+          prefetchOpts,
         );
 
-    return NextResponse.json({
-      venue_id: venueId,
-      resource_id: resourceId,
-      year,
-      month,
-      duration_minutes: durationAny ? null : durationMinutes,
-      duration_mode: durationAny ? 'any' : 'fixed',
-      available_dates,
-    });
+    return NextResponse.json(
+      {
+        venue_id: venueId,
+        resource_id: resourceId,
+        year,
+        month,
+        duration_minutes: durationAny ? null : durationMinutes,
+        duration_mode: durationAny ? 'any' : 'fixed',
+        available_dates,
+      },
+      {
+        headers: {
+          'Cache-Control': 'public, s-maxage=45, stale-while-revalidate=120',
+        },
+      },
+    );
   } catch (err) {
     console.error('GET /api/booking/resource-calendar failed:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

@@ -22,7 +22,9 @@ export async function GET(request: NextRequest) {
 
     const { data, error } = await supabase
       .from('unified_calendars')
-      .select('*')
+      .select(
+        'id, name, resource_type, min_booking_minutes, max_booking_minutes, slot_interval_minutes, price_per_slot_pence, payment_requirement, deposit_amount_pence, sort_order',
+      )
       .eq('venue_id', venueId)
       .eq('calendar_type', 'resource')
       .eq('is_active', true)

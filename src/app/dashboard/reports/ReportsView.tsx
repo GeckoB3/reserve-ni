@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
+import useSWR from 'swr';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
@@ -132,6 +133,12 @@ function aggregateBookingSourcesByLabel(bySource: Record<string, number>): Array
     .sort((a, b) => b.value - a.value);
 }
 
+async function fetchReportsJson(url: string): Promise<ReportsData> {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error('Failed to load');
+  return res.json() as Promise<ReportsData>;
+}
+
 export interface ReportsViewProps {
   bookingModel: BookingModel;
   terminology: VenueTerminology;
@@ -143,22 +150,25 @@ export function ReportsView({ bookingModel, terminology, venueId }: ReportsViewP
   const router = useRouter();
   const pathname = usePathname();
   const [range, setRange] = useState(last7Days);
-  const [data, setData] = useState<ReportsData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [appliedRange, setAppliedRange] = useState(last7Days);
+  const reportsUrl = `/api/venue/reports?from=${appliedRange.from}&to=${appliedRange.to}`;
+  const {
+    data,
+    error: swrError,
+    isLoading,
+    isValidating,
+    mutate,
+  } = useSWR(reportsUrl, fetchReportsJson, {
+    revalidateOnFocus: false,
+    dedupingInterval: 60_000,
+    keepPreviousData: true,
+  });
+  const error = swrError ? (swrError instanceof Error ? swrError.message : 'Error') : null;
   const [exportFlash, setExportFlash] = useState<ExportFlash | null>(null);
-  const [activeTab, setActiveTabState] = useState<'overview' | 'clients'>(() =>
-    searchParams.get('tab') === 'clients' ? 'clients' : 'overview',
-  );
-
-  useEffect(() => {
-    const t = searchParams.get('tab');
-    setActiveTabState(t === 'clients' ? 'clients' : 'overview');
-  }, [searchParams]);
+  const activeTab = searchParams.get('tab') === 'clients' ? 'clients' : 'overview';
 
   const setActiveTab = useCallback(
     (tab: 'overview' | 'clients') => {
-      setActiveTabState(tab);
       const p = new URLSearchParams(searchParams.toString());
       if (tab === 'clients') p.set('tab', 'clients');
       else p.delete('tab');
@@ -180,21 +190,9 @@ export function ReportsView({ bookingModel, terminology, venueId }: ReportsViewP
     [dismissExportFlashSoon],
   );
 
-  const fetchReports = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await fetch(`/api/venue/reports?from=${range.from}&to=${range.to}`);
-      if (!res.ok) throw new Error('Failed to load');
-      setData(await res.json());
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Error');
-    } finally {
-      setLoading(false);
-    }
-  }, [range.from, range.to]);
-
-  useEffect(() => { fetchReports(); }, [fetchReports]);
+  const applyRange = useCallback(() => {
+    setAppliedRange(range);
+  }, [range]);
 
   const exportReportByModel = useCallback(() => {
     const rows = data?.report_by_booking_model ?? [];
@@ -330,7 +328,7 @@ export function ReportsView({ bookingModel, terminology, venueId }: ReportsViewP
     ]);
   }, [data, terminology]);
 
-  if (loading && !data) {
+  if (isLoading && !data) {
     return (
       <div className="space-y-5">
         {[...Array(4)].map((_, i) => (
@@ -344,7 +342,7 @@ export function ReportsView({ bookingModel, terminology, venueId }: ReportsViewP
     return (
       <div className="rounded-xl border border-slate-200 bg-white p-12 text-center">
         <p className="text-red-600">{error}</p>
-        <button type="button" onClick={fetchReports} className="mt-3 text-sm font-medium text-brand-600 hover:text-brand-700">Retry</button>
+        <button type="button" onClick={() => void mutate()} className="mt-3 text-sm font-medium text-brand-600 hover:text-brand-700">Retry</button>
       </div>
     );
   }
@@ -467,11 +465,11 @@ export function ReportsView({ bookingModel, terminology, venueId }: ReportsViewP
         </label>
         <button
           type="button"
-          onClick={fetchReports}
-          disabled={loading}
+          onClick={applyRange}
+          disabled={isValidating}
           className="rounded-lg bg-brand-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
         >
-          {loading ? 'Loading...' : 'Apply'}
+          {isValidating ? 'Loading...' : 'Apply'}
         </button>
       </div>
 
@@ -482,7 +480,7 @@ export function ReportsView({ bookingModel, terminology, venueId }: ReportsViewP
           bookingModel={resolvedBookingModel}
           clientSummary={data.client_summary ?? null}
           rangeLabel={`${data.from} → ${data.to}`}
-          onReportsRefresh={fetchReports}
+          onReportsRefresh={() => void mutate()}
         />
       ) : null}
 

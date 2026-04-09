@@ -345,6 +345,61 @@ export function computeResourceAvailability(
   return results;
 }
 
+/**
+ * True if the resource has at least one non-conflicting slot for any of the given duration candidates
+ * (same rules as {@link computeResourceAvailability} for one resource). Used for month "any duration"
+ * scans without calling {@link computeResourceAvailability} once per duration.
+ */
+export function resourceHasAvailabilityForAnyDurationCandidate(
+  input: ResourceEngineInput,
+  resourceId: string,
+  durationCandidatesMinutes: number[],
+): boolean {
+  const resource = input.resources.find((r) => r.id === resourceId);
+  if (!resource?.is_active) return false;
+
+  const ranges =
+    input.effectiveAvailabilityRangesByResourceId?.get(resource.id) ??
+    getEffectiveAvailabilityRanges(resource, input.date);
+  if (ranges.length === 0) return false;
+
+  const resourceBookings = input.existingBookings.filter(
+    (b) => b.resource_id === resource.id && CAPACITY_CONSUMING_STATUSES.includes(b.status),
+  );
+
+  const { sameDaySlotCutoff } = input;
+
+  for (const range of ranges) {
+    for (let t = range.start; t < range.end; t += resource.slot_interval_minutes) {
+      if (
+        sameDaySlotCutoff &&
+        input.date === sameDaySlotCutoff.venueDateYmd &&
+        t <= sameDaySlotCutoff.minutesNow
+      ) {
+        continue;
+      }
+
+      for (const durRaw of durationCandidatesMinutes) {
+        const duration = Math.max(
+          resource.min_booking_minutes,
+          Math.min(durRaw, resource.max_booking_minutes),
+        );
+        if (t + duration > range.end) continue;
+
+        const slotEnd = t + duration;
+        const conflict = resourceBookings.some((b) => {
+          const bStart = timeToMinutes(b.booking_time);
+          const bEnd = timeToMinutes(b.booking_end_time);
+          return overlaps(t, slotEnd, bStart, bEnd);
+        });
+
+        if (!conflict) return true;
+      }
+    }
+  }
+  return false;
+}
+
 /** Booking lengths (minutes) allowed for this resource: multiples of the slot interval within min/max. */
 export function resourceDurationCandidatesMinutes(
   resource: Pick<VenueResource, 'min_booking_minutes' | 'max_booking_minutes' | 'slot_interval_minutes'>,
@@ -496,6 +551,15 @@ async function expandResourcesWithSiblings(
   return attachHostCalendarsToResources(supabase, venueId, conflictResources);
 }
 
+export interface PrefetchResourceMonthOptions {
+  /**
+   * When true, skip re-fetching `unified_calendars` for this resource and use `resource` as-is
+   * (caller must already have run {@link attachHostCalendarsToResources}). Avoids duplicate DB work
+   * when the route already loaded the row.
+   */
+  reuseEnrichedResourceRow?: boolean;
+}
+
 /**
  * One batch of DB reads for a resource calendar month (vs one fetchResourceInput per day).
  */
@@ -505,6 +569,7 @@ async function prefetchResourceMonthForAvailability(
   resource: VenueResource,
   year: number,
   month: number,
+  options?: PrefetchResourceMonthOptions,
 ): Promise<{
   resources: VenueResource[];
   conflictResources: VenueResource[];
@@ -518,17 +583,22 @@ async function prefetchResourceMonthForAvailability(
   const monthStart = `${year}-${pad(month)}-01`;
   const monthEnd = `${year}-${pad(month)}-${pad(lastDay)}`;
 
-  const resourcesRes = await supabase
-    .from('unified_calendars')
-    .select('*')
-    .eq('venue_id', venueId)
-    .eq('calendar_type', 'resource')
-    .eq('is_active', true)
-    .eq('id', resource.id)
-    .order('sort_order');
+  let resources: VenueResource[];
+  if (options?.reuseEnrichedResourceRow) {
+    resources = [resource];
+  } else {
+    const resourcesRes = await supabase
+      .from('unified_calendars')
+      .select('*')
+      .eq('venue_id', venueId)
+      .eq('calendar_type', 'resource')
+      .eq('is_active', true)
+      .eq('id', resource.id)
+      .order('sort_order');
 
-  let resources = (resourcesRes.data ?? []).map((r) => mapCalendarToResource(r as Record<string, unknown>));
-  resources = await attachHostCalendarsToResources(supabase, venueId, resources);
+    resources = (resourcesRes.data ?? []).map((r) => mapCalendarToResource(r as Record<string, unknown>));
+    resources = await attachHostCalendarsToResources(supabase, venueId, resources);
+  }
   const conflictResources = await expandResourcesWithSiblings(supabase, venueId, resources);
 
   const [venueRes, blocksRes, bookingsRes] = await Promise.all([
@@ -580,12 +650,20 @@ export async function computeResourceAvailableDatesInMonth(
   year: number,
   month: number,
   durationMinutes: number,
+  prefetchOptions?: PrefetchResourceMonthOptions,
 ): Promise<string[]> {
   const pad = (n: number) => String(n).padStart(2, '0');
   const out: string[] = [];
   const lastDay = new Date(year, month, 0).getDate();
 
-  const prefetch = await prefetchResourceMonthForAvailability(supabase, venueId, resource, year, month);
+  const prefetch = await prefetchResourceMonthForAvailability(
+    supabase,
+    venueId,
+    resource,
+    year,
+    month,
+    prefetchOptions,
+  );
 
   for (let d = 1; d <= lastDay; d++) {
     const dateStr = `${year}-${pad(month)}-${pad(d)}`;
@@ -615,14 +693,25 @@ export async function computeResourceAvailableDatesInMonthAnyDuration(
   resource: VenueResource,
   year: number,
   month: number,
+  prefetchOptions?: PrefetchResourceMonthOptions,
 ): Promise<string[]> {
   const durations = resourceDurationCandidatesMinutes(resource);
   const pad = (n: number) => String(n).padStart(2, '0');
   const out: string[] = [];
   const lastDay = new Date(year, month, 0).getDate();
 
-  const prefetch = await prefetchResourceMonthForAvailability(supabase, venueId, resource, year, month);
+  const tPrefetch0 = typeof performance !== 'undefined' ? performance.now() : 0;
+  const prefetch = await prefetchResourceMonthForAvailability(
+    supabase,
+    venueId,
+    resource,
+    year,
+    month,
+    prefetchOptions,
+  );
+  const prefetchMs = typeof performance !== 'undefined' ? performance.now() - tPrefetch0 : 0;
 
+  const tLoop0 = typeof performance !== 'undefined' ? performance.now() : 0;
   for (let day = 1; day <= lastDay; day++) {
     const dateStr = `${year}-${pad(month)}-${pad(day)}`;
     const input = buildResourceEngineInputFromParts({
@@ -634,17 +723,23 @@ export async function computeResourceAvailableDatesInMonthAnyDuration(
       venueWideBlocks: prefetch.venueWideBlocks,
       venueTimezone: prefetch.venueTimezone,
     });
-    let hasSlot = false;
-    for (const dur of durations) {
-      const results = computeResourceAvailability(input, dur);
-      const row = results.find((r) => r.id === resource.id);
-      if (row && row.slots.length > 0) {
-        hasSlot = true;
-        break;
-      }
+    if (resourceHasAvailabilityForAnyDurationCandidate(input, resource.id, durations)) {
+      out.push(dateStr);
     }
-    if (hasSlot) out.push(dateStr);
   }
+  const loopMs = typeof performance !== 'undefined' ? performance.now() - tLoop0 : 0;
+
+  if (process.env.DEBUG_RESOURCE_CALENDAR_TIMING === '1') {
+    console.info('[computeResourceAvailableDatesInMonthAnyDuration]', {
+      resourceId: resource.id,
+      year,
+      month,
+      prefetchMs: Math.round(prefetchMs * 100) / 100,
+      dayLoopMs: Math.round(loopMs * 100) / 100,
+      daysEvaluated: lastDay,
+    });
+  }
+
   return out;
 }
 

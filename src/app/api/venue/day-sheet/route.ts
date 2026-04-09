@@ -96,6 +96,7 @@ const ACTIVE_STATUSES = ['Pending', 'Confirmed', 'Seated'];
  * guest history, and summary statistics.
  */
 export async function GET(request: NextRequest) {
+  const t0 = typeof performance !== 'undefined' ? performance.now() : 0;
   try {
     const supabase = await createClient();
     const staff = await getVenueStaff(supabase);
@@ -487,5 +488,9 @@ export async function GET(request: NextRequest) {
   } catch (err) {
     console.error('GET /api/venue/day-sheet failed:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  } finally {
+    if (process.env.DEBUG_PERF_API === '1' && typeof performance !== 'undefined') {
+      console.info('[GET /api/venue/day-sheet]', { ms: Math.round(performance.now() - t0) });
+    }
   }
 }

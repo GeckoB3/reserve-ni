@@ -60,6 +60,10 @@ function formatDurationLabel(mins: number): string {
   return m > 0 ? `${h}h ${m}m` : `${h}h`;
 }
 
+function resourceCalendarCacheKey(resourceId: string, year: number, month: number): string {
+  return `${resourceId}:${year}:${month}`;
+}
+
 export interface ResourceBookingFlowProps {
   venue: VenuePublic;
   cancellationPolicy?: string;
@@ -94,6 +98,8 @@ export function ResourceBookingFlow({
   });
   const [availableDates, setAvailableDates] = useState<Set<string>>(new Set());
   const [loadingCalendar, setLoadingCalendar] = useState(false);
+  /** Month availability keyed by `resourceId:year:month` — populated by prefetch after resource list loads and by fetches. */
+  const [calendarPrefetchByKey, setCalendarPrefetchByKey] = useState<Map<string, Set<string>>>(() => new Map());
 
   const [date, setDate] = useState('');
   const [selectedResource, setSelectedResource] = useState<ResourceAvail | null>(null);
@@ -142,32 +148,105 @@ export function ResourceBookingFlow({
     };
   }, [venue.id, bookingAudience]);
 
+  /** After resources load, prefetch current month availability for every resource so the calendar step often hits cache. */
+  useEffect(() => {
+    if (resourceOptions.length === 0) return;
+    let cancelled = false;
+    const n = new Date();
+    const y = n.getFullYear();
+    const m = n.getMonth() + 1;
+    void Promise.all(
+      resourceOptions.map((r) =>
+        fetch(resourceCalendarUrl(bookingAudience, venue.id, r.id, y, m, 'any'))
+          .then((res) => {
+            if (!res.ok) throw new Error('calendar');
+            return res.json();
+          })
+          .then((data) => {
+            const list = (data.available_dates ?? []) as string[];
+            return { key: resourceCalendarCacheKey(r.id, y, m), dates: new Set(list) };
+          })
+          .catch(() => ({ key: resourceCalendarCacheKey(r.id, y, m), dates: new Set<string>() })),
+      ),
+    ).then((entries) => {
+      if (cancelled) return;
+      setCalendarPrefetchByKey((prev) => {
+        const next = new Map(prev);
+        for (const e of entries) {
+          next.set(e.key, e.dates);
+        }
+        return next;
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [resourceOptions, venue.id, bookingAudience]);
+
+  const cachedMonthForSelection = useMemo(() => {
+    if (!selectedMeta) return undefined;
+    return calendarPrefetchByKey.get(
+      resourceCalendarCacheKey(selectedMeta.id, calendarMonth.year, calendarMonth.month),
+    );
+  }, [calendarPrefetchByKey, selectedMeta, calendarMonth.year, calendarMonth.month]);
+
   useEffect(() => {
     if (step !== 'pick_date' || !selectedMeta) return;
+    if (cachedMonthForSelection !== undefined) {
+      setAvailableDates(new Set(cachedMonthForSelection));
+      setLoadingCalendar(false);
+      return;
+    }
+
+    const ac = new AbortController();
     let cancelled = false;
+    const key = resourceCalendarCacheKey(selectedMeta.id, calendarMonth.year, calendarMonth.month);
+
     (async () => {
       setLoadingCalendar(true);
       try {
-        const url = resourceCalendarUrl(bookingAudience, venue.id, selectedMeta.id, calendarMonth.year, calendarMonth.month, 'any');
-        const res = await fetch(url);
+        const url = resourceCalendarUrl(
+          bookingAudience,
+          venue.id,
+          selectedMeta.id,
+          calendarMonth.year,
+          calendarMonth.month,
+          'any',
+        );
+        const res = await fetch(url, { signal: ac.signal });
         const data = await res.json();
         if (cancelled) return;
         if (!res.ok) throw new Error(data.error ?? 'Failed to load calendar');
         const list = (data.available_dates ?? []) as string[];
-        setAvailableDates(new Set(list));
-      } catch {
-        if (!cancelled) {
-          setAvailableDates(new Set());
-          setError('Could not load availability for this month.');
-        }
+        const nextSet = new Set(list);
+        setAvailableDates(nextSet);
+        setCalendarPrefetchByKey((prev) => {
+          const next = new Map(prev);
+          next.set(key, nextSet);
+          return next;
+        });
+      } catch (e) {
+        if (cancelled || (e instanceof Error && e.name === 'AbortError')) return;
+        setAvailableDates(new Set());
+        setError('Could not load availability for this month.');
       } finally {
         if (!cancelled) setLoadingCalendar(false);
       }
     })();
+
     return () => {
       cancelled = true;
+      ac.abort();
     };
-  }, [step, venue.id, selectedMeta, calendarMonth.year, calendarMonth.month, bookingAudience]);
+  }, [
+    step,
+    venue.id,
+    selectedMeta,
+    calendarMonth.year,
+    calendarMonth.month,
+    bookingAudience,
+    cachedMonthForSelection,
+  ]);
 
   useEffect(() => {
     if (step !== 'pick_date' || !date) return;

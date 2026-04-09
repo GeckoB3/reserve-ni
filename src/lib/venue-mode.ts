@@ -20,6 +20,9 @@ export interface VenueMode {
   terminology: VenueTerminology;
 }
 
+const venueModeCache = new Map<string, { t: number; v: VenueMode }>();
+const VENUE_MODE_CACHE_TTL_MS = 30_000;
+
 /**
  * Single resolver for venue operation mode.
  * - `activeBookingModels` lists every booking model the venue exposes.
@@ -28,8 +31,24 @@ export interface VenueMode {
  * - `tableManagementEnabled` controls dashboard/table-management UX mode (Model A only).
  * - `availabilityEngine` controls which availability calculator to use (Model A only).
  * - `terminology` drives label substitution across UI.
+ *
+ * Results are cached per `venueId` for a short TTL to avoid repeated DB reads on hot API routes.
  */
 export async function resolveVenueMode(
+  supabase: SupabaseClient,
+  venueId: string
+): Promise<VenueMode> {
+  const now = Date.now();
+  const hit = venueModeCache.get(venueId);
+  if (hit && now - hit.t < VENUE_MODE_CACHE_TTL_MS) {
+    return hit.v;
+  }
+  const mode = await resolveVenueModeUncached(supabase, venueId);
+  venueModeCache.set(venueId, { t: now, v: mode });
+  return mode;
+}
+
+async function resolveVenueModeUncached(
   supabase: SupabaseClient,
   venueId: string
 ): Promise<VenueMode> {

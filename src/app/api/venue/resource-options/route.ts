@@ -25,7 +25,9 @@ export async function GET() {
 
     const { data, error } = await admin
       .from('unified_calendars')
-      .select('*')
+      .select(
+        'id, name, resource_type, min_booking_minutes, max_booking_minutes, slot_interval_minutes, price_per_slot_pence, sort_order',
+      )
       .eq('venue_id', staff.venue_id)
       .eq('calendar_type', 'resource')
       .eq('is_active', true)
