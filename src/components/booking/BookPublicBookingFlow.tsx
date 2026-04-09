@@ -14,9 +14,6 @@ import type { VenuePublic } from '@/components/booking/types';
 
 const EMPTY_ENABLED: BookingModel[] = [];
 
-const CANCELLATION_POLICY =
-  'Full refund if cancelled 48+ hours before your reservation. No refund within 48 hours or for no-shows.';
-
 interface Props {
   venue: VenuePublic;
   lockedPractitioner?: LockedPractitionerBooking | null;
@@ -119,7 +116,6 @@ export function BookPublicBookingFlow({
         key={activeSlug}
         venue={venue}
         activeBookingModel={activeModel}
-        cancellationPolicy={CANCELLATION_POLICY}
         lockedPractitioner={lockedPractitioner ?? undefined}
         embed={embed}
         onHeightChange={onHeightChange}

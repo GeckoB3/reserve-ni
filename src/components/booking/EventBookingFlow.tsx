@@ -15,6 +15,7 @@ import {
   bookingConfirmPaymentUrl,
   venueBookingsCreateUrl,
 } from '@/lib/booking/booking-flow-api';
+import { formatOnlinePaidRefundPolicyLine } from '@/lib/booking/public-deposit-refund-policy';
 
 interface EventOfferingSummary {
   series_key: string;
@@ -51,6 +52,8 @@ interface EventInstance {
   remaining_capacity: number;
   payment_requirement: 'none' | 'deposit' | 'full_payment';
   deposit_amount_pence: number | null;
+  /** Hours before start for refund of online deposit / prepayment. */
+  cancellation_notice_hours?: number;
   ticket_types: TicketTypeAvail[];
 }
 
@@ -236,6 +239,19 @@ export function EventBookingFlow({
   }, [selectedOccurrence, totalTickets, totalPricePence, currency]);
 
   const chargePence = paymentSummary?.chargePence ?? 0;
+
+  const eventPaymentRefundPolicy = useMemo(() => {
+    if (cancellationPolicy) return cancellationPolicy;
+    const h =
+      typeof selectedOccurrence?.cancellation_notice_hours === 'number' && Number.isFinite(selectedOccurrence.cancellation_notice_hours)
+        ? selectedOccurrence.cancellation_notice_hours
+        : venue.booking_rules?.cancellation_notice_hours ?? 48;
+    return formatOnlinePaidRefundPolicyLine(h);
+  }, [
+    cancellationPolicy,
+    selectedOccurrence?.cancellation_notice_hours,
+    venue.booking_rules?.cancellation_notice_hours,
+  ]);
 
   const handleDetailsSubmit = useCallback(
     async (details: GuestDetails) => {
@@ -574,8 +590,9 @@ export function EventBookingFlow({
           partySize={totalTickets}
           onComplete={handlePaymentComplete}
           onBack={() => setStep('details')}
-          cancellationPolicy={cancellationPolicy}
+          cancellationPolicy={eventPaymentRefundPolicy}
           summaryMode="total"
+          chargeKind={selectedOccurrence.payment_requirement === 'full_payment' ? 'full_payment' : 'deposit'}
         />
       )}
 

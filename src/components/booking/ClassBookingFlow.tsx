@@ -15,6 +15,7 @@ import {
   bookingConfirmPaymentUrl,
   venueBookingsCreateUrl,
 } from '@/lib/booking/booking-flow-api';
+import { formatOnlinePaidRefundPolicyLine } from '@/lib/booking/public-deposit-refund-policy';
 
 interface ClassOfferingSummary {
   class_type_id: string;
@@ -42,6 +43,8 @@ interface ClassSlot {
   price_pence: number | null;
   payment_requirement: ClassPaymentRequirement;
   deposit_amount_pence: number | null;
+  /** Hours before start for refund of online deposit / prepayment. */
+  cancellation_notice_hours?: number;
   requires_stripe_checkout: boolean;
   instructor_name: string | null;
   colour: string;
@@ -116,6 +119,10 @@ function mapInstanceToSlot(row: Record<string, unknown>): ClassSlot {
     price_pence: (row.price_pence as number | null) ?? null,
     payment_requirement: row.payment_requirement as ClassPaymentRequirement,
     deposit_amount_pence: (row.deposit_amount_pence as number | null) ?? null,
+    cancellation_notice_hours:
+      typeof row.cancellation_notice_hours === 'number' && Number.isFinite(row.cancellation_notice_hours)
+        ? row.cancellation_notice_hours
+        : undefined,
     requires_stripe_checkout: Boolean(row.requires_stripe_checkout),
     instructor_name: (row.instructor_name as string | null) ?? null,
     colour: (row.colour as string) ?? '#6366f1',
@@ -221,6 +228,15 @@ export function ClassBookingFlow({
     if (!selectedClass) return null;
     return paymentSummaryLines(selectedClass, spots, currency);
   }, [selectedClass, spots, currency]);
+
+  const classPaymentRefundPolicy = useMemo(() => {
+    if (cancellationPolicy) return cancellationPolicy;
+    const h =
+      typeof selectedClass?.cancellation_notice_hours === 'number' && Number.isFinite(selectedClass.cancellation_notice_hours)
+        ? selectedClass.cancellation_notice_hours
+        : venue.booking_rules?.cancellation_notice_hours ?? 48;
+    return formatOnlinePaidRefundPolicyLine(h);
+  }, [cancellationPolicy, selectedClass?.cancellation_notice_hours, venue.booking_rules?.cancellation_notice_hours]);
 
   const handleDetailsSubmit = useCallback(
     async (details: GuestDetails) => {
@@ -529,8 +545,9 @@ export function ClassBookingFlow({
           partySize={spots}
           onComplete={handlePaymentComplete}
           onBack={() => setStep('details')}
-          cancellationPolicy={cancellationPolicy}
+          cancellationPolicy={classPaymentRefundPolicy}
           summaryMode="total"
+          chargeKind={selectedClass.payment_requirement === 'full_payment' ? 'full_payment' : 'deposit'}
         />
       )}
 

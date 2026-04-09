@@ -14,6 +14,7 @@ import {
   formatRefundDeadlineDisplay,
   isDepositRefundAvailableAt,
 } from '@/lib/booking/cancellation-deadline';
+import { formatOnlinePaidRefundPolicyLine } from '@/lib/booking/public-deposit-refund-policy';
 import type { ClassPaymentRequirement } from '@/types/booking-models';
 
 const SHORT_WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -276,9 +277,7 @@ export function DetailsStep({
               <p className="text-sm font-medium text-amber-800">
                 Deposit of &pound;{depositPerPerson?.toFixed(2) ?? '5.00'} per person required
               </p>
-              <p className="text-xs text-amber-700">
-                Full refund if cancelled 48+ hours before your reservation. No refund within 48 hours or for no-shows.
-              </p>
+              <p className="text-xs text-amber-700">{formatOnlinePaidRefundPolicyLine(refundNoticeHours)}</p>
             </div>
           </div>
         </div>

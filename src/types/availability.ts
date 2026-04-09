@@ -152,6 +152,8 @@ export interface BookingRestriction {
   deposit_amount_per_person_gbp: number | null;
   /** When deposits apply, gate online/widget bookings (staff phone flow uses the Require deposit toggle only). */
   online_requires_deposit: boolean;
+  /** Hours before start for deposit refund for this dining service. */
+  cancellation_notice_hours?: number;
 }
 
 /** Optional JSON on availability_blocks (reduced_capacity); merged when several blocks apply. */
@@ -239,6 +241,8 @@ export interface ServiceAvailableSlot {
   deposit_amount: number | null;
   /** When deposits apply, whether online/widget bookings should require payment (public flow). */
   online_requires_deposit: boolean;
+  /** From `booking_restrictions` for this service (merged with exceptions). */
+  cancellation_notice_hours?: number;
   limited: boolean;
 }
 

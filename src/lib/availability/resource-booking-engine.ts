@@ -21,6 +21,7 @@ import {
   venueWideBlocksQueryForRange,
 } from '@/lib/availability/venue-wide-blocks-fetch';
 import { sameDaySlotCutoffForBookingDate } from '@/lib/venue/venue-local-clock';
+import { entityBookingWindowFromRow } from '@/lib/booking/entity-booking-window';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -67,6 +68,7 @@ export interface ResourceAvailabilityResult {
   price_per_slot_pence: number | null;
   payment_requirement: ClassPaymentRequirement;
   deposit_amount_pence: number | null;
+  cancellation_notice_hours: number;
   slots: ResourceSlot[];
 }
 
@@ -338,6 +340,7 @@ export function computeResourceAvailability(
       price_per_slot_pence: resource.price_per_slot_pence,
       payment_requirement: resource.payment_requirement,
       deposit_amount_pence: resource.deposit_amount_pence,
+      cancellation_notice_hours: entityBookingWindowFromRow(resource as unknown as Record<string, unknown>).cancellation_notice_hours,
       slots,
     });
   }
@@ -793,6 +796,7 @@ export async function fetchBookingsGroupedByDateForResourceMonth(
 /** Map a unified_calendars row to the VenueResource shape the engine expects. */
 export function mapCalendarToResource(row: Record<string, unknown>): VenueResource {
   const payReq = row.payment_requirement as ClassPaymentRequirement | null | undefined;
+  const win = entityBookingWindowFromRow(row);
   return {
     id: row.id as string,
     venue_id: row.venue_id as string,
@@ -804,6 +808,7 @@ export function mapCalendarToResource(row: Record<string, unknown>): VenueResour
     price_per_slot_pence: (row.price_per_slot_pence as number | null) ?? null,
     payment_requirement: payReq ?? 'none',
     deposit_amount_pence: (row.deposit_amount_pence as number | null) ?? null,
+    cancellation_notice_hours: win.cancellation_notice_hours,
     availability_hours: (row.working_hours as WorkingHours) ?? {},
     availability_exceptions: (row.availability_exceptions as VenueResource['availability_exceptions']) ?? undefined,
     is_active: (row.is_active as boolean | null) ?? true,

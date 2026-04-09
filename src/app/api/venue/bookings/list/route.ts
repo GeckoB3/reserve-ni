@@ -5,9 +5,11 @@ import { BOOKING_ACTIVE_STATUSES } from '@/lib/table-management/constants';
 import { isTableReservationBooking } from '@/lib/booking/infer-booking-row-model';
 
 /**
- * GET /api/venue/bookings/list?date=YYYY-MM-DD&status=Confirmed|Pending|...
+ * GET /api/venue/bookings/list?date=YYYY-MM-DD&status=Pending|Seated|...
  * or  /api/venue/bookings/list?from=YYYY-MM-DD&to=YYYY-MM-DD&status=...
  * Optional: guest=<uuid> filters to that guest_id (with date/from-to or ids).
+ * Optional: attendance_confirmed=1 — bookings where the guest confirmed via reminder link (guest_attendance_confirmed_at)
+ *   or staff pressed Confirm Booking (staff_attendance_confirmed_at). When set, `status` is ignored.
  * Returns bookings for the authenticated venue, with guest name.
  * Sorted by date then time.
  *
@@ -35,6 +37,7 @@ export async function GET(request: NextRequest) {
     const to = request.nextUrl.searchParams.get('to');
     const ids = request.nextUrl.searchParams.get('ids');
     const statusFilter = request.nextUrl.searchParams.get('status');
+    const attendanceConfirmedFilter = request.nextUrl.searchParams.get('attendance_confirmed') === '1';
     const groupBookingId = request.nextUrl.searchParams.get('group_booking_id');
     const unassignedTables = request.nextUrl.searchParams.get('unassigned_tables') === '1';
     const guestIdParam = request.nextUrl.searchParams.get('guest');
@@ -146,7 +149,15 @@ export async function GET(request: NextRequest) {
       };
     });
 
-    if (statusFilter) {
+    if (attendanceConfirmedFilter) {
+      bookings = bookings.filter((b: Record<string, unknown>) => {
+        const g = b.guest_attendance_confirmed_at;
+        const s = b.staff_attendance_confirmed_at;
+        const guestOn = typeof g === 'string' && g.trim().length > 0;
+        const staffOn = typeof s === 'string' && s.trim().length > 0;
+        return guestOn || staffOn;
+      });
+    } else if (statusFilter) {
       bookings = bookings.filter((b: Record<string, unknown>) => b.status === statusFilter);
     }
 

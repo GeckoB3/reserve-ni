@@ -52,6 +52,8 @@ export interface EventAvailabilitySlot {
   remaining_capacity: number;
   payment_requirement: 'none' | 'deposit' | 'full_payment';
   deposit_amount_pence: number | null;
+  /** Hours before start for deposit / prepayment refund (from `experience_events`). */
+  cancellation_notice_hours: number;
   ticket_types: Array<{
     id: string;
     name: string;
@@ -131,6 +133,7 @@ export function computeEventAvailability(
       });
 
     const seriesKey = event.parent_event_id ?? event.id;
+    const refundHours = entityBookingWindowFromRow(event as unknown as Record<string, unknown>).cancellation_notice_hours;
     results.push({
       event_id: event.id,
       series_key: seriesKey,
@@ -145,6 +148,7 @@ export function computeEventAvailability(
       remaining_capacity: remaining,
       payment_requirement: (event.payment_requirement as 'none' | 'deposit' | 'full_payment') ?? 'none',
       deposit_amount_pence: (event.deposit_amount_pence as number | null) ?? null,
+      cancellation_notice_hours: refundHours,
       ticket_types: ticketResults,
     });
   }

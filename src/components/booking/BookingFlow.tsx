@@ -8,6 +8,7 @@ import { SlotStep } from './SlotStep';
 import { DetailsStep } from './DetailsStep';
 import { PaymentStep } from './PaymentStep';
 import { ConfirmationStep } from './ConfirmationStep';
+import { formatOnlinePaidRefundPolicyLine } from '@/lib/booking/public-deposit-refund-policy';
 
 export interface BookingFlowProps {
   venue: VenuePublic;
@@ -181,6 +182,19 @@ export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, 
   const visibleSteps = requiresDeposit ? STEP_LABELS : STEP_LABELS.filter((_, i) => i !== 3);
   const currentVisibleIndex = requiresDeposit ? stepIndex : (stepIndex >= 3 ? stepIndex - 1 : stepIndex);
 
+  const tableRefundNoticeHours = useMemo(() => {
+    const fromSlot = selectedSlot?.cancellation_notice_hours;
+    if (typeof fromSlot === 'number' && Number.isFinite(fromSlot)) return fromSlot;
+    const fromVenue = rules.cancellation_notice_hours;
+    if (typeof fromVenue === 'number' && Number.isFinite(fromVenue)) return fromVenue;
+    return 48;
+  }, [selectedSlot?.cancellation_notice_hours, rules.cancellation_notice_hours]);
+
+  const tablePaymentPolicy = useMemo(() => {
+    if (cancellationPolicy) return cancellationPolicy;
+    return formatOnlinePaidRefundPolicyLine(tableRefundNoticeHours);
+  }, [cancellationPolicy, tableRefundNoticeHours]);
+
   return (
     <div className="mx-auto max-w-lg" style={accentStyle}>
       {/* Progress indicator */}
@@ -258,6 +272,7 @@ export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, 
               ? selectedSlot.deposit_amount / partySize
               : undefined
           }
+          refundNoticeHours={tableRefundNoticeHours}
           phoneDefaultCountry={phoneDefaultCountry}
         />
       )}
@@ -269,7 +284,7 @@ export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, 
           partySize={partySize}
           onComplete={handlePaymentComplete}
           onBack={goBack}
-          cancellationPolicy={cancellationPolicy}
+          cancellationPolicy={tablePaymentPolicy}
         />
       )}
       {step === 'confirmation' && (

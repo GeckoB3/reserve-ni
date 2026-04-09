@@ -177,6 +177,20 @@ function columnIdForBlock(bl: CalendarBlock): string | null {
   return bl.calendar_id ?? bl.practitioner_id ?? null;
 }
 
+/** Aligns with dashboard/bookings filters: Confirmed = guest or staff attendance confirmation; Started = status Seated. */
+function bookingMatchesCalendarStatusFilter(b: Booking, filterKey: string): boolean {
+  if (filterKey === 'all') return true;
+  if (filterKey === 'attendance_confirmed') {
+    const g = b.guest_attendance_confirmed_at;
+    const s = b.staff_attendance_confirmed_at;
+    const guestOn = typeof g === 'string' && g.trim().length > 0;
+    const staffOn = typeof s === 'string' && s.trim().length > 0;
+    return guestOn || staffOn;
+  }
+  if (filterKey === 'Seated') return b.status === 'Seated';
+  return b.status === filterKey;
+}
+
 function serviceIdForBooking(b: Booking): string | null {
   return b.appointment_service_id ?? b.service_item_id ?? null;
 }
@@ -996,7 +1010,7 @@ export function PractitionerCalendarView({
     return bookings.filter((b) => {
       if (b.booking_date !== dayDate) return false;
       if (resolveBookingColumnId(b, resourceParentById) !== pracId) return false;
-      if (filterStatus !== 'all' && b.status !== filterStatus) return false;
+      if (!bookingMatchesCalendarStatusFilter(b, filterStatus)) return false;
       return true;
     });
   }
@@ -1254,7 +1268,7 @@ export function PractitionerCalendarView({
         const colId = resolveBookingColumnId(b, resourceParentById);
         if (!colId || !calendarFilterIds.includes(colId)) return false;
       }
-      if (filterStatus !== 'all' && b.status !== filterStatus) return false;
+      if (!bookingMatchesCalendarStatusFilter(b, filterStatus)) return false;
       return true;
     });
   }, [bookings, calendarFilterIds, filterStatus, resourceParentById]);
@@ -1275,7 +1289,11 @@ export function PractitionerCalendarView({
   const activeToolbarBookings = bookingsForToolbarStats.filter(
     (b) => !['Cancelled', 'No-Show'].includes(b.status),
   );
-  const confirmedCount = bookingsForToolbarStats.filter((b) => b.status === 'Confirmed').length;
+  const confirmedCount = bookingsForToolbarStats.filter((b) => {
+    const g = b.guest_attendance_confirmed_at;
+    const s = b.staff_attendance_confirmed_at;
+    return (typeof g === 'string' && g.trim().length > 0) || (typeof s === 'string' && s.trim().length > 0);
+  }).length;
   const completedCount = bookingsForToolbarStats.filter((b) => b.status === 'Completed').length;
 
   const weekDays = useMemo(() => weekDatesFrom(weekStart), [weekStart]);
@@ -1404,8 +1422,8 @@ export function PractitionerCalendarView({
             >
               <option value="all">All statuses</option>
               <option value="Pending">Pending</option>
-              <option value="Confirmed">Confirmed</option>
-              <option value="Seated">In Progress</option>
+              <option value="attendance_confirmed">Confirmed</option>
+              <option value="Seated">Started</option>
               <option value="Completed">Completed</option>
               <option value="No-Show">No Show</option>
               <option value="Cancelled">Cancelled</option>

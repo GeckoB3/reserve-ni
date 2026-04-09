@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 interface Column {
   id: string;
@@ -24,6 +24,9 @@ function orderIdsLikeColumns(columns: Column[], ids: Set<string>): string[] {
  * “All calendars” or any combination of team calendar columns (unified scheduling grid).
  */
 export function CalendarColumnsFilter({ columns, myCalendarIds, value, onChange }: Props) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+
   const summary = useMemo(() => {
     if (value === null || columns.length === 0) return 'All calendars';
     if (value.length >= columns.length) return 'All columns';
@@ -36,6 +39,24 @@ export function CalendarColumnsFilter({ columns, myCalendarIds, value, onChange 
 
   const isAll = value === null;
 
+  useEffect(() => {
+    if (!open) return;
+    function onPointerDown(e: PointerEvent) {
+      const el = rootRef.current;
+      if (!el || el.contains(e.target as Node)) return;
+      setOpen(false);
+    }
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') setOpen(false);
+    }
+    document.addEventListener('pointerdown', onPointerDown, true);
+    document.addEventListener('keydown', onKeyDown, true);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown, true);
+      document.removeEventListener('keydown', onKeyDown, true);
+    };
+  }, [open]);
+
   if (columns.length === 0) {
     return (
       <span className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-sm text-slate-500">
@@ -45,12 +66,18 @@ export function CalendarColumnsFilter({ columns, myCalendarIds, value, onChange 
   }
 
   return (
-    <details className="group relative">
-      <summary className="cursor-pointer list-none rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm shadow-sm marker:hidden focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 [&::-webkit-details-marker]:hidden">
+    <div ref={rootRef} className="relative">
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-haspopup="listbox"
+        onClick={() => setOpen((o) => !o)}
+        className="w-full cursor-pointer rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-left text-sm shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+      >
         <span className="inline-flex items-center gap-1.5">
           <span className="font-medium text-slate-800">{summary}</span>
           <svg
-            className="h-4 w-4 text-slate-500 transition group-open:rotate-180"
+            className={`h-4 w-4 shrink-0 text-slate-500 transition ${open ? 'rotate-180' : ''}`}
             fill="none"
             viewBox="0 0 24 24"
             strokeWidth={2}
@@ -60,63 +87,66 @@ export function CalendarColumnsFilter({ columns, myCalendarIds, value, onChange 
             <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
           </svg>
         </span>
-      </summary>
-      <div
-        className="absolute left-0 z-50 mt-1 min-w-[min(20rem,calc(100vw-2rem))] max-w-[min(24rem,calc(100vw-2rem))] rounded-xl border border-slate-200 bg-white py-2 pl-3 pr-2 shadow-xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <label className="flex cursor-pointer items-center gap-2 py-1.5 text-sm text-slate-800">
-          <input
-            type="checkbox"
-            className="rounded border-slate-300 text-brand-600 focus:ring-brand-500"
-            checked={isAll}
-            onChange={(e) => {
-              if (e.target.checked) onChange(null);
-              else onChange(columns.map((c) => c.id));
-            }}
-          />
-          <span className="font-medium">All calendars</span>
-        </label>
-        <div className="my-1 border-t border-slate-100" />
-        <div className="max-h-60 space-y-0.5 overflow-y-auto pr-1">
-          {columns.map((col) => {
-            const mine = myCalendarIds.includes(col.id);
-            const label =
-              mine && myCalendarIds.length === 1
-                ? 'My appointments'
-                : mine
-                  ? `Mine — ${col.name}`
-                  : col.name;
-            const checked = isAll || (value !== null && value.includes(col.id));
-            return (
-              <label
-                key={col.id}
-                className={`flex cursor-pointer items-center gap-2 rounded-md py-1.5 pl-0.5 text-sm ${
-                  isAll ? 'text-slate-400' : 'text-slate-800'
-                }`}
-              >
-                <input
-                  type="checkbox"
-                  disabled={isAll}
-                  className="rounded border-slate-300 text-brand-600 focus:ring-brand-500 disabled:opacity-40"
-                  checked={checked}
-                  onChange={(e) => {
-                    if (isAll) return;
-                    const next = new Set(value ?? []);
-                    if (e.target.checked) next.add(col.id);
-                    else next.delete(col.id);
-                    const ordered = orderIdsLikeColumns(columns, next);
-                    if (ordered.length === 0) return;
-                    if (ordered.length === columns.length) onChange(null);
-                    else onChange(ordered);
-                  }}
-                />
-                <span>{label}</span>
-              </label>
-            );
-          })}
+      </button>
+      {open && (
+        <div
+          className="absolute left-0 z-50 mt-1 min-w-[min(20rem,calc(100vw-2rem))] max-w-[min(24rem,calc(100vw-2rem))] rounded-xl border border-slate-200 bg-white py-2 pl-3 pr-2 shadow-xl"
+          role="listbox"
+          aria-multiselectable
+        >
+          <label className="flex cursor-pointer items-center gap-2 py-1.5 text-sm text-slate-800">
+            <input
+              type="checkbox"
+              className="rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+              checked={isAll}
+              onChange={(e) => {
+                if (e.target.checked) onChange(null);
+                else onChange(columns.map((c) => c.id));
+              }}
+            />
+            <span className="font-medium">All calendars</span>
+          </label>
+          <div className="my-1 border-t border-slate-100" />
+          <div className="max-h-60 space-y-0.5 overflow-y-auto pr-1">
+            {columns.map((col) => {
+              const mine = myCalendarIds.includes(col.id);
+              const label =
+                mine && myCalendarIds.length === 1
+                  ? 'My appointments'
+                  : mine
+                    ? `Mine — ${col.name}`
+                    : col.name;
+              const checked = isAll || (value !== null && value.includes(col.id));
+              return (
+                <label
+                  key={col.id}
+                  className={`flex cursor-pointer items-center gap-2 rounded-md py-1.5 pl-0.5 text-sm ${
+                    isAll ? 'text-slate-400' : 'text-slate-800'
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    disabled={isAll}
+                    className="rounded border-slate-300 text-brand-600 focus:ring-brand-500 disabled:opacity-40"
+                    checked={checked}
+                    onChange={(e) => {
+                      if (isAll) return;
+                      const next = new Set(value ?? []);
+                      if (e.target.checked) next.add(col.id);
+                      else next.delete(col.id);
+                      const ordered = orderIdsLikeColumns(columns, next);
+                      if (ordered.length === 0) return;
+                      if (ordered.length === columns.length) onChange(null);
+                      else onChange(ordered);
+                    }}
+                  />
+                  <span>{label}</span>
+                </label>
+              );
+            })}
+          </div>
         </div>
-      </div>
-    </details>
+      )}
+    </div>
   );
 }

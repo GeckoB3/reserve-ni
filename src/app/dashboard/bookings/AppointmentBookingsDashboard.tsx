@@ -41,11 +41,12 @@ interface PractitionerServiceLink {
   custom_duration_minutes: number | null;
 }
 
-const STATUS_FILTERS: Array<{ label: string; apiValue: string | null }> = [
+const STATUS_FILTERS: Array<{ label: string; apiValue: string | null; attendanceConfirmed?: boolean }> = [
   { label: 'All', apiValue: null },
   { label: 'Pending', apiValue: 'Pending' },
-  { label: 'Confirmed', apiValue: 'Confirmed' },
-  { label: 'In progress', apiValue: 'Seated' },
+  /** Guest confirmed via reminder link, or staff used Confirm Booking — not `bookings.status`. */
+  { label: 'Confirmed', apiValue: null, attendanceConfirmed: true },
+  { label: 'Started', apiValue: 'Seated' },
   { label: 'Completed', apiValue: 'Completed' },
   { label: 'Cancelled', apiValue: 'Cancelled' },
   { label: 'No show', apiValue: 'No-Show' },
@@ -109,7 +110,7 @@ function formatDayHeader(date: string): string {
 }
 
 function statusLabelForCsv(status: string): string {
-  if (status === 'Seated') return 'In progress';
+  if (status === 'Seated') return 'Started';
   if (status === 'No-Show') return 'No show';
   return status;
 }
@@ -281,7 +282,7 @@ export function AppointmentBookingsDashboard({
   const [csvTo, setCsvTo] = useState(addDays(todayISO(), 30));
   const [csvExporting, setCsvExporting] = useState(false);
 
-  const selectedStatusApi = STATUS_FILTERS.find((f) => f.label === statusKey)?.apiValue ?? null;
+  const selectedStatusFilter = STATUS_FILTERS.find((f) => f.label === statusKey);
 
   const filterGuestId = useMemo(() => {
     const g = searchParams.get('guest');
@@ -301,6 +302,11 @@ export function AppointmentBookingsDashboard({
     const qs = next.toString();
     router.replace(qs ? `/dashboard/bookings?${qs}` : '/dashboard/bookings', { scroll: false });
   }, [router, searchParams]);
+
+  /** Legacy filter label before "Started" rename. */
+  useEffect(() => {
+    if (statusKey === 'In progress') setStatusKey('Started');
+  }, [statusKey]);
 
   useEffect(() => {
     const ob = searchParams.get('openBooking');
@@ -365,7 +371,11 @@ export function AppointmentBookingsDashboard({
         const params = new URLSearchParams(
           viewMode === 'day' ? { date: from } : { from, to },
         );
-        if (selectedStatusApi) params.set('status', selectedStatusApi);
+        if (selectedStatusFilter?.attendanceConfirmed) {
+          params.set('attendance_confirmed', '1');
+        } else if (selectedStatusFilter?.apiValue) {
+          params.set('status', selectedStatusFilter.apiValue);
+        }
         if (filterGuestId) params.set('guest', filterGuestId);
         const res = await fetch(`/api/venue/bookings/list?${params}`);
         if (!res.ok) {
@@ -386,7 +396,7 @@ export function AppointmentBookingsDashboard({
         else setLoading(false);
       }
     },
-    [filterGuestId, from, to, viewMode, selectedStatusApi, invalidCustomRange, primaryBookingModel, enabledModels],
+    [filterGuestId, from, to, viewMode, statusKey, invalidCustomRange, primaryBookingModel, enabledModels],
   );
 
 
@@ -694,7 +704,7 @@ export function AppointmentBookingsDashboard({
   }, [detailBookingId, bookings]);
 
   function tableStatusLabel(s: string): string {
-    if (s === 'Seated') return 'In progress';
+    if (s === 'Seated') return 'Started';
     if (s === 'No-Show') return 'No show';
     return s;
   }

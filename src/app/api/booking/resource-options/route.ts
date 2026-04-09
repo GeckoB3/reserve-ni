@@ -23,7 +23,7 @@ export async function GET(request: NextRequest) {
     const { data, error } = await supabase
       .from('unified_calendars')
       .select(
-        'id, name, resource_type, min_booking_minutes, max_booking_minutes, slot_interval_minutes, price_per_slot_pence, payment_requirement, deposit_amount_pence, sort_order',
+        'id, name, resource_type, min_booking_minutes, max_booking_minutes, slot_interval_minutes, price_per_slot_pence, payment_requirement, deposit_amount_pence, cancellation_notice_hours, sort_order',
       )
       .eq('venue_id', venueId)
       .eq('calendar_type', 'resource')
@@ -47,6 +47,10 @@ export async function GET(request: NextRequest) {
         price_per_slot_pence: (r.price_per_slot_pence as number | null) ?? null,
         payment_requirement: (r.payment_requirement as string) ?? 'none',
         deposit_amount_pence: (r.deposit_amount_pence as number | null) ?? null,
+        cancellation_notice_hours:
+          typeof r.cancellation_notice_hours === 'number' && Number.isFinite(r.cancellation_notice_hours)
+            ? r.cancellation_notice_hours
+            : 48,
       };
     });
 

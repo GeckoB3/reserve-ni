@@ -68,6 +68,8 @@ export interface ClassAvailabilitySlot {
   payment_requirement: ClassPaymentRequirement;
   /** Per-person deposit when payment_requirement is deposit. */
   deposit_amount_pence: number | null;
+  /** Hours before start for deposit / prepayment refund (from `class_types`). */
+  cancellation_notice_hours: number;
   /**
    * True when the customer flow should collect card details (deposit or full).
    * False for free or pay-at-venue (payment_requirement none with optional list price).
@@ -206,6 +208,8 @@ export function computeClassAvailability(input: ClassEngineInput): ClassAvailabi
       depositPerPerson,
     );
 
+    const refundHours = entityBookingWindowFromRow(classType as unknown as Record<string, unknown>).cancellation_notice_hours;
+
     results.push({
       instance_id: instance.id,
       class_type_id: classType.id,
@@ -221,6 +225,7 @@ export function computeClassAvailability(input: ClassEngineInput): ClassAvailabi
       price_pence: classType.price_pence,
       payment_requirement: paymentRequirement,
       deposit_amount_pence: depositPerPerson,
+      cancellation_notice_hours: refundHours,
       requires_stripe_checkout: requiresStripe,
       requires_online_payment: requiresStripe,
       colour: classType.colour,

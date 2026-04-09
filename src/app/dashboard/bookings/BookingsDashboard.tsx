@@ -89,7 +89,17 @@ interface BookingDetailLite {
 }
 
 type ViewMode = 'day' | 'week' | 'month' | 'custom';
-const STATUS_OPTIONS = ['All', 'Confirmed', 'Pending', 'Seated', 'Completed', 'Cancelled', 'No-Show'];
+
+/** Filter UI labels; "Confirmed" = attendance confirmed (guest link or staff button), not `bookings.status`. */
+const STATUS_FILTER_OPTIONS: Array<{ label: string; apiStatus: string | null; attendanceConfirmed?: boolean }> = [
+  { label: 'All', apiStatus: null },
+  { label: 'Confirmed', apiStatus: null, attendanceConfirmed: true },
+  { label: 'Pending', apiStatus: 'Pending' },
+  { label: 'Started', apiStatus: 'Seated' },
+  { label: 'Completed', apiStatus: 'Completed' },
+  { label: 'Cancelled', apiStatus: 'Cancelled' },
+  { label: 'No-Show', apiStatus: 'No-Show' },
+];
 const GUEST_UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -341,7 +351,11 @@ export function BookingsDashboard({
       const params = ids && ids.length > 0
         ? new URLSearchParams({ ids: ids.join(',') })
         : (viewMode === 'day' ? new URLSearchParams({ date: from }) : new URLSearchParams({ from, to }));
-      if (!ids && statusFilter !== 'All') params.set('status', statusFilter);
+      if (!ids && statusFilter !== 'All') {
+        const opt = STATUS_FILTER_OPTIONS.find((o) => o.label === statusFilter);
+        if (opt?.attendanceConfirmed) params.set('attendance_confirmed', '1');
+        else if (opt?.apiStatus) params.set('status', opt.apiStatus);
+      }
       if (!ids && filterGuestId) params.set('guest', filterGuestId);
       const res = await fetch(`/api/venue/bookings/list?${params}`);
       if (!res.ok) {
@@ -917,18 +931,18 @@ export function BookingsDashboard({
 
       <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm sm:flex-row sm:items-center sm:justify-between">
         <div className="flex flex-wrap gap-1.5">
-          {STATUS_OPTIONS.map((s) => (
+          {STATUS_FILTER_OPTIONS.map((s) => (
             <button
-              key={s}
+              key={s.label}
               type="button"
-              onClick={() => setStatusFilter(s)}
+              onClick={() => setStatusFilter(s.label)}
               className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
-                statusFilter === s
+                statusFilter === s.label
                   ? 'bg-brand-600 text-white shadow-sm'
                   : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
               }`}
             >
-              {s}
+              {s.label}
             </button>
           ))}
         </div>
@@ -1166,25 +1180,6 @@ export function BookingsDashboard({
   );
 }
 
-function statusBadge(s: string, tableStyle: boolean) {
-  const map: Record<string, { dot: string; bg: string; text: string }> = {
-    Confirmed: { dot: 'bg-emerald-500', bg: 'bg-emerald-50', text: 'text-emerald-700' },
-    Pending: { dot: 'bg-amber-500', bg: 'bg-amber-50', text: 'text-amber-700' },
-    Seated: { dot: 'bg-brand-500', bg: 'bg-brand-50', text: 'text-brand-800' },
-    Completed: { dot: 'bg-slate-400', bg: 'bg-slate-50', text: 'text-slate-600' },
-    Cancelled: { dot: 'bg-red-400', bg: 'bg-red-50', text: 'text-red-600' },
-    'No-Show': { dot: 'bg-red-600', bg: 'bg-red-50', text: 'text-red-700' },
-  };
-  const style = map[s] ?? { dot: 'bg-slate-400', bg: 'bg-slate-50', text: 'text-slate-600' };
-  const label = bookingStatusDisplayLabel(s, tableStyle);
-  return (
-    <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${style.bg} ${style.text}`}>
-      <span className={`h-1.5 w-1.5 rounded-full ${style.dot}`} />
-      {label}
-    </span>
-  );
-}
-
 function sourceBadge(s: string) {
   const map: Record<string, string> = {
     online: 'bg-violet-50 text-violet-700',
@@ -1345,7 +1340,6 @@ function BookingsAccordionList({
                         {bookingModelShortLabel(inferBookingRowModel(booking))}
                       </span>
                     )}
-                    {statusBadge(booking.status, isTableReservationBooking(booking))}
                     {booking.dietary_notes && (
                       <span className="hidden rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700 sm:inline-block" title={booking.dietary_notes}>
                         Dietary

@@ -148,7 +148,7 @@ export async function fetchEngineInput({
       ? supabase
           .from('booking_restrictions')
           .select(
-            'id, service_id, min_advance_minutes, max_advance_days, min_party_size_online, max_party_size_online, large_party_threshold, large_party_message, deposit_required_from_party_size, deposit_amount_per_person_gbp, online_requires_deposit',
+            'id, service_id, min_advance_minutes, max_advance_days, min_party_size_online, max_party_size_online, large_party_threshold, large_party_message, deposit_required_from_party_size, deposit_amount_per_person_gbp, online_requires_deposit, cancellation_notice_hours',
           )
           .in('service_id', serviceIds)
       : Promise.resolve({ data: [] as BookingRestriction[] }),

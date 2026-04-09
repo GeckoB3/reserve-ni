@@ -4,9 +4,6 @@ import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 import { BookVenueTitle } from '@/components/booking/BookVenueTitle';
 import type { VenuePublic, OpeningHours } from '@/components/booking/types';
 
-const CANCELLATION_POLICY =
-  'Full refund if cancelled 48+ hours before your reservation. No refund within 48 hours or for no-shows.';
-
 const DAY_LABELS: Record<string, string> = {
   '0': 'Sunday',
   '1': 'Monday',

@@ -19,6 +19,7 @@ import {
   bookingConfirmPaymentUrl,
   venueBookingsCreateUrl,
 } from '@/lib/booking/booking-flow-api';
+import { formatOnlinePaidRefundPolicyLine } from '@/lib/booking/public-deposit-refund-policy';
 
 interface ResourceSlot {
   resource_id: string;
@@ -37,6 +38,7 @@ interface ResourceOption {
   price_per_slot_pence: number | null;
   payment_requirement: ClassPaymentRequirement;
   deposit_amount_pence: number | null;
+  cancellation_notice_hours: number;
 }
 
 interface ResourceAvail extends ResourceOption {
@@ -307,6 +309,21 @@ export function ResourceBookingFlow({
     if (req === 'deposit' && (priceBasis.deposit_amount_pence ?? 0) > 0) return priceBasis.deposit_amount_pence ?? 0;
     return 0;
   }, [priceBasis, duration]);
+
+  const resourcePaymentRefundPolicy = useMemo(() => {
+    if (cancellationPolicy) return cancellationPolicy;
+    const basis = selectedResource ?? selectedMeta;
+    const h =
+      typeof basis?.cancellation_notice_hours === 'number' && Number.isFinite(basis.cancellation_notice_hours)
+        ? basis.cancellation_notice_hours
+        : venue.booking_rules?.cancellation_notice_hours ?? 48;
+    return formatOnlinePaidRefundPolicyLine(h);
+  }, [
+    cancellationPolicy,
+    selectedResource?.cancellation_notice_hours,
+    selectedMeta?.cancellation_notice_hours,
+    venue.booking_rules?.cancellation_notice_hours,
+  ]);
 
   const handleDetailsSubmit = useCallback(
     async (details: GuestDetails) => {
@@ -679,7 +696,8 @@ export function ResourceBookingFlow({
           partySize={1}
           onComplete={handlePaymentComplete}
           onBack={() => setStep('details')}
-          cancellationPolicy={cancellationPolicy}
+          cancellationPolicy={resourcePaymentRefundPolicy}
+          chargeKind={payReq === 'full_payment' ? 'full_payment' : 'deposit'}
         />
       )}
 

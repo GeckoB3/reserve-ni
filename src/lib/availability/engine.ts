@@ -36,6 +36,7 @@ const DEFAULT_RESTRICTION_WHEN_MISSING: Omit<BookingRestriction, 'id' | 'service
   deposit_required_from_party_size: null,
   deposit_amount_per_person_gbp: null,
   online_requires_deposit: true,
+  cancellation_notice_hours: 48,
 };
 
 /** Parse "HH:mm" or "HH:mm:ss" to minutes since midnight. */
@@ -684,6 +685,11 @@ function generateServiceSlots(
 
     const limited = availableCovers <= input.party_size * 2 || availableBookings <= 2;
 
+    const refundHours =
+      typeof slotRestriction?.cancellation_notice_hours === 'number' && Number.isFinite(slotRestriction.cancellation_notice_hours)
+        ? slotRestriction.cancellation_notice_hours
+        : DEFAULT_RESTRICTION_WHEN_MISSING.cancellation_notice_hours!;
+
     slots.push({
       key: `${service.id}_${slotTimeStr}`,
       label: slotTimeStr,
@@ -697,6 +703,7 @@ function generateServiceSlots(
       deposit_required: depositRequired,
       deposit_amount: depositRequired && perPersonGbp != null ? perPersonGbp * input.party_size : null,
       online_requires_deposit: onlineRequiresDeposit,
+      cancellation_notice_hours: refundHours,
       limited,
     });
   }

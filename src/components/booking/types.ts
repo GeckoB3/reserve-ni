@@ -58,6 +58,8 @@ export interface AvailableSlot {
   deposit_amount?: number | null;
   /** When deposits apply for this dining service, require them for online/widget checkout. */
   online_requires_deposit?: boolean;
+  /** Hours before start for deposit refund (from dining `booking_restrictions`). */
+  cancellation_notice_hours?: number;
   limited?: boolean;
   available_bookings?: number;
 }

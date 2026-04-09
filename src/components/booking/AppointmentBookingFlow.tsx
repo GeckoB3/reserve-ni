@@ -418,10 +418,15 @@ export function AppointmentBookingFlow({
   const refundNoticeHours = useMemo(() => {
     const fallback = venue.booking_rules?.cancellation_notice_hours ?? 48;
     if (multiServiceSegments && multiServiceSegments.length > 0) {
-      const first = multiServiceSegments[0]!;
-      const p = catalogStaff.find((c) => c.id === first.practitionerId);
-      const offer = p?.services.find((s) => s.id === first.serviceId);
-      return offer?.cancellation_notice_hours ?? fallback;
+      const hoursList = multiServiceSegments
+        .map((seg) => {
+          const p = catalogStaff.find((c) => c.id === seg.practitionerId);
+          const offer = p?.services.find((s) => s.id === seg.serviceId);
+          return offer?.cancellation_notice_hours;
+        })
+        .filter((h): h is number => typeof h === 'number' && Number.isFinite(h));
+      if (hoursList.length > 0) return Math.min(...hoursList);
+      return fallback;
     }
     const offer = selectedPrac?.services.find((s) => s.id === selectedServiceId);
     if (offer && typeof offer.cancellation_notice_hours === 'number') {

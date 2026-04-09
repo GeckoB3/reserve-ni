@@ -253,6 +253,8 @@ export interface VenueResource {
   payment_requirement: ClassPaymentRequirement;
   /** Total deposit (pence) for one booking when payment_requirement = deposit. */
   deposit_amount_pence: number | null;
+  /** Hours before start for deposit / prepayment refund (`unified_calendars`). */
+  cancellation_notice_hours?: number;
   availability_hours: WorkingHours;
   /** Optional per-date closed days or replacement `periods` for that date only. */
   availability_exceptions?: ResourceAvailabilityExceptions;
