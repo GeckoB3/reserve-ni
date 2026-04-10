@@ -61,6 +61,23 @@ export function isGuestBookingDateAllowed(
   return diff <= window.max_advance_booking_days;
 }
 
+/**
+ * Staff walk-in / counter bookings: date must be within venue-local advance window, but same-day is allowed
+ * even when `allow_same_day_booking` is false, as long as the slot/time is validated separately.
+ */
+export function isStaffWalkInBookingDateAllowed(
+  bookingDateYmd: string,
+  window: EntityBookingWindow,
+  venueTimezone: string,
+  referenceNowMs = Date.now(),
+): boolean {
+  const tz = venueTimezone.trim() || 'Europe/London';
+  const todayYmd = formatYmdInTimezone(referenceNowMs, tz);
+  const diff = daysBetweenCalendarYmd(todayYmd, bookingDateYmd);
+  if (diff < 0) return false;
+  return diff <= window.max_advance_booking_days;
+}
+
 const SERVICE_WINDOW_SELECT =
   'max_advance_booking_days, min_booking_notice_hours, cancellation_notice_hours, allow_same_day_booking';
 

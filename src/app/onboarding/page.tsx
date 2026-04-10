@@ -24,6 +24,7 @@ import {
   serviceDraftToApiPayload,
   type AppointmentServiceFormDraft,
 } from '@/components/onboarding/OnboardingAppointmentServiceList';
+import { normalizeTimeToHhMm } from '@/lib/experience-events/experience-event-validation';
 
 type Currency = 'GBP' | 'EUR';
 
@@ -982,8 +983,8 @@ export default function OnboardingPage() {
             body: JSON.stringify({
               name: eventName,
               event_date: eventDate,
-              start_time: eventDraft.start_time,
-              end_time: eventDraft.end_time,
+              start_time: normalizeTimeToHhMm(eventDraft.start_time),
+              end_time: normalizeTimeToHhMm(eventDraft.end_time),
               capacity: eventDraft.capacity,
               ticket_types: [
                 {

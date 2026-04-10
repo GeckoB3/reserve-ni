@@ -11,6 +11,7 @@ import {
   formatTime,
   renderBaseTemplate,
 } from '@/lib/emails/templates/base-template';
+import { buildGoogleCalendarAddUrlForBooking } from '@/lib/emails/calendar-links';
 import type {
   CommunicationLane,
   CommunicationMessageKey,
@@ -509,6 +510,27 @@ export function renderCommunicationEmail(
   opts: CommunicationRenderOptions,
 ): RenderedEmail | null {
   const config = buildMainContentEmail(opts);
+
+  const calendarUrl =
+    opts.messageKey === 'booking_confirmation'
+      ? buildGoogleCalendarAddUrlForBooking(opts.booking, opts.venue)
+      : null;
+
+  let ctaLabel = config.ctaLabel;
+  let ctaUrl = config.ctaUrl;
+  let secondaryCtaLabel = config.secondaryCtaLabel;
+  let secondaryCtaUrl = config.secondaryCtaUrl;
+
+  if (calendarUrl) {
+    if (ctaUrl) {
+      secondaryCtaLabel = 'Add to calendar';
+      secondaryCtaUrl = calendarUrl;
+    } else {
+      ctaLabel = 'Add to calendar';
+      ctaUrl = calendarUrl;
+    }
+  }
+
   const html = renderBaseTemplate({
     venueName: opts.venue.name,
     venueLogoUrl: opts.venue.logo_url ?? null,
@@ -520,10 +542,10 @@ export function renderCommunicationEmail(
     venueAddress: opts.venue.address ?? null,
     specialRequests: opts.booking.special_requests ?? null,
     customMessage: opts.emailCustomMessage ?? null,
-    ctaLabel: config.ctaLabel,
-    ctaUrl: config.ctaUrl,
-    secondaryCtaLabel: config.secondaryCtaLabel,
-    secondaryCtaUrl: config.secondaryCtaUrl,
+    ctaLabel,
+    ctaUrl,
+    secondaryCtaLabel,
+    secondaryCtaUrl,
     footerNote: emailFooterText(opts.venue),
     emailVariant: emailVariantForLane(opts.lane),
     practitionerName: opts.booking.practitioner_name ?? null,
@@ -535,9 +557,9 @@ export function renderCommunicationEmail(
     ...config.textLines,
     opts.emailCustomMessage ? '' : null,
     opts.emailCustomMessage ?? null,
-    config.ctaLabel && config.ctaUrl ? '' : null,
-    config.ctaLabel && config.ctaUrl ? `${config.ctaLabel}: ${config.ctaUrl}` : null,
-    config.secondaryCtaLabel && config.secondaryCtaUrl ? `${config.secondaryCtaLabel}: ${config.secondaryCtaUrl}` : null,
+    ctaLabel && ctaUrl ? '' : null,
+    ctaLabel && ctaUrl ? `${ctaLabel}: ${ctaUrl}` : null,
+    secondaryCtaLabel && secondaryCtaUrl ? `${secondaryCtaLabel}: ${secondaryCtaUrl}` : null,
     '',
     opts.venue.name,
     opts.venue.phone ?? null,

@@ -4,7 +4,7 @@ import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { z } from 'zod';
 
-const restrictionSchema = z.object({
+const restrictionFieldsSchema = z.object({
   service_id: z.string().uuid(),
   min_advance_minutes: z.number().int().min(0),
   max_advance_days: z.number().int().min(1).max(365),
@@ -19,9 +19,35 @@ const restrictionSchema = z.object({
   cancellation_notice_hours: z.number().int().min(0).max(168).optional(),
 });
 
-const restrictionPatchSchema = restrictionSchema.partial().extend({
+const restrictionSchema = restrictionFieldsSchema.refine(
+  (d) =>
+    d.deposit_required_from_party_size == null ||
+    (typeof d.deposit_amount_per_person_gbp === 'number' &&
+      Number.isFinite(d.deposit_amount_per_person_gbp) &&
+      d.deposit_amount_per_person_gbp > 0 &&
+      d.deposit_amount_per_person_gbp <= 100),
+  {
+    message: 'Deposit amount per person must be greater than 0 when deposits are required for this service',
+    path: ['deposit_amount_per_person_gbp'],
+  },
+);
+
+const restrictionPatchSchema = restrictionFieldsSchema.partial().extend({
   id: z.string().uuid(),
 });
+
+function mergedDepositInvariant(
+  depositRequired: number | null | undefined,
+  amountGbp: number | null | undefined,
+): boolean {
+  if (depositRequired == null) return true;
+  return (
+    typeof amountGbp === 'number' &&
+    Number.isFinite(amountGbp) &&
+    amountGbp > 0 &&
+    amountGbp <= 100
+  );
+}
 
 /** GET /api/venue/booking-restrictions */
 export async function GET() {
@@ -73,7 +99,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Service not found for this venue' }, { status: 400 });
     }
 
-    const { data, error } = await admin.from('booking_restrictions').insert(parsed.data).select('*').single();
+    const insertRow = {
+      ...parsed.data,
+      ...(parsed.data.deposit_required_from_party_size != null ? { online_requires_deposit: true as const } : {}),
+    };
+
+    const { data, error } = await admin.from('booking_restrictions').insert(insertRow).select('*').single();
     if (error) {
       console.error('POST /api/venue/booking-restrictions failed:', error);
       return NextResponse.json({ error: 'Failed to create restriction' }, { status: 500 });
@@ -102,17 +133,37 @@ export async function PATCH(request: NextRequest) {
     const { id, ...fields } = parsed.data;
 
     const admin = getSupabaseAdminClient();
-    const { data: existing } = await admin.from('booking_restrictions').select('id, service_id').eq('id', id).maybeSingle();
-    if (!existing) {
+    const { data: existingFull } = await admin.from('booking_restrictions').select('*').eq('id', id).maybeSingle();
+    if (!existingFull) {
       return NextResponse.json({ error: 'Restriction not found' }, { status: 404 });
     }
-    const svcId = (existing as { service_id: string }).service_id;
+    const svcId = (existingFull as { service_id: string }).service_id;
     const { data: svc } = await admin.from('venue_services').select('id').eq('id', svcId).eq('venue_id', staff.venue_id).maybeSingle();
     if (!svc) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
-    const { data, error } = await admin.from('booking_restrictions').update(fields).eq('id', id).select('*').single();
+    const merged = { ...(existingFull as Record<string, unknown>), ...fields } as {
+      deposit_required_from_party_size?: number | null;
+      deposit_amount_per_person_gbp?: number | null;
+    };
+    if (
+      !mergedDepositInvariant(merged.deposit_required_from_party_size, merged.deposit_amount_per_person_gbp)
+    ) {
+      return NextResponse.json(
+        {
+          error: 'Deposit amount per person must be greater than 0 when deposits are required for this service',
+        },
+        { status: 400 },
+      );
+    }
+
+    const updateFields: Record<string, unknown> = { ...fields };
+    if (merged.deposit_required_from_party_size != null) {
+      updateFields.online_requires_deposit = true;
+    }
+
+    const { data, error } = await admin.from('booking_restrictions').update(updateFields).eq('id', id).select('*').single();
     if (error) {
       console.error('PATCH /api/venue/booking-restrictions failed:', error);
       return NextResponse.json({ error: 'Failed to update restriction' }, { status: 500 });

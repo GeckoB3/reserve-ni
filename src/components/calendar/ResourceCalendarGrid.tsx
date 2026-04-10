@@ -410,7 +410,7 @@ export function ResourceCalendarGrid({
                                 <span
                                   className="inline-flex h-1.5 w-1.5 shrink-0 rounded-full bg-teal-500"
                                   aria-hidden
-                                  title="Attendance confirmed"
+                                  title="Confirmed"
                                 />
                               )}
                             </div>

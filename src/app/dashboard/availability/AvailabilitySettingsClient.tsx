@@ -1,20 +1,28 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { ServicesTab } from './ServicesTab';
 import { CapacityRulesTab } from './CapacityRulesTab';
 import { DiningDurationTab } from './DiningDurationTab';
 import { BookingRulesTab } from './BookingRulesTab';
+import { TableManagementSection } from '@/app/dashboard/settings/sections/TableManagementSection';
+import { AvailabilityConfigSection } from '@/app/dashboard/settings/sections/AvailabilityConfigSection';
+import { DepositConfigSection } from '@/app/dashboard/settings/sections/DepositConfigSection';
+import type { VenueSettings } from '@/app/dashboard/settings/types';
+import { isRestaurantTableProductTier } from '@/lib/tier-enforcement';
 
-const TABS = [
-  { key: 'services', label: 'Services' },
-  { key: 'capacity', label: 'Capacity Rules' },
-  { key: 'duration', label: 'Dining Duration' },
-  { key: 'rules', label: 'Booking Rules' },
-] as const;
+const BASE_TABS = [
+  { key: 'services' as const, label: 'Services' },
+  { key: 'capacity' as const, label: 'Capacity Rules' },
+  { key: 'duration' as const, label: 'Dining Duration' },
+  { key: 'rules' as const, label: 'Booking Rules' },
+];
 
-type TabKey = (typeof TABS)[number]['key'];
+const TABLE_TAB = { key: 'table' as const, label: 'Table Management' };
+
+type TabKey = (typeof BASE_TABS)[number]['key'] | typeof TABLE_TAB.key;
 
 interface Service {
   id: string;
@@ -27,11 +35,67 @@ interface Service {
   sort_order: number;
 }
 
-export default function AvailabilitySettingsClient() {
-  const [activeTab, setActiveTab] = useState<TabKey>('services');
+function resolveInitialActiveTab(
+  initialTab: TabKey | undefined,
+  venue: VenueSettings | null,
+): TabKey {
+  if (!venue) return 'services';
+  const showTable = isRestaurantTableProductTier(venue.pricing_tier);
+  if (initialTab === 'table' && !showTable) return 'services';
+  if (initialTab === 'table' && showTable) return 'table';
+  if (initialTab && initialTab !== 'table') return initialTab;
+  return 'services';
+}
+
+interface Props {
+  initialVenue: VenueSettings | null;
+  hasServiceConfig: boolean;
+  initialTab?: TabKey;
+}
+
+export default function AvailabilitySettingsClient({
+  initialVenue,
+  hasServiceConfig,
+  initialTab,
+}: Props) {
+  const router = useRouter();
+  const [venue, setVenue] = useState<VenueSettings | null>(initialVenue);
+  const [activeTab, setActiveTabState] = useState<TabKey>(() =>
+    resolveInitialActiveTab(initialTab, initialVenue),
+  );
   const [services, setServices] = useState<Service[]>([]);
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState<string | null>(null);
+
+  useEffect(() => {
+    setVenue(initialVenue);
+  }, [initialVenue]);
+
+  const showTableTab = Boolean(venue && isRestaurantTableProductTier(venue.pricing_tier));
+
+  const visibleTabs = useMemo(() => {
+    if (showTableTab) return [...BASE_TABS, TABLE_TAB];
+    return [...BASE_TABS];
+  }, [showTableTab]);
+
+  useEffect(() => {
+    if (activeTab === 'table' && !showTableTab) {
+      setActiveTabState('services');
+      router.replace('/dashboard/availability?tab=services', { scroll: false });
+    }
+  }, [activeTab, showTableTab, router]);
+
+  const setActiveTab = useCallback(
+    (key: TabKey) => {
+      setActiveTabState(key);
+      router.replace(`/dashboard/availability?tab=${key}`, { scroll: false });
+    },
+    [router],
+  );
+
+  const onUpdate = useCallback((patch: Partial<VenueSettings>) => {
+    setVenue((v) => (v ? { ...v, ...patch } : null));
+  }, []);
 
   const showToast = useCallback((message: string) => {
     setToast(message);
@@ -53,7 +117,15 @@ export default function AvailabilitySettingsClient() {
     load();
   }, []);
 
-  if (loading) {
+  if (!venue && !loading) {
+    return (
+      <div className="p-6 lg:p-8">
+        <p className="text-sm text-red-600">Could not load venue settings. Try again or contact support.</p>
+      </div>
+    );
+  }
+
+  if (loading || !venue) {
     return (
       <div className="flex items-center justify-center p-12">
         <div className="h-8 w-8 animate-spin rounded-full border-2 border-brand-600 border-t-transparent" />
@@ -67,8 +139,8 @@ export default function AvailabilitySettingsClient() {
         <div>
           <h1 className="mb-1 text-xl font-bold text-slate-900">Availability Settings</h1>
           <p className="text-sm text-slate-500">
-            Manage services, capacity, dining durations, and booking rules. Venue-wide closures, amended hours, and
-            capacity blocks are under{' '}
+            Manage services, capacity, dining durations, booking rules, and table management. Venue-wide closures, amended
+            hours, and capacity blocks are under{' '}
             <Link
               href="/dashboard/settings?tab=business-hours"
               className="font-medium text-brand-600 hover:text-brand-700 underline"
@@ -86,16 +158,14 @@ export default function AvailabilitySettingsClient() {
         </Link>
       </div>
 
-      {/* Tab bar */}
       <div className="mb-6 flex gap-1 overflow-x-auto rounded-xl border border-slate-200 bg-slate-100 p-1">
-        {TABS.map((tab) => (
+        {visibleTabs.map((tab) => (
           <button
             key={tab.key}
+            type="button"
             onClick={() => setActiveTab(tab.key)}
             className={`whitespace-nowrap rounded-lg px-4 py-2 text-sm font-medium transition-all ${
-              activeTab === tab.key
-                ? 'bg-white text-brand-700 shadow-sm'
-                : 'text-slate-500 hover:text-slate-700'
+              activeTab === tab.key ? 'bg-white text-brand-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'
             }`}
           >
             {tab.label}
@@ -103,20 +173,26 @@ export default function AvailabilitySettingsClient() {
         ))}
       </div>
 
-      {/* Tab content */}
       {activeTab === 'services' && (
         <ServicesTab services={services} setServices={setServices} showToast={showToast} />
       )}
-      {activeTab === 'capacity' && (
-        <CapacityRulesTab services={services} showToast={showToast} />
+      {activeTab === 'capacity' && <CapacityRulesTab services={services} showToast={showToast} />}
+      {activeTab === 'duration' && <DiningDurationTab services={services} showToast={showToast} />}
+      {activeTab === 'rules' && <BookingRulesTab services={services} showToast={showToast} />}
+      {activeTab === 'table' && showTableTab && (
+        <div className="space-y-6">
+          <TableManagementSection venue={venue} onUpdate={onUpdate} isAdmin />
+          {hasServiceConfig ? (
+            <DepositConfigSection venue={venue} onUpdate={onUpdate} isAdmin variant="service_engine_table" />
+          ) : (
+            <>
+              <AvailabilityConfigSection venue={venue} onUpdate={onUpdate} isAdmin />
+              <DepositConfigSection venue={venue} onUpdate={onUpdate} isAdmin variant="legacy_table" />
+            </>
+          )}
+        </div>
       )}
-      {activeTab === 'duration' && (
-        <DiningDurationTab services={services} showToast={showToast} />
-      )}
-      {activeTab === 'rules' && (
-        <BookingRulesTab services={services} showToast={showToast} />
-      )}
-      {/* Toast */}
+
       {toast && (
         <div className="fixed bottom-6 right-6 z-50 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-medium text-white shadow-lg">
           {toast}

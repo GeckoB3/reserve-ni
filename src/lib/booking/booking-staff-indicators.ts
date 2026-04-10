@@ -32,3 +32,20 @@ export function attendanceConfirmationSources(row: BookingStaffIndicatorInput): 
     staffAt: s ? s : null,
   };
 }
+
+/** Staff "Confirm Booking" (attendance) — same rules as dashboard booking lists. */
+export function canShowConfirmBookingAttendanceAction(
+  row: BookingStaffIndicatorInput & { source?: string | null; status: string },
+): boolean {
+  if (row.source === 'walk-in') return false;
+  if (showAttendanceConfirmedPill(row)) return false;
+  return !['Cancelled', 'No-Show', 'Completed'].includes(row.status);
+}
+
+export function canShowCancelStaffAttendanceConfirmationAction(
+  row: BookingStaffIndicatorInput & { source?: string | null; status: string },
+): boolean {
+  if (row.source === 'walk-in') return false;
+  if (!row.staff_attendance_confirmed_at?.trim()) return false;
+  return !['Cancelled', 'No-Show', 'Completed'].includes(row.status);
+}

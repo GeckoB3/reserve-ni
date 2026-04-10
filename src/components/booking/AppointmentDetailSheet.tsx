@@ -9,6 +9,7 @@ import {
   isBookingStatus,
   type BookingStatus,
 } from '@/lib/table-management/booking-status';
+import { validateNoShowGracePeriod } from '@/lib/table-management/lifecycle';
 import type { BookingModel, ClassPaymentRequirement } from '@/types/booking-models';
 import {
   inferBookingRowModel,
@@ -395,6 +396,13 @@ export function AppointmentDetailSheet({
   const canNoShow =
     detail?.status === 'Confirmed' &&
     canMarkNoShowForSlot(detail.booking_date, detail.booking_time, graceMinutes);
+  const noShowGraceResult =
+    detail?.status === 'Confirmed' &&
+    !canMarkNoShowForSlot(detail.booking_date, detail.booking_time, graceMinutes)
+      ? validateNoShowGracePeriod(detail.booking_date, detail.booking_time, graceMinutes)
+      : null;
+  const noShowGraceBlockedReason =
+    noShowGraceResult && !noShowGraceResult.ok ? noShowGraceResult.error : undefined;
 
   if (!open) return null;
 
@@ -506,10 +514,10 @@ export function AppointmentDetailSheet({
                         const parts: string[] = [];
                         if (src.guestAt) parts.push(`Guest: ${new Date(src.guestAt).toLocaleString('en-GB')}`);
                         if (src.staffAt) parts.push(`Staff: ${new Date(src.staffAt).toLocaleString('en-GB')}`);
-                        return parts.length ? parts.join(' · ') : 'Attendance confirmed';
+                        return parts.length ? parts.join(' · ') : 'Confirmed';
                       })()}
                     >
-                      Attendance confirmed
+                      Confirmed
                     </span>
                   )}
                 </div>
@@ -799,14 +807,15 @@ export function AppointmentDetailSheet({
                         : revert.label}
                     </button>
                   )}
-                  {detail.status === 'Confirmed' && canNoShow && (
+                  {detail.status === 'Confirmed' && (
                     <button
                       type="button"
-                      disabled={busy}
+                      disabled={busy || !canNoShow}
+                      title={noShowGraceBlockedReason}
                       onClick={() => void setStatus('No-Show')}
-                      className="rounded-lg bg-red-100 px-3 py-1.5 text-xs font-medium text-red-800 hover:bg-red-200 disabled:opacity-50"
+                      className="rounded-lg bg-red-100 px-3 py-1.5 text-xs font-medium text-red-800 hover:bg-red-200 disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                      No show
+                      Mark as no show
                     </button>
                   )}
                   {isBookingStatus(detail.status) &&

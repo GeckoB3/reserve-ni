@@ -211,9 +211,11 @@ function formatPence(pence: number): string {
  */
 function canShowDaySheetStaffAttendanceToggle(b: {
   status: string;
+  source?: string | null;
   guest_attendance_confirmed_at?: string | null;
   staff_attendance_confirmed_at?: string | null;
 }): boolean {
+  if (b.source === 'walk-in' || b.source === 'Walk-in') return false;
   if (['Cancelled', 'No-Show', 'Completed'].includes(b.status)) return false;
   if (b.staff_attendance_confirmed_at) return true;
   return !showAttendanceConfirmedPill(b);
@@ -1437,9 +1439,9 @@ export function DaySheetView({
                             {showAttendanceConfirmedPill(b) && (
                               <span
                                 className="rounded-full bg-teal-100 px-2 py-0.5 text-[9px] font-semibold text-teal-900 ring-1 ring-teal-200/80 print:hidden"
-                                title="Attendance confirmed"
+                                title="Confirmed"
                               >
-                                Attendance confirmed
+                                Confirmed
                               </span>
                             )}
                           </div>
@@ -1704,7 +1706,7 @@ export function DaySheetView({
                                         )}
                                         {showAttendanceConfirmedPill(b) && (
                                           <span className="inline-flex rounded-full bg-teal-100 px-2 py-0.5 text-xs font-medium text-teal-900 ring-1 ring-teal-200/80">
-                                            Attendance confirmed
+                                            Confirmed
                                           </span>
                                         )}
                                         {!showDepositPendingPill(b) && !showAttendanceConfirmedPill(b) && (

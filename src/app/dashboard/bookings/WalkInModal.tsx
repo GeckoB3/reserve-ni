@@ -242,7 +242,9 @@ export function WalkInModal({
         role="dialog"
         aria-modal="true"
         aria-label="Add walk-in booking"
-        className={`w-full rounded-2xl bg-white p-6 shadow-2xl ${embedded ? '' : 'my-8'} ${advancedMode ? 'max-w-2xl' : 'max-w-sm'}`}
+        className={`w-full rounded-2xl bg-white p-6 shadow-2xl ${
+          embedded ? 'mx-auto' : 'my-8'
+        } ${advancedMode ? 'max-w-2xl' : embedded ? 'max-w-lg' : 'max-w-sm'}`}
         onClick={(e) => e.stopPropagation()}
       >
         {!suppressTitle && (

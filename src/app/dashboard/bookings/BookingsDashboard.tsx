@@ -1211,11 +1211,13 @@ function depositBadge(status: string, amountPence: number | null) {
 }
 
 function canShowConfirmBookingAttendanceRow(b: BookingRow): boolean {
+  if (b.source === 'walk-in') return false;
   if (showAttendanceConfirmedPill(b)) return false;
   return !['Cancelled', 'No-Show', 'Completed'].includes(b.status);
 }
 
 function canShowCancelStaffAttendanceConfirmationRow(b: BookingRow): boolean {
+  if (b.source === 'walk-in') return false;
   if (!b.staff_attendance_confirmed_at) return false;
   return !['Cancelled', 'No-Show', 'Completed'].includes(b.status);
 }
@@ -1330,9 +1332,9 @@ function BookingsAccordionList({
                     {showAttendanceConfirmedPill(booking) && (
                       <span
                         className="rounded-full bg-teal-100 px-2 py-0.5 text-[10px] font-semibold text-teal-900 ring-1 ring-teal-200/80"
-                        title="Attendance confirmed"
+                        title="Confirmed"
                       >
-                        Attendance confirmed
+                        Confirmed
                       </span>
                     )}
                     {showModelBadges && (

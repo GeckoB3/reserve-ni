@@ -5,6 +5,7 @@ import type { VenuePublic, GuestDetails } from './types';
 import type { ClassPaymentRequirement } from '@/types/booking-models';
 import { defaultPhoneCountryForVenueCurrency } from '@/lib/phone/default-country';
 import { DetailsStep } from './DetailsStep';
+import { BookingSubmittingPanel } from './BookingSubmittingPanel';
 import { PaymentStep } from './PaymentStep';
 import { ClassOfferingsCalendar } from './ClassOfferingsCalendar';
 import {
@@ -170,6 +171,7 @@ export function ClassBookingFlow({
   } | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   const fetchOfferings = useCallback(async () => {
     setLoading(true);
@@ -242,6 +244,7 @@ export function ClassBookingFlow({
     async (details: GuestDetails) => {
       setError(null);
       if (!selectedClass) return;
+      setSubmitting(true);
       try {
         if (isStaff) {
           const res = await fetch(venueBookingsCreateUrl(), {
@@ -299,6 +302,8 @@ export function ClassBookingFlow({
         setStep(needsStripe ? 'payment' : 'confirmation');
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Booking failed');
+      } finally {
+        setSubmitting(false);
       }
     },
     [venue.id, selectedClass, spots, isStaff, staffBookingSource, onBookingCreated],
@@ -515,25 +520,29 @@ export function ClassBookingFlow({
               {spots !== 1 ? 's' : ''}
             </div>
           </div>
-          <DetailsStep
-            slot={{
-              key: selectedClass.instance_id,
-              label: selectedClass.class_name,
-              start_time: selectedClass.start_time,
-              end_time: '',
-              available_covers: selectedClass.remaining,
-            }}
-            date={selectedClass.instance_date}
-            partySize={spots}
-            onSubmit={handleDetailsSubmit}
-            onBack={() => setStep('summary')}
-            requiresDeposit={false}
-            variant="class"
-            appointmentDepositPence={depositPenceForDetails > 0 ? depositPenceForDetails : null}
-            currencySymbol={sym}
-            phoneDefaultCountry={phoneDefaultCountry}
-            audience={detailsAudience}
-          />
+          {submitting ? (
+            <BookingSubmittingPanel variant="class" />
+          ) : (
+            <DetailsStep
+              slot={{
+                key: selectedClass.instance_id,
+                label: selectedClass.class_name,
+                start_time: selectedClass.start_time,
+                end_time: '',
+                available_covers: selectedClass.remaining,
+              }}
+              date={selectedClass.instance_date}
+              partySize={spots}
+              onSubmit={handleDetailsSubmit}
+              onBack={() => setStep('summary')}
+              requiresDeposit={false}
+              variant="class"
+              appointmentDepositPence={depositPenceForDetails > 0 ? depositPenceForDetails : null}
+              currencySymbol={sym}
+              phoneDefaultCountry={phoneDefaultCountry}
+              audience={detailsAudience}
+            />
+          )}
         </div>
       )}
 

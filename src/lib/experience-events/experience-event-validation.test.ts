@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   normalizeTimeForDb,
+  normalizeTimeToHhMm,
   validateMergedEventTimes,
   validateStartEndTimes,
 } from '@/lib/experience-events/experience-event-validation';
@@ -17,6 +18,12 @@ describe('experience-event-validation', () => {
 
   it('normalizeTimeForDb adds seconds for HH:MM', () => {
     expect(normalizeTimeForDb('09:30')).toBe('09:30:00');
+  });
+
+  it('normalizeTimeToHhMm strips seconds from HH:mm:ss', () => {
+    expect(normalizeTimeToHhMm('10:30:00')).toBe('10:30');
+    expect(normalizeTimeToHhMm(' 09:15:59 ')).toBe('09:15');
+    expect(normalizeTimeToHhMm('12:00')).toBe('12:00');
   });
 
   it('validateMergedEventTimes merges one side from existing row', () => {

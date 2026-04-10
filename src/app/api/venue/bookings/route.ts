@@ -17,6 +17,7 @@ import {
   attachVenueClockToAppointmentInput,
   fetchAppointmentInput,
   computeAppointmentAvailability,
+  validateExactAppointmentStart,
 } from '@/lib/availability/appointment-engine';
 import { z } from 'zod';
 import { normalizeToE164 } from '@/lib/phone/e164';
@@ -37,7 +38,11 @@ import {
 } from '@/lib/availability/resource-booking-engine';
 import { mergeAppointmentServiceWithPractitionerLink } from '@/lib/appointments/merge-service-with-overrides';
 import { resolveAppointmentServiceOnlineCharge } from '@/lib/appointments/appointment-service-payment';
-import { isGuestBookingDateAllowed, loadServiceEntityBookingWindow } from '@/lib/booking/entity-booking-window';
+import {
+  isGuestBookingDateAllowed,
+  isStaffWalkInBookingDateAllowed,
+  loadServiceEntityBookingWindow,
+} from '@/lib/booking/entity-booking-window';
 
 const ticketLineSchema = z.object({
   ticket_type_id: z.string().uuid(),
@@ -738,7 +743,10 @@ export async function POST(request: NextRequest) {
         typeof venue.timezone === 'string' && venue.timezone.trim() !== ''
           ? venue.timezone.trim()
           : 'Europe/London';
-      if (!isGuestBookingDateAllowed(booking_date, svcWindow, tzAppt)) {
+      const dateAllowedForBooking = staffWalkIn
+        ? isStaffWalkInBookingDateAllowed(booking_date, svcWindow, tzAppt)
+        : isGuestBookingDateAllowed(booking_date, svcWindow, tzAppt);
+      if (!dateAllowedForBooking) {
         return NextResponse.json({ error: 'This date is not available for booking' }, { status: 400 });
       }
 
@@ -755,14 +763,41 @@ export async function POST(request: NextRequest) {
         venue as { timezone?: string | null; booking_rules?: unknown; opening_hours?: unknown },
         svcWindow,
       );
-      const availResult = computeAppointmentAvailability(appointmentInput);
-      const practitionerSlots = availResult.practitioners.find((p) => p.id === practitioner_id);
-      const matchingSlot = practitionerSlots?.slots.find(
-        (s) => s.start_time === timeStr && s.service_id === appointment_service_id,
-      );
 
-      if (!matchingSlot) {
-        return NextResponse.json({ error: 'Selected time is not available for this practitioner and service' }, { status: 409 });
+      let matchingSlot: { duration_minutes: number; start_time: string; service_id: string } | null = null;
+
+      if (staffWalkIn) {
+        /** Walk-ins start at counter time; ignore min-notice and 15-minute slot grid (still validate hours/conflicts). */
+        appointmentInput.skipPastSlotFilter = true;
+        appointmentInput.minNoticeHours = 0;
+        const exact = validateExactAppointmentStart(
+          appointmentInput,
+          practitioner_id,
+          appointment_service_id,
+          timeStr,
+        );
+        if (!exact.ok) {
+          return NextResponse.json(
+            {
+              error:
+                exact.reason === 'Past minimum notice window'
+                  ? 'Selected time is not available for this practitioner and service'
+                  : (exact.reason ?? 'Selected time is not available for this practitioner and service'),
+            },
+            { status: 409 },
+          );
+        }
+      } else {
+        const availResult = computeAppointmentAvailability(appointmentInput);
+        const practitionerSlots = availResult.practitioners.find((p) => p.id === practitioner_id);
+        matchingSlot =
+          practitionerSlots?.slots.find(
+            (s) => s.start_time === timeStr && s.service_id === appointment_service_id,
+          ) ?? null;
+
+        if (!matchingSlot) {
+          return NextResponse.json({ error: 'Selected time is not available for this practitioner and service' }, { status: 409 });
+        }
       }
 
       const baseSvc = appointmentInput.services.find((s) => s.id === appointment_service_id);
@@ -778,10 +813,14 @@ export async function POST(request: NextRequest) {
         appointment_price_display:
           svc?.price_pence != null ? `£${(svc.price_pence / 100).toFixed(2)}` : null,
       };
-      const durationMins = svc?.duration_minutes ?? matchingSlot.duration_minutes;
+      const durationMins =
+        svc?.duration_minutes ?? matchingSlot?.duration_minutes ?? 30;
       const [y, mo, d] = booking_date.split('-').map(Number);
-      const [hh, mm] = timeStr.split(':').map(Number);
-      const endDate = new Date(Date.UTC(y!, mo! - 1, d!, hh!, mm!, 0));
+      const timeParts = timeForDb.split(':').map(Number);
+      const hh = timeParts[0] ?? 0;
+      const mm = timeParts[1] ?? 0;
+      const ss = timeParts[2] ?? 0;
+      const endDate = new Date(Date.UTC(y!, mo! - 1, d!, hh, mm, ss));
       endDate.setMinutes(endDate.getMinutes() + durationMins);
       const estimatedEndTime = endDate.toISOString();
       const bookingEndTime = `${String(endDate.getUTCHours()).padStart(2, '0')}:${String(endDate.getUTCMinutes()).padStart(2, '0')}:00`;

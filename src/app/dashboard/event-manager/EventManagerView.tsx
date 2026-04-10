@@ -3,7 +3,8 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import { useToast } from '@/components/ui/Toast';
-import { validateStartEndTimes } from '@/lib/experience-events/experience-event-validation';
+import { normalizeTimeToHhMm, validateStartEndTimes } from '@/lib/experience-events/experience-event-validation';
+import { formatZodFlattenedError } from '@/lib/experience-events/experience-event-zod';
 import { downloadCsvFile, escapeCsvCell } from './event-manager-utils';
 
 interface TicketType {
@@ -76,6 +77,14 @@ interface EventFormState {
   allow_same_day_booking: boolean;
   payment_requirement: 'none' | 'deposit' | 'full_payment';
   deposit_pounds: string;
+}
+
+function parseOptionalTicketCapacity(raw: string): number | undefined {
+  const cap = raw.trim();
+  if (cap === '') return undefined;
+  const n = parseInt(cap, 10);
+  if (!Number.isFinite(n) || n < 1) return undefined;
+  return n;
 }
 
 function parseCustomDatesFromText(text: string): string[] {
@@ -360,15 +369,18 @@ export function EventManagerView({
         name: eventForm.name.trim(),
         description: eventForm.description.trim() || null,
         event_date: eventDateForPayload,
-        start_time: eventForm.start_time,
-        end_time: eventForm.end_time,
+        start_time: normalizeTimeToHhMm(eventForm.start_time),
+        end_time: normalizeTimeToHhMm(eventForm.end_time),
         capacity: eventForm.capacity,
         image_url: eventForm.image_url.trim() || null,
-        ticket_types: validTickets.map((tt) => ({
-          name: tt.name.trim(),
-          price_pence: Math.round(parseFloat(tt.price_pence || '0') * 100),
-          ...(tt.capacity !== '' && { capacity: parseInt(tt.capacity) }),
-        })),
+        ticket_types: validTickets.map((tt) => {
+          const cap = parseOptionalTicketCapacity(tt.capacity);
+          return {
+            name: tt.name.trim(),
+            price_pence: Math.round(parseFloat(tt.price_pence || '0') * 100),
+            ...(cap !== undefined ? { capacity: cap } : {}),
+          };
+        }),
         calendar_id: eventForm.calendar_id || null,
         max_advance_booking_days: eventForm.max_advance_booking_days,
         min_booking_notice_hours: eventForm.min_booking_notice_hours,
@@ -409,6 +421,7 @@ export function EventManagerView({
           });
       const json = (await res.json()) as {
         error?: string;
+        details?: unknown;
         created?: number;
         upgrade_required?: boolean;
         current?: number;
@@ -425,7 +438,9 @@ export function EventManagerView({
           setEventError(json.error ?? 'This time conflicts with another booking or block on that calendar.');
           return;
         }
-        setEventError(json.error ?? 'Save failed');
+        const hint = formatZodFlattenedError(json.details);
+        const baseErr = json.error ?? 'Save failed';
+        setEventError(hint ? `${baseErr}: ${hint}` : baseErr);
         return;
       }
       if (!editingEventId && typeof json.created === 'number' && json.created > 1) {

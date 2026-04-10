@@ -226,8 +226,7 @@ export async function POST(request: NextRequest) {
     estimatedEndTime = endDate.toISOString();
 
     const isOnlineSource = source === 'online' || source === 'widget' || source === 'booking_page';
-    const onlineDepositApplies =
-      isOnlineSource && slot.deposit_required && slot.online_requires_deposit !== false;
+    const onlineDepositApplies = isOnlineSource && slot.deposit_required;
 
     if (onlineDepositApplies) {
       requiresDeposit = true;

@@ -48,6 +48,21 @@ function baseUrl(): string {
   return process.env.NEXT_PUBLIC_BASE_URL || "https://www.reserveni.com";
 }
 
+/** Label + value row matching appointment card typography (table reservation emails). */
+function buildTableStyleDetailRow(
+  label: string,
+  valueHtmlEscaped: string,
+  showBorderBottom: boolean,
+): string {
+  const border = showBorderBottom ? "border-bottom:1px solid #e2e8f0" : "";
+  return (
+    `<tr><td style="padding:8px 0;${border}">` +
+    `<span style="display:block;font-size:11px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:0.04em">${escapeHtml(label)}</span>` +
+    `<span style="display:block;margin-top:4px;font-size:15px;color:#0f172a;font-weight:500">${valueHtmlEscaped}</span>` +
+    `</td></tr>`
+  );
+}
+
 export function buildBookingDetailsCard(opts: {
   bookingDate?: string;
   bookingTime?: string;
@@ -123,26 +138,30 @@ export function buildBookingDetailsCard(opts: {
       );
     }
   } else {
-    if (opts.bookingDate)
-      rows.push(
-        `<tr><td style="padding:4px 0;font-size:14px;color:#333">&#128197; ${escapeHtml(opts.bookingDate)}</td></tr>`,
-      );
-    if (opts.bookingTime)
-      rows.push(
-        `<tr><td style="padding:4px 0;font-size:14px;color:#333">&#128336; ${escapeHtml(opts.bookingTime)}</td></tr>`,
-      );
-    if (opts.partySize)
-      rows.push(
-        `<tr><td style="padding:4px 0;font-size:14px;color:#333">&#128101; ${opts.partySize} guest${opts.partySize !== 1 ? "s" : ""}</td></tr>`,
-      );
-    if (opts.venueAddress)
-      rows.push(
-        `<tr><td style="padding:4px 0;font-size:14px;color:#333">&#128205; ${escapeHtml(opts.venueAddress)}</td></tr>`,
-      );
-    if (opts.specialRequests)
-      rows.push(
-        `<tr><td style="padding:4px 0;font-size:14px;color:#333">&#128221; ${escapeHtml(opts.specialRequests)}</td></tr>`,
-      );
+    const tableRows: Array<{ label: string; value: string }> = [];
+    if (opts.bookingDate) {
+      tableRows.push({ label: "Date", value: escapeHtml(opts.bookingDate) });
+    }
+    if (opts.bookingTime) {
+      tableRows.push({ label: "Time", value: escapeHtml(opts.bookingTime) });
+    }
+    if (opts.partySize != null && opts.partySize > 0) {
+      const ps = opts.partySize;
+      tableRows.push({
+        label: "Party size",
+        value: escapeHtml(`${ps} guest${ps !== 1 ? "s" : ""}`),
+      });
+    }
+    if (opts.venueAddress) {
+      tableRows.push({ label: "Location", value: escapeHtml(opts.venueAddress) });
+    }
+    if (opts.specialRequests) {
+      tableRows.push({ label: "Notes", value: escapeHtml(opts.specialRequests) });
+    }
+    for (let i = 0; i < tableRows.length; i++) {
+      const r = tableRows[i]!;
+      rows.push(buildTableStyleDetailRow(r.label, r.value, i < tableRows.length - 1));
+    }
   }
 
   if (rows.length === 0) return "";

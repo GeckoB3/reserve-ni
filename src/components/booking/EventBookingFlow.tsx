@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { VenuePublic, GuestDetails } from './types';
 import { defaultPhoneCountryForVenueCurrency } from '@/lib/phone/default-country';
 import { DetailsStep } from './DetailsStep';
+import { BookingSubmittingPanel } from './BookingSubmittingPanel';
 import { PaymentStep } from './PaymentStep';
 import { ClassOfferingsCalendar } from './ClassOfferingsCalendar';
 import { formatBookablePricePence } from '@/lib/booking/format-price-display';
@@ -166,6 +167,7 @@ export function EventBookingFlow({
   } | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   const fetchOfferings = useCallback(async () => {
     setLoading(true);
@@ -257,6 +259,7 @@ export function EventBookingFlow({
     async (details: GuestDetails) => {
       setError(null);
       if (!selectedOccurrence) return;
+      setSubmitting(true);
       try {
         const ticket_lines = selectedOccurrence.ticket_types
           .filter((tt) => (ticketSelections[tt.id] ?? 0) > 0)
@@ -326,6 +329,8 @@ export function EventBookingFlow({
         setStep(needsStripe ? 'payment' : 'confirmation');
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Booking failed');
+      } finally {
+        setSubmitting(false);
       }
     },
     [
@@ -562,23 +567,27 @@ export function EventBookingFlow({
               {totalTickets !== 1 ? 's' : ''}
             </div>
           </div>
-          <DetailsStep
-            slot={{
-              key: selectedOccurrence.event_id,
-              label: selectedOccurrence.event_name,
-              start_time: selectedOccurrence.start_time,
-              end_time: selectedOccurrence.end_time,
-              available_covers: totalTickets,
-            }}
-            date={selectedOccurrence.event_date}
-            partySize={totalTickets}
-            onSubmit={handleDetailsSubmit}
-            onBack={() => setStep('summary')}
-            requiresDeposit={chargePence > 0}
-            variant="class"
-            phoneDefaultCountry={phoneDefaultCountry}
-            audience={detailsAudience}
-          />
+          {submitting ? (
+            <BookingSubmittingPanel variant="event" />
+          ) : (
+            <DetailsStep
+              slot={{
+                key: selectedOccurrence.event_id,
+                label: selectedOccurrence.event_name,
+                start_time: selectedOccurrence.start_time,
+                end_time: selectedOccurrence.end_time,
+                available_covers: totalTickets,
+              }}
+              date={selectedOccurrence.event_date}
+              partySize={totalTickets}
+              onSubmit={handleDetailsSubmit}
+              onBack={() => setStep('summary')}
+              requiresDeposit={chargePence > 0}
+              variant="class"
+              phoneDefaultCountry={phoneDefaultCountry}
+              audience={detailsAudience}
+            />
+          )}
         </div>
       )}
 

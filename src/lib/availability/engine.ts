@@ -632,7 +632,7 @@ function generateServiceSlots(
       perPersonGbp != null &&
       perPersonGbp > 0 &&
       depositThresholdMet(slotRestriction, input.party_size);
-    const onlineRequiresDeposit = slotRestriction?.online_requires_deposit ?? true;
+    const onlineRequiresDeposit = depositRequired ? true : (slotRestriction?.online_requires_deposit ?? true);
 
     if (slotRestriction) {
       const minAdvanceMs = slotRestriction.min_advance_minutes * 60 * 1000;

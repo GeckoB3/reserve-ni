@@ -17,7 +17,8 @@ interface Restriction {
   large_party_message: string | null;
   deposit_required_from_party_size: number | null;
   deposit_amount_per_person_gbp: number | null;
-  online_requires_deposit: boolean;
+  /** Persisted as true whenever deposits are enabled; public booking always collects when rule applies. */
+  online_requires_deposit?: boolean;
   cancellation_notice_hours?: number;
 }
 
@@ -36,7 +37,6 @@ const defaultRestriction = (serviceId: string): Omit<Restriction, 'id'> => ({
   large_party_message: null,
   deposit_required_from_party_size: null,
   deposit_amount_per_person_gbp: null,
-  online_requires_deposit: true,
   cancellation_notice_hours: 48,
 });
 
@@ -63,9 +63,20 @@ export function BookingRulesTab({ services, showToast }: Props) {
   }, []);
 
   async function handleSave(serviceId: string, data: Restriction) {
+    if (data.deposit_required_from_party_size != null) {
+      const amt = data.deposit_amount_per_person_gbp;
+      if (typeof amt !== 'number' || !Number.isFinite(amt) || amt <= 0) {
+        showToast('Enter a deposit amount per person greater than £0 when deposits are required.');
+        return;
+      }
+    }
     setSaving(true);
     const existing = restrictions.find((r) => r.service_id === serviceId);
-    const { id: _draftId, ...payload } = data;
+    const { id: _draftId, ...rest } = data;
+    const payload = {
+      ...rest,
+      online_requires_deposit: true as const,
+    };
     try {
       if (existing) {
         const res = await fetch('/api/venue/booking-restrictions', {
@@ -103,9 +114,10 @@ export function BookingRulesTab({ services, showToast }: Props) {
   return (
     <div className="space-y-6">
       <div className="rounded-lg bg-amber-50 border border-amber-200 p-3 text-xs text-amber-800">
-        <strong>Deposits:</strong> Configure per dining service below (amount per person, which party sizes trigger a
-        deposit, and whether online bookings must pay). Staff phone bookings use the &ldquo;Require deposit&rdquo; toggle on
-        the New Booking form only. Deposit refunds use the cancellation notice hours set for each service.
+        <strong>Deposits:</strong> Configure per dining service below (amount per person and which party sizes trigger a
+        deposit for <span className="font-medium">guest</span> online bookings). Staff use the &ldquo;Require deposit&rdquo;
+        toggle on the New Booking form to request a payment link case by case. Deposit refunds use the cancellation notice
+        hours set for each service.
       </div>
 
       {/* Per-service booking rules */}
@@ -127,7 +139,6 @@ export function BookingRulesTab({ services, showToast }: Props) {
                         ? {
                             ...restriction,
                             deposit_amount_per_person_gbp: restriction.deposit_amount_per_person_gbp ?? null,
-                            online_requires_deposit: restriction.online_requires_deposit !== false,
                           }
                         : ({ id: '', ...defaultRestriction(service.id) } as Restriction),
                     );
@@ -219,9 +230,9 @@ export function BookingRulesTab({ services, showToast }: Props) {
                       onChange={(e) => setEditDraft({
                         ...draft,
                         deposit_required_from_party_size: e.target.checked ? 6 : null,
-                        ...(e.target.checked && draft.deposit_amount_per_person_gbp == null
-                          ? { deposit_amount_per_person_gbp: 5 }
-                          : {}),
+                        deposit_amount_per_person_gbp: e.target.checked
+                          ? (draft.deposit_amount_per_person_gbp == null ? 5 : draft.deposit_amount_per_person_gbp)
+                          : null,
                       })}
                       className="h-4 w-4 rounded border-slate-300 text-brand-600"
                     />
@@ -241,22 +252,13 @@ export function BookingRulesTab({ services, showToast }: Props) {
                         </label>
                         <NumericInput
                           allowFloat
-                          min={0}
+                          min={0.01}
                           max={100}
-                          value={draft.deposit_amount_per_person_gbp ?? 0}
+                          value={draft.deposit_amount_per_person_gbp ?? 5}
                           onChange={(v) => setEditDraft({ ...draft, deposit_amount_per_person_gbp: v > 0 ? v : null })}
                           className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
                         />
                       </div>
-                      <label className="flex cursor-pointer items-center gap-3">
-                        <input
-                          type="checkbox"
-                          checked={draft.online_requires_deposit}
-                          onChange={(e) => setEditDraft({ ...draft, online_requires_deposit: e.target.checked })}
-                          className="h-4 w-4 rounded border-slate-300 text-brand-600"
-                        />
-                        <span className="text-xs font-medium text-slate-600">Online bookings require deposit</span>
-                      </label>
                     </div>
                   )}
                 </div>
@@ -284,7 +286,7 @@ export function BookingRulesTab({ services, showToast }: Props) {
                   <span className="text-slate-500">Deposits:</span>{' '}
                   <span className="font-medium text-slate-700">
                     {restriction.deposit_required_from_party_size
-                      ? `${restriction.deposit_required_from_party_size}+ guests, £${restriction.deposit_amount_per_person_gbp ?? '—'} pp, online ${restriction.online_requires_deposit !== false ? 'on' : 'off'}`
+                      ? `${restriction.deposit_required_from_party_size}+ guests, £${restriction.deposit_amount_per_person_gbp ?? '—'} pp (guest bookings)`
                       : 'Off'}
                   </span>
                 </div>

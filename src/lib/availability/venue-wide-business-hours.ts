@@ -17,7 +17,7 @@ function sliceTime(t: string | null | undefined): string | null {
   return String(t).slice(0, 5);
 }
 
-function blocksForDate(venueWideBlocks: AvailabilityBlock[], dateStr: string): AvailabilityBlock[] {
+export function blocksForDate(venueWideBlocks: AvailabilityBlock[], dateStr: string): AvailabilityBlock[] {
   return venueWideBlocks.filter(
     (b) =>
       b.service_id == null &&
@@ -25,6 +25,24 @@ function blocksForDate(venueWideBlocks: AvailabilityBlock[], dateStr: string): A
       dateStr <= b.date_end &&
       (b.block_type === 'closed' || b.block_type === 'special_event' || b.block_type === 'amended_hours'),
   );
+}
+
+/**
+ * True when there are no venue-wide blocks on this date, weekly opening hours are configured,
+ * but this weekday has no periods (e.g. restaurant closed Mon–Wed). In that case
+ * {@link resolveVenueWideAllowedMinuteRanges} returns `closed` even though there is no explicit
+ * closure block — ticketed events may still run that day.
+ */
+export function isWeeklyScheduleClosedForDate(
+  openingHours: OpeningHours | null | undefined,
+  dateStr: string,
+  venueWideBlocks: AvailabilityBlock[],
+): boolean {
+  if (blocksForDate(venueWideBlocks, dateStr).length > 0) return false;
+  if (!isOpeningHoursConfigured(openingHours)) return false;
+  const day = getDayOfWeek(dateStr);
+  const periods = getOpeningPeriodsForDay(openingHours!, day);
+  return periods.length === 0;
 }
 
 function subtractOneRange(

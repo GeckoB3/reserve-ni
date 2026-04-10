@@ -13,6 +13,8 @@ export default function SupportPage() {
   const [category, setCategory] = useState('general');
   const [subject, setSubject] = useState('');
   const [message, setMessage] = useState('');
+  const [contactEmail, setContactEmail] = useState('');
+  const [contactPhone, setContactPhone] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [sent, setSent] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -26,7 +28,13 @@ export default function SupportPage() {
       const res = await fetch('/api/venue/support', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ subject: subject.trim(), message: message.trim(), category }),
+        body: JSON.stringify({
+          subject: subject.trim(),
+          message: message.trim(),
+          category,
+          contact_email: contactEmail.trim() || undefined,
+          contact_phone: contactPhone.trim() || undefined,
+        }),
       });
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
@@ -55,7 +63,14 @@ export default function SupportPage() {
               Our support team will get back to you as soon as possible. We typically respond within 24 hours.
             </p>
             <button
-              onClick={() => { setSent(false); setSubject(''); setMessage(''); setCategory('general'); }}
+              onClick={() => {
+                setSent(false);
+                setSubject('');
+                setMessage('');
+                setCategory('general');
+                setContactEmail('');
+                setContactPhone('');
+              }}
               className="mt-6 rounded-xl border border-slate-200 px-5 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
             >
               Send another message
@@ -88,6 +103,39 @@ export default function SupportPage() {
                   <option key={c.value} value={c.value}>{c.label}</option>
                 ))}
               </select>
+            </div>
+
+            <div>
+              <label htmlFor="contact_email" className="mb-1.5 block text-sm font-medium text-slate-700">
+                Your email <span className="font-normal text-slate-400">(optional)</span>
+              </label>
+              <input
+                id="contact_email"
+                type="email"
+                autoComplete="email"
+                value={contactEmail}
+                onChange={(e) => setContactEmail(e.target.value)}
+                placeholder="Best address to reach you"
+                maxLength={255}
+                className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+              />
+              <p className="mt-1 text-xs text-slate-400">Helps us reply directly if it differs from your login email.</p>
+            </div>
+
+            <div>
+              <label htmlFor="contact_phone" className="mb-1.5 block text-sm font-medium text-slate-700">
+                Phone number <span className="font-normal text-slate-400">(optional)</span>
+              </label>
+              <input
+                id="contact_phone"
+                type="tel"
+                autoComplete="tel"
+                value={contactPhone}
+                onChange={(e) => setContactPhone(e.target.value)}
+                placeholder="e.g. +44 7700 900000"
+                maxLength={40}
+                className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+              />
             </div>
 
             <div>

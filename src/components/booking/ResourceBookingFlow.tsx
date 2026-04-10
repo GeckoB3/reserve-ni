@@ -5,6 +5,7 @@ import type { VenuePublic, GuestDetails } from './types';
 import type { ClassPaymentRequirement } from '@/types/booking-models';
 import { defaultPhoneCountryForVenueCurrency } from '@/lib/phone/default-country';
 import { DetailsStep } from './DetailsStep';
+import { BookingSubmittingPanel } from './BookingSubmittingPanel';
 import { PaymentStep } from './PaymentStep';
 import { ResourceCalendarMonth, todayYmdLocal } from './ResourceCalendarMonth';
 import { slotIntervalDurationLabel } from '@/lib/booking/slot-interval-label';
@@ -118,6 +119,7 @@ export function ResourceBookingFlow({
     staffMessage?: string;
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   const durationOptions = useMemo(() => {
     if (!selectedMeta) return [];
@@ -331,6 +333,7 @@ export function ResourceBookingFlow({
       const resourceId = selectedResource?.id ?? selectedMeta?.id;
       if (!resourceId || !selectedTime) return;
       const endTime = computeEndTime(selectedTime, duration);
+      setSubmitting(true);
       try {
         if (isStaff) {
           const res = await fetch(venueBookingsCreateUrl(), {
@@ -392,6 +395,8 @@ export function ResourceBookingFlow({
         setStep(data.requires_deposit && data.client_secret ? 'payment' : 'confirmation');
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Booking failed');
+      } finally {
+        setSubmitting(false);
       }
     },
     [
@@ -663,28 +668,32 @@ export function ResourceBookingFlow({
               </div>
             )}
           </div>
-          <DetailsStep
-            slot={{
-              key: selectedTime,
-              label: selectedTime,
-              start_time: selectedTime,
-              end_time: computeEndTime(selectedTime, duration),
-              available_covers: 1,
-            }}
-            date={date}
-            partySize={1}
-            onSubmit={handleDetailsSubmit}
-            onBack={() => setStep('summary')}
-            requiresDeposit={false}
-            variant="appointment"
-            appointmentDepositPence={onlineChargePence > 0 ? onlineChargePence : null}
-            appointmentChargeLabel={payReq === 'full_payment' ? 'full_payment' : 'deposit'}
-            payAtVenueBalancePence={payReq === 'none' && totalPricePence > 0 ? totalPricePence : null}
-            payAtVenuePaymentRequirement={payReq === 'none' ? 'none' : undefined}
-            currencySymbol={venue.currency === 'EUR' ? '€' : '£'}
-            phoneDefaultCountry={phoneDefaultCountry}
-            audience={detailsAudience}
-          />
+          {submitting ? (
+            <BookingSubmittingPanel variant="resource" />
+          ) : (
+            <DetailsStep
+              slot={{
+                key: selectedTime,
+                label: selectedTime,
+                start_time: selectedTime,
+                end_time: computeEndTime(selectedTime, duration),
+                available_covers: 1,
+              }}
+              date={date}
+              partySize={1}
+              onSubmit={handleDetailsSubmit}
+              onBack={() => setStep('summary')}
+              requiresDeposit={false}
+              variant="appointment"
+              appointmentDepositPence={onlineChargePence > 0 ? onlineChargePence : null}
+              appointmentChargeLabel={payReq === 'full_payment' ? 'full_payment' : 'deposit'}
+              payAtVenueBalancePence={payReq === 'none' && totalPricePence > 0 ? totalPricePence : null}
+              payAtVenuePaymentRequirement={payReq === 'none' ? 'none' : undefined}
+              currencySymbol={venue.currency === 'EUR' ? '€' : '£'}
+              phoneDefaultCountry={phoneDefaultCountry}
+              audience={detailsAudience}
+            />
+          )}
         </div>
       )}
 

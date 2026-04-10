@@ -11,6 +11,7 @@ import {
   formatTime,
   formatDepositAmount,
 } from "./base-template";
+import { buildGoogleCalendarAddUrlForBooking } from "@/lib/emails/calendar-links";
 
 /** Non-table detail block: appointments (B/USE) or C/D/E with labels. */
 function isAppointmentStyle(booking: BookingEmailData): boolean {
@@ -103,6 +104,21 @@ export function renderBookingConfirmation(
     mainContent += `<p style="margin:0 0 12px 0">A deposit of £${formatDepositAmount(booking.deposit_amount_pence!)} is required. You\'ll receive a separate message with payment details shortly.</p>`;
   }
 
+  const calendarUrl = buildGoogleCalendarAddUrlForBooking(booking, venue);
+  let ctaLabel: string | undefined = booking.manage_booking_link ? "Manage booking" : undefined;
+  let ctaUrl: string | null | undefined = booking.manage_booking_link;
+  let secondaryCtaLabel: string | undefined;
+  let secondaryCtaUrl: string | null | undefined;
+  if (calendarUrl) {
+    if (ctaUrl) {
+      secondaryCtaLabel = "Add to calendar";
+      secondaryCtaUrl = calendarUrl;
+    } else {
+      ctaLabel = "Add to calendar";
+      ctaUrl = calendarUrl;
+    }
+  }
+
   const html = renderBaseTemplate({
     venueName: venue.name,
     venueLogoUrl: venue.logo_url,
@@ -120,8 +136,10 @@ export function renderBookingConfirmation(
     serviceName: booking.appointment_service_name ?? null,
     priceDisplay: booking.appointment_price_display ?? null,
     groupAppointments: booking.group_appointments,
-    ctaLabel: booking.manage_booking_link ? "Manage booking" : undefined,
-    ctaUrl: booking.manage_booking_link,
+    ctaLabel,
+    ctaUrl: ctaUrl ?? null,
+    secondaryCtaLabel,
+    secondaryCtaUrl: secondaryCtaUrl ?? null,
   });
 
   const textParts = [`Hi ${booking.guest_name},`, ""];
@@ -198,7 +216,14 @@ export function renderBookingConfirmation(
     }
   }
   if (customMessage) textParts.push("", customMessage);
-  if (booking.manage_booking_link) {
+  if (calendarUrl) {
+    if (booking.manage_booking_link) {
+      textParts.push("", `Manage your booking: ${booking.manage_booking_link}`);
+      textParts.push(`Add to calendar: ${calendarUrl}`);
+    } else {
+      textParts.push("", `Add to calendar: ${calendarUrl}`);
+    }
+  } else if (booking.manage_booking_link) {
     textParts.push("", `Manage your booking: ${booking.manage_booking_link}`);
   }
   textParts.push(

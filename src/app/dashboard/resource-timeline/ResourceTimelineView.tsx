@@ -596,22 +596,87 @@ export function ResourceTimelineView({
   // Render
   // -------------------------------------------------------------------------
 
+  const canManageResources = isAdmin || linkedPractitionerIds.length > 0;
+
+  const pageChrome = (
+    <>
+      <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <h1 className="text-2xl font-semibold text-slate-900">Resources</h1>
+        {canManageResources && (
+          <button
+            type="button"
+            onClick={openCreate}
+            className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700"
+          >
+            + Add resource
+          </button>
+        )}
+      </div>
+
+      <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50/80 px-4 py-3 text-sm text-slate-600">
+        <p>
+          Resource bookings and free slots appear on the team calendar column you choose under Show on calendar when
+          editing a resource.{' '}
+          <Link href="/dashboard/calendar" className="font-medium text-brand-600 underline hover:text-brand-700">
+            Open dashboard calendar
+          </Link>
+          {' · '}
+          <Link
+            href="/dashboard/calendar-availability?tab=calendars"
+            className="font-medium text-brand-600 underline hover:text-brand-700"
+          >
+            Calendar availability
+          </Link>
+        </p>
+      </div>
+
+      {!isAdmin && (
+        <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50/80 px-4 py-3 text-sm text-slate-600">
+          {linkedPractitionerIds.length === 0
+            ? 'Your account is not linked to a calendar yet. Ask an admin to assign at least one calendar before you can create, edit, or delete resources.'
+            : 'You can create, edit, or delete resources when they are shown on a calendar column you control (choose under Show on calendar). Admins can assign any column.'}
+        </div>
+      )}
+    </>
+  );
+
   if (loading) {
     return (
-      <div className="flex min-h-[40vh] items-center justify-center">
-        <div className="h-8 w-8 animate-spin rounded-full border-4 border-brand-200 border-t-brand-600" />
+      <div>
+        {pageChrome}
+        <div className="flex min-h-0 flex-col gap-6 lg:flex-row lg:items-start">
+          <div className="w-full shrink-0 lg:w-72 xl:w-80">
+            <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+              <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+                <div className="h-4 w-28 animate-pulse rounded bg-slate-100" />
+                <div className="h-8 w-16 animate-pulse rounded-lg bg-slate-100" />
+              </div>
+              <div className="space-y-3 p-4">
+                {[1, 2, 3, 4, 5, 6].map((i) => (
+                  <div key={i} className="h-14 animate-pulse rounded-lg bg-slate-100" />
+                ))}
+              </div>
+            </div>
+          </div>
+          <div className="min-w-0 flex-1 space-y-4">
+            <div className="h-40 animate-pulse rounded-xl bg-slate-100" />
+            <div className="h-32 animate-pulse rounded-xl bg-slate-100" />
+          </div>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="flex min-h-0 flex-col gap-6 lg:flex-row lg:items-start">
+    <div>
+      {pageChrome}
+      <div className="flex min-h-0 flex-col gap-6 lg:flex-row lg:items-start">
       {/* ─── Sidebar: resource list ─── */}
       <div className="w-full shrink-0 lg:w-72 xl:w-80">
         <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
           <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
-            <h2 className="text-sm font-semibold text-slate-900">Resources</h2>
-            {(isAdmin || linkedPractitionerIds.length > 0) && (
+            <h2 className="text-sm font-semibold text-slate-900">All resources</h2>
+            {canManageResources && (
               <button type="button" onClick={openCreate} className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-brand-700 transition-colors">
                 + Add
               </button>
@@ -623,7 +688,7 @@ export function ResourceTimelineView({
                 <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5M10 11.25h4M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z" />
               </svg>
               <p className="mt-2 text-sm text-slate-500">No resources yet.</p>
-              {(isAdmin || linkedPractitionerIds.length > 0) && (
+              {canManageResources && (
                 <button type="button" onClick={openCreate} className="mt-3 text-sm font-medium text-brand-600 hover:text-brand-800">
                   Create your first resource
                 </button>
@@ -657,11 +722,7 @@ export function ResourceTimelineView({
           )}
         </div>
         {!isAdmin && (
-          <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
-            {linkedPractitionerIds.length === 0
-              ? 'Ask an admin to assign at least one calendar before you can create, edit, or delete resources.'
-              : 'You can create, edit, or delete resources when they are shown on a calendar column you control (choose under Show on calendar). Admins can assign any column.'}
-          </div>
+          <p className="mt-3 text-xs text-slate-500">Permission rules are explained in the note above.</p>
         )}
       </div>
 
@@ -1086,7 +1147,7 @@ export function ResourceTimelineView({
                     type="button"
                     onClick={applyExceptionRange}
                     disabled={!exceptionRangeStart}
-                    className="rounded-lg bg-slate-800 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-900 disabled:opacity-50"
+                    className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-brand-700 disabled:opacity-50"
                   >
                     Apply to calendar selection
                   </button>
@@ -1211,10 +1272,33 @@ export function ResourceTimelineView({
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <h3 className="text-sm font-semibold text-slate-900">Bookings</h3>
                 <div className="flex items-center gap-1.5">
-                  <button type="button" onClick={() => setBookingsDate((d) => { const t = new Date(`${d}T12:00:00`); t.setDate(t.getDate() - 1); return t.toISOString().slice(0, 10); })} className="rounded border border-slate-200 px-2 py-1 text-xs hover:bg-slate-50">&larr;</button>
-                  <input type="date" value={bookingsDate} onChange={(e) => setBookingsDate(e.target.value)} className="rounded border border-slate-200 px-2 py-1 text-xs" />
-                  <button type="button" onClick={() => setBookingsDate((d) => { const t = new Date(`${d}T12:00:00`); t.setDate(t.getDate() + 1); return t.toISOString().slice(0, 10); })} className="rounded border border-slate-200 px-2 py-1 text-xs hover:bg-slate-50">&rarr;</button>
-                  <button type="button" onClick={() => setBookingsDate(new Date().toISOString().slice(0, 10))} className="rounded border border-slate-200 px-2 py-1 text-xs font-medium hover:bg-slate-50">Today</button>
+                  <button
+                    type="button"
+                    onClick={() => setBookingsDate((d) => { const t = new Date(`${d}T12:00:00`); t.setDate(t.getDate() - 1); return t.toISOString().slice(0, 10); })}
+                    className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-700 outline-none hover:bg-slate-50 focus-visible:border-brand-500 focus-visible:ring-1 focus-visible:ring-brand-500"
+                  >
+                    &larr;
+                  </button>
+                  <input
+                    type="date"
+                    value={bookingsDate}
+                    onChange={(e) => setBookingsDate(e.target.value)}
+                    className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setBookingsDate((d) => { const t = new Date(`${d}T12:00:00`); t.setDate(t.getDate() + 1); return t.toISOString().slice(0, 10); })}
+                    className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-700 outline-none hover:bg-slate-50 focus-visible:border-brand-500 focus-visible:ring-1 focus-visible:ring-brand-500"
+                  >
+                    &rarr;
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setBookingsDate(new Date().toISOString().slice(0, 10))}
+                    className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs font-medium text-slate-700 outline-none hover:bg-slate-50 focus-visible:border-brand-500 focus-visible:ring-1 focus-visible:ring-brand-500"
+                  >
+                    Today
+                  </button>
                 </div>
               </div>
               {bookingsLoading ? (
@@ -1252,6 +1336,7 @@ export function ResourceTimelineView({
             </div>
           </div>
         )}
+      </div>
       </div>
     </div>
   );

@@ -91,6 +91,29 @@ export function getVenueLocalDateAndMinutes(timezone: string, at: Date = new Dat
   };
 }
 
+/** Wall-clock date and time-of-day (including seconds) in the venue timezone — for staff “start now” bookings. */
+export function getVenueLocalDateTimeForBooking(timezone: string, at: Date = new Date()): {
+  dateYmd: string;
+  timeHHmmss: string;
+} {
+  const tz = timezone.trim() || 'Europe/London';
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: tz,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).formatToParts(at);
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? '00';
+  return {
+    dateYmd: `${get('year')}-${get('month')}-${get('day')}`,
+    timeHHmmss: `${get('hour')}:${get('minute')}:${get('second')}`,
+  };
+}
+
 /**
  * When `bookingDateYmd` is "today" in the venue timezone, slot generation should exclude starts
  * with minute-of-day ≤ this value (same clock as {@link getVenueLocalDateAndMinutes}).

@@ -162,9 +162,9 @@ export function AppointmentDayBookingRow({
                 {(b.status === 'Confirmed' || b.status === 'Pending') && showAttendanceConfirmedPill(b) && (
                   <span
                     className="inline-flex rounded-full bg-teal-100 px-2 py-0.5 text-xs font-medium text-teal-900 ring-1 ring-teal-200/80"
-                    title="Attendance confirmed"
+                    title="Confirmed"
                   >
-                    Attendance confirmed
+                    Confirmed
                   </span>
                 )}
                 {arrived && b.status !== 'Seated' && (

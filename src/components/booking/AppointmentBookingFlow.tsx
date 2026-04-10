@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { VenuePublic, GuestDetails } from './types';
 import { DetailsStep } from './DetailsStep';
+import { BookingSubmittingPanel } from './BookingSubmittingPanel';
 import { PaymentStep } from './PaymentStep';
 import { APPOINTMENT_BOOKING_RESET_EVENT } from './appointment-booking-events';
 import {
@@ -11,6 +12,7 @@ import {
   isDepositRefundAvailableAt,
 } from '@/lib/booking/cancellation-deadline';
 import { defaultPhoneCountryForVenueCurrency } from '@/lib/phone/default-country';
+import { getVenueLocalDateTimeForBooking } from '@/lib/venue/venue-local-clock';
 import { minutesToTime, timeToMinutes } from '@/lib/availability';
 import { MultiServiceSummaryCard } from './MultiServiceSummaryCard';
 import { resolveAppointmentServiceOnlineCharge } from '@/lib/appointments/appointment-service-payment';
@@ -160,6 +162,7 @@ export function AppointmentBookingFlow({
   staffBookingSource = 'phone',
 }: AppointmentBookingFlowProps) {
   const isStaff = bookingAudience === 'staff';
+  const isStaffWalkInAppointment = isStaff && staffBookingSource === 'walk-in';
   const detailsAudience =
     isStaff && staffBookingSource === 'walk-in' ? ('staff_walk_in' as const) : isStaff ? ('staff' as const) : ('public' as const);
   const terms = venue.terminology ?? { client: 'Client', booking: 'Appointment', staff: 'Staff' };
@@ -180,6 +183,7 @@ export function AppointmentBookingFlow({
   const [slotPractitioners, setSlotPractitioners] = useState<SlotPractitioner[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   // Single booking state
   const [selectedServiceId, setSelectedServiceId] = useState<string | null>(null);
@@ -244,6 +248,7 @@ export function AppointmentBookingFlow({
       setGroupServiceId(null);
       setGroupPractitionerId(null);
       setGroupCreateResult(null);
+      setSubmitting(false);
       if (lockedPractitioner?.id && lockedPractitioner?.bookingSlug) {
         setStep('service');
         setSelectedPractitionerId(lockedPractitioner.id);
@@ -547,6 +552,7 @@ export function AppointmentBookingFlow({
           setError(v);
           return;
         }
+        setSubmitting(true);
         try {
           const res = await fetch(bookingCreateMultiServiceUrl(), {
             method: 'POST',
@@ -587,10 +593,13 @@ export function AppointmentBookingFlow({
           if (isStaff && !needsStripe) onBookingCreated?.();
         } catch (e) {
           setError(e instanceof Error ? e.message : 'Booking failed');
+        } finally {
+          setSubmitting(false);
         }
         return;
       }
 
+      setSubmitting(true);
       try {
         if (isStaff) {
           const online = selectedServiceForPractitioner
@@ -664,6 +673,8 @@ export function AppointmentBookingFlow({
         setStep(data.requires_deposit && data.client_secret ? 'payment' : 'confirmation');
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Booking failed');
+      } finally {
+        setSubmitting(false);
       }
     },
     [
@@ -739,6 +750,7 @@ export function AppointmentBookingFlow({
   const handleGroupDetailsSubmit = useCallback(async (details: GuestDetails) => {
     setGuestDetails(details);
     setError(null);
+    setSubmitting(true);
     try {
       const res = await fetch(bookingCreateGroupUrl(), {
         method: 'POST',
@@ -775,6 +787,8 @@ export function AppointmentBookingFlow({
       if (isStaff && !needsStripe) onBookingCreated?.();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Group booking failed');
+    } finally {
+      setSubmitting(false);
     }
   }, [venue.id, groupPeople, refundNoticeHours, isStaff, onBookingCreated, staffBookingSource]);
 
@@ -1091,6 +1105,40 @@ export function AppointmentBookingFlow({
             <label className="mb-1 block text-xs font-medium text-slate-500 uppercase tracking-wider">Date</label>
             <input type="date" value={date} min={todayStr()} onChange={(e) => { setDate(e.target.value); setSelectedTime(null); }} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm shadow-sm focus:border-brand-400 focus:ring-2 focus:ring-brand-100 focus:outline-none" />
           </div>
+          {isStaffWalkInAppointment && (
+            <div className="mb-4">
+              <button
+                type="button"
+                onClick={() => {
+                  const { dateYmd, timeHHmmss } = getVenueLocalDateTimeForBooking(venue.timezone);
+                  setDate(dateYmd);
+                  const offer = selectedPrac?.services.find((s) => s.id === selectedServiceId);
+                  const firstOnline = offer ? onlineChargeFromCatalogOffer(offer) : null;
+                  setSelectedTime(timeHHmmss);
+                  setMultiServiceSegments([
+                    {
+                      serviceId: selectedServiceId!,
+                      serviceName: offer?.name ?? '',
+                      practitionerId: selectedPractitionerId!,
+                      practitionerName: selectedPrac?.name ?? '',
+                      startTime: timeHHmmss,
+                      durationMinutes: offer?.duration_minutes ?? 30,
+                      bufferMinutes: offer?.buffer_minutes ?? 0,
+                      pricePence: offer?.price_pence ?? null,
+                      depositPence: firstOnline?.amountPence ?? 0,
+                      onlineChargeLabel: firstOnline?.chargeLabel,
+                    },
+                  ]);
+                  setAddingExtraService(false);
+                  setError(null);
+                  setStep('multi_service');
+                }}
+                className="w-full rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-left text-sm font-semibold text-emerald-900 shadow-sm transition-colors hover:bg-emerald-100"
+              >
+                Start appointment now
+              </button>
+            </div>
+          )}
           {loading ? (
             <div className="h-32 animate-pulse rounded-xl bg-slate-100" />
           ) : availableSlots.length === 0 ? (
@@ -1296,37 +1344,41 @@ export function AppointmentBookingFlow({
               </label>
             );
           })()}
-          <DetailsStep
-            slot={{ key: selectedTime, label: selectedTime, start_time: selectedTime, end_time: '', available_covers: 1 }}
-            date={date}
-            partySize={1}
-            onSubmit={handleDetailsSubmit}
-            onBack={() => {
-              setStep('multi_service');
-            }}
-            variant="appointment"
-            appointmentDepositPence={
-              multiServiceSegments && multiServiceSegments.length > 1
-                ? multiServiceSegments.reduce((sum, s) => sum + (s.depositPence ?? 0), 0)
-                : selectedServiceForPractitioner
-                  ? onlineChargeFromCatalogOffer(selectedServiceForPractitioner)?.amountPence ?? 0
-                  : 0
-            }
-            appointmentChargeLabel={
-              multiServiceSegments && multiServiceSegments.length > 1
-                ? multiServiceSegments.every((s) => s.onlineChargeLabel === 'full_payment')
-                  ? 'full_payment'
-                  : 'deposit'
-                : onlineChargeFromCatalogOffer(selectedServiceForPractitioner ?? { price_pence: null, deposit_pence: null })
-                      ?.chargeLabel === 'full_payment'
-                  ? 'full_payment'
-                  : 'deposit'
-            }
-            currencySymbol={sym}
-            refundNoticeHours={refundNoticeHours}
-            phoneDefaultCountry={phoneDefaultCountry}
-            audience={detailsAudience}
-          />
+          {submitting ? (
+            <BookingSubmittingPanel variant="appointment" />
+          ) : (
+            <DetailsStep
+              slot={{ key: selectedTime, label: selectedTime, start_time: selectedTime, end_time: '', available_covers: 1 }}
+              date={date}
+              partySize={1}
+              onSubmit={handleDetailsSubmit}
+              onBack={() => {
+                setStep('multi_service');
+              }}
+              variant="appointment"
+              appointmentDepositPence={
+                multiServiceSegments && multiServiceSegments.length > 1
+                  ? multiServiceSegments.reduce((sum, s) => sum + (s.depositPence ?? 0), 0)
+                  : selectedServiceForPractitioner
+                    ? onlineChargeFromCatalogOffer(selectedServiceForPractitioner)?.amountPence ?? 0
+                    : 0
+              }
+              appointmentChargeLabel={
+                multiServiceSegments && multiServiceSegments.length > 1
+                  ? multiServiceSegments.every((s) => s.onlineChargeLabel === 'full_payment')
+                    ? 'full_payment'
+                    : 'deposit'
+                  : onlineChargeFromCatalogOffer(selectedServiceForPractitioner ?? { price_pence: null, deposit_pence: null })
+                        ?.chargeLabel === 'full_payment'
+                    ? 'full_payment'
+                    : 'deposit'
+              }
+              currencySymbol={sym}
+              refundNoticeHours={refundNoticeHours}
+              phoneDefaultCountry={phoneDefaultCountry}
+              audience={detailsAudience}
+            />
+          )}
         </div>
       )}
 
@@ -1668,25 +1720,29 @@ export function AppointmentBookingFlow({
               )}
             </div>
           </div>
-          <DetailsStep
-            slot={{ key: 'group', label: 'Group', start_time: groupPeople[0]?.time ?? '', end_time: '', available_covers: 1 }}
-            date={groupPeople[0]?.date ?? date}
-            partySize={groupPeople.length}
-            onSubmit={handleGroupDetailsSubmit}
-            onBack={() => setStep('group_review')}
-            variant="appointment"
-            appointmentDepositPence={totalGroupDepositPence}
-            appointmentChargeLabel={
-              groupPeople.length > 0 && groupPeople.every((p) => p.onlineChargeLabel === 'full_payment')
-                ? 'full_payment'
-                : 'deposit'
-            }
-            currencySymbol={sym}
-            refundNoticeHours={refundNoticeHours}
-            multiAppointmentSlots={groupPeople.map((p) => ({ date: p.date, time: p.time }))}
-            phoneDefaultCountry={phoneDefaultCountry}
-            audience={detailsAudience}
-          />
+          {submitting ? (
+            <BookingSubmittingPanel variant="appointment" />
+          ) : (
+            <DetailsStep
+              slot={{ key: 'group', label: 'Group', start_time: groupPeople[0]?.time ?? '', end_time: '', available_covers: 1 }}
+              date={groupPeople[0]?.date ?? date}
+              partySize={groupPeople.length}
+              onSubmit={handleGroupDetailsSubmit}
+              onBack={() => setStep('group_review')}
+              variant="appointment"
+              appointmentDepositPence={totalGroupDepositPence}
+              appointmentChargeLabel={
+                groupPeople.length > 0 && groupPeople.every((p) => p.onlineChargeLabel === 'full_payment')
+                  ? 'full_payment'
+                  : 'deposit'
+              }
+              currencySymbol={sym}
+              refundNoticeHours={refundNoticeHours}
+              multiAppointmentSlots={groupPeople.map((p) => ({ date: p.date, time: p.time }))}
+              phoneDefaultCountry={phoneDefaultCountry}
+              audience={detailsAudience}
+            />
+          )}
         </div>
       )}
 

@@ -19,9 +19,6 @@ import { OpeningHoursSection } from './sections/OpeningHoursSection';
 import { StaffSection } from './sections/StaffSection';
 import { CommunicationTemplatesSection } from './sections/CommunicationTemplatesSection';
 import { StripeConnectSection } from './sections/StripeConnectSection';
-import { TableManagementSection } from './sections/TableManagementSection';
-import { AvailabilityConfigSection } from './sections/AvailabilityConfigSection';
-import { DepositConfigSection } from './sections/DepositConfigSection';
 import { BookingRulesSection } from './sections/BookingRulesSection';
 import { BookingTypesSection } from './sections/BookingTypesSection';
 import { StaffPersonalSettingsSection } from './sections/StaffPersonalSettingsSection';
@@ -363,16 +360,19 @@ export function SettingsView({
             <VenueProfileSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} bookingModel={bookingModel} />
             <BookingTypesSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} />
             {showRestaurantTableProfileSections && !isAppointment && (
-              <TableManagementSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} />
-            )}
-            {showRestaurantTableProfileSections && !isAppointment && hasServiceConfig && (
-              <DepositConfigSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} variant="service_engine_table" />
-            )}
-            {showRestaurantTableProfileSections && !isAppointment && !hasServiceConfig && (
-              <AvailabilityConfigSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} />
-            )}
-            {showRestaurantTableProfileSections && !isAppointment && !hasServiceConfig && (
-              <DepositConfigSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} variant="legacy_table" />
+              <div className="rounded-lg border border-slate-200 bg-slate-50/80 p-4 text-sm text-slate-700">
+                <p className="font-medium text-slate-900">Table management and dining availability</p>
+                <p className="mt-1 text-slate-600">
+                  Floor plan, table combinations, legacy availability, and related deposit options are under{' '}
+                  <Link
+                    href="/dashboard/availability?tab=table"
+                    className="font-medium text-brand-600 hover:text-brand-700 underline"
+                  >
+                    Dining Availability → Table Management
+                  </Link>
+                  .
+                </p>
+              </div>
             )}
             {isAppointment && (
               <BookingRulesSection

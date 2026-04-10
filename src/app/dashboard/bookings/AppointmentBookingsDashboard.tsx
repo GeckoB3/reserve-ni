@@ -596,11 +596,13 @@ export function AppointmentBookingsDashboard({
   }
 
   function canShowConfirmBookingAttendance(b: RegistryAppointment): boolean {
+    if (b.source === 'walk-in') return false;
     if (showAttendanceConfirmedPill(b)) return false;
     return !['Cancelled', 'No-Show', 'Completed'].includes(b.status);
   }
 
   function canShowCancelStaffAttendanceConfirmation(b: RegistryAppointment): boolean {
+    if (b.source === 'walk-in') return false;
     if (!b.staff_attendance_confirmed_at) return false;
     return !['Cancelled', 'No-Show', 'Completed'].includes(b.status);
   }
@@ -851,7 +853,7 @@ export function AppointmentBookingsDashboard({
                 )}
                 {showAttendanceConfirmedPill(b) && (
                   <span className="inline-flex rounded-full bg-teal-100 px-2 py-0.5 text-[10px] font-semibold text-teal-900 ring-1 ring-teal-200/80">
-                    Attendance confirmed
+                    Confirmed
                   </span>
                 )}
               </div>
@@ -945,7 +947,7 @@ export function AppointmentBookingsDashboard({
                   )}
                   {showAttendanceConfirmedPill(b) && (
                     <span className="inline-flex rounded-full bg-teal-100 px-2 py-0.5 text-[10px] font-semibold text-teal-900 ring-1 ring-teal-200/80">
-                      Attendance confirmed
+                      Confirmed
                     </span>
                   )}
                 </div>

@@ -20,13 +20,14 @@ import { DEFAULT_ENTITY_BOOKING_WINDOW } from '@/lib/booking/entity-booking-wind
 import type { OpeningHours } from '@/types/availability';
 import { parseVenueOpeningExceptions } from '@/types/venue-opening-exceptions';
 import { rowsToVenueWideBlocks, venueWideBlocksQueryForDate, venueWideBlocksQueryForRange } from '@/lib/availability/venue-wide-blocks-fetch';
+import { zExperienceEventDescription, zExperienceEventHhMm } from '@/lib/experience-events/experience-event-zod';
 
 const eventSchema = z.object({
   name: z.string().min(1).max(200),
-  description: z.string().max(2000).optional(),
+  description: zExperienceEventDescription,
   event_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  start_time: z.string().regex(/^\d{2}:\d{2}$/),
-  end_time: z.string().regex(/^\d{2}:\d{2}$/),
+  start_time: zExperienceEventHhMm,
+  end_time: zExperienceEventHhMm,
   capacity: z.number().int().min(1),
   image_url: z.preprocess((v) => (v === '' || v === null ? undefined : v), z.string().url().optional()),
   is_recurring: z.boolean().optional(),

@@ -111,6 +111,8 @@ export async function POST(request: NextRequest) {
 
     const admin = getSupabaseAdminClient();
     const venueMode = await resolveVenueMode(admin, staff.venue_id);
+    /** Walk-ins are served immediately; staff attendance is confirmed at creation (no extra UI step). */
+    const staffAttendanceAt = new Date().toISOString();
 
     // --- Model B: Appointment walk-in ---
     if (isUnifiedSchedulingVenue(venueMode.bookingModel)) {
@@ -199,6 +201,7 @@ export async function POST(request: NextRequest) {
           practitioner_id,
           appointment_service_id,
           estimated_end_time: estimatedEndIso,
+          staff_attendance_confirmed_at: staffAttendanceAt,
         })
         .select('id, booking_date, booking_time, booking_end_time, party_size, status, source')
         .single();
@@ -338,6 +341,7 @@ export async function POST(request: NextRequest) {
         deposit_status: 'Not Required',
         dietary_notes: dietary_notes?.trim() || null,
         occasion: occasion?.trim() || null,
+        staff_attendance_confirmed_at: staffAttendanceAt,
       })
       .select('id, booking_date, booking_time, party_size, status, source')
       .single();

@@ -20,7 +20,7 @@ const BOOKINGS_LIST_SELECT_FULL =
 
 /** Omits columns not used by the practitioner calendar grid to reduce payload and DB I/O. */
 const BOOKINGS_LIST_SELECT_CALENDAR =
-  'id, booking_date, booking_time, party_size, status, deposit_status, deposit_amount_pence, special_requests, internal_notes, client_arrived_at, guest_attendance_confirmed_at, staff_attendance_confirmed_at, estimated_end_time, guest_id, practitioner_id, appointment_service_id, calendar_id, service_item_id, experience_event_id, class_instance_id, resource_id, booking_end_time, event_session_id, group_booking_id, person_label';
+  'id, booking_date, booking_time, party_size, status, source, deposit_status, deposit_amount_pence, special_requests, internal_notes, client_arrived_at, guest_attendance_confirmed_at, staff_attendance_confirmed_at, estimated_end_time, guest_id, practitioner_id, appointment_service_id, calendar_id, service_item_id, experience_event_id, class_instance_id, resource_id, booking_end_time, event_session_id, group_booking_id, person_label';
 
 export async function GET(request: NextRequest) {
   try {
@@ -117,7 +117,7 @@ export async function GET(request: NextRequest) {
         booking_time: r.booking_time,
         party_size: r.party_size,
         status: r.status,
-        source: calendarView ? null : r.source,
+        source: r.source ?? null,
         deposit_status: r.deposit_status,
         deposit_amount_pence: r.deposit_amount_pence,
         dietary_notes: calendarView ? null : r.dietary_notes,

@@ -11,6 +11,7 @@ import { timeToMinutes } from '@/lib/availability';
 import {
   resolveVenueWideAllowedMinuteRanges,
   isMinuteSubintervalCoveredByRanges,
+  isWeeklyScheduleClosedForDate,
 } from '@/lib/availability/venue-wide-business-hours';
 import {
   rowsToVenueWideBlocks,
@@ -90,7 +91,10 @@ export function computeEventAvailability(
 
     if (venueWideBlocks != null) {
       const res = resolveVenueWideAllowedMinuteRanges(venueOpeningHours ?? null, event.event_date, venueWideBlocks);
-      if (res.kind === 'closed') continue;
+      const weeklyOffDayNoBlocks =
+        res.kind === 'closed' &&
+        isWeeklyScheduleClosedForDate(venueOpeningHours ?? null, event.event_date, venueWideBlocks);
+      if (res.kind === 'closed' && !weeklyOffDayNoBlocks) continue;
       if (res.kind === 'allowed') {
         const start = timeToMinutes(String(event.start_time).slice(0, 5));
         const end = timeToMinutes(String(event.end_time).slice(0, 5));

@@ -63,8 +63,8 @@ export default async function CalendarPage() {
    */
   return (
     <ToastProvider>
-      <div className="p-4 md:p-6 lg:p-8">
-        <div className="mx-auto max-w-[1600px]">
+      <div className="min-h-0 min-w-0 px-3 pb-[max(1rem,env(safe-area-inset-bottom))] pt-[max(1rem,env(safe-area-inset-top))] sm:px-4 md:p-6 md:pb-8 md:pt-6 lg:p-8">
+        <div className="mx-auto max-w-[1600px] min-w-0">
           {showPractitionerCalendar ? (
             <PractitionerCalendarView
               venueId={staff.venue_id}

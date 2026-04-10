@@ -8,6 +8,7 @@ import { SlotStep } from './SlotStep';
 import { DetailsStep } from './DetailsStep';
 import { PaymentStep } from './PaymentStep';
 import { ConfirmationStep } from './ConfirmationStep';
+import { BookingSubmittingPanel } from './BookingSubmittingPanel';
 import { formatOnlinePaidRefundPolicyLine } from '@/lib/booking/public-deposit-refund-policy';
 
 export interface BookingFlowProps {
@@ -35,6 +36,7 @@ export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, 
   const [error, setError] = useState<string | null>(null);
   const [largePartyRedirect, setLargePartyRedirect] = useState(false);
   const [largePartyMessage, setLargePartyMessage] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   const step = steps[stepIndex];
   const rules: BookingRulesPublic = venue.booking_rules ?? { min_party_size: 1, max_party_size: 20 };
@@ -42,9 +44,7 @@ export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, 
 
   const requiresDeposit = useMemo(() => {
     if (!selectedSlot) return false;
-    if (!selectedSlot.deposit_required) return false;
-    if (selectedSlot.online_requires_deposit === false) return false;
-    return true;
+    return Boolean(selectedSlot.deposit_required);
   }, [selectedSlot]);
 
   useEffect(() => {
@@ -105,6 +105,7 @@ export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, 
     setGuestDetails(details);
     setError(null);
     if (!selectedDate || !selectedSlot) return;
+    setSubmitting(true);
     try {
       const res = await fetch('/api/booking/create', {
         method: 'POST',
@@ -142,6 +143,8 @@ export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, 
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Booking failed');
+    } finally {
+      setSubmitting(false);
     }
   }, [venue.id, selectedDate, selectedSlot, partySize, embed]);
 
@@ -260,21 +263,25 @@ export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, 
         />
       )}
       {step === 'details' && selectedSlot && (
-        <DetailsStep
-          slot={selectedSlot}
-          date={selectedDate!}
-          partySize={partySize}
-          onSubmit={handleDetailsSubmit}
-          onBack={goBack}
-          requiresDeposit={requiresDeposit}
-          depositPerPerson={
-            selectedSlot.deposit_amount != null && partySize > 0
-              ? selectedSlot.deposit_amount / partySize
-              : undefined
-          }
-          refundNoticeHours={tableRefundNoticeHours}
-          phoneDefaultCountry={phoneDefaultCountry}
-        />
+        submitting ? (
+          <BookingSubmittingPanel variant="table" />
+        ) : (
+          <DetailsStep
+            slot={selectedSlot}
+            date={selectedDate!}
+            partySize={partySize}
+            onSubmit={handleDetailsSubmit}
+            onBack={goBack}
+            requiresDeposit={requiresDeposit}
+            depositPerPerson={
+              selectedSlot.deposit_amount != null && partySize > 0
+                ? selectedSlot.deposit_amount / partySize
+                : undefined
+            }
+            refundNoticeHours={tableRefundNoticeHours}
+            phoneDefaultCountry={phoneDefaultCountry}
+          />
+        )
       )}
       {step === 'payment' && createResult?.client_secret && (
         <PaymentStep

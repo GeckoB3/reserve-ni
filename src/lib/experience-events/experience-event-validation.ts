@@ -1,5 +1,14 @@
 /** Pure validation helpers (safe for client and server). */
 
+/**
+ * Normalises time strings to HH:mm for API validation and payloads.
+ * Browser `input type="time"` may return HH:mm:ss; stored rows may include seconds.
+ */
+export function normalizeTimeToHhMm(input: string): string {
+  const s = String(input).trim();
+  return s.length >= 5 ? s.slice(0, 5) : s;
+}
+
 export function normalizeTimeForDb(t: string): string {
   const s = t.trim();
   if (s.length === 5) return `${s}:00`;

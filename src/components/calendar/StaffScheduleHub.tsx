@@ -5,6 +5,27 @@ import { useMemo, useState } from 'react';
 import type { BookingModel } from '@/types/booking-models';
 import { StaffScheduleMergedDayGrid } from '@/components/calendar/StaffScheduleMergedDayGrid';
 
+const WEEKDAYS_LONG = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const MONTHS_LONG = [
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
+];
+
+function formatScheduleDayLabel(date: string): string {
+  const d = new Date(date + 'T12:00:00');
+  return `${WEEKDAYS_LONG[d.getDay()]} ${d.getDate()} ${MONTHS_LONG[d.getMonth()]} ${d.getFullYear()}`;
+}
+
 interface Props {
   bookingModel: BookingModel;
   enabledModels: BookingModel[];
@@ -90,8 +111,17 @@ export function StaffScheduleHub({ bookingModel, enabledModels }: Props) {
 
       {(showEvents || showResources) && (
         <div className="space-y-3">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-sm font-medium text-slate-700">Day</span>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm font-medium text-slate-700">Schedule day</p>
+            <button
+              type="button"
+              onClick={() => setDate(new Date().toISOString().slice(0, 10))}
+              className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 shadow-sm hover:bg-slate-50 sm:w-auto"
+            >
+              Today
+            </button>
+          </div>
+          <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-3 shadow-sm sm:px-4">
             <button
               type="button"
               onClick={() =>
@@ -101,17 +131,19 @@ export function StaffScheduleHub({ bookingModel, enabledModels }: Props) {
                   return t.toISOString().slice(0, 10);
                 })
               }
-              className="rounded-lg border border-slate-300 px-2 py-1 text-sm hover:bg-slate-50"
+              className="rounded-lg p-2 text-slate-400 hover:bg-slate-50 hover:text-slate-600"
+              aria-label="Previous day"
             >
-              ←
+              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" />
+              </svg>
             </button>
-            <button
-              type="button"
-              onClick={() => setDate(new Date().toISOString().slice(0, 10))}
-              className="rounded-lg border border-slate-300 px-3 py-1 text-sm font-medium hover:bg-slate-50"
-            >
-              Today
-            </button>
+            <div className="min-w-0 flex-1 px-2 text-center">
+              <h2 className="truncate text-sm font-semibold text-slate-900 sm:text-base">{formatScheduleDayLabel(date)}</h2>
+              {date === new Date().toISOString().slice(0, 10) && (
+                <span className="text-xs font-medium text-brand-600">Today</span>
+              )}
+            </div>
             <button
               type="button"
               onClick={() =>
@@ -121,16 +153,13 @@ export function StaffScheduleHub({ bookingModel, enabledModels }: Props) {
                   return t.toISOString().slice(0, 10);
                 })
               }
-              className="rounded-lg border border-slate-300 px-2 py-1 text-sm hover:bg-slate-50"
+              className="rounded-lg p-2 text-slate-400 hover:bg-slate-50 hover:text-slate-600"
+              aria-label="Next day"
             >
-              →
+              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden>
+                <path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
+              </svg>
             </button>
-            <input
-              type="date"
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
-              className="rounded-lg border border-slate-300 px-2 py-1 text-sm"
-            />
           </div>
           <StaffScheduleMergedDayGrid date={date} bookingModel={bookingModel} enabledModels={enabledModels} />
         </div>

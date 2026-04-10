@@ -12,11 +12,20 @@ if (apiKey) {
 const SUPPORT_TO = 'support@reserveni.com';
 const FROM = { email: 'hello@reserveni.com', name: 'Reserve NI' };
 
-const supportSchema = z.object({
-  subject: z.string().min(1, 'Subject is required').max(200),
-  message: z.string().min(1, 'Message is required').max(5000),
-  category: z.enum(['general', 'billing', 'technical', 'feature_request']).optional(),
-});
+const supportSchema = z
+  .object({
+    subject: z.string().min(1, 'Subject is required').max(200),
+    message: z.string().min(1, 'Message is required').max(5000),
+    category: z.enum(['general', 'billing', 'technical', 'feature_request']).optional(),
+    contact_email: z.string().trim().max(255).optional(),
+    contact_phone: z.string().trim().max(40).optional(),
+  })
+  .superRefine((data, ctx) => {
+    const e = data.contact_email?.trim();
+    if (e && !z.string().email().safeParse(e).success) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Invalid email address', path: ['contact_email'] });
+    }
+  });
 
 function escapeHtml(s: string): string {
   return s
@@ -43,7 +52,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { subject, message, category } = parsed.data;
+    const { subject, message, category, contact_email, contact_phone } = parsed.data;
+    const contactEmailTrimmed = contact_email?.trim() || undefined;
+    const contactPhoneTrimmed = contact_phone?.trim() || undefined;
 
     const admin = (await import('@/lib/supabase')).getSupabaseAdminClient();
     const { data: venue } = await admin
@@ -77,7 +88,9 @@ export async function POST(request: NextRequest) {
 <tr><td style="padding:24px">
 <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">
 <tr><td style="padding:8px 12px 8px 0;font-weight:600;color:#475569;vertical-align:top">Venue</td><td style="padding:8px 0;color:#1e293b">${escapeHtml(venueName)}</td></tr>
-<tr><td style="padding:8px 12px 8px 0;font-weight:600;color:#475569;vertical-align:top">From</td><td style="padding:8px 0;color:#1e293b">${escapeHtml(staff.email)}</td></tr>
+<tr><td style="padding:8px 12px 8px 0;font-weight:600;color:#475569;vertical-align:top">Staff account</td><td style="padding:8px 0;color:#1e293b">${escapeHtml(staff.email)}</td></tr>
+<tr><td style="padding:8px 12px 8px 0;font-weight:600;color:#475569;vertical-align:top">Contact email</td><td style="padding:8px 0;color:#1e293b">${contactEmailTrimmed ? escapeHtml(contactEmailTrimmed) : '—'}</td></tr>
+<tr><td style="padding:8px 12px 8px 0;font-weight:600;color:#475569;vertical-align:top">Contact phone</td><td style="padding:8px 0;color:#1e293b">${contactPhoneTrimmed ? escapeHtml(contactPhoneTrimmed) : '—'}</td></tr>
 <tr><td style="padding:8px 12px 8px 0;font-weight:600;color:#475569;vertical-align:top">Category</td><td style="padding:8px 0;color:#1e293b">${escapeHtml(categoryLabel)}</td></tr>
 <tr><td style="padding:8px 12px 8px 0;font-weight:600;color:#475569;vertical-align:top">Subject</td><td style="padding:8px 0;color:#1e293b">${escapeHtml(subject)}</td></tr>
 <tr><td style="padding:8px 12px 8px 0;font-weight:600;color:#475569;vertical-align:top">Message</td><td style="padding:8px 0;color:#1e293b;white-space:pre-wrap">${escapeHtml(message)}</td></tr>
@@ -91,7 +104,7 @@ export async function POST(request: NextRequest) {
       await sgMail.send({
         to: SUPPORT_TO,
         from: FROM,
-        replyTo: staff.email,
+        replyTo: contactEmailTrimmed ?? staff.email,
         subject: `[${categoryLabel}] ${subject} - ${venueName}`,
         html,
       });

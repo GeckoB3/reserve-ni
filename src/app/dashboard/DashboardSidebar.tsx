@@ -25,7 +25,7 @@ import { isRestaurantTableProductTier } from '@/lib/tier-enforcement';
  *
  * **Staff:** Settings link → label **Account**; page is account-only (`settings/page.tsx`). Reports and Dining Availability are omitted from nav.
  *
- * **Restaurant/founding + table primary:** Day Sheet + Bookings grouped (when not using table-management bundle); optional Table Grid + Floor Plan under Bookings when `table_management_enabled`. Injected **Calendar** (`/dashboard/calendar`) when `isVenueScheduleCalendarEligible`.
+ * **Restaurant/founding + table primary:** Day Sheet + Bookings grouped (when not using table-management bundle); optional Table Grid + Floor Plan under Bookings when `table_management_enabled`. Injected **Appointment Calendar** (`/dashboard/calendar`) when `isVenueScheduleCalendarEligible`.
  *
  * **Calendar Availability** (`/dashboard/calendar-availability`): when `shouldShowAppointmentAvailabilitySettings` (unified/practitioner primary, or C/D/E primary/secondary).
  *
@@ -174,11 +174,11 @@ export function DashboardSidebar({
     }
 
     /**
-     * Restaurant plan + table primary + schedule calendar: Calendar sits after Bookings / table
+     * Restaurant plan + table primary + schedule calendar: Appointment Calendar sits after Bookings / table
      * views and before New Booking (and merged model links), not down by Waitlist.
      */
     if (isRestaurantTablePrimaryInner && calendarEligible) {
-      const calItem: NavItem = { href: '/dashboard/calendar', label: 'Calendar', icon: CalendarIcon };
+      const calItem: NavItem = { href: '/dashboard/calendar', label: 'Appointment Calendar', icon: CalendarIcon };
       const newIdx = items.findIndex((i) => i.href === '/dashboard/bookings/new');
       const alreadyHasCal = items.some((i) => i.href === '/dashboard/calendar');
       if (!alreadyHasCal && newIdx >= 0) {
@@ -335,7 +335,7 @@ export function DashboardSidebar({
                     ) : (
                       <ClipboardIcon className={`h-5 w-5 flex-shrink-0 ${scheduleActive ? 'text-brand-600' : 'text-slate-400'}`} />
                     )}
-                    {calendarEligible ? 'Calendar' : 'Day Sheet'}
+                    {calendarEligible ? 'Appointment Calendar' : 'Day Sheet'}
                   </Link>
                 </div>
               );

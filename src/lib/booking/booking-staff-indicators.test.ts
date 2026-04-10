@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   attendanceConfirmationSources,
+  canShowCancelStaffAttendanceConfirmationAction,
+  canShowConfirmBookingAttendanceAction,
   showAttendanceConfirmedPill,
   showDepositPendingPill,
 } from './booking-staff-indicators';
@@ -47,6 +49,62 @@ describe('showAttendanceConfirmedPill', () => {
         staff_attendance_confirmed_at: '2026-01-02T12:00:00.000Z',
       }),
     ).toBe(true);
+  });
+});
+
+describe('canShowConfirmBookingAttendanceAction', () => {
+  it('true for pending booking without attendance when not walk-in', () => {
+    expect(
+      canShowConfirmBookingAttendanceAction({
+        status: 'Pending',
+        source: 'booking_page',
+        guest_attendance_confirmed_at: null,
+        staff_attendance_confirmed_at: null,
+      }),
+    ).toBe(true);
+  });
+
+  it('false for walk-in', () => {
+    expect(
+      canShowConfirmBookingAttendanceAction({
+        status: 'Pending',
+        source: 'walk-in',
+        guest_attendance_confirmed_at: null,
+        staff_attendance_confirmed_at: null,
+      }),
+    ).toBe(false);
+  });
+
+  it('false when already confirmed', () => {
+    expect(
+      canShowConfirmBookingAttendanceAction({
+        status: 'Pending',
+        source: 'booking_page',
+        staff_attendance_confirmed_at: '2026-01-01T12:00:00.000Z',
+      }),
+    ).toBe(false);
+  });
+});
+
+describe('canShowCancelStaffAttendanceConfirmationAction', () => {
+  it('true when staff confirmed and not walk-in', () => {
+    expect(
+      canShowCancelStaffAttendanceConfirmationAction({
+        status: 'Confirmed',
+        source: 'booking_page',
+        staff_attendance_confirmed_at: '2026-01-01T12:00:00.000Z',
+      }),
+    ).toBe(true);
+  });
+
+  it('false without staff timestamp', () => {
+    expect(
+      canShowCancelStaffAttendanceConfirmationAction({
+        status: 'Confirmed',
+        source: 'booking_page',
+        staff_attendance_confirmed_at: null,
+      }),
+    ).toBe(false);
   });
 });
 

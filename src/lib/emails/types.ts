@@ -53,6 +53,11 @@ export interface BookingEmailData {
   appointment_price_display?: string | null;
   /** Model B group: one row per person/treatment (omit for single appointment). */
   group_appointments?: GroupAppointmentLine[];
+  /**
+   * Optional override for calendar end time (minutes). When omitted, defaults by booking model
+   * (e.g. 90 table, 60 appointment) for the “Add to calendar” link.
+   */
+  calendar_duration_minutes?: number;
 }
 
 export interface RenderedEmail {
