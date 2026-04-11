@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ScheduleFeedColumn } from '@/app/dashboard/practitioner-calendar/ScheduleFeedColumn';
 import { getCalendarGridBounds } from '@/lib/venue-calendar-bounds';
@@ -26,6 +26,7 @@ interface Props {
  */
 export function StaffScheduleMergedDayGrid({ date, bookingModel, enabledModels }: Props) {
   const router = useRouter();
+  const gridScrollRef = useRef<HTMLDivElement>(null);
   const [openingHours, setOpeningHours] = useState<OpeningHours | null>(null);
   const [blocks, setBlocks] = useState<ScheduleBlockDTO[]>([]);
   const [loading, setLoading] = useState(true);
@@ -64,6 +65,28 @@ export function StaffScheduleMergedDayGrid({ date, bookingModel, enabledModels }
       cancelled = true;
     };
   }, [date]);
+
+  useEffect(() => {
+    const root = gridScrollRef.current;
+    if (!root) return;
+
+    const onWheel = (e: WheelEvent) => {
+      const main = root.closest('main');
+      if (!main) return;
+      if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
+        root.scrollLeft += e.deltaX;
+        e.preventDefault();
+        return;
+      }
+      if (e.deltaY !== 0) {
+        main.scrollBy({ top: e.deltaY });
+        e.preventDefault();
+      }
+    };
+
+    root.addEventListener('wheel', onWheel, { passive: false });
+    return () => root.removeEventListener('wheel', onWheel);
+  }, []);
 
   const { startHour, endHour } = useMemo(
     () => getCalendarGridBounds(date, openingHours ?? undefined, 7, 21),
@@ -125,7 +148,10 @@ export function StaffScheduleMergedDayGrid({ date, bookingModel, enabledModels }
           Loading schedule…
         </div>
       ) : (
-        <div className="max-h-[min(720px,70vh)] overflow-auto rounded-xl border border-slate-200 bg-white">
+        <div
+          ref={gridScrollRef}
+          className="w-full touch-manipulation overflow-x-auto rounded-xl border border-slate-200 bg-white"
+        >
           <div className="flex min-w-[600px]">
             <div className="w-16 flex-shrink-0 border-r border-slate-100 bg-slate-50">
               <div className="h-10 border-b border-slate-100" />

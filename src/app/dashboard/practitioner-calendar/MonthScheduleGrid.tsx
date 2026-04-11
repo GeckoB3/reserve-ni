@@ -31,7 +31,7 @@ export function MonthScheduleGrid({
   }, [monthDayScheduleCounts]);
 
   return (
-    <div className="min-h-0 flex-1 overflow-auto rounded-xl border border-slate-200 bg-white p-4">
+    <div className="w-full min-w-0 overflow-x-auto rounded-xl border border-slate-200 bg-white p-4">
       <div className="grid grid-cols-7 gap-1 text-center text-xs font-medium text-slate-500">
         {WEEK_SHORT.map((d) => (
           <div key={d} className="py-2">

@@ -142,6 +142,7 @@ export function ResourceCalendarGrid({
   const [availabilityDuration, setAvailabilityDuration] = useState(60);
   const [availSlots, setAvailSlots] = useState<Record<string, AvailSlot[]>>({});
   const scrollRef = useRef<HTMLDivElement>(null);
+  const timelineRootRef = useRef<HTMLDivElement>(null);
 
   const bounds = useMemo(
     () => getCalendarGridBounds(date, openingHours ?? undefined, 7, 21),
@@ -246,15 +247,50 @@ export function ResourceCalendarGrid({
   useEffect(() => {
     if (loading) return;
     const el = scrollRef.current;
-    if (!el) return;
+    const main = el?.closest('main');
+    if (!el || !main) return;
     const eightAm = ((8 - startHour) * 60) / SLOT_MINUTES;
-    el.scrollTop = Math.max(0, eightAm * SLOT_HEIGHT);
+    const yOffset = Math.max(0, eightAm * SLOT_HEIGHT);
+    const apply = () => {
+      const m = scrollRef.current?.closest('main');
+      const node = scrollRef.current;
+      if (!m || !node) return;
+      const mainRect = m.getBoundingClientRect();
+      const elRect = node.getBoundingClientRect();
+      const elDocTop = m.scrollTop + (elRect.top - mainRect.top);
+      m.scrollTo({ top: Math.max(0, elDocTop + yOffset) });
+    };
+    const id = requestAnimationFrame(() => requestAnimationFrame(apply));
+    return () => cancelAnimationFrame(id);
   }, [loading, startHour, date]);
+
+  useEffect(() => {
+    const root = timelineRootRef.current;
+    if (!root) return;
+
+    const onWheel = (e: WheelEvent) => {
+      const node = scrollRef.current;
+      const main = node?.closest('main');
+      if (!node || !main) return;
+      if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
+        node.scrollLeft += e.deltaX;
+        e.preventDefault();
+        return;
+      }
+      if (e.deltaY !== 0) {
+        main.scrollBy({ top: e.deltaY });
+        e.preventDefault();
+      }
+    };
+
+    root.addEventListener('wheel', onWheel, { passive: false });
+    return () => root.removeEventListener('wheel', onWheel);
+  }, [loading, resources.length]);
 
   const sym = currency === 'EUR' ? '€' : '£';
 
   return (
-    <div className="flex min-h-0 flex-col">
+    <div className="flex flex-col">
       {!compactToolbar && (
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-2">
@@ -325,9 +361,10 @@ export function ResourceCalendarGrid({
           <p className="mt-2 text-sm">Add resources under Settings or your venue setup checklist.</p>
         </div>
       ) : (
+        <div ref={timelineRootRef}>
         <div
           ref={scrollRef}
-          className="min-h-0 max-h-[calc(100dvh-220px)] flex-1 overflow-auto rounded-xl border border-slate-200 bg-white motion-safe:scroll-smooth md:max-h-[calc(100dvh-180px)]"
+          className="min-w-0 w-full touch-manipulation overflow-x-auto rounded-xl border border-slate-200 bg-white motion-safe:scroll-smooth"
         >
           <div className="flex min-w-[560px]">
             <div className="w-14 flex-shrink-0 border-r border-slate-100 bg-slate-50">
@@ -431,6 +468,7 @@ export function ResourceCalendarGrid({
               );
             })}
           </div>
+        </div>
         </div>
       )}
 

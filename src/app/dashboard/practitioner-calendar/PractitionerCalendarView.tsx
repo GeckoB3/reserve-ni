@@ -897,9 +897,10 @@ export function PractitionerCalendarView({
   const [noShowGraceMinutes, setNoShowGraceMinutes] = useState(15);
   const [scheduleBlocks, setScheduleBlocks] = useState<ScheduleBlockDTO[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const timelineRootRef = useRef<HTMLDivElement>(null);
   const touchX = useRef<number | null>(null);
   /** Snapshot when a touch starts; if scrollLeft/scrollTop move during the gesture, it was scrolling, not a day swipe. */
-  const scrollSnapshotAtTouch = useRef<{ left: number; top: number } | null>(null);
+  const scrollSnapshotAtTouch = useRef<{ left: number; top: number; mainScrollTop: number } | null>(null);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 10 } }));
 
@@ -1056,21 +1057,36 @@ export function PractitionerCalendarView({
   useEffect(() => {
     if (loading || viewMode !== 'day') return;
     const el = scrollRef.current;
-    if (!el) return;
+    const main = el?.closest('main');
+    if (!el || !main) return;
+
+    const gridStartM = startHour * 60;
+    const gridEndM = endHour * 60;
+    let yOffset: number;
     if (date === todayLocalISO()) {
       const now = new Date();
       const nowM = now.getHours() * 60 + now.getMinutes();
-      const gridStartM = startHour * 60;
-      const gridEndM = endHour * 60;
       const clampedM = Math.min(Math.max(nowM, gridStartM), Math.max(gridEndM - SLOT_MINUTES, gridStartM));
       const slotFromStart = (clampedM - gridStartM) / SLOT_MINUTES;
       const targetY = slotFromStart * SLOT_HEIGHT;
-      const viewH = el.clientHeight;
-      el.scrollTop = Math.max(0, targetY - viewH * 0.28);
+      const viewH = main.clientHeight;
+      yOffset = Math.max(0, targetY - viewH * 0.28);
     } else {
       const eightAm = ((8 - startHour) * 60) / SLOT_MINUTES;
-      el.scrollTop = Math.max(0, eightAm * SLOT_HEIGHT);
+      yOffset = Math.max(0, eightAm * SLOT_HEIGHT);
     }
+
+    const apply = () => {
+      const m = scrollRef.current?.closest('main');
+      const node = scrollRef.current;
+      if (!m || !node) return;
+      const mainRect = m.getBoundingClientRect();
+      const elRect = node.getBoundingClientRect();
+      const elDocTop = m.scrollTop + (elRect.top - mainRect.top);
+      m.scrollTo({ top: Math.max(0, elDocTop + yOffset) });
+    };
+    const id = requestAnimationFrame(() => requestAnimationFrame(apply));
+    return () => cancelAnimationFrame(id);
   }, [loading, viewMode, date, startHour, endHour]);
 
   useEffect(() => {
@@ -1145,6 +1161,29 @@ export function PractitionerCalendarView({
     const allowed = new Set(calendarFilterIds);
     return columnPractitioners.filter((p) => allowed.has(p.id));
   }, [columnPractitioners, calendarFilterIds]);
+
+  useEffect(() => {
+    const root = timelineRootRef.current;
+    if (!root) return;
+
+    const onWheel = (e: WheelEvent) => {
+      const node = scrollRef.current;
+      const main = node?.closest('main');
+      if (!node || !main) return;
+      if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
+        node.scrollLeft += e.deltaX;
+        e.preventDefault();
+        return;
+      }
+      if (e.deltaY !== 0) {
+        main.scrollBy({ top: e.deltaY });
+        e.preventDefault();
+      }
+    };
+
+    root.addEventListener('wheel', onWheel, { passive: false });
+    return () => root.removeEventListener('wheel', onWheel);
+  }, [loading, viewMode, filteredPractitioners.length]);
 
   const resourceParentById = useMemo(() => {
     const m = new Map<string, string>();
@@ -1606,7 +1645,7 @@ export function PractitionerCalendarView({
   }, [detailBookingId, bookings]);
 
   return (
-    <div className="flex min-h-0 flex-col h-[calc(100dvh-72px)] md:h-[calc(100dvh-100px)] lg:h-[calc(100dvh-120px)]">
+    <div className="flex flex-col">
       <div className="flex-shrink-0 space-y-3 pb-3">
         <PractitionerCalendarToolbar
           viewMode={viewMode}
@@ -1693,11 +1732,11 @@ export function PractitionerCalendarView({
       )}
 
       {loading ? (
-        <div className="flex min-h-0 flex-1 items-center justify-center">
+        <div className="flex min-h-[40vh] items-center justify-center">
           <div className="h-8 w-8 animate-spin rounded-full border-4 border-blue-600 border-t-transparent" />
         </div>
       ) : filteredPractitioners.length === 0 ? (
-        <div className="flex flex-1 items-center justify-center">
+        <div className="flex min-h-[40vh] items-center justify-center">
           <div className="rounded-xl border border-slate-200 bg-white p-12 text-center">
             <p className="text-slate-500">No calendars configured yet. Add them in Calendar availability.</p>
           </div>
@@ -1716,8 +1755,8 @@ export function PractitionerCalendarView({
           }}
         />
       ) : viewMode === 'week' ? (
-        <div className="min-h-0 flex-1 overflow-auto rounded-xl border border-slate-200 bg-white">
-          <div className="min-w-[720px] overflow-x-auto">
+        <div className="w-full overflow-x-auto rounded-xl border border-slate-200 bg-white">
+          <div className="min-w-[720px]">
             <table className="w-full border-collapse text-sm">
               <thead>
                 <tr className="border-b border-slate-200 bg-slate-50">
@@ -1863,16 +1902,17 @@ export function PractitionerCalendarView({
           </div>
         </div>
       ) : (
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <div ref={timelineRootRef} className="flex min-w-0 w-full flex-col">
           <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
             <div
               ref={scrollRef}
-              className="min-h-0 flex-1 overflow-x-auto overflow-y-auto rounded-xl border border-slate-200 bg-white motion-safe:scroll-smooth"
+              className="min-w-0 w-full touch-manipulation overflow-x-auto rounded-xl border border-slate-200 bg-white motion-safe:scroll-smooth"
             onTouchStart={(e) => {
               touchX.current = e.touches[0].clientX;
               const el = scrollRef.current;
-              scrollSnapshotAtTouch.current = el
-                ? { left: el.scrollLeft, top: el.scrollTop }
+              const main = el?.closest('main');
+              scrollSnapshotAtTouch.current = el && main
+                ? { left: el.scrollLeft, top: el.scrollTop, mainScrollTop: main.scrollTop }
                 : null;
             }}
             onTouchEnd={(e) => {
@@ -1880,11 +1920,13 @@ export function PractitionerCalendarView({
               const dx = e.changedTouches[0].clientX - touchX.current;
               touchX.current = null;
               const el = scrollRef.current;
+              const main = el?.closest('main');
               const snap = scrollSnapshotAtTouch.current;
               scrollSnapshotAtTouch.current = null;
-              if (el && snap) {
+              if (el && snap && main) {
                 const movedH = Math.abs(el.scrollLeft - snap.left);
-                const movedV = Math.abs(el.scrollTop - snap.top);
+                const movedV =
+                  Math.abs(el.scrollTop - snap.top) + Math.abs(main.scrollTop - snap.mainScrollTop);
                 const scrollMoveThreshold = 10;
                 if (movedH > scrollMoveThreshold || movedV > scrollMoveThreshold) {
                   return;
