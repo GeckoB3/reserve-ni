@@ -212,7 +212,7 @@ export function TimelineGrid({
 }: Props) {
   const SLOT_WIDTH = slotWidth ?? SLOT_WIDTH_DEFAULT;
   const scrollRef = useRef<HTMLDivElement>(null);
-  const leftScrollRef = useRef<HTMLDivElement>(null);
+  const timelineRootRef = useRef<HTMLDivElement>(null);
   const [activeDrag, setActiveDrag] = useState<BookingBlock | null>(null);
   const activeDragRef = useRef<BookingBlock | null>(null);
   /** Touch/pen start position for a booking - used to avoid opening the context menu after a drag-intent move. */
@@ -407,20 +407,62 @@ export function TimelineGrid({
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
+    const mainEl = el.closest('main');
+
     const sync = () => {
-      setScrollTop(el.scrollTop);
-      setViewportHeight(el.clientHeight);
-      if (leftScrollRef.current) {
-        leftScrollRef.current.scrollTop = el.scrollTop;
+      const node = scrollRef.current;
+      if (!node) return;
+      const main = node.closest('main');
+      if (!main) {
+        setScrollTop(node.scrollTop);
+        setViewportHeight(node.clientHeight);
+        return;
       }
+      const mainRect = main.getBoundingClientRect();
+      const elRect = node.getBoundingClientRect();
+      const st = Math.max(0, mainRect.top - elRect.top);
+      setScrollTop(st);
+      const clipTop = Math.max(0, mainRect.top - elRect.top);
+      const clipBottom = Math.min(node.offsetHeight, mainRect.bottom - elRect.top);
+      setViewportHeight(Math.max(0, clipBottom - clipTop));
     };
+
     sync();
     el.addEventListener('scroll', sync, { passive: true });
     window.addEventListener('resize', sync);
+    mainEl?.addEventListener('scroll', sync, { passive: true });
+    const ro = new ResizeObserver(sync);
+    ro.observe(el);
+
     return () => {
       el.removeEventListener('scroll', sync);
       window.removeEventListener('resize', sync);
+      mainEl?.removeEventListener('scroll', sync);
+      ro.disconnect();
     };
+  }, []);
+
+  useEffect(() => {
+    const root = timelineRootRef.current;
+    if (!root) return;
+
+    const onWheel = (e: WheelEvent) => {
+      const node = scrollRef.current;
+      const main = node?.closest('main');
+      if (!node || !main) return;
+      if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
+        node.scrollLeft += e.deltaX;
+        e.preventDefault();
+        return;
+      }
+      if (e.deltaY !== 0) {
+        main.scrollBy({ top: e.deltaY });
+        e.preventDefault();
+      }
+    };
+
+    root.addEventListener('wheel', onWheel, { passive: false });
+    return () => root.removeEventListener('wheel', onWheel);
   }, []);
 
   const [nowMinutes, setNowMinutes] = useState(() => {
@@ -820,22 +862,12 @@ export function TimelineGrid({
       onDragCancel={handleDragCancel}
       onDragEnd={handleDragEnd}
     >
-      <div className="flex h-full">
+      <div ref={timelineRootRef} className="flex w-full min-w-0">
         <div className="flex w-20 shrink-0 flex-col border-r border-slate-200 bg-slate-50/50 sm:w-28 md:w-[140px]">
-          <div className="flex h-10 items-center border-b border-slate-200 px-3 text-xs font-semibold text-slate-500">
+          <div className="flex h-10 shrink-0 items-center border-b border-slate-200 px-3 text-xs font-semibold text-slate-500">
             Tables
           </div>
-          <div
-            ref={leftScrollRef}
-            className="flex-1"
-            style={{ overflow: 'hidden' }}
-            onWheel={(e) => {
-              if (scrollRef.current) {
-                scrollRef.current.scrollTop += e.deltaY;
-                scrollRef.current.scrollLeft += e.deltaX;
-              }
-            }}
-          >
+          <div className="flex flex-col">
             <div style={{ height: topSpacerHeight }} />
             {visibleRowEntries.map((entry) => {
               if (entry.type === 'zone') {
@@ -886,7 +918,7 @@ export function TimelineGrid({
           </div>
         </div>
 
-        <div ref={scrollRef} className="flex-1 touch-manipulation overflow-auto">
+        <div ref={scrollRef} className="min-w-0 flex-1 touch-manipulation overflow-x-auto">
           <div style={{ width: gridWidth, position: 'relative' }}>
             <div className="sticky top-0 z-10 flex border-b border-slate-200 bg-white" style={{ height: HEADER_HEIGHT }}>
               {timeSlots.map((time, i) => (
