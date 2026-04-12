@@ -11,7 +11,8 @@
     "test:watch": "vitest",
     "smoke:cron": "node scripts/smoke-cron.mjs",
     "seed:dev-use-account": "node scripts/seed-dev-use-standard-account.mjs",
-    "delete:user-venue": "node scripts/delete-user-and-venue.mjs"
+    "delete:user-venue": "node scripts/delete-user-and-venue.mjs",
+    "supabase": "supabase"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
@@ -48,6 +49,7 @@
     "dotenv": "^17.3.1",
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
+    "supabase": "^2.89.1",
     "tailwindcss": "^4",
     "tsx": "^4.21.0",
     "typescript": "^5",

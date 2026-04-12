@@ -24,7 +24,8 @@ import {
   serviceDraftToApiPayload,
   type AppointmentServiceFormDraft,
 } from '@/components/onboarding/OnboardingAppointmentServiceList';
-import { normalizeTimeToHhMm } from '@/lib/experience-events/experience-event-validation';
+import { normalizeTimeToHhMm, validateStartEndTimes } from '@/lib/experience-events/experience-event-validation';
+import { formatZodFlattenedError } from '@/lib/experience-events/experience-event-zod';
 
 type Currency = 'GBP' | 'EUR';
 
@@ -67,13 +68,158 @@ interface PractitionerDraft {
   email: string;
 }
 
+/** Aligned with dashboard Event Manager create form (`EventManagerView` BLANK_EVENT + submit payload). */
+interface EventTicketDraft {
+  name: string;
+  price_pence: string;
+  capacity: string;
+}
+
+type EventScheduleMode = 'single' | 'weekly' | 'custom';
+
 interface EventDraft {
   name: string;
-  date: string;
+  description: string;
+  event_date: string;
   start_time: string;
   end_time: string;
   capacity: number;
-  ticketPrice: string;
+  image_url: string;
+  ticket_types: EventTicketDraft[];
+  scheduleMode: EventScheduleMode;
+  recurrenceUntil: string;
+  customDatesText: string;
+  calendar_id: string;
+  max_advance_booking_days: number;
+  min_booking_notice_hours: number;
+  cancellation_notice_hours: number;
+  allow_same_day_booking: boolean;
+  payment_requirement: 'none' | 'deposit' | 'full_payment';
+  deposit_pounds: string;
+}
+
+function parseOptionalTicketCapacity(raw: string): number | undefined {
+  const cap = raw.trim();
+  if (cap === '') return undefined;
+  const n = parseInt(cap, 10);
+  if (!Number.isFinite(n) || n < 1) return undefined;
+  return n;
+}
+
+function parseCustomDatesFromText(text: string): string[] {
+  const parts = text
+    .split(/[\s,;\n]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const set = new Set<string>();
+  for (const p of parts) {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(p)) set.add(p);
+  }
+  return [...set].sort();
+}
+
+function isEventSchedulingEmpty(d: EventDraft): boolean {
+  if (d.scheduleMode === 'single') return !d.event_date.trim();
+  if (d.scheduleMode === 'weekly') return !d.event_date.trim() && !d.recurrenceUntil.trim();
+  return parseCustomDatesFromText(d.customDatesText).length === 0;
+}
+
+/** Mirrors `handleSaveEvent` in `EventManagerView` for POST /api/venue/experience-events. */
+function buildOnboardingExperienceEventPostBody(
+  d: EventDraft,
+): { ok: true; body: Record<string, unknown> } | { ok: false; error: string } {
+  if (!d.name.trim()) {
+    return { ok: false, error: 'Event name is required.' };
+  }
+  const validTickets = d.ticket_types.filter((tt) => tt.name.trim());
+  if (validTickets.length === 0) {
+    return { ok: false, error: 'At least one ticket type with a name is required.' };
+  }
+
+  let eventDateForPayload = d.event_date;
+  if (d.scheduleMode === 'custom') {
+    const customDates = parseCustomDatesFromText(d.customDatesText);
+    if (customDates.length === 0) {
+      return { ok: false, error: 'Add at least one date (YYYY-MM-DD), separated by commas or new lines.' };
+    }
+    eventDateForPayload = customDates[0]!;
+  } else if (!d.event_date.trim()) {
+    return { ok: false, error: 'Event date is required.' };
+  }
+
+  if (!d.start_time || !d.end_time) {
+    return { ok: false, error: 'Start and end time are required.' };
+  }
+
+  const timeErr = validateStartEndTimes(d.start_time, d.end_time);
+  if (timeErr) {
+    return { ok: false, error: timeErr };
+  }
+
+  if (d.scheduleMode === 'weekly') {
+    if (!d.recurrenceUntil.trim()) {
+      return { ok: false, error: 'End date is required for weekly recurrence.' };
+    }
+    if (d.recurrenceUntil < d.event_date) {
+      return { ok: false, error: 'End date must be on or after the first occurrence date.' };
+    }
+  }
+
+  const depositPence =
+    d.payment_requirement === 'deposit' && d.deposit_pounds.trim() !== ''
+      ? Math.max(0, Math.round(parseFloat(d.deposit_pounds) * 100))
+      : null;
+
+  if (d.payment_requirement === 'deposit') {
+    const raw = d.deposit_pounds.trim();
+    const dep = parseFloat(raw);
+    if (!raw || !Number.isFinite(dep) || dep <= 0) {
+      return { ok: false, error: 'Enter a deposit amount greater than zero when taking a deposit online.' };
+    }
+  }
+
+  const basePayload = {
+    name: d.name.trim(),
+    description: d.description.trim() || null,
+    event_date: eventDateForPayload,
+    start_time: normalizeTimeToHhMm(d.start_time),
+    end_time: normalizeTimeToHhMm(d.end_time),
+    capacity: d.capacity,
+    image_url: d.image_url.trim() || null,
+    ticket_types: validTickets.map((tt) => {
+      const cap = parseOptionalTicketCapacity(tt.capacity);
+      return {
+        name: tt.name.trim(),
+        price_pence: Math.round(parseFloat(tt.price_pence || '0') * 100),
+        ...(cap !== undefined ? { capacity: cap } : {}),
+      };
+    }),
+    calendar_id: d.calendar_id.trim() || null,
+    max_advance_booking_days: d.max_advance_booking_days,
+    min_booking_notice_hours: d.min_booking_notice_hours,
+    cancellation_notice_hours: d.cancellation_notice_hours,
+    allow_same_day_booking: d.allow_same_day_booking,
+    payment_requirement: d.payment_requirement,
+    deposit_amount_pence: depositPence,
+  };
+
+  let postBody: Record<string, unknown> = { ...basePayload };
+  if (d.scheduleMode === 'weekly') {
+    postBody = {
+      ...basePayload,
+      event_date: d.event_date,
+      schedule: { type: 'weekly' as const, until_date: d.recurrenceUntil },
+    };
+  } else if (d.scheduleMode === 'custom') {
+    const dates = parseCustomDatesFromText(d.customDatesText);
+    postBody = {
+      ...basePayload,
+      event_date: dates[0],
+      schedule: { type: 'custom' as const, dates },
+    };
+  }
+
+  return { ok: true, body: postBody };
 }
 
 interface ClassDraft {
@@ -165,6 +311,8 @@ export default function OnboardingPage() {
   const [loading, setLoading] = useState(true);
   const [step, setStep] = useState(0);
   const [maxCompletedStep, setMaxCompletedStep] = useState(0);
+  /** Step index the user navigated back to; forces save on Continue instead of skipping persistence. */
+  const [revisitedStepIndex, setRevisitedStepIndex] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -190,12 +338,43 @@ export default function OnboardingPage() {
   // Model C: First event
   const [eventDraft, setEventDraft] = useState<EventDraft>({
     name: '',
-    date: '',
+    description: '',
+    event_date: '',
     start_time: '10:00',
     end_time: '12:00',
     capacity: 20,
-    ticketPrice: '0.00',
+    image_url: '',
+    ticket_types: [{ name: 'General Admission', price_pence: '0.00', capacity: '' }],
+    scheduleMode: 'single',
+    recurrenceUntil: '',
+    customDatesText: '',
+    calendar_id: '',
+    max_advance_booking_days: 90,
+    min_booking_notice_hours: 1,
+    cancellation_notice_hours: 48,
+    allow_same_day_booking: true,
+    payment_requirement: 'none',
+    deposit_pounds: '',
   });
+
+  const addEventTicketType = useCallback(() => {
+    setEventDraft((f) => ({
+      ...f,
+      ticket_types: [...f.ticket_types, { name: '', price_pence: '0.00', capacity: '' }],
+    }));
+  }, []);
+
+  const removeEventTicketType = useCallback((i: number) => {
+    setEventDraft((f) => ({ ...f, ticket_types: f.ticket_types.filter((_, j) => j !== i) }));
+  }, []);
+
+  const updateEventTicketType = useCallback((i: number, patch: Partial<EventTicketDraft>) => {
+    setEventDraft((f) => {
+      const updated = [...f.ticket_types];
+      updated[i] = { ...updated[i]!, ...patch };
+      return { ...f, ticket_types: updated };
+    });
+  }, []);
 
   // Model D: Classes
   const [classes, setClasses] = useState<ClassDraft[]>([
@@ -342,6 +521,7 @@ export default function OnboardingPage() {
         { key: 'profile', label: 'Business Details' },
         { key: 'opening_hours', label: 'Opening Hours' },
         { key: 'team', label: 'Calendars' },
+        { key: 'stripe_onboarding', label: 'Payments (Stripe)' },
         { key: 'users', label: 'Other Users' },
       ];
 
@@ -368,6 +548,7 @@ export default function OnboardingPage() {
 
     const steps: Array<{ key: string; label: string }> = [
       { key: 'profile', label: 'Business Profile' },
+      { key: 'stripe_onboarding', label: 'Payments (Stripe)' },
     ];
 
     switch (venue.booking_model) {
@@ -413,10 +594,17 @@ export default function OnboardingPage() {
   }, [rosterList]);
 
   useEffect(() => {
+    if (rosterList.length === 0) return;
+    const firstId = rosterList[0]!.id;
+    setEventDraft((prev) => (prev.calendar_id.trim() ? prev : { ...prev, calendar_id: firstId }));
+  }, [rosterList]);
+
+  useEffect(() => {
     if (!venue) return;
-    if (!['team', 'services', 'hours', 'classes', 'resources'].includes(currentStepKey)) return;
+    if (!['team', 'services', 'hours', 'classes', 'resources', 'first_event'].includes(currentStepKey)) return;
     const needsTeamRoster =
       currentStepKey === 'resources' ||
+      currentStepKey === 'first_event' ||
       isUnifiedSchedulingVenue(venue.booking_model) ||
       venue.booking_model === 'class_session';
     if (!needsTeamRoster) {
@@ -456,7 +644,7 @@ export default function OnboardingPage() {
       return;
     }
     if (!isUnifiedSchedulingVenue(venue.booking_model)) return;
-    if (!(step < maxCompletedStep)) {
+    if (!(step < maxCompletedStep && step !== revisitedStepIndex)) {
       setServicesSyncReady(true);
       return;
     }
@@ -486,7 +674,7 @@ export default function OnboardingPage() {
     return () => {
       cancelled = true;
     };
-  }, [venue, currentStepKey, step, maxCompletedStep]);
+  }, [venue, currentStepKey, step, maxCompletedStep, revisitedStepIndex]);
 
   useEffect(() => {
     if (!venue || !isUnifiedSchedulingVenue(venue.booking_model)) return;
@@ -550,7 +738,7 @@ export default function OnboardingPage() {
     setError(null);
 
     if (currentStepKey === 'welcome') {
-      if (step < maxCompletedStep) {
+      if (step < maxCompletedStep && step !== revisitedStepIndex) {
         setStep((s) => s + 1);
         return;
       }
@@ -560,6 +748,23 @@ export default function OnboardingPage() {
         setMaxCompletedStep((prev) => Math.max(prev, step + 1));
       } catch {
         setError('Failed to save your progress. Please try again.');
+        setSaving(false);
+        return;
+      }
+      setSaving(false);
+    }
+
+    if (currentStepKey === 'stripe_onboarding') {
+      if (step < maxCompletedStep && step !== revisitedStepIndex) {
+        setStep((s) => s + 1);
+        return;
+      }
+      setSaving(true);
+      try {
+        await saveProgress(step + 1);
+        setMaxCompletedStep((prev) => Math.max(prev, step + 1));
+      } catch {
+        setError('Failed to save progress. Please try again.');
         setSaving(false);
         return;
       }
@@ -627,7 +832,7 @@ export default function OnboardingPage() {
     }
 
     if (currentStepKey === 'opening_hours') {
-      if (step < maxCompletedStep) {
+      if (step < maxCompletedStep && step !== revisitedStepIndex) {
         setStep((s) => s + 1);
         return;
       }
@@ -660,7 +865,7 @@ export default function OnboardingPage() {
     }
 
     if (currentStepKey === 'team') {
-      if (step < maxCompletedStep) {
+      if (step < maxCompletedStep && step !== revisitedStepIndex) {
         setStep((s) => s + 1);
         return;
       }
@@ -766,7 +971,7 @@ export default function OnboardingPage() {
     }
 
     if (currentStepKey === 'users') {
-      if (step < maxCompletedStep) {
+      if (step < maxCompletedStep && step !== revisitedStepIndex) {
         setStep((s) => s + 1);
         return;
       }
@@ -782,7 +987,21 @@ export default function OnboardingPage() {
       }
       setSaving(true);
       try {
+        const staffListRes = await fetch('/api/venue/staff');
+        if (!staffListRes.ok) {
+          const errBody = (await staffListRes.json().catch(() => ({}))) as { error?: string };
+          throw new Error(errBody.error ?? 'Could not load staff list');
+        }
+        const staffBody = (await staffListRes.json()) as {
+          staff?: Array<{ email: string }>;
+        };
+        const existingEmails = new Set(
+          (staffBody.staff ?? []).map((r) => r.email.toLowerCase().trim()),
+        );
         for (const invite of validInvites) {
+          if (existingEmails.has(invite.email)) {
+            continue;
+          }
           const res = await fetch('/api/venue/staff/invite', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -792,8 +1011,8 @@ export default function OnboardingPage() {
             const body = (await res.json().catch(() => ({}))) as { error?: string };
             throw new Error(body.error ?? `Failed to invite ${invite.email}`);
           }
+          existingEmails.add(invite.email);
         }
-        setStaffInvites([{ email: '', role: 'staff' }]);
         await saveProgress(step + 1);
         setMaxCompletedStep((prev) => Math.max(prev, step + 1));
       } catch (e) {
@@ -808,7 +1027,7 @@ export default function OnboardingPage() {
       if (!servicesSyncReady) return;
       const validServices = services.filter((s) => s.name.trim());
       if (validServices.length === 0) {
-        if (step < maxCompletedStep) {
+        if (step < maxCompletedStep && step !== revisitedStepIndex) {
           setStep((s) => s + 1);
           return;
         }
@@ -889,7 +1108,7 @@ export default function OnboardingPage() {
     }
 
     if (currentStepKey === 'hours') {
-      if (step < maxCompletedStep) {
+      if (step < maxCompletedStep && step !== revisitedStepIndex) {
         setStep((s) => s + 1);
         return;
       }
@@ -944,14 +1163,14 @@ export default function OnboardingPage() {
     }
 
     if (currentStepKey === 'first_event') {
-      if (step < maxCompletedStep) {
+      if (step < maxCompletedStep && step !== revisitedStepIndex) {
         setStep((s) => s + 1);
         return;
       }
       const eventName = eventDraft.name.trim();
-      const eventDate = eventDraft.date.trim();
+      const schedulingEmpty = isEventSchedulingEmpty(eventDraft);
 
-      if (isAppointmentsPlanVenue && !eventName && !eventDate) {
+      if (isAppointmentsPlanVenue && !eventName && schedulingEmpty) {
         setSaving(true);
         try {
           await saveProgress(step + 1);
@@ -963,16 +1182,13 @@ export default function OnboardingPage() {
         }
         setSaving(false);
       } else {
-        if (!eventName || !eventDate) {
-          setError(
-            isAppointmentsPlanVenue
-              ? 'Enter both an event name and date, or leave both empty to skip this step.'
-              : 'Please enter an event name and date.',
-          );
+        if (isAppointmentsPlanVenue && !eventName && !schedulingEmpty) {
+          setError('Enter an event name or clear all scheduling fields to skip this step.');
           return;
         }
-        if (eventDraft.end_time <= eventDraft.start_time) {
-          setError('End time must be after start time.');
+        const built = buildOnboardingExperienceEventPostBody(eventDraft);
+        if (!built.ok) {
+          setError(built.error);
           return;
         }
         setSaving(true);
@@ -980,26 +1196,35 @@ export default function OnboardingPage() {
           const res = await fetch('/api/venue/experience-events', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              name: eventName,
-              event_date: eventDate,
-              start_time: normalizeTimeToHhMm(eventDraft.start_time),
-              end_time: normalizeTimeToHhMm(eventDraft.end_time),
-              capacity: eventDraft.capacity,
-              ticket_types: [
-                {
-                  name: 'General Admission',
-                  price_pence: poundsToMinor(eventDraft.ticketPrice),
-                  capacity: eventDraft.capacity,
-                },
-              ],
-            }),
+            body: JSON.stringify(built.body),
           });
-          if (!res.ok) throw new Error('Failed to create event');
+          const json = (await res.json()) as {
+            error?: string;
+            details?: unknown;
+            upgrade_required?: boolean;
+            current?: number;
+            limit?: number;
+          };
+          if (!res.ok) {
+            if (res.status === 403 && json.upgrade_required) {
+              throw new Error(
+                `Plan limit reached: ${json.current ?? '?'} of ${json.limit ?? '?'} active events. Upgrade your plan or deactivate old events.`,
+              );
+            }
+            if (res.status === 409) {
+              throw new Error(
+                json.error ??
+                  'This time conflicts with another booking or block on that calendar. Choose another time or calendar.',
+              );
+            }
+            const hint = formatZodFlattenedError(json.details);
+            const baseErr = json.error ?? 'Failed to create event';
+            throw new Error(hint ? `${baseErr}: ${hint}` : baseErr);
+          }
           await saveProgress(step + 1);
           setMaxCompletedStep((prev) => Math.max(prev, step + 1));
-        } catch {
-          setError('Failed to save event. Please try again.');
+        } catch (e) {
+          setError(e instanceof Error ? e.message : 'Failed to save event. Please try again.');
           setSaving(false);
           return;
         }
@@ -1008,7 +1233,7 @@ export default function OnboardingPage() {
     }
 
     if (currentStepKey === 'classes') {
-      if (step < maxCompletedStep) {
+      if (step < maxCompletedStep && step !== revisitedStepIndex) {
         setStep((s) => s + 1);
         return;
       }
@@ -1061,7 +1286,7 @@ export default function OnboardingPage() {
     }
 
     if (currentStepKey === 'resources') {
-      if (step < maxCompletedStep) {
+      if (step < maxCompletedStep && step !== revisitedStepIndex) {
         setStep((s) => s + 1);
         return;
       }
@@ -1179,7 +1404,7 @@ export default function OnboardingPage() {
     }
 
     if (currentStepKey === 'restaurant_setup') {
-      if (step < maxCompletedStep) {
+      if (step < maxCompletedStep && step !== revisitedStepIndex) {
         setStep((s) => s + 1);
         return;
       }
@@ -1195,6 +1420,9 @@ export default function OnboardingPage() {
       setSaving(false);
     }
 
+    if (revisitedStepIndex === step) {
+      setRevisitedStepIndex(null);
+    }
     setStep((s) => s + 1);
   }
 
@@ -1239,9 +1467,12 @@ export default function OnboardingPage() {
     );
   }
 
+  const sym = currencySymbol(currency);
+
   const wideOnboardingStep =
-    isUnifiedSchedulingVenue(venue.booking_model) &&
-    (currentStepKey === 'services' || currentStepKey === 'hours');
+    currentStepKey === 'first_event' ||
+    (isUnifiedSchedulingVenue(venue.booking_model) &&
+      (currentStepKey === 'services' || currentStepKey === 'hours'));
 
   return (
     <div className={`w-full ${wideOnboardingStep ? 'max-w-3xl' : 'max-w-xl'}`}>
@@ -1259,6 +1490,12 @@ export default function OnboardingPage() {
             style={{ width: `${((step + 1) / totalSteps) * 100}%` }}
           />
         </div>
+        {step > 0 && (
+          <p className="mt-2 text-xs text-slate-500">
+            Use <span className="font-medium text-slate-600">Back</span> to change a previous step. Your entries stay in
+            this session and are saved to your venue when you choose Continue.
+          </p>
+        )}
       </div>
 
       <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
@@ -1295,6 +1532,45 @@ export default function OnboardingPage() {
               You can enable or disable booking models later from Settings, but this onboarding flow will make sure the
               ones above are ready to use straight away.
             </div>
+          </div>
+        )}
+
+        {currentStepKey === 'stripe_onboarding' && (
+          <div>
+            <h2 className="mb-1 text-lg font-bold text-slate-900">Connect Stripe for online payments</h2>
+            <p className="mb-4 text-sm text-slate-500">
+              To take card payments and deposits (for appointments, ticketed events, resources, and restaurant bookings),
+              you need a connected Stripe account. This step is optional: you can finish onboarding now and set up Stripe
+              later.
+            </p>
+            <div className="mb-6 rounded-xl border border-amber-200 bg-amber-50/80 px-4 py-3 text-sm text-amber-950">
+              <p className="font-medium">Skip if you are not ready</p>
+              <p className="mt-1 text-amber-900/90">
+                Press <span className="font-semibold">Continue</span> below to move on without connecting Stripe. You can
+                complete payment setup any time under{' '}
+                <Link
+                  href="/dashboard/settings?tab=payments"
+                  className="font-medium text-brand-700 underline hover:text-brand-800"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Settings → Payments
+                </Link>
+                .
+              </p>
+            </div>
+            <p className="mb-4 text-sm text-slate-600">
+              When you are ready, open{' '}
+              <Link
+                href="/dashboard/settings?tab=payments"
+                className="font-medium text-brand-600 underline hover:text-brand-700"
+                target="_blank"
+                rel="noreferrer"
+              >
+                Settings → Payments
+              </Link>{' '}
+              to connect Stripe and verify your business details.
+            </p>
           </div>
         )}
 
@@ -1642,7 +1918,7 @@ export default function OnboardingPage() {
           </div>
         )}
 
-        {/* Model C: First event */}
+        {/* Model C: First event — aligned with dashboard Event manager → Create event */}
         {currentStepKey === 'first_event' && (
           <div>
             <h2 className="mb-1 text-lg font-bold text-slate-900">
@@ -1651,13 +1927,15 @@ export default function OnboardingPage() {
             <p className="mb-4 text-sm text-slate-500">
               {isAppointmentsPlanVenue ? (
                 <>
-                  You can skip this step and add events later. Events are ticketed experiences with a date and time;
-                  you create and manage them in the dashboard under{' '}
-                  <Link href="/dashboard/event-manager" className="font-medium text-brand-600 underline hover:text-brand-700">
+                  You can skip this step and add events later. Use the same form as{' '}
+                  <Link
+                    href="/dashboard/event-manager"
+                    className="font-medium text-brand-600 underline hover:text-brand-700"
+                  >
                     Event manager
-                  </Link>
-                  , where you set capacity, ticket types, and pricing. Guests book from your public Events tab when you
-                  publish an event.
+                  </Link>{' '}
+                  → Create event: schedule, ticket types, guest rules, calendar column, and optional image. Guests book
+                  from your public Events tab when you publish an event.
                 </>
               ) : (
                 <>Create one event now so guests can start booking from your Events tab straight away.</>
@@ -1667,91 +1945,393 @@ export default function OnboardingPage() {
               <div className="mb-6 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
                 <p className="font-medium text-slate-800">Optional step</p>
                 <p className="mt-1">
-                  Leave the fields below empty and click Continue to go on — or fill them in to create a first event now.
+                  Leave the form empty and click Continue to skip — or complete it to create a first event now.
                 </p>
               </div>
             )}
-            <div className="space-y-4">
-              <div>
-                <label className="mb-1.5 block text-sm font-medium text-slate-700">
-                  Event name
-                </label>
-                <input
-                  type="text"
-                  value={eventDraft.name}
-                  onChange={(e) => setEventDraft({ ...eventDraft, name: e.target.value })}
-                  placeholder="e.g. Seasonal tasting, Open day"
-                  className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
-                />
+
+            <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
+              <div className="space-y-2 border-b border-slate-100 px-5 py-4">
+                <h3 className="font-semibold text-slate-800">Create event</h3>
+                <p className="text-xs text-slate-500">
+                  Online payment defaults to None during onboarding; connect Stripe under Settings → Payments before
+                  accepting deposits or card payments.
+                </p>
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="mb-1.5 block text-sm font-medium text-slate-700">Date</label>
-                  <input
-                    type="date"
-                    value={eventDraft.date}
-                    onChange={(e) => setEventDraft({ ...eventDraft, date: e.target.value })}
-                    className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
-                  />
+              <div className="space-y-4 px-5 py-4">
+                <div className="rounded-lg border border-slate-100 bg-slate-50/80 p-3">
+                  <p className="mb-2 text-xs font-medium text-slate-700">Schedule</p>
+                  <div className="flex flex-wrap gap-4 text-sm">
+                    <label className="flex cursor-pointer items-center gap-2">
+                      <input
+                        type="radio"
+                        name="onb_event_sched"
+                        checked={eventDraft.scheduleMode === 'single'}
+                        onChange={() => setEventDraft((f) => ({ ...f, scheduleMode: 'single' }))}
+                        className="text-brand-600 focus:ring-brand-500"
+                      />
+                      <span className="text-slate-700">One date</span>
+                    </label>
+                    <label className="flex cursor-pointer items-center gap-2">
+                      <input
+                        type="radio"
+                        name="onb_event_sched"
+                        checked={eventDraft.scheduleMode === 'weekly'}
+                        onChange={() => setEventDraft((f) => ({ ...f, scheduleMode: 'weekly' }))}
+                        className="text-brand-600 focus:ring-brand-500"
+                      />
+                      <span className="text-slate-700">Weekly (same weekday)</span>
+                    </label>
+                    <label className="flex cursor-pointer items-center gap-2">
+                      <input
+                        type="radio"
+                        name="onb_event_sched"
+                        checked={eventDraft.scheduleMode === 'custom'}
+                        onChange={() => setEventDraft((f) => ({ ...f, scheduleMode: 'custom' }))}
+                        className="text-brand-600 focus:ring-brand-500"
+                      />
+                      <span className="text-slate-700">Custom dates</span>
+                    </label>
+                  </div>
+                  <p className="mt-2 text-xs text-slate-500">
+                    Weekly and custom create one event row per date (same ticket setup on each).
+                  </p>
                 </div>
-                <div>
-                  <label className="mb-1.5 block text-sm font-medium text-slate-700">
-                    Start time
-                  </label>
-                  <input
-                    type="time"
-                    value={eventDraft.start_time}
-                    onChange={(e) => setEventDraft({ ...eventDraft, start_time: e.target.value })}
-                    className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
-                  />
-                </div>
-              </div>
-              <div>
-                <label className="mb-1.5 block text-sm font-medium text-slate-700">
-                  End time
-                </label>
-                <input
-                  type="time"
-                  value={eventDraft.end_time}
-                  onChange={(e) => setEventDraft({ ...eventDraft, end_time: e.target.value })}
-                  className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="mb-1.5 block text-sm font-medium text-slate-700">
-                    Capacity
-                  </label>
-                  <input
-                    type="number"
-                    value={eventDraft.capacity}
-                    onChange={(e) =>
-                      setEventDraft({ ...eventDraft, capacity: parseInt(e.target.value) || 20 })
-                    }
-                    min={1}
-                    className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="mb-1.5 block text-sm font-medium text-slate-700">
-                    Ticket price ({currencySymbol(currency)})
-                  </label>
-                  <div className="relative">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-400">
-                      {currencySymbol(currency)}
-                    </span>
+
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="sm:col-span-2">
+                    <label className="mb-1 block text-xs font-medium text-slate-600">Event name *</label>
                     <input
-                      type="number"
-                      value={eventDraft.ticketPrice}
-                      onChange={(e) =>
-                        setEventDraft({ ...eventDraft, ticketPrice: e.target.value })
-                      }
-                      min={0}
-                      step={0.01}
-                      placeholder="0.00"
-                      className="w-full rounded-xl border border-slate-200 py-2.5 pl-7 pr-4 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
+                      type="text"
+                      value={eventDraft.name}
+                      onChange={(e) => setEventDraft((f) => ({ ...f, name: e.target.value }))}
+                      placeholder="e.g. Seasonal tasting, Workshop"
+                      className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
                     />
                   </div>
+                  {eventDraft.scheduleMode !== 'custom' ? (
+                    <>
+                      <div>
+                        <label className="mb-1 block text-xs font-medium text-slate-600">
+                          {eventDraft.scheduleMode === 'weekly' ? 'First occurrence *' : 'Date *'}
+                        </label>
+                        <input
+                          type="date"
+                          value={eventDraft.event_date}
+                          onChange={(e) => setEventDraft((f) => ({ ...f, event_date: e.target.value }))}
+                          className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
+                        />
+                      </div>
+                      {eventDraft.scheduleMode === 'weekly' && (
+                        <div>
+                          <label className="mb-1 block text-xs font-medium text-slate-600">Repeat until *</label>
+                          <input
+                            type="date"
+                            value={eventDraft.recurrenceUntil}
+                            onChange={(e) => setEventDraft((f) => ({ ...f, recurrenceUntil: e.target.value }))}
+                            className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
+                          />
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <div className="sm:col-span-2">
+                      <label className="mb-1 block text-xs font-medium text-slate-600">Dates * (YYYY-MM-DD)</label>
+                      <textarea
+                        rows={4}
+                        value={eventDraft.customDatesText}
+                        onChange={(e) => setEventDraft((f) => ({ ...f, customDatesText: e.target.value }))}
+                        placeholder={'2026-06-01\n2026-06-15\n2026-07-01'}
+                        className="w-full rounded-lg border border-slate-200 px-3 py-2 font-mono text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
+                      />
+                    </div>
+                  )}
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-slate-600">Capacity *</label>
+                    <input
+                      type="number"
+                      min={1}
+                      value={eventDraft.capacity}
+                      onChange={(e) =>
+                        setEventDraft((f) => ({ ...f, capacity: parseInt(e.target.value, 10) || 1 }))
+                      }
+                      className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-slate-600">Start time *</label>
+                    <input
+                      type="time"
+                      value={eventDraft.start_time}
+                      onChange={(e) => setEventDraft((f) => ({ ...f, start_time: e.target.value }))}
+                      className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-slate-600">End time *</label>
+                    <input
+                      type="time"
+                      value={eventDraft.end_time}
+                      onChange={(e) => setEventDraft((f) => ({ ...f, end_time: e.target.value }))}
+                      className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
+                    />
+                  </div>
+                  <div className="sm:col-span-2 rounded-lg border border-slate-200 bg-slate-50/80 p-3">
+                    <p className="mb-2 text-xs font-medium text-slate-700">Guest booking rules</p>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div>
+                        <label className="mb-1 block text-xs font-medium text-slate-600">Max advance (days)</label>
+                        <input
+                          type="number"
+                          min={1}
+                          max={365}
+                          value={eventDraft.max_advance_booking_days}
+                          onChange={(e) =>
+                            setEventDraft((f) => ({
+                              ...f,
+                              max_advance_booking_days: parseInt(e.target.value, 10) || 1,
+                            }))
+                          }
+                          className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-xs font-medium text-slate-600">Min notice (hours)</label>
+                        <input
+                          type="number"
+                          min={0}
+                          max={168}
+                          value={eventDraft.min_booking_notice_hours}
+                          onChange={(e) =>
+                            setEventDraft((f) => ({
+                              ...f,
+                              min_booking_notice_hours: parseInt(e.target.value, 10) || 0,
+                            }))
+                          }
+                          className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-xs font-medium text-slate-600">
+                          Cancellation notice (hours)
+                        </label>
+                        <input
+                          type="number"
+                          min={0}
+                          max={168}
+                          value={eventDraft.cancellation_notice_hours}
+                          onChange={(e) =>
+                            setEventDraft((f) => ({
+                              ...f,
+                              cancellation_notice_hours: parseInt(e.target.value, 10) || 0,
+                            }))
+                          }
+                          className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                        />
+                      </div>
+                      <div className="flex items-end pb-1">
+                        <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
+                          <input
+                            type="checkbox"
+                            checked={eventDraft.allow_same_day_booking}
+                            onChange={(e) =>
+                              setEventDraft((f) => ({ ...f, allow_same_day_booking: e.target.checked }))
+                            }
+                            className="h-4 w-4 rounded border-slate-300"
+                          />
+                          Allow same-day bookings
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="sm:col-span-2 space-y-3 rounded-lg border border-slate-100 bg-slate-50/80 p-3">
+                    <p className="text-xs font-medium text-slate-700">Calendar column</p>
+                    <p className="text-xs text-slate-500">
+                      Show this event on a team calendar column. The time must not overlap other bookings or blocked time
+                      on that column.
+                    </p>
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-slate-600">Calendar</label>
+                      <select
+                        value={eventDraft.calendar_id}
+                        onChange={(e) => setEventDraft((f) => ({ ...f, calendar_id: e.target.value }))}
+                        className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
+                      >
+                        <option value="">Not assigned to a calendar</option>
+                        {rosterList.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                  <div className="sm:col-span-2">
+                    <label className="mb-1 block text-xs font-medium text-slate-600">
+                      Description <span className="font-normal text-slate-400">optional</span>
+                    </label>
+                    <textarea
+                      rows={2}
+                      value={eventDraft.description}
+                      onChange={(e) => setEventDraft((f) => ({ ...f, description: e.target.value }))}
+                      placeholder="Briefly describe the event for guests…"
+                      className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
+                    />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <label className="mb-1 block text-xs font-medium text-slate-600">
+                      Image URL <span className="font-normal text-slate-400">optional</span>
+                    </label>
+                    <input
+                      type="url"
+                      value={eventDraft.image_url}
+                      onChange={(e) => setEventDraft((f) => ({ ...f, image_url: e.target.value }))}
+                      placeholder="https://…"
+                      className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
+                    />
+                    {/^https?:\/\//i.test(eventDraft.image_url.trim()) && (
+                      <div className="mt-2">
+                        <p className="mb-1 text-xs text-slate-500">Preview</p>
+                        <img
+                          src={eventDraft.image_url.trim()}
+                          alt=""
+                          className="max-h-40 max-w-full rounded-lg border border-slate-200 object-contain"
+                          onError={(e) => {
+                            (e.target as HTMLImageElement).style.display = 'none';
+                          }}
+                        />
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div>
+                  <h3 className="mb-2 text-sm font-medium text-slate-700">Ticket types</h3>
+                  <div className="space-y-2">
+                    {eventDraft.ticket_types.map((tt, i) => (
+                      <div
+                        key={i}
+                        className="flex flex-wrap items-end gap-2 rounded-lg border border-slate-100 bg-slate-50/60 px-3 py-2"
+                      >
+                        <div className="min-w-[140px] flex-1">
+                          <label className="mb-1 block text-xs font-medium text-slate-500">Ticket name</label>
+                          <input
+                            type="text"
+                            value={tt.name}
+                            onChange={(e) => updateEventTicketType(i, { name: e.target.value })}
+                            placeholder="e.g. General Admission"
+                            className="w-full rounded border border-slate-200 bg-white px-2 py-1.5 text-xs focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
+                          />
+                        </div>
+                        <div className="w-28">
+                          <label className="mb-1 block text-xs font-medium text-slate-500">Price ({sym})</label>
+                          <input
+                            type="number"
+                            min={0}
+                            step={0.01}
+                            value={tt.price_pence}
+                            onChange={(e) => updateEventTicketType(i, { price_pence: e.target.value })}
+                            placeholder="0.00"
+                            className="w-full rounded border border-slate-200 bg-white px-2 py-1.5 text-xs focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
+                          />
+                        </div>
+                        <div className="w-24">
+                          <label className="mb-1 block text-xs font-medium text-slate-500">
+                            Cap <span className="font-normal text-slate-400">opt.</span>
+                          </label>
+                          <input
+                            type="number"
+                            min={1}
+                            value={tt.capacity}
+                            onChange={(e) => updateEventTicketType(i, { capacity: e.target.value })}
+                            placeholder="-"
+                            className="w-full rounded border border-slate-200 bg-white px-2 py-1.5 text-xs focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
+                          />
+                        </div>
+                        {eventDraft.ticket_types.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => removeEventTicketType(i)}
+                            className="self-end pb-1.5 text-xs text-red-400 hover:text-red-600"
+                          >
+                            Remove
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={addEventTicketType}
+                    className="mt-2 text-sm font-medium text-brand-600 hover:text-brand-800"
+                  >
+                    + Add ticket type
+                  </button>
+                </div>
+
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-slate-700">Online payment (Stripe)</label>
+                  <div className="space-y-2">
+                    <label className="flex cursor-pointer items-start gap-2 text-sm text-slate-700">
+                      <input
+                        type="radio"
+                        name="onb_event_payment"
+                        className="mt-0.5"
+                        checked={eventDraft.payment_requirement === 'none'}
+                        onChange={() =>
+                          setEventDraft((f) => ({ ...f, payment_requirement: 'none', deposit_pounds: '' }))
+                        }
+                      />
+                      <span>None - pay at venue or free event</span>
+                    </label>
+                    <label className="flex cursor-pointer items-start gap-2 text-sm text-slate-700">
+                      <input
+                        type="radio"
+                        name="onb_event_payment"
+                        className="mt-0.5"
+                        checked={eventDraft.payment_requirement === 'deposit'}
+                        onChange={() => setEventDraft((f) => ({ ...f, payment_requirement: 'deposit' }))}
+                      />
+                      <span>Deposit per person (partial payment online)</span>
+                    </label>
+                    <label className="flex cursor-pointer items-start gap-2 text-sm text-slate-700">
+                      <input
+                        type="radio"
+                        name="onb_event_payment"
+                        className="mt-0.5"
+                        checked={eventDraft.payment_requirement === 'full_payment'}
+                        onChange={() =>
+                          setEventDraft((f) => ({ ...f, payment_requirement: 'full_payment', deposit_pounds: '' }))
+                        }
+                      />
+                      <span>Full payment online (per ticket)</span>
+                    </label>
+                  </div>
+                  {eventDraft.payment_requirement === 'deposit' && (
+                    <div className="mt-3 max-w-xs">
+                      <label className="mb-1 block text-xs font-medium text-slate-600">Deposit amount ({sym}) *</label>
+                      <input
+                        type="number"
+                        min={0}
+                        step={0.01}
+                        value={eventDraft.deposit_pounds}
+                        onChange={(e) => setEventDraft((f) => ({ ...f, deposit_pounds: e.target.value }))}
+                        placeholder="e.g. 5.00"
+                        className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
+                      />
+                    </div>
+                  )}
+                  <p className="mt-2 text-xs text-slate-500">
+                    Deposit and full payment require ticket prices greater than zero and a connected Stripe account. If you
+                    have not connected Stripe yet, leave this on None and finish setup under{' '}
+                    <Link
+                      href="/dashboard/settings?tab=payments"
+                      className="font-medium text-brand-600 underline hover:text-brand-700"
+                    >
+                      Settings → Payments
+                    </Link>
+                    .
+                  </p>
                 </div>
               </div>
             </div>
@@ -2320,7 +2900,10 @@ export default function OnboardingPage() {
           {step > 0 && !saving ? (
             <button
               type="button"
-              onClick={() => setStep(step - 1)}
+              onClick={() => {
+                setRevisitedStepIndex(step - 1);
+                setStep(step - 1);
+              }}
               className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
             >
               Back

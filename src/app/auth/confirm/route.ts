@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { sanitizeAuthNextPath } from '@/lib/safe-auth-redirect';
 
 function getBaseUrl(requestUrl: string): string {
   if (process.env.NEXT_PUBLIC_BASE_URL) return process.env.NEXT_PUBLIC_BASE_URL;
@@ -8,12 +9,13 @@ function getBaseUrl(requestUrl: string): string {
 }
 
 /**
- * GET /auth/confirm - handle PKCE magic link and email confirmation.
+ * GET /auth/confirm - handle OTP / email links (token_hash + type).
  *
- * Supabase's email template sends links to:
+ * Supabase email templates may send:
  *   {{ .SiteURL }}/auth/confirm?token_hash=xxx&type=magiclink
  *
- * This route verifies the token and redirects to the dashboard.
+ * Staff invites from `/api/venue/staff/invite` use PKCE `/auth/callback?next=/auth/set-password` instead;
+ * this route still handles invite/magiclink when templates point here without `next`.
  */
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -25,14 +27,20 @@ export async function GET(request: Request) {
     | 'recovery'
     | 'email_change'
     | null;
-  const next = searchParams.get('next') ?? '/dashboard';
+  const rawNext = searchParams.get('next');
+  const nextPath =
+    rawNext != null && rawNext !== ''
+      ? sanitizeAuthNextPath(rawNext)
+      : type === 'invite'
+        ? '/auth/set-password'
+        : sanitizeAuthNextPath(null);
   const base = getBaseUrl(request.url);
 
   if (tokenHash && type) {
     const supabase = await createClient();
     const { error } = await supabase.auth.verifyOtp({ token_hash: tokenHash, type });
     if (!error) {
-      return NextResponse.redirect(`${base}${next}`);
+      return NextResponse.redirect(`${base}${nextPath}`);
     }
     console.error('Auth confirm failed:', error.message);
   }
