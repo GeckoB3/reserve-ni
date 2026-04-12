@@ -2,6 +2,9 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { createClient } from '@/lib/supabase/browser';
+import { fetchPendingSignupSelection, syncPendingToSessionStorage } from '@/lib/signup-pending-client';
+import { isSignupPaymentReady } from '@/lib/signup-pending-selection';
 import { formatSignupBusinessTypeLabel } from '@/lib/business-config';
 import { APPOINTMENTS_PRICE, RESTAURANT_PRICE, FOUNDING_PARTNER_CAP, SMS_OVERAGE_GBP_PER_MESSAGE } from '@/lib/pricing-constants';
 import { SMS_INCLUDED_APPOINTMENTS, SMS_INCLUDED_RESTAURANT } from '@/lib/billing/sms-allowance';
@@ -16,23 +19,52 @@ export default function PlanPage() {
   const [foundingRemaining, setFoundingRemaining] = useState<number | null>(null);
 
   useEffect(() => {
-    const id = requestAnimationFrame(() => {
-      const bt = sessionStorage.getItem('signup_business_type');
+    let cancelled = false;
+    void (async () => {
+      let bt = sessionStorage.getItem('signup_business_type');
       const queryPlan = searchParams.get('plan') as PlanType | null;
-      const storedPlan = sessionStorage.getItem('signup_plan') as PlanType | null;
-      const p = queryPlan ?? storedPlan;
-      if (!p) {
+      let storedPlan = sessionStorage.getItem('signup_plan') as PlanType | null;
+
+      const supabase = createClient();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      let resolvedPlan = queryPlan ?? storedPlan;
+      let resolvedBt = bt;
+
+      if ((!resolvedPlan || (resolvedPlan !== 'appointments' && !resolvedBt)) && session) {
+        const pending = await fetchPendingSignupSelection();
+        if (cancelled) return;
+        if (pending?.plan && isSignupPaymentReady(pending.plan, pending.business_type)) {
+          syncPendingToSessionStorage(pending.plan, pending.business_type);
+          router.replace('/signup/payment');
+          return;
+        }
+        if (pending?.plan && (pending.plan === 'appointments' || pending.business_type)) {
+          syncPendingToSessionStorage(pending.plan, pending.business_type);
+          storedPlan = pending.plan;
+          bt = pending.business_type;
+          resolvedPlan = queryPlan ?? storedPlan;
+          resolvedBt = bt;
+        }
+      }
+
+      if (cancelled) return;
+      if (!resolvedPlan) {
         router.push('/signup/business-type');
         return;
       }
-      if (p !== 'appointments' && !bt) {
+      if (resolvedPlan !== 'appointments' && !resolvedBt) {
         router.push('/signup/business-type');
         return;
       }
-      setBusinessType(bt);
-      setPlan(p);
-    });
-    return () => cancelAnimationFrame(id);
+      setBusinessType(resolvedBt);
+      setPlan(resolvedPlan);
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [router, searchParams]);
 
   // Founding partner: check spots

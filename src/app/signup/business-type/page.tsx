@@ -4,6 +4,9 @@ import { useState, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { APPOINTMENTS_ACTIVE_MODEL_ORDER } from '@/lib/booking/active-models';
 import { BOOKING_MODEL_SIGNUP_CARDS } from '@/lib/business-config';
+import { createClient } from '@/lib/supabase/browser';
+import { fetchPendingSignupSelection, syncPendingToSessionStorage } from '@/lib/signup-pending-client';
+import { isSignupPaymentReady } from '@/lib/signup-pending-selection';
 
 type PlanType = 'appointments' | 'restaurant' | 'founding';
 
@@ -21,6 +24,30 @@ export default function BusinessTypePage() {
       sessionStorage.removeItem('signup_business_type');
     }
   }, [isRestaurantPlan, plan]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const supabase = createClient();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session || cancelled) return;
+      const venueRes = await fetch('/api/signup/existing-plan', { credentials: 'same-origin' });
+      if (!venueRes.ok || cancelled) return;
+      const venue = (await venueRes.json()) as { hasVenue?: boolean };
+      if (venue.hasVenue) return;
+      const pending = await fetchPendingSignupSelection();
+      if (cancelled) return;
+      if (pending?.plan && isSignupPaymentReady(pending.plan, pending.business_type)) {
+        syncPendingToSessionStorage(pending.plan, pending.business_type);
+        router.replace('/signup/payment');
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [router]);
 
   function handleContinue() {
     if (isRestaurantPlan) {

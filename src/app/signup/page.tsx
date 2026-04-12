@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { createClient } from '@/lib/supabase/browser';
 import { getSignupResumePath } from '@/lib/signup-resume';
+import { persistPendingSignupSelection } from '@/lib/signup-pending-client';
+import { isSignupPaymentReady, type SignupPendingPlan } from '@/lib/signup-pending-selection';
 
 export default function SignupPage() {
   const [email, setEmail] = useState('');
@@ -34,6 +36,18 @@ export default function SignupPage() {
         const planData = (await planRes.json()) as { hasVenue?: boolean };
         if (planData.hasVenue) {
           router.replace('/dashboard');
+          return;
+        }
+      }
+
+      const pendingRes = await fetch('/api/signup/pending-selection', { credentials: 'same-origin' });
+      if (pendingRes.ok) {
+        const pending = (await pendingRes.json()) as {
+          plan?: SignupPendingPlan | null;
+          business_type?: string | null;
+        };
+        if (isSignupPaymentReady(pending.plan ?? null, pending.business_type ?? null)) {
+          router.replace('/signup/payment');
           return;
         }
       }
@@ -87,6 +101,15 @@ export default function SignupPage() {
     if (!data.session) {
       setAwaitingEmailVerification(true);
       return;
+    }
+
+    const storedPlan = sessionStorage.getItem('signup_plan') as SignupPendingPlan | null;
+    const storedBt = sessionStorage.getItem('signup_business_type');
+    if (storedPlan && isSignupPaymentReady(storedPlan, storedBt)) {
+      await persistPendingSignupSelection(
+        storedPlan,
+        storedPlan === 'appointments' ? null : storedBt,
+      );
     }
 
     router.push(getSignupResumePath());

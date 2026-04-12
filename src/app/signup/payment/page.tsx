@@ -8,6 +8,8 @@ import { formatSignupBusinessTypeLabel, isDirectModelBusinessType } from '@/lib/
 import { APPOINTMENTS_PRICE, RESTAURANT_PRICE, SMS_OVERAGE_GBP_PER_MESSAGE } from '@/lib/pricing-constants';
 import { SMS_INCLUDED_APPOINTMENTS, SMS_INCLUDED_RESTAURANT } from '@/lib/billing/sms-allowance';
 import { signupPlanToFamily, SIGNUP_PLAN_CONFLICT_MESSAGE } from '@/lib/signup-plan-family';
+import { fetchPendingSignupSelection, syncPendingToSessionStorage } from '@/lib/signup-pending-client';
+import { isSignupPaymentReady } from '@/lib/signup-pending-selection';
 
 type PlanType = 'appointments' | 'restaurant' | 'founding';
 
@@ -20,21 +22,44 @@ export default function PaymentPage() {
   /** Until checked, we do not know if the browser has a Supabase session (required for checkout). */
   const [sessionChecked, setSessionChecked] = useState(false);
   const [hasSession, setHasSession] = useState(false);
+  /** Plan + business type resolved from sessionStorage and/or server-persisted signup progress. */
+  const [selectionHydrated, setSelectionHydrated] = useState(false);
   /** Logged-in user already has the other plan family — block checkout before hitting Stripe. */
   const [planFamilyBlocked, setPlanFamilyBlocked] = useState(false);
 
   useEffect(() => {
-    const id = requestAnimationFrame(() => {
-      const bt = sessionStorage.getItem('signup_business_type');
-      const p = sessionStorage.getItem('signup_plan') as PlanType | null;
+    let cancelled = false;
+    void (async () => {
+      let bt = sessionStorage.getItem('signup_business_type');
+      let p = sessionStorage.getItem('signup_plan') as PlanType | null;
+
+      const supabase = createClient();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if ((!p || (p !== 'appointments' && !bt)) && session) {
+        const pending = await fetchPendingSignupSelection();
+        if (cancelled) return;
+        if (pending?.plan && isSignupPaymentReady(pending.plan, pending.business_type)) {
+          p = pending.plan;
+          bt = pending.business_type;
+          syncPendingToSessionStorage(p, bt);
+        }
+      }
+
+      if (cancelled) return;
       if (!p || (p !== 'appointments' && !bt)) {
         router.push('/signup/business-type');
         return;
       }
       setBusinessType(bt);
       setPlan(p);
-    });
-    return () => cancelAnimationFrame(id);
+      setSelectionHydrated(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [router]);
 
   useEffect(() => {
@@ -122,7 +147,7 @@ export default function PaymentPage() {
     setLoading(false);
   }
 
-  if (!plan || !sessionChecked) {
+  if (!plan || !sessionChecked || !selectionHydrated) {
     return (
       <div className="flex min-h-[40vh] items-center justify-center">
         <div className="h-8 w-8 animate-spin rounded-full border-4 border-brand-200 border-t-brand-600" />

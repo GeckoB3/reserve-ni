@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import { isPlatformSuperuser } from '@/lib/platform-auth';
 import { SignupPlanConflictBanner } from '@/components/signup/SignupPlanConflictBanner';
+import { SignupNavAuth } from '@/components/signup/SignupNavAuth';
 
 export default async function SignupLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createClient();
@@ -18,9 +19,7 @@ export default async function SignupLayout({ children }: { children: React.React
           <Link href="/" className="flex-shrink-0">
             <img src="/Logo.png" alt="Reserve NI" className="h-9 w-auto" />
           </Link>
-          <Link href="/login" className="text-sm font-medium text-slate-500 hover:text-brand-600 transition-colors">
-            Already have an account? Sign in
-          </Link>
+          <SignupNavAuth />
         </div>
       </nav>
       <main className="flex flex-1 flex-col items-center px-4 py-12 sm:py-16">

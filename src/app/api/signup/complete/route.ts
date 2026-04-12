@@ -7,6 +7,7 @@ import { getBusinessConfig } from '@/lib/business-config';
 import { updateVenueSmsMonthlyAllowance } from '@/lib/billing/sms-allowance';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 import { parseNotificationSettings } from '@/lib/notifications/notification-settings';
+import { clearSignupPendingUserMetadata } from '@/lib/signup-pending-metadata';
 
 export async function POST(request: Request) {
   try {
@@ -64,9 +65,11 @@ export async function POST(request: Request) {
           activeModels.length === 0 &&
           existingVenue.onboarding_completed !== true
         ) {
+          await clearSignupPendingUserMetadata(admin, user.id);
           return NextResponse.json({ redirect_url: '/signup/booking-models' });
         }
       }
+      await clearSignupPendingUserMetadata(admin, user.id);
       return NextResponse.json({ redirect_url: '/onboarding' });
     }
 
@@ -152,6 +155,8 @@ export async function POST(request: Request) {
         console.warn('[signup/complete] Could not set default notification_settings for unified venue:', notifErr);
       }
     }
+
+    await clearSignupPendingUserMetadata(admin, user.id);
 
     return NextResponse.json({
       redirect_url: plan === 'appointments' ? '/signup/booking-models' : '/onboarding',

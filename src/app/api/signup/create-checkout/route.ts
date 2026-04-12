@@ -7,6 +7,7 @@ import { getBusinessConfig } from '@/lib/business-config';
 import { FOUNDING_PARTNER_CAP } from '@/lib/pricing-constants';
 import { getExistingVenueForUserEmail } from '@/lib/signup-existing-venue';
 import { pricingTierToSignupFamily, signupPlanToFamily, SIGNUP_PLAN_CONFLICT_MESSAGE } from '@/lib/signup-plan-family';
+import { clearSignupPendingUserMetadata } from '@/lib/signup-pending-metadata';
 
 export async function POST(request: Request) {
   try {
@@ -117,6 +118,8 @@ export async function POST(request: Request) {
           { status: 500 }
         );
       }
+
+      await clearSignupPendingUserMetadata(admin, user.id);
 
       return NextResponse.json({ redirect_url: '/onboarding' });
     }
