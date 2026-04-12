@@ -127,6 +127,7 @@ export async function POST(request: Request) {
         const session = await stripe.checkout.sessions.create({
           customer: venue.stripe_customer_id as string,
           mode: 'subscription',
+          allow_promotion_codes: true,
           line_items: buildCheckoutLineItems(priceId, 1),
           metadata: {
             venue_id: venue.id,
