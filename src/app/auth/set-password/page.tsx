@@ -83,7 +83,8 @@ export default function SetPasswordPage() {
           </Link>
           <h1 className="mt-4 text-center text-lg font-bold text-slate-900">Create your password</h1>
           <p className="mt-2 text-center text-sm text-slate-500">
-            Choose a password to sign in to your venue dashboard. You can change it later under Settings.
+            Use this page after you open the invitation or sign-in link from your email. Choose a password to access your
+            venue dashboard; you can change it later under Settings.
           </p>
         </div>
 

@@ -2,14 +2,21 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
+import { setStaffPractitionerLink, setStaffUnifiedCalendarAssignments } from '@/lib/staff-practitioner-link';
+import { getStaffInviteRedirectTo } from '@/lib/staff-invite-redirect';
 import { z } from 'zod';
 
 const inviteSchema = z.object({
   email: z.string().email(),
   role: z.enum(['admin', 'staff']),
+  name: z.string().max(200).optional(),
+  /** Optional: link to one calendar (legacy single-select). */
+  practitioner_id: z.string().uuid().nullable().optional(),
+  /** Optional: unified scheduling — assign any combination of bookable calendars. */
+  calendar_ids: z.array(z.string().uuid()).optional(),
 });
 
-/** POST /api/venue/staff/invite - invite staff by email (admin only). Sends Supabase magic link. */
+/** POST /api/venue/staff/invite - invite staff by email (admin only). Sends Supabase invite link to set password. */
 export async function POST(request: NextRequest) {
   try {
     const supabase = await createClient();
@@ -26,12 +33,76 @@ export async function POST(request: NextRequest) {
     if (!parsed.success) {
       return NextResponse.json(
         { error: 'Invalid request', details: parsed.error.flatten() },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
-    const { email, role } = parsed.data;
+    const {
+      email,
+      role,
+      name,
+      practitioner_id: practitionerIdOpt,
+      calendar_ids: calendarIdsOpt,
+    } = parsed.data;
     const normalisedEmail = email.trim().toLowerCase();
+
+    const admin = getSupabaseAdminClient();
+
+    const { data: venueRow } = await admin
+      .from('venues')
+      .select('name, booking_model')
+      .eq('id', staff.venue_id)
+      .single();
+    const bookingModel = (venueRow?.booking_model as string) ?? 'table_reservation';
+
+    const effectiveCalendarIds =
+      role === 'staff'
+        ? calendarIdsOpt && calendarIdsOpt.length > 0
+          ? calendarIdsOpt
+          : practitionerIdOpt
+            ? [practitionerIdOpt]
+            : []
+        : [];
+
+    const unifiedCalendarIdsToValidate = effectiveCalendarIds;
+    if (unifiedCalendarIdsToValidate.length > 0) {
+      const { data: ucs } = await admin
+        .from('unified_calendars')
+        .select('id, is_active')
+        .eq('venue_id', staff.venue_id)
+        .in('id', unifiedCalendarIdsToValidate);
+      if (!ucs || ucs.length !== unifiedCalendarIdsToValidate.length) {
+        return NextResponse.json({ error: 'One or more calendars were not found' }, { status: 400 });
+      }
+      if (ucs.some((uc) => uc.is_active === false)) {
+        return NextResponse.json(
+          {
+            error:
+              'Inactive calendars cannot be assigned to staff. Activate the calendar first or choose another.',
+          },
+          { status: 400 },
+        );
+      }
+    } else if (practitionerIdOpt) {
+      const { data: prCheck } = await admin
+        .from('practitioners')
+        .select('id, is_active')
+        .eq('id', practitionerIdOpt)
+        .eq('venue_id', staff.venue_id)
+        .maybeSingle();
+      if (!prCheck) {
+        return NextResponse.json({ error: 'Calendar not found' }, { status: 400 });
+      }
+      if (prCheck.is_active === false) {
+        return NextResponse.json(
+          {
+            error:
+              'Inactive calendars cannot be assigned to staff. Activate the calendar first or choose another.',
+          },
+          { status: 400 },
+        );
+      }
+    }
 
     const { data: existing } = await staff.db
       .from('staff')
@@ -44,20 +115,27 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'This email is already a staff member for this venue' }, { status: 409 });
     }
 
-    const admin = getSupabaseAdminClient();
-    const base =
-      process.env.NEXT_PUBLIC_BASE_URL?.replace(/\/$/, '') ||
-      (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : request.nextUrl.origin.replace(/\/$/, ''));
-    /** PKCE exchange on /auth/callback, then first-time password on /auth/set-password (not /dashboard, or middleware drops `code`). */
-    const redirectTo = `${base}/auth/callback?next=${encodeURIComponent('/auth/set-password')}`;
+    /** PKCE exchange on /auth/callback, then password on /auth/set-password (same URL as resend-invite). */
+    const redirectTo = getStaffInviteRedirectTo(request);
+
+    const trimmedName = name?.trim();
+    const userMetadata: Record<string, string> = { venue_id: staff.venue_id };
+    if (trimmedName) {
+      userMetadata.full_name = trimmedName;
+    }
+
     const { error: inviteError } = await admin.auth.admin.inviteUserByEmail(normalisedEmail, {
       redirectTo,
-      data: { venue_id: staff.venue_id },
+      data: userMetadata,
     });
 
-    if (inviteError) {
-      if (inviteError.message?.toLowerCase().includes('already been invited') || inviteError.message?.toLowerCase().includes('already exists')) {
-        // User may already exist in Auth; still add to staff
+    let inviteEmailSent = false;
+    if (!inviteError) {
+      inviteEmailSent = true;
+    } else {
+      const msg = inviteError.message?.toLowerCase() ?? '';
+      if (msg.includes('already been invited') || msg.includes('already exists')) {
+        inviteEmailSent = false;
       } else {
         console.error('inviteUserByEmail failed:', inviteError);
         return NextResponse.json({ error: 'Failed to send invite: ' + inviteError.message }, { status: 500 });
@@ -69,9 +147,10 @@ export async function POST(request: NextRequest) {
       .insert({
         venue_id: staff.venue_id,
         email: normalisedEmail,
+        name: trimmedName || null,
         role,
       })
-      .select('id, email, role, created_at')
+      .select('id, email, name, role, created_at')
       .single();
 
     if (insertError) {
@@ -79,10 +158,80 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to add staff member' }, { status: 500 });
     }
 
-    return NextResponse.json({
-      message: 'Invite sent',
-      staff: newStaff,
-    }, { status: 201 });
+    let linkedPractitionerId: string | null = null;
+    let linkedPractitionerName: string | null = null;
+    let linked_calendar_ids: string[] = [];
+
+    const unifiedIdsToAssign = effectiveCalendarIds;
+
+    if (unifiedIdsToAssign.length > 0) {
+      const linkResult = await setStaffUnifiedCalendarAssignments(
+        admin,
+        staff.venue_id,
+        newStaff.id,
+        unifiedIdsToAssign,
+      );
+      if (!linkResult.ok) {
+        console.error('[staff/invite] calendar link failed:', linkResult.error);
+        return NextResponse.json(
+          {
+            error:
+              'Invite was sent but linking to calendars failed. You can assign calendars from Settings → Staff.',
+          },
+          { status: 500 },
+        );
+      }
+      linked_calendar_ids = unifiedIdsToAssign;
+      linkedPractitionerId = unifiedIdsToAssign[0] ?? null;
+      const { data: nameRows } = await admin
+        .from('unified_calendars')
+        .select('id, name')
+        .eq('venue_id', staff.venue_id)
+        .in('id', unifiedIdsToAssign);
+      const nameById = new Map((nameRows ?? []).map((r) => [r.id as string, ((r.name as string) ?? '').trim()]));
+      linkedPractitionerName =
+        unifiedIdsToAssign.map((id) => nameById.get(id) ?? '').filter(Boolean).join(', ') || null;
+    } else if (role === 'staff' && practitionerIdOpt) {
+      const linkResult = await setStaffPractitionerLink(
+        admin,
+        staff.venue_id,
+        newStaff.id,
+        practitionerIdOpt,
+        { bookingModel },
+      );
+      if (!linkResult.ok) {
+        console.error('[staff/invite] calendar link failed:', linkResult.error);
+        return NextResponse.json(
+          {
+            error:
+              'Invite was sent but linking to the calendar failed. You can assign the calendar from Settings → Staff.',
+          },
+          { status: 500 },
+        );
+      }
+      linkedPractitionerId = practitionerIdOpt;
+      const { data: prNamed } = await admin
+        .from('practitioners')
+        .select('name')
+        .eq('id', practitionerIdOpt)
+        .eq('venue_id', staff.venue_id)
+        .maybeSingle();
+      linkedPractitionerName = prNamed?.name ?? null;
+    }
+
+    return NextResponse.json(
+      {
+        message: 'Invite sent',
+        invite_email_sent: inviteEmailSent,
+        staff: {
+          ...newStaff,
+          linked_calendar_ids,
+          linked_practitioner_id: linkedPractitionerId,
+          linked_practitioner_name: linkedPractitionerName,
+        },
+      },
+      { status: 201 },
+    );
   } catch (err) {
     console.error('POST /api/venue/staff/invite failed:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

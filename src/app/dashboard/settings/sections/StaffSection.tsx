@@ -33,8 +33,6 @@ export function StaffSection({
   // Create user form
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [createEmail, setCreateEmail] = useState('');
-  const [createPassword, setCreatePassword] = useState('');
-  const [createPasswordConfirm, setCreatePasswordConfirm] = useState('');
   const [createName, setCreateName] = useState('');
   const [createRole, setCreateRole] = useState<'admin' | 'staff'>('staff');
   const [createCalendarIds, setCreateCalendarIds] = useState<string[]>([]);
@@ -44,6 +42,9 @@ export function StaffSection({
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [createSuccess, setCreateSuccess] = useState<string | null>(null);
+  const [resendInviteStaffId, setResendInviteStaffId] = useState<string | null>(null);
+  const [resendInviteMessage, setResendInviteMessage] = useState<string | null>(null);
+  const [resendInviteError, setResendInviteError] = useState<string | null>(null);
 
   // Password change (own)
   const [showPasswordForm, setShowPasswordForm] = useState(false);
@@ -166,24 +167,14 @@ export function StaffSection({
     setCreateError(null);
     setCreateSuccess(null);
     const email = createEmail.trim().toLowerCase();
-    if (!email || !createPassword) return;
-    if (createPassword.length < 8) {
-      setCreateError('Password must be at least 8 characters');
-      return;
-    }
-    if (createPassword !== createPasswordConfirm) {
-      setCreateError('Passwords do not match');
-      return;
-    }
+    if (!email) return;
     setCreating(true);
     try {
-      const res = await fetch('/api/venue/staff/create', {
+      const res = await fetch('/api/venue/staff/invite', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           email,
-          password: createPassword,
-          password_confirm: createPasswordConfirm,
           name: createName.trim() || undefined,
           role: createRole,
           ...(createRole === 'staff' && createCalendarIds.length > 0 ? { calendar_ids: createCalendarIds } : {}),
@@ -191,23 +182,21 @@ export function StaffSection({
       });
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
-        throw new Error(j.error ?? 'Failed to create user');
+        throw new Error(j.error ?? 'Failed to send invite');
       }
-      const { staff: newMember, welcome_email_sent: welcomeSent } = await res.json() as {
+      const { staff: newMember, invite_email_sent: inviteSent } = await res.json() as {
         staff: StaffMember;
-        welcome_email_sent?: boolean;
+        invite_email_sent?: boolean;
       };
       setStaff((prev) => [...prev, newMember]);
       setCreateEmail('');
-      setCreatePassword('');
-      setCreatePasswordConfirm('');
       setCreateName('');
       setCreateRole('staff');
       setCreateCalendarIds([]);
       setCreateSuccess(
-        welcomeSent
-          ? `User ${email} created. They have been emailed their login details.`
-          : `User ${email} created. Welcome email could not be sent. Check SendGrid configuration and share their login details manually.`,
+        inviteSent
+          ? `Invitation sent to ${email}. They will receive a link to set their password and access the dashboard.`
+          : `${email} was added as staff. They may already have an account — if they did not receive a new email, they can sign in or use Forgot password on the login page.`,
       );
       setShowCreateForm(false);
       setTimeout(() => setCreateSuccess(null), 4000);
@@ -216,7 +205,27 @@ export function StaffSection({
     } finally {
       setCreating(false);
     }
-  }, [createEmail, createPassword, createPasswordConfirm, createName, createRole, createCalendarIds]);
+  }, [createEmail, createName, createRole, createCalendarIds]);
+
+  const onResendInvite = useCallback(async (member: StaffMember) => {
+    setResendInviteError(null);
+    setResendInviteMessage(null);
+    setResendInviteStaffId(member.id);
+    try {
+      const res = await fetch(`/api/venue/staff/${member.id}/resend-invite`, { method: 'POST' });
+      const j = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
+      if (!res.ok) {
+        throw new Error(j.error ?? 'Failed to resend invitation');
+      }
+      setResendInviteMessage(j.message ?? 'A new link was sent.');
+      setTimeout(() => setResendInviteMessage(null), 5000);
+    } catch (err) {
+      setResendInviteError(err instanceof Error ? err.message : 'Failed to resend invitation');
+      setTimeout(() => setResendInviteError(null), 6000);
+    } finally {
+      setResendInviteStaffId(null);
+    }
+  }, []);
 
   const onCalendarAssignmentsChange = useCallback(async (member: StaffMember, calendarIds: string[]) => {
     setCalendarError(null);
@@ -502,7 +511,6 @@ export function StaffSection({
                 setShowCreateForm(!showCreateForm);
                 setCreateError(null);
                 setCreateSuccess(null);
-                setCreatePasswordConfirm('');
               }}
               className="inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-brand-700"
             >
@@ -519,6 +527,14 @@ export function StaffSection({
           {createSuccess && (
             <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-4 py-2.5 text-sm text-emerald-700">{createSuccess}</div>
           )}
+          {resendInviteMessage && (
+            <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-4 py-2.5 text-sm text-emerald-700">
+              {resendInviteMessage}
+            </div>
+          )}
+          {resendInviteError && (
+            <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-700">{resendInviteError}</div>
+          )}
           {resetSuccess && (
             <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-4 py-2.5 text-sm text-emerald-700">{resetSuccess}</div>
           )}
@@ -526,7 +542,11 @@ export function StaffSection({
           {/* Create User Form */}
           {isAdmin && showCreateForm && (
             <form onSubmit={onCreateUser} className="rounded-lg border border-slate-200 bg-slate-50/50 p-4 space-y-3">
-              <h3 className="text-sm font-semibold text-slate-800">Create New User</h3>
+              <h3 className="text-sm font-semibold text-slate-800">Invite user</h3>
+              <p className="text-xs text-slate-600">
+                We will email them a secure link to set their password and open the dashboard. You do not choose a
+                password for them.
+              </p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="mb-1 block text-sm font-medium text-slate-700">Email <span className="text-red-400">*</span></label>
@@ -536,6 +556,7 @@ export function StaffSection({
                     onChange={(e) => setCreateEmail(e.target.value)}
                     placeholder="user@example.com"
                     required
+                    autoComplete="email"
                     className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
                   />
                 </div>
@@ -546,32 +567,7 @@ export function StaffSection({
                     value={createName}
                     onChange={(e) => setCreateName(e.target.value)}
                     placeholder="Full name"
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
-                  />
-                </div>
-                <div>
-                  <label className="mb-1 block text-sm font-medium text-slate-700">Password <span className="text-red-400">*</span></label>
-                  <input
-                    type="password"
-                    value={createPassword}
-                    onChange={(e) => setCreatePassword(e.target.value)}
-                    placeholder="Min 8 characters"
-                    required
-                    minLength={8}
-                    autoComplete="new-password"
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
-                  />
-                </div>
-                <div>
-                  <label className="mb-1 block text-sm font-medium text-slate-700">Confirm password <span className="text-red-400">*</span></label>
-                  <input
-                    type="password"
-                    value={createPasswordConfirm}
-                    onChange={(e) => setCreatePasswordConfirm(e.target.value)}
-                    placeholder="Re-enter password"
-                    required
-                    minLength={8}
-                    autoComplete="new-password"
+                    autoComplete="name"
                     className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
                   />
                 </div>
@@ -651,9 +647,9 @@ export function StaffSection({
               {createError && <p className="text-sm text-red-600">{createError}</p>}
               <div className="flex gap-2">
                 <button type="submit" disabled={creating} className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50">
-                  {creating ? 'Creating...' : 'Create User'}
+                  {creating ? 'Sending…' : 'Send invitation'}
                 </button>
-                <button type="button" onClick={() => { setShowCreateForm(false); setCreateError(null); setCreatePasswordConfirm(''); }} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">
+                <button type="button" onClick={() => { setShowCreateForm(false); setCreateError(null); }} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">
                   Cancel
                 </button>
               </div>
@@ -780,6 +776,17 @@ export function StaffSection({
                       <KeyIcon className="h-4 w-4" />
                     </button>
 
+                    {/* Resend invite / sign-in link */}
+                    <button
+                      type="button"
+                      onClick={() => void onResendInvite(s)}
+                      disabled={resendInviteStaffId === s.id}
+                      title="Resend invitation email"
+                      className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600 disabled:opacity-50"
+                    >
+                      <EnvelopeIcon className="h-4 w-4" />
+                    </button>
+
                     {/* Delete */}
                     <button
                       type="button"
@@ -808,13 +815,20 @@ export function StaffSection({
                 operations — schedule, bookings, and guest details for the calendars you assign below
               </div>
             </div>
-            {isAdmin && practitioners.length > 0 && (
+            {isAdmin && (
               <p className="mt-3 text-xs text-slate-600 border-t border-slate-200 pt-3">
-                <span className="font-medium text-slate-700">Calendars:</span> Add or rename bookable calendars under{' '}
-                <a href="/dashboard/calendar-availability" className="font-medium text-brand-600 hover:text-brand-700">
-                  Calendar availability
-                </a>
-                . Then tick the calendars each staff member should manage — you can assign one, several, or all.
+                <span className="font-medium text-slate-700">Invites:</span> The envelope button resends an invitation or
+                sign-in link if someone did not receive the first email (open link → set password → dashboard).
+                {practitioners.length > 0 && (
+                  <>
+                    {' '}
+                    <span className="font-medium text-slate-700">Calendars:</span> Add or rename bookable calendars under{' '}
+                    <a href="/dashboard/calendar-availability" className="font-medium text-brand-600 hover:text-brand-700">
+                      Calendar availability
+                    </a>
+                    , then assign them to each staff member below.
+                  </>
+                )}
               </p>
             )}
           </div>
@@ -957,6 +971,18 @@ function KeyIcon({ className }: { className?: string }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
       <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 5.25a3 3 0 0 1 3 3m3 0a6 6 0 0 1-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1 1 21.75 8.25Z" />
+    </svg>
+  );
+}
+
+function EnvelopeIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M21.75 6.75v10.5a2.25 2.25 0 0 1-2.25 2.25h-15a2.25 2.25 0 0 1-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25m19.5 0v.243a2.25 2.25 0 0 1-1.07 1.916l-7.5 4.615a2.25 2.25 0 0 1-2.36 0L3.32 8.91a2.25 2.25 0 0 1-1.07-1.916V6.75"
+      />
     </svg>
   );
 }
