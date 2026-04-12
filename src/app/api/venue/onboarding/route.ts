@@ -129,7 +129,7 @@ export async function GET() {
 
     const { data: staffRows } = await admin
       .from('staff')
-      .select('venue_id')
+      .select('venue_id, role')
       .ilike('email', (user.email ?? '').toLowerCase().trim())
       .limit(1);
     const staffRow = staffRows?.[0] ?? null;
@@ -141,7 +141,7 @@ export async function GET() {
     const { data: venue, error: venueError } = await admin
       .from('venues')
       .select(
-        'id, name, slug, address, phone, booking_model, enabled_models, active_booking_models, business_type, business_category, terminology, pricing_tier, calendar_count, onboarding_step, onboarding_completed, currency'
+        'id, name, slug, address, phone, booking_model, enabled_models, active_booking_models, business_type, business_category, terminology, pricing_tier, calendar_count, onboarding_step, onboarding_completed, currency, stripe_connected_account_id'
       )
       .eq('id', staffRow.venue_id)
       .single();
@@ -165,6 +165,7 @@ export async function GET() {
         booking_model: bookingModel,
         active_booking_models: activeModels,
         enabled_models: activeModelsToLegacyEnabledModels(activeModels, bookingModel),
+        is_admin: staffRow.role === 'admin',
       },
     });
   } catch (err) {

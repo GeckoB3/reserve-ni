@@ -5,6 +5,11 @@ import { useCallback, useEffect, useState } from 'react';
 interface StripeConnectSectionProps {
   stripeAccountId: string | null;
   isAdmin: boolean;
+  /**
+   * When set, Stripe Connect return/refresh URLs use these paths (same-origin) instead of
+   * Settings → Payments — e.g. onboarding so users return to the wizard after Stripe.
+   */
+  stripeAccountLinkPaths?: { return: string; refresh: string };
 }
 
 interface StripeStatus {
@@ -73,7 +78,11 @@ function StripeStepIndicator({ step1Done, step2Done }: { step1Done: boolean; ste
   );
 }
 
-export function StripeConnectSection({ stripeAccountId, isAdmin }: StripeConnectSectionProps) {
+export function StripeConnectSection({
+  stripeAccountId,
+  isAdmin,
+  stripeAccountLinkPaths,
+}: StripeConnectSectionProps) {
   const [state, setState] = useState<ViewState>(
     stripeAccountId ? { kind: 'loading' } : { kind: 'not_connected' },
   );
@@ -114,7 +123,18 @@ export function StripeConnectSection({ stripeAccountId, isAdmin }: StripeConnect
   const startOnboarding = useCallback(async () => {
     setRedirecting(true);
     try {
-      const res = await fetch('/api/venue/stripe-connect', { method: 'POST' });
+      const res = await fetch('/api/venue/stripe-connect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(
+          stripeAccountLinkPaths
+            ? {
+                return_path: stripeAccountLinkPaths.return,
+                refresh_path: stripeAccountLinkPaths.refresh,
+              }
+            : {},
+        ),
+      });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         setState({ kind: 'error', message: body.error ?? 'Failed to start onboarding' });
@@ -127,7 +147,7 @@ export function StripeConnectSection({ stripeAccountId, isAdmin }: StripeConnect
       setState({ kind: 'error', message: 'Network error. Please try again.' });
       setRedirecting(false);
     }
-  }, []);
+  }, [stripeAccountLinkPaths]);
 
   return (
     <section className="rounded-lg border border-neutral-200 bg-white p-6 shadow-sm">

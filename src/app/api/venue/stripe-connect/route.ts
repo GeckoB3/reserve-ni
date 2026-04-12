@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 import { stripe } from '@/lib/stripe';
+import { sanitizeAuthNextPath } from '@/lib/safe-auth-redirect';
+import { z } from 'zod';
 
 interface StripeConnectPostResponse {
   url: string;
@@ -13,6 +15,14 @@ interface StripeConnectGetResponse {
   details_submitted: boolean;
 }
 
+const postBodySchema = z
+  .object({
+    /** Same-origin path + optional query (e.g. /onboarding?stripe=success). Defaults to dashboard Settings → Payments. */
+    return_path: z.string().optional(),
+    refresh_path: z.string().optional(),
+  })
+  .optional();
+
 /** POST /api/venue/stripe-connect - create or resume Stripe Connect onboarding. */
 export async function POST(request: NextRequest) {
   try {
@@ -23,6 +33,24 @@ export async function POST(request: NextRequest) {
     }
     if (!requireAdmin(staff)) {
       return NextResponse.json({ error: 'Forbidden: admin only' }, { status: 403 });
+    }
+
+    let returnPath = '/dashboard/settings?stripe=success';
+    let refreshPath = '/dashboard/settings?stripe=refresh';
+    try {
+      const json = await request.json().catch(() => ({}));
+      const parsed = postBodySchema.safeParse(json);
+      if (parsed.success && parsed.data) {
+        const { return_path: ret, refresh_path: ref } = parsed.data;
+        if (ret?.trim()) {
+          returnPath = sanitizeAuthNextPath(ret.trim());
+        }
+        if (ref?.trim()) {
+          refreshPath = sanitizeAuthNextPath(ref.trim());
+        }
+      }
+    } catch {
+      /* use defaults */
     }
 
     const { data: venue, error: fetchError } = await staff.db
@@ -70,8 +98,8 @@ export async function POST(request: NextRequest) {
 
     const accountLink = await stripe.accountLinks.create({
       account: accountId,
-      refresh_url: `${origin}/dashboard/settings?stripe=refresh`,
-      return_url: `${origin}/dashboard/settings?stripe=success`,
+      refresh_url: `${origin.replace(/\/$/, '')}${refreshPath}`,
+      return_url: `${origin.replace(/\/$/, '')}${returnPath}`,
       type: 'account_onboarding',
     });
 

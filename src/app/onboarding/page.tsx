@@ -26,6 +26,7 @@ import {
 } from '@/components/onboarding/OnboardingAppointmentServiceList';
 import { normalizeTimeToHhMm, validateStartEndTimes } from '@/lib/experience-events/experience-event-validation';
 import { formatZodFlattenedError } from '@/lib/experience-events/experience-event-zod';
+import { StripeConnectSection } from '@/app/dashboard/settings/sections/StripeConnectSection';
 
 type Currency = 'GBP' | 'EUR';
 
@@ -61,6 +62,9 @@ interface VenueOnboarding {
   onboarding_step: number;
   onboarding_completed: boolean;
   currency: Currency;
+  stripe_connected_account_id: string | null;
+  /** True when the signed-in user is a venue admin (only admins can run Stripe Connect). */
+  is_admin: boolean;
 }
 
 interface PractitionerDraft {
@@ -493,6 +497,14 @@ export default function OnboardingPage() {
     loadVenue();
   }, [router]);
 
+  /** Strip ?stripe= from URL after returning from Stripe Connect (same data as initial GET). */
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    if (!params.get('stripe')) return;
+    router.replace('/onboarding', { scroll: false });
+  }, [router]);
+
   const terms = useMemo(
     () => venue?.terminology ?? { client: 'Client', booking: 'Booking', staff: 'Staff' },
     [venue?.terminology],
@@ -593,21 +605,35 @@ export default function OnboardingPage() {
     );
   }, [rosterList]);
 
+  /** Keep event calendar aligned with team columns from `unified_calendars` (invalid/stale id → first column). */
   useEffect(() => {
     if (rosterList.length === 0) return;
+    const ids = new Set(rosterList.map((r) => r.id));
     const firstId = rosterList[0]!.id;
-    setEventDraft((prev) => (prev.calendar_id.trim() ? prev : { ...prev, calendar_id: firstId }));
+    setEventDraft((prev) => {
+      const cal = prev.calendar_id.trim();
+      if (!cal || !ids.has(cal)) {
+        return { ...prev, calendar_id: firstId };
+      }
+      return prev;
+    });
   }, [rosterList]);
 
   useEffect(() => {
     if (!venue) return;
-    if (!['team', 'services', 'hours', 'classes', 'resources', 'first_event'].includes(currentStepKey)) return;
-    const needsTeamRoster =
-      currentStepKey === 'resources' ||
-      currentStepKey === 'first_event' ||
-      isUnifiedSchedulingVenue(venue.booking_model) ||
-      venue.booking_model === 'class_session';
-    if (!needsTeamRoster) {
+    /** Prefetch roster on team / Stripe / users so the Events step already has calendars when opened. */
+    if (
+      ![
+        'team',
+        'stripe_onboarding',
+        'users',
+        'services',
+        'hours',
+        'classes',
+        'resources',
+        'first_event',
+      ].includes(currentStepKey)
+    ) {
       return;
     }
     let cancelled = false;
@@ -1186,6 +1212,19 @@ export default function OnboardingPage() {
           setError('Enter an event name or clear all scheduling fields to skip this step.');
           return;
         }
+        if (isAppointmentsPlanVenue) {
+          if (rosterList.length === 0) {
+            setError(
+              'Team calendars are still loading or missing. Go back to the Calendars step, ensure each column is saved with Continue, then return here — or wait a few seconds and try again.',
+            );
+            return;
+          }
+          const calId = eventDraft.calendar_id.trim();
+          if (calId && !rosterIds.includes(calId)) {
+            setError('Choose a calendar column from the dropdown (from your Calendars step).');
+            return;
+          }
+        }
         const built = buildOnboardingExperienceEventPostBody(eventDraft);
         if (!built.ok) {
           setError(built.error);
@@ -1471,6 +1510,7 @@ export default function OnboardingPage() {
 
   const wideOnboardingStep =
     currentStepKey === 'first_event' ||
+    currentStepKey === 'stripe_onboarding' ||
     (isUnifiedSchedulingVenue(venue.booking_model) &&
       (currentStepKey === 'services' || currentStepKey === 'hours'));
 
@@ -1537,40 +1577,33 @@ export default function OnboardingPage() {
 
         {currentStepKey === 'stripe_onboarding' && (
           <div>
-            <h2 className="mb-1 text-lg font-bold text-slate-900">Connect Stripe for online payments</h2>
+            <h2 className="mb-1 text-lg font-bold text-slate-900">Payments (Stripe)</h2>
             <p className="mb-4 text-sm text-slate-500">
-              To take card payments and deposits (for appointments, ticketed events, resources, and restaurant bookings),
-              you need a connected Stripe account. This step is optional: you can finish onboarding now and set up Stripe
-              later.
+              Connect your Stripe account here — same setup as Settings → Payments. This step is optional: use{' '}
+              <span className="font-medium text-slate-700">Continue</span> below to finish onboarding and complete Stripe
+              later from the dashboard if you prefer.
             </p>
             <div className="mb-6 rounded-xl border border-amber-200 bg-amber-50/80 px-4 py-3 text-sm text-amber-950">
               <p className="font-medium">Skip if you are not ready</p>
               <p className="mt-1 text-amber-900/90">
-                Press <span className="font-semibold">Continue</span> below to move on without connecting Stripe. You can
-                complete payment setup any time under{' '}
+                Press <span className="font-semibold">Continue</span> to move on without connecting Stripe. You can open{' '}
                 <Link
                   href="/dashboard/settings?tab=payments"
                   className="font-medium text-brand-700 underline hover:text-brand-800"
-                  target="_blank"
-                  rel="noreferrer"
                 >
                   Settings → Payments
-                </Link>
-                .
+                </Link>{' '}
+                any time after onboarding.
               </p>
             </div>
-            <p className="mb-4 text-sm text-slate-600">
-              When you are ready, open{' '}
-              <Link
-                href="/dashboard/settings?tab=payments"
-                className="font-medium text-brand-600 underline hover:text-brand-700"
-                target="_blank"
-                rel="noreferrer"
-              >
-                Settings → Payments
-              </Link>{' '}
-              to connect Stripe and verify your business details.
-            </p>
+            <StripeConnectSection
+              stripeAccountId={venue.stripe_connected_account_id ?? null}
+              isAdmin={venue.is_admin}
+              stripeAccountLinkPaths={{
+                return: '/onboarding?stripe=success',
+                refresh: '/onboarding?stripe=refresh',
+              }}
+            />
           </div>
         )}
 
@@ -2147,9 +2180,15 @@ export default function OnboardingPage() {
                   <div className="sm:col-span-2 space-y-3 rounded-lg border border-slate-100 bg-slate-50/80 p-3">
                     <p className="text-xs font-medium text-slate-700">Calendar column</p>
                     <p className="text-xs text-slate-500">
-                      Show this event on a team calendar column. The time must not overlap other bookings or blocked time
-                      on that column.
+                      Show this event on a team calendar column from the Calendars step. The time must not overlap other
+                      bookings or blocked time on that column.
                     </p>
+                    {isAppointmentsPlanVenue && rosterList.length === 0 && (
+                      <p className="text-xs text-amber-800">
+                        Loading team calendars… If this persists, go back to the Calendars step and use Continue to save
+                        your columns.
+                      </p>
+                    )}
                     <div>
                       <label className="mb-1 block text-xs font-medium text-slate-600">Calendar</label>
                       <select
@@ -2157,7 +2196,9 @@ export default function OnboardingPage() {
                         onChange={(e) => setEventDraft((f) => ({ ...f, calendar_id: e.target.value }))}
                         className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
                       >
-                        <option value="">Not assigned to a calendar</option>
+                        <option value="">
+                          {rosterList.length === 0 ? 'Loading calendars…' : 'Not assigned to a calendar'}
+                        </option>
                         {rosterList.map((c) => (
                           <option key={c.id} value={c.id}>
                             {c.name}

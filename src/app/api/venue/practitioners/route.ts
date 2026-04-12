@@ -137,7 +137,15 @@ export async function GET(request: NextRequest) {
       .maybeSingle();
     const bookingModel = (venueMeta as { booking_model?: string } | null)?.booking_model ?? '';
 
-    if (bookingModel === 'unified_scheduling') {
+    /** Experience events, classes, etc. use `unified_calendars.id`. Prefer UC list whenever rows exist (mirrors share practitioner ids). */
+    const { count: unifiedCalendarCount } = await admin
+      .from('unified_calendars')
+      .select('id', { count: 'exact', head: true })
+      .eq('venue_id', staff.venue_id);
+    const useUnifiedCalendarList =
+      bookingModel === 'unified_scheduling' || (unifiedCalendarCount ?? 0) > 0;
+
+    if (useUnifiedCalendarList) {
       const { data, error } = await admin
         .from('unified_calendars')
         .select('*')
