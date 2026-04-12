@@ -2,13 +2,13 @@
 
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { type AuthErrorDetail, getAuthCode, getAuthErrorDetail, getAuthOtpParams, mapAuthErrorMessageToDetail, parseHashSearchParams, SET_PASSWORD_PATH } from '@/lib/auth-link';
 import { createClient } from '@/lib/supabase/browser';
 
 const LOGIN_REDIRECT = `/login?redirectTo=${encodeURIComponent(SET_PASSWORD_PATH)}`;
 
-export default function SetPasswordPage() {
+function SetPasswordContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [checking, setChecking] = useState(true);
@@ -290,5 +290,19 @@ export default function SetPasswordPage() {
         </div>
       </div>
     </main>
+  );
+}
+
+export default function SetPasswordPage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="flex min-h-screen items-center justify-center bg-slate-50 p-4">
+          <div className="h-8 w-8 animate-spin rounded-full border-4 border-brand-200 border-t-brand-600" />
+        </main>
+      }
+    >
+      <SetPasswordContent />
+    </Suspense>
   );
 }
