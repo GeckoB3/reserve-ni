@@ -1,4 +1,5 @@
 import type { NextRequest } from 'next/server';
+import { normalizePublicBaseUrl } from './public-base-url';
 
 /**
  * Public site URL for auth redirects. Prefer NEXT_PUBLIC_BASE_URL in production so it matches
@@ -6,9 +7,15 @@ import type { NextRequest } from 'next/server';
  * `${base}/auth/callback` and `${base}/auth/**`).
  */
 export function getStaffAuthBaseUrl(request: NextRequest | Request): string {
+  const envBase = process.env.NEXT_PUBLIC_BASE_URL;
+  if (envBase) {
+    return normalizePublicBaseUrl(envBase);
+  }
+
   return (
-    process.env.NEXT_PUBLIC_BASE_URL?.replace(/\/$/, '') ||
-    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : new URL(request.url).origin.replace(/\/$/, ''))
+    process.env.VERCEL_URL
+      ? normalizePublicBaseUrl(`https://${process.env.VERCEL_URL}`)
+      : normalizePublicBaseUrl(new URL(request.url).origin)
   );
 }
 

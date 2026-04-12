@@ -3,6 +3,13 @@
 import { createBrowserClient } from '@supabase/ssr';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useEffect } from 'react';
+import {
+  getAuthCode,
+  getAuthErrorDetail,
+  getAuthFailurePath,
+  mapAuthErrorMessageToDetail,
+  parseHashSearchParams,
+} from '@/lib/auth-link';
 import { hasPlatformSuperuserJwtRole } from '@/lib/platform-auth';
 import { sanitizeAuthNextPath } from '@/lib/safe-auth-redirect';
 
@@ -39,14 +46,11 @@ function AuthCallbackContent() {
         router.refresh();
       }
 
-      const oauthError = searchParams.get('error');
-      const oauthDesc = (searchParams.get('error_description') ?? '').toLowerCase();
-      if (oauthError) {
-        const isOtp =
-          oauthDesc.includes('expired') ||
-          oauthDesc.includes('invalid') ||
-          oauthError === 'access_denied';
-        router.replace(`/login?error=auth_callback_error&detail=${isOtp ? 'otp_expired' : 'exchange_failed'}`);
+      const hashParams = typeof window === 'undefined' ? undefined : parseHashSearchParams(window.location.hash);
+
+      const authErrorDetail = getAuthErrorDetail(searchParams, hashParams);
+      if (authErrorDetail) {
+        router.replace(getAuthFailurePath(searchParams.get('next'), authErrorDetail));
         return;
       }
 
@@ -58,31 +62,17 @@ function AuthCallbackContent() {
         return;
       }
 
-      let code = searchParams.get('code');
-      if (!code && typeof window !== 'undefined') {
-        const hash = window.location.hash?.replace(/^#/, '');
-        if (hash) {
-          code = new URLSearchParams(hash).get('code');
-        }
-      }
-
+      const code = getAuthCode(searchParams, hashParams);
       if (!code) {
-        router.replace('/login?error=auth_callback_error&detail=exchange_failed');
+        router.replace(getAuthFailurePath(searchParams.get('next'), 'exchange_failed'));
         return;
       }
 
       const { error } = await supabase.auth.exchangeCodeForSession(code);
       if (error) {
-        const msg = (error.message ?? '').toLowerCase();
-        const isOtp =
-          msg.includes('expired') ||
-          msg.includes('invalid') ||
-          msg.includes('already been used') ||
-          msg.includes('code verifier') ||
-          msg.includes('bad code');
-        const detail = isOtp ? 'otp_expired' : 'exchange_failed';
+        const detail = mapAuthErrorMessageToDetail(error.message);
         console.error('[auth/callback] exchangeCodeForSession:', error.message);
-        router.replace(`/login?error=auth_callback_error&detail=${detail}`);
+        router.replace(getAuthFailurePath(searchParams.get('next'), detail));
         return;
       }
 

@@ -1,6 +1,8 @@
 'use client';
 
 import { useState } from 'react';
+import { SET_PASSWORD_PATH } from '@/lib/auth-link';
+import { normalizePublicBaseUrl } from '@/lib/public-base-url';
 import { createClient } from '@/lib/supabase/browser';
 import { hasPlatformSuperuserJwtRole } from '@/lib/platform-auth';
 
@@ -16,10 +18,12 @@ export function LoginForm({ redirectTo }: { redirectTo?: string }) {
 
   const supabase = createClient();
   const siteOrigin = process.env.NEXT_PUBLIC_BASE_URL
-    || (typeof window !== 'undefined' ? window.location.origin : '');
+    ? normalizePublicBaseUrl(process.env.NEXT_PUBLIC_BASE_URL)
+    : (typeof window !== 'undefined' ? window.location.origin : '');
   const callbackUrl = redirectTo
     ? `${siteOrigin}/auth/callback?next=${encodeURIComponent(redirectTo)}`
     : `${siteOrigin}/auth/callback`;
+  const passwordSetupCallbackUrl = `${siteOrigin}/auth/callback?next=${encodeURIComponent(SET_PASSWORD_PATH)}`;
 
   async function handlePasswordSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -52,7 +56,7 @@ export function LoginForm({ redirectTo }: { redirectTo?: string }) {
     setError(null);
     setSuccessMessage(null);
     setLoading(true);
-    const { error: err } = await supabase.auth.resetPasswordForEmail(email.trim(), { redirectTo: callbackUrl });
+    const { error: err } = await supabase.auth.resetPasswordForEmail(email.trim(), { redirectTo: passwordSetupCallbackUrl });
     setLoading(false);
     if (err) { setError(err.message); return; }
     setSuccessMessage('Check your inbox for a link to reset your password.');

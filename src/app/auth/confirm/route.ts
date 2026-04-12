@@ -1,11 +1,13 @@
 import { NextResponse } from 'next/server';
+import { getAuthFailurePath, mapAuthErrorMessageToDetail, SET_PASSWORD_PATH } from '@/lib/auth-link';
+import { normalizePublicBaseUrl } from '@/lib/public-base-url';
 import { createClient } from '@/lib/supabase/server';
 import { sanitizeAuthNextPath } from '@/lib/safe-auth-redirect';
 
 function getBaseUrl(requestUrl: string): string {
-  if (process.env.NEXT_PUBLIC_BASE_URL) return process.env.NEXT_PUBLIC_BASE_URL;
-  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
-  return new URL(requestUrl).origin;
+  if (process.env.NEXT_PUBLIC_BASE_URL) return normalizePublicBaseUrl(process.env.NEXT_PUBLIC_BASE_URL);
+  if (process.env.VERCEL_URL) return normalizePublicBaseUrl(`https://${process.env.VERCEL_URL}`);
+  return normalizePublicBaseUrl(new URL(requestUrl).origin);
 }
 
 /**
@@ -31,8 +33,8 @@ export async function GET(request: Request) {
   const nextPath =
     rawNext != null && rawNext !== ''
       ? sanitizeAuthNextPath(rawNext)
-      : type === 'invite'
-        ? '/auth/set-password'
+      : type === 'invite' || type === 'recovery'
+        ? SET_PASSWORD_PATH
         : sanitizeAuthNextPath(null);
   const base = getBaseUrl(request.url);
 
@@ -43,7 +45,8 @@ export async function GET(request: Request) {
       return NextResponse.redirect(`${base}${nextPath}`);
     }
     console.error('Auth confirm failed:', error.message);
+    return NextResponse.redirect(`${base}${getAuthFailurePath(nextPath, mapAuthErrorMessageToDetail(error.message))}`);
   }
 
-  return NextResponse.redirect(`${base}/login?error=auth_callback_error`);
+  return NextResponse.redirect(`${base}${getAuthFailurePath(nextPath, 'exchange_failed')}`);
 }
