@@ -1432,7 +1432,7 @@ export default function OnboardingPage() {
           </div>
         )}
 
-        {/* Model B: Team / calendars (all appointment-style plans: unlimited calendars — same add/remove UI) */}
+        {/* Model B: Team / calendars (all appointment-style plans: same add/remove UI) */}
         {currentStepKey === 'team' && venue && (
           <div>
             <h2 className="mb-1 text-lg font-bold text-slate-900">
@@ -1441,44 +1441,48 @@ export default function OnboardingPage() {
             {venue.pricing_tier === 'founding' ? (
               <p className="mb-4 text-sm text-slate-500">
                 Your Founding Partner plan includes <strong>unlimited bookable calendars</strong> and{' '}
-                <strong>unlimited team members</strong>: add everyone you need. Each person below gets their own
-                calendar and staff settings. Set{' '}
-                <strong>working hours, breaks, and days off</strong> under{' '}
+                <strong>unlimited team members</strong>. Each name you add below is a <strong>calendar column</strong>: a
+                lane on your schedule. A column might match a specific staff member or a resource, or just be a label you
+                work with. You can point bookable resources at whichever column fits, and you can change that later. Use{' '}
+                <strong>Add</strong> for another column and <strong>Remove</strong> to drop one. You need at least one.
+                After onboarding, add or remove columns any time under{' '}
                 <Link
                   href="/dashboard/calendar-availability"
                   className="font-medium text-brand-600 underline hover:text-brand-700"
                 >
                   Calendar availability
-                </Link>{' '}
-                after onboarding. You can also manage {terms.staff.toLowerCase()} under{' '}
+                </Link>
+                . Set working hours, breaks, and days off there too. Under{' '}
                 <Link
                   href="/dashboard/settings?tab=staff"
                   className="font-medium text-brand-600 underline hover:text-brand-700"
                 >
                   Settings → Staff
                 </Link>
-                .
+                , choose which staff can manage which columns.
               </p>
             ) : (
               <p className="mb-4 text-sm text-slate-500">
-                Your plan includes <strong>unlimited bookable calendars</strong>. Add a row for each calendar you need
-                (each can represent a person or a room). Use <strong>Add</strong> to add more and{' '}
-                <strong>Remove</strong> to delete a row you don&apos;t need—you need at least one. Set{' '}
-                <strong>working hours, breaks, and days off</strong> under{' '}
+                Your plan includes <strong>unlimited bookable calendars</strong>. Each row is a{' '}
+                <strong>calendar column</strong>: a vertical lane on your main schedule. A column can line up with a staff member or a resource, or simply
+                be a name you use to organise the day. Bookable resources can be allocated to any column you choose, and
+                you can adjust that as your setup evolves. Use <strong>Add</strong> to create another column and{' '}
+                <strong>Remove</strong> to delete one you do not need. You need at least one column. Later, add or remove
+                columns under{' '}
                 <Link
                   href="/dashboard/calendar-availability"
                   className="font-medium text-brand-600 underline hover:text-brand-700"
                 >
                   Calendar availability
-                </Link>{' '}
-                after onboarding. Manage {terms.staff.toLowerCase()} under{' '}
+                </Link>
+                . Set working hours, breaks, and days off there as well. Under{' '}
                 <Link
                   href="/dashboard/settings?tab=staff"
                   className="font-medium text-brand-600 underline hover:text-brand-700"
                 >
                   Settings → Staff
                 </Link>
-                .
+                , give team members control of the columns they should use.
               </p>
             )}
             <div className="mb-6 space-y-3">
@@ -1501,8 +1505,8 @@ export default function OnboardingPage() {
                       </button>
                     )}
                   </div>
-                  <div className="flex flex-col gap-3 sm:flex-row sm:gap-3">
-                    <div className="flex-1">
+                  {isAppointmentsPlanVenue ? (
+                    <div>
                       <label className="mb-1 block text-xs font-medium text-slate-600">
                         Name <span className="text-red-500">*</span>
                       </label>
@@ -1514,27 +1518,46 @@ export default function OnboardingPage() {
                           updated[i] = { ...p, name: e.target.value };
                           setPractitioners(updated);
                         }}
-                        placeholder="e.g. Staff name or room label"
+                        placeholder="Calendar name or resource label"
                         className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
                       />
                     </div>
-                    <div className="flex-1">
-                      <label className="mb-1 block text-xs font-medium text-slate-600">
-                        Email <span className="font-normal text-slate-400">(optional)</span>
-                      </label>
-                      <input
-                        type="email"
-                        value={p.email}
-                        onChange={(e) => {
-                          const updated = [...practitioners];
-                          updated[i] = { ...p, email: e.target.value };
-                          setPractitioners(updated);
-                        }}
-                        placeholder="name@example.com"
-                        className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
-                      />
+                  ) : (
+                    <div className="flex flex-col gap-3 sm:flex-row sm:gap-3">
+                      <div className="flex-1">
+                        <label className="mb-1 block text-xs font-medium text-slate-600">
+                          Name <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          value={p.name}
+                          onChange={(e) => {
+                            const updated = [...practitioners];
+                            updated[i] = { ...p, name: e.target.value };
+                            setPractitioners(updated);
+                          }}
+                          placeholder="e.g. Staff name or room label"
+                          className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
+                        />
+                      </div>
+                      <div className="flex-1">
+                        <label className="mb-1 block text-xs font-medium text-slate-600">
+                          Email <span className="font-normal text-slate-400">(optional)</span>
+                        </label>
+                        <input
+                          type="email"
+                          value={p.email}
+                          onChange={(e) => {
+                            const updated = [...practitioners];
+                            updated[i] = { ...p, email: e.target.value };
+                            setPractitioners(updated);
+                          }}
+                          placeholder="name@example.com"
+                          className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
+                        />
+                      </div>
                     </div>
-                  </div>
+                  )}
                 </div>
               ))}
               <button

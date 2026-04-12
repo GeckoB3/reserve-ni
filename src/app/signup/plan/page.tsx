@@ -211,7 +211,7 @@ export default function PlanPage() {
           onClick={handleContinue}
           className="rounded-xl bg-brand-600 px-8 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 transition-colors"
         >
-          Continue to Payment
+          Continue
         </button>
       </div>
     </div>
