@@ -14,8 +14,8 @@ export function getStaffAuthBaseUrl(request: NextRequest | Request): string {
 
 /**
  * After the user clicks the link in their email, Supabase redirects here with a `code` query param.
- * `/auth/callback` exchanges the code for a session, then sends the user to `/auth/set-password`
- * to choose a password before opening the dashboard.
+ * The `/auth/callback` **page** (client) exchanges the code in the browser so PKCE cookies apply,
+ * then redirects to `/auth/set-password` (via `next`) so they can choose a password before the dashboard.
  */
 export function getStaffInviteRedirectTo(request: NextRequest | Request): string {
   const base = getStaffAuthBaseUrl(request);
