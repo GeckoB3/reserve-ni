@@ -15,8 +15,8 @@ export function OnboardingStaffInviteStep({ invites, setInvites }: Props) {
     <div>
       <h2 className="mb-1 text-lg font-bold text-slate-900">Set up other users</h2>
       <p className="mb-6 text-sm text-slate-500">
-        Add any teammates who should be able to sign in after onboarding. This sends an email invite, and you can add
-        or remove users later under Settings → Staff.
+        Add any teammates who should be able to sign in after onboarding. They receive an email with a link to create a
+        password and open the dashboard. You can add or remove users later under Settings → Staff.
       </p>
 
       <div className="space-y-3">

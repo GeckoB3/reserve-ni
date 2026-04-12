@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server';
 import { isPlatformSuperuser } from '@/lib/platform-auth';
+import { sanitizeAuthNextPath } from '@/lib/safe-auth-redirect';
 import { NextResponse } from 'next/server';
 
 function getBaseUrl(requestUrl: string): string {
@@ -14,7 +15,7 @@ function getBaseUrl(requestUrl: string): string {
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const code = searchParams.get('code');
-  const next = searchParams.get('next') ?? '/dashboard';
+  const next = sanitizeAuthNextPath(searchParams.get('next'));
   const base = getBaseUrl(request.url);
 
   if (code) {

@@ -45,7 +45,11 @@ export async function POST(request: NextRequest) {
     }
 
     const admin = getSupabaseAdminClient();
-    const redirectTo = (process.env.NEXT_PUBLIC_BASE_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : request.nextUrl.origin)) + '/dashboard';
+    const base =
+      process.env.NEXT_PUBLIC_BASE_URL?.replace(/\/$/, '') ||
+      (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : request.nextUrl.origin.replace(/\/$/, ''));
+    /** PKCE exchange on /auth/callback, then first-time password on /auth/set-password (not /dashboard, or middleware drops `code`). */
+    const redirectTo = `${base}/auth/callback?next=${encodeURIComponent('/auth/set-password')}`;
     const { error: inviteError } = await admin.auth.admin.inviteUserByEmail(normalisedEmail, {
       redirectTo,
       data: { venue_id: staff.venue_id },

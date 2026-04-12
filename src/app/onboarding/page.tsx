@@ -1463,26 +1463,23 @@ export default function OnboardingPage() {
               </p>
             ) : (
               <p className="mb-4 text-sm text-slate-500">
-                Your plan includes <strong>unlimited bookable calendars</strong>. Each row is a{' '}
-                <strong>calendar column</strong>: a vertical lane on your main schedule. A column can line up with a staff member or a resource, or simply
-                be a name you use to organise the day. Bookable resources can be allocated to any column you choose, and
-                you can adjust that as your setup evolves. Use <strong>Add</strong> to create another column and{' '}
-                <strong>Remove</strong> to delete one you do not need. You need at least one column. Later, add or remove
-                columns under{' '}
+                Your plan includes <strong>unlimited bookable calendars</strong>. Each row is a calendar column
+                representing a staff member, resource, or category. Add or remove columns as needed (minimum one required).
+                Later, manage working hours, breaks, and days off under{' '}
                 <Link
                   href="/dashboard/calendar-availability"
                   className="font-medium text-brand-600 underline hover:text-brand-700"
                 >
                   Calendar availability
                 </Link>
-                . Set working hours, breaks, and days off there as well. Under{' '}
+                . Give team members column access via{' '}
                 <Link
                   href="/dashboard/settings?tab=staff"
                   className="font-medium text-brand-600 underline hover:text-brand-700"
                 >
                   Settings → Staff
                 </Link>
-                , give team members control of the columns they should use.
+                .
               </p>
             )}
             <div className="mb-6 space-y-3">
