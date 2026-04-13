@@ -7,6 +7,7 @@ import { mergeAppointmentServiceWithPractitionerLink } from '@/lib/appointments/
 import type { AppointmentService, ClassPaymentRequirement, PractitionerService } from '@/types/booking-models';
 import { DEFAULT_ENTITY_BOOKING_WINDOW } from '@/lib/booking/entity-booking-window';
 import { formatPricePenceForServiceCatalog } from '@/lib/booking/format-price-display';
+import { StripePaymentWarning } from '@/components/dashboard/StripePaymentWarning';
 import { HelpTooltip } from '@/components/dashboard/HelpTooltip';
 import { StaffServiceOverrideModal } from './StaffServiceOverrideModal';
 
@@ -138,11 +139,14 @@ export function AppointmentServicesView({
   isAdmin,
   linkedPractitionerIds = [],
   currency = 'GBP',
+  stripeConnected = false,
 }: {
   isAdmin: boolean;
   /** Bookable calendars (`unified_calendars.id`) this staff user manages. */
   linkedPractitionerIds?: string[];
   currency?: string;
+  /** Venue has `stripe_connected_account_id` — required for online deposits / full payment. */
+  stripeConnected?: boolean;
 }) {
   const sym = currency === 'EUR' ? '€' : '£';
 
@@ -904,6 +908,12 @@ export function AppointmentServicesView({
                     The full service price (above) is charged when the guest completes booking online.
                   </p>
                 )}
+                <StripePaymentWarning
+                  stripeConnected={stripeConnected}
+                  requiresOnlinePayment={
+                    form.payment_requirement === 'deposit' || form.payment_requirement === 'full_payment'
+                  }
+                />
               </div>
 
               {/* Online guest booking rules */}

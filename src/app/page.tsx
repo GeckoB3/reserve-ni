@@ -156,10 +156,7 @@ export default function Home() {
           <div className="mx-auto mt-14 grid max-w-4xl items-stretch gap-8 lg:grid-cols-2">
             {/* Appointments */}
             <div className="flex flex-col rounded-2xl border-2 border-brand-500 bg-white p-8 shadow-sm ring-1 ring-brand-500/20">
-              <div className="flex items-center gap-2">
-                <h3 className="text-lg font-bold text-slate-900">Appointments</h3>
-                <span className="rounded-full bg-brand-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-brand-700">Most popular</span>
-              </div>
+              <h3 className="text-lg font-bold text-slate-900">Appointments</h3>
               <div className="mt-3 flex items-baseline gap-1">
                 <span className="text-4xl font-extrabold text-slate-900">&pound;{APPOINTMENTS_PRICE}</span>
                 <span className="text-sm text-slate-500">/month</span>

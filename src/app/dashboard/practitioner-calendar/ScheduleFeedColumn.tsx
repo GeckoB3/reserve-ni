@@ -28,6 +28,8 @@ interface ScheduleFeedColumnProps {
   onClassInstanceClick?: (block: ScheduleBlockDTO) => void;
   /** When set, experience event aggregate blocks open this handler (roster + event detail). */
   onEventInstanceClick?: (block: ScheduleBlockDTO) => void;
+  /** Omit the top label row when the parent renders a unified sticky header (day grid). */
+  hideHeader?: boolean;
 }
 
 /**
@@ -42,6 +44,7 @@ export function ScheduleFeedColumn({
   onBookingClick,
   onClassInstanceClick,
   onEventInstanceClick,
+  hideHeader = false,
 }: ScheduleFeedColumnProps) {
   const totalSlots = (() => {
     const n = ((endHour - startHour) * 60) / SLOT_MINUTES;
@@ -63,9 +66,11 @@ export function ScheduleFeedColumn({
 
   return (
     <div className="min-w-[180px] flex-1 border-r border-slate-100 last:border-r-0">
-      <div className="sticky top-0 z-10 flex h-10 items-center justify-center border-b border-slate-100 bg-white px-3 py-2">
-        <span className="truncate text-center text-sm font-semibold text-slate-900">{label}</span>
-      </div>
+      {!hideHeader ? (
+        <div className="sticky top-0 z-10 flex h-10 items-center justify-center border-b border-slate-100 bg-white px-3 py-2">
+          <span className="truncate text-center text-sm font-semibold text-slate-900">{label}</span>
+        </div>
+      ) : null}
       <div className="relative" style={{ height: totalSlots * SLOT_HEIGHT }}>
         {dayBlocks.map((b) => {
           const top = slotTop(b.start_time);

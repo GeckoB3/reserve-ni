@@ -231,14 +231,16 @@ export function ClassBookingFlow({
     return paymentSummaryLines(selectedClass, spots, currency);
   }, [selectedClass, spots, currency]);
 
+  const classRefundNoticeHours = useMemo(() => {
+    const h = selectedClass?.cancellation_notice_hours;
+    if (typeof h === 'number' && Number.isFinite(h)) return h;
+    return venue.booking_rules?.cancellation_notice_hours ?? 48;
+  }, [selectedClass?.cancellation_notice_hours, venue.booking_rules?.cancellation_notice_hours]);
+
   const classPaymentRefundPolicy = useMemo(() => {
     if (cancellationPolicy) return cancellationPolicy;
-    const h =
-      typeof selectedClass?.cancellation_notice_hours === 'number' && Number.isFinite(selectedClass.cancellation_notice_hours)
-        ? selectedClass.cancellation_notice_hours
-        : venue.booking_rules?.cancellation_notice_hours ?? 48;
-    return formatOnlinePaidRefundPolicyLine(h);
-  }, [cancellationPolicy, selectedClass?.cancellation_notice_hours, venue.booking_rules?.cancellation_notice_hours]);
+    return formatOnlinePaidRefundPolicyLine(classRefundNoticeHours);
+  }, [cancellationPolicy, classRefundNoticeHours]);
 
   const handleDetailsSubmit = useCallback(
     async (details: GuestDetails) => {
@@ -538,7 +540,9 @@ export function ClassBookingFlow({
               requiresDeposit={false}
               variant="class"
               appointmentDepositPence={depositPenceForDetails > 0 ? depositPenceForDetails : null}
+              appointmentChargeLabel={selectedClass.payment_requirement === 'full_payment' ? 'full_payment' : 'deposit'}
               currencySymbol={sym}
+              refundNoticeHours={classRefundNoticeHours}
               phoneDefaultCountry={phoneDefaultCountry}
               audience={detailsAudience}
             />

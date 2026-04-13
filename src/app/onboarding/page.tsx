@@ -309,6 +309,96 @@ function unifiedTeamStepLabel(terms: { staff: string }): string {
   return `Your ${s}s`;
 }
 
+type OnboardingStepDef = { key: string; label: string };
+
+/**
+ * Every Appointments-plan booking model uses team calendar columns (`unified_calendars`) for at least one flow
+ * (appointments, classes, events, resources), so per-calendar working hours belong in onboarding whenever any
+ * model is enabled — not only when `unified_scheduling` is selected.
+ */
+function appointmentsPlanNeedsCalendarAvailabilityStep(activeModels: AppointmentPlanModel[]): boolean {
+  return activeModels.length > 0;
+}
+
+/** Appointments plan: calendars → calendar hours → staff → model setup → Stripe → review. */
+function buildAppointmentsPlanModelSteps(activeModels: AppointmentPlanModel[]): OnboardingStepDef[] {
+  const steps: OnboardingStepDef[] = [
+    { key: 'welcome', label: 'Welcome' },
+    { key: 'profile', label: 'Business Details' },
+    { key: 'opening_hours', label: 'Opening Hours' },
+    { key: 'team', label: 'Calendars' },
+  ];
+  if (appointmentsPlanNeedsCalendarAvailabilityStep(activeModels)) {
+    steps.push({ key: 'hours', label: 'Calendar Availability' });
+  }
+  steps.push({ key: 'users', label: 'Other Users' });
+  for (const model of APPOINTMENTS_ACTIVE_MODEL_ORDER.filter(isAppointmentPlanModel)) {
+    if (!activeModels.includes(model)) continue;
+    if (model === 'unified_scheduling') {
+      steps.push({ key: 'services', label: 'Appointments Setup' });
+    }
+    if (model === 'class_session') {
+      steps.push({ key: 'classes', label: 'Classes Setup' });
+    }
+    if (model === 'event_ticket') {
+      steps.push({ key: 'first_event', label: 'Events Setup' });
+    }
+    if (model === 'resource_booking') {
+      steps.push({ key: 'resources', label: 'Resources Setup' });
+    }
+  }
+  steps.push({ key: 'stripe_onboarding', label: 'Payments (Stripe)' });
+  steps.push({ key: 'preview', label: 'Review & Go Live' });
+  return steps;
+}
+
+/**
+ * Previous appointments step order (Stripe before staff; appointments setup before calendar hours).
+ * Used only to remap stored `onboarding_step` indices for users mid-flow when the flow order changes.
+ */
+function buildLegacyAppointmentsPlanModelSteps(activeModels: AppointmentPlanModel[]): OnboardingStepDef[] {
+  const steps: OnboardingStepDef[] = [
+    { key: 'welcome', label: 'Welcome' },
+    { key: 'profile', label: 'Business Details' },
+    { key: 'opening_hours', label: 'Opening Hours' },
+    { key: 'team', label: 'Calendars' },
+    { key: 'stripe_onboarding', label: 'Payments (Stripe)' },
+    { key: 'users', label: 'Other Users' },
+  ];
+  for (const model of APPOINTMENTS_ACTIVE_MODEL_ORDER.filter(isAppointmentPlanModel)) {
+    if (!activeModels.includes(model)) continue;
+    if (model === 'unified_scheduling') {
+      steps.push({ key: 'services', label: 'Appointments Setup' });
+      steps.push({ key: 'hours', label: 'Calendar Availability' });
+    }
+    if (model === 'class_session') {
+      steps.push({ key: 'classes', label: 'Classes Setup' });
+    }
+    if (model === 'event_ticket') {
+      steps.push({ key: 'first_event', label: 'Events Setup' });
+    }
+    if (model === 'resource_booking') {
+      steps.push({ key: 'resources', label: 'Resources Setup' });
+    }
+  }
+  steps.push({ key: 'preview', label: 'Review & Go Live' });
+  return steps;
+}
+
+function migrateOnboardingStepToCurrentLayout(
+  storedIndex: number,
+  legacySteps: OnboardingStepDef[],
+  currentSteps: OnboardingStepDef[],
+): number {
+  const legacyKey = legacySteps[storedIndex]?.key;
+  if (!legacyKey) {
+    return Math.min(Math.max(0, storedIndex), Math.max(0, currentSteps.length - 1));
+  }
+  const idx = currentSteps.findIndex((s) => s.key === legacyKey);
+  if (idx >= 0) return idx;
+  return Math.min(Math.max(0, storedIndex), Math.max(0, currentSteps.length - 1));
+}
+
 export default function OnboardingPage() {
   const router = useRouter();
   const [venue, setVenue] = useState<VenueOnboarding | null>(null);
@@ -414,8 +504,6 @@ export default function OnboardingPage() {
         const data = await res.json();
         const v = data.venue as VenueOnboarding;
         setVenue(v);
-        setStep(v.onboarding_step);
-        setMaxCompletedStep(v.onboarding_step);
         setName(v.name === 'My Business' ? '' : v.name);
         const parsed = parseAddress(v.address);
         setAddressName(parsed.name);
@@ -434,6 +522,27 @@ export default function OnboardingPage() {
           router.push('/signup/booking-models');
           return;
         }
+
+        let initialStep = v.onboarding_step;
+        let initialMaxStep = v.onboarding_step;
+        if (v.pricing_tier === 'appointments') {
+          const active = (v.active_booking_models ?? []).filter(isAppointmentPlanModel) as AppointmentPlanModel[];
+          if (active.length > 0) {
+            const legacySteps = buildLegacyAppointmentsPlanModelSteps(active);
+            const currentSteps = buildAppointmentsPlanModelSteps(active);
+            initialStep = migrateOnboardingStepToCurrentLayout(v.onboarding_step, legacySteps, currentSteps);
+            initialMaxStep = initialStep;
+            if (initialStep !== v.onboarding_step) {
+              void fetch('/api/venue/onboarding', {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ onboarding_step: initialStep }),
+              });
+            }
+          }
+        }
+        setStep(initialStep);
+        setMaxCompletedStep(initialMaxStep);
 
         // Pre-fill services from business config defaults (stored in pence, display in pounds)
         if (v.business_type) {
@@ -528,34 +637,7 @@ export default function OnboardingPage() {
   const modelSteps = useMemo(() => {
     if (!venue) return [];
     if (venue.pricing_tier === 'appointments') {
-      const steps: Array<{ key: string; label: string }> = [
-        { key: 'welcome', label: 'Welcome' },
-        { key: 'profile', label: 'Business Details' },
-        { key: 'opening_hours', label: 'Opening Hours' },
-        { key: 'team', label: 'Calendars' },
-        { key: 'stripe_onboarding', label: 'Payments (Stripe)' },
-        { key: 'users', label: 'Other Users' },
-      ];
-
-      for (const model of APPOINTMENTS_ACTIVE_MODEL_ORDER.filter(isAppointmentPlanModel)) {
-        if (!activeAppointmentsModels.includes(model)) continue;
-        if (model === 'unified_scheduling') {
-          steps.push({ key: 'services', label: 'Appointments Setup' });
-          steps.push({ key: 'hours', label: 'Calendar Availability' });
-        }
-        if (model === 'class_session') {
-          steps.push({ key: 'classes', label: 'Classes Setup' });
-        }
-        if (model === 'event_ticket') {
-          steps.push({ key: 'first_event', label: 'Events Setup' });
-        }
-        if (model === 'resource_booking') {
-          steps.push({ key: 'resources', label: 'Resources Setup' });
-        }
-      }
-
-      steps.push({ key: 'preview', label: 'Review & Go Live' });
-      return steps;
+      return buildAppointmentsPlanModelSteps(activeAppointmentsModels);
     }
 
     const steps: Array<{ key: string; label: string }> = [
@@ -621,7 +703,7 @@ export default function OnboardingPage() {
 
   useEffect(() => {
     if (!venue) return;
-    /** Prefetch roster on team / Stripe / users so the Events step already has calendars when opened. */
+    /** Prefetch roster on team, hours, staff, Stripe, and model steps so calendars are loaded when needed. */
     if (
       ![
         'team',
@@ -703,8 +785,16 @@ export default function OnboardingPage() {
   }, [venue, currentStepKey, step, maxCompletedStep, revisitedStepIndex]);
 
   useEffect(() => {
-    if (!venue || !isUnifiedSchedulingVenue(venue.booking_model)) return;
+    if (!venue) return;
     if (currentStepKey !== 'hours' && currentStepKey !== 'opening_hours') return;
+    const isAppointmentsTier = venue.pricing_tier === 'appointments';
+    if (
+      currentStepKey === 'hours' &&
+      !isUnifiedSchedulingVenue(venue.booking_model) &&
+      !isAppointmentsTier
+    ) {
+      return;
+    }
     let cancelled = false;
     (async () => {
       try {
@@ -1511,8 +1601,9 @@ export default function OnboardingPage() {
   const wideOnboardingStep =
     currentStepKey === 'first_event' ||
     currentStepKey === 'stripe_onboarding' ||
-    (isUnifiedSchedulingVenue(venue.booking_model) &&
-      (currentStepKey === 'services' || currentStepKey === 'hours'));
+    (currentStepKey === 'hours' &&
+      (isAppointmentsPlanVenue || isUnifiedSchedulingVenue(venue.booking_model))) ||
+    (currentStepKey === 'services' && isUnifiedSchedulingVenue(venue.booking_model));
 
   return (
     <div className={`w-full ${wideOnboardingStep ? 'max-w-3xl' : 'max-w-xl'}`}>
@@ -1550,8 +1641,8 @@ export default function OnboardingPage() {
             <h2 className="mb-1 text-lg font-bold text-slate-900">Welcome to your Appointments plan</h2>
             <p className="mb-6 text-sm text-slate-500">
               Reserve NI supports appointments, classes, events, and bookable resources from one venue. This setup will
-              guide you through your business details, opening hours, calendars, users, and the booking models you
-              enabled.
+              guide you through your business details, opening hours, calendars, calendar availability, inviting staff,
+              the booking models you enabled, and then Stripe payments before review.
             </p>
             <div className="mb-6 rounded-xl border border-brand-200 bg-brand-50/60 p-4">
               <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-brand-800">
@@ -1910,7 +2001,8 @@ export default function OnboardingPage() {
             </div>
           )}
 
-        {currentStepKey === 'hours' && isUnifiedSchedulingVenue(venue.booking_model) && (
+        {currentStepKey === 'hours' &&
+          (isAppointmentsPlanVenue || isUnifiedSchedulingVenue(venue.booking_model)) && (
           <div>
             <h2 className="mb-1 text-lg font-bold text-slate-900">
               {isAppointmentsPlanVenue ? 'Set calendar availability' : 'Opening hours & schedules'}
@@ -2865,14 +2957,15 @@ export default function OnboardingPage() {
                 </p>
               </div>
             )}
-            {isUnifiedSchedulingVenue(venue.booking_model) && (
+            {(isAppointmentsPlanVenue || isUnifiedSchedulingVenue(venue.booking_model)) && (
               <div className="mb-6 rounded-xl border border-amber-100 bg-amber-50/80 p-4 text-left">
                 <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-amber-900/80">
                   Before you go live
                 </p>
                 <p className="mb-3 text-sm text-slate-700">
-                  You have already set services, opening hours, and working hours. Before taking paid bookings, finish
-                  Stripe Connect and any advanced availability rules in the dashboard:
+                  {!isAppointmentsPlanVenue || activeAppointmentsModels.includes('unified_scheduling')
+                    ? 'You have already set services, opening hours, and working hours. Before taking paid bookings, finish Stripe Connect and any advanced availability rules in the dashboard:'
+                    : 'You have already set opening hours and calendar availability for your team columns. Before taking paid bookings, finish Stripe Connect and refine availability in the dashboard:'}
                 </p>
                 <ul className="list-inside list-disc space-y-1.5 text-sm text-slate-600">
                   <li>

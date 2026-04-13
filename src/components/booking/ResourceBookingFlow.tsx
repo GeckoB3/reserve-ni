@@ -312,20 +312,43 @@ export function ResourceBookingFlow({
     return 0;
   }, [priceBasis, duration]);
 
+  const resourceRefundNoticeHours = useMemo(() => {
+    const basis = selectedResource ?? selectedMeta;
+    const h = basis?.cancellation_notice_hours;
+    if (typeof h === 'number' && Number.isFinite(h)) return h;
+    return venue.booking_rules?.cancellation_notice_hours ?? 48;
+  }, [selectedResource?.cancellation_notice_hours, selectedMeta?.cancellation_notice_hours, venue.booking_rules?.cancellation_notice_hours]);
+
   const resourcePaymentRefundPolicy = useMemo(() => {
     if (cancellationPolicy) return cancellationPolicy;
-    const basis = selectedResource ?? selectedMeta;
-    const h =
-      typeof basis?.cancellation_notice_hours === 'number' && Number.isFinite(basis.cancellation_notice_hours)
-        ? basis.cancellation_notice_hours
-        : venue.booking_rules?.cancellation_notice_hours ?? 48;
-    return formatOnlinePaidRefundPolicyLine(h);
-  }, [
-    cancellationPolicy,
-    selectedResource?.cancellation_notice_hours,
-    selectedMeta?.cancellation_notice_hours,
-    venue.booking_rules?.cancellation_notice_hours,
-  ]);
+    return formatOnlinePaidRefundPolicyLine(resourceRefundNoticeHours);
+  }, [cancellationPolicy, resourceRefundNoticeHours]);
+
+  const resourcePriceSummary = useMemo(() => {
+    const sym = venue.currency === 'EUR' ? '€' : '£';
+    if (totalPricePence <= 0) {
+      return { primary: 'Free', secondary: null as string | null };
+    }
+    if (payReq === 'full_payment') {
+      return {
+        primary: `${sym}${(totalPricePence / 100).toFixed(2)} due now (paid online in full)`,
+        secondary: null,
+      };
+    }
+    if (payReq === 'deposit' && onlineChargePence > 0) {
+      return {
+        primary: `${sym}${(onlineChargePence / 100).toFixed(2)} deposit due now online`,
+        secondary:
+          totalPricePence > onlineChargePence
+            ? `Total for this booking: ${sym}${(totalPricePence / 100).toFixed(2)} (remainder at venue)`
+            : null,
+      };
+    }
+    return {
+      primary: `${sym}${(totalPricePence / 100).toFixed(2)} (pay at venue)`,
+      secondary: null,
+    };
+  }, [totalPricePence, payReq, onlineChargePence, venue.currency]);
 
   const handleDetailsSubmit = useCallback(
     async (details: GuestDetails) => {
@@ -629,10 +652,11 @@ export function ResourceBookingFlow({
             {totalPricePence <= 0 ? (
               <div className="font-medium text-brand-600">Free</div>
             ) : (
-              <div className="font-medium text-brand-600">
-                {venue.currency === 'EUR' ? '€' : '£'}
-                {(totalPricePence / 100).toFixed(2)}
-                {payReq === 'none' ? ' (pay at venue)' : payReq === 'deposit' ? ' (total; deposit charged online)' : ' (paid online in full)'}
+              <div className="space-y-1">
+                <div className="font-medium text-brand-600">{resourcePriceSummary.primary}</div>
+                {resourcePriceSummary.secondary ? (
+                  <div className="text-xs text-slate-600">{resourcePriceSummary.secondary}</div>
+                ) : null}
               </div>
             )}
           </div>
@@ -659,12 +683,11 @@ export function ResourceBookingFlow({
             {totalPricePence <= 0 ? (
               <div className="mt-1 font-medium text-brand-600">Free</div>
             ) : (
-              <div className="mt-1 space-y-0.5">
-                <div className="font-medium text-brand-600">
-                  {venue.currency === 'EUR' ? '€' : '£'}
-                  {(totalPricePence / 100).toFixed(2)}
-                  {payReq === 'none' ? ' (pay at venue)' : payReq === 'deposit' ? ' (total; deposit charged online)' : ' (paid online in full)'}
-                </div>
+              <div className="mt-1 space-y-1">
+                <div className="font-medium text-brand-600">{resourcePriceSummary.primary}</div>
+                {resourcePriceSummary.secondary ? (
+                  <div className="text-xs text-slate-600">{resourcePriceSummary.secondary}</div>
+                ) : null}
               </div>
             )}
           </div>
@@ -690,6 +713,7 @@ export function ResourceBookingFlow({
               payAtVenueBalancePence={payReq === 'none' && totalPricePence > 0 ? totalPricePence : null}
               payAtVenuePaymentRequirement={payReq === 'none' ? 'none' : undefined}
               currencySymbol={venue.currency === 'EUR' ? '€' : '£'}
+              refundNoticeHours={resourceRefundNoticeHours}
               phoneDefaultCountry={phoneDefaultCountry}
               audience={detailsAudience}
             />

@@ -83,9 +83,10 @@ async function ensureDefaultCalendarColumn(admin, venueId) {
     console.log('[seed] Venue already has unified_calendars row(s); skipping insert.');
     return;
   }
+  // Default team column label (avoid "Main column", which matched old form placeholder text).
   const { error } = await admin.from('unified_calendars').insert({
     venue_id: venueId,
-    name: 'Main column',
+    name: 'Team calendar',
     staff_id: null,
     slug: null,
     working_hours: {},

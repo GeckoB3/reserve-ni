@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { StripePaymentWarning } from '@/components/dashboard/StripePaymentWarning';
 import { defaultNewUnifiedCalendarWorkingHours } from '@/lib/availability/practitioner-defaults';
 import { ClassScheduleModal } from './ClassScheduleModal';
 import { ClassTimetableReadOnlyCalendar } from './ClassTimetableReadOnlyCalendar';
@@ -129,11 +130,13 @@ export function ClassTimetableView({
   isAdmin,
   linkedPractitionerIds = [],
   currency = 'GBP',
+  stripeConnected = false,
 }: {
   venueId: string;
   isAdmin: boolean;
   linkedPractitionerIds?: string[];
   currency?: string;
+  stripeConnected?: boolean;
 }) {
   const sym = currency === 'EUR' ? '€' : '£';
   function formatPrice(pence: number): string {
@@ -1048,6 +1051,13 @@ export function ClassTimetableView({
                   <p className="mt-2 text-xs text-slate-500">
                     Deposit and full payment require a price per person and a connected Stripe account.
                   </p>
+                  <StripePaymentWarning
+                    stripeConnected={stripeConnected}
+                    requiresOnlinePayment={
+                      classTypeForm.payment_requirement === 'deposit' ||
+                      classTypeForm.payment_requirement === 'full_payment'
+                    }
+                  />
                 </div>
                 <div className="sm:col-span-2 rounded-lg border border-slate-200 bg-slate-50/80 p-3">
                   <p className="mb-2 text-xs font-medium text-slate-700">Guest booking rules</p>
@@ -1386,7 +1396,7 @@ export function ClassTimetableView({
               type="text"
               value={newCalendarName}
               onChange={(e) => setNewCalendarName(e.target.value)}
-              placeholder="e.g. Studio A, Main column"
+              placeholder="e.g. Studio A, Front desk"
               disabled={addCalendarSubmitting}
               className="mb-4 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 disabled:opacity-60"
               autoFocus

@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
+import { StripePaymentWarning } from '@/components/dashboard/StripePaymentWarning';
 import { useToast } from '@/components/ui/Toast';
 import { normalizeTimeToHhMm, validateStartEndTimes } from '@/lib/experience-events/experience-event-validation';
 import { formatZodFlattenedError } from '@/lib/experience-events/experience-event-zod';
@@ -1141,12 +1142,13 @@ export function EventManagerView({
               )}
               <p className="mt-2 text-xs text-slate-500">
                 Deposit and full payment require ticket prices &gt; 0 and a connected Stripe account.
-                {!stripeConnected && (eventForm.payment_requirement === 'deposit' || eventForm.payment_requirement === 'full_payment') && (
-                  <span className="mt-1 block font-medium text-amber-700">
-                    Stripe is not connected. Connect your Stripe account in Settings before guests can pay online.
-                  </span>
-                )}
               </p>
+              <StripePaymentWarning
+                stripeConnected={stripeConnected}
+                requiresOnlinePayment={
+                  eventForm.payment_requirement === 'deposit' || eventForm.payment_requirement === 'full_payment'
+                }
+              />
             </div>
 
             {eventError && <p className="text-sm text-red-600">{eventError}</p>}
@@ -1273,7 +1275,7 @@ export function EventManagerView({
               type="text"
               value={newCalendarName}
               onChange={(e) => setNewCalendarName(e.target.value)}
-              placeholder="e.g. Studio A, Main column"
+              placeholder="e.g. Studio A, Front desk"
               disabled={addCalendarSubmitting}
               className="mb-4 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 disabled:opacity-60"
               autoFocus

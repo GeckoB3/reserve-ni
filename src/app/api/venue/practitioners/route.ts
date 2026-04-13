@@ -48,7 +48,24 @@ async function getVenueBookingModel(
   return ((data as { booking_model?: string } | null)?.booking_model as string) ?? '';
 }
 
-/** Booking link slug uniqueness: `unified_calendars` for USE venues, else legacy `practitioners`. */
+/**
+ * True when calendar columns are read from `unified_calendars` (must match GET /api/venue/practitioners).
+ * Classes/events and USE share the same UUID space; `booking_model` alone is not enough.
+ */
+async function useUnifiedCalendarListForVenue(
+  admin: ReturnType<typeof getSupabaseAdminClient>,
+  venueId: string,
+  bookingModel: string,
+): Promise<boolean> {
+  if (bookingModel === 'unified_scheduling') return true;
+  const { count } = await admin
+    .from('unified_calendars')
+    .select('id', { count: 'exact', head: true })
+    .eq('venue_id', venueId);
+  return (count ?? 0) > 0;
+}
+
+/** Booking link slug uniqueness: `unified_calendars` when that table is the column source of truth, else `practitioners`. */
 async function isPractitionerSlugTaken(
   admin: ReturnType<typeof getSupabaseAdminClient>,
   venueId: string,
@@ -56,7 +73,8 @@ async function isPractitionerSlugTaken(
   excludePractitionerId?: string,
   bookingModel?: string,
 ): Promise<boolean> {
-  if (bookingModel === 'unified_scheduling') {
+  const useUnified = await useUnifiedCalendarListForVenue(admin, venueId, bookingModel ?? '');
+  if (useUnified) {
     let q = admin.from('unified_calendars').select('id').eq('venue_id', venueId).eq('slug', slug).limit(1);
     if (excludePractitionerId) {
       q = q.neq('id', excludePractitionerId);
@@ -138,12 +156,11 @@ export async function GET(request: NextRequest) {
     const bookingModel = (venueMeta as { booking_model?: string } | null)?.booking_model ?? '';
 
     /** Experience events, classes, etc. use `unified_calendars.id`. Prefer UC list whenever rows exist (mirrors share practitioner ids). */
-    const { count: unifiedCalendarCount } = await admin
-      .from('unified_calendars')
-      .select('id', { count: 'exact', head: true })
-      .eq('venue_id', staff.venue_id);
-    const useUnifiedCalendarList =
-      bookingModel === 'unified_scheduling' || (unifiedCalendarCount ?? 0) > 0;
+    const useUnifiedCalendarList = await useUnifiedCalendarListForVenue(
+      admin,
+      staff.venue_id,
+      bookingModel,
+    );
 
     if (useUnifiedCalendarList) {
       const { data, error } = await admin
@@ -267,6 +284,7 @@ export async function POST(request: NextRequest) {
 
     const admin = getSupabaseAdminClient();
     const bookingModel = await getVenueBookingModel(admin, staff.venue_id);
+    const useUnifiedListForCreate = await useUnifiedCalendarListForVenue(admin, staff.venue_id, bookingModel);
     const { slug: rawSlug, ...createRest } = parsed.data;
     const slugNorm = normalisePractitionerSlugInput(rawSlug);
     if (!slugNorm.ok) {
@@ -301,7 +319,7 @@ export async function POST(request: NextRequest) {
       insertRow.slug = slugNorm.value;
     }
 
-    if (bookingModel === 'unified_scheduling') {
+    if (useUnifiedListForCreate) {
       const calendarId = randomUUID();
       const initialWorkingHours =
         parsed.data.working_hours !== undefined &&
@@ -437,8 +455,13 @@ export async function PATCH(request: NextRequest) {
       }
 
       const bookingModelStaff = await getVenueBookingModel(admin, staff.venue_id);
+      const useUnifiedStaffList = await useUnifiedCalendarListForVenue(
+        admin,
+        staff.venue_id,
+        bookingModelStaff,
+      );
 
-      if (bookingModelStaff === 'unified_scheduling') {
+      if (useUnifiedStaffList) {
         const { data: cal, error: calErr } = await admin
           .from('unified_calendars')
           .select('id')
@@ -513,6 +536,7 @@ export async function PATCH(request: NextRequest) {
     }
 
     const bookingModel = await getVenueBookingModel(admin, staff.venue_id);
+    const useUnifiedAdminList = await useUnifiedCalendarListForVenue(admin, staff.venue_id, bookingModel);
 
     const updatePayload: Record<string, unknown> = { ...parsed.data };
     if (Object.prototype.hasOwnProperty.call(parsed.data, 'slug')) {
@@ -538,7 +562,7 @@ export async function PATCH(request: NextRequest) {
       updatePayload.slug = slugNorm.value === undefined ? undefined : slugNorm.value;
     }
 
-    if (bookingModel === 'unified_scheduling') {
+    if (useUnifiedAdminList) {
       const ucPayload: Record<string, unknown> = {};
       const ucKeys = [
         'name',
@@ -616,10 +640,61 @@ export async function DELETE(request: NextRequest) {
 
     const admin = getSupabaseAdminClient();
     const bookingModel = await getVenueBookingModel(admin, staff.venue_id);
+    const useUnifiedList = await useUnifiedCalendarListForVenue(admin, staff.venue_id, bookingModel);
 
-    const countTable = bookingModel === 'unified_scheduling' ? 'unified_calendars' : 'practitioners';
+    if (useUnifiedList) {
+      const { data: ucRow, error: ucFetchErr } = await admin
+        .from('unified_calendars')
+        .select('id, calendar_type')
+        .eq('id', id)
+        .eq('venue_id', staff.venue_id)
+        .maybeSingle();
+
+      if (ucFetchErr) {
+        console.error('DELETE /api/venue/practitioners unified row lookup failed:', ucFetchErr);
+        return NextResponse.json({ error: 'Failed to verify calendar' }, { status: 500 });
+      }
+      if (!ucRow) {
+        return NextResponse.json({ error: 'Calendar not found' }, { status: 404 });
+      }
+      if ((ucRow as { calendar_type?: string | null }).calendar_type === 'resource') {
+        return NextResponse.json(
+          { error: 'Resource calendars are removed from Resource settings, not here.' },
+          { status: 400 },
+        );
+      }
+
+      const { count: teamCount, error: countErr } = await admin
+        .from('unified_calendars')
+        .select('id', { count: 'exact', head: true })
+        .eq('venue_id', staff.venue_id)
+        .neq('calendar_type', 'resource');
+
+      if (countErr) {
+        console.error('DELETE /api/venue/practitioners (unified team count) failed:', countErr);
+        return NextResponse.json({ error: 'Failed to verify calendars' }, { status: 500 });
+      }
+      if ((teamCount ?? 0) <= 1) {
+        return NextResponse.json(
+          { error: 'You must keep at least one team calendar column for scheduling.' },
+          { status: 400 },
+        );
+      }
+
+      const { error: delUc } = await admin
+        .from('unified_calendars')
+        .delete()
+        .eq('id', id)
+        .eq('venue_id', staff.venue_id);
+      if (delUc) {
+        console.error('DELETE /api/venue/practitioners unified_calendars failed:', delUc);
+        return NextResponse.json({ error: 'Failed to delete calendar' }, { status: 500 });
+      }
+      return NextResponse.json({ success: true });
+    }
+
     const { count: calendarCount, error: countErr } = await admin
-      .from(countTable)
+      .from('practitioners')
       .select('id', { count: 'exact', head: true })
       .eq('venue_id', staff.venue_id);
 
@@ -632,19 +707,6 @@ export async function DELETE(request: NextRequest) {
         { error: 'You must keep at least one bookable calendar for appointment bookings.' },
         { status: 400 },
       );
-    }
-
-    if (bookingModel === 'unified_scheduling') {
-      const { error: delUc } = await admin
-        .from('unified_calendars')
-        .delete()
-        .eq('id', id)
-        .eq('venue_id', staff.venue_id);
-      if (delUc) {
-        console.error('DELETE /api/venue/practitioners unified_calendars failed:', delUc);
-        return NextResponse.json({ error: 'Failed to delete calendar' }, { status: 500 });
-      }
-      return NextResponse.json({ success: true });
     }
 
     const { error } = await admin

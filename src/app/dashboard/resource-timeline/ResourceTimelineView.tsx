@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { StripePaymentWarning } from '@/components/dashboard/StripePaymentWarning';
 import { ResourceExceptionsCalendar } from './ResourceExceptionsCalendar';
 
 // ---------------------------------------------------------------------------
@@ -180,11 +181,13 @@ export function ResourceTimelineView({
   isAdmin = false,
   linkedPractitionerIds = [],
   currency = 'GBP',
+  stripeConnected = false,
 }: {
   venueId: string;
   isAdmin?: boolean;
   linkedPractitionerIds?: string[];
   currency?: string;
+  stripeConnected?: boolean;
 }) {
   const sym = currency === 'EUR' ? '\u20ac' : '\u00a3';
   function formatPrice(pence: number): string {
@@ -990,6 +993,10 @@ export function ResourceTimelineView({
                   </label>
                 ))}
               </div>
+              <StripePaymentWarning
+                stripeConnected={stripeConnected}
+                requiresOnlinePayment={formPaymentReq === 'deposit' || formPaymentReq === 'full_payment'}
+              />
               {formPaymentReq === 'deposit' && (
                 <div className="mt-3 max-w-xs">
                   <label className="mb-1 block text-xs font-medium text-slate-600">Deposit amount ({sym})</label>

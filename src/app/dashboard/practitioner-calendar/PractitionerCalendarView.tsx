@@ -900,7 +900,7 @@ export function PractitionerCalendarView({
   const timelineRootRef = useRef<HTMLDivElement>(null);
   const touchX = useRef<number | null>(null);
   /** Snapshot when a touch starts; if scrollLeft/scrollTop move during the gesture, it was scrolling, not a day swipe. */
-  const scrollSnapshotAtTouch = useRef<{ left: number; top: number; mainScrollTop: number } | null>(null);
+  const scrollSnapshotAtTouch = useRef<{ left: number; mainScrollTop: number } | null>(null);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 10 } }));
 
@@ -1171,7 +1171,7 @@ export function PractitionerCalendarView({
       const main = node?.closest('main');
       if (!node || !main) return;
       if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
-        node.scrollLeft += e.deltaX;
+        main.scrollLeft += e.deltaX;
         e.preventDefault();
         return;
       }
@@ -1755,16 +1755,19 @@ export function PractitionerCalendarView({
           }}
         />
       ) : viewMode === 'week' ? (
-        <div className="w-full overflow-x-auto rounded-xl border border-slate-200 bg-white">
+        <div className="w-full rounded-xl border border-slate-200 bg-white">
           <div className="min-w-[720px]">
             <table className="w-full border-collapse text-sm">
               <thead>
-                <tr className="border-b border-slate-200 bg-slate-50">
-                  <th className="sticky left-0 z-10 bg-slate-50 px-3 py-2 text-left font-semibold text-slate-700">
+                <tr className="sticky top-0 z-20 border-b border-slate-200 bg-slate-50 shadow-sm">
+                  <th className="sticky left-0 top-0 z-30 bg-slate-50 px-3 py-2 text-left font-semibold text-slate-700">
                     Team
                   </th>
                   {weekDays.map((d) => (
-                    <th key={d} className="px-2 py-2 text-center font-semibold text-slate-700">
+                    <th
+                      key={d}
+                      className="sticky top-0 z-20 bg-slate-50 px-2 py-2 text-center font-semibold text-slate-700"
+                    >
                       <div>{WEEK_SHORT[new Date(`${d}T12:00:00`).getDay()]}</div>
                       <div className="text-xs font-normal text-slate-500">{d.slice(8, 10)}</div>
                     </th>
@@ -1906,27 +1909,24 @@ export function PractitionerCalendarView({
           <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
             <div
               ref={scrollRef}
-              className="min-w-0 w-full touch-manipulation overflow-x-auto rounded-xl border border-slate-200 bg-white motion-safe:scroll-smooth"
+              className="min-w-0 w-full touch-manipulation rounded-xl border border-slate-200 bg-white motion-safe:scroll-smooth"
             onTouchStart={(e) => {
               touchX.current = e.touches[0].clientX;
-              const el = scrollRef.current;
-              const main = el?.closest('main');
-              scrollSnapshotAtTouch.current = el && main
-                ? { left: el.scrollLeft, top: el.scrollTop, mainScrollTop: main.scrollTop }
+              const main = scrollRef.current?.closest('main');
+              scrollSnapshotAtTouch.current = main
+                ? { left: main.scrollLeft, mainScrollTop: main.scrollTop }
                 : null;
             }}
             onTouchEnd={(e) => {
               if (touchX.current == null) return;
               const dx = e.changedTouches[0].clientX - touchX.current;
               touchX.current = null;
-              const el = scrollRef.current;
-              const main = el?.closest('main');
+              const main = scrollRef.current?.closest('main');
               const snap = scrollSnapshotAtTouch.current;
               scrollSnapshotAtTouch.current = null;
-              if (el && snap && main) {
-                const movedH = Math.abs(el.scrollLeft - snap.left);
-                const movedV =
-                  Math.abs(el.scrollTop - snap.top) + Math.abs(main.scrollTop - snap.mainScrollTop);
+              if (main && snap) {
+                const movedH = Math.abs(main.scrollLeft - snap.left);
+                const movedV = Math.abs(main.scrollTop - snap.mainScrollTop);
                 const scrollMoveThreshold = 10;
                 if (movedH > scrollMoveThreshold || movedV > scrollMoveThreshold) {
                   return;
@@ -1958,7 +1958,33 @@ export function PractitionerCalendarView({
                   )}
                 </div>
               </div>
-
+              <div className="flex min-w-0 flex-1 flex-col">
+                <div
+                  className="sticky top-0 z-20 flex w-full divide-x divide-slate-100 border-b border-slate-200 border-l border-slate-100 bg-white shadow-sm"
+                  role="row"
+                  aria-label="Calendar columns"
+                >
+                  {filteredPractitioners.map((prac) => (
+                    <div
+                      key={`hdr-${prac.id}`}
+                      className="flex h-10 min-w-[180px] flex-1 items-center justify-center px-3"
+                    >
+                      <span className="truncate text-center text-sm font-semibold text-slate-900">{prac.name}</span>
+                    </div>
+                  ))}
+                  {showMergedFeeds &&
+                  showEventsColumn &&
+                  scheduleBlocks.some(
+                    (b) => b.kind === 'event_ticket' && !b.calendar_id && b.status !== 'Cancelled',
+                  ) ? (
+                    <div className="flex h-10 min-w-[180px] flex-1 items-center justify-center px-3">
+                      <span className="truncate text-center text-sm font-semibold text-slate-900">
+                        Events (unassigned)
+                      </span>
+                    </div>
+                  ) : null}
+                </div>
+                <div className="flex w-full min-w-0 border-l border-slate-100">
               {filteredPractitioners.map((prac) => {
                 const pracBookings = bookingsForPractitioner(prac.id, date);
                 const pracClassBlocks = classBlocksForGrid.filter(
@@ -1975,9 +2001,6 @@ export function PractitionerCalendarView({
                 );
                 return (
                   <div key={prac.id} className="min-w-[180px] flex-1 border-r border-slate-100 last:border-r-0">
-                    <div className="sticky top-0 z-10 flex h-10 items-center justify-center gap-1.5 border-b border-slate-100 bg-white px-3 py-2">
-                      <span className="truncate text-center text-sm font-semibold text-slate-900">{prac.name}</span>
-                    </div>
                     <div className="relative" style={{ height: TOTAL_SLOTS * SLOT_HEIGHT }}>
                       {timeLabels.map((_, i) => (
                         <div
@@ -2377,10 +2400,13 @@ export function PractitionerCalendarView({
                       startHour={startHour}
                       endHour={endHour}
                       onBookingClick={openBookingDetail}
+                      hideHeader
                     />
                   ) : null}
                 </>
               ) : null}
+            </div>
+            </div>
             </div>
           </div>
           <DragOverlay dropAnimation={null}>

@@ -74,7 +74,7 @@ export function StaffScheduleMergedDayGrid({ date, bookingModel, enabledModels }
       const main = root.closest('main');
       if (!main) return;
       if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
-        root.scrollLeft += e.deltaX;
+        main.scrollLeft += e.deltaX;
         e.preventDefault();
         return;
       }
@@ -150,7 +150,7 @@ export function StaffScheduleMergedDayGrid({ date, bookingModel, enabledModels }
       ) : (
         <div
           ref={gridScrollRef}
-          className="w-full touch-manipulation overflow-x-auto rounded-xl border border-slate-200 bg-white"
+          className="w-full touch-manipulation rounded-xl border border-slate-200 bg-white"
         >
           <div className="flex min-w-[600px]">
             <div className="w-16 flex-shrink-0 border-r border-slate-100 bg-slate-50">
@@ -169,26 +169,48 @@ export function StaffScheduleMergedDayGrid({ date, bookingModel, enabledModels }
                 )}
               </div>
             </div>
-            {showEvents ? (
-              <ScheduleFeedColumn
-                label="Events"
-                date={date}
-                blocks={blocks.filter((b) => b.kind === 'event_ticket')}
-                startHour={startHour}
-                endHour={endHour}
-                onBookingClick={onBookingClick}
-              />
-            ) : null}
-            {showResources ? (
-              <ScheduleFeedColumn
-                label="Resources"
-                date={date}
-                blocks={blocks.filter((b) => b.kind === 'resource_booking')}
-                startHour={startHour}
-                endHour={endHour}
-                onBookingClick={onBookingClick}
-              />
-            ) : null}
+            <div className="flex min-w-0 flex-1 flex-col">
+              <div
+                className="sticky top-0 z-20 flex w-full divide-x divide-slate-100 border-b border-slate-200 border-l border-slate-100 bg-white shadow-sm"
+                role="row"
+                aria-label="Schedule columns"
+              >
+                {showEvents ? (
+                  <div className="flex h-10 min-w-[180px] flex-1 items-center justify-center px-3">
+                    <span className="truncate text-center text-sm font-semibold text-slate-900">Events</span>
+                  </div>
+                ) : null}
+                {showResources ? (
+                  <div className="flex h-10 min-w-[180px] flex-1 items-center justify-center px-3">
+                    <span className="truncate text-center text-sm font-semibold text-slate-900">Resources</span>
+                  </div>
+                ) : null}
+              </div>
+              <div className="flex w-full min-w-0 border-l border-slate-100">
+                {showEvents ? (
+                  <ScheduleFeedColumn
+                    label="Events"
+                    date={date}
+                    blocks={blocks.filter((b) => b.kind === 'event_ticket')}
+                    startHour={startHour}
+                    endHour={endHour}
+                    onBookingClick={onBookingClick}
+                    hideHeader
+                  />
+                ) : null}
+                {showResources ? (
+                  <ScheduleFeedColumn
+                    label="Resources"
+                    date={date}
+                    blocks={blocks.filter((b) => b.kind === 'resource_booking')}
+                    startHour={startHour}
+                    endHour={endHour}
+                    onBookingClick={onBookingClick}
+                    hideHeader
+                  />
+                ) : null}
+              </div>
+            </div>
           </div>
         </div>
       )}

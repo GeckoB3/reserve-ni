@@ -242,18 +242,16 @@ export function EventBookingFlow({
 
   const chargePence = paymentSummary?.chargePence ?? 0;
 
+  const eventRefundNoticeHours = useMemo(() => {
+    const h = selectedOccurrence?.cancellation_notice_hours;
+    if (typeof h === 'number' && Number.isFinite(h)) return h;
+    return venue.booking_rules?.cancellation_notice_hours ?? 48;
+  }, [selectedOccurrence?.cancellation_notice_hours, venue.booking_rules?.cancellation_notice_hours]);
+
   const eventPaymentRefundPolicy = useMemo(() => {
     if (cancellationPolicy) return cancellationPolicy;
-    const h =
-      typeof selectedOccurrence?.cancellation_notice_hours === 'number' && Number.isFinite(selectedOccurrence.cancellation_notice_hours)
-        ? selectedOccurrence.cancellation_notice_hours
-        : venue.booking_rules?.cancellation_notice_hours ?? 48;
-    return formatOnlinePaidRefundPolicyLine(h);
-  }, [
-    cancellationPolicy,
-    selectedOccurrence?.cancellation_notice_hours,
-    venue.booking_rules?.cancellation_notice_hours,
-  ]);
+    return formatOnlinePaidRefundPolicyLine(eventRefundNoticeHours);
+  }, [cancellationPolicy, eventRefundNoticeHours]);
 
   const handleDetailsSubmit = useCallback(
     async (details: GuestDetails) => {
@@ -582,8 +580,18 @@ export function EventBookingFlow({
               partySize={totalTickets}
               onSubmit={handleDetailsSubmit}
               onBack={() => setStep('summary')}
-              requiresDeposit={chargePence > 0}
+              requiresDeposit={false}
               variant="class"
+              appointmentDepositPence={chargePence > 0 ? chargePence : null}
+              appointmentChargeLabel={selectedOccurrence.payment_requirement === 'full_payment' ? 'full_payment' : 'deposit'}
+              payAtVenueBalancePence={
+                selectedOccurrence.payment_requirement === 'none' && totalPricePence > 0 ? totalPricePence : null
+              }
+              payAtVenuePaymentRequirement={
+                selectedOccurrence.payment_requirement === 'none' ? 'none' : undefined
+              }
+              currencySymbol={sym}
+              refundNoticeHours={eventRefundNoticeHours}
               phoneDefaultCountry={phoneDefaultCountry}
               audience={detailsAudience}
             />

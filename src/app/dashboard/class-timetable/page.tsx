@@ -22,8 +22,13 @@ export default async function ClassTimetablePage() {
   }
 
   const admin = getSupabaseAdminClient();
-  const { data: venue } = await admin.from('venues').select('currency').eq('id', staff.venue_id).single();
+  const { data: venue } = await admin
+    .from('venues')
+    .select('currency, stripe_connected_account_id')
+    .eq('id', staff.venue_id)
+    .single();
   const currency = (venue?.currency as string) ?? 'GBP';
+  const stripeConnected = Boolean((venue as { stripe_connected_account_id?: string | null } | null)?.stripe_connected_account_id);
   const linkedPractitionerIds =
     staff.role === 'admin' || !staff.id
       ? []
@@ -38,6 +43,7 @@ export default async function ClassTimetablePage() {
             isAdmin={staff.role === 'admin'}
             linkedPractitionerIds={linkedPractitionerIds}
             currency={currency}
+            stripeConnected={stripeConnected}
           />
         </div>
       </div>
