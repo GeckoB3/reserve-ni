@@ -4,7 +4,7 @@ import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { setStaffPractitionerLink, setStaffUnifiedCalendarAssignments } from '@/lib/staff-practitioner-link';
 import { deliverStaffAccessLinkEmail } from '@/lib/staff-invite-email';
-import { getStaffInviteRedirectTo } from '@/lib/staff-invite-redirect';
+import { getStaffAuthBaseUrl } from '@/lib/staff-invite-redirect';
 import { z } from 'zod';
 
 const inviteSchema = z.object({
@@ -116,9 +116,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'This email is already a staff member for this venue' }, { status: 409 });
     }
 
-    /** PKCE exchange on /auth/callback, then password on /auth/set-password (same URL as resend-invite). */
-    const redirectTo = getStaffInviteRedirectTo(request);
-
     const trimmedName = name?.trim();
     const venueName = venueRow?.name?.trim() || 'your venue';
     const userMetadata: Record<string, unknown> = {
@@ -132,7 +129,7 @@ export async function POST(request: NextRequest) {
     const deliver = await deliverStaffAccessLinkEmail({
       admin,
       email: normalisedEmail,
-      redirectTo,
+      baseUrl: getStaffAuthBaseUrl(request),
       userMetadata,
       venueName,
     });

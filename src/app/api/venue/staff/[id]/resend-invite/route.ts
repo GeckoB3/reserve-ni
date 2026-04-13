@@ -3,12 +3,12 @@ import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { resendStaffAccessLinkEmail } from '@/lib/staff-invite-email';
-import { getStaffInviteRedirectTo } from '@/lib/staff-invite-redirect';
+import { getStaffAuthBaseUrl } from '@/lib/staff-invite-redirect';
 
 /**
  * POST /api/venue/staff/[id]/resend-invite — admin only.
- * Sends a magic link (same pipeline as login: signInWithOtp), with SendGrid/generateLink and
- * invite fallbacks. Flow: callback → set-password → dashboard.
+ * Sends a sign-in link via generateLink → /auth/confirm (server-side OTP, no PKCE) with
+ * inviteUserByEmail fallback. Flow: /auth/confirm → /auth/set-password → dashboard.
  */
 export async function POST(
   request: NextRequest,
@@ -37,7 +37,6 @@ export async function POST(
     }
 
     const email = (target.email as string).trim().toLowerCase();
-    const redirectTo = getStaffInviteRedirectTo(request);
 
     const { data: venueRow } = await admin
       .from('venues')
@@ -54,7 +53,7 @@ export async function POST(
     const result = await resendStaffAccessLinkEmail({
       admin,
       email,
-      redirectTo,
+      baseUrl: getStaffAuthBaseUrl(request),
       userMetadata,
       venueName,
     });

@@ -1,29 +1,34 @@
 /**
- * Staff access emails: use the same Supabase magic-link pipeline as the login page
- * (`signInWithOtp` → email from Supabase with `/auth/v1/verify?...`).
+ * Staff access emails.
  *
- * Fallback when OTP send fails: `generateLink` + SendGrid (disableTracking). Last resort:
- * `inviteUserByEmail` when no auth user exists yet (rare with ensure-first flow).
+ * Why NOT `signInWithOtp` server-side:
+ *   `signInWithOtp` requires a **browser** context to store the PKCE code verifier in session
+ *   storage. Called from a server API route (no browser), Supabase cannot store the verifier and
+ *   generates a plain OTP token (no `pkce_` prefix). After the user clicks, Supabase uses implicit
+ *   flow (`#access_token=…` in hash). `/auth/callback` expects a PKCE `code=` query param, finds
+ *   none, and fails with `exchange_failed`.
+ *
+ * Primary path (SendGrid configured):
+ *   1. Ensure auth user exists and metadata is set.
+ *   2. `admin.generateLink({ type: 'magiclink' })` → extract `hashed_token`.
+ *   3. Build `${baseUrl}/auth/confirm?token_hash=…&type=magiclink&next=/auth/set-password`.
+ *   4. Email that URL via SendGrid (disableTracking — tracking wrappers break token URLs).
+ *   `/auth/confirm` calls server-side `verifyOtp`, sets session in cookies, redirects to
+ *   `/auth/set-password`. No PKCE involved — works reliably from a server context.
+ *
+ * Fallback (no SendGrid or send failure):
+ *   `inviteUserByEmail` — Supabase sends its own email. The invite token type works with the
+ *   `/auth/callback?next=/auth/set-password` redirect because Supabase's email templates send
+ *   the user through its own verify endpoint with a `code` param when PKCE is enabled.
  */
 import { randomBytes } from 'crypto';
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { sendEmail } from '@/lib/emails/send-email';
 
-export type StaffAccessLinkChannel = 'supabase_otp' | 'sendgrid' | 'supabase_invite';
+export type StaffAccessLinkChannel = 'sendgrid' | 'supabase_invite';
 
 function isSendGridConfigured(): boolean {
   return Boolean(process.env.SENDGRID_API_KEY?.trim());
-}
-
-function getSupabaseAnonClient() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!url || !anonKey) {
-    throw new Error('NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY are required for staff magic links');
-  }
-  return createClient(url, anonKey, {
-    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
-  });
 }
 
 function escapeHtml(s: string): string {
@@ -40,82 +45,50 @@ export type StaffAccessLinkResult =
   /** Auth user already exists (e.g. invited elsewhere); caller may still insert staff with invite_email_sent: false. */
   | { ok: false; error: string; status: 409; allowStaffInsertWithoutEmail: true };
 
-/**
- * Same magic-link send path as [`login-form.tsx`](src/app/login/login-form.tsx) (`signInWithOtp` + `emailRedirectTo`).
- */
-async function sendStaffMagicLinkViaSignInWithOtp(
-  email: string,
-  redirectTo: string,
-  userMetadata: Record<string, unknown>,
-): Promise<{ ok: true } | { ok: false; error: string }> {
-  let supabase: SupabaseClient;
-  try {
-    supabase = getSupabaseAnonClient();
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    return { ok: false, error: msg };
-  }
-
-  const { error } = await supabase.auth.signInWithOtp({
-    email,
-    options: {
-      emailRedirectTo: redirectTo,
-      shouldCreateUser: false,
-      data: userMetadata as Record<string, string | boolean>,
-    },
-  });
-
-  if (error) {
-    console.error('[staff-invite-email] signInWithOtp:', error.message);
-    return { ok: false, error: error.message };
-  }
-  return { ok: true };
-}
-
 export async function deliverStaffAccessLinkEmail(params: {
   admin: SupabaseClient;
   email: string;
-  redirectTo: string;
+  /** Base URL e.g. `https://www.reserveni.com` — used to build the /auth/confirm link. */
+  baseUrl: string;
   /** Merged into auth user_metadata; must include has_set_password: false for new staff. */
   userMetadata: Record<string, unknown>;
   venueName: string;
 }): Promise<StaffAccessLinkResult> {
-  const { admin, email, redirectTo, userMetadata, venueName } = params;
+  const { admin, email, baseUrl, userMetadata, venueName } = params;
   const normalisedEmail = email.trim().toLowerCase();
 
-  const ensured = await ensureAuthUserWithStaffMetadata(admin, normalisedEmail, userMetadata);
-  if (!ensured.ok) {
-    return { ok: false, error: ensured.error, status: ensured.status };
-  }
-
-  const otpResult = await sendStaffMagicLinkViaSignInWithOtp(normalisedEmail, redirectTo, userMetadata);
-  if (otpResult.ok) {
-    return { ok: true, channel: 'supabase_otp' };
-  }
-
   if (isSendGridConfigured()) {
-    const sendResult = await generateMagicLinkAndSendEmail(
+    const ensured = await ensureAuthUserWithStaffMetadata(admin, normalisedEmail, userMetadata);
+    if (!ensured.ok) {
+      return { ok: false, error: ensured.error, status: ensured.status };
+    }
+
+    const sendResult = await generateConfirmLinkAndSendEmail(
       admin,
       normalisedEmail,
-      redirectTo,
+      baseUrl,
       userMetadata,
       venueName,
     );
+
     if (sendResult.ok) {
       return { ok: true, channel: 'sendgrid' };
     }
-    console.error('[staff-invite-email] SendGrid fallback failed:', sendResult.error);
-  }
 
-  if (ensured.createdUserId) {
-    const { error: delErr } = await admin.auth.admin.deleteUser(ensured.createdUserId);
-    if (delErr) {
-      console.error('[staff-invite-email] deleteUser before invite fallback:', delErr);
+    console.error('[staff-invite-email] primary path failed:', sendResult.error);
+
+    if (ensured.createdUserId) {
+      const { error: delErr } = await admin.auth.admin.deleteUser(ensured.createdUserId);
+      if (delErr) {
+        console.error('[staff-invite-email] deleteUser after failed send:', delErr);
+      }
     }
   }
 
+  const inviteRedirectTo = `${baseUrl}/auth/callback?next=${encodeURIComponent('/auth/set-password')}`;
+
   const { error: inviteErr } = await admin.auth.admin.inviteUserByEmail(normalisedEmail, {
-    redirectTo,
+    redirectTo: inviteRedirectTo,
     data: userMetadata as Record<string, string | boolean>,
   });
 
@@ -136,7 +109,7 @@ export async function deliverStaffAccessLinkEmail(params: {
     };
   }
 
-  console.error('[staff-invite-email] inviteUserByEmail:', inviteErr);
+  console.error('[staff-invite-email] inviteUserByEmail fallback:', inviteErr);
   return {
     ok: false,
     error: inviteErr.message ?? 'Failed to send invite',
@@ -147,49 +120,48 @@ export async function deliverStaffAccessLinkEmail(params: {
 export async function resendStaffAccessLinkEmail(params: {
   admin: SupabaseClient;
   email: string;
-  redirectTo: string;
+  baseUrl: string;
   userMetadata: Record<string, unknown>;
   venueName: string;
 }): Promise<
   | { ok: true; channel: StaffAccessLinkChannel }
   | { ok: false; error: string; status: number }
 > {
-  const { admin, email, redirectTo, userMetadata, venueName } = params;
+  const { admin, email, baseUrl, userMetadata, venueName } = params;
   const normalisedEmail = email.trim().toLowerCase();
 
-  const ensured = await ensureAuthUserWithStaffMetadata(admin, normalisedEmail, userMetadata);
-  if (!ensured.ok) {
-    return { ok: false, error: ensured.error, status: ensured.status };
-  }
-
-  const otpResult = await sendStaffMagicLinkViaSignInWithOtp(normalisedEmail, redirectTo, userMetadata);
-  if (otpResult.ok) {
-    return { ok: true, channel: 'supabase_otp' };
-  }
-
   if (isSendGridConfigured()) {
-    const sendResult = await generateMagicLinkAndSendEmail(
+    const ensured = await ensureAuthUserWithStaffMetadata(admin, normalisedEmail, userMetadata);
+    if (!ensured.ok) {
+      return { ok: false, error: ensured.error, status: ensured.status };
+    }
+
+    const sendResult = await generateConfirmLinkAndSendEmail(
       admin,
       normalisedEmail,
-      redirectTo,
+      baseUrl,
       userMetadata,
       venueName,
     );
+
     if (sendResult.ok) {
       return { ok: true, channel: 'sendgrid' };
     }
-    console.error('[staff-invite-email] resend SendGrid fallback failed:', sendResult.error);
-  }
 
-  if (ensured.createdUserId) {
-    const { error: delErr } = await admin.auth.admin.deleteUser(ensured.createdUserId);
-    if (delErr) {
-      console.error('[staff-invite-email] deleteUser before invite fallback (resend):', delErr);
+    console.error('[staff-invite-email] resend primary path failed:', sendResult.error);
+
+    if (ensured.createdUserId) {
+      const { error: delErr } = await admin.auth.admin.deleteUser(ensured.createdUserId);
+      if (delErr) {
+        console.error('[staff-invite-email] deleteUser after failed resend:', delErr);
+      }
     }
   }
 
+  const inviteRedirectTo = `${baseUrl}/auth/callback?next=${encodeURIComponent('/auth/set-password')}`;
+
   const { error: inviteErr } = await admin.auth.admin.inviteUserByEmail(normalisedEmail, {
-    redirectTo,
+    redirectTo: inviteRedirectTo,
     data: userMetadata as Record<string, string | boolean>,
   });
 
@@ -205,12 +177,12 @@ export async function resendStaffAccessLinkEmail(params: {
     return {
       ok: false,
       error:
-        'Could not send a magic link. Configure SENDGRID_API_KEY as a fallback, or ask the team member to use the Magic link tab on the login page.',
+        'Could not send a sign-in link. Configure SENDGRID_API_KEY and SENDGRID_FROM_EMAIL, or ask the team member to use the Magic link tab on the login page.',
       status: 503,
     };
   }
 
-  console.error('[staff-invite-email] resend inviteUserByEmail:', inviteErr);
+  console.error('[staff-invite-email] resend inviteUserByEmail fallback:', inviteErr);
   return {
     ok: false,
     error: inviteErr.message ?? 'Failed to send invite',
@@ -253,8 +225,8 @@ async function ensureAuthUserWithStaffMetadata(
   });
 
   if (createErr) {
-    const msg = createErr.message?.toLowerCase() ?? '';
-    if (msg.includes('already') || msg.includes('registered') || msg.includes('exists')) {
+    const createMsg = createErr.message?.toLowerCase() ?? '';
+    if (createMsg.includes('already') || createMsg.includes('registered') || createMsg.includes('exists')) {
       return { ok: false, error: 'This email is already registered. Try resending the invite.', status: 409 };
     }
     console.error('[staff-invite-email] createUser:', createErr);
@@ -264,10 +236,15 @@ async function ensureAuthUserWithStaffMetadata(
   return { ok: true, createdUserId: created.user.id };
 }
 
-async function generateMagicLinkAndSendEmail(
+/**
+ * Generates a `hashed_token` via the Supabase Admin API and emails a URL that points to our own
+ * `/auth/confirm` server route. That route calls `verifyOtp({ token_hash, type })` server-side
+ * (no PKCE verifier needed) and redirects to `/auth/set-password`.
+ */
+async function generateConfirmLinkAndSendEmail(
   admin: SupabaseClient,
   normalisedEmail: string,
-  redirectTo: string,
+  baseUrl: string,
   userMetadata: Record<string, unknown>,
   venueName: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
@@ -275,33 +252,38 @@ async function generateMagicLinkAndSendEmail(
     type: 'magiclink',
     email: normalisedEmail,
     options: {
-      redirectTo,
       data: userMetadata as Record<string, string | boolean>,
     },
   });
 
-  const actionLink =
-    (genData as { properties?: { action_link?: string } } | null)?.properties?.action_link ?? '';
+  const hashedToken =
+    (genData as { properties?: { hashed_token?: string } } | null)?.properties?.hashed_token ?? '';
 
-  if (linkErr || !actionLink) {
-    return { ok: false, error: linkErr?.message ?? 'generateLink returned no action_link' };
+  if (linkErr || !hashedToken) {
+    return { ok: false, error: linkErr?.message ?? 'generateLink returned no hashed_token' };
   }
+
+  const confirmUrl =
+    `${baseUrl}/auth/confirm` +
+    `?token_hash=${encodeURIComponent(hashedToken)}` +
+    `&type=magiclink` +
+    `&next=${encodeURIComponent('/auth/set-password')}`;
 
   const subject = `Sign in to ${venueName} — Reserve NI`;
   const text = [
     `You were invited to access the dashboard for ${venueName}.`,
     '',
-    `Open this link to sign in and set or confirm your password:`,
-    actionLink,
+    'Open this link to sign in and create your password:',
+    confirmUrl,
     '',
     'If you did not expect this email, you can ignore it.',
   ].join('\n');
 
   const html = `
-      <p>You were invited to access the dashboard for <strong>${escapeHtml(venueName)}</strong>.</p>
-      <p><a href="${escapeHtml(actionLink)}">Sign in and continue</a></p>
-      <p style="font-size:12px;color:#64748b;">If you did not expect this email, you can ignore it.</p>
-    `;
+    <p>You were invited to access the dashboard for <strong>${escapeHtml(venueName)}</strong>.</p>
+    <p><a href="${escapeHtml(confirmUrl)}">Sign in and continue</a></p>
+    <p style="font-size:12px;color:#64748b;">If you did not expect this email, you can ignore it.</p>
+  `;
 
   try {
     const messageId = await sendEmail({
