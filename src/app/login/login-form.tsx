@@ -23,6 +23,10 @@ export function LoginForm({ redirectTo }: { redirectTo?: string }) {
   const callbackUrl = redirectTo
     ? `${siteOrigin}/auth/callback?next=${encodeURIComponent(redirectTo)}`
     : `${siteOrigin}/auth/callback`;
+  /** Path-only version of callbackUrl for the /api/auth/send-magic-link API route. */
+  const callbackPath = redirectTo
+    ? `/auth/callback?next=${encodeURIComponent(redirectTo)}`
+    : '/auth/callback';
   const passwordSetupCallbackUrl = `${siteOrigin}/auth/callback?next=${encodeURIComponent(SET_PASSWORD_PATH)}`;
 
   async function handlePasswordSubmit(e: React.FormEvent) {
@@ -45,10 +49,35 @@ export function LoginForm({ redirectTo }: { redirectTo?: string }) {
     setError(null);
     setSuccessMessage(null);
     setLoading(true);
-    const { error: err } = await supabase.auth.signInWithOtp({ email: email.trim(), options: { emailRedirectTo: callbackUrl } });
-    setLoading(false);
-    if (err) { setError(err.message); return; }
-    setSent(true);
+
+    try {
+      const res = await fetch('/api/auth/send-magic-link', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim(), next: callbackPath }),
+      });
+
+      const json = (await res.json().catch(() => ({}))) as { ok?: boolean; fallback?: boolean; error?: string };
+
+      if (res.ok && json.ok) {
+        setSent(true);
+        return;
+      }
+
+      if (json.fallback) {
+        const { error: err } = await supabase.auth.signInWithOtp({
+          email: email.trim(),
+          options: { emailRedirectTo: callbackUrl },
+        });
+        if (err) { setError(err.message); return; }
+        setSent(true);
+        return;
+      }
+
+      setError(json.error ?? 'Could not send magic link. Please try again.');
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function handleForgotPasswordSubmit(e: React.FormEvent) {
