@@ -9,6 +9,7 @@ import {
   getAuthFailurePath,
   mapAuthErrorMessageToDetail,
   parseHashSearchParams,
+  SET_PASSWORD_PATH,
 } from '@/lib/auth-link';
 import { hasPlatformSuperuserJwtRole } from '@/lib/platform-auth';
 import { sanitizeAuthNextPath } from '@/lib/safe-auth-redirect';
@@ -36,7 +37,14 @@ function AuthCallbackContent() {
         const {
           data: { user },
         } = await supabase.auth.getUser();
-        if (user && hasPlatformSuperuserJwtRole(user)) {
+
+        const meta = user?.user_metadata as Record<string, unknown> | undefined;
+        if (meta?.has_set_password === false) {
+          const pathOnly = destination.split('?')[0] ?? '';
+          if (pathOnly !== SET_PASSWORD_PATH && !pathOnly.startsWith(`${SET_PASSWORD_PATH}/`)) {
+            destination = `${SET_PASSWORD_PATH}?next=${encodeURIComponent(destination)}`;
+          }
+        } else if (user && hasPlatformSuperuserJwtRole(user)) {
           const pathOnly = destination.split('?')[0] ?? '';
           if (pathOnly !== '/super' && !pathOnly.startsWith('/super/')) {
             destination = '/super';

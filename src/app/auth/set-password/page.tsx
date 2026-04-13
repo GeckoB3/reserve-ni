@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useState } from 'react';
 import { type AuthErrorDetail, getAuthCode, getAuthErrorDetail, getAuthOtpParams, mapAuthErrorMessageToDetail, parseHashSearchParams, SET_PASSWORD_PATH } from '@/lib/auth-link';
+import { sanitizeAuthNextPath } from '@/lib/safe-auth-redirect';
 import { createClient } from '@/lib/supabase/browser';
 
 const LOGIN_REDIRECT = `/login?redirectTo=${encodeURIComponent(SET_PASSWORD_PATH)}`;
@@ -162,7 +163,8 @@ function SetPasswordContent() {
         const j = (await res.json().catch(() => ({}))) as { error?: string };
         throw new Error(j.error ?? 'Could not set password');
       }
-      router.push('/dashboard');
+      const after = sanitizeAuthNextPath(searchParams.get('next'));
+      router.push(after);
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not set password');

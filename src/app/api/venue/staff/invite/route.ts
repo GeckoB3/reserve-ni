@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { setStaffPractitionerLink, setStaffUnifiedCalendarAssignments } from '@/lib/staff-practitioner-link';
+import { deliverStaffAccessLinkEmail } from '@/lib/staff-invite-email';
 import { getStaffInviteRedirectTo } from '@/lib/staff-invite-redirect';
 import { z } from 'zod';
 
@@ -16,7 +17,7 @@ const inviteSchema = z.object({
   calendar_ids: z.array(z.string().uuid()).optional(),
 });
 
-/** POST /api/venue/staff/invite - invite staff by email (admin only). Sends Supabase invite link to set password. */
+/** POST /api/venue/staff/invite - invite staff by email (admin only). Sends a magic link (SendGrid when configured) or Supabase invite to /auth/callback → set password. */
 export async function POST(request: NextRequest) {
   try {
     const supabase = await createClient();
@@ -119,27 +120,30 @@ export async function POST(request: NextRequest) {
     const redirectTo = getStaffInviteRedirectTo(request);
 
     const trimmedName = name?.trim();
-    const userMetadata: Record<string, string> = { venue_id: staff.venue_id };
+    const venueName = venueRow?.name?.trim() || 'your venue';
+    const userMetadata: Record<string, unknown> = {
+      venue_id: staff.venue_id,
+      has_set_password: false,
+    };
     if (trimmedName) {
       userMetadata.full_name = trimmedName;
     }
 
-    const { error: inviteError } = await admin.auth.admin.inviteUserByEmail(normalisedEmail, {
+    const deliver = await deliverStaffAccessLinkEmail({
+      admin,
+      email: normalisedEmail,
       redirectTo,
-      data: userMetadata,
+      userMetadata,
+      venueName,
     });
 
     let inviteEmailSent = false;
-    if (!inviteError) {
+    if (deliver.ok) {
       inviteEmailSent = true;
+    } else if ('allowStaffInsertWithoutEmail' in deliver && deliver.allowStaffInsertWithoutEmail) {
+      inviteEmailSent = false;
     } else {
-      const msg = inviteError.message?.toLowerCase() ?? '';
-      if (msg.includes('already been invited') || msg.includes('already exists')) {
-        inviteEmailSent = false;
-      } else {
-        console.error('inviteUserByEmail failed:', inviteError);
-        return NextResponse.json({ error: 'Failed to send invite: ' + inviteError.message }, { status: 500 });
-      }
+      return NextResponse.json({ error: deliver.error }, { status: deliver.status });
     }
 
     const { data: newStaff, error: insertError } = await staff.db

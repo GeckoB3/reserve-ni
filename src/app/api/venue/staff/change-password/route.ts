@@ -24,6 +24,10 @@ export async function POST(request: NextRequest) {
 
     const { error: updateErr } = await supabase.auth.updateUser({
       password: parsed.data.new_password,
+      data: {
+        ...(user.user_metadata as Record<string, unknown>),
+        has_set_password: true,
+      },
     });
 
     if (updateErr) {

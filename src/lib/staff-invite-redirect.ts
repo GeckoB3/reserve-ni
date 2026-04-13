@@ -5,6 +5,9 @@ import { normalizePublicBaseUrl } from './public-base-url';
  * Public site URL for auth redirects. Prefer NEXT_PUBLIC_BASE_URL in production so it matches
  * Supabase Dashboard → Authentication → URL Configuration (Site URL + Redirect URLs must allow
  * `${base}/auth/callback` and `${base}/auth/**`).
+ *
+ * Staff invite and magic links use the same `redirectTo` here; if links fail in production, verify
+ * the canonical hostname in NEXT_PUBLIC_BASE_URL matches the allowlist exactly.
  */
 export function getStaffAuthBaseUrl(request: NextRequest | Request): string {
   const envBase = process.env.NEXT_PUBLIC_BASE_URL;
