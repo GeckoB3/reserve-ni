@@ -1,16 +1,29 @@
 /**
- * Staff access emails: when `SENDGRID_API_KEY` is set, we email a magic link from
- * `generateLink({ type: 'magiclink' })` (same PKCE flow as login). Otherwise we fall back to
- * Supabase `inviteUserByEmail` only — configure SendGrid in production for reliable delivery.
+ * Staff access emails: use the same Supabase magic-link pipeline as the login page
+ * (`signInWithOtp` → email from Supabase with `/auth/v1/verify?...`).
+ *
+ * Fallback when OTP send fails: `generateLink` + SendGrid (disableTracking). Last resort:
+ * `inviteUserByEmail` when no auth user exists yet (rare with ensure-first flow).
  */
 import { randomBytes } from 'crypto';
-import type { SupabaseClient } from '@supabase/supabase-js';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { sendEmail } from '@/lib/emails/send-email';
 
-export type StaffAccessLinkChannel = 'sendgrid' | 'supabase';
+export type StaffAccessLinkChannel = 'supabase_otp' | 'sendgrid' | 'supabase_invite';
 
 function isSendGridConfigured(): boolean {
   return Boolean(process.env.SENDGRID_API_KEY?.trim());
+}
+
+function getSupabaseAnonClient() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!url || !anonKey) {
+    throw new Error('NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY are required for staff magic links');
+  }
+  return createClient(url, anonKey, {
+    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+  });
 }
 
 function escapeHtml(s: string): string {
@@ -21,16 +34,43 @@ function escapeHtml(s: string): string {
     .replace(/"/g, '&quot;');
 }
 
-/**
- * When SendGrid is configured, prefer magic links (generateLink + SendGrid) so the same PKCE
- * pipeline as login works reliably. Supabase invite emails are the fallback when SendGrid is
- * unavailable or sending fails (single channel per attempt — no duplicate emails).
- */
 export type StaffAccessLinkResult =
   | { ok: true; channel: StaffAccessLinkChannel }
   | { ok: false; error: string; status: number }
   /** Auth user already exists (e.g. invited elsewhere); caller may still insert staff with invite_email_sent: false. */
   | { ok: false; error: string; status: 409; allowStaffInsertWithoutEmail: true };
+
+/**
+ * Same magic-link send path as [`login-form.tsx`](src/app/login/login-form.tsx) (`signInWithOtp` + `emailRedirectTo`).
+ */
+async function sendStaffMagicLinkViaSignInWithOtp(
+  email: string,
+  redirectTo: string,
+  userMetadata: Record<string, unknown>,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  let supabase: SupabaseClient;
+  try {
+    supabase = getSupabaseAnonClient();
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return { ok: false, error: msg };
+  }
+
+  const { error } = await supabase.auth.signInWithOtp({
+    email,
+    options: {
+      emailRedirectTo: redirectTo,
+      shouldCreateUser: false,
+      data: userMetadata as Record<string, string | boolean>,
+    },
+  });
+
+  if (error) {
+    console.error('[staff-invite-email] signInWithOtp:', error.message);
+    return { ok: false, error: error.message };
+  }
+  return { ok: true };
+}
 
 export async function deliverStaffAccessLinkEmail(params: {
   admin: SupabaseClient;
@@ -43,12 +83,17 @@ export async function deliverStaffAccessLinkEmail(params: {
   const { admin, email, redirectTo, userMetadata, venueName } = params;
   const normalisedEmail = email.trim().toLowerCase();
 
-  if (isSendGridConfigured()) {
-    const ensured = await ensureAuthUserWithStaffMetadata(admin, normalisedEmail, userMetadata);
-    if (!ensured.ok) {
-      return { ok: false, error: ensured.error, status: ensured.status };
-    }
+  const ensured = await ensureAuthUserWithStaffMetadata(admin, normalisedEmail, userMetadata);
+  if (!ensured.ok) {
+    return { ok: false, error: ensured.error, status: ensured.status };
+  }
 
+  const otpResult = await sendStaffMagicLinkViaSignInWithOtp(normalisedEmail, redirectTo, userMetadata);
+  if (otpResult.ok) {
+    return { ok: true, channel: 'supabase_otp' };
+  }
+
+  if (isSendGridConfigured()) {
     const sendResult = await generateMagicLinkAndSendEmail(
       admin,
       normalisedEmail,
@@ -59,22 +104,14 @@ export async function deliverStaffAccessLinkEmail(params: {
     if (sendResult.ok) {
       return { ok: true, channel: 'sendgrid' };
     }
+    console.error('[staff-invite-email] SendGrid fallback failed:', sendResult.error);
+  }
 
-    console.error('[staff-invite-email] SendGrid path failed:', sendResult.error);
-
-    if (ensured.createdUserId) {
-      const { error: delErr } = await admin.auth.admin.deleteUser(ensured.createdUserId);
-      if (delErr) {
-        console.error('[staff-invite-email] deleteUser after failed send:', delErr);
-      }
+  if (ensured.createdUserId) {
+    const { error: delErr } = await admin.auth.admin.deleteUser(ensured.createdUserId);
+    if (delErr) {
+      console.error('[staff-invite-email] deleteUser before invite fallback:', delErr);
     }
-
-    return {
-      ok: false,
-      error:
-        'Could not email a sign-in link. Check SENDGRID_API_KEY and SENDGRID_FROM_EMAIL, then try again.',
-      status: 503,
-    };
   }
 
   const { error: inviteErr } = await admin.auth.admin.inviteUserByEmail(normalisedEmail, {
@@ -83,7 +120,7 @@ export async function deliverStaffAccessLinkEmail(params: {
   });
 
   if (!inviteErr) {
-    return { ok: true, channel: 'supabase' };
+    return { ok: true, channel: 'supabase_invite' };
   }
 
   const msg = inviteErr.message?.toLowerCase() ?? '';
@@ -107,11 +144,6 @@ export async function deliverStaffAccessLinkEmail(params: {
   };
 }
 
-/**
- * Resend access link for an existing staff row. When SendGrid is configured this matches the primary
- * magic-link path. Without SendGrid, only `inviteUserByEmail` is available; if the auth user already
- * exists that call fails and we cannot email a link (configure SendGrid).
- */
 export async function resendStaffAccessLinkEmail(params: {
   admin: SupabaseClient;
   email: string;
@@ -125,12 +157,17 @@ export async function resendStaffAccessLinkEmail(params: {
   const { admin, email, redirectTo, userMetadata, venueName } = params;
   const normalisedEmail = email.trim().toLowerCase();
 
-  if (isSendGridConfigured()) {
-    const ensured = await ensureAuthUserWithStaffMetadata(admin, normalisedEmail, userMetadata);
-    if (!ensured.ok) {
-      return { ok: false, error: ensured.error, status: ensured.status };
-    }
+  const ensured = await ensureAuthUserWithStaffMetadata(admin, normalisedEmail, userMetadata);
+  if (!ensured.ok) {
+    return { ok: false, error: ensured.error, status: ensured.status };
+  }
 
+  const otpResult = await sendStaffMagicLinkViaSignInWithOtp(normalisedEmail, redirectTo, userMetadata);
+  if (otpResult.ok) {
+    return { ok: true, channel: 'supabase_otp' };
+  }
+
+  if (isSendGridConfigured()) {
     const sendResult = await generateMagicLinkAndSendEmail(
       admin,
       normalisedEmail,
@@ -141,22 +178,14 @@ export async function resendStaffAccessLinkEmail(params: {
     if (sendResult.ok) {
       return { ok: true, channel: 'sendgrid' };
     }
+    console.error('[staff-invite-email] resend SendGrid fallback failed:', sendResult.error);
+  }
 
-    console.error('[staff-invite-email] resend SendGrid failed:', sendResult.error);
-
-    if (ensured.createdUserId) {
-      const { error: delErr } = await admin.auth.admin.deleteUser(ensured.createdUserId);
-      if (delErr) {
-        console.error('[staff-invite-email] deleteUser after failed resend:', delErr);
-      }
+  if (ensured.createdUserId) {
+    const { error: delErr } = await admin.auth.admin.deleteUser(ensured.createdUserId);
+    if (delErr) {
+      console.error('[staff-invite-email] deleteUser before invite fallback (resend):', delErr);
     }
-
-    return {
-      ok: false,
-      error:
-        'Could not email a sign-in link. Check SENDGRID_API_KEY and SENDGRID_FROM_EMAIL, then try again.',
-      status: 503,
-    };
   }
 
   const { error: inviteErr } = await admin.auth.admin.inviteUserByEmail(normalisedEmail, {
@@ -165,7 +194,7 @@ export async function resendStaffAccessLinkEmail(params: {
   });
 
   if (!inviteErr) {
-    return { ok: true, channel: 'supabase' };
+    return { ok: true, channel: 'supabase_invite' };
   }
 
   const msg = inviteErr.message?.toLowerCase() ?? '';
@@ -176,7 +205,7 @@ export async function resendStaffAccessLinkEmail(params: {
     return {
       ok: false,
       error:
-        'This account already exists. Configure SENDGRID_API_KEY and SENDGRID_FROM_EMAIL to email a sign-in link, or ask the team member to use the magic link on the login page.',
+        'Could not send a magic link. Configure SENDGRID_API_KEY as a fallback, or ask the team member to use the Magic link tab on the login page.',
       status: 503,
     };
   }

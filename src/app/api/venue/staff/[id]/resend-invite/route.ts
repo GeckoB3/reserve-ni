@@ -7,7 +7,8 @@ import { getStaffInviteRedirectTo } from '@/lib/staff-invite-redirect';
 
 /**
  * POST /api/venue/staff/[id]/resend-invite — admin only.
- * Sends a magic link (SendGrid when configured) or Supabase invite: callback → set-password → dashboard.
+ * Sends a magic link (same pipeline as login: signInWithOtp), with SendGrid/generateLink and
+ * invite fallbacks. Flow: callback → set-password → dashboard.
  */
 export async function POST(
   request: NextRequest,
@@ -64,10 +65,7 @@ export async function POST(
 
     return NextResponse.json({
       ok: true,
-      message:
-        result.channel === 'sendgrid'
-          ? 'A new sign-in link was emailed to them.'
-          : 'A new invitation email was sent.',
+      message: 'A new sign-in link was emailed to them.',
       channel: result.channel,
     });
   } catch (err) {
