@@ -275,7 +275,13 @@ async function generateMagicLinkAndSendEmail(
     `;
 
   try {
-    const messageId = await sendEmail({ to: normalisedEmail, subject, html, text });
+    const messageId = await sendEmail({
+      to: normalisedEmail,
+      subject,
+      html,
+      text,
+      disableTracking: true,
+    });
     if (!messageId) {
       return { ok: false, error: 'SendGrid returned no message id (check SENDGRID_API_KEY)' };
     }
