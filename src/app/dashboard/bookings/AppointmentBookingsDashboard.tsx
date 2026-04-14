@@ -17,6 +17,10 @@ import type { BookingModel } from '@/types/booking-models';
 import { BOOKING_MODEL_ORDER, venueExposesBookingModel } from '@/lib/booking/enabled-models';
 import { inferBookingRowModel, bookingModelShortLabel } from '@/lib/booking/infer-booking-row-model';
 import { showAttendanceConfirmedPill, showDepositPendingPill } from '@/lib/booking/booking-staff-indicators';
+import { CalendarDateTimePicker } from '@/components/calendar/CalendarDateTimePicker';
+import { getCalendarGridBounds } from '@/lib/venue-calendar-bounds';
+import { isBookingTimeInHourRange } from '@/lib/booking-time-window';
+import type { OpeningHours } from '@/types/availability';
 
 type ViewMode = 'day' | 'week' | 'month' | 'custom';
 
@@ -281,6 +285,12 @@ export function AppointmentBookingsDashboard({
   const [csvFrom, setCsvFrom] = useState(todayISO);
   const [csvTo, setCsvTo] = useState(addDays(todayISO(), 30));
   const [csvExporting, setCsvExporting] = useState(false);
+  const [openingHours, setOpeningHours] = useState<OpeningHours | null>(null);
+  const [venueTimezone, setVenueTimezone] = useState<string>('Europe/London');
+  const [startHourOverride, setStartHourOverride] = useState<number | null>(null);
+  const [endHourOverride, setEndHourOverride] = useState<number | null>(null);
+  /** When true, day view list/stats are filtered to the hour window from the time dropdown. */
+  const [timeRangeFilterActive, setTimeRangeFilterActive] = useState(false);
 
   const selectedStatusFilter = STATUS_FILTERS.find((f) => f.label === statusKey);
 
@@ -295,6 +305,30 @@ export function AppointmentBookingsDashboard({
     return [...uniq].sort((a, b) => BOOKING_MODEL_ORDER.indexOf(a) - BOOKING_MODEL_ORDER.indexOf(b));
   }, [primaryBookingModel, enabledModels]);
   const statsPrimaryLabel = enabledModels.length > 0 ? 'Bookings' : 'Appointments';
+
+  const { startHour: derivedStartHour, endHour: derivedEndHour } = useMemo(
+    () =>
+      getCalendarGridBounds(anchorDate, openingHours ?? undefined, 7, 21, {
+        timeZone: venueTimezone,
+      }),
+    [anchorDate, openingHours, venueTimezone],
+  );
+  const pickerStartHour = startHourOverride ?? derivedStartHour;
+  const pickerEndHour = endHourOverride ?? derivedEndHour;
+
+  useEffect(() => {
+    setStartHourOverride(null);
+    setEndHourOverride(null);
+    setTimeRangeFilterActive(false);
+  }, [anchorDate]);
+
+  useEffect(() => {
+    if (viewMode !== 'day') {
+      setStartHourOverride(null);
+      setEndHourOverride(null);
+      setTimeRangeFilterActive(false);
+    }
+  }, [viewMode]);
 
   const clearGuestFilter = useCallback(() => {
     const next = new URLSearchParams(searchParams.toString());
@@ -432,6 +466,22 @@ export function AppointmentBookingsDashboard({
 
   useEffect(() => {
     let cancelled = false;
+    void fetch('/api/venue')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((v) => {
+        if (cancelled || !v) return;
+        if (v.opening_hours) setOpeningHours(v.opening_hours as OpeningHours);
+        const tz = v.timezone;
+        if (typeof tz === 'string' && tz.trim() !== '') setVenueTimezone(tz.trim());
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
     void fetch('/api/venue/practitioners?roster=1')
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
@@ -500,12 +550,22 @@ export function AppointmentBookingsDashboard({
   );
 
   const filteredBookings = useMemo(() => {
-    if (modelFilter === 'all') return registryFiltered;
-    return registryFiltered.filter((b) => inferRegistryModel(b) === modelFilter);
-  }, [registryFiltered, modelFilter]);
+    let list = modelFilter === 'all' ? registryFiltered : registryFiltered.filter((b) => inferRegistryModel(b) === modelFilter);
+    if (viewMode === 'day' && timeRangeFilterActive) {
+      list = list.filter((b) => isBookingTimeInHourRange(b.booking_time, pickerStartHour, pickerEndHour));
+    }
+    return list;
+  }, [
+    registryFiltered,
+    modelFilter,
+    viewMode,
+    timeRangeFilterActive,
+    pickerStartHour,
+    pickerEndHour,
+  ]);
 
   const statsBookings = useMemo(() => {
-    const reg = filterRegistryAppointments(
+    let reg = filterRegistryAppointments(
       allStatusBookings,
       practitionerFilter,
       serviceFilter,
@@ -513,8 +573,11 @@ export function AppointmentBookingsDashboard({
       primaryBookingModel,
       enabledModels,
     );
-    if (modelFilter === 'all') return reg;
-    return reg.filter((b) => inferRegistryModel(b) === modelFilter);
+    if (modelFilter !== 'all') reg = reg.filter((b) => inferRegistryModel(b) === modelFilter);
+    if (viewMode === 'day' && timeRangeFilterActive) {
+      reg = reg.filter((b) => isBookingTimeInHourRange(b.booking_time, pickerStartHour, pickerEndHour));
+    }
+    return reg;
   }, [
     allStatusBookings,
     practitionerFilter,
@@ -523,6 +586,10 @@ export function AppointmentBookingsDashboard({
     primaryBookingModel,
     enabledModels,
     modelFilter,
+    viewMode,
+    timeRangeFilterActive,
+    pickerStartHour,
+    pickerEndHour,
   ]);
 
   const sortedBookings = useMemo(() => {
@@ -1142,37 +1209,79 @@ export function AppointmentBookingsDashboard({
       </div>
 
       {viewMode !== 'custom' ? (
-        <div className="flex items-stretch justify-between gap-1 rounded-xl border border-slate-200 bg-white px-1 py-2 shadow-sm sm:px-4 sm:py-3">
-          <button
-            type="button"
-            onClick={() => navigate(-1)}
-            className="flex min-h-[48px] min-w-[48px] shrink-0 touch-manipulation items-center justify-center rounded-lg text-slate-500 hover:bg-slate-50 hover:text-slate-700 active:bg-slate-100 sm:min-h-[44px] sm:min-w-[44px]"
-            aria-label="Previous period"
-          >
-            <svg className="h-6 w-6 sm:h-5 sm:w-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" />
-            </svg>
-          </button>
-          <div className="min-w-0 flex-1 px-1 text-center sm:px-2">
-            <h2 className="text-sm font-semibold leading-snug text-slate-900 sm:text-base">
-              <span className="sm:hidden">{formatDateLabelCompact(anchorDate, viewMode)}</span>
-              <span className="hidden sm:inline">{formatDateLabel(anchorDate, viewMode)}</span>
-            </h2>
-            {anchorDate === todayISO() && (
-              <span className="mt-0.5 inline-block text-xs font-medium text-brand-600">Today</span>
+        viewMode === 'day' ? (
+          <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+            <CalendarDateTimePicker
+              date={anchorDate}
+              onDateChange={setAnchorDate}
+              startHour={pickerStartHour}
+              endHour={pickerEndHour}
+              onTimeRangeChange={(start, end) => {
+                setStartHourOverride(start);
+                setEndHourOverride(end);
+                setTimeRangeFilterActive(true);
+              }}
+            />
+            {timeRangeFilterActive && (
+              <div className="mt-2 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-2">
+                <p className="text-xs text-slate-600">
+                  Showing bookings with start times from{' '}
+                  <span className="font-medium text-slate-800">
+                    {String(pickerStartHour).padStart(2, '0')}:00
+                  </span>{' '}
+                  up to{' '}
+                  <span className="font-medium text-slate-800">
+                    {String(pickerEndHour).padStart(2, '0')}:00
+                  </span>{' '}
+                  (not including the end hour).
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setStartHourOverride(null);
+                    setEndHourOverride(null);
+                    setTimeRangeFilterActive(false);
+                  }}
+                  className="shrink-0 text-xs font-medium text-brand-600 hover:text-brand-700 hover:underline"
+                >
+                  Clear time filter
+                </button>
+              </div>
             )}
           </div>
-          <button
-            type="button"
-            onClick={() => navigate(1)}
-            className="flex min-h-[48px] min-w-[48px] shrink-0 touch-manipulation items-center justify-center rounded-lg text-slate-500 hover:bg-slate-50 hover:text-slate-700 active:bg-slate-100 sm:min-h-[44px] sm:min-w-[44px]"
-            aria-label="Next period"
-          >
-            <svg className="h-6 w-6 sm:h-5 sm:w-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
-            </svg>
-          </button>
-        </div>
+        ) : (
+          <div className="flex items-stretch justify-between gap-1 rounded-xl border border-slate-200 bg-white px-1 py-2 shadow-sm sm:px-4 sm:py-3">
+            <button
+              type="button"
+              onClick={() => navigate(-1)}
+              className="flex min-h-[48px] min-w-[48px] shrink-0 touch-manipulation items-center justify-center rounded-lg text-slate-500 hover:bg-slate-50 hover:text-slate-700 active:bg-slate-100 sm:min-h-[44px] sm:min-w-[44px]"
+              aria-label="Previous period"
+            >
+              <svg className="h-6 w-6 sm:h-5 sm:w-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" />
+              </svg>
+            </button>
+            <div className="min-w-0 flex-1 px-1 text-center sm:px-2">
+              <h2 className="text-sm font-semibold leading-snug text-slate-900 sm:text-base">
+                <span className="sm:hidden">{formatDateLabelCompact(anchorDate, viewMode)}</span>
+                <span className="hidden sm:inline">{formatDateLabel(anchorDate, viewMode)}</span>
+              </h2>
+              {anchorDate === todayISO() && (
+                <span className="mt-0.5 inline-block text-xs font-medium text-brand-600">Today</span>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => navigate(1)}
+              className="flex min-h-[48px] min-w-[48px] shrink-0 touch-manipulation items-center justify-center rounded-lg text-slate-500 hover:bg-slate-50 hover:text-slate-700 active:bg-slate-100 sm:min-h-[44px] sm:min-w-[44px]"
+              aria-label="Next period"
+            >
+              <svg className="h-6 w-6 sm:h-5 sm:w-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
+              </svg>
+            </button>
+          </div>
+        )
       ) : (
         <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm sm:flex-row sm:flex-wrap sm:items-end">
           <div className="flex flex-col gap-1">

@@ -55,6 +55,7 @@ import {
   groupScheduleBlocksByDate,
   buildMonthDayScheduleCounts,
 } from '@/lib/calendar/schedule-blocks-grouping';
+import { formatWorkingHoursLineForDate } from '@/lib/calendar/format-working-hours-for-date';
 import { formatEventUptakeLine } from '@/lib/calendar/event-block-label';
 import {
   canShowCancelStaffAttendanceConfirmationAction,
@@ -77,6 +78,8 @@ interface Practitioner {
   calendar_type?: string;
   /** Left-to-right column order on the staff calendar grid. */
   sort_order?: number;
+  /** Per-day template from Calendar availability (Settings). */
+  working_hours?: WorkingHours;
 }
 
 interface AppointmentService {
@@ -901,6 +904,12 @@ export function PractitionerCalendarView({
   const touchX = useRef<number | null>(null);
   /** Snapshot when a touch starts; if scrollLeft/scrollTop move during the gesture, it was scrolling, not a day swipe. */
   const scrollSnapshotAtTouch = useRef<{ left: number; mainScrollTop: number } | null>(null);
+  /**
+   * After the user changes day or time range via the calendar date/time picker, skip scrolling the timeline
+   * to "now" and instead scroll the dashboard `main` to the top so the toolbar + date picker bar stay visible.
+   * Initial navigation still scrolls the timeline to the current time for today.
+   */
+  const skipAutoScrollToTimelineNowRef = useRef(false);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 10 } }));
 
@@ -920,10 +929,17 @@ export function PractitionerCalendarView({
   const showMergedFeeds = showEventsColumn || showClassSessions;
 
   const activeDayDate = viewMode === 'day' ? date : viewMode === 'week' ? weekStart : monthAnchor;
-  const { startHour, endHour } = useMemo(
-    () => getCalendarGridBounds(activeDayDate, openingHours ?? undefined, 7, 21),
-    [activeDayDate, openingHours],
+  const { startHour: derivedStartHour, endHour: derivedEndHour } = useMemo(
+    () =>
+      getCalendarGridBounds(activeDayDate, openingHours ?? undefined, 7, 21, {
+        timeZone: venueTimezone,
+      }),
+    [activeDayDate, openingHours, venueTimezone],
   );
+  const [startHourOverride, setStartHourOverride] = useState<number | null>(null);
+  const [endHourOverride, setEndHourOverride] = useState<number | null>(null);
+  const startHour = startHourOverride ?? derivedStartHour;
+  const endHour = endHourOverride ?? derivedEndHour;
   const TOTAL_SLOTS = (() => {
     const n = ((endHour - startHour) * 60) / SLOT_MINUTES;
     return Number.isFinite(n) && n > 0 ? n : ((21 - 7) * 60) / SLOT_MINUTES;
@@ -1059,6 +1075,17 @@ export function PractitionerCalendarView({
     const el = scrollRef.current;
     const main = el?.closest('main');
     if (!el || !main) return;
+
+    /** After picker changes: scroll the dashboard main to the top so the toolbar + date picker stay in view. */
+    if (skipAutoScrollToTimelineNowRef.current) {
+      const applyPicker = () => {
+        const m = scrollRef.current?.closest('main');
+        if (!m) return;
+        m.scrollTo({ top: 0, behavior: 'auto' });
+      };
+      const id = requestAnimationFrame(() => requestAnimationFrame(applyPicker));
+      return () => cancelAnimationFrame(id);
+    }
 
     const gridStartM = startHour * 60;
     const gridEndM = endHour * 60;
@@ -1281,9 +1308,16 @@ export function PractitionerCalendarView({
     return Math.max((durationMins / SLOT_MINUTES) * SLOT_HEIGHT, SLOT_HEIGHT * 0.75);
   }
 
+  function clearTimeRangeOverridesForDayChange() {
+    setStartHourOverride(null);
+    setEndHourOverride(null);
+  }
+
   function navigateDay(dir: -1 | 1) {
-    if (viewMode === 'day') setDate((d) => addCalendarDays(d, dir));
-    else if (viewMode === 'week') setWeekStart((d) => addCalendarDays(d, dir * 7));
+    if (viewMode === 'day') {
+      clearTimeRangeOverridesForDayChange();
+      setDate((d) => addCalendarDays(d, dir));
+    } else if (viewMode === 'week') setWeekStart((d) => addCalendarDays(d, dir * 7));
     else {
       const som = startOfMonth(monthAnchor);
       const d = new Date(`${som}T12:00:00`);
@@ -1294,7 +1328,22 @@ export function PractitionerCalendarView({
     }
   }
 
+  function navigateDayDirect(iso: string) {
+    skipAutoScrollToTimelineNowRef.current = true;
+    clearTimeRangeOverridesForDayChange();
+    setDate(iso);
+    setWeekStart(iso);
+    setMonthAnchor(iso);
+  }
+
+  function handleTimeRangeChange(start: number, end: number) {
+    skipAutoScrollToTimelineNowRef.current = true;
+    setStartHourOverride(start);
+    setEndHourOverride(end);
+  }
+
   function goToday() {
+    clearTimeRangeOverridesForDayChange();
     const now = new Date();
     const t = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     setDate(t);
@@ -1651,75 +1700,90 @@ export function PractitionerCalendarView({
           viewMode={viewMode}
           onViewModeChange={setViewMode}
           onNavigateDay={navigateDay}
-          onGoToday={goToday}
+          onDateChange={navigateDayDirect}
           date={date}
           weekStart={weekStart}
           monthAnchor={monthAnchor}
+          startHour={startHour}
+          endHour={endHour}
+          onTimeRangeChange={handleTimeRangeChange}
+          toolbarExtension={
+            <>
+              <CalendarColumnsFilter
+                columns={columnPractitioners.map((p) => ({ id: p.id, name: p.name }))}
+                myCalendarIds={myCalendarIds}
+                value={calendarFilterIds}
+                onChange={setVisibleCalendarIdsState}
+              />
+              <select
+                value={filterStatus}
+                onChange={(e) => setFilterStatus(e.target.value)}
+                className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+              >
+                <option value="all">All statuses</option>
+                <option value="Pending">Pending</option>
+                <option value="attendance_confirmed">Confirmed</option>
+                <option value="Seated">Started</option>
+                <option value="Completed">Completed</option>
+                <option value="No-Show">No Show</option>
+                <option value="Cancelled">Cancelled</option>
+              </select>
+
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPrefillDate(viewMode === 'day' ? date : undefined);
+                    setPrefillTime(undefined);
+                    setPrefillPractitionerId(
+                      calendarFilterIds?.length === 1 ? calendarFilterIds[0] : undefined,
+                    );
+                    setStaffBookingModal('new');
+                  }}
+                  className="flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-brand-700"
+                >
+                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                  </svg>
+                  {newBookingToolbarLabel}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setStaffBookingModal('walk-in')}
+                  className="flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-emerald-700"
+                >
+                  Walk-in
+                </button>
+              </div>
+
+              <div className="flex w-full flex-wrap items-center gap-x-4 gap-y-2 sm:ml-auto sm:w-auto">
+                <div
+                  className="flex flex-wrap items-center gap-4 text-sm"
+                  title="Bookings on a team column in the visible date range (day, week, or calendar month). Excludes padding weeks around month view."
+                >
+                  <span className="text-slate-500">
+                    <span className="font-semibold text-slate-900">{activeToolbarBookings.length}</span> on grid
+                  </span>
+                  <span className="hidden sm:inline text-slate-500">
+                    <span className="font-semibold text-blue-600">{confirmedCount}</span> confirmed
+                  </span>
+                  <span className="hidden sm:inline text-slate-500">
+                    <span className="font-semibold text-green-600">{completedCount}</span> completed
+                  </span>
+                </div>
+                {viewMode !== 'day' && (
+                  <button
+                    type="button"
+                    onClick={goToday}
+                    className="shrink-0 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 shadow-sm hover:bg-slate-50"
+                  >
+                    Today
+                  </button>
+                )}
+              </div>
+            </>
+          }
         />
-
-        <div className="flex flex-wrap items-center gap-3">
-            <CalendarColumnsFilter
-              columns={columnPractitioners.map((p) => ({ id: p.id, name: p.name }))}
-              myCalendarIds={myCalendarIds}
-              value={calendarFilterIds}
-              onChange={setVisibleCalendarIdsState}
-            />
-            <select
-              value={filterStatus}
-              onChange={(e) => setFilterStatus(e.target.value)}
-              className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
-            >
-              <option value="all">All statuses</option>
-              <option value="Pending">Pending</option>
-              <option value="attendance_confirmed">Confirmed</option>
-              <option value="Seated">Started</option>
-              <option value="Completed">Completed</option>
-              <option value="No-Show">No Show</option>
-              <option value="Cancelled">Cancelled</option>
-            </select>
-
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  setPrefillDate(viewMode === 'day' ? date : undefined);
-                  setPrefillTime(undefined);
-                  setPrefillPractitionerId(
-                    calendarFilterIds?.length === 1 ? calendarFilterIds[0] : undefined,
-                  );
-                  setStaffBookingModal('new');
-                }}
-                className="flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-brand-700"
-              >
-                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-                </svg>
-                {newBookingToolbarLabel}
-              </button>
-              <button
-                type="button"
-                onClick={() => setStaffBookingModal('walk-in')}
-                className="flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-emerald-700"
-              >
-                Walk-in
-              </button>
-            </div>
-
-            <div
-              className="ml-auto flex flex-wrap items-center gap-4 text-sm"
-              title="Bookings on a team column in the visible date range (day, week, or calendar month). Excludes padding weeks around month view."
-            >
-              <span className="text-slate-500">
-                <span className="font-semibold text-slate-900">{activeToolbarBookings.length}</span> on grid
-              </span>
-              <span className="hidden sm:inline text-slate-500">
-                <span className="font-semibold text-blue-600">{confirmedCount}</span> confirmed
-              </span>
-              <span className="hidden sm:inline text-slate-500">
-                <span className="font-semibold text-green-600">{completedCount}</span> completed
-              </span>
-            </div>
-          </div>
       </div>
 
       {fetchError && (
@@ -1748,6 +1812,7 @@ export function PractitionerCalendarView({
           monthDayScheduleCounts={monthDayScheduleCounts}
           showMergedFeeds={showMergedFeeds}
           onSelectDay={(cell) => {
+            clearTimeRangeOverridesForDayChange();
             setDate(cell);
             setWeekStart(cell);
             setMonthAnchor(cell);
@@ -1933,6 +1998,7 @@ export function PractitionerCalendarView({
                 }
               }
               if (Math.abs(dx) < 72) return;
+              clearTimeRangeOverridesForDayChange();
               if (dx > 0) setDate((d) => addCalendarDays(d, -1));
               else setDate((d) => addCalendarDays(d, 1));
             }}
@@ -1942,15 +2008,18 @@ export function PractitionerCalendarView({
             }}
           >
             <div className="flex min-w-[600px]">
-              <div className="w-16 flex-shrink-0 border-r border-slate-100 bg-slate-50">
-                <div className="h-10 border-b border-slate-100" />
+              <div className="w-16 flex-shrink-0 border-r border-slate-200 bg-slate-50">
+                <div
+                  className="min-h-[52px] rounded-tl-xl border-b border-slate-200 bg-slate-50"
+                  aria-hidden
+                />
                 <div className="relative" style={{ height: TOTAL_SLOTS * SLOT_HEIGHT }}>
                   {timeLabels.map((t, i) =>
                     i % 4 === 0 ? (
                       <div
                         key={t}
                         className="absolute left-0 w-full pr-2 text-right text-xs text-slate-400"
-                        style={{ top: i * SLOT_HEIGHT - 6 }}
+                        style={{ top: i === 0 ? 0 : i * SLOT_HEIGHT - 6 }}
                       >
                         {t}
                       </div>
@@ -1960,27 +2029,39 @@ export function PractitionerCalendarView({
               </div>
               <div className="flex min-w-0 flex-1 flex-col">
                 <div
-                  className="sticky top-0 z-20 flex w-full divide-x divide-slate-100 border-b border-slate-200 border-l border-slate-100 bg-white shadow-sm"
+                  className="sticky top-0 z-20 flex w-full divide-x divide-slate-200 rounded-tr-xl border-b border-slate-200 border-l border-slate-200 bg-white shadow-sm"
                   role="row"
                   aria-label="Calendar columns"
                 >
-                  {filteredPractitioners.map((prac) => (
-                    <div
-                      key={`hdr-${prac.id}`}
-                      className="flex h-10 min-w-[180px] flex-1 items-center justify-center px-3"
-                    >
-                      <span className="truncate text-center text-sm font-semibold text-slate-900">{prac.name}</span>
-                    </div>
-                  ))}
+                  {filteredPractitioners.map((prac) => {
+                    const hoursLine = formatWorkingHoursLineForDate(prac.working_hours, date, venueTimezone);
+                    return (
+                      <div
+                        key={`hdr-${prac.id}`}
+                        className="flex min-h-[52px] min-w-[180px] flex-1 flex-col items-center justify-center gap-0.5 px-2 py-1"
+                      >
+                        <span className="truncate text-center text-sm font-semibold text-slate-900" title={prac.name}>
+                          {prac.name}
+                        </span>
+                        <span
+                          className="line-clamp-2 w-full text-center text-[11px] leading-tight text-slate-600"
+                          title={hoursLine}
+                        >
+                          {hoursLine}
+                        </span>
+                      </div>
+                    );
+                  })}
                   {showMergedFeeds &&
                   showEventsColumn &&
                   scheduleBlocks.some(
                     (b) => b.kind === 'event_ticket' && !b.calendar_id && b.status !== 'Cancelled',
                   ) ? (
-                    <div className="flex h-10 min-w-[180px] flex-1 items-center justify-center px-3">
+                    <div className="flex min-h-[52px] min-w-[180px] flex-1 flex-col items-center justify-center gap-0.5 px-2 py-1">
                       <span className="truncate text-center text-sm font-semibold text-slate-900">
                         Events (unassigned)
                       </span>
+                      <span className="text-center text-[11px] leading-tight text-slate-500">—</span>
                     </div>
                   ) : null}
                 </div>

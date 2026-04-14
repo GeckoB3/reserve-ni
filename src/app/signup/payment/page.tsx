@@ -10,8 +10,12 @@ import { SMS_INCLUDED_APPOINTMENTS, SMS_INCLUDED_RESTAURANT } from '@/lib/billin
 import { signupPlanToFamily, SIGNUP_PLAN_CONFLICT_MESSAGE } from '@/lib/signup-plan-family';
 import { fetchPendingSignupSelection, syncPendingToSessionStorage } from '@/lib/signup-pending-client';
 import { isSignupPaymentReady } from '@/lib/signup-pending-selection';
+import { ensureDefaultRestaurantFamilyBusinessType } from '@/lib/signup-resume';
 
 type PlanType = 'appointments' | 'restaurant' | 'founding';
+
+/** Hospitality keys from signup; redundant next to "Plan: Restaurant" / Founding on order summary. */
+const HOSPITALITY_BUSINESS_TYPE_KEYS = new Set(['restaurant', 'cafe', 'pub', 'hotel_restaurant']);
 
 export default function PaymentPage() {
   const router = useRouter();
@@ -47,6 +51,10 @@ export default function PaymentPage() {
           syncPendingToSessionStorage(p, bt);
         }
       }
+
+      ensureDefaultRestaurantFamilyBusinessType();
+      bt = sessionStorage.getItem('signup_business_type');
+      p = sessionStorage.getItem('signup_plan') as PlanType | null;
 
       if (cancelled) return;
       if (!p || (p !== 'appointments' && !bt)) {
@@ -160,6 +168,10 @@ export default function PaymentPage() {
   const isFounding = plan === 'founding';
   const smsIncluded = isRestaurant || isFounding ? SMS_INCLUDED_RESTAURANT : SMS_INCLUDED_APPOINTMENTS;
   const planLabel = isFounding ? 'Founding Partner' : isRestaurant ? 'Restaurant' : 'Appointments';
+  const omitBusinessTypeRow =
+    (isRestaurant || isFounding) &&
+    !!businessType &&
+    HOSPITALITY_BUSINESS_TYPE_KEYS.has(businessType);
 
   return (
     <div className="w-full max-w-md">
@@ -172,7 +184,7 @@ export default function PaymentPage() {
 
       <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
         <div className="space-y-4">
-          {businessType ? (
+          {businessType && !omitBusinessTypeRow ? (
             <>
               <div className="flex justify-between text-sm">
                 <span className="text-slate-500">
@@ -189,12 +201,12 @@ export default function PaymentPage() {
                 </p>
               )}
             </>
-          ) : (
+          ) : !businessType ? (
             <div className="rounded-lg border border-brand-100 bg-brand-50/60 px-3 py-2 text-xs text-brand-900">
               Appointments includes appointments, classes, events, and resources. After payment, you&apos;ll choose
               which booking models to enable first and can change them later in Settings.
             </div>
-          )}
+          ) : null}
           <div className="flex justify-between text-sm">
             <span className="text-slate-500">Plan</span>
             <span className="font-medium text-slate-900">{planLabel}</span>

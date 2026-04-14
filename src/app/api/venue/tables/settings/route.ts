@@ -11,7 +11,7 @@ const settingsSchema = z.object({
   floor_plan_background_url: z.string().url().nullable().optional(),
   auto_bussing_minutes: z.number().int().min(0).max(60).optional(),
   active_table_statuses: z.array(z.string()).optional(),
-  combination_threshold: z.number().int().min(20).max(300).optional(),
+  combination_threshold: z.number().int().min(5).max(300).optional(),
 });
 
 /**

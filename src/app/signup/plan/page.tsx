@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase/browser';
 import { fetchPendingSignupSelection, syncPendingToSessionStorage } from '@/lib/signup-pending-client';
 import { isSignupPaymentReady } from '@/lib/signup-pending-selection';
 import { formatSignupBusinessTypeLabel } from '@/lib/business-config';
+import { DEFAULT_RESTAURANT_FAMILY_BUSINESS_TYPE } from '@/lib/signup-resume';
 import { APPOINTMENTS_PRICE, RESTAURANT_PRICE, FOUNDING_PARTNER_CAP, SMS_OVERAGE_GBP_PER_MESSAGE } from '@/lib/pricing-constants';
 import { SMS_INCLUDED_APPOINTMENTS, SMS_INCLUDED_RESTAURANT } from '@/lib/billing/sms-allowance';
 
@@ -51,11 +52,18 @@ export default function PlanPage() {
       }
 
       if (cancelled) return;
-      if (!resolvedPlan) {
-        router.push('/signup/business-type');
-        return;
+      if (resolvedPlan) {
+        sessionStorage.setItem('signup_plan', resolvedPlan);
       }
-      if (resolvedPlan !== 'appointments' && !resolvedBt) {
+      if (
+        resolvedPlan &&
+        (resolvedPlan === 'restaurant' || resolvedPlan === 'founding') &&
+        !resolvedBt
+      ) {
+        resolvedBt = DEFAULT_RESTAURANT_FAMILY_BUSINESS_TYPE;
+        sessionStorage.setItem('signup_business_type', resolvedBt);
+      }
+      if (!resolvedPlan) {
         router.push('/signup/business-type');
         return;
       }

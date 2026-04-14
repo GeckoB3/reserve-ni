@@ -1,30 +1,13 @@
 'use client';
 
 import Link from 'next/link';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { BookingModel } from '@/types/booking-models';
 import { StaffScheduleMergedDayGrid } from '@/components/calendar/StaffScheduleMergedDayGrid';
+import { CalendarDateTimePicker } from '@/components/calendar/CalendarDateTimePicker';
+import { getCalendarGridBounds } from '@/lib/venue-calendar-bounds';
+import type { OpeningHours } from '@/types/availability';
 
-const WEEKDAYS_LONG = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-const MONTHS_LONG = [
-  'January',
-  'February',
-  'March',
-  'April',
-  'May',
-  'June',
-  'July',
-  'August',
-  'September',
-  'October',
-  'November',
-  'December',
-];
-
-function formatScheduleDayLabel(date: string): string {
-  const d = new Date(date + 'T12:00:00');
-  return `${WEEKDAYS_LONG[d.getDay()]} ${d.getDate()} ${MONTHS_LONG[d.getMonth()]} ${d.getFullYear()}`;
-}
 
 interface Props {
   bookingModel: BookingModel;
@@ -39,6 +22,29 @@ interface Props {
  */
 export function StaffScheduleHub({ bookingModel, enabledModels }: Props) {
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [openingHours, setOpeningHours] = useState<OpeningHours | null>(null);
+  const [venueTimezone, setVenueTimezone] = useState<string>('Europe/London');
+  const [startHourOverride, setStartHourOverride] = useState<number | null>(null);
+  const [endHourOverride, setEndHourOverride] = useState<number | null>(null);
+
+  useEffect(() => {
+    void fetch('/api/venue')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((v) => {
+        if (v?.opening_hours) setOpeningHours(v.opening_hours as OpeningHours);
+        const tz = v?.timezone;
+        if (typeof tz === 'string' && tz.trim() !== '') setVenueTimezone(tz.trim());
+      })
+      .catch(() => {});
+  }, []);
+
+  const { startHour: derivedStart, endHour: derivedEnd } = useMemo(
+    () => getCalendarGridBounds(date, openingHours ?? undefined, 7, 21, { timeZone: venueTimezone }),
+    [date, openingHours, venueTimezone],
+  );
+  const startHour = startHourOverride ?? derivedStart;
+  const endHour = endHourOverride ?? derivedEnd;
+
   const active = useMemo(() => new Set<BookingModel>([bookingModel, ...enabledModels]), [bookingModel, enabledModels]);
   const showAppointments = active.has('unified_scheduling') && bookingModel !== 'unified_scheduling';
   const showEvents = active.has('event_ticket');
@@ -111,55 +117,22 @@ export function StaffScheduleHub({ bookingModel, enabledModels }: Props) {
 
       {(showEvents || showResources) && (
         <div className="space-y-3">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <p className="text-sm font-medium text-slate-700">Schedule day</p>
-            <button
-              type="button"
-              onClick={() => setDate(new Date().toISOString().slice(0, 10))}
-              className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 shadow-sm hover:bg-slate-50 sm:w-auto"
-            >
-              Today
-            </button>
-          </div>
-          <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-3 shadow-sm sm:px-4">
-            <button
-              type="button"
-              onClick={() =>
-                setDate((d) => {
-                  const t = new Date(`${d}T12:00:00`);
-                  t.setDate(t.getDate() - 1);
-                  return t.toISOString().slice(0, 10);
-                })
-              }
-              className="rounded-lg p-2 text-slate-400 hover:bg-slate-50 hover:text-slate-600"
-              aria-label="Previous day"
-            >
-              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" />
-              </svg>
-            </button>
-            <div className="min-w-0 flex-1 px-2 text-center">
-              <h2 className="truncate text-sm font-semibold text-slate-900 sm:text-base">{formatScheduleDayLabel(date)}</h2>
-              {date === new Date().toISOString().slice(0, 10) && (
-                <span className="text-xs font-medium text-brand-600">Today</span>
-              )}
-            </div>
-            <button
-              type="button"
-              onClick={() =>
-                setDate((d) => {
-                  const t = new Date(`${d}T12:00:00`);
-                  t.setDate(t.getDate() + 1);
-                  return t.toISOString().slice(0, 10);
-                })
-              }
-              className="rounded-lg p-2 text-slate-400 hover:bg-slate-50 hover:text-slate-600"
-              aria-label="Next day"
-            >
-              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden>
-                <path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
-              </svg>
-            </button>
+          <p className="text-sm font-medium text-slate-700">Schedule day</p>
+          <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+            <CalendarDateTimePicker
+              date={date}
+              onDateChange={(next) => {
+                setStartHourOverride(null);
+                setEndHourOverride(null);
+                setDate(next);
+              }}
+              startHour={startHour}
+              endHour={endHour}
+              onTimeRangeChange={(s, e) => {
+                setStartHourOverride(s);
+                setEndHourOverride(e);
+              }}
+            />
           </div>
           <StaffScheduleMergedDayGrid date={date} bookingModel={bookingModel} enabledModels={enabledModels} />
         </div>

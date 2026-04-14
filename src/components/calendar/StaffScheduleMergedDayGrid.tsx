@@ -28,6 +28,7 @@ export function StaffScheduleMergedDayGrid({ date, bookingModel, enabledModels }
   const router = useRouter();
   const gridScrollRef = useRef<HTMLDivElement>(null);
   const [openingHours, setOpeningHours] = useState<OpeningHours | null>(null);
+  const [venueTimezone, setVenueTimezone] = useState<string>('Europe/London');
   const [blocks, setBlocks] = useState<ScheduleBlockDTO[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -37,6 +38,8 @@ export function StaffScheduleMergedDayGrid({ date, bookingModel, enabledModels }
       .then((r) => (r.ok ? r.json() : null))
       .then((v) => {
         if (v?.opening_hours) setOpeningHours(v.opening_hours as OpeningHours);
+        const tz = v?.timezone;
+        if (typeof tz === 'string' && tz.trim() !== '') setVenueTimezone(tz.trim());
       })
       .catch(() => {});
   }, []);
@@ -89,8 +92,8 @@ export function StaffScheduleMergedDayGrid({ date, bookingModel, enabledModels }
   }, []);
 
   const { startHour, endHour } = useMemo(
-    () => getCalendarGridBounds(date, openingHours ?? undefined, 7, 21),
-    [date, openingHours],
+    () => getCalendarGridBounds(date, openingHours ?? undefined, 7, 21, { timeZone: venueTimezone }),
+    [date, openingHours, venueTimezone],
   );
 
   const showEvents = venueExposesBookingModel(bookingModel, enabledModels, 'event_ticket');

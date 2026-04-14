@@ -30,6 +30,10 @@ import {
   bookingStatusDisplayLabel,
 } from '@/lib/booking/infer-booking-row-model';
 import { showAttendanceConfirmedPill, showDepositPendingPill } from '@/lib/booking/booking-staff-indicators';
+import { CalendarDateTimePicker } from '@/components/calendar/CalendarDateTimePicker';
+import { getCalendarGridBounds } from '@/lib/venue-calendar-bounds';
+import { isBookingTimeInHourRange } from '@/lib/booking-time-window';
+import type { OpeningHours } from '@/types/availability';
 
 interface BookingRow {
   id: string;
@@ -227,6 +231,11 @@ export function BookingsDashboard({
   const [changeTableSelectedIds, setChangeTableSelectedIds] = useState<string[]>([]);
   const [changeTableSaving, setChangeTableSaving] = useState(false);
   const [confirmAttendanceLoadingId, setConfirmAttendanceLoadingId] = useState<string | null>(null);
+  const [openingHours, setOpeningHours] = useState<OpeningHours | null>(null);
+  const [venueTimezone, setVenueTimezone] = useState<string>('Europe/London');
+  const [startHourOverride, setStartHourOverride] = useState<number | null>(null);
+  const [endHourOverride, setEndHourOverride] = useState<number | null>(null);
+  const [timeRangeFilterActive, setTimeRangeFilterActive] = useState(false);
 
   const { from, to } = useMemo(() => {
     if (viewMode === 'day') return { from: anchorDate, to: anchorDate };
@@ -235,6 +244,30 @@ export function BookingsDashboard({
     return { from: customFrom, to: customTo };
   }, [viewMode, anchorDate, customFrom, customTo]);
   const invalidCustomRange = viewMode === 'custom' && customFrom > customTo;
+
+  const { startHour: derivedStartHour, endHour: derivedEndHour } = useMemo(
+    () =>
+      getCalendarGridBounds(anchorDate, openingHours ?? undefined, 7, 21, {
+        timeZone: venueTimezone,
+      }),
+    [anchorDate, openingHours, venueTimezone],
+  );
+  const pickerStartHour = startHourOverride ?? derivedStartHour;
+  const pickerEndHour = endHourOverride ?? derivedEndHour;
+
+  useEffect(() => {
+    setStartHourOverride(null);
+    setEndHourOverride(null);
+    setTimeRangeFilterActive(false);
+  }, [anchorDate]);
+
+  useEffect(() => {
+    if (viewMode !== 'day') {
+      setStartHourOverride(null);
+      setEndHourOverride(null);
+      setTimeRangeFilterActive(false);
+    }
+  }, [viewMode]);
 
   const showModelFilters = enabledModels.length > 0;
   const filterModels = useMemo(() => {
@@ -264,6 +297,22 @@ export function BookingsDashboard({
       router.replace(qs ? `/dashboard/bookings?${qs}` : '/dashboard/bookings', { scroll: false });
     }
   }, [searchParams, router]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetch('/api/venue')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((v) => {
+        if (cancelled || !v) return;
+        if (v.opening_hours) setOpeningHours(v.opening_hours as OpeningHours);
+        const tz = v.timezone;
+        if (typeof tz === 'string' && tz.trim() !== '') setVenueTimezone(tz.trim());
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const fetchModeData = useCallback(async () => {
     try {
@@ -589,38 +638,6 @@ export function BookingsDashboard({
     }
   }, [loadBookingDetail]);
 
-  const exportCsv = useCallback(() => {
-    const esc = (value: string) => `"${value.replace(/"/g, '""')}"`;
-    const rows = bookings.map((b) => [
-      b.booking_date,
-      b.booking_time?.slice(0, 5) ?? '',
-      b.guest_name,
-      String(b.party_size),
-      b.status,
-      b.source,
-      b.deposit_status,
-      b.deposit_amount_pence != null ? (b.deposit_amount_pence / 100).toFixed(2) : '',
-      b.dietary_notes ?? '',
-      b.occasion ?? '',
-      b.guest_phone ?? '',
-      b.guest_email ?? '',
-    ]);
-    const header = [
-      'Date', 'Time', 'Guest', 'Party Size', 'Status', 'Source', 'Deposit Status', 'Deposit Amount GBP',
-      'Dietary Notes', 'Occasion', 'Phone', 'Email',
-    ];
-    const csv = [header, ...rows].map((row) => row.map((cell) => esc(String(cell))).join(',')).join('\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `reservations_${from}_to_${to}.csv`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-  }, [bookings, from, to]);
-
   const executeBulkNoShow = useCallback(async () => {
     const previousMap = new Map(bookings.map((b) => [b.id, b.status]));
     setBulkLoading(true);
@@ -767,16 +784,29 @@ export function BookingsDashboard({
   }, [bookings, modelFilter]);
 
   const filteredBookings = useMemo(() => {
+    let list = modelScopedBookings;
     const q = searchQuery.trim().toLowerCase();
-    if (!q) return modelScopedBookings;
-    return modelScopedBookings.filter((booking) =>
-      booking.guest_name.toLowerCase().includes(q)
-      || (booking.guest_phone ?? '').toLowerCase().includes(q)
-      || (booking.guest_email ?? '').toLowerCase().includes(q)
-      || booking.id.toLowerCase().includes(q)
-      || booking.source.toLowerCase().includes(q)
-    );
-  }, [modelScopedBookings, searchQuery]);
+    if (q) {
+      list = list.filter((booking) =>
+        booking.guest_name.toLowerCase().includes(q)
+        || (booking.guest_phone ?? '').toLowerCase().includes(q)
+        || (booking.guest_email ?? '').toLowerCase().includes(q)
+        || booking.id.toLowerCase().includes(q)
+        || booking.source.toLowerCase().includes(q)
+      );
+    }
+    if (viewMode === 'day' && timeRangeFilterActive) {
+      list = list.filter((b) => isBookingTimeInHourRange(b.booking_time, pickerStartHour, pickerEndHour));
+    }
+    return list;
+  }, [
+    modelScopedBookings,
+    searchQuery,
+    viewMode,
+    timeRangeFilterActive,
+    pickerStartHour,
+    pickerEndHour,
+  ]);
 
   const groupedByDate = useMemo(() => {
     if (viewMode === 'day') return null;
@@ -794,6 +824,38 @@ export function BookingsDashboard({
     const pending = filteredBookings.filter((b) => b.status === 'Pending').length;
     return { total, totalCovers, confirmed, pending };
   }, [filteredBookings]);
+
+  const exportCsv = useCallback(() => {
+    const esc = (value: string) => `"${value.replace(/"/g, '""')}"`;
+    const rows = filteredBookings.map((b) => [
+      b.booking_date,
+      b.booking_time?.slice(0, 5) ?? '',
+      b.guest_name,
+      String(b.party_size),
+      b.status,
+      b.source,
+      b.deposit_status,
+      b.deposit_amount_pence != null ? (b.deposit_amount_pence / 100).toFixed(2) : '',
+      b.dietary_notes ?? '',
+      b.occasion ?? '',
+      b.guest_phone ?? '',
+      b.guest_email ?? '',
+    ]);
+    const header = [
+      'Date', 'Time', 'Guest', 'Party Size', 'Status', 'Source', 'Deposit Status', 'Deposit Amount GBP',
+      'Dietary Notes', 'Occasion', 'Phone', 'Email',
+    ];
+    const csv = [header, ...rows].map((row) => row.map((cell) => esc(String(cell))).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `reservations_${from}_to_${to}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }, [filteredBookings, from, to]);
 
   return (
     <div className="space-y-5">
@@ -894,18 +956,60 @@ export function BookingsDashboard({
       </div>
 
       {viewMode !== 'custom' ? (
-        <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-3 shadow-sm sm:px-4">
-          <button type="button" onClick={() => navigate(-1)} className="rounded-lg p-2 text-slate-400 hover:bg-slate-50 hover:text-slate-600">
-            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" /></svg>
-          </button>
-          <div className="min-w-0 flex-1 px-2 text-center">
-            <h2 className="truncate text-sm font-semibold text-slate-900 sm:text-base">{formatDateLabel(anchorDate, viewMode)}</h2>
-            {anchorDate === todayISO() && <span className="text-xs font-medium text-brand-600">Today</span>}
+        viewMode === 'day' ? (
+          <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+            <CalendarDateTimePicker
+              date={anchorDate}
+              onDateChange={setAnchorDate}
+              startHour={pickerStartHour}
+              endHour={pickerEndHour}
+              onTimeRangeChange={(start, end) => {
+                setStartHourOverride(start);
+                setEndHourOverride(end);
+                setTimeRangeFilterActive(true);
+              }}
+            />
+            {timeRangeFilterActive && (
+              <div className="mt-2 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-2">
+                <p className="text-xs text-slate-600">
+                  Showing bookings with start times from{' '}
+                  <span className="font-medium text-slate-800">
+                    {String(pickerStartHour).padStart(2, '0')}:00
+                  </span>{' '}
+                  up to{' '}
+                  <span className="font-medium text-slate-800">
+                    {String(pickerEndHour).padStart(2, '0')}:00
+                  </span>{' '}
+                  (not including the end hour).
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setStartHourOverride(null);
+                    setEndHourOverride(null);
+                    setTimeRangeFilterActive(false);
+                  }}
+                  className="shrink-0 text-xs font-medium text-brand-600 hover:text-brand-700 hover:underline"
+                >
+                  Clear time filter
+                </button>
+              </div>
+            )}
           </div>
-          <button type="button" onClick={() => navigate(1)} className="rounded-lg p-2 text-slate-400 hover:bg-slate-50 hover:text-slate-600">
-            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" /></svg>
-          </button>
-        </div>
+        ) : (
+          <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-3 shadow-sm sm:px-4">
+            <button type="button" onClick={() => navigate(-1)} className="rounded-lg p-2 text-slate-400 hover:bg-slate-50 hover:text-slate-600">
+              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" /></svg>
+            </button>
+            <div className="min-w-0 flex-1 px-2 text-center">
+              <h2 className="truncate text-sm font-semibold text-slate-900 sm:text-base">{formatDateLabel(anchorDate, viewMode)}</h2>
+              {anchorDate === todayISO() && <span className="text-xs font-medium text-brand-600">Today</span>}
+            </div>
+            <button type="button" onClick={() => navigate(1)} className="rounded-lg p-2 text-slate-400 hover:bg-slate-50 hover:text-slate-600">
+              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" /></svg>
+            </button>
+          </div>
+        )
       ) : (
         <div className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
           <div className="flex items-center gap-2">

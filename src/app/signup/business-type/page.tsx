@@ -1,17 +1,17 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { APPOINTMENTS_ACTIVE_MODEL_ORDER } from '@/lib/booking/active-models';
 import { BOOKING_MODEL_SIGNUP_CARDS } from '@/lib/business-config';
 import { createClient } from '@/lib/supabase/browser';
 import { fetchPendingSignupSelection, syncPendingToSessionStorage } from '@/lib/signup-pending-client';
 import { isSignupPaymentReady } from '@/lib/signup-pending-selection';
+import { DEFAULT_RESTAURANT_FAMILY_BUSINESS_TYPE } from '@/lib/signup-resume';
 
 type PlanType = 'appointments' | 'restaurant' | 'founding';
 
 export default function BusinessTypePage() {
-  const [selected, setSelected] = useState<string | null>(null);
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -24,6 +24,13 @@ export default function BusinessTypePage() {
       sessionStorage.removeItem('signup_business_type');
     }
   }, [isRestaurantPlan, plan]);
+
+  useEffect(() => {
+    if (!isRestaurantPlan) return;
+    sessionStorage.setItem('signup_plan', plan);
+    sessionStorage.setItem('signup_business_type', DEFAULT_RESTAURANT_FAMILY_BUSINESS_TYPE);
+    router.replace(`/signup/plan?plan=${plan}`);
+  }, [isRestaurantPlan, plan, router]);
 
   useEffect(() => {
     let cancelled = false;
@@ -50,63 +57,14 @@ export default function BusinessTypePage() {
   }, [router]);
 
   function handleContinue() {
-    if (isRestaurantPlan) {
-      if (!selected) return;
-      sessionStorage.setItem('signup_business_type', selected);
-      sessionStorage.setItem('signup_plan', plan);
-      router.push('/signup/plan');
-      return;
-    }
     sessionStorage.setItem('signup_plan', plan);
     router.push('/signup/plan?plan=appointments');
   }
 
-  // For restaurant plan, show a simplified picker
   if (isRestaurantPlan) {
     return (
-      <div className="w-full max-w-2xl">
-        <div className="mb-8 text-center">
-          <h1 className="text-2xl font-bold text-slate-900">
-            {plan === 'founding' ? 'Founding Partner' : 'Restaurant Plan'}
-          </h1>
-          <p className="mt-2 text-sm text-slate-500">
-            What type of venue are you?
-          </p>
-        </div>
-
-        <div className="mb-8 grid gap-3 sm:grid-cols-2">
-          {[
-            { key: 'restaurant', label: 'Restaurant', desc: 'Full-service dining' },
-            { key: 'cafe', label: 'Cafe', desc: 'Casual food and drinks' },
-            { key: 'pub', label: 'Pub / Bar', desc: 'Food and/or drinks service' },
-            { key: 'hotel_restaurant', label: 'Hotel dining', desc: 'Hotel restaurant or room dining' },
-          ].map((item) => (
-            <button
-              key={item.key}
-              type="button"
-              onClick={() => setSelected(item.key)}
-              className={`rounded-2xl border px-4 py-4 text-left transition-all ${
-                selected === item.key
-                  ? 'border-brand-500 bg-brand-50 ring-1 ring-brand-500'
-                  : 'border-slate-200 bg-white hover:border-slate-300'
-              }`}
-            >
-              <p className="text-sm font-semibold text-slate-900">{item.label}</p>
-              <p className="mt-1 text-xs text-slate-600">{item.desc}</p>
-            </button>
-          ))}
-        </div>
-
-        <div className="mt-8 flex justify-center">
-          <button
-            type="button"
-            disabled={!selected}
-            onClick={handleContinue}
-            className="rounded-xl bg-brand-600 px-8 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 disabled:opacity-50 transition-colors"
-          >
-            Continue
-          </button>
-        </div>
+      <div className="w-full max-w-2xl py-12 text-center text-sm text-slate-500">
+        Redirecting…
       </div>
     );
   }

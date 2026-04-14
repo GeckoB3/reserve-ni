@@ -9,7 +9,6 @@ import { DiningDurationTab } from './DiningDurationTab';
 import { BookingRulesTab } from './BookingRulesTab';
 import { TableManagementSection } from '@/app/dashboard/settings/sections/TableManagementSection';
 import { AvailabilityConfigSection } from '@/app/dashboard/settings/sections/AvailabilityConfigSection';
-import { DepositConfigSection } from '@/app/dashboard/settings/sections/DepositConfigSection';
 import type { VenueSettings } from '@/app/dashboard/settings/types';
 import { isRestaurantTableProductTier } from '@/lib/tier-enforcement';
 
@@ -182,13 +181,8 @@ export default function AvailabilitySettingsClient({
       {activeTab === 'table' && showTableTab && (
         <div className="space-y-6">
           <TableManagementSection venue={venue} onUpdate={onUpdate} isAdmin />
-          {hasServiceConfig ? (
-            <DepositConfigSection venue={venue} onUpdate={onUpdate} isAdmin variant="service_engine_table" />
-          ) : (
-            <>
-              <AvailabilityConfigSection venue={venue} onUpdate={onUpdate} isAdmin />
-              <DepositConfigSection venue={venue} onUpdate={onUpdate} isAdmin variant="legacy_table" />
-            </>
+          {!hasServiceConfig && (
+            <AvailabilityConfigSection venue={venue} onUpdate={onUpdate} isAdmin />
           )}
         </div>
       )}

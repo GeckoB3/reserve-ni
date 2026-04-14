@@ -1,4 +1,5 @@
 import type { OpeningHours, OpeningHoursPeriod } from '@/types/availability';
+import { getDayOfWeekForYmdInTimezone } from '@/lib/venue/venue-local-clock';
 
 function timeToMinutesHM(t: string): number {
   if (typeof t !== 'string' || t.trim() === '') return NaN;
@@ -26,6 +27,11 @@ function periodsForDay(day: OpeningHours[keyof OpeningHours] | undefined): Openi
   return [];
 }
 
+export interface CalendarGridBoundsOptions {
+  /** IANA timezone (e.g. Europe/London). When set, weekday matches Settings → Business Hours for that civil date. */
+  timeZone?: string | null;
+}
+
 /**
  * Calendar grid vertical range from venue opening_hours for one date.
  * Falls back to 07:00–21:00 when closed or missing.
@@ -35,11 +41,15 @@ export function getCalendarGridBounds(
   openingHours: OpeningHours | null | undefined,
   fallbackStart = 7,
   fallbackEnd = 21,
+  options?: CalendarGridBoundsOptions,
 ): { startHour: number; endHour: number } {
   if (!openingHours || Object.keys(openingHours).length === 0) {
     return { startHour: fallbackStart, endHour: fallbackEnd };
   }
-  const key = utcWeekdayKey(dateStr);
+  const tz = options?.timeZone?.trim();
+  const key = tz
+    ? String(getDayOfWeekForYmdInTimezone(dateStr, tz))
+    : utcWeekdayKey(dateStr);
   const day = openingHours[key];
   const periods = periodsForDay(day);
   if (periods.length === 0) {

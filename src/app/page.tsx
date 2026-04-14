@@ -51,7 +51,7 @@ const steps = [
     number: "1",
     title: "Pick your plan",
     description:
-      "Choose Appointments or Restaurant and create your account. Founding Partner spots are available for restaurants.",
+      "Choose Appointments or Restaurant and create your account. Founding Partner spots are available for both.",
   },
   { number: "2", title: "Choose your booking models", description: "Appointments includes appointments, classes, events, and resources. Enable the ones you want to start with." },
   { number: "3", title: "Start taking bookings", description: "Share your booking page link, embed the widget, or print a QR code so your clients can book instantly." },
@@ -197,13 +197,13 @@ export default function Home() {
                 <PricingFeature text="Email and SMS communications" />
                 <PricingFeature text="Priority support" />
               </ul>
-              <Link href="/signup/business-type?plan=restaurant" className="mt-8 inline-flex h-11 w-full items-center justify-center rounded-xl bg-brand-600 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700">
+              <Link href="/signup/plan?plan=restaurant" className="mt-8 inline-flex h-11 w-full items-center justify-center rounded-xl bg-brand-600 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700">
                 Get started
               </Link>
             </div>
           </div>
 
-          {/* Founding Partner - restaurants & hospitality */}
+          {/* Founding Partner - Appointments and Restaurant */}
           <div className="mx-auto mt-10 max-w-4xl overflow-hidden rounded-2xl border border-emerald-200 bg-gradient-to-br from-emerald-50 to-white shadow-sm">
             <div className="flex flex-col gap-4 p-6 sm:flex-row sm:items-center sm:justify-between sm:gap-8">
               <div>
@@ -213,11 +213,11 @@ export default function Home() {
                     Limited
                   </span>
                   <span className="rounded-full bg-white/80 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-800 ring-1 ring-emerald-200">
-                    Restaurants
+                    Appointments & Restaurant
                   </span>
                 </div>
                 <p className="mt-2 text-sm font-medium text-emerald-900">
-                  Free for six months - full Restaurant plan, no card to start. We onboard you personally.
+                  Free for six months - full Appointments or Restaurant plan (whichever fits your business). We onboard you personally.
                 </p>
                 <p className="mt-1 text-xs text-emerald-700">Only {FOUNDING_PARTNER_CAP} spots available.</p>
               </div>

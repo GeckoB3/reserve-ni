@@ -43,13 +43,17 @@ describe('getSignupResumePath', () => {
     expect(getSignupResumePath()).toBe('/signup/payment');
   });
 
-  it('returns the business type step when required signup details are missing', () => {
+  it('defaults business type and returns payment when restaurant plan is set without business type', () => {
     const storage = new Map<string, string>([['signup_plan', 'restaurant']]);
     vi.stubGlobal('window', {});
     vi.stubGlobal('sessionStorage', {
       getItem: (key: string) => storage.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        storage.set(key, value);
+      },
     });
 
-    expect(getSignupResumePath()).toBe('/signup/business-type');
+    expect(getSignupResumePath()).toBe('/signup/payment');
+    expect(storage.get('signup_business_type')).toBe('restaurant');
   });
 });

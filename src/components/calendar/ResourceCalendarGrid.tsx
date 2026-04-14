@@ -133,6 +133,7 @@ export function ResourceCalendarGrid({
   compactToolbar?: boolean;
 }) {
   const [openingHours, setOpeningHours] = useState<OpeningHours | null>(null);
+  const [venueTimezone, setVenueTimezone] = useState<string>('Europe/London');
   const [resources, setResources] = useState<VenueResource[]>([]);
   const [bookings, setBookings] = useState<ResourceBookingRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -145,8 +146,8 @@ export function ResourceCalendarGrid({
   const timelineRootRef = useRef<HTMLDivElement>(null);
 
   const bounds = useMemo(
-    () => getCalendarGridBounds(date, openingHours ?? undefined, 7, 21),
-    [date, openingHours],
+    () => getCalendarGridBounds(date, openingHours ?? undefined, 7, 21, { timeZone: venueTimezone }),
+    [date, openingHours, venueTimezone],
   );
 
   const startHour = Number.isFinite(bounds.startHour) ? bounds.startHour : 7;
@@ -189,6 +190,8 @@ export function ResourceCalendarGrid({
         bookRes.json(),
       ]);
       if (venueJson?.opening_hours) setOpeningHours(venueJson.opening_hours as OpeningHours);
+      const tz = (venueJson as { timezone?: string | null }).timezone;
+      if (typeof tz === 'string' && tz.trim() !== '') setVenueTimezone(tz.trim());
       const raw = (resJson.resources ?? []) as VenueResource[];
       setResources(raw.filter((r) => r.is_active).sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)));
       const rows = (bookJson.bookings ?? []) as ResourceBookingRow[];

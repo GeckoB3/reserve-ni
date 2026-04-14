@@ -439,7 +439,7 @@ export function TableManagementSection({ venue, onUpdate, isAdmin }: Props) {
         </p>
         <div className="mt-2 flex items-center gap-2">
           <NumericInput
-            min={20}
+            min={5}
             max={300}
             value={thresholdDraft}
             onChange={(v) => setThresholdDraft(v)}

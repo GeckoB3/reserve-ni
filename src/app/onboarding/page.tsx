@@ -27,6 +27,14 @@ import {
 import { normalizeTimeToHhMm, validateStartEndTimes } from '@/lib/experience-events/experience-event-validation';
 import { formatZodFlattenedError } from '@/lib/experience-events/experience-event-zod';
 import { StripeConnectSection } from '@/app/dashboard/settings/sections/StripeConnectSection';
+import { OpeningHoursStep } from './steps/restaurant/OpeningHoursStep';
+import { ServicesStep } from './steps/restaurant/ServicesStep';
+import { CapacityStep } from './steps/restaurant/CapacityStep';
+import { DiningDurationStep } from './steps/restaurant/DiningDurationStep';
+import { BookingRulesStep } from './steps/restaurant/BookingRulesStep';
+import { TableModeStep } from './steps/restaurant/TableModeStep';
+import { TableSetupStep } from './steps/restaurant/TableSetupStep';
+import { DashboardOrientationStep } from './steps/restaurant/DashboardOrientationStep';
 
 type Currency = 'GBP' | 'EUR';
 
@@ -429,6 +437,9 @@ export default function OnboardingPage() {
   const [openingHoursDraft, setOpeningHoursDraft] = useState<OpeningHoursSettings>(() => defaultOpeningHoursSettings());
   const [calendarWorkingDraft, setCalendarWorkingDraft] = useState<Record<string, WorkingHours>>({});
 
+  /** Restaurant plan: tracks simple vs advanced table management (drives dynamic step list). */
+  const [tableManagementEnabled, setTableManagementEnabled] = useState(false);
+
   // Model C: First event
   const [eventDraft, setEventDraft] = useState<EventDraft>({
     name: '',
@@ -640,15 +651,31 @@ export default function OnboardingPage() {
       return buildAppointmentsPlanModelSteps(activeAppointmentsModels);
     }
 
+    if (venue.booking_model === 'table_reservation') {
+      const steps: Array<{ key: string; label: string }> = [
+        { key: 'profile', label: 'Business Profile' },
+        { key: 'r_opening_hours', label: 'Opening Hours' },
+        { key: 'r_services', label: 'Dining Services' },
+        { key: 'r_capacity', label: 'Capacity' },
+        { key: 'r_dining_duration', label: 'Dining Duration' },
+        { key: 'r_booking_rules', label: 'Booking Rules' },
+        { key: 'r_table_mode', label: 'Table Management' },
+      ];
+      if (tableManagementEnabled) {
+        steps.push({ key: 'r_table_setup', label: 'Table Setup' });
+      }
+      steps.push({ key: 'r_dashboard', label: 'Your Dashboard' });
+      steps.push({ key: 'stripe_onboarding', label: 'Payments (Stripe)' });
+      steps.push({ key: 'preview', label: 'Preview & Go Live' });
+      return steps;
+    }
+
     const steps: Array<{ key: string; label: string }> = [
       { key: 'profile', label: 'Business Profile' },
       { key: 'stripe_onboarding', label: 'Payments (Stripe)' },
     ];
 
     switch (venue.booking_model) {
-      case 'table_reservation':
-        steps.push({ key: 'restaurant_setup', label: 'Restaurant Setup' });
-        break;
       case 'practitioner_appointment':
       case 'unified_scheduling':
         steps.push({ key: 'team', label: unifiedTeamStepLabel(terms) });
@@ -668,7 +695,7 @@ export default function OnboardingPage() {
 
     steps.push({ key: 'preview', label: 'Preview & Go Live' });
     return steps;
-  }, [activeAppointmentsModels, venue, terms]);
+  }, [activeAppointmentsModels, venue, terms, tableManagementEnabled]);
 
   const currentStepKey = modelSteps[step]?.key ?? 'profile';
   const totalSteps = modelSteps.length;
@@ -1549,10 +1576,44 @@ export default function OnboardingPage() {
       setSaving(false);
     }
 
+    // Restaurant-specific steps delegate saving to the child component via advanceRestaurantStep.
+    // handleNext is not used for these steps — the standard Continue button is hidden.
+    if (
+      currentStepKey === 'r_opening_hours' ||
+      currentStepKey === 'r_services' ||
+      currentStepKey === 'r_capacity' ||
+      currentStepKey === 'r_dining_duration' ||
+      currentStepKey === 'r_booking_rules' ||
+      currentStepKey === 'r_table_mode' ||
+      currentStepKey === 'r_table_setup' ||
+      currentStepKey === 'r_dashboard'
+    ) {
+      return;
+    }
+
     if (revisitedStepIndex === step) {
       setRevisitedStepIndex(null);
     }
     setStep((s) => s + 1);
+  }
+
+  /**
+   * Called by restaurant step components when they finish (save or skip).
+   * Saves the onboarding step progress index then advances to the next step.
+   */
+  async function advanceRestaurantStep() {
+    setSaving(true);
+    setError(null);
+    try {
+      const nextStep = Math.max(step + 1, maxCompletedStep);
+      await saveProgress(nextStep);
+      setMaxCompletedStep(nextStep);
+      setStep((s) => s + 1);
+    } catch {
+      setError('Failed to save progress. Please try again.');
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function handleGoLive() {
@@ -1568,11 +1629,7 @@ export default function OnboardingPage() {
         }),
       });
       if (!res.ok) throw new Error('Failed to complete onboarding');
-      if (venue?.booking_model === 'table_reservation') {
-        router.push('/dashboard/onboarding');
-      } else {
-        router.push('/dashboard');
-      }
+      router.push('/dashboard');
     } catch {
       setError('Failed to complete setup. Please try again.');
     } finally {
@@ -1598,9 +1655,19 @@ export default function OnboardingPage() {
 
   const sym = currencySymbol(currency);
 
+  const RESTAURANT_SELF_MANAGED_STEPS = new Set([
+    'r_opening_hours', 'r_services', 'r_capacity', 'r_dining_duration',
+    'r_booking_rules', 'r_table_mode', 'r_table_setup', 'r_dashboard',
+  ]);
+
   const wideOnboardingStep =
     currentStepKey === 'first_event' ||
     currentStepKey === 'stripe_onboarding' ||
+    currentStepKey === 'r_services' ||
+    currentStepKey === 'r_capacity' ||
+    currentStepKey === 'r_booking_rules' ||
+    currentStepKey === 'r_table_mode' ||
+    currentStepKey === 'r_dashboard' ||
     (currentStepKey === 'hours' &&
       (isAppointmentsPlanVenue || isUnifiedSchedulingVenue(venue.booking_model))) ||
     (currentStepKey === 'services' && isUnifiedSchedulingVenue(venue.booking_model));
@@ -1714,7 +1781,7 @@ export default function OnboardingPage() {
                   type="text"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder="e.g. The Cutting Room"
+                  placeholder="Business name"
                   className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
                 />
               </div>
@@ -1821,6 +1888,46 @@ export default function OnboardingPage() {
           </div>
         )}
 
+        {/* Restaurant plan steps */}
+        {currentStepKey === 'r_opening_hours' && (
+          <OpeningHoursStep onDone={advanceRestaurantStep} />
+        )}
+
+        {currentStepKey === 'r_services' && (
+          <ServicesStep onDone={advanceRestaurantStep} />
+        )}
+
+        {currentStepKey === 'r_capacity' && (
+          <CapacityStep onDone={advanceRestaurantStep} />
+        )}
+
+        {currentStepKey === 'r_dining_duration' && (
+          <DiningDurationStep onDone={advanceRestaurantStep} />
+        )}
+
+        {currentStepKey === 'r_booking_rules' && (
+          <BookingRulesStep onDone={advanceRestaurantStep} />
+        )}
+
+        {currentStepKey === 'r_table_mode' && (
+          <TableModeStep
+            onDone={advanceRestaurantStep}
+            onModeSelected={(advanced) => setTableManagementEnabled(advanced)}
+          />
+        )}
+
+        {currentStepKey === 'r_table_setup' && (
+          <TableSetupStep onDone={advanceRestaurantStep} />
+        )}
+
+        {currentStepKey === 'r_dashboard' && (
+          <DashboardOrientationStep
+            onDone={advanceRestaurantStep}
+            tableManagementEnabled={tableManagementEnabled}
+          />
+        )}
+
+        {/* Legacy restaurant_setup step (no longer reached by new signups) */}
         {currentStepKey === 'restaurant_setup' && (
           <div className="text-center">
             <h2 className="mb-2 text-lg font-bold text-slate-900">Restaurant setup</h2>
@@ -2912,8 +3019,8 @@ export default function OnboardingPage() {
             <p className="mb-4 text-sm text-slate-500">
               {venue.booking_model === 'table_reservation' ? (
                 <>
-                  Your public booking link is below. Next, finish table and sitting setup on your dashboard so guests
-                  can reserve covers and pay deposits as you configure.
+                  Your restaurant is ready. Share your booking link below and guests can start making reservations
+                  straight away. Refine settings any time from the Availability dashboard.
                 </>
               ) : isAppointmentsPlanVenue ? (
                 <>
@@ -2947,13 +3054,13 @@ export default function OnboardingPage() {
               </div>
             )}
             {venue.booking_model === 'table_reservation' && (
-              <div className="mb-6 rounded-xl border border-amber-100 bg-amber-50/80 p-4 text-left">
-                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-amber-900/80">
-                  Next step
+              <div className="mb-6 rounded-xl border border-emerald-100 bg-emerald-50/60 p-4 text-left">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-emerald-900/80">
+                  You&apos;re ready to take bookings
                 </p>
                 <p className="text-sm text-slate-700">
-                  You&apos;ll set service periods, capacity, party-size durations, and optional deposits in the hosted
-                  restaurant setup wizard.
+                  Your restaurant is configured. Fine-tune services, capacity, booking rules, and table management
+                  any time from your <strong>Availability</strong> dashboard.
                 </p>
               </div>
             )}
@@ -3029,9 +3136,9 @@ export default function OnboardingPage() {
           </div>
         )}
 
-        {/* Navigation */}
-        <div className="mt-8 flex justify-between">
-          {step > 0 && !saving ? (
+        {/* Back button for restaurant self-managed steps */}
+        {RESTAURANT_SELF_MANAGED_STEPS.has(currentStepKey) && step > 0 && !saving && (
+          <div className="mt-6 flex">
             <button
               type="button"
               onClick={() => {
@@ -3042,38 +3149,52 @@ export default function OnboardingPage() {
             >
               Back
             </button>
-          ) : (
-            <div />
-          )}
-          {currentStepKey === 'preview' ? (
-            <button
-              type="button"
-              onClick={handleGoLive}
-              disabled={saving}
-              className="rounded-lg bg-brand-600 px-6 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
-            >
-              {saving
-                ? 'Finishing...'
-                : venue.booking_model === 'table_reservation'
-                  ? 'Continue to restaurant setup'
-                  : 'Go to Dashboard'}
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={handleNext}
-              disabled={
-                saving ||
-                (currentStepKey === 'services' &&
-                  isUnifiedSchedulingVenue(venue.booking_model) &&
-                  !servicesSyncReady)
-              }
-              className="rounded-lg bg-brand-600 px-6 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
-            >
-              {saving ? 'Saving...' : 'Continue'}
-            </button>
-          )}
-        </div>
+          </div>
+        )}
+
+        {/* Navigation — hidden for restaurant self-managed steps (they render their own CTAs) */}
+        {!RESTAURANT_SELF_MANAGED_STEPS.has(currentStepKey) && (
+          <div className="mt-8 flex justify-between">
+            {step > 0 && !saving ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setRevisitedStepIndex(step - 1);
+                  setStep(step - 1);
+                }}
+                className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
+              >
+                Back
+              </button>
+            ) : (
+              <div />
+            )}
+            {currentStepKey === 'preview' ? (
+              <button
+                type="button"
+                onClick={handleGoLive}
+                disabled={saving}
+                className="rounded-lg bg-brand-600 px-6 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
+              >
+                {saving ? 'Finishing...' : 'Go to Dashboard'}
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={handleNext}
+                disabled={
+                  saving ||
+                  (currentStepKey === 'services' &&
+                    isUnifiedSchedulingVenue(venue.booking_model) &&
+                    !servicesSyncReady)
+                }
+                className="rounded-lg bg-brand-600 px-6 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
+              >
+                {saving ? 'Saving...' : 'Continue'}
+              </button>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
