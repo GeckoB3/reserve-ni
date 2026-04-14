@@ -52,7 +52,7 @@ async function getVenueBookingModel(
  * True when calendar columns are read from `unified_calendars` (must match GET /api/venue/practitioners).
  * Classes/events and USE share the same UUID space; `booking_model` alone is not enough.
  */
-async function useUnifiedCalendarListForVenue(
+async function checkVenueUsesUnifiedCalendarList(
   admin: ReturnType<typeof getSupabaseAdminClient>,
   venueId: string,
   bookingModel: string,
@@ -73,7 +73,7 @@ async function isPractitionerSlugTaken(
   excludePractitionerId?: string,
   bookingModel?: string,
 ): Promise<boolean> {
-  const useUnified = await useUnifiedCalendarListForVenue(admin, venueId, bookingModel ?? '');
+  const useUnified = await checkVenueUsesUnifiedCalendarList(admin, venueId, bookingModel ?? '');
   if (useUnified) {
     let q = admin.from('unified_calendars').select('id').eq('venue_id', venueId).eq('slug', slug).limit(1);
     if (excludePractitionerId) {
@@ -156,7 +156,7 @@ export async function GET(request: NextRequest) {
     const bookingModel = (venueMeta as { booking_model?: string } | null)?.booking_model ?? '';
 
     /** Experience events, classes, etc. use `unified_calendars.id`. Prefer UC list whenever rows exist (mirrors share practitioner ids). */
-    const useUnifiedCalendarList = await useUnifiedCalendarListForVenue(
+    const useUnifiedCalendarList = await checkVenueUsesUnifiedCalendarList(
       admin,
       staff.venue_id,
       bookingModel,
@@ -284,7 +284,7 @@ export async function POST(request: NextRequest) {
 
     const admin = getSupabaseAdminClient();
     const bookingModel = await getVenueBookingModel(admin, staff.venue_id);
-    const useUnifiedListForCreate = await useUnifiedCalendarListForVenue(admin, staff.venue_id, bookingModel);
+    const useUnifiedListForCreate = await checkVenueUsesUnifiedCalendarList(admin, staff.venue_id, bookingModel);
     const { slug: rawSlug, ...createRest } = parsed.data;
     const slugNorm = normalisePractitionerSlugInput(rawSlug);
     if (!slugNorm.ok) {
@@ -455,7 +455,7 @@ export async function PATCH(request: NextRequest) {
       }
 
       const bookingModelStaff = await getVenueBookingModel(admin, staff.venue_id);
-      const useUnifiedStaffList = await useUnifiedCalendarListForVenue(
+      const useUnifiedStaffList = await checkVenueUsesUnifiedCalendarList(
         admin,
         staff.venue_id,
         bookingModelStaff,
@@ -536,7 +536,7 @@ export async function PATCH(request: NextRequest) {
     }
 
     const bookingModel = await getVenueBookingModel(admin, staff.venue_id);
-    const useUnifiedAdminList = await useUnifiedCalendarListForVenue(admin, staff.venue_id, bookingModel);
+    const useUnifiedAdminList = await checkVenueUsesUnifiedCalendarList(admin, staff.venue_id, bookingModel);
 
     const updatePayload: Record<string, unknown> = { ...parsed.data };
     if (Object.prototype.hasOwnProperty.call(parsed.data, 'slug')) {
@@ -640,7 +640,7 @@ export async function DELETE(request: NextRequest) {
 
     const admin = getSupabaseAdminClient();
     const bookingModel = await getVenueBookingModel(admin, staff.venue_id);
-    const useUnifiedList = await useUnifiedCalendarListForVenue(admin, staff.venue_id, bookingModel);
+    const useUnifiedList = await checkVenueUsesUnifiedCalendarList(admin, staff.venue_id, bookingModel);
 
     if (useUnifiedList) {
       const { data: ucRow, error: ucFetchErr } = await admin

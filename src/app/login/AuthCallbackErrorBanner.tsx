@@ -34,10 +34,11 @@ export function AuthCallbackErrorBanner({
     if (!raw) return;
     const p = new URLSearchParams(raw);
     const code = p.get('error_code');
-    if (code === 'otp_expired') {
-      setHashDetail('otp_expired');
-    } else if (p.get('error')) {
-      setHashDetail('exchange_failed');
+    let next: string | null = null;
+    if (code === 'otp_expired') next = 'otp_expired';
+    else if (p.get('error')) next = 'exchange_failed';
+    if (next) {
+      queueMicrotask(() => setHashDetail(next));
     }
     window.history.replaceState(null, '', window.location.pathname + window.location.search);
   }, []);
