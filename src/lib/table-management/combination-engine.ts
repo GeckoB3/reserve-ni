@@ -1,3 +1,6 @@
+import type { BookingModel } from '@/types/booking-models';
+import { ALL_DAYS_OF_WEEK, isCombinationAllowedForBookingContext } from '@/lib/table-management/combination-rules';
+
 export interface CombinationTable {
   id: string;
   name: string;
@@ -31,6 +34,28 @@ export interface ManualCombination {
   combined_min_covers: number;
   combined_max_covers: number;
   is_active?: boolean;
+  days_of_week?: number[];
+  time_start?: string | null;
+  time_end?: string | null;
+  booking_type_filters?: string[] | null;
+  requires_manager_approval?: boolean;
+  internal_notes?: string | null;
+}
+
+/** DB row for combination_auto_overrides (keyed by sorted table ids). */
+export interface AutoCombinationOverrideInput {
+  id: string;
+  table_group_key: string;
+  disabled: boolean;
+  display_name: string | null;
+  combined_min_covers: number | null;
+  combined_max_covers: number | null;
+  days_of_week: number[];
+  time_start: string | null;
+  time_end: string | null;
+  booking_type_filters: string[] | null;
+  requires_manager_approval: boolean;
+  internal_notes: string | null;
 }
 
 export interface BoundingBox {
@@ -52,6 +77,9 @@ export interface CombinationSuggestion {
   compactness_area: number;
   manual_combination_id?: string;
   manual_combination_name?: string;
+  auto_override_id?: string;
+  requires_manager_approval?: boolean;
+  internal_notes?: string | null;
 }
 
 const ACTIVE_BOOKING_STATUSES = new Set(['Pending', 'Confirmed', 'Seated']);
@@ -150,6 +178,61 @@ export function detectAdjacentTables(
   }
 
   return adjacency;
+}
+
+function isConnectedSubset(subset: string[], adjacencyMap: Map<string, Set<string>>): boolean {
+  if (subset.length <= 1) return subset.length === 1;
+  const set = new Set(subset);
+  const start = subset[0]!;
+  const visited = new Set<string>([start]);
+  const queue = [start];
+  while (queue.length > 0) {
+    const u = queue.shift()!;
+    for (const v of adjacencyMap.get(u) ?? []) {
+      if (!set.has(v) || visited.has(v)) continue;
+      visited.add(v);
+      queue.push(v);
+    }
+  }
+  return visited.size === subset.length;
+}
+
+/**
+ * All unordered groups of 2..maxGroupSize tables that form a connected subgraph
+ * under the given adjacency map (same graph as {@link detectAdjacentTables}).
+ */
+export function enumerateAdjacentCombinationGroups(
+  adjacencyMap: Map<string, Set<string>>,
+  maxGroupSize = 4,
+): string[][] {
+  const ids = [...adjacencyMap.keys()].sort();
+  const results: string[][] = [];
+  const seen = new Set<string>();
+
+  for (let k = 2; k <= maxGroupSize; k++) {
+    const combo: string[] = [];
+    function dfs(start: number) {
+      if (combo.length === k) {
+        if (isConnectedSubset(combo, adjacencyMap)) {
+          const sorted = [...combo].sort();
+          const key = sorted.join('|');
+          if (!seen.has(key)) {
+            seen.add(key);
+            results.push(sorted);
+          }
+        }
+        return;
+      }
+      for (let i = start; i < ids.length; i++) {
+        combo.push(ids[i]!);
+        dfs(i + 1);
+        combo.pop();
+      }
+    }
+    dfs(0);
+  }
+
+  return results.sort((a, b) => a.join('|').localeCompare(b.join('|')));
 }
 
 export function findConnectedGroups(
@@ -289,6 +372,14 @@ export function findValidCombinations(args: {
   blocks: CombinationBlock[];
   adjacencyMap: Map<string, Set<string>>;
   manualCombinations: ManualCombination[];
+  /** Key = sorted table ids joined with `|`. */
+  autoOverrides?: Map<string, AutoCombinationOverrideInput>;
+  /** When set, day/time/booking-type filters apply to auto overrides and manual custom rows. */
+  bookingContext?: {
+    bookingDate: string;
+    bookingTime: string;
+    bookingModel: BookingModel;
+  };
   excludeBookingId?: string;
   maxGroupSize?: number;
 }): CombinationSuggestion[] {
@@ -301,6 +392,8 @@ export function findValidCombinations(args: {
     blocks,
     adjacencyMap,
     manualCombinations,
+    autoOverrides,
+    bookingContext,
     excludeBookingId,
     maxGroupSize = 4,
   } = args;
@@ -356,20 +449,49 @@ export function findValidCombinations(args: {
       if (group.length < 2) continue;
       const sortedGroup = [...group].sort();
       const key = sortedGroup.join('|');
+      const ov = autoOverrides?.get(key);
+      if (ov?.disabled) continue;
+
       const tablesInGroup = sortedGroup.map((tableId) => tableMap.get(tableId)).filter(Boolean) as CombinationTable[];
-      const capacity = tablesInGroup.reduce((sum, table) => sum + table.max_covers, 0);
-      if (capacity < partySize) continue;
+      const sumCap = tablesInGroup.reduce((sum, table) => sum + table.max_covers, 0);
+      const effectiveMaxParty = ov?.combined_max_covers ?? sumCap;
+      const effectiveMinParty = ov?.combined_min_covers ?? 1;
+      if (partySize < effectiveMinParty || partySize > effectiveMaxParty) continue;
+      const effectiveCapacity = Math.min(sumCap, effectiveMaxParty);
+      if (effectiveCapacity < partySize) continue;
+
+      if (ov && bookingContext) {
+        const ok = isCombinationAllowedForBookingContext(
+          {
+            days_of_week: ov.days_of_week,
+            time_start: ov.time_start,
+            time_end: ov.time_end,
+            booking_type_filters: ov.booking_type_filters,
+            requires_manager_approval: ov.requires_manager_approval,
+          },
+          {
+            bookingDate: bookingContext.bookingDate,
+            bookingTime: bookingContext.bookingTime,
+            bookingModel: bookingContext.bookingModel,
+          },
+        );
+        if (!ok) continue;
+      }
+
       const metrics = scoreCombination(sortedGroup, partySize, tableMap, false);
       comboByKey.set(key, {
         source: 'auto',
         table_ids: sortedGroup,
         table_names: tablesInGroup.map((table) => table.name),
-        combined_capacity: capacity,
-        spare_covers: Math.max(0, capacity - partySize),
+        combined_capacity: effectiveCapacity,
+        spare_covers: Math.max(0, effectiveCapacity - partySize),
         score: metrics.score,
         waste: metrics.waste,
         table_count: sortedGroup.length,
         compactness_area: metrics.compactnessArea,
+        auto_override_id: ov?.id,
+        requires_manager_approval: ov?.requires_manager_approval,
+        internal_notes: ov?.internal_notes ?? undefined,
       });
     }
   }
@@ -380,6 +502,24 @@ export function findValidCombinations(args: {
     if (memberIds.length < 2) continue;
     if (memberIds.some((tableId) => !availableSet.has(tableId))) continue;
     if (manual.combined_max_covers < partySize || manual.combined_min_covers > partySize) continue;
+
+    if (bookingContext) {
+      const ok = isCombinationAllowedForBookingContext(
+        {
+          days_of_week: manual.days_of_week ?? [...ALL_DAYS_OF_WEEK],
+          time_start: manual.time_start ?? null,
+          time_end: manual.time_end ?? null,
+          booking_type_filters: manual.booking_type_filters ?? null,
+          requires_manager_approval: manual.requires_manager_approval ?? false,
+        },
+        {
+          bookingDate: bookingContext.bookingDate,
+          bookingTime: bookingContext.bookingTime,
+          bookingModel: bookingContext.bookingModel,
+        },
+      );
+      if (!ok) continue;
+    }
 
     const tablesInGroup = memberIds.map((tableId) => tableMap.get(tableId)).filter(Boolean) as CombinationTable[];
     const capacity = tablesInGroup.reduce((sum, table) => sum + table.max_covers, 0);
@@ -400,6 +540,8 @@ export function findValidCombinations(args: {
       compactness_area: metrics.compactnessArea,
       manual_combination_id: manual.id,
       manual_combination_name: manual.name,
+      requires_manager_approval: manual.requires_manager_approval ?? false,
+      internal_notes: manual.internal_notes ?? undefined,
     };
 
     if (!existing || existing.source !== 'manual' || manualSuggestion.score < existing.score) {

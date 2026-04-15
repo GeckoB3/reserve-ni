@@ -44,7 +44,7 @@ export async function GET() {
     let venue = null;
     const { data: fullVenue, error } = await staff.db
       .from('venues')
-      .select('id, name, slug, address, phone, email, cover_photo_url, cuisine_type, price_band, no_show_grace_minutes, kitchen_email, communication_templates, opening_hours, booking_rules, deposit_config, availability_config, stripe_connected_account_id, timezone, currency, website_url, booking_model, enabled_models, active_booking_models, pricing_tier, terminology')
+      .select('id, name, slug, address, phone, email, reply_to_email, cover_photo_url, cuisine_type, price_band, no_show_grace_minutes, kitchen_email, communication_templates, opening_hours, booking_rules, deposit_config, availability_config, stripe_connected_account_id, timezone, currency, website_url, booking_model, enabled_models, active_booking_models, pricing_tier, terminology')
       .eq('id', staff.venue_id)
       .single();
 
@@ -53,7 +53,7 @@ export async function GET() {
     } else {
       const { data: basicVenue } = await staff.db
         .from('venues')
-        .select('id, name, slug, address, phone, email, cover_photo_url, opening_hours, booking_rules, deposit_config, availability_config, stripe_connected_account_id, timezone, currency, website_url, booking_model, enabled_models, active_booking_models, pricing_tier, terminology')
+        .select('id, name, slug, address, phone, email, reply_to_email, cover_photo_url, opening_hours, booking_rules, deposit_config, availability_config, stripe_connected_account_id, timezone, currency, website_url, booking_model, enabled_models, active_booking_models, pricing_tier, terminology')
         .eq('id', staff.venue_id)
         .single();
       if (basicVenue) {
@@ -125,7 +125,11 @@ export async function PATCH(request: NextRequest) {
         update.phone = e164;
       }
     }
-    if (data.email !== undefined) update.email = data.email === '' ? null : data.email;
+    if (data.email !== undefined) {
+      const nextEmail = data.email === '' ? null : data.email;
+      update.email = nextEmail;
+      update.reply_to_email = nextEmail;
+    }
     if (data.cover_photo_url !== undefined) update.cover_photo_url = data.cover_photo_url;
     if (data.cuisine_type !== undefined) update.cuisine_type = data.cuisine_type;
     if (data.price_band !== undefined) update.price_band = data.price_band;
@@ -206,7 +210,7 @@ export async function PATCH(request: NextRequest) {
       .update(update)
       .eq('id', staff.venue_id)
       .select(
-        'id, name, slug, address, phone, email, cover_photo_url, cuisine_type, price_band, no_show_grace_minutes, kitchen_email, timezone, website_url, booking_model, enabled_models, active_booking_models, pricing_tier',
+        'id, name, slug, address, phone, email, reply_to_email, cover_photo_url, cuisine_type, price_band, no_show_grace_minutes, kitchen_email, timezone, website_url, booking_model, enabled_models, active_booking_models, pricing_tier',
       )
       .single();
 

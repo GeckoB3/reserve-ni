@@ -1,8 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import type { VenueTable, TableShape } from '@/types/table-management';
-import { getTableDimensions } from '@/types/table-management';
+import type { VenueTable, TableShape, TableType } from '@/types/table-management';
+import { getTableDimensions, TABLE_TYPES } from '@/types/table-management';
 import { NumericInput } from '@/components/ui/NumericInput';
 
 interface Props {
@@ -27,6 +27,7 @@ interface EditingTable {
   min_covers: number;
   max_covers: number;
   shape: TableShape;
+  table_type: TableType;
   zone: string;
   server_section: string;
   is_active: boolean;
@@ -37,6 +38,7 @@ const emptyTable: EditingTable = {
   min_covers: 1,
   max_covers: 2,
   shape: 'rectangle',
+  table_type: 'Regular',
   zone: '',
   server_section: '',
   is_active: true,
@@ -70,6 +72,7 @@ export function TableList({ tables, setTables, isAdmin, onRefresh, variant = 'fu
             min_covers: editing.min_covers,
             max_covers: editing.max_covers,
             shape: editing.shape,
+            table_type: editing.table_type,
             zone: editing.zone || null,
             server_section: editing.server_section || null,
             is_active: editing.is_active,
@@ -92,6 +95,7 @@ export function TableList({ tables, setTables, isAdmin, onRefresh, variant = 'fu
             min_covers: editing.min_covers,
             max_covers: editing.max_covers,
             shape: editing.shape,
+            table_type: editing.table_type,
             zone: editing.zone || null,
             server_section: editing.server_section || null,
             is_active: editing.is_active,
@@ -135,6 +139,7 @@ export function TableList({ tables, setTables, isAdmin, onRefresh, variant = 'fu
       min_covers: table.min_covers,
       max_covers: table.max_covers,
       shape: table.shape as TableShape,
+      table_type: (table.table_type as TableType) ?? 'Regular',
       zone: table.zone ?? '',
       server_section: table.server_section ?? '',
       is_active: table.is_active,
@@ -329,7 +334,19 @@ export function TableList({ tables, setTables, isAdmin, onRefresh, variant = 'fu
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-slate-600">Zone</label>
+                  <label className="block text-xs font-medium text-slate-600">Table Type</label>
+                  <select
+                    value={editing.table_type}
+                    onChange={(e) => setEditing({ ...editing, table_type: e.target.value as TableType })}
+                    className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
+                  >
+                    {TABLE_TYPES.map((tt) => (
+                      <option key={tt} value={tt}>{tt}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-600">Zone / Area</label>
                   <input
                     type="text"
                     value={editing.zone}
@@ -409,6 +426,7 @@ export function TableList({ tables, setTables, isAdmin, onRefresh, variant = 'fu
                       min_covers: t.min_covers,
                       max_covers: t.max_covers,
                       shape: t.shape as TableShape,
+                      table_type: (t.table_type as TableType) ?? 'Regular',
                       zone: t.zone ?? '',
                       server_section: t.server_section ?? '',
                       is_active: t.is_active,
@@ -431,6 +449,7 @@ export function TableList({ tables, setTables, isAdmin, onRefresh, variant = 'fu
                       min_covers: t.min_covers,
                       max_covers: t.max_covers,
                       shape: t.shape as TableShape,
+                      table_type: (t.table_type as TableType) ?? 'Regular',
                       zone: t.zone ?? '',
                       server_section: t.server_section ?? '',
                       is_active: t.is_active,
@@ -453,6 +472,7 @@ export function TableList({ tables, setTables, isAdmin, onRefresh, variant = 'fu
                 min_covers: t.min_covers,
                 max_covers: t.max_covers,
                 shape: t.shape as TableShape,
+                table_type: (t.table_type as TableType) ?? 'Regular',
                 zone: t.zone ?? '',
                 server_section: t.server_section ?? '',
                 is_active: t.is_active,
@@ -485,7 +505,7 @@ function TableGrid({ tables, isAdmin, onEdit, onDelete, onDuplicate, variant = '
               <th className="px-4 py-2.5 text-left text-xs font-medium text-slate-500">Name</th>
               {!isCovers && <th className="px-4 py-2.5 text-left text-xs font-medium text-slate-500">Shape</th>}
               <th className="px-4 py-2.5 text-center text-xs font-medium text-slate-500">{isCovers ? 'Seats' : 'Covers'}</th>
-              {!isCovers && <th className="px-4 py-2.5 text-left text-xs font-medium text-slate-500">Zone</th>}
+              {!isCovers && <th className="px-4 py-2.5 text-left text-xs font-medium text-slate-500">Type</th>}
               <th className="px-4 py-2.5 text-center text-xs font-medium text-slate-500">Active</th>
               {isAdmin && (
                 <th className="px-4 py-2.5 text-right text-xs font-medium text-slate-500">Actions</th>
@@ -498,7 +518,7 @@ function TableGrid({ tables, isAdmin, onEdit, onDelete, onDuplicate, variant = '
                 <td className="px-4 py-2.5 font-medium text-slate-900">{t.name}</td>
                 {!isCovers && <td className="px-4 py-2.5 capitalize text-slate-600">{t.shape}</td>}
                 <td className="px-4 py-2.5 text-center text-slate-600">{isCovers ? t.max_covers : `${t.min_covers}–${t.max_covers}`}</td>
-                {!isCovers && <td className="px-4 py-2.5 text-slate-600">{t.zone ?? '-'}</td>}
+                {!isCovers && <td className="px-4 py-2.5 text-slate-600">{t.table_type ?? 'Regular'}</td>}
                 <td className="px-4 py-2.5 text-center">
                   <span className={`inline-block h-2 w-2 rounded-full ${t.is_active ? 'bg-green-500' : 'bg-slate-300'}`} />
                 </td>

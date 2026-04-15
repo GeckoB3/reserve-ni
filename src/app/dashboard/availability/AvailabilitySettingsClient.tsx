@@ -8,6 +8,7 @@ import { CapacityRulesTab } from './CapacityRulesTab';
 import { DiningDurationTab } from './DiningDurationTab';
 import { BookingRulesTab } from './BookingRulesTab';
 import { TableManagementSection } from '@/app/dashboard/settings/sections/TableManagementSection';
+import { FloorPlanEditorTabs, type FloorPlanEditorTabKey } from './FloorPlanEditorTabs';
 import { AvailabilityConfigSection } from '@/app/dashboard/settings/sections/AvailabilityConfigSection';
 import type { VenueSettings } from '@/app/dashboard/settings/types';
 import { isRestaurantTableProductTier } from '@/lib/tier-enforcement';
@@ -46,29 +47,56 @@ function resolveInitialActiveTab(
   return 'services';
 }
 
+const VALID_FLOOR_PLAN_TABS: FloorPlanEditorTabKey[] = ['layout', 'tables', 'combinations', 'areas'];
+
 interface Props {
   initialVenue: VenueSettings | null;
   hasServiceConfig: boolean;
   initialTab?: TabKey;
+  initialFloorPlanTab?: FloorPlanEditorTabKey;
 }
 
 export default function AvailabilitySettingsClient({
   initialVenue,
   hasServiceConfig,
   initialTab,
+  initialFloorPlanTab,
 }: Props) {
   const router = useRouter();
   const [venue, setVenue] = useState<VenueSettings | null>(initialVenue);
   const [activeTab, setActiveTabState] = useState<TabKey>(() =>
     resolveInitialActiveTab(initialTab, initialVenue),
   );
+  const [floorPlanTab, setFloorPlanTabState] = useState<FloorPlanEditorTabKey>(() => {
+    const resolved =
+      initialFloorPlanTab && VALID_FLOOR_PLAN_TABS.includes(initialFloorPlanTab) ? initialFloorPlanTab : 'layout';
+    if (initialVenue && !initialVenue.table_management_enabled && resolved !== 'tables') {
+      return 'tables';
+    }
+    return resolved;
+  });
   const [services, setServices] = useState<Service[]>([]);
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState<string | null>(null);
+  // Incremented each time the floor plan editor successfully auto-saves positions.
+  // Passed to TableManagementSection so it can refresh the adjacency diagram and
+  // re-run the recalculate API automatically.
+  const [layoutSaveCount, setLayoutSaveCount] = useState(0);
+  const handleLayoutSaved = useCallback(() => setLayoutSaveCount((n) => n + 1), []);
 
   useEffect(() => {
     setVenue(initialVenue);
   }, [initialVenue]);
+
+  useEffect(() => {
+    if (initialFloorPlanTab && VALID_FLOOR_PLAN_TABS.includes(initialFloorPlanTab)) {
+      const next =
+        venue && !venue.table_management_enabled && initialFloorPlanTab !== 'tables'
+          ? 'tables'
+          : initialFloorPlanTab;
+      setFloorPlanTabState(next);
+    }
+  }, [initialFloorPlanTab, venue]);
 
   const showTableTab = Boolean(venue && isRestaurantTableProductTier(venue.pricing_tier));
 
@@ -87,7 +115,19 @@ export default function AvailabilitySettingsClient({
   const setActiveTab = useCallback(
     (key: TabKey) => {
       setActiveTabState(key);
-      router.replace(`/dashboard/availability?tab=${key}`, { scroll: false });
+      if (key === 'table') {
+        router.replace(`/dashboard/availability?tab=table&fp=${floorPlanTab}`, { scroll: false });
+      } else {
+        router.replace(`/dashboard/availability?tab=${key}`, { scroll: false });
+      }
+    },
+    [router, floorPlanTab],
+  );
+
+  const setFloorPlanTab = useCallback(
+    (key: FloorPlanEditorTabKey) => {
+      setFloorPlanTabState(key);
+      router.replace(`/dashboard/availability?tab=table&fp=${key}`, { scroll: false });
     },
     [router],
   );
@@ -100,6 +140,13 @@ export default function AvailabilitySettingsClient({
     setToast(message);
     setTimeout(() => setToast(null), 3000);
   }, []);
+
+  useEffect(() => {
+    if (venue && !venue.table_management_enabled && floorPlanTab !== 'tables') {
+      setFloorPlanTabState('tables');
+      router.replace('/dashboard/availability?tab=table&fp=tables', { scroll: false });
+    }
+  }, [venue, floorPlanTab, router]);
 
   useEffect(() => {
     async function load() {
@@ -180,7 +227,15 @@ export default function AvailabilitySettingsClient({
       {activeTab === 'rules' && <BookingRulesTab services={services} showToast={showToast} />}
       {activeTab === 'table' && showTableTab && (
         <div className="space-y-6">
-          <TableManagementSection venue={venue} onUpdate={onUpdate} isAdmin />
+          <TableManagementSection venue={venue} onUpdate={onUpdate} isAdmin layoutSaveCount={layoutSaveCount} />
+          <FloorPlanEditorTabs
+            isAdmin
+            activeTab={floorPlanTab}
+            onTabChange={setFloorPlanTab}
+            advancedTableManagement={Boolean(venue.table_management_enabled)}
+            onLayoutSaved={handleLayoutSaved}
+            combinationThreshold={venue.combination_threshold ?? 80}
+          />
           {!hasServiceConfig && (
             <AvailabilityConfigSection venue={venue} onUpdate={onUpdate} isAdmin />
           )}

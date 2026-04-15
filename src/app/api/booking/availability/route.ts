@@ -8,6 +8,7 @@ import { BOOKING_ACTIVE_STATUSES } from '@/lib/table-management/constants';
 import {
   detectAdjacentTables,
   findValidCombinations,
+  type AutoCombinationOverrideInput,
   type CombinationBooking,
   type CombinationBlock,
   type CombinationTable,
@@ -55,6 +56,7 @@ async function buildTableFilterByTime(
   date: string,
   slots: Array<{ start_time?: string; key?: string; end_time?: string }>,
   partySize: number,
+  bookingModel: BookingModel = 'table_reservation',
 ): Promise<Set<string>> {
   const uniqueTimes = new Map<string, number>();
   for (const slot of slots) {
@@ -65,7 +67,7 @@ async function buildTableFilterByTime(
   }
   if (uniqueTimes.size === 0) return new Set();
 
-  const [venueRes, tablesRes, blocksRes, assignmentsRes, combinationsRes] = await Promise.all([
+  const [venueRes, tablesRes, blocksRes, assignmentsRes, combinationsRes, overridesRes] = await Promise.all([
     supabase.from('venues').select('combination_threshold').eq('id', venueId).single(),
     supabase.from('venue_tables').select('*').eq('venue_id', venueId).eq('is_active', true).order('sort_order'),
     supabase.from('table_blocks').select('id, table_id, start_at, end_at, reason')
@@ -80,6 +82,7 @@ async function buildTableFilterByTime(
       .select('*, members:table_combination_members(id, table_id)')
       .eq('venue_id', venueId)
       .eq('is_active', true),
+    supabase.from('combination_auto_overrides').select('*').eq('venue_id', venueId),
   ]);
 
   const tables = (tablesRes.data ?? []) as VenueTable[];
@@ -110,12 +113,41 @@ async function buildTableFilterByTime(
     table_id: b.table_id, start_at: b.start_at, end_at: b.end_at,
   }));
   const manualCombinations: ManualCombination[] = (combinationsRes.data ?? []).map((c: Record<string, unknown>) => ({
-    id: c.id as string, name: c.name as string,
+    id: c.id as string,
+    name: c.name as string,
     combined_min_covers: c.combined_min_covers as number,
     combined_max_covers: c.combined_max_covers as number,
     is_active: c.is_active as boolean,
     table_ids: ((c.members ?? []) as Array<{ table_id: string }>).map((m) => m.table_id),
+    days_of_week: (c.days_of_week as number[] | undefined) ?? undefined,
+    time_start: (c.time_start as string | null | undefined) ?? null,
+    time_end: (c.time_end as string | null | undefined) ?? null,
+    booking_type_filters: (c.booking_type_filters as string[] | null | undefined) ?? null,
+    requires_manager_approval: (c.requires_manager_approval as boolean | undefined) ?? false,
+    internal_notes: (c.internal_notes as string | null | undefined) ?? null,
   }));
+
+  const autoOverrides = new Map<string, AutoCombinationOverrideInput>();
+  if (!overridesRes.error && overridesRes.data) {
+    for (const row of overridesRes.data as Record<string, unknown>[]) {
+      autoOverrides.set(row.table_group_key as string, {
+        id: row.id as string,
+        table_group_key: row.table_group_key as string,
+        disabled: row.disabled as boolean,
+        display_name: (row.display_name as string | null) ?? null,
+        combined_min_covers: (row.combined_min_covers as number | null) ?? null,
+        combined_max_covers: (row.combined_max_covers as number | null) ?? null,
+        days_of_week: (row.days_of_week as number[]) ?? [1, 2, 3, 4, 5, 6, 7],
+        time_start: (row.time_start as string | null) ?? null,
+        time_end: (row.time_end as string | null) ?? null,
+        booking_type_filters: (row.booking_type_filters as string[] | null) ?? null,
+        requires_manager_approval: (row.requires_manager_approval as boolean) ?? false,
+        internal_notes: (row.internal_notes as string | null) ?? null,
+      });
+    }
+  } else if (overridesRes.error) {
+    console.error('buildTableFilterByTime combination_auto_overrides:', overridesRes.error.message);
+  }
 
   const threshold = venueRes.data?.combination_threshold ?? 80;
   const adjacencyMap = detectAdjacentTables(algorithmTables, threshold);
@@ -124,17 +156,25 @@ async function buildTableFilterByTime(
 
   const timesWithTable = new Set<string>();
   for (const [time, duration] of uniqueTimes.entries()) {
+    const timePart = time.length >= 5 ? time.slice(0, 5) : time;
     const results = findValidCombinations({
       partySize,
-      datetime: `${date}T${time}:00.000Z`,
+      datetime: `${date}T${timePart}:00.000Z`,
       durationMinutes: duration + bufferMinutes,
       tables: algorithmTables,
       bookings: allBookings,
       blocks: algorithmBlocks,
       adjacencyMap,
       manualCombinations,
+      autoOverrides,
+      bookingContext: {
+        bookingDate: date,
+        bookingTime: timePart,
+        bookingModel,
+      },
     });
-    if (results.length > 0) {
+    const usable = results.filter((s) => s.source === 'single' || !s.requires_manager_approval);
+    if (usable.length > 0) {
       timesWithTable.add(time);
     }
   }

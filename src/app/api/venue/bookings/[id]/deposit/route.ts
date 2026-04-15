@@ -5,6 +5,7 @@ import { getVenueStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { stripe } from '@/lib/stripe';
 import { sendDepositRequestNotifications } from '@/lib/communications/send-templated';
+import { venueRowToEmailData } from '@/lib/emails/venue-email-data';
 import { createPaymentPageUrl } from '@/lib/payment-token';
 
 const schema = z.object({
@@ -70,7 +71,11 @@ export async function POST(
   }
 
   const { data: guest } = await admin.from('guests').select('name, email, phone').eq('id', booking.guest_id).single();
-  const { data: venue } = await admin.from('venues').select('name, address').eq('id', staff.venue_id).single();
+  const { data: venue } = await admin
+    .from('venues')
+    .select('name, address, email, reply_to_email')
+    .eq('id', staff.venue_id)
+    .single();
   if (!venue?.name) return NextResponse.json({ error: 'Venue not found' }, { status: 400 });
   if (!guest?.email && !guest?.phone) {
     return NextResponse.json(
@@ -96,7 +101,12 @@ export async function POST(
       party_size: booking.party_size as number,
       deposit_amount_pence: booking.deposit_amount_pence ?? null,
     },
-    { name: venue.name, address: venue.address ?? undefined },
+    venueRowToEmailData({
+      name: venue.name,
+      address: venue.address ?? null,
+      email: venue.email ?? null,
+      reply_to_email: venue.reply_to_email ?? null,
+    }),
     staff.venue_id,
     paymentLink,
   );

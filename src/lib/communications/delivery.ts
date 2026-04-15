@@ -12,6 +12,10 @@ export interface CommunicationDeliveryContext {
   lane: CommunicationLane;
   messageType: CommunicationLogMessageType;
   recipient: string;
+  /** From display name (business name); envelope address is platform SendGrid identity. */
+  emailFromDisplayName?: string;
+  /** Guest replies route here when set (business inbox from venue profile). */
+  emailReplyTo?: string | null;
 }
 
 export interface CommunicationSendResult {
@@ -101,6 +105,8 @@ export async function deliverEmailMessage(
       subject: rendered.subject,
       html: rendered.html,
       text: rendered.text,
+      fromDisplayName: ctx.emailFromDisplayName,
+      replyTo: ctx.emailReplyTo ?? null,
     });
     await updateStatus(ctx, 'sent', externalId);
     return { sent: true };

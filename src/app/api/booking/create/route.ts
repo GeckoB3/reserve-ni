@@ -42,6 +42,7 @@ import {
 import type { BookingModel, ClassPaymentRequirement } from '@/types/booking-models';
 import { createShortManageLink } from '@/lib/short-manage-link';
 import type { BookingEmailData } from '@/lib/emails/types';
+import { venueRowToEmailData } from '@/lib/emails/venue-email-data';
 import { logBookingOp } from '@/lib/observability/booking-ops-log';
 import { timeToMinutes } from '@/lib/availability';
 import { venueWideBlocksRejectBookingWindow } from '@/lib/availability/venue-wide-business-hours';
@@ -140,7 +141,7 @@ export async function POST(request: NextRequest) {
 
     const { data: venue, error: venueErr } = await supabase
       .from('venues')
-      .select('id, name, stripe_connected_account_id, booking_rules, deposit_config, timezone, table_management_enabled, show_table_in_confirmation, address, opening_hours, venue_opening_exceptions')
+      .select('id, name, stripe_connected_account_id, booking_rules, deposit_config, timezone, table_management_enabled, show_table_in_confirmation, address, opening_hours, venue_opening_exceptions, email, reply_to_email')
       .eq('id', venue_id)
       .single();
 
@@ -381,7 +382,12 @@ export async function POST(request: NextRequest) {
                 deposit_status: requiresDeposit ? 'Pending' : 'Not Required',
                 manage_booking_link: manageBookingLink,
               },
-              { name: venue.name, address: venue.address ?? undefined },
+              venueRowToEmailData({
+                name: venue.name as string,
+                address: (venue.address as string | null) ?? null,
+                email: (venue as { email?: string | null }).email ?? null,
+                reply_to_email: (venue as { reply_to_email?: string | null }).reply_to_email ?? null,
+              }),
               venue.id,
             );
             if (!email.sent) console.warn('[after] confirmation email not sent:', email.reason);
@@ -962,7 +968,12 @@ async function handleNonTableBooking(
               manage_booking_link: manageBookingLink,
               ...appointmentEmailExtras,
             },
-            { name: venue.name as string, address: (venue.address as string) ?? undefined },
+            venueRowToEmailData({
+              name: venue.name as string,
+              address: (venue.address as string | null) ?? null,
+              email: (venue as { email?: string | null }).email ?? null,
+              reply_to_email: (venue as { reply_to_email?: string | null }).reply_to_email ?? null,
+            }),
             venue_id,
           );
           if (!email.sent) console.warn('[after] confirmation email not sent:', email.reason);

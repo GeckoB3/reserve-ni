@@ -7,6 +7,8 @@ export interface VenueEmailData {
   logo_url?: string | null;
   booking_page_url?: string;
   timezone?: string;
+  /** Business inbox for Reply-To on guest emails; from Profile / venues.reply_to_email. */
+  reply_to_email?: string | null;
 }
 
 /** One line in a group appointment booking (shared guest, multiple treatments). */

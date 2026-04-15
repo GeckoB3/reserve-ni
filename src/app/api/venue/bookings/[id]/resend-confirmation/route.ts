@@ -6,6 +6,7 @@ import { generateConfirmToken, hashConfirmToken } from '@/lib/confirm-token';
 import { sendBookingConfirmationNotifications } from '@/lib/communications/send-templated';
 import { enrichBookingEmailForComms } from '@/lib/emails/booking-email-enrichment';
 import { createShortManageLink } from '@/lib/short-manage-link';
+import { venueRowToEmailData } from '@/lib/emails/venue-email-data';
 
 export async function POST(
   request: NextRequest,
@@ -28,7 +29,7 @@ export async function POST(
 
   const [{ data: guest }, { data: venue }] = await Promise.all([
     admin.from('guests').select('name, email, phone').eq('id', booking.guest_id).maybeSingle(),
-    admin.from('venues').select('name, address').eq('id', booking.venue_id).maybeSingle(),
+    admin.from('venues').select('name, address, email, reply_to_email').eq('id', booking.venue_id).maybeSingle(),
   ]);
   if (!venue?.name || !guest?.email) {
     return NextResponse.json({ error: 'Guest email not available' }, { status: 400 });
@@ -70,7 +71,12 @@ export async function POST(
   const enriched = await enrichBookingEmailForComms(admin, booking.id, basePayload);
   await sendBookingConfirmationNotifications(
     enriched,
-    { name: venue.name, address: venue.address ?? undefined },
+    venueRowToEmailData({
+      name: venue.name,
+      address: venue.address ?? null,
+      email: venue.email ?? null,
+      reply_to_email: venue.reply_to_email ?? null,
+    }),
     staff.venue_id,
   );
 

@@ -5,11 +5,16 @@ import { BOOKING_ACTIVE_STATUSES } from '@/lib/table-management/constants';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 
+const TABLE_TYPE_VALUES = ['Regular', 'High-Top', 'Counter', 'Bar', 'Outdoor'] as const;
+
+const TABLE_SHAPES = ['rectangle', 'circle', 'square', 'oval', 'l-shape', 'polygon'] as const;
+
 const tableSchema = z.object({
   name: z.string().min(1).max(50),
   min_covers: z.number().int().min(1).max(50).default(1),
   max_covers: z.number().int().min(1).max(50).default(2),
-  shape: z.enum(['rectangle', 'circle', 'square', 'oval', 'l-shape']).default('rectangle'),
+  shape: z.enum(TABLE_SHAPES).default('rectangle'),
+  table_type: z.enum(TABLE_TYPE_VALUES).default('Regular'),
   zone: z.string().max(100).nullable().optional(),
   position_x: z.number().nullable().optional(),
   position_y: z.number().nullable().optional(),
@@ -19,6 +24,7 @@ const tableSchema = z.object({
   sort_order: z.number().int().default(0),
   server_section: z.string().max(100).nullable().optional(),
   is_active: z.boolean().default(true),
+  polygon_points: z.array(z.object({ x: z.number(), y: z.number() })).nullable().optional(),
 });
 
 const batchSchema = z.object({
@@ -30,7 +36,8 @@ const updateSchema = z.object({
   name: z.string().min(1).max(50).optional(),
   min_covers: z.number().int().min(1).max(50).optional(),
   max_covers: z.number().int().min(1).max(50).optional(),
-  shape: z.enum(['rectangle', 'circle', 'square', 'oval', 'l-shape']).optional(),
+  shape: z.enum(TABLE_SHAPES).optional(),
+  table_type: z.enum(TABLE_TYPE_VALUES).optional(),
   zone: z.string().max(100).nullable().optional(),
   position_x: z.number().nullable().optional(),
   position_y: z.number().nullable().optional(),
@@ -40,8 +47,8 @@ const updateSchema = z.object({
   sort_order: z.number().int().optional(),
   server_section: z.string().max(100).nullable().optional(),
   is_active: z.boolean().optional(),
-  snap_group_id: z.string().uuid().nullable().optional(),
-  snap_sides: z.array(z.string()).nullable().optional(),
+  seat_angles: z.array(z.number().nullable()).nullable().optional(),
+  polygon_points: z.array(z.object({ x: z.number(), y: z.number() })).nullable().optional(),
 });
 
 async function hasFutureAssignedBookings(

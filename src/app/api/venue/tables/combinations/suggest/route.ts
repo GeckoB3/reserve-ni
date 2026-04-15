@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff } from '@/lib/venue-auth';
+import { inferBookingRowModel } from '@/lib/booking/infer-booking-row-model';
 import {
   detectAdjacentTables,
   findValidCombinations,
   getOccupiedTableIdsForWindow,
   getRequestWindowMinutes,
+  type AutoCombinationOverrideInput,
   type CombinationBooking,
   type CombinationBlock,
   type CombinationTable,
@@ -34,7 +36,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'date, time and party_size are required' }, { status: 400 });
   }
 
-  const [venueRes, tablesRes, combosRes, bookingsRes, blocksRes] = await Promise.all([
+  const [venueRes, tablesRes, combosRes, bookingsRes, blocksRes, overridesRes] = await Promise.all([
     staff.db
       .from('venues')
       .select('combination_threshold')
@@ -47,7 +49,9 @@ export async function GET(request: NextRequest) {
       .eq('is_active', true),
     staff.db
       .from('table_combinations')
-      .select('id, name, combined_min_covers, combined_max_covers, is_active, members:table_combination_members(table_id)')
+      .select(
+        'id, name, combined_min_covers, combined_max_covers, is_active, days_of_week, time_start, time_end, booking_type_filters, requires_manager_approval, internal_notes, members:table_combination_members(table_id)',
+      )
       .eq('venue_id', staff.venue_id)
       .eq('is_active', true),
     staff.db
@@ -62,6 +66,7 @@ export async function GET(request: NextRequest) {
       .eq('venue_id', staff.venue_id)
       .lt('start_at', `${date}T23:59:59.999Z`)
       .gt('end_at', `${date}T00:00:00.000Z`),
+    staff.db.from('combination_auto_overrides').select('*').eq('venue_id', staff.venue_id),
   ]);
 
   if (tablesRes.error || combosRes.error || bookingsRes.error || blocksRes.error) {
@@ -119,14 +124,61 @@ export async function GET(request: NextRequest) {
     end_at: block.end_at,
   }));
 
-  const manualCombinations: ManualCombination[] = (combosRes.data ?? []).map((combo) => ({
-    id: combo.id,
-    name: combo.name,
-    combined_min_covers: combo.combined_min_covers,
-    combined_max_covers: combo.combined_max_covers,
-    is_active: combo.is_active,
-    table_ids: (combo.members ?? []).map((member: { table_id: string }) => member.table_id),
+  const manualCombinations: ManualCombination[] = (combosRes.data ?? []).map((combo: Record<string, unknown>) => ({
+    id: combo.id as string,
+    name: combo.name as string,
+    combined_min_covers: combo.combined_min_covers as number,
+    combined_max_covers: combo.combined_max_covers as number,
+    is_active: combo.is_active as boolean,
+    table_ids: ((combo.members ?? []) as { table_id: string }[]).map((m) => m.table_id),
+    days_of_week: combo.days_of_week as number[] | undefined,
+    time_start: (combo.time_start as string | null | undefined) ?? null,
+    time_end: (combo.time_end as string | null | undefined) ?? null,
+    booking_type_filters: (combo.booking_type_filters as string[] | null | undefined) ?? null,
+    requires_manager_approval: (combo.requires_manager_approval as boolean | undefined) ?? false,
+    internal_notes: (combo.internal_notes as string | null | undefined) ?? null,
   }));
+
+  const autoOverrides = new Map<string, AutoCombinationOverrideInput>();
+  if (!overridesRes.error && overridesRes.data) {
+    for (const row of overridesRes.data as Record<string, unknown>[]) {
+      autoOverrides.set(row.table_group_key as string, {
+        id: row.id as string,
+        table_group_key: row.table_group_key as string,
+        disabled: row.disabled as boolean,
+        display_name: (row.display_name as string | null) ?? null,
+        combined_min_covers: (row.combined_min_covers as number | null) ?? null,
+        combined_max_covers: (row.combined_max_covers as number | null) ?? null,
+        days_of_week: (row.days_of_week as number[]) ?? [1, 2, 3, 4, 5, 6, 7],
+        time_start: (row.time_start as string | null) ?? null,
+        time_end: (row.time_end as string | null) ?? null,
+        booking_type_filters: (row.booking_type_filters as string[] | null) ?? null,
+        requires_manager_approval: (row.requires_manager_approval as boolean) ?? false,
+        internal_notes: (row.internal_notes as string | null) ?? null,
+      });
+    }
+  } else if (overridesRes.error) {
+    console.error('suggest combination_auto_overrides:', overridesRes.error.message);
+  }
+
+  let bookingContext:
+    | { bookingDate: string; bookingTime: string; bookingModel: ReturnType<typeof inferBookingRowModel> }
+    | undefined;
+  if (excludeBookingId) {
+    const { data: bRow } = await staff.db
+      .from('bookings')
+      .select(
+        'experience_event_id, class_instance_id, resource_id, event_session_id, calendar_id, service_item_id, practitioner_id, appointment_service_id',
+      )
+      .eq('id', excludeBookingId)
+      .single();
+    const timePart = time.length >= 5 ? time.slice(0, 5) : time;
+    bookingContext = {
+      bookingDate: date,
+      bookingTime: timePart,
+      bookingModel: inferBookingRowModel(bRow ?? {}),
+    };
+  }
 
   const threshold = venueRes.data?.combination_threshold ?? 80;
   const adjacency = detectAdjacentTables(tables, threshold);
@@ -141,6 +193,8 @@ export async function GET(request: NextRequest) {
     blocks,
     adjacencyMap: adjacency,
     manualCombinations,
+    autoOverrides,
+    bookingContext,
     excludeBookingId,
   });
 

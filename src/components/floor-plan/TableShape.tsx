@@ -1,13 +1,18 @@
 'use client';
 
 import React, { useMemo } from 'react';
-import { Group, Rect, Circle, Ellipse, Text } from 'react-konva';
+import { Group, Rect, Circle, Ellipse, Text, Line } from 'react-konva';
 import type { KonvaEventObject } from 'konva/lib/Node';
 import { getTableDimensions } from '@/types/table-management';
 import { calculateSeatPositions } from '@/lib/floor-plan/seat-positions';
+import {
+  computeInnerLabelWidthRounded,
+  computeFittedTableLabelFonts,
+  type TableLabelFitResult,
+} from '@/lib/floor-plan/table-label-fonts';
 
-const SEAT_DOT_RADIUS = 6;
-const SEAT_DOT_OFFSET = 12;
+const SEAT_DOT_RADIUS = 9;
+const SEAT_DOT_OFFSET = 14;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -24,6 +29,7 @@ export interface TableRenderData {
   width: number | null;
   height: number | null;
   rotation: number | null;
+  polygon_points?: { x: number; y: number }[] | null;
 }
 
 export interface BookingInfo {
@@ -48,6 +54,12 @@ export interface TableShapeProps {
   compactLabels?: boolean;
   /** Whole-table opacity (e.g. drag ghost on live floor). */
   groupOpacity?: number;
+  /**
+   * Parent canvas zoom (0–1 = layout zoomed out). Used to scale up labels/seats
+   * on screen when the layout is zoomed out so text stays readable, while the
+   * shrink loop and clip keep content inside each table.
+   */
+  layoutScale?: number;
   /** Override the computed pixel position during drag. */
   overrideX?: number;
   overrideY?: number;
@@ -55,6 +67,27 @@ export interface TableShapeProps {
   onDragMove?: (e: KonvaEventObject<DragEvent>) => void;
   onClick?: (e: KonvaEventObject<MouseEvent>) => void;
   onTap?: () => void;
+  /**
+   * Called while dragging a resize handle on oval/circle/rectangle tables.
+   * axis: 'x' for horizontal (width), 'y' for vertical (height).
+   * halfPixels: distance from table centre to handle in pixels.
+   */
+  onResizeHandleDrag?: (axis: 'x' | 'y', halfPixels: number) => void;
+  /** Called when a resize handle drag ends (for final save). */
+  onResizeHandleEnd?: () => void;
+  /**
+   * Custom seat angle overrides per seat index (radians). null = use computed.
+   */
+  seatAngles?: (number | null)[] | null;
+  /** Called when a seat dot is dragged to a new position in editor mode. */
+  onSeatDrag?: (seatIndex: number, newAngle: number) => void;
+  /** Called when seat drag ends (for save). */
+  onSeatDragEnd?: (seatIndex: number, newAngle: number) => void;
+  /**
+   * When set (e.g. floor-wide minimum from the parent canvas), all tables use these
+   * font sizes so labels match the tightest table on the plan.
+   */
+  unifiedLabelFonts?: TableLabelFitResult | null;
   children?: React.ReactNode;
 }
 
@@ -88,6 +121,77 @@ function darkenHex(hex: string, amount = 0.15): string {
   return `rgb(${Math.round(r * (1 - amount))},${Math.round(g * (1 - amount))},${Math.round(b * (1 - amount))})`;
 }
 
+function rectangleBoundaryPoint(angle: number, halfW: number, halfH: number): { x: number; y: number } {
+  const cosA = Math.cos(angle);
+  const sinA = Math.sin(angle);
+  const tx = Math.abs(cosA) > 1e-6 ? halfW / Math.abs(cosA) : Number.POSITIVE_INFINITY;
+  const ty = Math.abs(sinA) > 1e-6 ? halfH / Math.abs(sinA) : Number.POSITIVE_INFINITY;
+  const t = Math.min(tx, ty);
+  return { x: cosA * t, y: sinA * t };
+}
+
+function rayPolygonIntersection(
+  angle: number,
+  points: { x: number; y: number }[],
+): { x: number; y: number; edgeTangentRad: number } | null {
+  const dx = Math.cos(angle);
+  const dy = Math.sin(angle);
+  let bestT = Number.POSITIVE_INFINITY;
+  let hit: { x: number; y: number; edgeTangentRad: number } | null = null;
+
+  for (let i = 0; i < points.length; i++) {
+    const a = points[i]!;
+    const b = points[(i + 1) % points.length]!;
+    const ex = b.x - a.x;
+    const ey = b.y - a.y;
+    const det = dx * ey - dy * ex;
+    if (Math.abs(det) < 1e-8) continue;
+
+    const ax = a.x;
+    const ay = a.y;
+    const t = (ax * ey - ay * ex) / det;
+    const u = (ax * dy - ay * dx) / det;
+    if (t > 0 && u >= 0 && u <= 1 && t < bestT) {
+      bestT = t;
+      const edgeTangentRad = Math.atan2(ey, ex);
+      hit = { x: dx * t, y: dy * t, edgeTangentRad };
+    }
+  }
+
+  return hit;
+}
+
+/** Ellipse (rx, ry) parametric tangent at angle t — parallel to the local table edge. */
+function ellipseParametricTangentRad(t: number, rx: number, ry: number): number {
+  return Math.atan2(ry * Math.cos(t), -rx * Math.sin(t));
+}
+
+/** Which rectangle edge a boundary point lies on → tangent along that edge. */
+function rectangleEdgeTangentAtBoundaryPoint(
+  bx: number,
+  by: number,
+  halfW: number,
+  halfH: number,
+): number {
+  const distTop = Math.abs(by + halfH);
+  const distBottom = Math.abs(by - halfH);
+  const distLeft = Math.abs(bx + halfW);
+  const distRight = Math.abs(bx - halfW);
+  const m = Math.min(distTop, distBottom, distLeft, distRight);
+  if (m === distTop) return 0;
+  if (m === distBottom) return Math.PI;
+  if (m === distRight) return Math.PI / 2;
+  return -Math.PI / 2;
+}
+
+/**
+ * Konva Rect uses height as the long axis along local +Y; rotate so that axis
+ * aligns with edgeTangentRad (parallel to the table side).
+ */
+function konvaSeatBackRotationDeg(edgeTangentRad: number): number {
+  return ((edgeTangentRad - Math.PI / 2) * 180) / Math.PI;
+}
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -103,12 +207,19 @@ export default function TableShape({
   canvasHeight,
   compactLabels = false,
   groupOpacity = 1,
+  layoutScale,
   overrideX,
   overrideY,
   onDragEnd,
   onDragMove,
   onClick,
   onTap,
+  onResizeHandleDrag,
+  onResizeHandleEnd,
+  seatAngles,
+  onSeatDrag,
+  onSeatDragEnd,
+  unifiedLabelFonts,
   children,
 }: TableShapeProps) {
   // --- Geometry ---
@@ -128,10 +239,29 @@ export default function TableShape({
 
   const isOccupied = !isEditorMode && booking != null;
 
+  const isCircular = table.shape === 'circle';
+  const isOval = table.shape === 'oval';
+  const isPolygon = table.shape === 'polygon';
+
+  // Normalised polygon points → pixel coords relative to table centre (must come before useMemo)
+  const polygonPixelPts = isPolygon && table.polygon_points
+    ? table.polygon_points.map((pt) => ({
+        x: (pt.x / 100 - 0.5) * w,
+        y: (pt.y / 100 - 0.5) * h,
+      }))
+    : null;
+  const polygonFlatPts = polygonPixelPts ? polygonPixelPts.flatMap((p) => [p.x, p.y]) : null;
+
   // Stabilise the Set dependency for useMemo
   const hiddenKey = useMemo(
     () => Array.from(hiddenSides).sort().join(','),
     [hiddenSides],
+  );
+
+  // Stable polygon key for useMemo dependency
+  const polygonKey = useMemo(
+    () => (table.polygon_points ? JSON.stringify(table.polygon_points) : ''),
+    [table.polygon_points],
   );
 
   const seats = useMemo(
@@ -142,9 +272,10 @@ export default function TableShape({
         h,
         table.max_covers,
         hiddenSides.size > 0 ? hiddenSides : undefined,
+        polygonPixelPts ?? undefined,
       ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [table.shape, w, h, table.max_covers, hiddenKey],
+    [table.shape, w, h, table.max_covers, hiddenKey, polygonKey],
   );
 
   // --- Appearance ---
@@ -163,9 +294,6 @@ export default function TableShape({
     ? `${booking!.party_size} pax`
     : capacityText;
 
-  const isCircular = table.shape === 'circle';
-  const isOval = table.shape === 'oval';
-
   const HANDLE = 6;
 
   const minDim = Math.min(w, h);
@@ -175,7 +303,6 @@ export default function TableShape({
   /** Single-line box height for Konva Text (bold needs extra headroom vs raw fontSize). */
   const compactLineBox = (fs: number, bold: boolean) =>
     Math.ceil(fs * (bold ? 1.32 : 1.24)) + 2;
-  const charW = (fs: number) => fs * 0.5;
 
   let fontName: number;
   let fontCap: number;
@@ -194,36 +321,21 @@ export default function TableShape({
   let capLineH = 0;
 
   if (compactLabels) {
-    const insetY = clamp(minDim * 0.1, 4, 11);
-    const insetXLocal = clamp(w * 0.04, 1, 8);
-    const innerTop = topEdge + insetY;
-    const innerBottom = bottomEdge - insetY;
-    const innerBandH = Math.max(0, innerBottom - innerTop);
-    /* Full table height for font shrink loop; padded band only for chord width on curves. */
-    const innerH = Math.max(0, bottomEdge - topEdge);
-
-    let iw = Math.max(14, w - insetXLocal * 2);
-    /* Keep labels inside curved edges: limit width to horizontal chord at the
-       vertical extremes of the centred label block (≈ ±innerBandH/2 from centre). */
-    const ySpan = Math.min(innerBandH / 2, minDim * 0.42);
-    if (isCircular) {
-      const r = Math.min(w, h) / 2;
-      const halfW = Math.sqrt(Math.max(0, r * r - ySpan * ySpan));
-      iw = Math.min(iw, 2 * halfW * 0.88);
-    } else if (isOval) {
-      const rX = w / 2;
-      const rY = h / 2;
-      const yClamped = Math.min(ySpan, rY * 0.98);
-      const halfW = rX * Math.sqrt(Math.max(0, 1 - (yClamped / rY) ** 2));
-      iw = Math.min(iw, 2 * halfW * 0.88);
-    }
-
-    innerW = iw;
-    textX = -innerW / 2;
-
-    let fn = Math.round(clamp(minDim * 0.34, 10, 16));
-    let fc = Math.round(clamp(minDim * 0.3, 9, 15));
-    let gap = 2;
+    const insetXLocal = clamp(w * 0.03, 1, 6);
+    const fit =
+      unifiedLabelFonts ??
+      computeFittedTableLabelFonts({
+        w,
+        h,
+        shape: table.shape,
+        topLabel,
+        bottomLabel,
+        compactLabels: true,
+        layoutScale,
+      });
+    const fn = fit.fontName;
+    const fc = fit.fontCap;
+    const gap = fit.gap;
 
     const measureBlock = (nameFs: number, capFs: number, g: number) => {
       const nh = nameFs + 1;
@@ -231,26 +343,27 @@ export default function TableShape({
       return { blockH: nh + g + ch, nameBox: nh, capBox: ch };
     };
 
-    let { blockH, nameBox, capBox } = measureBlock(fn, fc, gap);
-    while (blockH > innerH && (fn > 4 || fc > 4 || gap > 0)) {
-      if (gap > 0) {
-        gap -= 1;
-        ({ blockH, nameBox, capBox } = measureBlock(fn, fc, gap));
-        continue;
-      }
-      if (fn >= fc && fn > 4) fn -= 1;
-      else if (fc > 4) fc -= 1;
-      else break;
-      ({ blockH, nameBox, capBox } = measureBlock(fn, fc, gap));
-    }
+    const { blockH, nameBox, capBox } = measureBlock(fn, fc, gap);
+    const computedInnerW = computeInnerLabelWidthRounded({
+      w,
+      h,
+      insetXLocal,
+      isCircular,
+      isOval,
+      labelHalfHeight: blockH / 2,
+      curveInsetFactor: 0.97,
+    });
 
     fontName = fn;
     fontCap = fc;
     nameLineH = nameBox;
     capLineH = capBox;
 
-    const nm = Math.max(3, Math.floor(innerW / (fontName * 0.38)));
-    const cm = Math.max(2, Math.floor(innerW / (fontCap * 0.38)));
+    innerW = computedInnerW;
+    textX = -innerW / 2;
+
+    const nm = Math.max(3, Math.floor(innerW / (fontName * 0.5)));
+    const cm = Math.max(2, Math.floor(innerW / (fontCap * 0.5)));
     displayName = truncateForWidth(topLabel, nm);
     displayCap = truncateForWidth(bottomLabel, cm);
 
@@ -264,32 +377,26 @@ export default function TableShape({
     compactTextStrokeW = 0;
   } else {
     /* Edit + live floor: same centred block as compact picker, larger type & tighter leading. */
-    const insetY = clamp(minDim * 0.05, 3, 8);
-    const insetXLocal = clamp(w * 0.05, 3, 10);
+    const insetY = clamp(minDim * 0.032, 2, 6);
+    const insetXLocal = clamp(w * 0.032, 2, 7);
     const innerTop = topEdge + insetY;
     const innerBottom = bottomEdge - insetY;
     const innerH = Math.max(0, innerBottom - innerTop);
 
-    let iw = Math.max(14, w - insetXLocal * 2);
-    const ySpan = Math.min(innerH / 2, minDim * 0.42);
-    if (isCircular) {
-      const r = Math.min(w, h) / 2;
-      const halfW = Math.sqrt(Math.max(0, r * r - ySpan * ySpan));
-      iw = Math.min(iw, 2 * halfW * 0.9);
-    } else if (isOval) {
-      const rX = w / 2;
-      const rY = h / 2;
-      const yClamped = Math.min(ySpan, rY * 0.98);
-      const halfW = rX * Math.sqrt(Math.max(0, 1 - (yClamped / rY) ** 2));
-      iw = Math.min(iw, 2 * halfW * 0.9);
-    }
-
-    innerW = iw;
-    textX = -innerW / 2;
-
-    let fn = Math.round(clamp(minDim * 0.32, 12, 20));
-    let fc = Math.round(clamp(minDim * 0.26, 10, 17));
-    let gap = 1;
+    const fit =
+      unifiedLabelFonts ??
+      computeFittedTableLabelFonts({
+        w,
+        h,
+        shape: table.shape,
+        topLabel,
+        bottomLabel,
+        compactLabels: false,
+        layoutScale,
+      });
+    const fn = fit.fontName;
+    const fc = fit.fontCap;
+    const gap = fit.gap;
 
     const measureBlock = (nameFs: number, capFs: number, g: number) => {
       const nh = compactLineBox(nameFs, true);
@@ -297,26 +404,27 @@ export default function TableShape({
       return { blockH: nh + g + ch, nameBox: nh, capBox: ch };
     };
 
-    let { blockH, nameBox, capBox } = measureBlock(fn, fc, gap);
-    while (blockH > innerH && (fn > 8 || fc > 8 || gap > 0)) {
-      if (gap > 0) {
-        gap -= 1;
-        ({ blockH, nameBox, capBox } = measureBlock(fn, fc, gap));
-        continue;
-      }
-      if (fn >= fc && fn > 8) fn -= 1;
-      else if (fc > 8) fc -= 1;
-      else break;
-      ({ blockH, nameBox, capBox } = measureBlock(fn, fc, gap));
-    }
+    const { blockH, nameBox, capBox } = measureBlock(fn, fc, gap);
+    const computedInnerW = computeInnerLabelWidthRounded({
+      w,
+      h,
+      insetXLocal,
+      isCircular,
+      isOval,
+      labelHalfHeight: blockH / 2,
+      curveInsetFactor: 0.97,
+    });
 
     fontName = fn;
     fontCap = fc;
     nameLineH = nameBox;
     capLineH = capBox;
 
-    const nm = Math.max(3, Math.floor(innerW / charW(fontName)));
-    const cm = Math.max(2, Math.floor(innerW / charW(fontCap)));
+    innerW = computedInnerW;
+    textX = -innerW / 2;
+
+    const nm = Math.max(3, Math.floor(innerW / (fontName * 0.52)));
+    const cm = Math.max(2, Math.floor(innerW / (fontCap * 0.52)));
     displayName = truncateForWidth(topLabel, nm);
     displayCap = truncateForWidth(bottomLabel, cm);
 
@@ -367,6 +475,18 @@ export default function TableShape({
           shadowBlur={4}
           shadowOffsetY={1}
         />
+      ) : isPolygon && polygonFlatPts && polygonFlatPts.length >= 6 ? (
+        <Line
+          points={polygonFlatPts}
+          closed
+          fill={fill}
+          stroke={stroke}
+          strokeWidth={strokeWidth}
+          shadowColor="rgba(0,0,0,0.15)"
+          shadowBlur={4}
+          shadowOffsetY={1}
+          lineJoin="round"
+        />
       ) : (
         <Rect
           x={-w / 2}
@@ -386,33 +506,161 @@ export default function TableShape({
       {/* ---- Seat dots (subdued in compact picker so centred labels stay legible) ---- */}
       <Group opacity={compactLabels ? 0.35 : 1}>
         {seats.map((seat, i) => {
-          const dotX = seat.x + SEAT_DOT_OFFSET * Math.cos(seat.angle);
-          const dotY = seat.y + SEAT_DOT_OFFSET * Math.sin(seat.angle);
+          // Apply custom angle override if provided
+          const overrideAngle = seatAngles?.[i] ?? null;
+          const effectiveAngle = overrideAngle ?? seat.angle;
+
+          // For custom angles, project to the actual shape boundary then offset outward.
+          let dotX: number;
+          let dotY: number;
+          let edgeTangentRad: number;
+          if (overrideAngle != null) {
+            let edgeX: number;
+            let edgeY: number;
+
+            if (isCircular || isOval) {
+              const rX = isCircular ? Math.min(w, h) / 2 : w / 2;
+              const rY = isCircular ? Math.min(w, h) / 2 : h / 2;
+              edgeX = rX * Math.cos(overrideAngle);
+              edgeY = rY * Math.sin(overrideAngle);
+              edgeTangentRad = ellipseParametricTangentRad(overrideAngle, rX, rY);
+            } else if (isPolygon && polygonPixelPts && polygonPixelPts.length >= 3) {
+              const hit = rayPolygonIntersection(overrideAngle, polygonPixelPts);
+              if (hit) {
+                edgeX = hit.x;
+                edgeY = hit.y;
+                edgeTangentRad = hit.edgeTangentRad;
+              } else {
+                const fallback = rectangleBoundaryPoint(overrideAngle, w / 2, h / 2);
+                edgeX = fallback.x;
+                edgeY = fallback.y;
+                edgeTangentRad = rectangleEdgeTangentAtBoundaryPoint(
+                  fallback.x,
+                  fallback.y,
+                  w / 2,
+                  h / 2,
+                );
+              }
+            } else {
+              const edge = rectangleBoundaryPoint(overrideAngle, w / 2, h / 2);
+              edgeX = edge.x;
+              edgeY = edge.y;
+              edgeTangentRad = rectangleEdgeTangentAtBoundaryPoint(edge.x, edge.y, w / 2, h / 2);
+            }
+
+            dotX = edgeX + SEAT_DOT_OFFSET * Math.cos(overrideAngle);
+            dotY = edgeY + SEAT_DOT_OFFSET * Math.sin(overrideAngle);
+          } else {
+            dotX = seat.x + SEAT_DOT_OFFSET * Math.cos(effectiveAngle);
+            dotY = seat.y + SEAT_DOT_OFFSET * Math.sin(effectiveAngle);
+            edgeTangentRad = seat.edgeTangentRad;
+          }
+
           const isFilled = isOccupied && i < booking!.party_size;
+          const seatRadius = compactLabels
+            ? 4
+            : Math.min(
+                13,
+                (SEAT_DOT_RADIUS + 2) *
+                  (layoutScale != null && layoutScale > 0
+                    ? clamp(0.38 / layoutScale, 1, 1.8)
+                    : 1),
+              );
+
+          const canDragSeat = isEditorMode && !compactLabels && !!onSeatDrag;
+
+          // Chair-back proportions (width = short axis, length = along table edge).
+          const seatThickness = Math.max(4, seatRadius * 1.1); // ~2× prior width
+          const seatLength = Math.max(10, seatRadius * 4.1875); // ~1.25× prior length (3.35 × 1.25)
+          const seatRotation = konvaSeatBackRotationDeg(edgeTangentRad);
 
           return (
-            <Circle
+            <Rect
               key={`seat-${seat.edgeSide}-${i}`}
               x={dotX}
               y={dotY}
-              radius={compactLabels ? 4 : SEAT_DOT_RADIUS}
+              width={seatThickness}
+              height={seatLength}
+              offsetX={seatThickness / 2}
+              offsetY={seatLength / 2}
+              cornerRadius={Math.max(1, seatThickness * 0.45)}
+              rotation={seatRotation}
               fill={
                 isEditorMode
-                  ? '#D1D5DB'
+                  ? canDragSeat ? '#B0B8C5' : '#D1D5DB'
                   : isFilled
                     ? darkenHex(statusColour)
                     : '#D1D5DB'
               }
-              stroke={isFilled ? statusColour : '#9CA3AF'}
-              strokeWidth={1}
+              stroke={
+                canDragSeat
+                  ? '#6B7280'
+                  : isFilled ? statusColour : '#9CA3AF'
+              }
+              strokeWidth={canDragSeat ? 1.3 : 1}
+              draggable={canDragSeat}
+              onDragMove={canDragSeat ? (e) => {
+                e.cancelBubble = true;
+                const node = e.target;
+                const nx = node.x();
+                const ny = node.y();
+                const angle = Math.atan2(ny, nx);
+                onSeatDrag!(i, angle);
+                // Snap back to computed position — parent updates via state.
+                node.x(dotX);
+                node.y(dotY);
+              } : undefined}
+              onDragEnd={canDragSeat ? (e) => {
+                e.cancelBubble = true;
+                const node = e.target;
+                const nx = node.x();
+                const ny = node.y();
+                const angle = Math.atan2(ny, nx);
+                onSeatDragEnd?.(i, angle);
+                node.x(dotX);
+                node.y(dotY);
+              } : undefined}
+              style={canDragSeat ? ({ cursor: 'grab' } as React.CSSProperties) : undefined}
             />
           );
         })}
       </Group>
 
-      {/* ---- Labels (clipped to table bounds so font-metric overflow is invisible) ---- */}
+      {/* ---- Labels: shape-aware clip ---- */}
       <Group
-        clip={{ x: -w / 2, y: topEdge, width: w, height: bottomEdge - topEdge }}
+        {...(isCircular || isOval
+          ? {
+              clipFunc: (ctx) => {
+                const g = ctx as unknown as CanvasRenderingContext2D;
+                g.beginPath();
+                if (isCircular) {
+                  g.arc(0, 0, Math.min(w, h) / 2, 0, Math.PI * 2, false);
+                } else {
+                  g.ellipse(0, 0, w / 2, h / 2, 0, 0, 2 * Math.PI);
+                }
+                g.closePath();
+              },
+            }
+          : isPolygon && polygonPixelPts && polygonPixelPts.length >= 3
+            ? {
+                clipFunc: (ctx) => {
+                  const g = ctx as unknown as CanvasRenderingContext2D;
+                  g.beginPath();
+                  g.moveTo(polygonPixelPts[0]!.x, polygonPixelPts[0]!.y);
+                  for (let i = 1; i < polygonPixelPts.length; i++) {
+                    g.lineTo(polygonPixelPts[i]!.x, polygonPixelPts[i]!.y);
+                  }
+                  g.closePath();
+                },
+              }
+            : {
+                clip: {
+                  x: -w / 2,
+                  y: topEdge,
+                  width: w,
+                  height: bottomEdge - topEdge,
+                },
+              })}
       >
         <Text
           text={displayName}
@@ -474,22 +722,108 @@ export default function TableShape({
           />
         ))}
 
+      {/* Circle handles — dragging any changes diameter (w = h) */}
       {isSelected && isEditorMode && isCircular &&
-        [0, Math.PI / 2, Math.PI, 1.5 * Math.PI].map((a, i) => {
+        ([
+          [1, 0],    // right  → width axis
+          [0, 1],    // bottom → height axis
+          [-1, 0],   // left   → width axis
+          [0, -1],   // top    → height axis
+        ] as [number, number][]).map(([nx, ny], i) => {
           const r = Math.min(w, h) / 2;
+          const hx = nx * r;
+          const hy = ny * r;
           return (
             <Rect
               key={`handle-${i}`}
-              x={Math.cos(a) * r - HANDLE / 2}
-              y={Math.sin(a) * r - HANDLE / 2}
+              x={hx - HANDLE / 2}
+              y={hy - HANDLE / 2}
               width={HANDLE}
               height={HANDLE}
               fill="#ffffff"
               stroke="#2563eb"
               strokeWidth={1.5}
+              draggable={!!onResizeHandleDrag}
+              onDragMove={onResizeHandleDrag ? (e) => {
+                e.cancelBubble = true;
+                const node = e.target;
+                // Distance from centre = new radius → diameter
+                const dist = Math.sqrt(node.x() ** 2 + node.y() ** 2);
+                onResizeHandleDrag('x', dist);
+                // Snap handle back to computed position
+                node.x(hx - HANDLE / 2);
+                node.y(hy - HANDLE / 2);
+              } : undefined}
+              onDragEnd={onResizeHandleEnd ? (e) => {
+                e.cancelBubble = true;
+                onResizeHandleEnd();
+              } : undefined}
+              style={onResizeHandleDrag ? ({ cursor: 'ew-resize' } as React.CSSProperties) : undefined}
             />
           );
         })}
+
+      {/* Oval handles — left/right for width, top/bottom for height */}
+      {isSelected && isEditorMode && isOval &&
+        ([
+          ['x', w / 2, 0],   // right
+          ['y', 0, h / 2],   // bottom
+          ['x', -w / 2, 0],  // left
+          ['y', 0, -h / 2],  // top
+        ] as ['x' | 'y', number, number][]).map(([axis, hx, hy], i) => (
+          <Rect
+            key={`handle-${i}`}
+            x={hx - HANDLE / 2}
+            y={hy - HANDLE / 2}
+            width={HANDLE}
+            height={HANDLE}
+            fill="#ffffff"
+            stroke="#2563eb"
+            strokeWidth={1.5}
+            draggable={!!onResizeHandleDrag}
+            onDragMove={onResizeHandleDrag ? (e) => {
+              e.cancelBubble = true;
+              const node = e.target;
+              const halfPx = axis === 'x'
+                ? Math.abs(node.x() + HANDLE / 2)
+                : Math.abs(node.y() + HANDLE / 2);
+              onResizeHandleDrag(axis, Math.max(14, halfPx));
+              // Keep handle pinned to its axis
+              if (axis === 'x') node.y(hy - HANDLE / 2);
+              else node.x(hx - HANDLE / 2);
+            } : undefined}
+            onDragEnd={onResizeHandleEnd ? (e) => {
+              e.cancelBubble = true;
+              onResizeHandleEnd();
+            } : undefined}
+            style={onResizeHandleDrag
+              ? ({ cursor: axis === 'x' ? 'ew-resize' : 'ns-resize' } as React.CSSProperties)
+              : undefined}
+          />
+        ))}
+
+      {/* Polygon: show bbox corner handles for scaling */}
+      {isSelected && isEditorMode && isPolygon && polygonPixelPts && (
+        (
+          [
+            [-w / 2, -h / 2],
+            [w / 2, -h / 2],
+            [w / 2, h / 2],
+            [-w / 2, h / 2],
+          ] as [number, number][]
+        ).map(([cx, cy], i) => (
+          <Rect
+            key={`poly-handle-${i}`}
+            x={cx - HANDLE / 2}
+            y={cy - HANDLE / 2}
+            width={HANDLE}
+            height={HANDLE}
+            fill="#ffffff"
+            stroke="#2563eb"
+            strokeWidth={1.5}
+          />
+        ))
+      )}
 
       {children}
     </Group>

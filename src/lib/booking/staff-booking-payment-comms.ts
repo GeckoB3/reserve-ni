@@ -6,6 +6,7 @@ import { generateConfirmToken, hashConfirmToken } from '@/lib/confirm-token';
 import { createPaymentPageUrl } from '@/lib/payment-token';
 import { createShortManageLink } from '@/lib/short-manage-link';
 import { sendBookingConfirmationNotifications, sendDepositRequestNotifications } from '@/lib/communications/send-templated';
+import { venueRowToEmailData } from '@/lib/emails/venue-email-data';
 import type { BookingModel } from '@/types/booking-models';
 
 export type StaffBookingEmailExtras = {
@@ -26,6 +27,10 @@ export async function applyStaffBookingPaymentAndComms(params: {
   venueId: string;
   venueName: string;
   venueAddress: string | undefined;
+  /** Profile / venues.email — fallback for Reply-To when reply_to_email is unset. */
+  venueProfileEmail?: string | null;
+  /** venues.reply_to_email — Reply-To for guest emails. */
+  venueReplyToEmail?: string | null;
   stripeConnectedAccountId: string | null;
   bookingId: string;
   guestName: string;
@@ -47,6 +52,8 @@ export async function applyStaffBookingPaymentAndComms(params: {
     venueId,
     venueName,
     venueAddress,
+    venueProfileEmail,
+    venueReplyToEmail,
     stripeConnectedAccountId,
     bookingId,
     guestName,
@@ -105,7 +112,12 @@ export async function applyStaffBookingPaymentAndComms(params: {
       try {
         const results = await sendDepositRequestNotifications(
           depositPayload,
-          { name: venueName, address: venueAddress },
+          venueRowToEmailData({
+            name: venueName,
+            address: venueAddress ?? null,
+            email: venueProfileEmail ?? null,
+            reply_to_email: venueReplyToEmail ?? null,
+          }),
           venueId,
           payment_url!,
         );
@@ -145,7 +157,12 @@ export async function applyStaffBookingPaymentAndComms(params: {
               manage_booking_link: manageBookingLink,
               ...emailExtras,
             },
-            { name: venueName, address: venueAddress },
+            venueRowToEmailData({
+              name: venueName,
+              address: venueAddress ?? null,
+              email: venueProfileEmail ?? null,
+              reply_to_email: venueReplyToEmail ?? null,
+            }),
             venueId,
           );
           if (!email.sent) console.warn(`[after] ${logContext} confirmation email not sent:`, email.reason);

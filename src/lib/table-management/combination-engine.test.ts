@@ -1,13 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import {
   detectAdjacentTables,
+  enumerateAdjacentCombinationGroups,
   findConnectedGroups,
   findValidCombinations,
   getBoundingBoxGap,
   getRotatedBoundingBox,
   scoreCombination,
+  type AutoCombinationOverrideInput,
   type CombinationTable,
 } from './combination-engine';
+import { tableGroupKeyFromIds } from './combination-rules';
 
 function makeTable(
   id: string,
@@ -125,6 +128,44 @@ describe('scoreCombination', () => {
   });
 });
 
+function makeAutoOverride(
+  tableIds: string[],
+  partial: Partial<AutoCombinationOverrideInput>,
+): AutoCombinationOverrideInput {
+  const key = tableGroupKeyFromIds(tableIds);
+  return {
+    id: `ov-${key}`,
+    table_group_key: key,
+    disabled: false,
+    display_name: null,
+    combined_min_covers: null,
+    combined_max_covers: null,
+    days_of_week: [1, 2, 3, 4, 5, 6, 7],
+    time_start: null,
+    time_end: null,
+    booking_type_filters: null,
+    requires_manager_approval: false,
+    internal_notes: null,
+    ...partial,
+  };
+}
+
+describe('enumerateAdjacentCombinationGroups', () => {
+  it('lists pairs and longer chains but not non-adjacent pairs', () => {
+    const adjacency = new Map<string, Set<string>>([
+      ['a', new Set(['b'])],
+      ['b', new Set(['a', 'c'])],
+      ['c', new Set(['b'])],
+    ]);
+    const groups = enumerateAdjacentCombinationGroups(adjacency, 4);
+    const keys = groups.map((g) => g.join('|')).sort();
+    expect(keys).toContain('a|b');
+    expect(keys).toContain('b|c');
+    expect(keys).toContain('a|b|c');
+    expect(keys).not.toContain('a|c');
+  });
+});
+
 describe('findValidCombinations', () => {
   it('returns singles first, then combinations', () => {
     const tables = [
@@ -175,5 +216,96 @@ describe('findValidCombinations', () => {
     const manual = results.find((result) => result.source === 'manual');
     expect(manual).toBeTruthy();
     expect(manual?.table_ids).toEqual(['a', 'b']);
+  });
+
+  it('excludes an auto combination when the override is disabled', () => {
+    const tables = [
+      makeTable('a', 0, 0, 100, 60, 4),
+      makeTable('b', 100, 0, 100, 60, 4),
+    ];
+    const adjacency = detectAdjacentTables(tables, 80);
+    const key = tableGroupKeyFromIds(['a', 'b']);
+    const overrides = new Map<string, AutoCombinationOverrideInput>([
+      [key, makeAutoOverride(['a', 'b'], { disabled: true })],
+    ]);
+    const results = findValidCombinations({
+      partySize: 6,
+      datetime: '2026-03-11T18:00:00.000Z',
+      durationMinutes: 90,
+      tables,
+      bookings: [],
+      blocks: [],
+      adjacencyMap: adjacency,
+      manualCombinations: [],
+      autoOverrides: overrides,
+    });
+    expect(results.some((r) => r.source === 'auto' && r.table_ids.join('|') === key)).toBe(false);
+  });
+
+  it('sets requires_manager_approval on auto suggestions from overrides', () => {
+    const tables = [
+      makeTable('a', 0, 0, 100, 60, 4),
+      makeTable('b', 100, 0, 100, 60, 4),
+    ];
+    const adjacency = detectAdjacentTables(tables, 80);
+    const key = tableGroupKeyFromIds(['a', 'b']);
+    const overrides = new Map<string, AutoCombinationOverrideInput>([
+      [key, makeAutoOverride(['a', 'b'], { requires_manager_approval: true })],
+    ]);
+    const results = findValidCombinations({
+      partySize: 6,
+      datetime: '2026-03-11T18:00:00.000Z',
+      durationMinutes: 90,
+      tables,
+      bookings: [],
+      blocks: [],
+      adjacencyMap: adjacency,
+      manualCombinations: [],
+      autoOverrides: overrides,
+      bookingContext: {
+        bookingDate: '2026-03-11',
+        bookingTime: '18:00',
+        bookingModel: 'table_reservation',
+      },
+    });
+    const auto = results.find((r) => r.source === 'auto' && r.table_ids.join('|') === key);
+    expect(auto?.requires_manager_approval).toBe(true);
+  });
+
+  it('respects combined_max_covers override for party size', () => {
+    const tables = [
+      makeTable('a', 0, 0, 100, 60, 4),
+      makeTable('b', 100, 0, 100, 60, 4),
+    ];
+    const adjacency = detectAdjacentTables(tables, 80);
+    const key = tableGroupKeyFromIds(['a', 'b']);
+    const overrides = new Map<string, AutoCombinationOverrideInput>([
+      [key, makeAutoOverride(['a', 'b'], { combined_max_covers: 6 })],
+    ]);
+    const blocked = findValidCombinations({
+      partySize: 8,
+      datetime: '2026-03-11T18:00:00.000Z',
+      durationMinutes: 90,
+      tables,
+      bookings: [],
+      blocks: [],
+      adjacencyMap: adjacency,
+      manualCombinations: [],
+      autoOverrides: overrides,
+    });
+    expect(blocked.some((r) => r.source === 'auto' && r.table_ids.join('|') === key)).toBe(false);
+
+    const allowed = findValidCombinations({
+      partySize: 6,
+      datetime: '2026-03-11T18:00:00.000Z',
+      durationMinutes: 90,
+      tables,
+      bookings: [],
+      blocks: [],
+      adjacencyMap: adjacency,
+      manualCombinations: [],
+      autoOverrides: overrides,
+    });
+    expect(allowed.some((r) => r.source === 'auto' && r.table_ids.join('|') === key)).toBe(true);
   });
 });

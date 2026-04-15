@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { createShortConfirmLink, createShortManageLink } from '@/lib/short-manage-link';
 import { enrichBookingEmailForAppointment } from '@/lib/emails/booking-email-enrichment';
-import type { BookingEmailData, VenueEmailData } from '@/lib/emails/types';
+import type { BookingEmailData } from '@/lib/emails/types';
+import { venueRowToEmailData } from '@/lib/emails/venue-email-data';
 import { requireCronAuthorisation } from '@/lib/cron-auth';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 import { isCdeBookingRow } from '@/lib/booking/cde-booking';
@@ -151,20 +152,6 @@ function buildBookingData(row: BookingRow): BookingEmailData {
   };
 }
 
-function buildVenueData(venue: {
-  name: string;
-  address: string | null;
-  phone?: string | null;
-  booking_page_url?: string;
-}): VenueEmailData {
-  return {
-    name: venue.name,
-    address: venue.address,
-    phone: venue.phone ?? null,
-    booking_page_url: venue.booking_page_url,
-  };
-}
-
 async function sendConfirmOrCancelPrompts(results: {
   reminders_56h: number;
   errors: number;
@@ -173,7 +160,7 @@ async function sendConfirmOrCancelPrompts(results: {
   const now = new Date();
   const { data: venues } = await supabase
     .from('venues')
-    .select('id, name, address, phone, timezone, booking_model');
+    .select('id, name, address, phone, timezone, booking_model, email, reply_to_email, booking_page_url');
 
   if (!venues?.length) return;
 
@@ -208,7 +195,7 @@ async function sendConfirmOrCancelPrompts(results: {
 
       if (!bookings?.length) continue;
 
-      const venueData = buildVenueData(venue);
+      const venueData = venueRowToEmailData(venue);
       for (const bookingRow of normalizeBookings(bookings)) {
         try {
           if (isCdeBookingRow(bookingRow)) continue;
@@ -275,7 +262,7 @@ async function sendPreVisitReminders(results: {
   const now = new Date();
   const { data: venues } = await supabase
     .from('venues')
-    .select('id, name, address, phone, timezone, booking_model');
+    .select('id, name, address, phone, timezone, booking_model, email, reply_to_email, booking_page_url');
 
   if (!venues?.length) return;
 
@@ -310,7 +297,7 @@ async function sendPreVisitReminders(results: {
 
       if (!bookings?.length) continue;
 
-      const venueData = buildVenueData(venue);
+      const venueData = venueRowToEmailData(venue);
       for (const bookingRow of normalizeBookings(bookings)) {
         try {
           if (isCdeBookingRow(bookingRow)) continue;
@@ -373,7 +360,7 @@ async function sendPostVisitThankYous(results: {
   const now = new Date();
   const { data: venues } = await supabase
     .from('venues')
-    .select('id, name, address, phone, timezone, booking_model');
+    .select('id, name, address, phone, timezone, booking_model, email, reply_to_email, booking_page_url');
 
   if (!venues?.length) return;
 
@@ -410,7 +397,7 @@ async function sendPostVisitThankYous(results: {
 
       if (!bookings?.length) continue;
 
-      const venueData = buildVenueData(venue);
+      const venueData = venueRowToEmailData(venue);
       for (const bookingRow of normalizeBookings(bookings)) {
         try {
           if (isCdeBookingRow(bookingRow)) continue;

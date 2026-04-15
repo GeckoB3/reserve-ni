@@ -61,6 +61,8 @@ interface BookingDetail {
   events: EventRow[];
   communications: CommRow[];
   table_assignments?: Array<{ id: string; name: string }>;
+  /** Staff-only note from table combination rules when multiple tables assigned. */
+  combination_staff_notes?: string | null;
   /** Set by GET /api/venue/bookings/[id] for notes UI (table vs C/D/E). */
   inferred_booking_model?: BookingModel;
 }
@@ -842,6 +844,12 @@ export function BookingDetailPanel({
                     {hasTable ? 'Reassign' : 'Assign'}
                   </button>
                 </div>
+                {isHydrated && detail?.combination_staff_notes ? (
+                  <p className="mt-2 border-t border-slate-200/80 pt-2 text-xs leading-snug text-slate-600">
+                    <span className="font-medium text-slate-700">Combination note: </span>
+                    {detail.combination_staff_notes}
+                  </p>
+                ) : null}
               </div>
             );
           })()}

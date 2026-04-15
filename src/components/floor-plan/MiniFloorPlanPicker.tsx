@@ -6,6 +6,7 @@ import type { KonvaEventObject } from 'konva/lib/Node';
 import type Konva from 'konva';
 import TableShape from '@/components/floor-plan/TableShape';
 import { getTableDimensions } from '@/types/table-management';
+import { computeGlobalUnifiedLabelFonts } from '@/lib/floor-plan/table-label-fonts';
 
 const COLOR_FREE = '#047857';
 const COLOR_SELECTED = '#2563eb';
@@ -183,6 +184,29 @@ export default function MiniFloorPlanPicker({
     }
     return sum;
   }, [selectedIds, tables]);
+
+  const unifiedLabelFonts = useMemo(() => {
+    if (tables.length === 0) return null;
+    const inputs = tables.map((table) => {
+      const fb = getTableDimensions(table.max_covers, table.shape);
+      const tw = ((table.width ?? fb.width) / 100) * dimensions.width;
+      const th = ((table.height ?? fb.height) / 100) * dimensions.height;
+      const capacityText =
+        table.min_covers === table.max_covers
+          ? `${table.max_covers}`
+          : `${table.min_covers}-${table.max_covers}`;
+      return {
+        w: tw,
+        h: th,
+        shape: table.shape,
+        topLabel: table.name,
+        bottomLabel: capacityText,
+        compactLabels: true,
+        layoutScale: undefined,
+      };
+    });
+    return computeGlobalUnifiedLabelFonts(inputs);
+  }, [tables, dimensions.width, dimensions.height]);
 
   const zoomBy = useCallback(
     (delta: number) => {
@@ -365,6 +389,7 @@ export default function MiniFloorPlanPicker({
                     canvasWidth={dimensions.width}
                     canvasHeight={dimensions.height}
                     compactLabels
+                    unifiedLabelFonts={unifiedLabelFonts}
                     onClick={() => toggleTable(table.id)}
                     onTap={() => toggleTable(table.id)}
                   />

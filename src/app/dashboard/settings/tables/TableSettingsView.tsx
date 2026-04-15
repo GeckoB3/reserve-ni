@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import type { VenueTable, TableCombination } from '@/types/table-management';
 import { TableList } from './TableList';
-import { CombinationList } from './CombinationList';
+import { TableCombinationsPage } from './TableCombinationsPage';
 import { StatusSettings } from './StatusSettings';
 import { SetupWizard } from './SetupWizard';
 
@@ -14,6 +14,8 @@ interface TableSettings {
   floor_plan_background_url: string | null;
   auto_bussing_minutes: number;
   active_table_statuses: string[];
+  /** Combination Detection Distance (px); drives auto-detected combination groups. */
+  combination_threshold?: number;
 }
 
 interface Props {
@@ -231,7 +233,7 @@ export function TableSettingsView({ isAdmin }: Props) {
             <>
               {tables.length > 0 && isAdmin && (
                 <Link
-                  href="/dashboard/settings/floor-plan"
+                  href="/dashboard/availability?tab=table&fp=layout"
                   className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-5 py-4 shadow-sm transition-colors hover:border-brand-200 hover:bg-brand-50/30"
                 >
                   <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-brand-100">
@@ -258,12 +260,13 @@ export function TableSettingsView({ isAdmin }: Props) {
           )}
 
           {activeTab === 'combinations' && (
-            <CombinationList
+            <TableCombinationsPage
               combinations={combinations}
               setCombinations={setCombinations}
               tables={tables}
               isAdmin={isAdmin}
               onRefresh={fetchData}
+              combinationThreshold={settings.combination_threshold ?? 80}
             />
           )}
 

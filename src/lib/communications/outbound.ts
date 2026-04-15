@@ -77,6 +77,8 @@ export async function sendPolicyMessage(
     lane: resolved.lane,
     messageType: resolved.logMessageTypeByChannel[opts.channel]!,
     recipient,
+    emailFromDisplayName: opts.venue.name,
+    emailReplyTo: opts.venue.reply_to_email ?? null,
   };
 
   if (opts.channel === 'email') {

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { VenueTable } from '@/types/table-management';
 import { getTableDimensions } from '@/types/table-management';
 import {
@@ -11,6 +11,8 @@ import {
 
 interface Props {
   threshold: number;
+  /** Increment this to trigger a silent re-fetch of table positions. */
+  refreshKey?: number;
 }
 
 function toCombinationTable(t: VenueTable): CombinationTable {
@@ -28,27 +30,50 @@ function toCombinationTable(t: VenueTable): CombinationTable {
   };
 }
 
-export function AdjacencyPreview({ threshold }: Props) {
+export function AdjacencyPreview({ threshold, refreshKey = 0 }: Props) {
   const [tables, setTables] = useState<VenueTable[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
+  const mountedRef = useRef(true);
+
+  const fetchTables = useCallback(async (showSpinner = false) => {
+    if (showSpinner) setLoading(true);
+    try {
+      const res = await fetch('/api/venue/tables');
+      if (!res.ok || !mountedRef.current) return;
+      const data = await res.json();
+      if (!mountedRef.current) return;
+      setTables((data.tables ?? []).filter((t: VenueTable) => t.is_active));
+    } catch {
+      // Non-critical — diagram will show stale data
+    } finally {
+      if (mountedRef.current) setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    let mounted = true;
-    fetch('/api/venue/tables')
-      .then(async (res) => {
-        if (!res.ok) return;
-        const data = await res.json();
-        if (!mounted) return;
-        setTables((data.tables ?? []).filter((t: VenueTable) => t.is_active));
-      })
-      .catch(() => {})
-      .finally(() => {
-        if (mounted) setLoading(false);
-      });
-    return () => { mounted = false; };
-  }, []);
+    mountedRef.current = true;
+    void fetchTables(true);
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        void fetchTables(false);
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      mountedRef.current = false;
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [fetchTables]);
+
+  // Re-fetch silently whenever the parent signals a new layout save.
+  useEffect(() => {
+    if (refreshKey === 0) return;
+    void fetchTables(false);
+  }, [refreshKey, fetchTables]);
 
   const comboTables = useMemo(
     () => tables.map(toCombinationTable),
@@ -85,6 +110,22 @@ export function AdjacencyPreview({ threshold }: Props) {
     };
   }, [selectedTable]);
 
+  // Compute a tight viewBox around all table bounding boxes so the diagram is
+  // centred in the SVG regardless of where tables are positioned on the canvas.
+  const viewBox = useMemo(() => {
+    if (comboTables.length === 0) return '0 0 100 100';
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const t of comboTables) {
+      const b = getRotatedBoundingBox(t);
+      if (b.left < minX) minX = b.left;
+      if (b.top < minY) minY = b.top;
+      if (b.right > maxX) maxX = b.right;
+      if (b.bottom > maxY) maxY = b.bottom;
+    }
+    const pad = Math.max((maxX - minX), (maxY - minY)) * 0.12 + 10;
+    return `${minX - pad} ${minY - pad} ${maxX - minX + pad * 2} ${maxY - minY + pad * 2}`;
+  }, [comboTables]);
+
   if (loading) {
     return (
       <div className="mt-3 flex h-40 items-center justify-center rounded-lg border border-slate-200 bg-white">
@@ -105,8 +146,23 @@ export function AdjacencyPreview({ threshold }: Props) {
 
   return (
     <div className="mt-3">
+      <div className="mb-1.5 flex items-center justify-between">
+        <p className="text-[11px] text-slate-400">
+          {selectedId
+            ? `${adjacentCount} table${adjacentCount !== 1 ? 's' : ''} within combination range. Green tables will be considered adjacent.`
+            : 'Click a table to preview which tables are within combination range.'}
+        </p>
+        <button
+          type="button"
+          onClick={() => void fetchTables(false)}
+          className="ml-3 shrink-0 rounded px-2 py-0.5 text-[11px] font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+          title="Reload positions from latest saved layout"
+        >
+          Refresh
+        </button>
+      </div>
       <svg
-        viewBox="0 0 100 100"
+        viewBox={viewBox}
         className="w-full rounded-lg border border-slate-200 bg-white"
         style={{ maxHeight: 300 }}
         onClick={() => setSelectedId(null)}
@@ -207,12 +263,6 @@ export function AdjacencyPreview({ threshold }: Props) {
           );
         })}
       </svg>
-
-      <p className="mt-1.5 text-[11px] text-slate-400">
-        {selectedId
-          ? `${adjacentCount} table${adjacentCount !== 1 ? 's' : ''} within combination range. Green tables will be considered adjacent.`
-          : 'Click a table to preview which tables are within combination range.'}
-      </p>
     </div>
   );
 }

@@ -18,15 +18,23 @@ import type { VenueSettings } from '@/app/dashboard/settings/types';
 const VALID_TABS = ['services', 'capacity', 'duration', 'rules', 'table'] as const;
 type ValidTab = (typeof VALID_TABS)[number];
 
+const VALID_FLOOR_PLAN_TABS = ['layout', 'tables', 'combinations', 'areas'] as const;
+type ValidFloorPlanTab = (typeof VALID_FLOOR_PLAN_TABS)[number];
+
 function resolveInitialTab(tab: string | undefined): ValidTab | undefined {
   if (!tab) return undefined;
   return VALID_TABS.includes(tab as ValidTab) ? (tab as ValidTab) : undefined;
 }
 
+function resolveInitialFloorPlanTab(fp: string | undefined): ValidFloorPlanTab | undefined {
+  if (!fp) return undefined;
+  return VALID_FLOOR_PLAN_TABS.includes(fp as ValidFloorPlanTab) ? (fp as ValidFloorPlanTab) : undefined;
+}
+
 export default async function AvailabilitySettingsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ tab?: string }>;
+  searchParams: Promise<{ tab?: string; fp?: string }>;
 }) {
   const supabase = await createClient();
   const {
@@ -155,12 +163,14 @@ export default async function AvailabilitySettingsPage({
 
   const sp = await searchParams;
   const initialTab = resolveInitialTab(sp.tab);
+  const initialFloorPlanTab = resolveInitialFloorPlanTab(sp.fp);
 
   return (
     <AvailabilitySettingsClient
       initialVenue={venue}
       hasServiceConfig={hasServiceConfig}
       initialTab={initialTab}
+      initialFloorPlanTab={initialFloorPlanTab}
     />
   );
 }

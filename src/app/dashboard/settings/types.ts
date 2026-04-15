@@ -9,6 +9,8 @@ export interface VenueSettings {
   address: string | null;
   phone: string | null;
   email: string | null;
+  /** Synced with email from Profile; used as Reply-To on guest emails. */
+  reply_to_email?: string | null;
   /** Public https URL for the business website; shown on the booking page when set. */
   website_url: string | null;
   cover_photo_url: string | null;

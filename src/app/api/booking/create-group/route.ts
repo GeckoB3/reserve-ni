@@ -3,6 +3,7 @@ import { getSupabaseAdminClient } from '@/lib/supabase';
 import { stripe } from '@/lib/stripe';
 import { findOrCreateGuest } from '@/lib/guests';
 import { sendBookingConfirmationNotifications } from '@/lib/communications/send-templated';
+import { venueRowToEmailData } from '@/lib/emails/venue-email-data';
 import { generateConfirmToken, hashConfirmToken } from '@/lib/confirm-token';
 import { normalizeToE164 } from '@/lib/phone/e164';
 import { resolveVenueMode } from '@/lib/venue-mode';
@@ -77,7 +78,7 @@ export async function POST(request: NextRequest) {
 
     const { data: venue, error: venueErr } = await supabase
       .from('venues')
-      .select('id, name, stripe_connected_account_id, address, booking_rules, timezone, opening_hours, venue_opening_exceptions')
+      .select('id, name, stripe_connected_account_id, address, booking_rules, timezone, opening_hours, venue_opening_exceptions, email, reply_to_email')
       .eq('id', venue_id)
       .single();
 
@@ -372,7 +373,12 @@ export async function POST(request: NextRequest) {
                 groupAppointmentLines.length === 1 ? groupAppointmentLines[0]!.service_name : 'Group booking',
               appointment_price_display: null,
             },
-            { name: venue.name, address: venue.address ?? undefined },
+            venueRowToEmailData({
+              name: venue.name,
+              address: venue.address ?? null,
+              email: venue.email ?? null,
+              reply_to_email: venue.reply_to_email ?? null,
+            }),
             venue_id,
           );
         } catch (err) {

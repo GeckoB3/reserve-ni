@@ -1,5 +1,6 @@
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import type { BookingEmailData, VenueEmailData } from '@/lib/emails/types';
+import { venueRowToEmailData } from '@/lib/emails/venue-email-data';
 import { sendPolicyMessage } from './outbound';
 import type { MessageType, Recipient, TemplateVariables } from './types';
 import { sendEmail } from '@/lib/emails/send-email';
@@ -155,7 +156,7 @@ async function buildGuestBookingContext(
 
   const venueRow = await admin
     .from('venues')
-    .select('name, address, phone, booking_page_url, booking_model')
+    .select('name, address, phone, booking_page_url, booking_model, email, reply_to_email')
     .eq('id', ctx.venue_id)
     .maybeSingle();
 
@@ -166,6 +167,8 @@ async function buildGuestBookingContext(
         phone?: string | null;
         booking_page_url?: string | null;
         booking_model?: string | null;
+        email?: string | null;
+        reply_to_email?: string | null;
       }
     | null;
 
@@ -235,12 +238,14 @@ async function buildGuestBookingContext(
         null,
       booking_model: bookingModel as BookingModel,
     },
-    venue: {
+    venue: venueRowToEmailData({
       name: venue.name,
       address: venue.address ?? null,
       phone: venue.phone ?? null,
-      booking_page_url: venue.booking_page_url ?? undefined,
-    },
+      booking_page_url: venue.booking_page_url ?? null,
+      email: venue.email ?? null,
+      reply_to_email: venue.reply_to_email ?? null,
+    }),
   };
 }
 

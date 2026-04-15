@@ -11,6 +11,7 @@ import {
   computeAppointmentAvailability,
 } from '@/lib/availability/appointment-engine';
 import { enrichBookingEmailForComms } from '@/lib/emails/booking-email-enrichment';
+import { venueRowToEmailData } from '@/lib/emails/venue-email-data';
 import { autoAssignTable } from '@/lib/table-availability';
 import { BOOKING_MUTABLE_STATUSES } from '@/lib/table-management/constants';
 import {
@@ -32,6 +33,7 @@ import { inferBookingRowModel } from '@/lib/booking/infer-booking-row-model';
 import { logBookingOp } from '@/lib/observability/booking-ops-log';
 import { resolveCdeBookingContext } from '@/lib/booking/cde-booking-context';
 import { resolveBookingScopedCalendarId } from '@/lib/booking/staff-booking-calendar-scope';
+import { tableGroupKeyFromIds } from '@/lib/table-management/combination-rules';
 import type { BookingModel } from '@/types/booking-models';
 
 const statusSchema = z.enum(BOOKING_MUTABLE_STATUSES);
@@ -115,6 +117,30 @@ export async function GET(
       },
     );
 
+    let combination_staff_notes: string | null = null;
+    if (assignedTables.length >= 2) {
+      const key = tableGroupKeyFromIds(assignedTables.map((t) => t.id));
+      const { data: customCombo } = await staff.db
+        .from('table_combinations')
+        .select('internal_notes')
+        .eq('venue_id', staff.venue_id)
+        .eq('table_group_key', key)
+        .maybeSingle();
+      if (customCombo?.internal_notes) {
+        combination_staff_notes = customCombo.internal_notes as string;
+      } else {
+        const { data: autoOv } = await staff.db
+          .from('combination_auto_overrides')
+          .select('internal_notes')
+          .eq('venue_id', staff.venue_id)
+          .eq('table_group_key', key)
+          .maybeSingle();
+        if (autoOv?.internal_notes) {
+          combination_staff_notes = autoOv.internal_notes as string;
+        }
+      }
+    }
+
     return NextResponse.json({
       ...booking,
       booking_time: bookingTimeStr,
@@ -122,6 +148,7 @@ export async function GET(
       events: events ?? [],
       communications: communications ?? [],
       table_assignments: assignedTables,
+      combination_staff_notes,
       cde_context,
       inferred_booking_model: inferred_booking_model as BookingModel,
     });
@@ -343,7 +370,11 @@ export async function PATCH(
         });
 
         const { data: guestRow } = await staff.db.from('guests').select('name, email, phone').eq('id', booking.guest_id).single();
-        const { data: venueRow } = await staff.db.from('venues').select('name, address, phone').eq('id', staff.venue_id).single();
+        const { data: venueRow } = await staff.db
+          .from('venues')
+          .select('name, address, phone, email, reply_to_email')
+          .eq('id', staff.venue_id)
+          .single();
         if (guestRow && venueRow?.name) {
           const depositAmountStr = depositPenceForMessage
             ? `£${(depositPenceForMessage / 100).toFixed(2)}`
@@ -369,11 +400,13 @@ export async function PATCH(
             deposit_amount_pence: depositPenceForMessage ?? booking.deposit_amount_pence ?? null,
             deposit_status: booking.deposit_status ?? null,
           };
-          const cancelVenueEmail: import('@/lib/emails/types').VenueEmailData = {
+          const cancelVenueEmail = venueRowToEmailData({
             name: venueRow.name,
             address: venueRow.address ?? null,
             phone: venueRow.phone ?? null,
-          };
+            email: venueRow.email ?? null,
+            reply_to_email: venueRow.reply_to_email ?? null,
+          });
           const vid = staff.venue_id;
           const refundMsg = refund_message;
           after(async () => {
@@ -864,7 +897,11 @@ export async function PATCH(
       }
 
       const { data: guestRow } = await staff.db.from('guests').select('name, email, phone').eq('id', booking.guest_id).single();
-      const { data: venueRow } = await staff.db.from('venues').select('name, address, phone').eq('id', staff.venue_id).single();
+      const { data: venueRow } = await staff.db
+        .from('venues')
+        .select('name, address, phone, email, reply_to_email')
+        .eq('id', staff.venue_id)
+        .single();
       if (guestRow && venueRow?.name) {
         const { sendBookingModificationNotification } = await import('@/lib/communications/send-templated');
         const { createShortManageLink } = await import('@/lib/short-manage-link');
@@ -881,11 +918,13 @@ export async function PATCH(
           deposit_status: updatedAfterModify.deposit_status ?? null,
           manage_booking_link: manageLink,
         };
-        const venueEmail: import('@/lib/emails/types').VenueEmailData = {
+        const venueEmail = venueRowToEmailData({
           name: venueRow.name,
           address: venueRow.address ?? null,
           phone: venueRow.phone ?? null,
-        };
+          email: venueRow.email ?? null,
+          reply_to_email: venueRow.reply_to_email ?? null,
+        });
         const vid = staff.venue_id;
         after(async () => {
           try {

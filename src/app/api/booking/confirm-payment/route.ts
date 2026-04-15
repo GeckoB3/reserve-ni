@@ -7,6 +7,7 @@ import { sendBookingConfirmationNotifications, sendDepositConfirmationEmail } fr
 import { isSelfServeBookingSource } from '@/lib/booking-source';
 import { enrichBookingEmailForComms } from '@/lib/emails/booking-email-enrichment';
 import { createShortManageLink } from '@/lib/short-manage-link';
+import { venueRowToEmailData } from '@/lib/emails/venue-email-data';
 
 /**
  * POST /api/booking/confirm-payment
@@ -51,7 +52,7 @@ export async function POST(request: NextRequest) {
     // Retrieve the venue's connected account to query the PaymentIntent.
     const { data: venue } = await supabase
       .from('venues')
-      .select('name, stripe_connected_account_id, address')
+      .select('name, stripe_connected_account_id, address, email, reply_to_email')
       .eq('id', booking.venue_id)
       .single();
 
@@ -136,7 +137,12 @@ export async function POST(request: NextRequest) {
       : booking.booking_time;
 
     const recipientEmail = guestEmail || guest?.email;
-    const venueData = { name: venue.name, address: venue.address ?? undefined };
+    const venueData = venueRowToEmailData({
+      name: venue.name,
+      address: venue.address ?? null,
+      email: venue.email ?? null,
+      reply_to_email: venue.reply_to_email ?? null,
+    });
     const bookingData = {
       id: booking.id,
       guest_name: guest?.name ?? guestEmail ?? 'Guest',

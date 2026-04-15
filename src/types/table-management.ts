@@ -4,7 +4,11 @@ import type { TableServiceStatus } from '@/lib/table-management/constants';
  * Table management types - optional layer on top of covers-based availability.
  */
 
-export type TableShape = 'rectangle' | 'circle' | 'square' | 'oval' | 'l-shape';
+export type TableShape = 'rectangle' | 'circle' | 'square' | 'oval' | 'l-shape' | 'polygon';
+
+export type TableType = 'Regular' | 'High-Top' | 'Counter' | 'Bar' | 'Outdoor';
+
+export const TABLE_TYPES: TableType[] = ['Regular', 'High-Top', 'Counter', 'Bar', 'Outdoor'];
 
 export interface VenueTable {
   id: string;
@@ -13,6 +17,7 @@ export interface VenueTable {
   min_covers: number;
   max_covers: number;
   shape: TableShape;
+  table_type: TableType;
   zone: string | null;
   position_x: number | null;
   position_y: number | null;
@@ -22,8 +27,10 @@ export interface VenueTable {
   sort_order: number;
   server_section: string | null;
   is_active: boolean;
-  snap_group_id: string | null;
-  snap_sides: string[] | null;
+  /** Per-seat angle overrides in radians. null at an index = use computed position. */
+  seat_angles?: (number | null)[] | null;
+  /** Normalised polygon vertices (0–100% of bounding box) for 'polygon' shape. */
+  polygon_points?: { x: number; y: number }[] | null;
   created_at: string;
   updated_at: string;
 }
@@ -36,6 +43,15 @@ export interface TableCombination {
   combined_max_covers: number;
   is_active: boolean;
   created_at: string;
+  table_group_key?: string | null;
+  days_of_week?: number[];
+  time_start?: string | null;
+  time_end?: string | null;
+  booking_type_filters?: string[] | null;
+  requires_manager_approval?: boolean;
+  internal_notes?: string | null;
+  updated_at?: string;
+  is_valid?: boolean;
   members?: TableCombinationMember[];
 }
 
@@ -85,8 +101,12 @@ export interface TableAvailabilityCandidate {
   max_covers: number;
   combination_id?: string;
   combination_name?: string;
+  /** Auto-detected combination override row (not a custom `table_combinations` row). */
+  auto_override_id?: string;
   spare_covers?: number;
   score?: number;
+  requires_manager_approval?: boolean;
+  internal_notes?: string | null;
 }
 
 export interface TableGridCell {
@@ -140,6 +160,33 @@ export interface TableGridData {
   };
 }
 
+export interface FloorPlan {
+  id: string;
+  venue_id: string;
+  name: string;
+  background_url: string | null;
+  sort_order: number;
+  canvas_width: number | null;
+  canvas_height: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface FloorPlanTablePosition {
+  id: string;
+  floor_plan_id: string;
+  table_id: string;
+  position_x: number | null;
+  position_y: number | null;
+  width: number | null;
+  height: number | null;
+  rotation: number;
+  seat_angles?: (number | null)[] | null;
+  polygon_points?: { x: number; y: number }[] | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface UndoAction {
   id: string;
   type: 'reassign_table' | 'change_time' | 'resize' | 'unassign' | 'change_status';
@@ -152,27 +199,35 @@ export interface UndoAction {
 /**
  * Returns floor-plan dimensions (width/height as % of canvas) scaled to table capacity.
  * Circles use equal width/height; squares use the short-side dimension for both axes;
- * rectangles grow wider for larger parties.
+ * rectangles/ovals grow wider for larger parties.
  */
 export function getTableDimensions(maxCovers: number, shape: string): { width: number; height: number } {
   if (shape === 'circle') {
-    if (maxCovers <= 2) return { width: 7, height: 7 };
-    if (maxCovers <= 4) return { width: 7.5, height: 7.5 };
-    if (maxCovers <= 6) return { width: 9, height: 9 };
-    return { width: 10.5, height: 10.5 };
+    if (maxCovers <= 2) return { width: 9.5, height: 9.5 };
+    if (maxCovers <= 4) return { width: 11, height: 11 };
+    if (maxCovers <= 6) return { width: 13, height: 13 };
+    return { width: 15, height: 15 };
   }
   if (shape === 'square') {
-    if (maxCovers <= 2) return { width: 7, height: 7 };
-    if (maxCovers <= 4) return { width: 7, height: 7 };
-    if (maxCovers <= 6) return { width: 7, height: 7 };
-    if (maxCovers <= 8) return { width: 7.5, height: 7.5 };
-    return { width: 8.5, height: 8.5 };
+    if (maxCovers <= 2) return { width: 9.5, height: 9.5 };
+    if (maxCovers <= 4) return { width: 9.5, height: 9.5 };
+    if (maxCovers <= 6) return { width: 9.5, height: 9.5 };
+    if (maxCovers <= 8) return { width: 10.5, height: 10.5 };
+    return { width: 12, height: 12 };
   }
-  if (maxCovers <= 2) return { width: 8, height: 6.5 };
-  if (maxCovers <= 4) return { width: 8, height: 6.5 };
-  if (maxCovers <= 6) return { width: 10, height: 7 };
-  if (maxCovers <= 8) return { width: 12, height: 7.5 };
-  return { width: 14, height: 8.5 };
+  if (shape === 'oval') {
+    if (maxCovers <= 2) return { width: 11, height: 8 };
+    if (maxCovers <= 4) return { width: 12, height: 8.5 };
+    if (maxCovers <= 6) return { width: 14, height: 9.5 };
+    if (maxCovers <= 8) return { width: 16.5, height: 10.5 };
+    return { width: 19, height: 11.5 };
+  }
+  // rectangle, l-shape, polygon, and any other shape
+  if (maxCovers <= 2) return { width: 11, height: 8 };
+  if (maxCovers <= 4) return { width: 11, height: 8 };
+  if (maxCovers <= 6) return { width: 13.5, height: 9.5 };
+  if (maxCovers <= 8) return { width: 16.5, height: 10.5 };
+  return { width: 19, height: 11.5 };
 }
 
 export type BlockedSides = { top: boolean; right: boolean; bottom: boolean; left: boolean };

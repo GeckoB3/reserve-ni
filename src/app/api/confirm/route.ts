@@ -2,7 +2,8 @@ import { NextRequest, NextResponse, after } from "next/server";
 import { getSupabaseAdminClient } from "@/lib/supabase";
 import { stripe } from "@/lib/stripe";
 import { sendCancellationNotification } from "@/lib/communications/send-templated";
-import type { BookingEmailData, VenueEmailData } from "@/lib/emails/types";
+import type { BookingEmailData } from "@/lib/emails/types";
+import { venueRowToEmailData } from "@/lib/emails/venue-email-data";
 import { enrichBookingEmailForComms } from "@/lib/emails/booking-email-enrichment";
 import {
   getCancellationNoticeHoursForBooking,
@@ -85,7 +86,7 @@ export async function GET(request: NextRequest) {
 
     const { data: venue } = await supabase
       .from("venues")
-      .select("name, address, phone, booking_model, booking_rules")
+      .select("name, address, phone, booking_model, booking_rules, email, reply_to_email")
       .eq("id", booking.venue_id)
       .single();
     const depositPaid = booking.deposit_status === "Paid";
@@ -477,7 +478,7 @@ export async function POST(request: NextRequest) {
 
       const { data: venue } = await supabase
         .from("venues")
-        .select("name, address, phone, booking_rules")
+        .select("name, address, phone, booking_rules, email, reply_to_email")
         .eq("id", booking.venue_id)
         .single();
       const { data: guest } = await supabase
@@ -528,11 +529,13 @@ export async function POST(request: NextRequest) {
           deposit_amount_pence: booking.deposit_amount_pence ?? null,
           deposit_status: booking.deposit_status ?? null,
         };
-        const cancelVenueEmail: VenueEmailData = {
+        const cancelVenueEmail = venueRowToEmailData({
           name: venue.name,
           address: venue.address ?? null,
           phone: venue.phone ?? null,
-        };
+          email: venue.email ?? null,
+          reply_to_email: venue.reply_to_email ?? null,
+        });
         const vid = booking.venue_id;
         const refundMsg = refund_message || null;
         after(async () => {

@@ -15,6 +15,11 @@ export interface SeatPosition {
   angle: number;
   /** Which edge of the table this seat belongs to. */
   edgeSide: 'top' | 'right' | 'bottom' | 'left';
+  /**
+   * Direction along the table edge (parallel to the side), in radians from +x.
+   * Used so seat backs stay edge-parallel for all shapes.
+   */
+  edgeTangentRad: number;
 }
 
 type EdgeSide = 'top' | 'right' | 'bottom' | 'left';
@@ -95,30 +100,35 @@ function positionsOnEdge(
     const t = (i + 0.5) / count; // 0→1, centred within each slot
     let x: number, y: number, angle: number;
 
+    let edgeTangentRad: number;
     switch (edge) {
       case 'top':
         x = -halfW + t * 2 * halfW;
         y = -halfH;
         angle = -Math.PI / 2;
+        edgeTangentRad = 0;
         break;
       case 'right':
         x = halfW;
         y = -halfH + t * 2 * halfH;
         angle = 0;
+        edgeTangentRad = Math.PI / 2;
         break;
       case 'bottom':
         x = halfW - t * 2 * halfW;
         y = halfH;
         angle = Math.PI / 2;
+        edgeTangentRad = Math.PI;
         break;
       case 'left':
         x = -halfW;
         y = halfH - t * 2 * halfH;
         angle = Math.PI;
+        edgeTangentRad = -Math.PI / 2;
         break;
     }
 
-    seats.push({ x, y, angle, edgeSide: edge });
+    seats.push({ x, y, angle, edgeSide: edge, edgeTangentRad });
   }
 
   return seats;
@@ -129,14 +139,79 @@ function positionsOnEdge(
 // ---------------------------------------------------------------------------
 
 /**
+ * Distributes `count` seats evenly along a polygon perimeter.
+ * Points are pixel coords relative to the polygon's centroid (table centre).
+ */
+function polygonPerimeterSeats(
+  pixelPts: { x: number; y: number }[],
+  count: number,
+): SeatPosition[] {
+  if (pixelPts.length < 3 || count <= 0) return [];
+
+  // Build cumulative arc-length for each edge
+  const n = pixelPts.length;
+  const edgeLengths: number[] = [];
+  let totalLen = 0;
+  for (let i = 0; i < n; i++) {
+    const a = pixelPts[i]!;
+    const b = pixelPts[(i + 1) % n]!;
+    const len = Math.hypot(b.x - a.x, b.y - a.y);
+    edgeLengths.push(len);
+    totalLen += len;
+  }
+
+  const spacing = totalLen / count;
+  const seats: SeatPosition[] = [];
+
+  let edgeIdx = 0;
+  let distAlongEdge = spacing / 2;
+
+  for (let s = 0; s < count; s++) {
+    // Advance along edges until we've walked distAlongEdge
+    while (edgeIdx < n && distAlongEdge > edgeLengths[edgeIdx]!) {
+      distAlongEdge -= edgeLengths[edgeIdx]!;
+      edgeIdx = (edgeIdx + 1) % n;
+    }
+    const a = pixelPts[edgeIdx]!;
+    const b = pixelPts[(edgeIdx + 1) % n]!;
+    const len = edgeLengths[edgeIdx] ?? 1;
+    const t = len > 0 ? distAlongEdge / len : 0;
+    const px = a.x + (b.x - a.x) * t;
+    const py = a.y + (b.y - a.y) * t;
+
+    // Outward normal angle: perpendicular to edge, pointing away from centroid
+    const edgeTangentRad = Math.atan2(b.y - a.y, b.x - a.x);
+    const normalAngle = edgeTangentRad - Math.PI / 2;
+    // Choose outward direction (centroid is at 0,0)
+    const outX = Math.cos(normalAngle);
+    const outY = Math.sin(normalAngle);
+    const angle = (outX * px + outY * py) > 0 ? normalAngle : normalAngle + Math.PI;
+
+    // Map angle to closest cardinal edgeSide
+    const deg = (((angle + Math.PI / 2) * 180) / Math.PI + 360) % 360;
+    let edgeSide: EdgeSide;
+    if (deg < 45 || deg >= 315) edgeSide = 'top';
+    else if (deg < 135) edgeSide = 'right';
+    else if (deg < 225) edgeSide = 'bottom';
+    else edgeSide = 'left';
+
+    seats.push({ x: px, y: py, angle, edgeSide, edgeTangentRad });
+    distAlongEdge += spacing;
+  }
+
+  return seats;
+}
+
+/**
  * Calculates seat positions around a table's perimeter.
  *
- * @param shape       Table shape (`'rectangle'`, `'square'`, `'circle'`, `'oval'`)
+ * @param shape       Table shape (`'rectangle'`, `'square'`, `'circle'`, `'oval'`, `'polygon'`)
  * @param width       Table width in **pixels**
  * @param height      Table height in **pixels**
  * @param maxCovers   Total number of seats
  * @param hiddenSides Optional set of edge names whose seats are omitted
  *                    (used when tables are joined - the joined side loses its seats)
+ * @param polygonPoints Pixel-space vertices for polygon shape (relative to table centre)
  * @returns Array of seat positions relative to the table centre
  */
 export function calculateSeatPositions(
@@ -145,8 +220,14 @@ export function calculateSeatPositions(
   height: number,
   maxCovers: number,
   hiddenSides?: Set<string>,
+  polygonPoints?: { x: number; y: number }[] | null,
 ): SeatPosition[] {
   if (maxCovers <= 0 || width <= 0 || height <= 0) return [];
+
+  // ---- Polygon tables ----
+  if (shape === 'polygon' && polygonPoints && polygonPoints.length >= 3) {
+    return polygonPerimeterSeats(polygonPoints, maxCovers);
+  }
 
   // ---- Circular / oval tables ----
   if (shape === 'circle' || shape === 'oval') {
@@ -158,6 +239,7 @@ export function calculateSeatPositions(
       const angle = (2 * Math.PI * i) / maxCovers - Math.PI / 2;
       const x = Math.cos(angle) * rx;
       const y = Math.sin(angle) * ry;
+      const edgeTangentRad = Math.atan2(ry * Math.cos(angle), -rx * Math.sin(angle));
 
       // Map the angle to a quadrant using clockwise-from-top degrees:
       //   top: 315°–45°,  right: 45°–135°,  bottom: 135°–225°,  left: 225°–315°
@@ -169,7 +251,7 @@ export function calculateSeatPositions(
       else edgeSide = 'left';
 
       if (!hiddenSides?.has(edgeSide)) {
-        positions.push({ x, y, angle, edgeSide });
+        positions.push({ x, y, angle, edgeSide, edgeTangentRad });
       }
     }
 

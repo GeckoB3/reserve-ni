@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { BookingEmailData, VenueEmailData } from '@/lib/emails/types';
+import type { BookingEmailData } from '@/lib/emails/types';
+import { venueRowToEmailData } from '@/lib/emails/venue-email-data';
 import type { BookingModel } from '@/types/booking-models';
 import { createShortConfirmLink, createShortManageLink } from '@/lib/short-manage-link';
 import { enrichBookingEmailForAppointment } from '@/lib/emails/booking-email-enrichment';
@@ -115,20 +116,6 @@ function buildBookingData(
   };
 }
 
-function buildVenueData(venue: {
-  name: string;
-  address: string | null;
-  phone?: string | null;
-  booking_page_url?: string | null;
-}): VenueEmailData {
-  return {
-    name: venue.name,
-    address: venue.address,
-    phone: venue.phone ?? null,
-    booking_page_url: venue.booking_page_url ?? undefined,
-  };
-}
-
 async function runLaneReminder(opts: {
   supabase: SupabaseClient;
   venue: {
@@ -168,7 +155,7 @@ async function runLaneReminder(opts: {
     .in('booking_date', dates)
     .in('status', ['Pending', 'Confirmed']);
 
-  const venueData = buildVenueData(opts.venue);
+  const venueData = venueRowToEmailData(opts.venue);
   for (const row of normalizeBookings(data ?? [])) {
     try {
       const isCde = isCdeBookingRow(row);
@@ -266,7 +253,7 @@ async function runLanePostVisit(opts: {
     .in('booking_date', dates)
     .eq('status', 'Completed');
 
-  const venueData = buildVenueData(opts.venue);
+  const venueData = venueRowToEmailData(opts.venue);
   for (const row of normalizeBookings(data ?? [])) {
     try {
       const isCde = isCdeBookingRow(row);
@@ -308,7 +295,7 @@ export async function runUnifiedSchedulingComms(
 ): Promise<void> {
   const { data: venues } = await supabase
     .from('venues')
-    .select('id, name, address, phone, timezone, booking_model')
+    .select('id, name, address, phone, timezone, booking_model, email, reply_to_email, booking_page_url')
     .in('booking_model', ['unified_scheduling', 'practitioner_appointment']);
 
   for (const venue of venues ?? []) {
@@ -344,7 +331,7 @@ export async function runSecondaryModelScheduledComms(
 ): Promise<void> {
   const { data: venues } = await supabase
     .from('venues')
-    .select('id, name, address, phone, timezone, booking_model');
+    .select('id, name, address, phone, timezone, booking_model, email, reply_to_email, booking_page_url');
 
   for (const venue of venues ?? []) {
     await runLaneReminder({

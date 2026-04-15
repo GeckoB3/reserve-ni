@@ -9,12 +9,14 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { VenueTable, TableAvailabilityCandidate, TableGridData, TableGridCell } from '@/types/table-management';
+import type { BookingModel } from '@/types/booking-models';
 import { timeToMinutes, minutesToTime } from '@/lib/availability';
 import { BOOKING_ACTIVE_STATUSES } from '@/lib/table-management/constants';
-import { isTableReservationBooking } from '@/lib/booking/infer-booking-row-model';
+import { inferBookingRowModel, isTableReservationBooking } from '@/lib/booking/infer-booking-row-model';
 import {
   detectAdjacentTables,
   findValidCombinations,
+  type AutoCombinationOverrideInput,
   type CombinationBooking,
   type CombinationBlock,
   type CombinationTable,
@@ -70,6 +72,9 @@ export async function getAvailableTablesForBooking(
   durationMinutes: number,
   bufferMinutes: number,
   partySize: number,
+  opts?: {
+    bookingContext?: { bookingDate: string; bookingTime: string; bookingModel: BookingModel };
+  },
 ): Promise<TableAvailabilityCandidate[]> {
   const [venueRes, tablesRes, blocksRes] = await Promise.all([
     supabase
@@ -143,6 +148,14 @@ export async function getAvailableTablesForBooking(
     .eq('venue_id', venueId)
     .eq('is_active', true);
 
+  let overrideRows: Record<string, unknown>[] = [];
+  const ovRes = await supabase.from('combination_auto_overrides').select('*').eq('venue_id', venueId);
+  if (ovRes.error) {
+    console.error('load combination_auto_overrides:', ovRes.error.message);
+  } else {
+    overrideRows = (ovRes.data ?? []) as Record<string, unknown>[];
+  }
+
   const algorithmTables: CombinationTable[] = (tables as VenueTable[]).map((table) => ({
     id: table.id,
     name: table.name,
@@ -161,25 +174,54 @@ export async function getAvailableTablesForBooking(
     end_at: block.end_at,
   }));
 
-  const manualCombinations: ManualCombination[] = (combinations ?? []).map((combo) => ({
-    id: combo.id,
-    name: combo.name,
-    combined_min_covers: combo.combined_min_covers,
-    combined_max_covers: combo.combined_max_covers,
-    is_active: combo.is_active,
-    table_ids: (combo.members ?? []).map((member: { table_id: string }) => member.table_id),
+  const manualCombinations: ManualCombination[] = (combinations ?? []).map((combo: Record<string, unknown>) => ({
+    id: combo.id as string,
+    name: combo.name as string,
+    combined_min_covers: combo.combined_min_covers as number,
+    combined_max_covers: combo.combined_max_covers as number,
+    is_active: combo.is_active as boolean,
+    table_ids: ((combo.members as { table_id: string }[]) ?? []).map((m) => m.table_id),
+    days_of_week: (combo.days_of_week as number[] | undefined) ?? undefined,
+    time_start: (combo.time_start as string | null | undefined) ?? null,
+    time_end: (combo.time_end as string | null | undefined) ?? null,
+    booking_type_filters: (combo.booking_type_filters as string[] | null | undefined) ?? null,
+    requires_manager_approval: (combo.requires_manager_approval as boolean | undefined) ?? false,
+    internal_notes: (combo.internal_notes as string | null | undefined) ?? null,
   }));
+
+  const autoOverrides = new Map<string, AutoCombinationOverrideInput>();
+  for (const row of overrideRows ?? []) {
+    const r = row as Record<string, unknown>;
+    autoOverrides.set(r.table_group_key as string, {
+      id: r.id as string,
+      table_group_key: r.table_group_key as string,
+      disabled: r.disabled as boolean,
+      display_name: (r.display_name as string | null) ?? null,
+      combined_min_covers: (r.combined_min_covers as number | null) ?? null,
+      combined_max_covers: (r.combined_max_covers as number | null) ?? null,
+      days_of_week: (r.days_of_week as number[]) ?? [1, 2, 3, 4, 5, 6, 7],
+      time_start: (r.time_start as string | null) ?? null,
+      time_end: (r.time_end as string | null) ?? null,
+      booking_type_filters: (r.booking_type_filters as string[] | null) ?? null,
+      requires_manager_approval: (r.requires_manager_approval as boolean) ?? false,
+      internal_notes: (r.internal_notes as string | null) ?? null,
+    });
+  }
+
+  const timePart = startTime.length >= 5 ? startTime.slice(0, 5) : startTime;
 
   const threshold = venueRes.data?.combination_threshold ?? 80;
   const suggestions = findValidCombinations({
     partySize,
-    datetime: `${date}T${startTime}:00.000Z`,
+    datetime: `${date}T${timePart}:00.000Z`,
     durationMinutes: durationMinutes + bufferMinutes,
     tables: algorithmTables,
     bookings: Array.from(bookingsById.values()),
     blocks: algorithmBlocks,
     adjacencyMap: detectAdjacentTables(algorithmTables, threshold),
     manualCombinations,
+    autoOverrides,
+    bookingContext: opts?.bookingContext,
   });
 
   const tableMap = new Map((tables as VenueTable[]).map((table) => [table.id, table]));
@@ -213,8 +255,11 @@ export async function getAvailableTablesForBooking(
       max_covers: manual?.combined_max_covers ?? suggestion.combined_capacity,
       combination_id: manual?.id,
       combination_name: manual?.name,
+      auto_override_id: suggestion.auto_override_id,
       spare_covers: suggestion.spare_covers,
       score: suggestion.score,
+      requires_manager_approval: suggestion.requires_manager_approval,
+      internal_notes: suggestion.internal_notes ?? null,
     } satisfies TableAvailabilityCandidate;
   });
 }
@@ -447,6 +492,17 @@ export async function autoAssignTable(
   bufferMinutes: number,
   partySize: number,
 ): Promise<TableAvailabilityCandidate | null> {
+  const { data: bookingRow } = await supabase
+    .from('bookings')
+    .select(
+      'experience_event_id, class_instance_id, resource_id, event_session_id, calendar_id, service_item_id, practitioner_id, appointment_service_id',
+    )
+    .eq('id', bookingId)
+    .single();
+
+  const timePart = startTime.length >= 5 ? startTime.slice(0, 5) : startTime;
+  const bookingModel = inferBookingRowModel(bookingRow ?? {});
+
   const candidates = await getAvailableTablesForBooking(
     supabase,
     venueId,
@@ -455,9 +511,17 @@ export async function autoAssignTable(
     durationMinutes,
     bufferMinutes,
     partySize,
+    {
+      bookingContext: {
+        bookingDate: date,
+        bookingTime: timePart,
+        bookingModel,
+      },
+    },
   );
 
-  if (candidates.length === 0) {
+  const assignable = candidates.filter((c) => !c.requires_manager_approval);
+  if (assignable.length === 0) {
     const { logTableAutoAssignMiss } = await import('@/lib/table-management/auto-assign-policy');
     logTableAutoAssignMiss({
       venueId,
@@ -472,7 +536,7 @@ export async function autoAssignTable(
     return null;
   }
 
-  const best = candidates[0]!;
+  const best = assignable[0]!;
 
   const inserts = best.table_ids.map((tableId) => ({
     booking_id: bookingId,

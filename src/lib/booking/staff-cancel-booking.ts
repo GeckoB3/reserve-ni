@@ -8,7 +8,8 @@ import { enrichBookingEmailForComms } from '@/lib/emails/booking-email-enrichmen
 import { sendCancellationNotification } from '@/lib/communications/send-templated';
 import { inferBookingRowModel } from '@/lib/booking/infer-booking-row-model';
 import { getCancellationNoticeHoursForBooking, parseExtendedBookingRules } from '@/lib/booking/venue-booking-rules';
-import type { BookingEmailData, VenueEmailData } from '@/lib/emails/types';
+import type { BookingEmailData } from '@/lib/emails/types';
+import { venueRowToEmailData } from '@/lib/emails/venue-email-data';
 
 const CANCELLABLE = ['Pending', 'Confirmed', 'Seated'];
 
@@ -158,7 +159,7 @@ export async function cancelStaffBookingWithNotify(
 
   const { data: venueRow } = await staffDb
     .from('venues')
-    .select('name, address, phone, booking_rules')
+    .select('name, address, phone, booking_rules, email, reply_to_email')
     .eq('id', venueId)
     .single();
   const { data: guestRow } = await staffDb
@@ -217,11 +218,13 @@ export async function cancelStaffBookingWithNotify(
     deposit_amount_pence: depositPenceForMessage ?? (booking.deposit_amount_pence as number | null) ?? null,
     deposit_status: booking.deposit_status as string | null,
   };
-  const cancelVenueEmail: VenueEmailData = {
+  const cancelVenueEmail = venueRowToEmailData({
     name: venueRow?.name ?? 'Venue',
     address: venueRow?.address ?? null,
     phone: venueRow?.phone ?? null,
-  };
+    email: (venueRow as { email?: string | null } | null)?.email ?? null,
+    reply_to_email: (venueRow as { reply_to_email?: string | null } | null)?.reply_to_email ?? null,
+  });
 
   let scheduleNotification: (() => Promise<void>) | undefined;
   if (guestRow && venueRow?.name) {

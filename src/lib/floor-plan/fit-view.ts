@@ -67,3 +67,40 @@ export function computeStageFitToView(
     y: canvasH / 2 - midY * scale,
   };
 }
+
+export interface FitFullLayoutOptions {
+  /** Padding from viewport edges (px). Default 16. */
+  padding?: number;
+  maxScale?: number;
+}
+
+/**
+ * Fits the entire logical layout rectangle (0,0 → layoutW × layoutH) into the
+ * visible viewport. Use with a viewport-sized Konva Stage and a Group scaled by
+ * `scale` at `x`/`y` so the whole floor plan area is visible on load.
+ */
+export function computeFitFullLayoutToViewport(
+  layoutW: number,
+  layoutH: number,
+  viewportW: number,
+  viewportH: number,
+  options?: FitFullLayoutOptions,
+): { scale: number; x: number; y: number } {
+  const pad = options?.padding ?? 16;
+  const maxScale = options?.maxScale ?? 3;
+  if (layoutW < 1 || layoutH < 1 || viewportW < 1 || viewportH < 1) {
+    return { scale: 1, x: 0, y: 0 };
+  }
+  const scale = Math.min(
+    (viewportW - pad * 2) / layoutW,
+    (viewportH - pad * 2) / layoutH,
+    maxScale,
+  );
+  const midX = layoutW / 2;
+  const midY = layoutH / 2;
+  return {
+    scale,
+    x: viewportW / 2 - midX * scale,
+    y: viewportH / 2 - midY * scale,
+  };
+}

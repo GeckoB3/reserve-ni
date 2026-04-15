@@ -5,6 +5,7 @@ import { getSupabaseAdminClient } from '@/lib/supabase';
 import { sendCommunication } from '@/lib/communications';
 import { generateConfirmToken, hashConfirmToken } from '@/lib/confirm-token';
 import { sendBookingConfirmationNotifications, sendDepositConfirmationEmail } from '@/lib/communications/send-templated';
+import { venueRowToEmailData } from '@/lib/emails/venue-email-data';
 import { enrichBookingEmailForComms } from '@/lib/emails/booking-email-enrichment';
 import { isSelfServeBookingSource } from '@/lib/booking-source';
 import { createShortManageLink } from '@/lib/short-manage-link';
@@ -104,7 +105,11 @@ export async function POST(request: NextRequest) {
         confirm_token_hash: hashConfirmToken(candidateToken),
         updated_at: new Date().toISOString(),
       }).eq('id', bookingId).is('confirm_token_hash', null).select('id');
-      const { data: venue } = await supabase.from('venues').select('name, address').eq('id', booking.venue_id).single();
+      const { data: venue } = await supabase
+        .from('venues')
+        .select('name, address, email, reply_to_email')
+        .eq('id', booking.venue_id)
+        .single();
       const { data: guest } = await supabase.from('guests').select('name, email, phone').eq('id', booking.guest_id).single();
       const b = bRow;
       const manageBookingLink = createShortManageLink(bookingId);
@@ -122,7 +127,12 @@ export async function POST(request: NextRequest) {
         deposit_status: 'Paid' as const,
         manage_booking_link: manageBookingLink,
       };
-      const venueData = { name: venue?.name ?? '', address: (venue as Record<string, unknown>)?.address as string | undefined };
+      const venueData = venueRowToEmailData({
+        name: venue?.name ?? 'Venue',
+        address: venue?.address ?? null,
+        email: venue?.email ?? null,
+        reply_to_email: venue?.reply_to_email ?? null,
+      });
 
       const venueIdForAfter = booking.venue_id;
       const hasDeposit = Boolean(recipientEmail && b?.deposit_amount_pence);

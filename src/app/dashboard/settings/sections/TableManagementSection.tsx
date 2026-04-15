@@ -1,18 +1,18 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import type { VenueSettings } from '../types';
-import type { VenueTable } from '@/types/table-management';
 import { AdjacencyPreview } from './AdjacencyPreview';
-import { TableList } from '../tables/TableList';
 import { NumericInput } from '@/components/ui/NumericInput';
 
 interface Props {
   venue: VenueSettings;
   onUpdate: (patch: Partial<VenueSettings>) => void;
   isAdmin: boolean;
+  /** Incremented by the parent each time the floor plan editor saves positions. */
+  layoutSaveCount?: number;
 }
 
 interface ToggleFlags {
@@ -20,7 +20,7 @@ interface ToggleFlags {
   hasActiveAssignments: boolean;
 }
 
-export function TableManagementSection({ venue, onUpdate, isAdmin }: Props) {
+export function TableManagementSection({ venue, onUpdate, isAdmin, layoutSaveCount = 0 }: Props) {
   const router = useRouter();
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -34,31 +34,6 @@ export function TableManagementSection({ venue, onUpdate, isAdmin }: Props) {
   const [thresholdSaving, setThresholdSaving] = useState(false);
   const [recalcLoading, setRecalcLoading] = useState(false);
   const [recalcResult, setRecalcResult] = useState<string | null>(null);
-
-  const [floorPlanPrompt, setFloorPlanPrompt] = useState<{ open: boolean; seeded: boolean }>({
-    open: false,
-    seeded: false,
-  });
-
-  const [coversTables, setCoversTables] = useState<VenueTable[]>([]);
-  const [coversTablesLoading, setCoversTablesLoading] = useState(false);
-
-  const fetchCoversTables = useCallback(async () => {
-    setCoversTablesLoading(true);
-    try {
-      const res = await fetch('/api/venue/tables');
-      if (!res.ok) return;
-      const data = await res.json();
-      setCoversTables(data.tables ?? []);
-    } catch { /* non-critical */ }
-    finally { setCoversTablesLoading(false); }
-  }, []);
-
-  useEffect(() => {
-    if (!venue.table_management_enabled) {
-      void fetchCoversTables();
-    }
-  }, [venue.table_management_enabled, fetchCoversTables]);
 
   useEffect(() => {
     let mounted = true;
@@ -112,9 +87,6 @@ export function TableManagementSection({ venue, onUpdate, isAdmin }: Props) {
           : {}),
       } as Partial<VenueSettings>);
       setNotice(`Advanced table management ${nextValue ? 'enabled' : 'disabled'}.`);
-      if (!nextValue) {
-        setFloorPlanPrompt({ open: false, seeded: false });
-      }
       router.refresh();
       return {
         success: true,
@@ -196,11 +168,26 @@ export function TableManagementSection({ venue, onUpdate, isAdmin }: Props) {
     }
     const result = await commitToggle(nextValue);
     if (result.success && nextValue) {
-      setFloorPlanPrompt({
-        open: true,
-        seeded: result.defaultFloorPlanSeeded ?? false,
-      });
       await previewUnassignedBookings();
+    }
+  }
+
+  async function recalculateAdjacency() {
+    if (!isAdmin || recalcLoading) return;
+    setRecalcLoading(true);
+    setRecalcResult(null);
+    try {
+      const res = await fetch('/api/venue/tables/combinations/recalculate', { method: 'POST' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setRecalcResult(data.error ?? 'Failed to recalculate adjacency.');
+        return;
+      }
+      setRecalcResult(`${data.adjacent_pairs ?? 0} adjacent table pair${(data.adjacent_pairs ?? 0) !== 1 ? 's' : ''} detected.`);
+    } catch {
+      setRecalcResult('Failed to recalculate adjacency.');
+    } finally {
+      setRecalcLoading(false);
     }
   }
 
@@ -221,8 +208,9 @@ export function TableManagementSection({ venue, onUpdate, isAdmin }: Props) {
         return;
       }
       onUpdate({ combination_threshold: thresholdDraft } as Partial<VenueSettings>);
-      setNotice('Combination threshold saved.');
       router.refresh();
+      // Recalculate immediately so the diagram and result reflect the new distance.
+      await recalculateAdjacency();
     } catch {
       setNotice('Failed to save combination threshold.');
     } finally {
@@ -230,24 +218,13 @@ export function TableManagementSection({ venue, onUpdate, isAdmin }: Props) {
     }
   }
 
-  async function recalculateAdjacency() {
-    if (!isAdmin || recalcLoading) return;
-    setRecalcLoading(true);
-    setRecalcResult(null);
-    try {
-      const res = await fetch('/api/venue/tables/combinations/recalculate', { method: 'POST' });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setRecalcResult(data.error ?? 'Failed to recalculate adjacency.');
-        return;
-      }
-      setRecalcResult(`Done - ${data.adjacent_pairs ?? 0} adjacent table pairs detected.`);
-    } catch {
-      setRecalcResult('Failed to recalculate adjacency.');
-    } finally {
-      setRecalcLoading(false);
-    }
-  }
+  // Auto-recalculate adjacency whenever the floor plan editor saves a new layout.
+  // Skip the very first render (layoutSaveCount === 0).
+  useEffect(() => {
+    if (layoutSaveCount === 0 || !venue.table_management_enabled) return;
+    void recalculateAdjacency();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [layoutSaveCount]);
 
   const advanced = venue.table_management_enabled;
 
@@ -338,6 +315,37 @@ export function TableManagementSection({ venue, onUpdate, isAdmin }: Props) {
               </div>
             </div>
           </details>
+
+          {showDisableWarning && (
+            <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-4">
+              <p className="text-sm text-amber-900">
+                Switch back to <strong className="font-semibold">Simple covers mode</strong>? Your Floor Plan and Table Grid
+                will be hidden and the Day Sheet will be your main service view again. Table layouts and data stay saved and
+                return if you turn Advanced on later. Existing bookings are not removed.
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  disabled={saving}
+                  onClick={async () => {
+                    setShowDisableWarning(false);
+                    await commitToggle(false);
+                  }}
+                  className="rounded-lg bg-amber-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-60"
+                >
+                  Switch to Simple covers
+                </button>
+                <button
+                  type="button"
+                  disabled={saving}
+                  onClick={() => setShowDisableWarning(false)}
+                  className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="flex shrink-0 flex-col gap-1.5 border-t border-slate-100 pt-3 lg:border-t-0 lg:border-l lg:pl-4 lg:pt-0">
@@ -383,52 +391,6 @@ export function TableManagementSection({ venue, onUpdate, isAdmin }: Props) {
 
       {notice && <p className="mt-3 text-xs text-slate-600">{notice}</p>}
 
-      {floorPlanPrompt.open && venue.table_management_enabled && (
-        <div className="mt-4 rounded-lg border border-brand-200 bg-brand-50/90 p-4 shadow-sm">
-          <p className="text-sm text-slate-800">
-            {floorPlanPrompt.seeded ? (
-              <>
-                We placed your existing tables on a <strong className="font-semibold">starter floor layout</strong>. Open the
-                Floor Plan to upload a background image, fine-tune positions, and set table combinations.
-              </>
-            ) : (
-              <>
-                Open the <strong className="font-semibold">Floor Plan</strong> to arrange your tables, upload a background
-                image, and configure combinations.
-              </>
-            )}
-          </p>
-          <Link
-            href="/dashboard/floor-plan"
-            className="mt-3 inline-flex items-center justify-center rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-brand-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
-          >
-            Open Floor Plan
-          </Link>
-        </div>
-      )}
-
-      {/* Covers-mode: simplified table list for seating tracking */}
-      {!venue.table_management_enabled && (
-        <div className="mt-4 space-y-3">
-          <p className="text-xs text-slate-500">
-            Optional: define tables for staff seating notes on the Day Sheet. This does not change how many guests can book online.
-          </p>
-          {coversTablesLoading ? (
-            <div className="flex items-center justify-center py-8">
-              <div className="h-6 w-6 animate-spin rounded-full border-2 border-slate-300 border-t-brand-600" />
-            </div>
-          ) : (
-            <TableList
-              tables={coversTables}
-              setTables={setCoversTables}
-              isAdmin={isAdmin}
-              onRefresh={fetchCoversTables}
-              variant="covers"
-            />
-          )}
-        </div>
-      )}
-
       {venue.table_management_enabled && (
       <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
         <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500">
@@ -449,57 +411,16 @@ export function TableManagementSection({ venue, onUpdate, isAdmin }: Props) {
           <button
             type="button"
             onClick={saveThreshold}
-            disabled={!isAdmin || thresholdSaving}
+            disabled={!isAdmin || thresholdSaving || recalcLoading}
             className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60"
           >
-            {thresholdSaving ? 'Saving...' : 'Save'}
+            {thresholdSaving || recalcLoading ? 'Saving…' : 'Save'}
           </button>
-        </div>
-        <div className="mt-3">
-          <button
-            type="button"
-            onClick={recalculateAdjacency}
-            disabled={!isAdmin || recalcLoading}
-            className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60"
-          >
-            {recalcLoading ? 'Recalculating...' : 'Recalculate table adjacency'}
-          </button>
-          {recalcResult && <p className="mt-2 text-xs text-slate-600">{recalcResult}</p>}
+          {recalcResult && <p className="text-xs text-slate-500">{recalcResult}</p>}
         </div>
 
-        <AdjacencyPreview threshold={thresholdDraft} />
+        <AdjacencyPreview threshold={thresholdDraft} refreshKey={layoutSaveCount} />
       </div>
-      )}
-
-      {showDisableWarning && (
-        <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-4">
-          <p className="text-sm text-amber-900">
-            Switch back to <strong className="font-semibold">Simple covers mode</strong>? Your Floor Plan and Table Grid
-            will be hidden and the Day Sheet will be your main service view again. Table layouts and data stay saved and
-            return if you turn Advanced on later. Existing bookings are not removed.
-          </p>
-          <div className="mt-3 flex gap-2">
-            <button
-              type="button"
-              disabled={saving}
-              onClick={async () => {
-                setShowDisableWarning(false);
-                await commitToggle(false);
-              }}
-              className="rounded-lg bg-amber-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-60"
-            >
-              Switch to Simple covers
-            </button>
-            <button
-              type="button"
-              disabled={saving}
-              onClick={() => setShowDisableWarning(false)}
-              className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
       )}
 
       {showEnableAssignDialog && (
@@ -545,7 +466,7 @@ export function TableManagementSection({ venue, onUpdate, isAdmin }: Props) {
               Open Table Grid
             </button>
             <Link
-              href="/dashboard/floor-plan"
+              href="/dashboard/availability?tab=table&fp=layout"
               className="inline-flex items-center justify-center rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
             >
               Open Floor Plan

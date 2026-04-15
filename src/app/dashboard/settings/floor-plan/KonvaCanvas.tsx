@@ -1,30 +1,42 @@
 'use client';
 
-import { useRef, useState, useCallback, useEffect } from 'react';
+import React, { useRef, useState, useCallback, useEffect, useMemo } from 'react';
 import { Stage, Layer, Line, Rect, Text, Group, Circle } from 'react-konva';
 import type { KonvaEventObject } from 'konva/lib/Node';
 import type Konva from 'konva';
+
 import type { VenueTable } from '@/types/table-management';
 import { getTableDimensions, computeTableAdjacency } from '@/types/table-management';
 import type { BlockedSides } from '@/types/table-management';
 import TableShape from '@/components/floor-plan/TableShape';
-import {
-  detectSnap,
-  buildSnapGroup,
-  removeFromSnapGroup,
-  calculateGroupOutline,
-  type SnapDetectResult,
-  type SnapTableBounds,
-  type SnapGroupUpdate,
-  type SnapRemoveUpdate,
-} from '@/lib/floor-plan/snap-detection';
-import { computeStageFitToView } from '@/lib/floor-plan/fit-view';
+import { computeFitFullLayoutToViewport } from '@/lib/floor-plan/fit-view';
+import { computeGlobalUnifiedLabelFonts } from '@/lib/floor-plan/table-label-fonts';
 
 // ---------------------------------------------------------------------------
 // Constants & helpers
 // ---------------------------------------------------------------------------
 
-const SNAP_THRESHOLD = 20;
+/** Logical floor size is at least this wide (px) so 50+ tables can be placed comfortably. */
+const MIN_LAYOUT_WIDTH = 2600;
+const MIN_LAYOUT_HEIGHT = 1950;
+const MIN_RESIZE_WIDTH = 1600;
+const MIN_RESIZE_HEIGHT = 1200;
+/** Match toolbar limits in FloorPlanEditor */
+const MAX_LAYOUT_WIDTH = 12000;
+const MAX_LAYOUT_HEIGHT = 9000;
+
+export type LayoutResizeAnchor =
+  | 'e'
+  | 's'
+  | 'w'
+  | 'n'
+  | 'se'
+  | 'sw'
+  | 'ne'
+  | 'nw';
+
+/** Multiply viewport width so the editable area is larger than the on-screen column. */
+const VIEWPORT_TO_LAYOUT_MULTIPLIER = 2.6;
 const ZONE_COLORS: Record<string, string> = {};
 const ZONE_PALETTE = [
   '#3b82f6', '#10b981', '#f59e0b', '#ef4444',
@@ -71,26 +83,6 @@ function tableBounds(t: VenueTable, dims: { width: number; height: number }): { 
   };
 }
 
-function toSnapBounds(
-  t: VenueTable,
-  dims: { width: number; height: number },
-  overrideXY?: { x: number; y: number },
-): SnapTableBounds {
-  const b = tableBounds(t, dims);
-  return {
-    id: t.id,
-    x: overrideXY?.x ?? b.x,
-    y: overrideXY?.y ?? b.y,
-    w: b.w,
-    h: b.h,
-    shape: t.shape,
-    snap_group_id: t.snap_group_id,
-    snap_sides: t.snap_sides,
-    max_covers: t.max_covers,
-    name: t.name,
-  };
-}
-
 // ---------------------------------------------------------------------------
 // Component props
 // ---------------------------------------------------------------------------
@@ -106,15 +98,32 @@ interface Props {
   selectedId: string | null;
   selectedIds?: string[];
   onSelect: (id: string | null, additive?: boolean) => void;
+  onMultiSelect?: (ids: string[]) => void;
   onMove: (id: string, x: number, y: number) => void;
   onResize: (id: string, w: number, h: number) => void;
-  onGroupMove?: (moves: Array<{ id: string; x: number; y: number }>) => void;
-  onSnapApply?: (result: SnapGroupUpdate, pctPositions: Array<{ id: string; x: number; y: number }>) => void;
-  onSnapRemove?: (result: SnapRemoveUpdate, movedTable: { id: string; x: number; y: number }) => void;
+  onRotate?: (id: string, rotation: number) => void;
   combinationLinks?: CombinationLink[];
   backgroundUrl?: string | null;
-  joinSnapEnabled?: boolean;
   alignmentGuidesEnabled?: boolean;
+  /** Override the computed logical canvas dimensions (from saved floor plan). */
+  layoutWidth?: number | null;
+  layoutHeight?: number | null;
+  /** Called on every frame while dragging a layout resize handle. */
+  onLayoutResize?: (w: number, h: number, opts?: { anchor: LayoutResizeAnchor }) => void;
+  /** Called once when the user finishes dragging a layout resize handle (for DB save). */
+  onLayoutResizeEnd?: () => void;
+  /** Called when a seat is dragged to a new position. */
+  onSeatDrag?: (tableId: string, seatIndex: number, newAngle: number) => void;
+  onSeatDragEnd?: (tableId: string, seatIndex: number, newAngle: number) => void;
+  /**
+   * Called when the user finishes drawing a polygon on the canvas.
+   * Returns canvas-space points; caller converts to % and creates the table.
+   */
+  onPolygonCreate?: (points: { x: number; y: number }[], canvasWidth: number, canvasHeight: number) => void;
+  /** Set to true while the user is dragging "Custom" from the elements panel. */
+  polygonDrawPending?: boolean;
+  onPolygonDrawCancel?: () => void;
+  onDimensionsChange?: (dims: { width: number; height: number }) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -122,13 +131,21 @@ interface Props {
 // ---------------------------------------------------------------------------
 
 export default function KonvaCanvas({
-  tables, selectedId, selectedIds, onSelect, onMove,
-  onGroupMove, onSnapApply, onSnapRemove, combinationLinks, backgroundUrl,
-  joinSnapEnabled = true, alignmentGuidesEnabled = true,
+  tables, selectedId, selectedIds, onSelect, onMultiSelect, onMove, onResize, onRotate,
+  combinationLinks, backgroundUrl,
+  alignmentGuidesEnabled = false,
+  layoutWidth, layoutHeight, onLayoutResize, onLayoutResizeEnd,
+  onSeatDrag, onSeatDragEnd,
+  onPolygonCreate,
+  polygonDrawPending,
+  onPolygonDrawCancel,
+  onDimensionsChange,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<Konva.Stage | null>(null);
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
+  /** Visible area of the scroll container — used to fit the full layout on load. */
+  const [viewport, setViewport] = useState({ width: 0, height: 0 });
   const [scale, setScale] = useState(1);
   const [stagePos, setStagePos] = useState({ x: 0, y: 0 });
   const [, forceRender] = useState(0);
@@ -137,29 +154,149 @@ export default function KonvaCanvas({
   const dragPosRef = useRef<{ id: string; x: number; y: number } | null>(null);
   const snapGuidesRef = useRef<Array<{ points: number[] }>>([]);
 
-  // Snap-join state
-  const snapResultRef = useRef<SnapDetectResult | null>(null);
-  const snapGuideEdgeRef = useRef<number[] | null>(null);
-  const snapGhostRef = useRef<{ x: number; y: number; w: number; h: number } | null>(null);
-
-  // Group drag state
-  const groupDragRef = useRef<{
-    groupId: string;
-    startPositions: Map<string, { x: number; y: number }>;
+  // Marquee (box) selection state
+  const marqueeRef = useRef<{
+    active: boolean;
+    startX: number;
+    startY: number;
+    currentX: number;
+    currentY: number;
   } | null>(null);
-  const dragGroupOffsetsRef = useRef<Map<string, { x: number; y: number }>>(new Map());
+
+  // Rotation handle drag state
+  const rotatingRef = useRef<{
+    tableId: string;
+    centerX: number;
+    centerY: number;
+  } | null>(null);
+
+  // Resize handle live state (for oval/circle — updates table while dragging)
+  const resizingRef = useRef<{
+    tableId: string;
+    axis: 'x' | 'y';
+    currentHalfPx: number;
+  } | null>(null);
+
+  // Polygon drawing state
+  const [polygonDrawing, setPolygonDrawing] = useState<{
+    active: boolean;
+    points: { x: number; y: number }[];
+    cursorPos: { x: number; y: number } | null;
+  }>({ active: false, points: [], cursorPos: null });
+
+  // Layout canvas resize via pointer tracking (NOT Konva draggable)
+  const layoutResizeRef = useRef<{
+    anchor: LayoutResizeAnchor;
+    startW: number;
+    startH: number;
+    startPointerLocal: { x: number; y: number };
+  } | null>(null);
+
+  // Space-bar / middle-mouse temporary pan mode
+  const [spacebarPan, setSpacebarPan] = useState(false);
+  const middleMousePanRef = useRef(false);
 
   useEffect(() => {
     const updateSize = () => {
       if (containerRef.current) {
-        const w = containerRef.current.offsetWidth;
-        setDimensions({ width: w, height: Math.round(w * 0.75) });
+        const vw = containerRef.current.offsetWidth;
+        const autoW = Math.max(Math.round(vw * VIEWPORT_TO_LAYOUT_MULTIPLIER), MIN_LAYOUT_WIDTH);
+        const autoH = Math.max(Math.round(autoW * 0.75), MIN_LAYOUT_HEIGHT);
+        setDimensions({
+          width: layoutWidth ?? autoW,
+          height: layoutHeight ?? autoH,
+        });
       }
     };
     updateSize();
     window.addEventListener('resize', updateSize);
     return () => window.removeEventListener('resize', updateSize);
+  }, [layoutWidth, layoutHeight]);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver((entries) => {
+      const cr = entries[0]?.contentRect;
+      if (!cr) return;
+      setViewport({
+        width: Math.max(1, Math.round(cr.width)),
+        height: Math.max(1, Math.round(cr.height)),
+      });
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
   }, []);
+
+  useEffect(() => {
+    onDimensionsChange?.(dimensions);
+  }, [dimensions, onDimensionsChange]);
+
+  // --- Enter polygon drawing mode when parent signals pending drop ---
+  useEffect(() => {
+    if (polygonDrawPending && !polygonDrawing.active) {
+      setPolygonDrawing({ active: true, points: [], cursorPos: null });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [polygonDrawPending]);
+
+  // Cancel polygon drawing when Esc fires or component unmounts
+  useEffect(() => {
+    if (!polygonDrawing.active) {
+      onPolygonDrawCancel?.();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [polygonDrawing.active]);
+
+  // --- Space-bar + middle-mouse temporary pan mode; Escape to cancel polygon drawing ---
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.code === 'Space' && e.target === document.body) {
+        e.preventDefault();
+        setSpacebarPan(true);
+      }
+      if (e.code === 'Escape') {
+        setPolygonDrawing({ active: false, points: [], cursorPos: null });
+      }
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.code === 'Space') {
+        setSpacebarPan(false);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+    };
+  }, []);
+
+  const handleWheel = useCallback(
+    (e: KonvaEventObject<WheelEvent>) => {
+      e.evt.preventDefault();
+      const stage = stageRef.current;
+      if (!stage) return;
+      const pointer = stage.getPointerPosition();
+      if (!pointer) return;
+
+      const zoomFactor = e.evt.ctrlKey ? 1.08 : 1.12;
+      const direction = e.evt.deltaY > 0 ? -1 : 1;
+      const oldScale = scale;
+      const newScale = Math.max(0.15, Math.min(5, oldScale * (direction > 0 ? zoomFactor : 1 / zoomFactor)));
+
+      const mousePointTo = {
+        x: (pointer.x - stagePos.x) / oldScale,
+        y: (pointer.y - stagePos.y) / oldScale,
+      };
+      setScale(newScale);
+      setStagePos({
+        x: pointer.x - mousePointTo.x * newScale,
+        y: pointer.y - mousePointTo.y * newScale,
+      });
+    },
+    [scale, stagePos],
+  );
 
   // --- Build table bounds helper (uses latest dimensions) ---
   const getBounds = useCallback(
@@ -184,145 +321,64 @@ export default function KonvaCanvas({
       const dw = ((draggedTable.width ?? fb.width) / 100) * dimensions.width;
       const dh = ((draggedTable.height ?? fb.height) / 100) * dimensions.height;
 
-      // -- Group drag: initialise on first move --
-      if (draggedTable.snap_group_id && !groupDragRef.current) {
-        const starts = new Map<string, { x: number; y: number }>();
-        for (const t of tables) {
-          if (t.snap_group_id === draggedTable.snap_group_id) {
-            const b = getBounds(t);
-            starts.set(t.id, { x: b.x, y: b.y });
+      // -- Alignment guides --
+      const guides: Array<{ points: number[] }> = [];
+      let snappedX = false;
+      let snappedY = false;
+
+      for (const other of tables) {
+        if (other.id === tableId) continue;
+
+        const ob = getBounds(other);
+        const obLeft = ob.x - ob.w / 2;
+        const obRight = ob.x + ob.w / 2;
+        const obTop = ob.y - ob.h / 2;
+        const obBottom = ob.y + ob.h / 2;
+        const dragLeft = newX - dw / 2;
+        const dragRight = newX + dw / 2;
+        const dragTop = newY - dh / 2;
+        const dragBottom = newY + dh / 2;
+
+        if (!snappedX) {
+          if (Math.abs(dragRight - obLeft) < 15) {
+            guides.push({ points: [obLeft, Math.min(dragTop, obTop) - 10, obLeft, Math.max(dragBottom, obBottom) + 10] });
+            if (alignmentGuidesEnabled) { newX = obLeft + dw / 2; }
+            snappedX = true;
+          } else if (Math.abs(dragLeft - obRight) < 15) {
+            guides.push({ points: [obRight, Math.min(dragTop, obTop) - 10, obRight, Math.max(dragBottom, obBottom) + 10] });
+            if (alignmentGuidesEnabled) { newX = obRight - dw / 2; }
+            snappedX = true;
+          } else if (Math.abs(newX - ob.x) < 15) {
+            guides.push({ points: [ob.x, Math.min(dragTop, obTop) - 10, ob.x, Math.max(dragBottom, obBottom) + 10] });
+            if (alignmentGuidesEnabled) { newX = ob.x; }
+            snappedX = true;
           }
         }
-        groupDragRef.current = {
-          groupId: draggedTable.snap_group_id,
-          startPositions: starts,
-        };
-      }
-
-      // -- Group drag: apply delta to group members --
-      if (groupDragRef.current) {
-        const startPos = groupDragRef.current.startPositions.get(tableId);
-        if (startPos) {
-          const dx = newX - startPos.x;
-          const dy = newY - startPos.y;
-          for (const [id, sp] of groupDragRef.current.startPositions) {
-            if (id !== tableId) {
-              dragGroupOffsetsRef.current.set(id, { x: sp.x + dx, y: sp.y + dy });
-            }
-          }
-        }
-      }
-
-      // -- Snap-join detection (only when join-snap is enabled) --
-      const allBounds: SnapTableBounds[] = tables.map((t) => {
-        const offset = dragGroupOffsetsRef.current.get(t.id);
-        return toSnapBounds(t, dimensions, t.id === tableId ? { x: newX, y: newY } : offset ? offset : undefined);
-      });
-      const draggedBounds = allBounds.find((b) => b.id === tableId)!;
-      const snapRes = joinSnapEnabled ? detectSnap(draggedBounds, allBounds, SNAP_THRESHOLD) : null;
-
-      let snapApplied = false;
-      if (snapRes) {
-        newX = snapRes.snapX;
-        newY = snapRes.snapY;
-        node.x(newX);
-        node.y(newY);
-        snapResultRef.current = snapRes;
-        snapApplied = true;
-
-        const target = allBounds.find((b) => b.id === snapRes.targetTableId)!;
-        const tL = target.x - target.w / 2;
-        const tR = target.x + target.w / 2;
-        const tT = target.y - target.h / 2;
-        const tB = target.y + target.h / 2;
-        switch (snapRes.targetSide) {
-          case 'left':   snapGuideEdgeRef.current = [tL, tT, tL, tB]; break;
-          case 'right':  snapGuideEdgeRef.current = [tR, tT, tR, tB]; break;
-          case 'top':    snapGuideEdgeRef.current = [tL, tT, tR, tT]; break;
-          case 'bottom': snapGuideEdgeRef.current = [tL, tB, tR, tB]; break;
-        }
-
-        snapGhostRef.current = { x: newX, y: newY, w: dw, h: dh };
-
-        if (groupDragRef.current) {
-          const startPos = groupDragRef.current.startPositions.get(tableId);
-          if (startPos) {
-            const dx = newX - startPos.x;
-            const dy = newY - startPos.y;
-            for (const [id, sp] of groupDragRef.current.startPositions) {
-              if (id !== tableId) {
-                dragGroupOffsetsRef.current.set(id, { x: sp.x + dx, y: sp.y + dy });
-              }
-            }
+        if (!snappedY) {
+          if (Math.abs(dragBottom - obTop) < 15) {
+            guides.push({ points: [Math.min(dragLeft, obLeft) - 10, obTop, Math.max(dragRight, obRight) + 10, obTop] });
+            if (alignmentGuidesEnabled) { newY = obTop + dh / 2; }
+            snappedY = true;
+          } else if (Math.abs(dragTop - obBottom) < 15) {
+            guides.push({ points: [Math.min(dragLeft, obLeft) - 10, obBottom, Math.max(dragRight, obRight) + 10, obBottom] });
+            if (alignmentGuidesEnabled) { newY = obBottom - dh / 2; }
+            snappedY = true;
+          } else if (Math.abs(newY - ob.y) < 15) {
+            guides.push({ points: [Math.min(dragLeft, obLeft) - 10, ob.y, Math.max(dragRight, obRight) + 10, ob.y] });
+            if (alignmentGuidesEnabled) { newY = ob.y; }
+            snappedY = true;
           }
         }
       }
 
-      if (!snapApplied) {
-        snapResultRef.current = null;
-        snapGuideEdgeRef.current = null;
-        snapGhostRef.current = null;
-
-        // -- Alignment guides: always compute visual guides, but only hard-snap position when enabled --
-        const guides: Array<{ points: number[] }> = [];
-        let snappedX = false;
-        let snappedY = false;
-
-        for (const other of tables) {
-          if (other.id === tableId) continue;
-          if (groupDragRef.current && groupDragRef.current.startPositions.has(other.id)) continue;
-
-          const ob = getBounds(other);
-          const obLeft = ob.x - ob.w / 2;
-          const obRight = ob.x + ob.w / 2;
-          const obTop = ob.y - ob.h / 2;
-          const obBottom = ob.y + ob.h / 2;
-          const dragLeft = newX - dw / 2;
-          const dragRight = newX + dw / 2;
-          const dragTop = newY - dh / 2;
-          const dragBottom = newY + dh / 2;
-
-          if (!snappedX) {
-            if (Math.abs(dragRight - obLeft) < 15) {
-              guides.push({ points: [obLeft, Math.min(dragTop, obTop) - 10, obLeft, Math.max(dragBottom, obBottom) + 10] });
-              if (alignmentGuidesEnabled) { newX = obLeft + dw / 2; }
-              snappedX = true;
-            } else if (Math.abs(dragLeft - obRight) < 15) {
-              guides.push({ points: [obRight, Math.min(dragTop, obTop) - 10, obRight, Math.max(dragBottom, obBottom) + 10] });
-              if (alignmentGuidesEnabled) { newX = obRight - dw / 2; }
-              snappedX = true;
-            } else if (Math.abs(newX - ob.x) < 15) {
-              guides.push({ points: [ob.x, Math.min(dragTop, obTop) - 10, ob.x, Math.max(dragBottom, obBottom) + 10] });
-              if (alignmentGuidesEnabled) { newX = ob.x; }
-              snappedX = true;
-            }
-          }
-          if (!snappedY) {
-            if (Math.abs(dragBottom - obTop) < 15) {
-              guides.push({ points: [Math.min(dragLeft, obLeft) - 10, obTop, Math.max(dragRight, obRight) + 10, obTop] });
-              if (alignmentGuidesEnabled) { newY = obTop + dh / 2; }
-              snappedY = true;
-            } else if (Math.abs(dragTop - obBottom) < 15) {
-              guides.push({ points: [Math.min(dragLeft, obLeft) - 10, obBottom, Math.max(dragRight, obRight) + 10, obBottom] });
-              if (alignmentGuidesEnabled) { newY = obBottom - dh / 2; }
-              snappedY = true;
-            } else if (Math.abs(newY - ob.y) < 15) {
-              guides.push({ points: [Math.min(dragLeft, obLeft) - 10, ob.y, Math.max(dragRight, obRight) + 10, ob.y] });
-              if (alignmentGuidesEnabled) { newY = ob.y; }
-              snappedY = true;
-            }
-          }
-        }
-
-        node.x(newX);
-        node.y(newY);
-        snapGuidesRef.current = guides;
-      }
+      node.x(newX);
+      node.y(newY);
+      snapGuidesRef.current = guides;
 
       dragPosRef.current = { id: tableId, x: newX, y: newY };
       forceRender((c) => c + 1);
     },
-    [tables, dimensions, getBounds, alignmentGuidesEnabled, joinSnapEnabled],
+    [tables, dimensions, getBounds, alignmentGuidesEnabled],
   );
 
   const handleDragEnd = useCallback(
@@ -334,133 +390,242 @@ export default function KonvaCanvas({
       const finalPctX = pixelToPct(rawX, dimensions.width);
       const finalPctY = pixelToPct(rawY, dimensions.height);
 
-      // -- Snap-join apply --
-      if (snapResultRef.current && onSnapApply) {
-        const allBounds = tables.map((t) => {
-          const offset = dragGroupOffsetsRef.current.get(t.id);
-          return toSnapBounds(t, dimensions, t.id === tableId ? { x: rawX, y: rawY } : offset ?? undefined);
-        });
+      onMove(tableId, finalPctX, finalPctY);
 
-        // If dragged table was in a different group from the target, clean up old group first
-        const draggedBounds = allBounds.find((b) => b.id === tableId)!;
-        const targetBounds = allBounds.find((b) => b.id === snapResultRef.current!.targetTableId)!;
-        if (
-          draggedBounds.snap_group_id &&
-          draggedBounds.snap_group_id !== targetBounds.snap_group_id &&
-          onSnapRemove
-        ) {
-          const removeResult = removeFromSnapGroup(tableId, allBounds);
-          onSnapRemove(removeResult, { id: tableId, x: finalPctX, y: finalPctY });
-        }
-
-        // Clear dragged table's old group data before building new group
-        const cleanedBounds = allBounds.map((b) =>
-          b.id === tableId ? { ...b, snap_group_id: null, snap_sides: null } : b,
-        );
-        const groupUpdate = buildSnapGroup(tableId, snapResultRef.current, cleanedBounds);
-
-        const pctPositions = groupUpdate.tableUpdates.map((tu) => {
-          if (tu.id === tableId) return { id: tu.id, x: finalPctX, y: finalPctY };
-          const offset = dragGroupOffsetsRef.current.get(tu.id);
-          const t = tables.find((tb) => tb.id === tu.id)!;
-          return {
-            id: tu.id,
-            x: offset ? pixelToPct(offset.x, dimensions.width) : t.position_x ?? 50,
-            y: offset ? pixelToPct(offset.y, dimensions.height) : t.position_y ?? 50,
-          };
-        });
-
-        onSnapApply(groupUpdate, pctPositions);
-      }
-      // -- Group move (no snap change) --
-      else if (groupDragRef.current && onGroupMove) {
-        const moves: Array<{ id: string; x: number; y: number }> = [];
-        for (const [id] of groupDragRef.current.startPositions) {
-          if (id === tableId) {
-            moves.push({ id, x: finalPctX, y: finalPctY });
-          } else {
-            const offset = dragGroupOffsetsRef.current.get(id);
-            if (offset) {
-              moves.push({
-                id,
-                x: pixelToPct(offset.x, dimensions.width),
-                y: pixelToPct(offset.y, dimensions.height),
-              });
-            }
-          }
-        }
-        onGroupMove(moves);
-      }
-      // -- Normal single move --
-      else {
-        onMove(tableId, finalPctX, finalPctY);
-      }
-
-      // Clear all drag state
+      // Clear drag state
       dragPosRef.current = null;
       snapGuidesRef.current = [];
-      snapResultRef.current = null;
-      snapGuideEdgeRef.current = null;
-      snapGhostRef.current = null;
-      groupDragRef.current = null;
-      dragGroupOffsetsRef.current.clear();
       forceRender((c) => c + 1);
     },
-    [tables, dimensions, onMove, onGroupMove, onSnapApply, onSnapRemove],
+    [dimensions, onMove],
   );
 
   // ============================================================
   // Other handlers
   // ============================================================
 
+  const closePolygon = useCallback(
+    (pts: { x: number; y: number }[]) => {
+      if (pts.length < 3 || !onPolygonCreate) {
+        setPolygonDrawing({ active: false, points: [], cursorPos: null });
+        return;
+      }
+      onPolygonCreate(pts, dimensions.width, dimensions.height);
+      setPolygonDrawing({ active: false, points: [], cursorPos: null });
+    },
+    [onPolygonCreate, dimensions.width, dimensions.height],
+  );
+
   const handleStageClick = useCallback(
     (e: KonvaEventObject<MouseEvent | TouchEvent>) => {
-      if (e.target === e.target.getStage()) onSelect(null);
+      // Polygon drawing mode
+      if (polygonDrawing.active) {
+        const stage = stageRef.current;
+        if (!stage) return;
+        const pos = stage.getRelativePointerPosition();
+        if (!pos) return;
+        const lx = (pos.x - stagePos.x) / scale;
+        const ly = (pos.y - stagePos.y) / scale;
+
+        const pts = polygonDrawing.points;
+        const CLOSE_THRESHOLD = 14 / scale;
+        const firstPt = pts[0];
+        const isDoubleClick = 'evt' in e && (e.evt as MouseEvent).detail >= 2;
+
+        if (isDoubleClick && pts.length >= 3) {
+          closePolygon(pts);
+          return;
+        }
+        if (
+          firstPt &&
+          pts.length >= 3 &&
+          Math.abs(lx - firstPt.x) < CLOSE_THRESHOLD &&
+          Math.abs(ly - firstPt.y) < CLOSE_THRESHOLD
+        ) {
+          closePolygon(pts);
+          return;
+        }
+        setPolygonDrawing((prev) => ({ ...prev, points: [...prev.points, { x: lx, y: ly }] }));
+        return;
+      }
+      // If we just completed a marquee drag, don't deselect
+      if (marqueeRef.current) return;
+      if (e.target === e.target.getStage() || e.target.name() === 'panHit') onSelect(null);
     },
-    [onSelect],
+    [onSelect, polygonDrawing, stagePos, scale, closePolygon],
   );
 
-  const handleWheel = useCallback(
-    (e: KonvaEventObject<WheelEvent>) => {
-      e.evt.preventDefault();
+  const handleStageMouseDown = useCallback(
+    (e: KonvaEventObject<MouseEvent>) => {
+      if (!e.evt.shiftKey) return;
       const stage = stageRef.current;
       if (!stage) return;
-      const pointer = stage.getPointerPosition();
-      if (!pointer) return;
-      const mousePointTo = {
-        x: (pointer.x - stagePos.x) / scale,
-        y: (pointer.y - stagePos.y) / scale,
-      };
-      const direction = e.evt.deltaY > 0 ? -1 : 1;
-      const newScale = Math.max(0.3, Math.min(3, scale + direction * 0.1));
-      setScale(newScale);
-      setStagePos({
-        x: pointer.x - mousePointTo.x * newScale,
-        y: pointer.y - mousePointTo.y * newScale,
-      });
+      const target = e.target;
+      const isStage = target === stage;
+      const isPan = target.name() === 'panHit';
+      if (!isStage && !isPan) return;
+      const pos = stage.getRelativePointerPosition();
+      if (!pos) return;
+      const lx = (pos.x - stagePos.x) / scale;
+      const ly = (pos.y - stagePos.y) / scale;
+      marqueeRef.current = { active: true, startX: lx, startY: ly, currentX: lx, currentY: ly };
+      e.evt.preventDefault();
     },
-    [scale, stagePos],
+    [stagePos, scale],
   );
 
+  /** Convert stage pointer to layout-local coords. */
+  const pointerToLocal = useCallback((): { x: number; y: number } | null => {
+    const stage = stageRef.current;
+    if (!stage) return null;
+    const pos = stage.getRelativePointerPosition();
+    if (!pos) return null;
+    return {
+      x: (pos.x - stagePos.x) / scale,
+      y: (pos.y - stagePos.y) / scale,
+    };
+  }, [stagePos, scale]);
+
+  const handleStageMouseMove = useCallback(
+    (e: KonvaEventObject<MouseEvent>) => {
+      const stage = stageRef.current;
+      if (!stage) return;
+
+      // ---- Layout canvas resize (pointer-tracking, NOT Konva drag) ----
+      if (layoutResizeRef.current && onLayoutResize) {
+        const local = pointerToLocal();
+        if (!local) return;
+        const r = layoutResizeRef.current;
+        const dx = local.x - r.startPointerLocal.x;
+        const dy = local.y - r.startPointerLocal.y;
+
+        let newW = r.startW;
+        let newH = r.startH;
+
+        switch (r.anchor) {
+          case 'e':
+            newW = r.startW + dx;
+            break;
+          case 'w':
+            newW = r.startW - dx;
+            break;
+          case 's':
+            newH = r.startH + dy;
+            break;
+          case 'n':
+            newH = r.startH - dy;
+            break;
+          case 'se':
+            newW = r.startW + dx;
+            newH = r.startH + dy;
+            break;
+          case 'sw':
+            newW = r.startW - dx;
+            newH = r.startH + dy;
+            break;
+          case 'ne':
+            newW = r.startW + dx;
+            newH = r.startH - dy;
+            break;
+          case 'nw':
+            newW = r.startW - dx;
+            newH = r.startH - dy;
+            break;
+        }
+
+        newW = Math.max(MIN_RESIZE_WIDTH, Math.min(MAX_LAYOUT_WIDTH, Math.round(newW)));
+        newH = Math.max(MIN_RESIZE_HEIGHT, Math.min(MAX_LAYOUT_HEIGHT, Math.round(newH)));
+
+        onLayoutResize(newW, newH, { anchor: r.anchor });
+        e.evt.preventDefault();
+        return;
+      }
+
+      if (polygonDrawing.active) {
+        const local = pointerToLocal();
+        if (!local) return;
+        setPolygonDrawing((prev) => ({ ...prev, cursorPos: { x: local.x, y: local.y } }));
+        return;
+      }
+
+      if (marqueeRef.current?.active) {
+        const local = pointerToLocal();
+        if (!local) return;
+        marqueeRef.current = { ...marqueeRef.current, currentX: local.x, currentY: local.y };
+        forceRender((c) => c + 1);
+        return;
+      }
+
+      if (rotatingRef.current) {
+        const local = pointerToLocal();
+        if (!local) return;
+        const { tableId, centerX, centerY } = rotatingRef.current;
+        const angle = (Math.atan2(local.x - centerX, -(local.y - centerY)) * 180) / Math.PI;
+        const snapped = Math.round(angle / 5) * 5;
+        onRotate?.(tableId, snapped);
+        e.evt.preventDefault();
+      }
+    },
+    [onRotate, stagePos, scale, polygonDrawing.active, onLayoutResize, pointerToLocal],
+  );
+
+  const handleStageMouseUp = useCallback(() => {
+    // ---- Layout resize end ----
+    if (layoutResizeRef.current) {
+      layoutResizeRef.current = null;
+      onLayoutResizeEnd?.();
+      const container = stageRef.current?.container();
+      if (container) container.style.cursor = 'default';
+      return;
+    }
+
+    if (marqueeRef.current?.active) {
+      const { startX, startY, currentX, currentY } = marqueeRef.current;
+      const minX = Math.min(startX, currentX);
+      const maxX = Math.max(startX, currentX);
+      const minY = Math.min(startY, currentY);
+      const maxY = Math.max(startY, currentY);
+      if (maxX - minX > 5 || maxY - minY > 5) {
+        const hit = tables.filter((t) => {
+          const b = getBounds(t);
+          return b.x >= minX && b.x <= maxX && b.y >= minY && b.y <= maxY;
+        });
+        if (hit.length > 0) onMultiSelect?.(hit.map((t) => t.id));
+      }
+      marqueeRef.current = null;
+      forceRender((c) => c + 1);
+    }
+    rotatingRef.current = null;
+  }, [tables, getBounds, onMultiSelect, onLayoutResizeEnd]);
+
+  /** Scale that fits the full layout in the viewport — shown as 100% in the zoom indicator. */
+  const [baselineScale, setBaselineScale] = useState(1);
+
   const resetView = useCallback(() => {
-    const fit = computeStageFitToView(tables, dimensions.width, dimensions.height);
+    const fit = computeFitFullLayoutToViewport(
+      dimensions.width,
+      dimensions.height,
+      viewport.width,
+      viewport.height,
+    );
     setScale(fit.scale);
     setStagePos({ x: fit.x, y: fit.y });
-  }, [tables, dimensions.width, dimensions.height]);
+    setBaselineScale(fit.scale);
+  }, [dimensions.width, dimensions.height, viewport.width, viewport.height]);
 
   const initialFitDone = useRef(false);
   useEffect(() => {
-    if (!initialFitDone.current && tables.length > 0 && dimensions.width > 1) {
-      resetView();
-      initialFitDone.current = true;
-    }
-  }, [tables, dimensions.width, dimensions.height, resetView]);
+    if (initialFitDone.current) return;
+    if (dimensions.width <= 1 || viewport.width <= 1 || viewport.height <= 1) return;
+    resetView();
+    initialFitDone.current = true;
+  }, [dimensions.width, dimensions.height, viewport.width, viewport.height, resetView]);
 
   const zoomBy = useCallback(
     (delta: number) => {
       const newScale = Math.max(0.3, Math.min(3, scale + delta));
-      const cx = dimensions.width / 2;
-      const cy = dimensions.height / 2;
+      const cx = viewport.width / 2;
+      const cy = viewport.height / 2;
       const pointTo = {
         x: (cx - stagePos.x) / scale,
         y: (cy - stagePos.y) / scale,
@@ -471,38 +636,7 @@ export default function KonvaCanvas({
         y: cy - pointTo.y * newScale,
       });
     },
-    [scale, stagePos, dimensions.width, dimensions.height],
-  );
-
-  const handleSplit = useCallback(
-    (ejectTableId: string, ejectedSide: string) => {
-      if (!onSnapRemove) return;
-
-      const ejectedTable = tables.find((t) => t.id === ejectTableId);
-      if (!ejectedTable) return;
-
-      const separationPx = SNAP_THRESHOLD + 5;
-      const b = getBounds(ejectedTable);
-      let newX = b.x;
-      let newY = b.y;
-
-      switch (ejectedSide) {
-        case 'right':  newX -= separationPx; break;
-        case 'left':   newX += separationPx; break;
-        case 'bottom': newY -= separationPx; break;
-        case 'top':    newY += separationPx; break;
-      }
-
-      const allBounds = tables.map((t) => toSnapBounds(t, dimensions));
-      const removeResult = removeFromSnapGroup(ejectTableId, allBounds);
-
-      onSnapRemove(removeResult, {
-        id: ejectTableId,
-        x: pixelToPct(newX, dimensions.width),
-        y: pixelToPct(newY, dimensions.height),
-      });
-    },
-    [tables, dimensions, getBounds, onSnapRemove],
+    [scale, stagePos, viewport.width, viewport.height],
   );
 
   // ============================================================
@@ -515,11 +649,10 @@ export default function KonvaCanvas({
     const bounds = tables.map((t) => {
       const fb = getTableDimensions(t.max_covers, t.shape);
       const isDrag = dp?.id === t.id;
-      const offset = dragGroupOffsetsRef.current.get(t.id);
       return {
         id: t.id,
-        x: isDrag ? dp!.x : offset ? offset.x : pctToPixel(t.position_x, dimensions.width),
-        y: isDrag ? dp!.y : offset ? offset.y : pctToPixel(t.position_y, dimensions.height),
+        x: isDrag ? dp!.x : pctToPixel(t.position_x, dimensions.width),
+        y: isDrag ? dp!.y : pctToPixel(t.position_y, dimensions.height),
         w: ((t.width ?? fb.width) / 100) * dimensions.width,
         h: ((t.height ?? fb.height) / 100) * dimensions.height,
       };
@@ -527,117 +660,59 @@ export default function KonvaCanvas({
     return computeTableAdjacency(bounds);
   })();
 
-  // Snap groups for combined outlines and labels
-  const snapGroups = (() => {
-    const groups = new Map<string, VenueTable[]>();
-    for (const t of tables) {
-      if (!t.snap_group_id) continue;
-      if (!groups.has(t.snap_group_id)) groups.set(t.snap_group_id, []);
-      groups.get(t.snap_group_id)!.push(t);
-    }
-    const result: Array<{
-      groupId: string;
-      tables: VenueTable[];
-      outline: number[];
-      label: string;
-      labelX: number;
-      labelY: number;
-    }> = [];
-
-    groups.forEach((groupTables, groupId) => {
-      if (groupTables.length < 2) return;
-      const boundsArr = groupTables.map((t) => {
-        const dp = dragPosRef.current;
-        const isDrag = dp?.id === t.id;
-        const offset = dragGroupOffsetsRef.current.get(t.id);
-        const b = getBounds(t);
-        return {
-          x: isDrag ? dp!.x : offset ? offset.x : b.x,
-          y: isDrag ? dp!.y : offset ? offset.y : b.y,
-          w: b.w,
-          h: b.h,
-        };
-      });
-      const outline = calculateGroupOutline(boundsArr);
-      const label = groupTables.map((t) => t.name).join(' + ');
-
-      const minX = Math.min(...boundsArr.map((b) => b.x - b.w / 2));
-      const maxX = Math.max(...boundsArr.map((b) => b.x + b.w / 2));
-      const minY = Math.min(...boundsArr.map((b) => b.y - b.h / 2));
-
-      result.push({
-        groupId,
-        tables: groupTables,
-        outline,
-        label,
-        labelX: (minX + maxX) / 2,
-        labelY: minY - 22,
-      });
-    });
-
-    return result;
-  })();
-
-  // Join pairs for split buttons (only when not dragging)
-  const joinPairs = (() => {
-    if (dragPosRef.current) return [];
-    const pairs: Array<{
-      tableA: VenueTable;
-      tableB: VenueTable;
-      aSide: string;
-      bSide: string;
-      midX: number;
-      midY: number;
-    }> = [];
-
-    for (const group of snapGroups) {
-      for (let i = 0; i < group.tables.length; i++) {
-        for (let j = i + 1; j < group.tables.length; j++) {
-          const a = group.tables[i]!;
-          const b = group.tables[j]!;
-          const ab = getBounds(a);
-          const bb = getBounds(b);
-          const tol = 4;
-
-          const aR = ab.x + ab.w / 2, aL = ab.x - ab.w / 2;
-          const aT = ab.y - ab.h / 2, aB = ab.y + ab.h / 2;
-          const bR = bb.x + bb.w / 2, bL = bb.x - bb.w / 2;
-          const bT = bb.y - bb.h / 2, bB = bb.y + bb.h / 2;
-
-          if (Math.abs(aR - bL) < tol) {
-            const top = Math.max(aT, bT), bot = Math.min(aB, bB);
-            if (bot > top) pairs.push({ tableA: a, tableB: b, aSide: 'right', bSide: 'left', midX: aR, midY: (top + bot) / 2 });
-          } else if (Math.abs(aL - bR) < tol) {
-            const top = Math.max(aT, bT), bot = Math.min(aB, bB);
-            if (bot > top) pairs.push({ tableA: b, tableB: a, aSide: 'right', bSide: 'left', midX: aL, midY: (top + bot) / 2 });
-          } else if (Math.abs(aB - bT) < tol) {
-            const left = Math.max(aL, bL), right = Math.min(aR, bR);
-            if (right > left) pairs.push({ tableA: a, tableB: b, aSide: 'bottom', bSide: 'top', midX: (left + right) / 2, midY: aB });
-          } else if (Math.abs(aT - bB) < tol) {
-            const left = Math.max(aL, bL), right = Math.min(aR, bR);
-            if (right > left) pairs.push({ tableA: b, tableB: a, aSide: 'bottom', bSide: 'top', midX: (left + right) / 2, midY: bB });
-          }
-        }
-      }
-    }
-
-    return pairs;
-  })();
-
   // ============================================================
   // Render
   // ============================================================
 
+  const viewW = Math.max(1, viewport.width || 800);
+  const viewH = Math.max(1, viewport.height || 600);
+  const panEnabled =
+    !layoutResizeRef.current &&
+    (spacebarPan ||
+    middleMousePanRef.current ||
+    (!(selectedIds?.length ?? (selectedId ? 1 : 0)) && !marqueeRef.current?.active));
+
+  /** 100% = full layout visible (baseline), >100% zoomed in, <100% zoomed out. */
+  const zoomPercent =
+    baselineScale > 0 ? Math.round((scale / baselineScale) * 100) : 100;
+
+  const unifiedLabelFonts = useMemo(() => {
+    const inputs = tables.map((table) => {
+      const fb = getTableDimensions(table.max_covers, table.shape);
+      const tw = ((table.width ?? fb.width) / 100) * dimensions.width;
+      const th = ((table.height ?? fb.height) / 100) * dimensions.height;
+      const capacityText =
+        table.min_covers === table.max_covers
+          ? `${table.max_covers}`
+          : `${table.min_covers}-${table.max_covers}`;
+      return {
+        w: tw,
+        h: th,
+        shape: table.shape,
+        topLabel: table.name,
+        bottomLabel: capacityText,
+        compactLabels: false,
+        layoutScale: scale,
+      };
+    });
+    return computeGlobalUnifiedLabelFonts(inputs);
+  }, [tables, dimensions.width, dimensions.height, scale]);
+
   return (
     <div
       ref={containerRef}
+      className="min-h-0 max-h-full overflow-auto"
       style={{
         width: '100%',
         position: 'relative',
-        backgroundImage: backgroundUrl ? `url(${backgroundUrl})` : undefined,
-        backgroundSize: 'cover',
-        backgroundPosition: 'center',
-        backgroundRepeat: 'no-repeat',
+        ...(backgroundUrl
+          ? {
+              backgroundImage: `url(${backgroundUrl})`,
+              backgroundSize: `${dimensions.width}px ${dimensions.height}px`,
+              backgroundPosition: 'top left',
+              backgroundRepeat: 'no-repeat',
+            }
+          : {}),
       }}
     >
       <div className="absolute right-2 top-2 z-10 flex gap-1">
@@ -657,65 +732,89 @@ export default function KonvaCanvas({
           type="button"
           onClick={resetView}
           className="flex h-7 min-w-[2.75rem] items-center justify-center rounded border border-slate-300 bg-white px-2 text-xs text-slate-600 hover:bg-slate-50"
-          title="Fit entire floor plan to this view (same as filling the canvas)"
-        >{Math.round(scale * 100)}%</button>
+          title="Fit entire layout in view (reset to 100%)"
+        >{zoomPercent}%</button>
       </div>
 
       <Stage
         ref={(node) => { stageRef.current = node; }}
-        width={dimensions.width}
-        height={dimensions.height}
-        scaleX={scale}
-        scaleY={scale}
-        x={stagePos.x}
-        y={stagePos.y}
+        width={viewW}
+        height={viewH}
+        scaleX={1}
+        scaleY={1}
+        x={0}
+        y={0}
         onClick={handleStageClick}
         onTap={handleStageClick}
-        onWheel={handleWheel}
-        draggable={!(selectedIds?.length ?? (selectedId ? 1 : 0))}
-        onDragEnd={(e) => {
-          if (e.target === e.target.getStage()) {
-            setStagePos({ x: e.target.x(), y: e.target.y() });
+        onMouseDown={(e: KonvaEventObject<MouseEvent>) => {
+          // Middle-mouse activates temporary pan
+          if (e.evt.button === 1) {
+            middleMousePanRef.current = true;
+            forceRender((c) => c + 1);
+            e.evt.preventDefault();
+            return;
           }
+          handleStageMouseDown(e);
         }}
-        style={{ background: backgroundUrl ? 'rgba(248,250,252,0.55)' : '#f8fafc', cursor: 'default' }}
+        onMouseUp={(e: KonvaEventObject<MouseEvent>) => {
+          if (e.evt.button === 1) {
+            middleMousePanRef.current = false;
+            forceRender((c) => c + 1);
+            return;
+          }
+          handleStageMouseUp();
+        }}
+        onMouseMove={handleStageMouseMove}
+        onWheel={handleWheel}
+        style={{
+          background: backgroundUrl ? 'rgba(248,250,252,0.55)' : '#f8fafc',
+          cursor: marqueeRef.current?.active
+            ? 'crosshair'
+            : rotatingRef.current
+              ? 'grabbing'
+              : (spacebarPan || middleMousePanRef.current)
+                ? 'grab'
+                : 'default',
+        }}
       >
         <Layer>
-          {/* ---- Combined outlines & labels for snap groups (hidden during drag) ---- */}
-          {!dragPosRef.current && snapGroups.map((g) => (
-            <Line
-              key={`outline-${g.groupId}`}
-              points={g.outline}
-              stroke="#374151"
-              strokeWidth={1.5}
-              closed
-              opacity={0.45}
-              dash={[6, 3]}
-              listening={false}
-              perfectDrawEnabled={false}
-            />
-          ))}
-
-          {!dragPosRef.current && snapGroups.map((g) => (
-            <Text
-              key={`label-${g.groupId}`}
-              text={g.label}
-              x={g.labelX - 96}
-              y={g.labelY}
-              width={192}
-              align="center"
-              fontSize={12}
-              fontFamily="Inter, system-ui, sans-serif"
-              fontStyle="600"
-              fill="#374151"
-              listening={false}
-            />
-          ))}
-
+          <Group
+            name="layoutGroup"
+            x={stagePos.x}
+            y={stagePos.y}
+            scaleX={scale}
+            scaleY={scale}
+            draggable={panEnabled}
+            onDragEnd={() => {
+              const stage = stageRef.current;
+              if (!stage) return;
+              const g = stage.findOne((n: Konva.Node) => n.name() === 'layoutGroup');
+              if (!g) return;
+              setStagePos({ x: g.x(), y: g.y() });
+            }}
+          >
+          <Rect
+            name="panHit"
+            x={0}
+            y={0}
+            width={dimensions.width}
+            height={dimensions.height}
+            fill="rgba(0,0,0,0.02)"
+          />
+          <Rect
+            x={0}
+            y={0}
+            width={dimensions.width}
+            height={dimensions.height}
+            fill="rgba(248, 250, 252, 0.92)"
+            stroke="#64748b"
+            strokeWidth={2}
+            dash={[12, 8]}
+            listening={false}
+          />
           {/* ---- Tables ---- */}
           {tables.map((table) => {
             const isDragging = dragPosRef.current?.id === table.id;
-            const groupOffset = dragGroupOffsetsRef.current.get(table.id);
             const isSelected = (selectedIds ?? []).includes(table.id) || table.id === selectedId;
             const color = getZoneColor(table.zone);
             const blocked = adjacency.get(table.id);
@@ -732,12 +831,39 @@ export default function KonvaCanvas({
                 booking={null}
                 canvasWidth={dimensions.width}
                 canvasHeight={dimensions.height}
-                overrideX={isDragging ? dragPosRef.current!.x : groupOffset?.x}
-                overrideY={isDragging ? dragPosRef.current!.y : groupOffset?.y}
+                overrideX={isDragging ? dragPosRef.current!.x : undefined}
+                overrideY={isDragging ? dragPosRef.current!.y : undefined}
                 onDragMove={(e) => handleDragMove(e, table.id)}
                 onDragEnd={(e) => handleDragEnd(e, table.id)}
                 onClick={(e) => onSelect(table.id, e.evt.shiftKey)}
                 onTap={() => onSelect(table.id, false)}
+                layoutScale={scale}
+                unifiedLabelFonts={unifiedLabelFonts}
+                seatAngles={table.seat_angles}
+                onSeatDrag={onSeatDrag ? (seatIndex, newAngle) => {
+                  onSeatDrag(table.id, seatIndex, newAngle);
+                } : undefined}
+                onSeatDragEnd={onSeatDragEnd ? (seatIndex, newAngle) => {
+                  onSeatDragEnd(table.id, seatIndex, newAngle);
+                } : undefined}
+                onResizeHandleDrag={(axis, halfPx) => {
+                  resizingRef.current = { tableId: table.id, axis, currentHalfPx: halfPx };
+                  const t = tables.find((tb) => tb.id === table.id);
+                  if (!t) return;
+                  const fallback = getTableDimensions(t.max_covers, t.shape);
+                  const curW = t.width ?? fallback.width;
+                  const curH = t.height ?? fallback.height;
+                  const newPct = (halfPx * 2) / (axis === 'x' ? dimensions.width : dimensions.height) * 100;
+                  const clamped = Math.max(3, Math.min(25, newPct));
+                  onResize(
+                    table.id,
+                    axis === 'x' ? clamped : (t.shape === 'circle' ? clamped : curW),
+                    axis === 'y' ? clamped : (t.shape === 'circle' ? clamped : curH),
+                  );
+                }}
+                onResizeHandleEnd={() => {
+                  resizingRef.current = null;
+                }}
               />
             );
           })}
@@ -766,66 +892,7 @@ export default function KonvaCanvas({
             );
           })}
 
-          {/* ---- Snap-join guide: blue edge highlight ---- */}
-          {snapGuideEdgeRef.current && (
-            <Line
-              points={snapGuideEdgeRef.current}
-              stroke="#3B82F6"
-              strokeWidth={3}
-              dash={[6, 3]}
-            />
-          )}
-
-          {/* ---- Snap ghost outline ---- */}
-          {snapGhostRef.current && (
-            <Rect
-              x={snapGhostRef.current.x - snapGhostRef.current.w / 2}
-              y={snapGhostRef.current.y - snapGhostRef.current.h / 2}
-              width={snapGhostRef.current.w}
-              height={snapGhostRef.current.h}
-              stroke="#3B82F6"
-              strokeWidth={1.5}
-              dash={[4, 4]}
-              fill="rgba(59,130,246,0.08)"
-              cornerRadius={8}
-              listening={false}
-            />
-          )}
-
-          {/* ---- Split buttons on join lines ---- */}
-          {joinPairs.map((pair, i) => {
-            const aCount = pair.tableA.snap_sides?.length ?? 0;
-            const bCount = pair.tableB.snap_sides?.length ?? 0;
-            const ejectId = aCount <= bCount ? pair.tableA.id : pair.tableB.id;
-            const ejectSide = ejectId === pair.tableA.id ? pair.aSide : pair.bSide;
-
-            return (
-              <Group
-                key={`split-${i}`}
-                x={pair.midX}
-                y={pair.midY}
-                onClick={(e: KonvaEventObject<MouseEvent>) => {
-                  e.cancelBubble = true;
-                  handleSplit(ejectId, ejectSide);
-                }}
-                onTap={() => handleSplit(ejectId, ejectSide)}
-              >
-                <Circle
-                  radius={10}
-                  fill="#ffffff"
-                  stroke="#cbd5e1"
-                  strokeWidth={1.5}
-                  shadowColor="rgba(0,0,0,0.12)"
-                  shadowBlur={3}
-                  shadowOffsetY={1}
-                />
-                <Line points={[-3.5, -3.5, 3.5, 3.5]} stroke="#ef4444" strokeWidth={2} lineCap="round" />
-                <Line points={[-3.5, 3.5, 3.5, -3.5]} stroke="#ef4444" strokeWidth={2} lineCap="round" />
-              </Group>
-            );
-          })}
-
-          {/* ---- Standard alignment guides ---- */}
+          {/* ---- Alignment guides ---- */}
           {snapGuidesRef.current.map((guide, i) => (
             <Line
               key={`guide-${i}`}
@@ -835,8 +902,245 @@ export default function KonvaCanvas({
               dash={[4, 4]}
             />
           ))}
+
+          {/* ---- Rotation handle (single selected table in editor) ---- */}
+          {(() => {
+            if (!selectedId || !onRotate) return null;
+            const t = tables.find((tb) => tb.id === selectedId);
+            if (!t) return null;
+            const b = getBounds(t);
+            const HANDLE_OFFSET = 24;
+            const halfH = b.h / 2;
+            const θ = ((t.rotation ?? 0) * Math.PI) / 180;
+            const hx = b.x + (halfH + HANDLE_OFFSET) * Math.sin(θ);
+            const hy = b.y - (halfH + HANDLE_OFFSET) * Math.cos(θ);
+            return (
+              <Group key="rotation-handle">
+                {/* Line from table center to handle */}
+                <Line points={[b.x, b.y, hx, hy]} stroke="#2563eb" strokeWidth={1} opacity={0.5} listening={false} />
+                {/* Handle dot */}
+                <Circle
+                  x={hx}
+                  y={hy}
+                  radius={7}
+                  fill="#2563eb"
+                  stroke="#ffffff"
+                  strokeWidth={2}
+                  shadowColor="rgba(0,0,0,0.25)"
+                  shadowBlur={4}
+                  onMouseDown={(e: KonvaEventObject<MouseEvent>) => {
+                    e.cancelBubble = true;
+                    rotatingRef.current = { tableId: t.id, centerX: b.x, centerY: b.y };
+                    e.evt.preventDefault();
+                  }}
+                  onTouchStart={() => {
+                    rotatingRef.current = { tableId: t.id, centerX: b.x, centerY: b.y };
+                  }}
+                  style={{ cursor: 'grab' } as React.CSSProperties}
+                />
+              </Group>
+            );
+          })()}
+
+          {/* ---- Marquee selection rectangle ---- */}
+          {marqueeRef.current?.active && (() => {
+            const m = marqueeRef.current!;
+            const x = Math.min(m.startX, m.currentX);
+            const y = Math.min(m.startY, m.currentY);
+            const w = Math.abs(m.currentX - m.startX);
+            const h = Math.abs(m.currentY - m.startY);
+            return (
+              <Rect
+                x={x}
+                y={y}
+                width={w}
+                height={h}
+                fill="rgba(37,99,235,0.06)"
+                stroke="#2563eb"
+                strokeWidth={1}
+                dash={[4, 3]}
+                listening={false}
+              />
+            );
+          })()}
+
+          {/* ---- Polygon drawing overlay ---- */}
+          {polygonDrawing.active && (() => {
+            const pts = polygonDrawing.points;
+            const cursor = polygonDrawing.cursorPos;
+            if (pts.length === 0) return null;
+
+            // Flatten all points + cursor for the in-progress polyline
+            const polyPts = pts.flatMap((p) => [p.x, p.y]);
+            if (cursor) polyPts.push(cursor.x, cursor.y);
+
+            const CLOSE_THRESHOLD = 14 / scale;
+            const isNearFirst = cursor && pts.length >= 3 &&
+              Math.abs(cursor.x - pts[0]!.x) < CLOSE_THRESHOLD &&
+              Math.abs(cursor.y - pts[0]!.y) < CLOSE_THRESHOLD;
+
+            return (
+              <Group listening={false}>
+                {/* Filled polygon preview */}
+                {pts.length >= 3 && (
+                  <Line
+                    points={pts.flatMap((p) => [p.x, p.y])}
+                    closed
+                    fill="rgba(37,99,235,0.07)"
+                    stroke="transparent"
+                    strokeWidth={0}
+                    listening={false}
+                  />
+                )}
+                {/* In-progress polyline */}
+                <Line
+                  points={polyPts}
+                  stroke="#2563eb"
+                  strokeWidth={1.5 / scale}
+                  dash={[6 / scale, 3 / scale]}
+                  lineCap="round"
+                  lineJoin="round"
+                  listening={false}
+                />
+                {/* Placed vertex dots */}
+                {pts.map((p, i) => (
+                  <Circle
+                    key={`poly-pt-${i}`}
+                    x={p.x}
+                    y={p.y}
+                    radius={(i === 0 && pts.length >= 3 ? 7 : 5) / scale}
+                    fill={i === 0 && pts.length >= 3 ? '#2563eb' : '#ffffff'}
+                    stroke="#2563eb"
+                    strokeWidth={1.5 / scale}
+                    listening={false}
+                    opacity={i === 0 && isNearFirst ? 0.6 : 1}
+                  />
+                ))}
+                {/* Snap-to-close indicator */}
+                {isNearFirst && (
+                  <Circle
+                    x={pts[0]!.x}
+                    y={pts[0]!.y}
+                    radius={12 / scale}
+                    stroke="#2563eb"
+                    strokeWidth={1.5 / scale}
+                    fill="rgba(37,99,235,0.1)"
+                    listening={false}
+                    dash={[3 / scale, 2 / scale]}
+                  />
+                )}
+              </Group>
+            );
+          })()}
+
+          {/* ---- Layout resize: non-draggable edge/corner hit areas ---- */}
+          {onLayoutResize && (() => {
+            const hSize = 14;
+            const edgeHit = 16;
+            const W = dimensions.width;
+            const H = dimensions.height;
+            const isResizing = layoutResizeRef.current != null;
+
+            const setCur = (c: string) => {
+              if (isResizing) return;
+              const container = stageRef.current?.container();
+              if (container) container.style.cursor = c;
+            };
+
+            const startResize = (anchor: LayoutResizeAnchor, e: KonvaEventObject<MouseEvent>) => {
+              e.cancelBubble = true;
+              const local = pointerToLocal();
+              if (!local) return;
+              layoutResizeRef.current = {
+                anchor,
+                startW: W,
+                startH: H,
+                startPointerLocal: local,
+              };
+            };
+
+            const edges: Array<{
+              anchor: LayoutResizeAnchor;
+              x: number; y: number; w: number; h: number;
+              cursor: string;
+            }> = [
+              { anchor: 'w',  x: -edgeHit / 2,      y: hSize,            w: edgeHit, h: H - hSize * 2, cursor: 'ew-resize' },
+              { anchor: 'e',  x: W - edgeHit / 2,    y: hSize,            w: edgeHit, h: H - hSize * 2, cursor: 'ew-resize' },
+              { anchor: 'n',  x: hSize,              y: -edgeHit / 2,     w: W - hSize * 2, h: edgeHit, cursor: 'ns-resize' },
+              { anchor: 's',  x: hSize,              y: H - edgeHit / 2,  w: W - hSize * 2, h: edgeHit, cursor: 'ns-resize' },
+            ];
+            const corners: Array<{
+              anchor: LayoutResizeAnchor;
+              x: number; y: number;
+              cursor: string;
+            }> = [
+              { anchor: 'nw', x: -hSize,      y: -hSize,      cursor: 'nwse-resize' },
+              { anchor: 'ne', x: W - hSize,   y: -hSize,      cursor: 'nesw-resize' },
+              { anchor: 'sw', x: -hSize,      y: H - hSize,   cursor: 'nesw-resize' },
+              { anchor: 'se', x: W - hSize,   y: H - hSize,   cursor: 'nwse-resize' },
+            ];
+
+            return (
+              <>
+                {edges.map((ed) => (
+                  <Rect
+                    key={`resize-edge-${ed.anchor}`}
+                    x={ed.x}
+                    y={ed.y}
+                    width={ed.w}
+                    height={ed.h}
+                    fill="transparent"
+                    onMouseEnter={() => setCur(ed.cursor)}
+                    onMouseLeave={() => setCur('default')}
+                    onMouseDown={(e) => startResize(ed.anchor, e)}
+                  />
+                ))}
+                {corners.map((cr) => (
+                  <Rect
+                    key={`resize-corner-${cr.anchor}`}
+                    x={cr.x}
+                    y={cr.y}
+                    width={hSize}
+                    height={hSize}
+                    fill="#3b82f6"
+                    cornerRadius={2}
+                    opacity={0.85}
+                    onMouseEnter={() => setCur(cr.cursor)}
+                    onMouseLeave={() => setCur('default')}
+                    onMouseDown={(e) => startResize(cr.anchor, e)}
+                  />
+                ))}
+                <Line
+                  points={[W - 10, H - 3, W - 3, H - 10]}
+                  stroke="#dbeafe"
+                  strokeWidth={1.5}
+                  lineCap="round"
+                  listening={false}
+                />
+              </>
+            );
+          })()}
+          </Group>
         </Layer>
       </Stage>
+
+      {/* ---- Polygon drawing hint bar ---- */}
+      {polygonDrawing.active && (
+        <div className="pointer-events-none absolute bottom-2 left-1/2 -translate-x-1/2 z-20">
+          <div className="rounded-lg bg-slate-900/90 px-3 py-1.5 text-xs text-white shadow-lg flex items-center gap-2">
+            <span className="opacity-70">Click to add points</span>
+            <span className="opacity-30">·</span>
+            <span className="opacity-70">Double-click or click first point to close</span>
+            <span className="opacity-30">·</span>
+            <button
+              className="pointer-events-auto underline opacity-90 hover:opacity-100"
+              onClick={() => setPolygonDrawing({ active: false, points: [], cursorPos: null })}
+            >
+              Esc to cancel
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

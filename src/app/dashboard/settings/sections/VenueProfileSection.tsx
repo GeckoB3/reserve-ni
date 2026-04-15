@@ -129,6 +129,7 @@ export function VenueProfileSection({ venue, onUpdate, isAdmin, bookingModel = '
       address: string | null;
       phone: string | null;
       email: string | null;
+      reply_to_email?: string | null;
       website_url: string | null;
       cuisine_type: string | null;
       price_band: string | null;
@@ -143,6 +144,7 @@ export function VenueProfileSection({ venue, onUpdate, isAdmin, bookingModel = '
       address: updated.address ?? null,
       phone: updated.phone ?? null,
       email: updated.email ?? null,
+      reply_to_email: updated.reply_to_email ?? updated.email ?? null,
       website_url: updated.website_url ?? null,
       cuisine_type: updated.cuisine_type ?? null,
       price_band: updated.price_band ?? null,
@@ -263,6 +265,9 @@ export function VenueProfileSection({ venue, onUpdate, isAdmin, bookingModel = '
           <div>
             <label htmlFor="email" className="block text-sm font-medium text-neutral-700 mb-1">Email</label>
             <input id="email" type="email" {...register('email')} disabled={!isAdmin} className="w-full rounded border border-neutral-300 px-3 py-2 disabled:bg-neutral-50" />
+            <p className="mt-1 text-xs text-neutral-500">
+              Guest replies to booking confirmations and reminders are sent to this address.
+            </p>
           </div>
         </div>
         <div>

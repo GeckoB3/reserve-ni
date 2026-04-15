@@ -1,7 +1,8 @@
 import sgMail from '@sendgrid/mail';
 
 const apiKey = process.env.SENDGRID_API_KEY;
-const fromEmail = process.env.SENDGRID_FROM_EMAIL ?? 'hello@reserveni.com';
+/** Verified sender domain address; display name is set per message (business name). */
+const defaultFromAddress = process.env.SENDGRID_FROM_EMAIL ?? 'bookings@reserveni.com';
 
 if (apiKey) {
   sgMail.setApiKey(apiKey);
@@ -12,6 +13,14 @@ interface SendEmailOptions {
   subject: string;
   html: string;
   text: string;
+  /**
+   * Display name for the From header, e.g. venue name. The envelope address stays {@link defaultFromAddress}.
+   */
+  fromDisplayName?: string;
+  /**
+   * When set, guest replies go to this address instead of the platform inbox.
+   */
+  replyTo?: string | null;
   /**
    * When true, disables SendGrid click and open tracking for this message.
    * Required for auth links (magic links, password reset): tracking wraps URLs in
@@ -32,10 +41,18 @@ export async function sendEmail(opts: SendEmailOptions): Promise<string | null> 
     return null;
   }
 
+  const fromBlock =
+    opts.fromDisplayName?.trim() ?
+      { email: defaultFromAddress, name: opts.fromDisplayName.trim() }
+    : defaultFromAddress;
+
+  const replyTo = opts.replyTo?.trim() || undefined;
+
   try {
     const [response] = await sgMail.send({
       to: opts.to,
-      from: fromEmail,
+      from: fromBlock,
+      ...(replyTo ? { replyTo } : {}),
       subject: opts.subject,
       text: opts.text,
       html: opts.html,

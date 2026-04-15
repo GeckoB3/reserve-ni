@@ -8,6 +8,7 @@ import { computeTableAdjacency, getTableDimensions } from '@/types/table-managem
 import { computeStageFitToView } from '@/lib/floor-plan/fit-view';
 import type { BlockedSides } from '@/types/table-management';
 import TableShape from '@/components/floor-plan/TableShape';
+import { computeGlobalUnifiedLabelFonts } from '@/lib/floor-plan/table-label-fonts';
 
 /**
  * Stat tile label colours from `DashboardStatCard` (Tailwind `text-blue-700` / `text-emerald-700`).
@@ -341,6 +342,46 @@ export default function LiveFloorCanvas({
   const isDragging = draggingBookingId != null || reassignMode != null;
   const activeBookingId = draggingBookingId ?? reassignMode?.bookingId ?? null;
 
+  const unifiedLabelFonts = useMemo(() => {
+    const inputs = tables.map((table) => {
+      const fb = getTableDimensions(table.max_covers, table.shape);
+      const tw = ((table.width ?? fb.width) / 100) * dimensions.width;
+      const th = ((table.height ?? fb.height) / 100) * dimensions.height;
+      const capacityText =
+        table.min_covers === table.max_covers
+          ? `${table.max_covers}`
+          : `${table.min_covers}-${table.max_covers}`;
+      const dragOrReassign = draggingBookingId != null || reassignMode != null;
+      const isSource = activeBookingId
+        ? (combinedTableGroups?.get(activeBookingId)?.includes(table.id) ??
+          (table.booking?.id === activeBookingId))
+        : false;
+      const booking = dragOrReassign && isSource ? null : table.booking;
+      const isOccupied = booking != null;
+      const topLabel = isOccupied ? booking!.guest_name.slice(0, 12) : table.name;
+      const bottomLabel = isOccupied ? `${booking!.party_size} pax` : capacityText;
+      return {
+        w: tw,
+        h: th,
+        shape: table.shape,
+        topLabel,
+        bottomLabel,
+        compactLabels: false,
+        layoutScale: scale,
+      };
+    });
+    return computeGlobalUnifiedLabelFonts(inputs);
+  }, [
+    tables,
+    dimensions.width,
+    dimensions.height,
+    scale,
+    draggingBookingId,
+    reassignMode,
+    combinedTableGroups,
+    activeBookingId,
+  ]);
+
   return (
     <div ref={containerRef} className="h-full w-full" style={{ position: 'relative', touchAction: 'none' }}>
       <div className="absolute right-2 top-2 z-10 flex gap-1">
@@ -468,6 +509,8 @@ export default function LiveFloorCanvas({
                 booking={isDragging && isSource ? null : table.booking}
                 canvasWidth={dimensions.width}
                 canvasHeight={dimensions.height}
+                layoutScale={scale}
+                unifiedLabelFonts={unifiedLabelFonts}
                 onClick={() => {
                   if (isDragging && isValidTarget) {
                     if (draggingBookingId) {

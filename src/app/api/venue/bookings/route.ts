@@ -29,6 +29,7 @@ import { cancellationDeadlineHoursBefore } from '@/lib/booking/cancellation-dead
 import { getCancellationNoticeHoursForBooking, parseExtendedBookingRules } from '@/lib/booking/venue-booking-rules';
 import { resolveCancellationNoticeHoursForCreate } from '@/lib/booking/resolve-cancellation-notice-hours';
 import { applyStaffBookingPaymentAndComms } from '@/lib/booking/staff-booking-payment-comms';
+import { venueRowToEmailData } from '@/lib/emails/venue-email-data';
 import { fetchClassInput, computeClassAvailability } from '@/lib/availability/class-session-engine';
 import { getResourceBookingEmailLabels } from '@/lib/booking/resource-booking-email-labels';
 import {
@@ -138,7 +139,7 @@ export async function POST(request: NextRequest) {
 
     const { data: venue } = await admin
       .from('venues')
-      .select('id, name, stripe_connected_account_id, booking_rules, deposit_config, table_management_enabled, show_table_in_confirmation, timezone, address, opening_hours, venue_opening_exceptions')
+      .select('id, name, stripe_connected_account_id, booking_rules, deposit_config, table_management_enabled, show_table_in_confirmation, timezone, address, opening_hours, venue_opening_exceptions, email, reply_to_email')
       .eq('id', venueId)
       .single();
 
@@ -338,6 +339,8 @@ export async function POST(request: NextRequest) {
           venueId,
           venueName: venue.name,
           venueAddress: venue.address ?? undefined,
+          venueProfileEmail: venue.email ?? null,
+          venueReplyToEmail: venue.reply_to_email ?? null,
           stripeConnectedAccountId: venue.stripe_connected_account_id,
           bookingId: evBooking.id,
           guestName: name,
@@ -487,6 +490,8 @@ export async function POST(request: NextRequest) {
           venueId,
           venueName: venue.name,
           venueAddress: venue.address ?? undefined,
+          venueProfileEmail: venue.email ?? null,
+          venueReplyToEmail: venue.reply_to_email ?? null,
           stripeConnectedAccountId: venue.stripe_connected_account_id,
           bookingId: classBooking.id,
           guestName: name,
@@ -686,6 +691,8 @@ export async function POST(request: NextRequest) {
           venueId,
           venueName: venue.name,
           venueAddress: venue.address ?? undefined,
+          venueProfileEmail: venue.email ?? null,
+          venueReplyToEmail: venue.reply_to_email ?? null,
           stripeConnectedAccountId: venue.stripe_connected_account_id,
           bookingId: resBooking.id,
           guestName: name,
@@ -940,7 +947,12 @@ export async function POST(request: NextRequest) {
           try {
             const results = await sendDepositRequestNotifications(
               depositBookingPayload,
-              { name: venue.name, address: venue.address ?? undefined },
+              venueRowToEmailData({
+                name: venue.name,
+                address: venue.address ?? null,
+                email: venue.email ?? null,
+                reply_to_email: venue.reply_to_email ?? null,
+              }),
               venueId,
               payment_url!,
             );
@@ -980,7 +992,12 @@ export async function POST(request: NextRequest) {
                   manage_booking_link: manageBookingLink,
                   ...apptEmailExtras,
                 },
-                { name: venue.name, address: venue.address ?? undefined },
+                venueRowToEmailData({
+                  name: venue.name,
+                  address: venue.address ?? null,
+                  email: venue.email ?? null,
+                  reply_to_email: venue.reply_to_email ?? null,
+                }),
                 venueId,
               );
               if (!email.sent) console.warn('[after] appointment confirmation email not sent:', email.reason);
@@ -1180,7 +1197,12 @@ export async function POST(request: NextRequest) {
         try {
           const results = await sendDepositRequestNotifications(
             tableDepositPayload,
-            { name: venue.name, address: venue.address ?? undefined },
+            venueRowToEmailData({
+              name: venue.name,
+              address: venue.address ?? null,
+              email: venue.email ?? null,
+              reply_to_email: venue.reply_to_email ?? null,
+            }),
             venueId,
             payment_url!,
           );
@@ -1222,7 +1244,12 @@ export async function POST(request: NextRequest) {
                 dietary_notes: dietary_notes ?? null,
                 manage_booking_link: manageBookingLink,
               },
-              { name: venue.name, address: venue.address ?? undefined },
+              venueRowToEmailData({
+                name: venue.name,
+                address: venue.address ?? null,
+                email: venue.email ?? null,
+                reply_to_email: venue.reply_to_email ?? null,
+              }),
               venueId,
             );
             if (!email.sent) console.warn('[after] confirmation email not sent:', email.reason);
