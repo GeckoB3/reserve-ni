@@ -5,7 +5,12 @@
 -- ENUMS
 -- =============================================================================
 
-CREATE TYPE block_type AS ENUM ('closed', 'reduced_capacity', 'special_event');
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'block_type') THEN
+    CREATE TYPE block_type AS ENUM ('closed', 'reduced_capacity', 'special_event');
+  END IF;
+END $$;
 
 -- =============================================================================
 -- TABLES
@@ -235,7 +240,12 @@ CREATE POLICY "public_read_availability_blocks"
 -- WAITLIST
 -- =============================================================================
 
-CREATE TYPE waitlist_status AS ENUM ('waiting', 'offered', 'confirmed', 'expired', 'cancelled');
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'waitlist_status') THEN
+    CREATE TYPE waitlist_status AS ENUM ('waiting', 'offered', 'confirmed', 'expired', 'cancelled');
+  END IF;
+END $$;
 
 CREATE TABLE waitlist_entries (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),

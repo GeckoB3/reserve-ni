@@ -6,13 +6,18 @@
 -- BOOKING MODEL ENUM
 -- =============================================================================
 
-CREATE TYPE booking_model AS ENUM (
-  'table_reservation',
-  'practitioner_appointment',
-  'event_ticket',
-  'class_session',
-  'resource_booking'
-);
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'booking_model') THEN
+    CREATE TYPE booking_model AS ENUM (
+      'table_reservation',
+      'practitioner_appointment',
+      'event_ticket',
+      'class_session',
+      'resource_booking'
+    );
+  END IF;
+END $$;
 
 -- =============================================================================
 -- VENUES: add booking model, business metadata, terminology
