@@ -7,10 +7,17 @@ import { fetchPendingSignupSelection, syncPendingToSessionStorage } from '@/lib/
 import { isSignupPaymentReady } from '@/lib/signup-pending-selection';
 import { formatSignupBusinessTypeLabel } from '@/lib/business-config';
 import { DEFAULT_RESTAURANT_FAMILY_BUSINESS_TYPE } from '@/lib/signup-resume';
-import { APPOINTMENTS_PRICE, RESTAURANT_PRICE, FOUNDING_PARTNER_CAP, SMS_OVERAGE_GBP_PER_MESSAGE } from '@/lib/pricing-constants';
+import {
+  APPOINTMENTS_LIGHT_PRICE,
+  APPOINTMENTS_PRICE,
+  RESTAURANT_PRICE,
+  FOUNDING_PARTNER_CAP,
+  SMS_LIGHT_GBP_PER_MESSAGE,
+  SMS_OVERAGE_GBP_PER_MESSAGE,
+} from '@/lib/pricing-constants';
 import { SMS_INCLUDED_APPOINTMENTS, SMS_INCLUDED_RESTAURANT } from '@/lib/billing/sms-allowance';
 
-type PlanType = 'appointments' | 'restaurant' | 'founding';
+type PlanType = 'appointments' | 'light' | 'restaurant' | 'founding';
 
 export default function PlanPage() {
   const router = useRouter();
@@ -18,6 +25,8 @@ export default function PlanPage() {
   const [businessType, setBusinessType] = useState<string | null>(null);
   const [plan, setPlan] = useState<PlanType | null>(null);
   const [foundingRemaining, setFoundingRemaining] = useState<number | null>(null);
+  /** Non-restaurant: pick Appointments Light vs full Appointments */
+  const [selectedUnifiedPlan, setSelectedUnifiedPlan] = useState<'light' | 'appointments'>('appointments');
 
   useEffect(() => {
     let cancelled = false;
@@ -34,7 +43,10 @@ export default function PlanPage() {
       let resolvedPlan = queryPlan ?? storedPlan;
       let resolvedBt = bt;
 
-      if ((!resolvedPlan || (resolvedPlan !== 'appointments' && !resolvedBt)) && session) {
+      if (
+        (!resolvedPlan || (resolvedPlan !== 'appointments' && resolvedPlan !== 'light' && !resolvedBt)) &&
+        session
+      ) {
         const pending = await fetchPendingSignupSelection();
         if (cancelled) return;
         if (pending?.plan && isSignupPaymentReady(pending.plan, pending.business_type)) {
@@ -42,7 +54,7 @@ export default function PlanPage() {
           router.replace('/signup/payment');
           return;
         }
-        if (pending?.plan && (pending.plan === 'appointments' || pending.business_type)) {
+        if (pending?.plan && (pending.plan === 'appointments' || pending.plan === 'light' || pending.business_type)) {
           syncPendingToSessionStorage(pending.plan, pending.business_type);
           storedPlan = pending.plan;
           bt = pending.business_type;
@@ -69,13 +81,15 @@ export default function PlanPage() {
       }
       setBusinessType(resolvedBt);
       setPlan(resolvedPlan);
+      if (resolvedPlan === 'light') {
+        setSelectedUnifiedPlan('light');
+      }
     })();
     return () => {
       cancelled = true;
     };
   }, [router, searchParams]);
 
-  // Founding partner: check spots
   useEffect(() => {
     if (plan !== 'founding') return;
     let cancelled = false;
@@ -94,13 +108,18 @@ export default function PlanPage() {
         }
       }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [plan]);
 
   function handleContinue() {
     if (!plan) return;
-    sessionStorage.setItem('signup_plan', plan);
-    // Account must exist before checkout (Stripe + Supabase). Create account, then order summary / payment.
+    let effectivePlan: PlanType = plan;
+    if (plan === 'appointments') {
+      effectivePlan = selectedUnifiedPlan;
+    }
+    sessionStorage.setItem('signup_plan', effectivePlan);
     router.push('/signup');
   }
 
@@ -113,8 +132,8 @@ export default function PlanPage() {
   }
 
   const overagePence = Math.round(SMS_OVERAGE_GBP_PER_MESSAGE * 100);
+  const lightSmsPence = Math.round(SMS_LIGHT_GBP_PER_MESSAGE * 100);
 
-  // Founding Partner confirmation
   if (plan === 'founding') {
     if (foundingRemaining === null) {
       return (
@@ -164,62 +183,124 @@ export default function PlanPage() {
     );
   }
 
-  // Standard plan confirmation (Appointments or Restaurant)
   const isRestaurant = plan === 'restaurant';
-  const price = isRestaurant ? RESTAURANT_PRICE : APPOINTMENTS_PRICE;
-  const smsIncluded = isRestaurant ? SMS_INCLUDED_RESTAURANT : SMS_INCLUDED_APPOINTMENTS;
-  const planLabel = isRestaurant ? 'Restaurant' : 'Appointments';
+
+  if (isRestaurant) {
+    const smsIncluded = SMS_INCLUDED_RESTAURANT;
+    return (
+      <div className="w-full max-w-xl">
+        <div className="mb-8 text-center">
+          <h1 className="text-2xl font-bold text-slate-900">Your plan</h1>
+          {businessType ? (
+            <p className="mt-2 text-sm text-slate-500">
+              Your selection: {formatSignupBusinessTypeLabel(businessType)}
+            </p>
+          ) : null}
+        </div>
+        <div className="rounded-2xl border border-brand-200 bg-brand-50/30 p-6 shadow-sm">
+          <h2 className="text-lg font-bold text-slate-900">Restaurant</h2>
+          <div className="mt-2 flex items-baseline gap-1">
+            <span className="text-2xl font-extrabold text-slate-900">&pound;{RESTAURANT_PRICE}</span>
+            <span className="text-sm text-slate-500">/month</span>
+          </div>
+          <p className="mt-2 text-xs text-slate-500">Single venue only.</p>
+          <ul className="mt-4 space-y-2 text-sm text-slate-600">
+            <FeatureItem text="Table management with timeline grid and floor plan" />
+            <FeatureItem text="Plus all appointment booking types if needed" />
+            <FeatureItem text={`${smsIncluded} SMS messages included per month`} />
+            <FeatureItem text={`Additional SMS at ${overagePence}p each`} />
+            <FeatureItem text="Bookings, deposits, reminders, guest records, reporting" />
+            <FeatureItem text="Priority support" />
+          </ul>
+        </div>
+        <div className="mt-8 flex justify-center">
+          <button
+            type="button"
+            onClick={handleContinue}
+            className="rounded-xl bg-brand-600 px-8 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 transition-colors"
+          >
+            Continue
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Appointments funnel: choose Light vs full Appointments (URL often ?plan=appointments)
+  const isLightSelected = selectedUnifiedPlan === 'light';
 
   return (
-    <div className="w-full max-w-xl">
+    <div className="w-full max-w-5xl">
       <div className="mb-8 text-center">
-        <h1 className="text-2xl font-bold text-slate-900">Your plan</h1>
+        <h1 className="text-2xl font-bold text-slate-900">Choose your plan</h1>
         {businessType ? (
           <p className="mt-2 text-sm text-slate-500">
-            Your selection: {formatSignupBusinessTypeLabel(businessType)}
+            Your business: {formatSignupBusinessTypeLabel(businessType)}
           </p>
         ) : (
           <p className="mt-2 text-sm text-slate-500">
-            Appointments includes appointments, classes, events, and resources.
+            Appointments, classes, events, and resources — pick the plan that fits.
           </p>
         )}
       </div>
-      <div className="rounded-2xl border border-brand-200 bg-brand-50/30 p-6 shadow-sm">
-        <h2 className="text-lg font-bold text-slate-900">{planLabel}</h2>
-        <div className="mt-2 flex items-baseline gap-1">
-          <span className="text-2xl font-extrabold text-slate-900">&pound;{price}</span>
-          <span className="text-sm text-slate-500">/month</span>
-        </div>
-        <ul className="mt-4 space-y-2 text-sm text-slate-600">
-          {isRestaurant ? (
-            <>
-              <FeatureItem text="Table management with timeline grid and floor plan" />
-              <FeatureItem text="Plus all appointment booking types if needed" />
-              <FeatureItem text={`${smsIncluded} SMS messages included per month`} />
-              <FeatureItem text={`Additional SMS at ${overagePence}p each`} />
-              <FeatureItem text="Bookings, deposits, reminders, guest records, reporting" />
-              <FeatureItem text="Priority support" />
-            </>
-          ) : (
-            <>
-              <FeatureItem text="All booking types: appointments, classes, events, resources" />
-              <FeatureItem text="Unlimited calendars and team members" />
-              <FeatureItem text="Choose which booking models to enable after payment" />
-              <FeatureItem text={`${smsIncluded} SMS messages included per month`} />
-              <FeatureItem text={`Additional SMS at ${overagePence}p each`} />
-              <FeatureItem text="Bookings, deposits, reminders, client records, reporting" />
-              <FeatureItem text="Email support" />
-            </>
-          )}
-        </ul>
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        <button
+          type="button"
+          onClick={() => setSelectedUnifiedPlan('light')}
+          className={`rounded-2xl border p-6 text-left shadow-sm transition-all ${
+            isLightSelected ? 'border-brand-500 ring-2 ring-brand-500/30' : 'border-slate-200 hover:border-brand-200'
+          }`}
+        >
+          <h2 className="text-lg font-bold text-slate-900">Appointments Light</h2>
+          <p className="mt-2 text-2xl font-extrabold text-slate-900">Free for 3 months</p>
+          <p className="text-sm text-slate-600">&pound;{APPOINTMENTS_LIGHT_PRICE}/month after</p>
+          <p className="mt-2 text-xs text-slate-500">For sole traders getting started</p>
+          <ul className="mt-4 space-y-2 text-sm text-slate-600">
+            <FeatureItem text="One calendar for you and your business" />
+            <FeatureItem text="Online booking page your clients can use 24/7" />
+            <FeatureItem text="Appointments, classes, events, and resource booking" />
+            <FeatureItem text="Automated email reminders included" />
+            <FeatureItem text={`SMS at ${lightSmsPence}p each — pay only for what you send`} />
+            <FeatureItem text="Client records with visit history" />
+            <FeatureItem text="Email support" />
+          </ul>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setSelectedUnifiedPlan('appointments')}
+          className={`relative rounded-2xl border p-6 text-left shadow-sm transition-all ${
+            !isLightSelected ? 'border-brand-500 ring-2 ring-brand-500/30' : 'border-slate-200 hover:border-brand-200'
+          }`}
+        >
+          <span className="absolute right-4 top-4 rounded-full bg-brand-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-brand-800">
+            Most popular
+          </span>
+          <h2 className="text-lg font-bold text-slate-900">Appointments</h2>
+          <p className="mt-2 text-2xl font-extrabold text-slate-900">&pound;{APPOINTMENTS_PRICE}<span className="text-sm font-normal text-slate-500">/month</span></p>
+          <p className="mt-2 text-xs text-slate-500">For teams of any size</p>
+          <ul className="mt-4 space-y-2 text-sm text-slate-600">
+            <FeatureItem text="Unlimited calendars and team members" />
+            <FeatureItem text="Everything in Light, plus:" />
+            <FeatureItem text={`${SMS_INCLUDED_APPOINTMENTS} SMS per month included, then ${overagePence}p each`} />
+            <FeatureItem text="Personal booking links per staff member" />
+            <FeatureItem text="Phone and email support" />
+          </ul>
+        </button>
       </div>
-      <div className="mt-8 flex justify-center">
+
+      <p className="mt-8 text-center text-xs text-slate-500">
+        No per-booking fees. No commission. Cancel anytime.
+      </p>
+
+      <div className="mt-6 flex justify-center">
         <button
           type="button"
           onClick={handleContinue}
-          className="rounded-xl bg-brand-600 px-8 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 transition-colors"
+          className="rounded-xl bg-brand-600 px-10 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 transition-colors"
         >
-          Continue
+          {isLightSelected ? 'Start Free' : 'Get Started'}
         </button>
       </div>
     </div>

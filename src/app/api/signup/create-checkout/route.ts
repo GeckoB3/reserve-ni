@@ -4,10 +4,13 @@ import { getSupabaseAdminClient } from '@/lib/supabase';
 import { stripe } from '@/lib/stripe';
 import { buildCheckoutLineItems } from '@/lib/stripe/subscription-line-items';
 import { getBusinessConfig } from '@/lib/business-config';
+import { updateVenueSmsMonthlyAllowance } from '@/lib/billing/sms-allowance';
 import { FOUNDING_PARTNER_CAP } from '@/lib/pricing-constants';
 import { getExistingVenueForUserEmail } from '@/lib/signup-existing-venue';
 import { pricingTierToSignupFamily, signupPlanToFamily, SIGNUP_PLAN_CONFLICT_MESSAGE } from '@/lib/signup-plan-family';
 import { clearSignupPendingUserMetadata } from '@/lib/signup-pending-metadata';
+import { communicationPoliciesEmailOnlyAppointmentsLane } from '@/lib/communications/policies';
+import { defaultNotificationSettingsForLightPlan } from '@/lib/notifications/notification-settings';
 
 export async function POST(request: Request) {
   try {
@@ -23,11 +26,11 @@ export async function POST(request: Request) {
     const body = await request.json();
     const { business_type: rawBusinessType, plan } = body as {
       business_type?: string | null;
-      plan: 'appointments' | 'restaurant' | 'founding';
+      plan: 'appointments' | 'light' | 'restaurant' | 'founding';
     };
-    const business_type = rawBusinessType?.trim() || (plan === 'appointments' ? 'other' : '');
+    const business_type = rawBusinessType?.trim() || (plan === 'appointments' || plan === 'light' ? 'other' : '');
 
-    if (!plan || (plan !== 'appointments' && !business_type)) {
+    if (!plan || (plan !== 'appointments' && plan !== 'light' && !business_type)) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
     }
 
@@ -45,7 +48,7 @@ export async function POST(request: Request) {
         );
       }
       if (
-        existingVenue.pricing_tier === 'appointments' &&
+        (existingVenue.pricing_tier === 'appointments' || existingVenue.pricing_tier === 'light') &&
         Array.isArray((existingVenue as { active_booking_models?: unknown }).active_booking_models) &&
         ((existingVenue as { active_booking_models?: unknown[] }).active_booking_models?.length ?? 0) === 0
       ) {
@@ -122,6 +125,90 @@ export async function POST(request: Request) {
       await clearSignupPendingUserMetadata(admin, user.id);
 
       return NextResponse.json({ redirect_url: '/onboarding' });
+    }
+
+    // Appointments Light: no payment at signup; Stripe Customer only for later SMS / paid period.
+    if (plan === 'light') {
+      if (config.model === 'table_reservation') {
+        return NextResponse.json(
+          { error: 'Appointments Light is only available for non-restaurant businesses.' },
+          { status: 400 },
+        );
+      }
+
+      const existingCustomers = await stripe.customers.list({
+        email: user.email ?? undefined,
+        limit: 1,
+      });
+      const customer =
+        existingCustomers.data[0] ??
+        (await stripe.customers.create({
+          email: user.email ?? undefined,
+          metadata: {
+            supabase_user_id: user.id,
+            business_type,
+            plan: 'light',
+          },
+        }));
+
+      const freeEnd = new Date();
+      freeEnd.setMonth(freeEnd.getMonth() + 3);
+      const slug = `venue-${Date.now()}`;
+
+      const commPolicies = communicationPoliciesEmailOnlyAppointmentsLane();
+      const notifDefaults = defaultNotificationSettingsForLightPlan();
+
+      const { data: venue, error: venueError } = await admin
+        .from('venues')
+        .insert({
+          name: 'My Business',
+          slug,
+          booking_model: config.model,
+          business_type,
+          business_category: config.category,
+          terminology: config.terms,
+          pricing_tier: 'light',
+          plan_status: 'active',
+          calendar_count: 1,
+          sms_monthly_allowance: 0,
+          light_plan_free_period_ends_at: freeEnd.toISOString(),
+          stripe_customer_id: customer.id,
+          stripe_subscription_id: null,
+          stripe_subscription_item_id: null,
+          stripe_sms_subscription_item_id: null,
+          onboarding_step: 0,
+          onboarding_completed: false,
+          communication_policies: commPolicies as unknown as Record<string, never>,
+          notification_settings: notifDefaults as unknown as Record<string, never>,
+        })
+        .select('id')
+        .single();
+
+      if (venueError || !venue) {
+        return NextResponse.json(
+          { error: 'Failed to create venue: ' + (venueError?.message ?? 'unknown') },
+          { status: 500 },
+        );
+      }
+
+      const { error: staffError } = await admin.from('staff').insert({
+        venue_id: venue.id,
+        email: user.email,
+        name: user.email?.split('@')[0] ?? 'Admin',
+        role: 'admin',
+      });
+
+      if (staffError) {
+        return NextResponse.json(
+          { error: 'Failed to create staff record: ' + staffError.message },
+          { status: 500 },
+        );
+      }
+
+      await updateVenueSmsMonthlyAllowance(venue.id);
+      await clearSignupPendingUserMetadata(admin, user.id);
+
+      return NextResponse.json({ redirect_url: '/signup/booking-models' });
     }
 
     // Create Stripe Checkout Session for paid plans

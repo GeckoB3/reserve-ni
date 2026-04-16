@@ -38,6 +38,10 @@ import { DashboardOrientationStep } from './steps/restaurant/DashboardOrientatio
 
 type Currency = 'GBP' | 'EUR';
 
+function isAppointmentsPlanSku(tier: string | null | undefined): boolean {
+  return tier === 'appointments' || tier === 'light';
+}
+
 const CURRENCY_OPTIONS: { code: Currency; symbol: string; label: string }[] = [
   { code: 'GBP', symbol: '£', label: 'GBP (£)' },
   { code: 'EUR', symbol: '€', label: 'EUR (€)' },
@@ -529,14 +533,14 @@ export default function OnboardingPage() {
           return;
         }
 
-        if (v.pricing_tier === 'appointments' && (!v.active_booking_models || v.active_booking_models.length === 0)) {
+        if (isAppointmentsPlanSku(v.pricing_tier) && (!v.active_booking_models || v.active_booking_models.length === 0)) {
           router.push('/signup/booking-models');
           return;
         }
 
         let initialStep = v.onboarding_step;
         let initialMaxStep = v.onboarding_step;
-        if (v.pricing_tier === 'appointments') {
+        if (isAppointmentsPlanSku(v.pricing_tier)) {
           const active = (v.active_booking_models ?? []).filter(isAppointmentPlanModel) as AppointmentPlanModel[];
           if (active.length > 0) {
             const legacySteps = buildLegacyAppointmentsPlanModelSteps(active);
@@ -630,7 +634,8 @@ export default function OnboardingPage() {
     [venue?.terminology],
   );
 
-  const isAppointmentsPlanVenue = venue?.pricing_tier === 'appointments';
+  const isAppointmentsPlanVenue = isAppointmentsPlanSku(venue?.pricing_tier);
+  const isLightPlanVenue = venue?.pricing_tier === 'light';
   const activeAppointmentsModels: AppointmentPlanModel[] = useMemo(
     () => (venue?.active_booking_models ?? []).filter(isAppointmentPlanModel),
     [venue?.active_booking_models],
@@ -647,7 +652,7 @@ export default function OnboardingPage() {
 
   const modelSteps = useMemo(() => {
     if (!venue) return [];
-    if (venue.pricing_tier === 'appointments') {
+    if (isAppointmentsPlanSku(venue.pricing_tier)) {
       return buildAppointmentsPlanModelSteps(activeAppointmentsModels);
     }
 
@@ -814,7 +819,7 @@ export default function OnboardingPage() {
   useEffect(() => {
     if (!venue) return;
     if (currentStepKey !== 'hours' && currentStepKey !== 'opening_hours') return;
-    const isAppointmentsTier = venue.pricing_tier === 'appointments';
+    const isAppointmentsTier = isAppointmentsPlanSku(venue.pricing_tier);
     if (
       currentStepKey === 'hours' &&
       !isUnifiedSchedulingVenue(venue.booking_model) &&
@@ -1945,7 +1950,14 @@ export default function OnboardingPage() {
             <h2 className="mb-1 text-lg font-bold text-slate-900">
               {isAppointmentsPlanVenue ? 'Set up your calendars' : unifiedTeamStepLabel(terms)}
             </h2>
-            {venue.pricing_tier === 'founding' ? (
+            {isLightPlanVenue ? (
+              <p className="mb-4 text-sm text-slate-500">
+                Your Appointments Light plan includes <strong>one calendar column</strong> for your business. Give it a
+                name (often your own name or your business name). You can set working hours and availability after this
+                step. Need more team members or calendars? You can upgrade to the full Appointments plan
+                (&pound;35/month) anytime under Settings.
+              </p>
+            ) : venue.pricing_tier === 'founding' ? (
               <p className="mb-4 text-sm text-slate-500">
                 Your Founding Partner plan includes <strong>unlimited bookable calendars</strong> and{' '}
                 <strong>unlimited team members</strong>. Each name you add below is a <strong>calendar column</strong>: a
@@ -1999,7 +2011,7 @@ export default function OnboardingPage() {
                     <span className="text-xs font-medium uppercase tracking-wide text-slate-400">
                       Calendar {i + 1}
                     </span>
-                    {practitioners.length > 1 && (
+                    {!isLightPlanVenue && practitioners.length > 1 && (
                       <button
                         type="button"
                         onClick={() => setPractitioners(practitioners.filter((_, j) => j !== i))}
@@ -2064,13 +2076,24 @@ export default function OnboardingPage() {
                   )}
                 </div>
               ))}
-              <button
-                type="button"
-                onClick={() => setPractitioners([...practitioners, { name: '', email: '' }])}
-                className="w-full rounded-xl border-2 border-dashed border-slate-200 py-3 text-sm font-medium text-slate-500 transition-colors hover:border-brand-300 hover:text-brand-600"
-              >
-                + Add calendar
-              </button>
+              {!isLightPlanVenue && (
+                <button
+                  type="button"
+                  onClick={() => setPractitioners([...practitioners, { name: '', email: '' }])}
+                  className="w-full rounded-xl border-2 border-dashed border-slate-200 py-3 text-sm font-medium text-slate-500 transition-colors hover:border-brand-300 hover:text-brand-600"
+                >
+                  + Add calendar
+                </button>
+              )}
+              {isLightPlanVenue && (
+                <p className="text-center text-xs text-slate-500">
+                  Need more team members or calendars?{' '}
+                  <Link href="/dashboard/settings?tab=plan" className="font-medium text-brand-600 underline">
+                    Upgrade to Appointments
+                  </Link>{' '}
+                  (&pound;35/month) anytime.
+                </p>
+              )}
             </div>
           </div>
         )}

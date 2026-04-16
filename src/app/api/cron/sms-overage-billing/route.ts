@@ -38,9 +38,14 @@ export async function GET(request: NextRequest) {
     const r = row as { id: string; venue_id: string; overage_count: number };
     const { data: venue } = await admin
       .from('venues')
-      .select('stripe_sms_subscription_item_id')
+      .select('stripe_sms_subscription_item_id, pricing_tier')
       .eq('id', r.venue_id)
       .maybeSingle();
+
+    const tier = ((venue as { pricing_tier?: string | null } | null)?.pricing_tier ?? '').toLowerCase().trim();
+    if (tier === 'light') {
+      continue;
+    }
 
     const itemId = (venue as { stripe_sms_subscription_item_id?: string | null } | null)
       ?.stripe_sms_subscription_item_id;

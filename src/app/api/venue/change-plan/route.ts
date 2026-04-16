@@ -2,15 +2,11 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { stripe } from '@/lib/stripe';
-import {
-  subscriptionCancelAtPeriodEnd,
-  subscriptionPeriodEndIso,
-  subscriptionStatus,
-} from '@/lib/stripe/subscription-fields';
+import { subscriptionPeriodEndIso, subscriptionStatus } from '@/lib/stripe/subscription-fields';
 import {
   buildCheckoutLineItems,
+  buildLightPlanCheckoutLineItems,
 } from '@/lib/stripe/subscription-line-items';
-import { updateVenueSmsMonthlyAllowance } from '@/lib/billing/sms-allowance';
 
 /**
  * POST /api/venue/change-plan
@@ -113,6 +109,34 @@ export async function POST(request: Request) {
         const custErr = requireStripeCustomer();
         if (custErr) return custErr;
         const tier = ((venue.pricing_tier as string) ?? 'appointments').toLowerCase();
+
+        if (tier === 'light') {
+          let lineItems;
+          try {
+            lineItems = buildLightPlanCheckoutLineItems(1);
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : 'Light plan prices not configured';
+            console.error('[change-plan] Light resubscribe:', msg);
+            return NextResponse.json({ error: msg }, { status: 500 });
+          }
+
+          const session = await stripe.checkout.sessions.create({
+            customer: venue.stripe_customer_id as string,
+            mode: 'subscription',
+            allow_promotion_codes: true,
+            line_items: lineItems,
+            metadata: {
+              venue_id: venue.id,
+              plan: 'light',
+              action: 'resubscribe',
+            },
+            success_url: `${origin}/dashboard/settings?tab=plan&resubscribed=true`,
+            cancel_url: `${origin}/dashboard/settings?tab=plan`,
+          });
+
+          return NextResponse.json({ redirect_url: session.url });
+        }
+
         const priceIdMap: Record<string, string | undefined> = {
           appointments: process.env.STRIPE_APPOINTMENTS_PRICE_ID,
           restaurant: process.env.STRIPE_RESTAURANT_PRICE_ID,

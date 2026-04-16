@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { resolveVenueMode } from '@/lib/venue-mode';
 import { venueExposesBookingModel } from '@/lib/booking/enabled-models';
+import { nextResponseIfPublicBookingBlockedForVenue } from '@/lib/booking/light-plan-public-block';
 
 /**
  * GET /api/booking/resource-options?venue_id=uuid
@@ -15,6 +16,9 @@ export async function GET(request: NextRequest) {
     }
 
     const supabase = getSupabaseAdminClient();
+    const blocked = await nextResponseIfPublicBookingBlockedForVenue(supabase, venueId);
+    if (blocked) return blocked;
+
     const venueMode = await resolveVenueMode(supabase, venueId);
     if (!venueExposesBookingModel(venueMode.bookingModel, venueMode.enabledModels, 'resource_booking')) {
       return NextResponse.json({ error: 'Resource bookings are not available for this venue' }, { status: 403 });

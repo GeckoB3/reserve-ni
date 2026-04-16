@@ -8,6 +8,9 @@ import { checkRateLimit, getClientIp } from '@/lib/rate-limit';
  * GET /api/booking/pay?t=token
  * Returns client_secret for the PaymentIntent associated with the booking.
  * Token is signed payload booking_id:exp (24h expiry).
+ *
+ * No Appointments Light `past_due` guard: guests must finish in-flight deposit PaymentIntents for
+ * bookings created before the venue entered past_due (new bookings are already blocked at create).
  */
 export async function GET(request: NextRequest) {
   try {

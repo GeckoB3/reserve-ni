@@ -3,7 +3,6 @@ import { redirect } from 'next/navigation';
 import { SettingsView } from './SettingsView';
 import { StaffPersonalSettingsSection } from './sections/StaffPersonalSettingsSection';
 import { getDashboardStaff } from '@/lib/venue-auth';
-import { getSupabaseAdminClient } from '@/lib/supabase';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 import {
   activeModelsToLegacyEnabledModels,
@@ -23,6 +22,7 @@ export default async function SettingsPage({
     upgraded?: string;
     downgraded?: string;
     resubscribed?: string;
+    light_sms_setup?: string;
   }>;
 }) {
   const supabase = await createClient();
@@ -67,7 +67,7 @@ export default async function SettingsPage({
   let hasServiceConfig = false;
   const { data: fullVenue, error: fullErr } = await staff.db
     .from('venues')
-    .select('id, name, slug, address, phone, email, website_url, cover_photo_url, cuisine_type, price_band, no_show_grace_minutes, kitchen_email, communication_templates, opening_hours, venue_opening_exceptions, booking_rules, deposit_config, availability_config, stripe_connected_account_id, timezone, table_management_enabled, combination_threshold, pricing_tier, plan_status, subscription_current_period_end, calendar_count, booking_model, enabled_models, active_booking_models, sms_monthly_allowance')
+    .select('id, name, slug, address, phone, email, website_url, cover_photo_url, cuisine_type, price_band, no_show_grace_minutes, kitchen_email, communication_templates, opening_hours, venue_opening_exceptions, booking_rules, deposit_config, availability_config, stripe_connected_account_id, timezone, table_management_enabled, combination_threshold, pricing_tier, plan_status, subscription_current_period_end, calendar_count, booking_model, enabled_models, active_booking_models, sms_monthly_allowance, stripe_subscription_id, created_at, light_plan_free_period_ends_at')
     .eq('id', venueId)
     .single();
 
@@ -157,7 +157,6 @@ export default async function SettingsPage({
   }
 
   const isAdmin = staff.role === 'admin';
-  let activePractitionerCount = 0;
   let smsMessagesSentThisMonth: number | null = null;
   if (venueId) {
     const now = new Date();
@@ -170,31 +169,15 @@ export default async function SettingsPage({
       .maybeSingle();
     smsMessagesSentThisMonth = (smsRow as { messages_sent?: number } | null)?.messages_sent ?? 0;
   }
-  if (venueId && isUnifiedSchedulingVenue(bookingModel)) {
-    const adminClient = getSupabaseAdminClient();
-    if (bookingModel === 'unified_scheduling') {
-      const { count } = await adminClient
-        .from('unified_calendars')
-        .select('id', { count: 'exact', head: true })
-        .eq('venue_id', venueId)
-        .eq('is_active', true);
-      activePractitionerCount = count ?? 0;
-    } else {
-      const { count } = await adminClient
-        .from('practitioners')
-        .select('id', { count: 'exact', head: true })
-        .eq('venue_id', venueId)
-        .eq('is_active', true);
-      activePractitionerCount = count ?? 0;
-    }
-  }
-
   const sp = await searchParams;
   const { tab } = sp;
-  let planCheckoutReturn: 'upgraded' | 'downgraded' | 'resubscribed' | undefined;
+  let planCheckoutReturn: 'upgraded' | 'downgraded' | 'resubscribed' | 'light_sms_setup' | undefined;
   if (sp.upgraded === 'true') planCheckoutReturn = 'upgraded';
   else if (sp.downgraded === 'true') planCheckoutReturn = 'downgraded';
   else if (sp.resubscribed === 'true') planCheckoutReturn = 'resubscribed';
+  else if (sp.light_sms_setup === '1' || sp.light_sms_setup === 'true') {
+    planCheckoutReturn = 'light_sms_setup';
+  }
 
   return (
     <div className="p-4 md:p-6 lg:p-8">
@@ -211,7 +194,6 @@ export default async function SettingsPage({
           planCheckoutReturn={planCheckoutReturn}
           hasServiceConfig={hasServiceConfig}
           bookingModel={bookingModel}
-          activePractitionerCount={activePractitionerCount}
         />
       </div>
     </div>

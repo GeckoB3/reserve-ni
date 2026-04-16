@@ -3,7 +3,6 @@ import { createClient } from '@/lib/supabase/server';
 import {
   getVenueStaff,
   getStaffManagedCalendarIds,
-  requireAdmin,
   requireManagedCalendarAccess,
   requireManagedCalendarIds,
 } from '@/lib/venue-auth';
@@ -16,6 +15,7 @@ import {
 } from '@/lib/booking/resource-weekly-overlap';
 import type { WorkingHours } from '@/types/booking-models';
 import { DEFAULT_ENTITY_BOOKING_WINDOW } from '@/lib/booking/entity-booking-window';
+import { assertLightPlanCalendarSlotAvailable } from '@/lib/light-plan';
 import { z } from 'zod';
 
 const availabilityExceptionDaySchema = z.union([
@@ -288,6 +288,18 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         { error: 'Choose a calendar column to show this resource on' },
         { status: 400 },
+      );
+    }
+
+    const calLimit = await assertLightPlanCalendarSlotAvailable(staff.venue_id);
+    if (!calLimit.allowed) {
+      return NextResponse.json(
+        {
+          error:
+            'Your Appointments Light plan includes one calendar column. Upgrade to the Appointments plan to add more.',
+          code: 'LIGHT_PLAN_CALENDAR_LIMIT',
+        },
+        { status: 403 },
       );
     }
 

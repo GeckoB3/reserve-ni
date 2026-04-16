@@ -3,8 +3,10 @@ import { isAppointmentPlanTier, isRestaurantTableProductTier } from '@/lib/tier-
 /** Appointments SKU vs Restaurant / Founding SKU (matches signup `plan` query). */
 export type SignupPlanFamily = 'appointments' | 'restaurant';
 
-export function signupPlanToFamily(plan: 'appointments' | 'restaurant' | 'founding'): SignupPlanFamily {
-  return plan === 'appointments' ? 'appointments' : 'restaurant';
+export function signupPlanToFamily(
+  plan: 'appointments' | 'light' | 'restaurant' | 'founding',
+): SignupPlanFamily {
+  return plan === 'appointments' || plan === 'light' ? 'appointments' : 'restaurant';
 }
 
 export function pricingTierToSignupFamily(tier: string | null | undefined): SignupPlanFamily {

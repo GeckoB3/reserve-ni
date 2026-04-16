@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
+import { assertLightPlanCalendarSlotAvailable } from '@/lib/light-plan';
 import { z } from 'zod';
 
 const createBodySchema = z.object({
@@ -29,6 +30,18 @@ export async function POST(request: NextRequest) {
     }
 
     const admin = getSupabaseAdminClient();
+
+    const limit = await assertLightPlanCalendarSlotAvailable(staff.venue_id);
+    if (!limit.allowed) {
+      return NextResponse.json(
+        {
+          error:
+            'Your Appointments Light plan includes one calendar column. Upgrade to the Appointments plan to add more.',
+          code: 'LIGHT_PLAN_CALENDAR_LIMIT',
+        },
+        { status: 403 },
+      );
+    }
 
     const { data: maxRows } = await admin
       .from('unified_calendars')

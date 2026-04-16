@@ -49,6 +49,7 @@ import { venueWideBlocksRejectBookingWindow } from '@/lib/availability/venue-wid
 import { fetchVenueOpeningHoursAndWideBlocksForDate } from '@/lib/availability/venue-wide-blocks-fetch';
 import { getResourceBookingEmailLabels } from '@/lib/booking/resource-booking-email-labels';
 import { listActiveAreasForVenue } from '@/lib/areas/resolve-default-area';
+import { isOnlineBookingBlockedForLightPastDue } from '@/lib/booking/light-plan-public-block';
 
 function hhMmAfterAddingMinutes(startHhMm: string, durationMinutes: number): string {
   const base = timeToMinutes(startHhMm.slice(0, 5));
@@ -144,12 +145,26 @@ export async function POST(request: NextRequest) {
 
     const { data: venue, error: venueErr } = await supabase
       .from('venues')
-      .select('id, name, stripe_connected_account_id, booking_rules, deposit_config, timezone, table_management_enabled, show_table_in_confirmation, address, opening_hours, venue_opening_exceptions, email, reply_to_email')
+      .select(
+        'id, name, stripe_connected_account_id, booking_rules, deposit_config, timezone, table_management_enabled, show_table_in_confirmation, address, opening_hours, venue_opening_exceptions, email, reply_to_email, pricing_tier, plan_status',
+      )
       .eq('id', venue_id)
       .single();
 
     if (venueErr || !venue) {
       return NextResponse.json({ error: 'Venue not found' }, { status: 404 });
+    }
+
+    if (
+      isOnlineBookingBlockedForLightPastDue(
+        (venue as { pricing_tier?: string | null }).pricing_tier,
+        (venue as { plan_status?: string | null }).plan_status,
+      )
+    ) {
+      return NextResponse.json(
+        { error: 'Online booking is temporarily unavailable for this venue.' },
+        { status: 403 },
+      );
     }
 
     const venueMode = await resolveVenueMode(supabase, venue_id);

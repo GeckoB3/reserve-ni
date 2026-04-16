@@ -8,7 +8,7 @@ import {
   type SignupPendingPlan,
 } from '@/lib/signup-pending-selection';
 
-const PlanSchema = z.enum(['appointments', 'restaurant', 'founding']);
+const PlanSchema = z.enum(['appointments', 'light', 'restaurant', 'founding']);
 
 const PostBodySchema = z
   .object({
@@ -17,7 +17,7 @@ const PostBodySchema = z
   })
   .refine(
     (data) => {
-      if (data.plan === 'appointments') return true;
+      if (data.plan === 'appointments' || data.plan === 'light') return true;
       return !!(data.business_type && data.business_type.trim());
     },
     { message: 'business_type is required for this plan', path: ['business_type'] },
@@ -82,7 +82,7 @@ export async function POST(request: Request) {
 
     const meta = { ...(existing.user.user_metadata ?? {}) };
     meta[SIGNUP_PENDING_PLAN_KEY] = plan;
-    if (plan === 'appointments') {
+    if (plan === 'appointments' || plan === 'light') {
       delete meta[SIGNUP_PENDING_BUSINESS_TYPE_KEY];
     } else {
       meta[SIGNUP_PENDING_BUSINESS_TYPE_KEY] = business_type!.trim();

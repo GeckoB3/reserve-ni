@@ -9,6 +9,16 @@ export function getStripeSmsOveragePriceId(): string | undefined {
   return id || undefined;
 }
 
+export function getStripeSmsLightPriceId(): string | undefined {
+  const id = process.env.STRIPE_SMS_LIGHT_PRICE_ID?.trim();
+  return id || undefined;
+}
+
+export function getStripeLightPlanPriceId(): string | undefined {
+  const id = process.env.STRIPE_LIGHT_PRICE_ID?.trim();
+  return id || undefined;
+}
+
 function priceIdOf(item: Stripe.SubscriptionItem): string | undefined {
   const p = item.price;
   if (!p) return undefined;
@@ -20,6 +30,7 @@ export function findMainPlanSubscriptionItem(sub: Stripe.Subscription): Stripe.S
   const knownPriceIds = [
     process.env.STRIPE_APPOINTMENTS_PRICE_ID?.trim(),
     process.env.STRIPE_RESTAURANT_PRICE_ID?.trim(),
+    process.env.STRIPE_LIGHT_PRICE_ID?.trim(),
   ].filter(Boolean) as string[];
   for (const item of sub.items.data) {
     const pid = priceIdOf(item);
@@ -37,13 +48,16 @@ export function findMainPlanSubscriptionItem(sub: Stripe.Subscription): Stripe.S
   return sub.items.data[0];
 }
 
-/** Metered line item used for SMS overage usage records. */
+/** Metered line item used for SMS overage usage records (6p or Light 8p). */
 export function findSmsMeteredSubscriptionItem(sub: Stripe.Subscription): Stripe.SubscriptionItem | undefined {
-  const smsPrice = getStripeSmsOveragePriceId();
-  if (!smsPrice) return undefined;
+  const candidates = [
+    getStripeSmsOveragePriceId(),
+    getStripeSmsLightPriceId(),
+  ].filter(Boolean) as string[];
+  if (candidates.length === 0) return undefined;
   for (const item of sub.items.data) {
     const pid = priceIdOf(item);
-    if (pid === smsPrice) return item;
+    if (pid && candidates.includes(pid)) return item;
   }
   return undefined;
 }
@@ -71,6 +85,25 @@ export function buildCheckoutLineItems(mainPriceId: string, mainQuantity: number
   ];
   if (sms) {
     items.push({ price: sms });
+  }
+  return items;
+}
+
+/**
+ * Appointments Light Checkout: flat £5 (deferred via subscription trial in API/webhook) + metered SMS at 8p.
+ * Quantity only applies to the main recurring price.
+ */
+export function buildLightPlanCheckoutLineItems(mainQuantity: number): Stripe.Checkout.SessionCreateParams.LineItem[] {
+  const main = getStripeLightPlanPriceId();
+  const smsLight = getStripeSmsLightPriceId();
+  if (!main?.trim()) {
+    throw new Error('STRIPE_LIGHT_PRICE_ID is not configured');
+  }
+  const items: Stripe.Checkout.SessionCreateParams.LineItem[] = [
+    { price: main.trim(), quantity: mainQuantity },
+  ];
+  if (smsLight?.trim()) {
+    items.push({ price: smsLight.trim() });
   }
   return items;
 }

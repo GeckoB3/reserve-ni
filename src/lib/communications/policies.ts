@@ -154,6 +154,21 @@ export function defaultCommunicationPolicies(): VenueCommunicationPolicies {
   };
 }
 
+/** Appointments Light: SMS toggles default off — email-only channels for the unified scheduling lane. */
+export function communicationPoliciesEmailOnlyAppointmentsLane(): VenueCommunicationPolicies {
+  const base = defaultCommunicationPolicies();
+  const lane = { ...base.appointments_other };
+  for (const key of Object.keys(lane) as CommunicationMessageKey[]) {
+    const pol = lane[key];
+    const nextChannels = pol.channels.filter((c) => c !== 'sms');
+    lane[key] = {
+      ...pol,
+      channels: nextChannels.length > 0 ? nextChannels : ['email'],
+    };
+  }
+  return { table: base.table, appointments_other: lane };
+}
+
 const ALLOWED_CHANNELS_BY_MESSAGE: Record<
   CommunicationMessageKey,
   CommunicationChannel[]

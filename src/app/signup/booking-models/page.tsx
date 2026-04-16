@@ -60,7 +60,7 @@ export default function SignupBookingModelsPage() {
         if (!venue) {
           throw new Error('Missing venue');
         }
-        if (venue.pricing_tier !== 'appointments') {
+        if (venue.pricing_tier !== 'appointments' && venue.pricing_tier !== 'light') {
           router.replace('/onboarding');
           return;
         }

@@ -30,6 +30,8 @@ export interface VenuePublic {
   public_booking_area_mode?: 'auto' | 'manual';
   /** Active dining areas when `booking_model` is table_reservation. */
   areas?: Array<{ id: string; name: string; colour: string; sort_order: number }>;
+  /** Appointments Light: booking page paused when free period ended without payment. */
+  booking_paused?: boolean;
 }
 
 export interface DepositConfigPublic {

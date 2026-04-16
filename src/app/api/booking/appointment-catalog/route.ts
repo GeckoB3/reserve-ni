@@ -3,6 +3,7 @@ import { getSupabaseAdminClient } from '@/lib/supabase';
 import { fetchAppointmentCatalog } from '@/lib/availability/appointment-catalog';
 import { resolveVenueMode } from '@/lib/venue-mode';
 import { isUnifiedSchedulingVenue, venueUsesUnifiedAppointmentData } from '@/lib/booking/unified-scheduling';
+import { nextResponseIfPublicBookingBlockedForVenue } from '@/lib/booking/light-plan-public-block';
 
 /**
  * GET /api/booking/appointment-catalog?venue_id=uuid
@@ -18,6 +19,9 @@ export async function GET(request: NextRequest) {
     const practitionerSlug = new URL(request.url).searchParams.get('practitioner_slug')?.trim();
 
     const supabase = getSupabaseAdminClient();
+    const blocked = await nextResponseIfPublicBookingBlockedForVenue(supabase, venueId);
+    if (blocked) return blocked;
+
     const venueMode = await resolveVenueMode(supabase, venueId);
     if (
       !isUnifiedSchedulingVenue(venueMode.bookingModel) &&

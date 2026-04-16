@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import type { BookingModel } from "@/types/booking-models";
 import {
   type CommunicationChannel,
@@ -366,6 +367,22 @@ export function CommunicationTemplatesSection({
         </div>
         <SaveIndicator status={saveStatus} />
       </div>
+
+      {pricingTier === "light" && (
+        <div className="rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-950">
+          <p className="font-medium">SMS on Appointments Light</p>
+          <p className="mt-1 text-sky-900">
+            Each SMS is billed at 8p (metered). Add a card under{" "}
+            <Link
+              href="/dashboard/settings?tab=plan"
+              className="font-medium text-sky-800 underline underline-offset-2 hover:text-sky-950"
+            >
+              Settings → Plan
+            </Link>{" "}
+            so Stripe can record usage after your free period.
+          </p>
+        </div>
+      )}
 
       {availableLanes.length > 1 && (
         <div

@@ -5,14 +5,20 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/browser';
 import { formatSignupBusinessTypeLabel, isDirectModelBusinessType } from '@/lib/business-config';
-import { APPOINTMENTS_PRICE, RESTAURANT_PRICE, SMS_OVERAGE_GBP_PER_MESSAGE } from '@/lib/pricing-constants';
+import {
+  APPOINTMENTS_LIGHT_PRICE,
+  APPOINTMENTS_PRICE,
+  RESTAURANT_PRICE,
+  SMS_LIGHT_GBP_PER_MESSAGE,
+  SMS_OVERAGE_GBP_PER_MESSAGE,
+} from '@/lib/pricing-constants';
 import { SMS_INCLUDED_APPOINTMENTS, SMS_INCLUDED_RESTAURANT } from '@/lib/billing/sms-allowance';
 import { signupPlanToFamily, SIGNUP_PLAN_CONFLICT_MESSAGE } from '@/lib/signup-plan-family';
 import { fetchPendingSignupSelection, syncPendingToSessionStorage } from '@/lib/signup-pending-client';
 import { isSignupPaymentReady } from '@/lib/signup-pending-selection';
 import { ensureDefaultRestaurantFamilyBusinessType } from '@/lib/signup-resume';
 
-type PlanType = 'appointments' | 'restaurant' | 'founding';
+type PlanType = 'appointments' | 'light' | 'restaurant' | 'founding';
 
 /** Hospitality keys from signup; redundant next to "Plan: Restaurant" / Founding on order summary. */
 const HOSPITALITY_BUSINESS_TYPE_KEYS = new Set(['restaurant', 'cafe', 'pub', 'hotel_restaurant']);
@@ -57,7 +63,7 @@ export default function PaymentPage() {
       p = sessionStorage.getItem('signup_plan') as PlanType | null;
 
       if (cancelled) return;
-      if (!p || (p !== 'appointments' && !bt)) {
+      if (!p || (p !== 'appointments' && p !== 'light' && !bt)) {
         router.push('/signup/business-type');
         return;
       }
@@ -97,6 +103,7 @@ export default function PaymentPage() {
   }, [sessionChecked, hasSession, plan]);
 
   const totalPrice = useMemo(() => {
+    if (plan === 'light') return APPOINTMENTS_LIGHT_PRICE;
     if (plan === 'appointments') return APPOINTMENTS_PRICE;
     if (plan === 'restaurant') return RESTAURANT_PRICE;
     return 0; // founding is free
@@ -164,10 +171,18 @@ export default function PaymentPage() {
   }
 
   const overagePence = Math.round(SMS_OVERAGE_GBP_PER_MESSAGE * 100);
+  const lightSmsPence = Math.round(SMS_LIGHT_GBP_PER_MESSAGE * 100);
   const isRestaurant = plan === 'restaurant';
   const isFounding = plan === 'founding';
+  const isLight = plan === 'light';
   const smsIncluded = isRestaurant || isFounding ? SMS_INCLUDED_RESTAURANT : SMS_INCLUDED_APPOINTMENTS;
-  const planLabel = isFounding ? 'Founding Partner' : isRestaurant ? 'Restaurant' : 'Appointments';
+  const planLabel = isFounding
+    ? 'Founding Partner'
+    : isRestaurant
+      ? 'Restaurant'
+      : isLight
+        ? 'Appointments Light'
+        : 'Appointments';
   const omitBusinessTypeRow =
     (isRestaurant || isFounding) &&
     !!businessType &&
@@ -222,6 +237,14 @@ export default function PaymentPage() {
                 and priority support. Additional SMS at {overagePence}p each.
               </p>
             </div>
+          ) : isLight ? (
+            <div className="rounded-lg border border-brand-100 bg-brand-50/60 px-3 py-2 text-xs text-brand-900">
+              <p className="font-medium">Appointments Light — free for 3 months, then &pound;{APPOINTMENTS_LIGHT_PRICE}/month.</p>
+              <p className="mt-1 leading-relaxed">
+                Full access to appointments, classes, events, and resources with one calendar column and one login.
+                SMS is pay-as-you-go at {lightSmsPence}p per message when you enable it (no card required to start).
+              </p>
+            </div>
           ) : (
             <div className="rounded-lg border border-slate-100 bg-slate-50/80 px-3 py-2 text-xs text-slate-600">
               <p className="font-medium text-slate-800">
@@ -245,6 +268,8 @@ export default function PaymentPage() {
               <span className="text-base font-bold text-slate-900">
                 {isFounding ? (
                   <span className="text-emerald-600">Free for 6 months</span>
+                ) : isLight ? (
+                  <span className="text-brand-700">Free for 3 months</span>
                 ) : (
                   <>&pound;{totalPrice}/mo</>
                 )}
@@ -284,14 +309,19 @@ export default function PaymentPage() {
             ? 'Processing...'
             : isFounding
               ? 'Complete setup'
-              : 'Proceed to payment'}
+              : isLight
+                ? 'Start free'
+                : 'Proceed to payment'}
         </button>
 
         <p className="mt-3 text-center text-xs text-slate-500">Cancel anytime with 30 days notice.</p>
-        {!isFounding && (
+        {!isFounding && !isLight && (
           <p className="mt-1 text-center text-xs text-slate-400">
             You&apos;ll be redirected to Stripe for secure payment.
           </p>
+        )}
+        {isLight && (
+          <p className="mt-1 text-center text-xs text-slate-500">No card required. We&apos;ll create your venue and you can continue to onboarding.</p>
         )}
       </div>
 

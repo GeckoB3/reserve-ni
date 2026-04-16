@@ -5,6 +5,7 @@ import { getSupabaseAdminClient } from '@/lib/supabase';
 import { setStaffPractitionerLink, setStaffUnifiedCalendarAssignments } from '@/lib/staff-practitioner-link';
 import { deliverStaffAccessLinkEmail } from '@/lib/staff-invite-email';
 import { getStaffAuthBaseUrl } from '@/lib/staff-invite-redirect';
+import { assertLightPlanSingleStaffOnly } from '@/lib/light-plan';
 import { z } from 'zod';
 
 const inviteSchema = z.object({
@@ -111,6 +112,18 @@ export async function POST(request: NextRequest) {
       .eq('venue_id', staff.venue_id)
       .eq('email', normalisedEmail)
       .maybeSingle();
+
+    const staffLimit = await assertLightPlanSingleStaffOnly(staff.venue_id);
+    if (!staffLimit.allowed) {
+      return NextResponse.json(
+        {
+          error:
+            'Your Appointments Light plan includes one login. Upgrade to the Appointments plan to invite team members.',
+          code: 'LIGHT_PLAN_STAFF_LIMIT',
+        },
+        { status: 403 },
+      );
+    }
 
     if (existing) {
       return NextResponse.json({ error: 'This email is already a staff member for this venue' }, { status: 409 });

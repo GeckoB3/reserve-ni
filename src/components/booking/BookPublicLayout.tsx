@@ -87,6 +87,19 @@ interface BookPublicLayoutProps {
 export function BookPublicLayout({ venue, lockedPractitioner }: BookPublicLayoutProps) {
   const isAppointment = isUnifiedSchedulingVenue(venue.booking_model);
 
+  if (venue.booking_paused) {
+    return (
+      <main className="min-h-screen bg-slate-50 px-4 py-16">
+        <div className="mx-auto max-w-2xl rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
+          <h1 className="text-xl font-semibold text-slate-900">Online booking unavailable</h1>
+          <p className="mt-3 text-sm leading-relaxed text-slate-600">
+            Online booking for {venue.name} is temporarily unavailable. Please contact them directly to make a booking.
+          </p>
+        </div>
+      </main>
+    );
+  }
+
   return (
     <main className="min-h-screen bg-slate-50">
       <header className="relative overflow-hidden bg-slate-900">

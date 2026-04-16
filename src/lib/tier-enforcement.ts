@@ -1,6 +1,12 @@
 import { getSupabaseAdminClient } from '@/lib/supabase';
+import { assertLightPlanCalendarSlotAvailable } from '@/lib/light-plan';
 
-export type PricingTier = 'appointments' | 'restaurant' | 'founding';
+export type PricingTier = 'appointments' | 'light' | 'restaurant' | 'founding';
+
+/** Appointments Light — sole trader tier: one calendar column, one staff login, PAYG SMS. */
+export function isLightPlanTier(pricingTier: string | null | undefined): boolean {
+  return (pricingTier ?? '').toLowerCase().trim() === 'light';
+}
 
 /**
  * Restaurant / Founding tiers: table reservations, dining availability, floor plan.
@@ -19,21 +25,26 @@ export function isRestaurantCommsTier(pricingTier: string | null | undefined): b
   return t === 'restaurant' || t === 'founding';
 }
 
-/** Appointments product plan — use unified / "Appointments & other bookings" messaging, not table-only. */
+/**
+ * Unified scheduling product (Appointments full plan or Appointments Light), not restaurant table SKU.
+ */
 export function isAppointmentPlanTier(pricingTier: string | null | undefined): boolean {
   const t = (pricingTier ?? '').toLowerCase().trim();
-  return t === 'appointments';
+  return t === 'appointments' || t === 'light';
 }
 
 /**
- * Calendar limits have been removed - all plans now include unlimited calendars.
- * Kept for API compatibility; always returns allowed.
+ * Appointments Light: at most one active `unified_calendars` row. Other tiers: unlimited.
  */
 export async function checkCalendarLimit(
-  _venueId: string,
+  venueId: string,
   _countTable: 'practitioners' | 'venue_resources' | 'experience_events'
 ): Promise<{ allowed: boolean; current?: number; limit?: number }> {
-  return { allowed: true };
+  const r = await assertLightPlanCalendarSlotAvailable(venueId);
+  if (r.limit === Infinity) {
+    return { allowed: true };
+  }
+  return { allowed: r.allowed, current: r.current, limit: r.limit };
 }
 
 /**

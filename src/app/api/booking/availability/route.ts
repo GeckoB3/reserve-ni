@@ -28,6 +28,7 @@ import { venueExposesBookingModel } from '@/lib/booking/enabled-models';
 import type { BookingModel } from '@/types/booking-models';
 import { DEFAULT_ENTITY_BOOKING_WINDOW, loadServiceEntityBookingWindow } from '@/lib/booking/entity-booking-window';
 import { listActiveAreasForVenue } from '@/lib/areas/resolve-default-area';
+import { nextResponseIfPublicBookingBlockedForVenue } from '@/lib/booking/light-plan-public-block';
 import type { EngineServiceResult, ServiceAvailableSlot } from '@/types/availability';
 
 /** Public availability can request C/D/E explicitly when the venue primary is another model (multi-tab embed). */
@@ -318,6 +319,9 @@ export async function GET(request: NextRequest) {
     }
 
     const supabase = getSupabaseAdminClient();
+    const blocked = await nextResponseIfPublicBookingBlockedForVenue(supabase, venueId);
+    if (blocked) return blocked;
+
     const venueMode = await resolveVenueMode(supabase, venueId);
 
     const serviceIdParam = searchParams.get('service_id');

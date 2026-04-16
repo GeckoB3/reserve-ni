@@ -61,7 +61,7 @@ export async function POST(request: Request) {
           ? existingVenue.active_booking_models
           : [];
         if (
-          existingVenue?.pricing_tier === 'appointments' &&
+          (existingVenue?.pricing_tier === 'appointments' || existingVenue?.pricing_tier === 'light') &&
           activeModels.length === 0 &&
           existingVenue.onboarding_completed !== true
         ) {

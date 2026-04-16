@@ -44,6 +44,16 @@ const DEFAULT_NOTIFICATION_SETTINGS: VenueNotificationSettings = {
   staff_cancellation_alert: true,
 };
 
+/** Appointments Light: no SMS by default; owner opts in per channel after adding a payment method. */
+export function defaultNotificationSettingsForLightPlan(): VenueNotificationSettings {
+  return {
+    ...DEFAULT_NOTIFICATION_SETTINGS,
+    confirmation_channels: ['email'],
+    reminder_1_channels: ['email'],
+    reminder_2_channels: ['email'],
+  };
+}
+
 export function parseNotificationSettings(raw: unknown): VenueNotificationSettings {
   if (!raw || typeof raw !== 'object') return { ...DEFAULT_NOTIFICATION_SETTINGS };
   const o = raw as Record<string, unknown>;

@@ -8,6 +8,7 @@ import {
   computeResourceAvailableDatesInMonthAnyDuration,
   attachHostCalendarsToResources,
 } from '@/lib/availability/resource-booking-engine';
+import { nextResponseIfPublicBookingBlockedForVenue } from '@/lib/booking/light-plan-public-block';
 
 /**
  * GET /api/booking/resource-calendar?venue_id=&resource_id=&year=&month=&duration=
@@ -46,6 +47,9 @@ export async function GET(request: NextRequest) {
     }
 
     const supabase = getSupabaseAdminClient();
+    const blocked = await nextResponseIfPublicBookingBlockedForVenue(supabase, venueId);
+    if (blocked) return blocked;
+
     const venueMode = await resolveVenueMode(supabase, venueId);
     if (!venueExposesBookingModel(venueMode.bookingModel, venueMode.enabledModels, 'resource_booking')) {
       return NextResponse.json({ error: 'Resource bookings are not available for this venue' }, { status: 403 });

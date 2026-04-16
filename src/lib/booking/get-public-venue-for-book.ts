@@ -2,6 +2,7 @@ import { getSupabaseAdminClient } from '@/lib/supabase';
 import { resolveVenueMode } from '@/lib/venue-mode';
 import type { VenuePublic } from '@/components/booking/types';
 import { listActiveAreasForVenue } from '@/lib/areas/resolve-default-area';
+import { isOnlineBookingBlockedForLightPastDue } from '@/lib/booking/light-plan-public-block';
 
 /** Loads a venue for the public /book/[slug] pages (admin client; slug is public). */
 export async function getPublicVenueForBookBySlug(slug: string): Promise<VenuePublic | null> {
@@ -9,11 +10,17 @@ export async function getPublicVenueForBookBySlug(slug: string): Promise<VenuePu
   const { data, error } = await supabase
     .from('venues')
     .select(
-      'id, name, slug, cover_photo_url, address, phone, website_url, deposit_config, booking_rules, opening_hours, timezone, booking_model, enabled_models, active_booking_models, terminology, currency, public_booking_area_mode',
+      'id, name, slug, cover_photo_url, address, phone, website_url, deposit_config, booking_rules, opening_hours, timezone, booking_model, enabled_models, active_booking_models, terminology, currency, public_booking_area_mode, pricing_tier, plan_status',
     )
     .eq('slug', slug)
     .single();
   if (error || !data) return null;
+
+  const pricingTier = (data as { pricing_tier?: string | null }).pricing_tier;
+  const planStatus = (data as { plan_status?: string | null }).plan_status;
+  if (isOnlineBookingBlockedForLightPastDue(pricingTier, planStatus)) {
+    (data as { booking_paused?: boolean }).booking_paused = true;
+  }
 
   const venueMode = await resolveVenueMode(supabase, data.id);
   (data as VenuePublic).booking_model = venueMode.bookingModel;

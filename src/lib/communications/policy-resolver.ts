@@ -1,4 +1,6 @@
-import { isSmsAllowed } from '@/lib/tier-enforcement';
+import { getSupabaseAdminClient } from '@/lib/supabase';
+import { isLightPlanTier, isSmsAllowed } from '@/lib/tier-enforcement';
+import { venueHasStripePaymentMethodForSms } from '@/lib/stripe/venue-customer-payment';
 import type { BookingModel } from '@/types/booking-models';
 import {
   type CommunicationChannel,
@@ -114,6 +116,14 @@ export async function resolveCommPolicy(
   const policy = policies[lane][input.messageKey];
   const smsAllowed = await isSmsAllowed(input.venueId);
 
+  const admin = getSupabaseAdminClient();
+  const { data: tierRow } = await admin
+    .from('venues')
+    .select('pricing_tier')
+    .eq('id', input.venueId)
+    .maybeSingle();
+  const pricingTier = (tierRow as { pricing_tier?: string | null } | null)?.pricing_tier;
+
   let channels = [...policy.channels];
   if (input.requestedChannels?.length) {
     const requested = new Set(input.requestedChannels);
@@ -121,6 +131,20 @@ export async function resolveCommPolicy(
   }
   if (!smsAllowed) {
     channels = channels.filter((channel) => channel !== 'sms');
+  }
+
+  if (isLightPlanTier(pricingTier) && channels.includes('sms')) {
+    const canBillSms = await venueHasStripePaymentMethodForSms(input.venueId);
+    if (!canBillSms) {
+      console.warn(
+        JSON.stringify({
+          event: 'light_plan_sms_skipped_no_payment_method',
+          venue_id: input.venueId,
+          message_key: input.messageKey,
+        }),
+      );
+      channels = channels.filter((channel) => channel !== 'sms');
+    }
   }
 
   return {

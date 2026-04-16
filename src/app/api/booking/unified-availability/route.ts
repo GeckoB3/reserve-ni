@@ -3,6 +3,7 @@ import { getSupabaseAdminClient } from '@/lib/supabase';
 import { resolveVenueMode } from '@/lib/venue-mode';
 import { isUnifiedSchedulingVenue, venueUsesUnifiedAppointmentData } from '@/lib/booking/unified-scheduling';
 import { getUnifiedAvailableSlots } from '@/lib/unified-availability';
+import { nextResponseIfPublicBookingBlockedForVenue } from '@/lib/booking/light-plan-public-block';
 import { z } from 'zod';
 
 const querySchema = z.object({
@@ -34,6 +35,9 @@ export async function GET(request: NextRequest) {
 
     const { venue_id, calendar_id, date, service_item_id, duration_minutes } = parsed.data;
     const supabase = getSupabaseAdminClient();
+    const blocked = await nextResponseIfPublicBookingBlockedForVenue(supabase, venue_id);
+    if (blocked) return blocked;
+
     const venueMode = await resolveVenueMode(supabase, venue_id);
     if (
       !isUnifiedSchedulingVenue(venueMode.bookingModel) &&

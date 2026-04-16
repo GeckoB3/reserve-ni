@@ -12,6 +12,8 @@ import {
   getPersistedSubscriptionItemIds,
 } from '@/lib/stripe/subscription-line-items';
 import { updateVenueSmsMonthlyAllowance } from '@/lib/billing/sms-allowance';
+import { handleLightPaymentMethodUpdateFromSetup } from '@/lib/stripe/light-past-due-payment-webhook';
+import { handleLightSmsSetupCheckoutCompleted } from '@/lib/stripe/light-sms-setup-webhook';
 
 /**
  * Configure in Stripe Dashboard: endpoint URL /api/webhooks/stripe-subscription,
@@ -123,6 +125,19 @@ async function handleCheckoutCompleted(
   session: Stripe.Checkout.Session
 ) {
   const metadata = session.metadata ?? {};
+
+  /** Appointments Light: past_due with existing sub — new card from Setup Checkout. */
+  if (session.mode === 'setup' && metadata.action === 'light_payment_method_update' && metadata.venue_id) {
+    await handleLightPaymentMethodUpdateFromSetup(supabase, session);
+    return;
+  }
+
+  /** Appointments Light: collect default payment method, then create £5 + metered SMS subscription (webhook). */
+  if (session.mode === 'setup' && metadata.action === 'light_sms_setup' && metadata.venue_id) {
+    await handleLightSmsSetupCheckoutCompleted(supabase, session);
+    return;
+  }
+
   const businessType = metadata.business_type;
   const plan = metadata.plan;
   const supabaseUserId = metadata.supabase_user_id;
@@ -172,6 +187,10 @@ async function handleCheckoutCompleted(
       changePlanUpdates.pricing_tier = newPlan;
     }
     changePlanUpdates.calendar_count = null;
+    if (newPlan === 'appointments') {
+      changePlanUpdates.light_plan_free_period_ends_at = null;
+      changePlanUpdates.light_plan_converted_at = null;
+    }
 
     await supabase
       .from('venues')
@@ -323,6 +342,7 @@ async function handleSubscriptionUpdated(
   };
   addMapping('STRIPE_APPOINTMENTS_PRICE_ID', 'appointments');
   addMapping('STRIPE_RESTAURANT_PRICE_ID', 'restaurant');
+  addMapping('STRIPE_LIGHT_PRICE_ID', 'light');
   if (priceId && priceToTier[priceId]) {
     updates.pricing_tier = priceToTier[priceId];
     updates.calendar_count = null;
@@ -359,15 +379,52 @@ async function handleSubscriptionDeleted(
     typeof subscription.customer === 'string'
       ? subscription.customer
       : subscription.customer.id;
+  const deletedId = subscription.id;
+  if (!customerId || !deletedId) return;
 
-  await supabase
+  try {
+    const stillOpen = await stripe.subscriptions.list({
+      customer: customerId,
+      status: 'all',
+      limit: 20,
+    });
+    const hasReplacement = stillOpen.data.some(
+      (s) =>
+        s.id !== deletedId && ['active', 'trialing', 'past_due', 'unpaid'].includes(s.status),
+    );
+    if (hasReplacement) {
+      console.log(
+        `[Subscription webhook] Ignoring deleted event ${deletedId}: customer still has another subscription`,
+      );
+      return;
+    }
+  } catch (e) {
+    console.warn('[Subscription webhook] Could not list subscriptions after delete; continuing cautiously', e);
+  }
+
+  /**
+   * Only clear the venue row when the deleted sub matches what we stored. Otherwise a plan change
+   * that cancels the *old* subscription (e.g. Light → Appointments upgrade) would wipe the new sub id.
+   */
+  const { data: rows } = await supabase
     .from('venues')
-    .update({
-      plan_status: 'cancelled',
-      stripe_subscription_id: null,
-      stripe_subscription_item_id: null,
-      stripe_sms_subscription_item_id: null,
-      subscription_current_period_end: null,
-    })
+    .select('id, stripe_subscription_id')
     .eq('stripe_customer_id', customerId);
+
+  for (const row of rows ?? []) {
+    const vid = (row as { id?: string }).id;
+    const stored = (row as { stripe_subscription_id?: string | null }).stripe_subscription_id;
+    if (!vid || stored !== deletedId) continue;
+
+    await supabase
+      .from('venues')
+      .update({
+        plan_status: 'cancelled',
+        stripe_subscription_id: null,
+        stripe_subscription_item_id: null,
+        stripe_sms_subscription_item_id: null,
+        subscription_current_period_end: null,
+      })
+      .eq('id', vid);
+  }
 }

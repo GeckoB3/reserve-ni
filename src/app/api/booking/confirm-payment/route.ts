@@ -18,6 +18,8 @@ import { venueRowToEmailData } from '@/lib/emails/venue-email-data';
  *
  * This endpoint is the primary confirmation path. The webhook handler is kept
  * as a backup for edge cases (3D Secure redirects, delayed confirmations).
+ *
+ * No Appointments Light `past_due` guard: same reasoning as GET /api/booking/pay (complete existing deposits).
  */
 export async function POST(request: NextRequest) {
   try {

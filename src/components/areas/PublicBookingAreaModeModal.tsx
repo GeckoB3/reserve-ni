@@ -81,7 +81,7 @@ export function PublicBookingAreaModeModal({ open, onClose, initialMode, onSaved
             <span>
               <span className="font-medium text-slate-900">Combined times</span>
               <span className="mt-1 block text-sm text-slate-600">
-                Show one list of available times across all areas. Each slot is labelled with its area where needed.
+                Show one list of available times across all areas.
               </span>
             </span>
           </label>

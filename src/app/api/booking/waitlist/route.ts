@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { z } from 'zod';
 import { normalizeToE164 } from '@/lib/phone/e164';
+import { nextResponseIfPublicBookingBlockedForVenue } from '@/lib/booking/light-plan-public-block';
 
 const joinSchema = z.object({
   venue_id: z.string().uuid(),
@@ -25,6 +26,8 @@ export async function POST(request: NextRequest) {
     }
 
     const supabase = getSupabaseAdminClient();
+    const blocked = await nextResponseIfPublicBookingBlockedForVenue(supabase, parsed.data.venue_id);
+    if (blocked) return blocked;
 
     const guestPhoneE164 = normalizeToE164(parsed.data.guest_phone, 'GB');
     if (!guestPhoneE164) {

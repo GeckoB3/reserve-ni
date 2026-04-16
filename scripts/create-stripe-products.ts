@@ -27,12 +27,12 @@ async function main() {
 
   const appointmentsProduct = await stripe.products.create({
     name: 'Reserve NI Appointments',
-    description: 'Appointments plan - unlimited calendars, 300 SMS/month included. £29/month.',
+    description: 'Appointments plan - unlimited calendars, 300 SMS/month included. £35/month.',
   });
 
   const appointmentsPrice = await stripe.prices.create({
     product: appointmentsProduct.id,
-    unit_amount: 2900,
+    unit_amount: 3500,
     currency: 'gbp',
     recurring: { interval: 'month' },
   });
@@ -55,9 +55,52 @@ async function main() {
   console.log(`Restaurant Product:  ${restaurantProduct.id}`);
   console.log(`Restaurant Price:    ${restaurantPrice.id}`);
 
+  const lightProduct = await stripe.products.create({
+    name: 'Reserve NI Appointments Light',
+    description: 'Appointments Light — £5/month after free period, one calendar, PAYG SMS.',
+  });
+
+  const lightPrice = await stripe.prices.create({
+    product: lightProduct.id,
+    unit_amount: 500,
+    currency: 'gbp',
+    recurring: { interval: 'month' },
+  });
+
+  console.log(`Appointments Light Product: ${lightProduct.id}`);
+  console.log(`Appointments Light Price:   ${lightPrice.id}`);
+
+  const smsProduct = await stripe.products.create({
+    name: 'Reserve NI SMS (metered)',
+    description: 'Metered SMS overage for Appointments / Restaurant (6p) or Light (8p) — attach separate prices.',
+  });
+
+  const smsOverage6 = await stripe.prices.create({
+    product: smsProduct.id,
+    currency: 'gbp',
+    unit_amount: 6,
+    recurring: { interval: 'month', usage_type: 'metered' },
+    billing_scheme: 'per_unit',
+  });
+
+  const smsLight8 = await stripe.prices.create({
+    product: smsProduct.id,
+    currency: 'gbp',
+    unit_amount: 8,
+    recurring: { interval: 'month', usage_type: 'metered' },
+    billing_scheme: 'per_unit',
+  });
+
+  console.log(`SMS Product:           ${smsProduct.id}`);
+  console.log(`SMS overage 6p Price:  ${smsOverage6.id}`);
+  console.log(`SMS Light 8p Price:    ${smsLight8.id}`);
+
   console.log('\n--- Add these to your .env.local ---\n');
   console.log(`STRIPE_APPOINTMENTS_PRICE_ID=${appointmentsPrice.id}`);
   console.log(`STRIPE_RESTAURANT_PRICE_ID=${restaurantPrice.id}`);
+  console.log(`STRIPE_LIGHT_PRICE_ID=${lightPrice.id}`);
+  console.log(`STRIPE_SMS_OVERAGE_PRICE_ID=${smsOverage6.id}`);
+  console.log(`STRIPE_SMS_LIGHT_PRICE_ID=${smsLight8.id}`);
   console.log('\nAlso register a webhook endpoint at {your-domain}/api/webhooks/stripe-subscription');
   console.log('for events: checkout.session.completed, customer.subscription.updated,');
   console.log('customer.subscription.deleted, invoice.payment_succeeded, invoice.payment_failed');

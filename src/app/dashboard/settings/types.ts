@@ -43,6 +43,12 @@ export interface VenueSettings {
   sms_monthly_allowance?: number | null;
   /** Sent this calendar month (from sms_usage), when loaded. */
   sms_messages_sent_this_month?: number | null;
+  /** Stripe subscription id when loaded (Plan tab actions). */
+  stripe_subscription_id?: string | null;
+  /** Venue row created_at (ISO) for promotional banners. */
+  created_at?: string;
+  /** Appointments Light: free period end (ISO). */
+  light_plan_free_period_ends_at?: string | null;
   /**
    * Multi-area table venues: `auto` = combined slot list on public + staff booking; `manual` = area tabs to view times per area.
    */

@@ -48,6 +48,54 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
+  /** Block mutating venue APIs when subscription is past due (billing routes exempt). */
+  const method = request.method.toUpperCase();
+  const isVenueMutating =
+    user &&
+    pathname.startsWith('/api/venue/') &&
+    ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method);
+
+  function isVenueBillingExemptVenuePath(p: string): boolean {
+    if (p === '/api/venue/change-plan') return true;
+    if (p.startsWith('/api/venue/light-plan')) return true;
+    if (p.startsWith('/api/venue/stripe-connect')) return true;
+    if (p.startsWith('/api/venue/staff/me')) return true;
+    if (p === '/api/venue/staff/change-password') return true;
+    if (p.startsWith('/api/venue/support')) return true;
+    return false;
+  }
+
+  if (isVenueMutating && !isVenueBillingExemptVenuePath(pathname)) {
+    const email = (user?.email ?? '').trim();
+    if (!email) {
+      return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
+    }
+    const { data: staffRows } = await supabase
+      .from('staff')
+      .select('venue_id')
+      .ilike('email', email.toLowerCase())
+      .limit(1);
+    const vid = staffRows?.[0]?.venue_id as string | undefined;
+    if (vid) {
+      const { data: venueRow } = await supabase
+        .from('venues')
+        .select('plan_status')
+        .eq('id', vid)
+        .maybeSingle();
+      const ps = (venueRow as { plan_status?: string | null } | null)?.plan_status;
+      if (ps === 'past_due') {
+        return NextResponse.json(
+          {
+            error:
+              'Billing is past due. Add or update your payment method under Settings → Plan to continue editing.',
+            code: 'VENUE_PAST_DUE',
+          },
+          { status: 403 },
+        );
+      }
+    }
+  }
+
   // Platform routes: require superuser role + email allowlist
   if ((isPlatformUI || isPlatformAPI) && user) {
     const isSuperuser = isPlatformRoleInJwt(

@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { computeSmsMonthlyAllowance } from '@/lib/billing/sms-allowance';
-import { SMS_OVERAGE_GBP_PER_MESSAGE } from '@/lib/pricing-constants';
+import { SMS_LIGHT_GBP_PER_MESSAGE, SMS_OVERAGE_GBP_PER_MESSAGE } from '@/lib/pricing-constants';
 
 function billingMonthFirstDayUtcYmd(): string {
   const d = new Date();
@@ -41,16 +41,32 @@ export async function getSmsUsageDisplayForVenue(
 
   const { data: usage } = await admin
     .from('sms_usage')
-    .select('messages_sent')
+    .select('messages_sent, overage_amount_pence')
     .eq('venue_id', venueId)
     .eq('billing_month', bm)
     .maybeSingle();
 
   const u = usage as {
     messages_sent?: number;
+    overage_amount_pence?: number;
   } | null;
 
   const sent = u?.messages_sent ?? 0;
+  const tierLower = (row.pricing_tier ?? '').toLowerCase();
+  if (tierLower === 'light') {
+    const overagePenceLight =
+      typeof u?.overage_amount_pence === 'number'
+        ? u.overage_amount_pence
+        : sent * Math.round(SMS_LIGHT_GBP_PER_MESSAGE * 100);
+    return {
+      messages_sent: sent,
+      messages_included: 0,
+      remaining: 0,
+      overage_count: sent,
+      overage_amount_pence: overagePenceLight,
+    };
+  }
+
   const remaining = Math.max(0, included - sent);
   const overageCount = Math.max(0, sent - included);
   const overagePence = overageCount * Math.round(SMS_OVERAGE_GBP_PER_MESSAGE * 100);

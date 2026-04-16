@@ -23,6 +23,7 @@ import { isUnifiedSchedulingVenue, venueUsesUnifiedAppointmentData } from '@/lib
 import { createShortManageLink } from '@/lib/short-manage-link';
 import { loadServiceEntityBookingWindow } from '@/lib/booking/entity-booking-window';
 import { resolveCancellationNoticeHoursForCreate } from '@/lib/booking/resolve-cancellation-notice-hours';
+import { isOnlineBookingBlockedForLightPastDue } from '@/lib/booking/light-plan-public-block';
 
 const personEntrySchema = z.object({
   person_label: z.string().min(1).max(100),
@@ -78,12 +79,26 @@ export async function POST(request: NextRequest) {
 
     const { data: venue, error: venueErr } = await supabase
       .from('venues')
-      .select('id, name, stripe_connected_account_id, address, booking_rules, timezone, opening_hours, venue_opening_exceptions, email, reply_to_email')
+      .select(
+        'id, name, stripe_connected_account_id, address, booking_rules, timezone, opening_hours, venue_opening_exceptions, email, reply_to_email, pricing_tier, plan_status',
+      )
       .eq('id', venue_id)
       .single();
 
     if (venueErr || !venue) {
       return NextResponse.json({ error: 'Venue not found' }, { status: 404 });
+    }
+
+    if (
+      isOnlineBookingBlockedForLightPastDue(
+        (venue as { pricing_tier?: string | null }).pricing_tier,
+        (venue as { plan_status?: string | null }).plan_status,
+      )
+    ) {
+      return NextResponse.json(
+        { error: 'Online booking is temporarily unavailable for this venue.' },
+        { status: 403 },
+      );
     }
 
     const venueMode = await resolveVenueMode(supabase, venue_id);

@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
+import { assertLightPlanCalendarSlotAvailable } from '@/lib/light-plan';
+import { isLightPlanTier } from '@/lib/tier-enforcement';
 
 /**
  * GET /api/venue/calendar-entitlement
@@ -36,7 +38,21 @@ export async function GET() {
 
     const activePractitioners = count ?? 0;
 
-    // All plans now have unlimited calendars
+    const lightRes = await assertLightPlanCalendarSlotAvailable(staff.venue_id);
+    if (isLightPlanTier(tier)) {
+      return NextResponse.json({
+        pricing_tier: tier,
+        calendar_count: 1,
+        active_practitioners: activePractitioners,
+        calendar_limit: lightRes.limit,
+        unlimited: false,
+        at_calendar_limit: !lightRes.allowed,
+        can_add_practitioner: lightRes.allowed,
+        booking_model: venue.booking_model,
+        unified_calendar_count: lightRes.current,
+      });
+    }
+
     return NextResponse.json({
       pricing_tier: tier,
       calendar_count: null,

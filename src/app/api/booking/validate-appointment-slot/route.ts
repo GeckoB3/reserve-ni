@@ -10,6 +10,7 @@ import {
 import { z } from 'zod';
 import { isUnifiedSchedulingVenue, venueUsesUnifiedAppointmentData } from '@/lib/booking/unified-scheduling';
 import { isGuestBookingDateAllowed, loadServiceEntityBookingWindow } from '@/lib/booking/entity-booking-window';
+import { isOnlineBookingBlockedForLightPastDue } from '@/lib/booking/light-plan-public-block';
 
 const phantomSchema = z.object({
   practitioner_id: z.string().uuid(),
@@ -51,12 +52,21 @@ export async function POST(request: NextRequest) {
 
     const { data: venue } = await supabase
       .from('venues')
-      .select('timezone, booking_rules, opening_hours, venue_opening_exceptions')
+      .select('timezone, booking_rules, opening_hours, venue_opening_exceptions, pricing_tier, plan_status')
       .eq('id', venue_id)
       .single();
 
     if (!venue) {
       return NextResponse.json({ ok: false, error: 'Venue not found' }, { status: 404 });
+    }
+
+    if (
+      isOnlineBookingBlockedForLightPastDue(
+        (venue as { pricing_tier?: string | null }).pricing_tier,
+        (venue as { plan_status?: string | null }).plan_status,
+      )
+    ) {
+      return NextResponse.json({ ok: false, error: 'Online booking is temporarily unavailable for this venue.' });
     }
 
     const serviceWindow = await loadServiceEntityBookingWindow(supabase, venue_id, venueMode.bookingModel, service_id);

@@ -13,6 +13,9 @@ export const SMS_INCLUDED_RESTAURANT = 800;
  */
 export function computeSmsMonthlyAllowance(pricingTier: string, _calendarCount: number | null): number {
   const tier = (pricingTier ?? 'appointments').toLowerCase();
+  if (tier === 'light') {
+    return 0;
+  }
   if (tier === 'restaurant' || tier === 'founding') {
     return SMS_INCLUDED_RESTAURANT;
   }

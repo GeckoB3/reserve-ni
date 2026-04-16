@@ -80,6 +80,17 @@ export function BookPublicBookingFlow({
     // Intentionally omit `searchParams` object identity - use tabParam + pathname only.
   }, [tabs.length, tabParam, activeModels, venue.terminology, pathname, router]);
 
+  if (venue.booking_paused) {
+    return (
+      <div className="rounded-xl border border-slate-200 bg-slate-50 p-6 text-center shadow-sm">
+        <p className="text-base font-semibold text-slate-900">Online booking unavailable</p>
+        <p className="mt-2 text-sm leading-relaxed text-slate-600">
+          Online booking for {venue.name} is temporarily unavailable. Please contact them directly to make a booking.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       {tabs.length > 1 && (

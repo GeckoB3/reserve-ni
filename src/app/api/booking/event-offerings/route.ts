@@ -7,6 +7,7 @@ import {
   computeEventAvailability,
   fetchEventInputForRange,
 } from '@/lib/availability/event-ticket-engine';
+import { nextResponseIfPublicBookingBlockedForVenue } from '@/lib/booking/light-plan-public-block';
 
 function addDaysIso(from: string, days: number): string {
   const [y, m, d] = from.split('-').map(Number);
@@ -35,6 +36,9 @@ export async function GET(request: NextRequest) {
     const to = addDaysIso(from, days);
 
     const supabase = getSupabaseAdminClient();
+    const blocked = await nextResponseIfPublicBookingBlockedForVenue(supabase, venueId);
+    if (blocked) return blocked;
+
     const venueMode = await resolveVenueMode(supabase, venueId);
     if (!venueExposesBookingModel(venueMode.bookingModel, venueMode.enabledModels, 'event_ticket')) {
       return NextResponse.json({ error: 'Event booking is not available for this venue' }, { status: 403 });

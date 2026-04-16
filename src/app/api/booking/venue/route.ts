@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { resolveVenueMode } from '@/lib/venue-mode';
 import { listActiveAreasForVenue } from '@/lib/areas/resolve-default-area';
+import { isOnlineBookingBlockedForLightPastDue } from '@/lib/booking/light-plan-public-block';
 
 /**
  * GET /api/booking/venue?slug=venue-slug
@@ -22,7 +23,9 @@ export async function GET(request: NextRequest) {
     const supabase = getSupabaseAdminClient();
     const { data: venue, error } = await supabase
       .from('venues')
-      .select('id, name, slug, cover_photo_url, address, phone, website_url, deposit_config, booking_rules, opening_hours, timezone, booking_model, enabled_models, active_booking_models, terminology, currency, public_booking_area_mode')
+      .select(
+        'id, name, slug, cover_photo_url, address, phone, website_url, deposit_config, booking_rules, opening_hours, timezone, booking_model, enabled_models, active_booking_models, terminology, currency, public_booking_area_mode, pricing_tier, plan_status',
+      )
       .eq('slug', slug.trim())
       .single();
 
@@ -56,14 +59,22 @@ export async function GET(request: NextRequest) {
       areas = await listActiveAreasForVenue(supabase, venue.id);
     }
 
-    return NextResponse.json({
+    const payload: Record<string, unknown> = {
       ...venue,
       booking_model: venueMode.bookingModel,
       active_booking_models: venueMode.activeBookingModels,
       enabled_models: venueMode.enabledModels,
       terminology: venueMode.terminology,
       areas,
-    });
+    };
+
+    const pricingTier = (venue as { pricing_tier?: string | null }).pricing_tier;
+    const planStatus = (venue as { plan_status?: string | null }).plan_status;
+    if (isOnlineBookingBlockedForLightPastDue(pricingTier, planStatus)) {
+      payload.booking_paused = true;
+    }
+
+    return NextResponse.json(payload);
   } catch (err) {
     console.error('GET /api/booking/venue failed:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
