@@ -30,6 +30,16 @@ describe('getSignupResumePath', () => {
     expect(getSignupResumePath()).toBe('/signup/payment');
   });
 
+  it('returns payment for Appointments Light without a business type', () => {
+    const storage = new Map<string, string>([['signup_plan', 'light']]);
+    vi.stubGlobal('window', {});
+    vi.stubGlobal('sessionStorage', {
+      getItem: (key: string) => storage.get(key) ?? null,
+    });
+
+    expect(getSignupResumePath()).toBe('/signup/payment');
+  });
+
   it('returns payment when business type and plan are both set', () => {
     const storage = new Map<string, string>([
       ['signup_plan', 'restaurant'],

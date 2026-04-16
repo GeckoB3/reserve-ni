@@ -11,8 +11,6 @@ import {
   resolveActiveBookingModels,
 } from '@/lib/booking/active-models';
 import type { BookingModel } from '@/types/booking-models';
-import { LightUpgradePromoBanner } from '@/components/dashboard/LightUpgradePromoBanner';
-
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -36,8 +34,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   let isAdmin = false;
   let planStatus: string = 'active';
   let onboardingCompleted = true;
-    let venueTerminology: Record<string, unknown> | null = null;
-    let venueCreatedAt: string | undefined;
+  let venueTerminology: Record<string, unknown> | null = null;
   try {
     const admin = getSupabaseAdminClient();
     const { data: staffRows } = await admin
@@ -58,7 +55,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
       const { data: venue } = await admin
         .from('venues')
         .select(
-          'name, slug, table_management_enabled, booking_model, enabled_models, active_booking_models, plan_status, onboarding_completed, pricing_tier, terminology, created_at',
+          'name, slug, table_management_enabled, booking_model, enabled_models, active_booking_models, plan_status, onboarding_completed, pricing_tier, terminology',
         )
         .eq('id', venueId)
         .single();
@@ -84,8 +81,6 @@ export default async function DashboardLayout({ children }: { children: React.Re
         rawTerms && typeof rawTerms === 'object' && rawTerms !== null && !Array.isArray(rawTerms)
           ? (rawTerms as Record<string, unknown>)
           : null;
-      venueCreatedAt = (venue as { created_at?: string } | null)?.created_at;
-
       if (!onboardingCompleted) {
         redirect('/onboarding');
       }
@@ -155,16 +150,6 @@ export default async function DashboardLayout({ children }: { children: React.Re
               </a>
             </div>
           </div>
-        )}
-        {venueId && pricingTier === 'light' && venueCreatedAt && planStatus !== 'cancelled' && (
-          <LightUpgradePromoBanner
-            eligible={(() => {
-              const created = new Date(venueCreatedAt);
-              if (Number.isNaN(created.getTime())) return false;
-              const ageMs = Date.now() - created.getTime();
-              return ageMs >= 0 && ageMs <= 30 * 86_400_000;
-            })()}
-          />
         )}
         {venueId && <SessionTimeoutGuard venueId={venueId} />}
         <DashboardSWRProvider>{children}</DashboardSWRProvider>

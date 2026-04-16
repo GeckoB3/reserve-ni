@@ -26,7 +26,7 @@ export function getSignupResumePath(): string {
   ensureDefaultRestaurantFamilyBusinessType();
   const bt = sessionStorage.getItem('signup_business_type');
   const p = sessionStorage.getItem('signup_plan');
-  if (p === 'appointments') return '/signup/payment';
+  if (p === 'appointments' || p === 'light') return '/signup/payment';
   if (bt && p) return '/signup/payment';
   return '/signup/business-type';
 }

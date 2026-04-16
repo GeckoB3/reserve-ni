@@ -214,6 +214,8 @@ interface OnboardingAppointmentServiceListProps {
   roster: Array<{ id: string; name: string }>;
   /** When roster loads, merge into drafts that still have empty practitioner_ids */
   rosterIds: string[];
+  /** Appointments Light: single calendar, hide per-staff field customisation UI */
+  hideStaffCustomization?: boolean;
 }
 
 export function OnboardingAppointmentServiceList({
@@ -223,6 +225,7 @@ export function OnboardingAppointmentServiceList({
   setServices,
   roster,
   rosterIds,
+  hideStaffCustomization = false,
 }: OnboardingAppointmentServiceListProps) {
   const sym = currencySymbol;
 
@@ -486,44 +489,47 @@ export function OnboardingAppointmentServiceList({
             <span className="text-sm text-slate-700">Active (visible to clients)</span>
           </div>
 
-          <div className="rounded-lg border border-slate-200 bg-slate-50/90 p-4 space-y-3">
-            <p className="text-sm font-medium text-slate-800">{terms.staff} can customise (their calendar only)</p>
-            <p className="text-xs text-slate-500">
-              When ticked, linked {terms.staff.toLowerCase()} can set their own value for that field on their calendar.
-            </p>
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-              {(
-                [
-                  ['name', 'Display name'],
-                  ['description', 'Description'],
-                  ['duration', 'Duration'],
-                  ['buffer', 'Buffer time'],
-                  ['price', 'Price'],
-                  ['deposit', 'Deposit'],
-                  ['colour', 'Colour'],
-                ] as const
-              ).map(([key, label]) => (
-                <label key={key} className="flex items-center gap-2 text-sm text-slate-700">
-                  <input
-                    type="checkbox"
-                    checked={s.staffMay[key]}
-                    onChange={(e) => {
-                      const checked = e.target.checked;
-                      setServices((prev) =>
-                        prev.map((row) =>
-                          row.clientKey === s.clientKey
-                            ? { ...row, staffMay: { ...row.staffMay, [key]: checked } }
-                            : row,
-                        ),
-                      );
-                    }}
-                    className="h-4 w-4 rounded border-slate-300 text-blue-600"
-                  />
-                  {label}
-                </label>
-              ))}
+          {!hideStaffCustomization && (
+            <div className="rounded-lg border border-slate-200 bg-slate-50/90 p-4 space-y-3">
+              <p className="text-sm font-medium text-slate-800">{terms.staff} can customise (their calendar only)</p>
+              <p className="text-xs text-slate-500">
+                When ticked, linked {terms.staff.toLowerCase()} can set their own value for that field on their
+                calendar.
+              </p>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                {(
+                  [
+                    ['name', 'Display name'],
+                    ['description', 'Description'],
+                    ['duration', 'Duration'],
+                    ['buffer', 'Buffer time'],
+                    ['price', 'Price'],
+                    ['deposit', 'Deposit'],
+                    ['colour', 'Colour'],
+                  ] as const
+                ).map(([key, label]) => (
+                  <label key={key} className="flex items-center gap-2 text-sm text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={s.staffMay[key]}
+                      onChange={(e) => {
+                        const checked = e.target.checked;
+                        setServices((prev) =>
+                          prev.map((row) =>
+                            row.clientKey === s.clientKey
+                              ? { ...row, staffMay: { ...row.staffMay, [key]: checked } }
+                              : row,
+                          ),
+                        );
+                      }}
+                      className="h-4 w-4 rounded border-slate-300 text-blue-600"
+                    />
+                    {label}
+                  </label>
+                ))}
+              </div>
             </div>
-          </div>
+          )}
 
           {roster.length > 0 && (
             <div>

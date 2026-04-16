@@ -27,6 +27,7 @@ import {
 import { normalizeTimeToHhMm, validateStartEndTimes } from '@/lib/experience-events/experience-event-validation';
 import { formatZodFlattenedError } from '@/lib/experience-events/experience-event-zod';
 import { StripeConnectSection } from '@/app/dashboard/settings/sections/StripeConnectSection';
+import { StripePaymentWarning } from '@/components/dashboard/StripePaymentWarning';
 import { OpeningHoursStep } from './steps/restaurant/OpeningHoursStep';
 import { ServicesStep } from './steps/restaurant/ServicesStep';
 import { CapacityStep } from './steps/restaurant/CapacityStep';
@@ -238,15 +239,78 @@ function buildOnboardingExperienceEventPostBody(
   return { ok: true, body: postBody };
 }
 
+/** Aligns with dashboard Class timetable → Add class type (`BLANK_CT` / `buildClassTypePayload`). */
+type ClassPaymentRequirement = 'none' | 'deposit' | 'full_payment';
+
 interface ClassDraft {
   name: string;
-  /** Shown to guests; optional like dashboard Add Class Type. */
   description: string;
   /** Team calendar column id (`unified_calendars.id`); required by POST /api/venue/classes. */
   instructor_id: string;
+  /** Guest-facing instructor label; optional. */
+  instructor_custom_name: string;
   duration_minutes: number;
   capacity: number;
+  /** Price per person in major units (string for controlled inputs). */
   price: string;
+  payment_requirement: ClassPaymentRequirement;
+  deposit_pounds: string;
+  colour: string;
+  is_active: boolean;
+  max_advance_booking_days: number;
+  min_booking_notice_hours: number;
+  cancellation_notice_hours: number;
+  allow_same_day_booking: boolean;
+}
+
+function createEmptyClassDraft(instructorId: string): ClassDraft {
+  return {
+    name: '',
+    description: '',
+    instructor_id: instructorId,
+    instructor_custom_name: '',
+    duration_minutes: 60,
+    capacity: 10,
+    price: '',
+    payment_requirement: 'none',
+    deposit_pounds: '',
+    colour: '#6366f1',
+    is_active: true,
+    max_advance_booking_days: 90,
+    min_booking_notice_hours: 1,
+    cancellation_notice_hours: 48,
+    allow_same_day_booking: true,
+  };
+}
+
+function buildClassTypePayloadFromDraft(c: ClassDraft): Record<string, unknown> {
+  const priceRaw = c.price.trim();
+  const priceNum = parseFloat(priceRaw);
+  const pricePence =
+    priceRaw === '' || Number.isNaN(priceNum) ? null : Math.max(0, Math.round(priceNum * 100));
+  const depositRaw = c.deposit_pounds.trim();
+  const depNum = parseFloat(depositRaw);
+  const depositPence =
+    c.payment_requirement === 'deposit' && depositRaw !== '' && !Number.isNaN(depNum)
+      ? Math.max(0, Math.round(depNum * 100))
+      : null;
+  return {
+    name: c.name.trim(),
+    description: c.description.trim() || null,
+    duration_minutes: c.duration_minutes,
+    capacity: c.capacity,
+    colour: c.colour,
+    is_active: c.is_active,
+    payment_requirement: c.payment_requirement,
+    deposit_amount_pence: depositPence,
+    price_pence: pricePence,
+    instructor_id: c.instructor_id.trim(),
+    instructor_name: c.instructor_custom_name.trim() || null,
+    max_advance_booking_days: c.max_advance_booking_days,
+    min_booking_notice_hours: c.min_booking_notice_hours,
+    cancellation_notice_hours: c.cancellation_notice_hours,
+    allow_same_day_booking: c.allow_same_day_booking,
+  };
 }
 
 type ResourcePaymentRequirement = 'none' | 'deposit' | 'full_payment';
@@ -333,7 +397,10 @@ function appointmentsPlanNeedsCalendarAvailabilityStep(activeModels: Appointment
 }
 
 /** Appointments plan: calendars → calendar hours → staff → model setup → Stripe → review. */
-function buildAppointmentsPlanModelSteps(activeModels: AppointmentPlanModel[]): OnboardingStepDef[] {
+function buildAppointmentsPlanModelSteps(
+  activeModels: AppointmentPlanModel[],
+  options?: { omitOtherUsersStep?: boolean },
+): OnboardingStepDef[] {
   const steps: OnboardingStepDef[] = [
     { key: 'welcome', label: 'Welcome' },
     { key: 'profile', label: 'Business Details' },
@@ -343,7 +410,9 @@ function buildAppointmentsPlanModelSteps(activeModels: AppointmentPlanModel[]): 
   if (appointmentsPlanNeedsCalendarAvailabilityStep(activeModels)) {
     steps.push({ key: 'hours', label: 'Calendar Availability' });
   }
-  steps.push({ key: 'users', label: 'Other Users' });
+  if (!options?.omitOtherUsersStep) {
+    steps.push({ key: 'users', label: 'Other Users' });
+  }
   for (const model of APPOINTMENTS_ACTIVE_MODEL_ORDER.filter(isAppointmentPlanModel)) {
     if (!activeModels.includes(model)) continue;
     if (model === 'unified_scheduling') {
@@ -406,7 +475,24 @@ function migrateOnboardingStepToCurrentLayout(
   if (!legacyKey) {
     return Math.min(Math.max(0, storedIndex), Math.max(0, currentSteps.length - 1));
   }
-  const idx = currentSteps.findIndex((s) => s.key === legacyKey);
+  let idx = currentSteps.findIndex((s) => s.key === legacyKey);
+  if (idx < 0 && legacyKey === 'users') {
+    const priority: Array<OnboardingStepDef['key']> = [
+      'services',
+      'classes',
+      'first_event',
+      'resources',
+      'stripe_onboarding',
+      'preview',
+    ];
+    for (const key of priority) {
+      const j = currentSteps.findIndex((s) => s.key === key);
+      if (j >= 0) {
+        idx = j;
+        break;
+      }
+    }
+  }
   if (idx >= 0) return idx;
   return Math.min(Math.max(0, storedIndex), Math.max(0, currentSteps.length - 1));
 }
@@ -485,17 +571,8 @@ export default function OnboardingPage() {
     });
   }, []);
 
-  // Model D: Classes
-  const [classes, setClasses] = useState<ClassDraft[]>([
-    {
-      name: '',
-      description: '',
-      instructor_id: '',
-      duration_minutes: 60,
-      capacity: 15,
-      price: '0.00',
-    },
-  ]);
+  // Model D: Classes (draft shape matches dashboard Class timetable → Add class type)
+  const [classes, setClasses] = useState<ClassDraft[]>(() => [createEmptyClassDraft('')]);
 
   // Model E: Resources
   const [resources, setResources] = useState<ResourceDraft[]>(() => [createEmptyResourceDraft('')]);
@@ -544,7 +621,9 @@ export default function OnboardingPage() {
           const active = (v.active_booking_models ?? []).filter(isAppointmentPlanModel) as AppointmentPlanModel[];
           if (active.length > 0) {
             const legacySteps = buildLegacyAppointmentsPlanModelSteps(active);
-            const currentSteps = buildAppointmentsPlanModelSteps(active);
+            const currentSteps = buildAppointmentsPlanModelSteps(active, {
+              omitOtherUsersStep: v.pricing_tier === 'light',
+            });
             initialStep = migrateOnboardingStepToCurrentLayout(v.onboarding_step, legacySteps, currentSteps);
             initialMaxStep = initialStep;
             if (initialStep !== v.onboarding_step) {
@@ -653,7 +732,9 @@ export default function OnboardingPage() {
   const modelSteps = useMemo(() => {
     if (!venue) return [];
     if (isAppointmentsPlanSku(venue.pricing_tier)) {
-      return buildAppointmentsPlanModelSteps(activeAppointmentsModels);
+      return buildAppointmentsPlanModelSteps(activeAppointmentsModels, {
+        omitOtherUsersStep: venue.pricing_tier === 'light',
+      });
     }
 
     if (venue.booking_model === 'table_reservation') {
@@ -1337,7 +1418,7 @@ export default function OnboardingPage() {
         if (isAppointmentsPlanVenue) {
           if (rosterList.length === 0) {
             setError(
-              'Team calendars are still loading or missing. Go back to the Calendars step, ensure each column is saved with Continue, then return here — or wait a few seconds and try again.',
+              'Team calendars are still loading or missing. Go back to the Calendars step, ensure each column is saved with Continue, then return here. Or wait a few seconds and try again.',
             );
             return;
           }
@@ -1412,6 +1493,25 @@ export default function OnboardingPage() {
           setError('Select a calendar for each class.');
           return;
         }
+        const pricePence = poundsToMinor(c.price);
+        const req = c.payment_requirement;
+        if (req !== 'none' && pricePence <= 0) {
+          setError(
+            `Set a price per person for "${c.name.trim()}" when using deposit or full payment online.`,
+          );
+          return;
+        }
+        if (req === 'deposit') {
+          const dep = poundsToMinor(c.deposit_pounds);
+          if (dep <= 0) {
+            setError(`Enter a deposit amount for "${c.name.trim()}".`);
+            return;
+          }
+          if (pricePence > 0 && dep > pricePence) {
+            setError(`Deposit cannot exceed price per person for "${c.name.trim()}".`);
+            return;
+          }
+        }
       }
       setSaving(true);
       try {
@@ -1419,14 +1519,7 @@ export default function OnboardingPage() {
           const typeRes = await fetch('/api/venue/classes', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              name: c.name.trim(),
-              description: c.description.trim() || null,
-              duration_minutes: c.duration_minutes,
-              capacity: c.capacity,
-              price_pence: poundsToMinor(c.price),
-              instructor_id: c.instructor_id.trim(),
-            }),
+            body: JSON.stringify(buildClassTypePayloadFromDraft(c)),
           });
           const typeBody = (await typeRes.json()) as { data?: { id?: string }; error?: string };
           if (!typeRes.ok) {
@@ -1659,6 +1752,7 @@ export default function OnboardingPage() {
   }
 
   const sym = currencySymbol(currency);
+  const stripeConnected = Boolean(venue.stripe_connected_account_id);
 
   const RESTAURANT_SELF_MANAGED_STEPS = new Set([
     'r_opening_hours', 'r_services', 'r_capacity', 'r_dining_duration',
@@ -1675,7 +1769,8 @@ export default function OnboardingPage() {
     currentStepKey === 'r_dashboard' ||
     (currentStepKey === 'hours' &&
       (isAppointmentsPlanVenue || isUnifiedSchedulingVenue(venue.booking_model))) ||
-    (currentStepKey === 'services' && isUnifiedSchedulingVenue(venue.booking_model));
+    (currentStepKey === 'services' && isUnifiedSchedulingVenue(venue.booking_model)) ||
+    currentStepKey === 'classes';
 
   return (
     <div className={`w-full ${wideOnboardingStep ? 'max-w-3xl' : 'max-w-xl'}`}>
@@ -1710,11 +1805,13 @@ export default function OnboardingPage() {
 
         {currentStepKey === 'welcome' && (
           <div>
-            <h2 className="mb-1 text-lg font-bold text-slate-900">Welcome to your Appointments plan</h2>
+            <h2 className="mb-1 text-lg font-bold text-slate-900">
+              {isLightPlanVenue ? 'Welcome to Appointments Light' : 'Welcome to your Appointments plan'}
+            </h2>
             <p className="mb-6 text-sm text-slate-500">
-              Reserve NI supports appointments, classes, events, and bookable resources from one venue. This setup will
-              guide you through your business details, opening hours, calendars, calendar availability, inviting staff,
-              the booking models you enabled, and then Stripe payments before review.
+              {isLightPlanVenue
+                ? 'Reserve NI runs appointments, classes, events, and resources from one venue with a single calendar. This guide covers your business profile, opening hours, that calendar, the booking models you chose, optional Stripe, then review.'
+                : 'Reserve NI supports appointments, classes, events, and bookable resources from one venue. This setup covers your business profile, opening hours, calendars, calendar availability, inviting other users, the booking models you enabled, Stripe, then review.'}
             </p>
             <div className="mb-6 rounded-xl border border-brand-200 bg-brand-50/60 p-4">
               <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-brand-800">
@@ -1732,8 +1829,9 @@ export default function OnboardingPage() {
               </div>
             </div>
             <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-4 text-sm text-slate-600">
-              You can enable or disable booking models later from Settings, but this onboarding flow will make sure the
-              ones above are ready to use straight away.
+              {isLightPlanVenue
+                ? 'You can change booking models later in Settings. The following steps set up the ones you enabled.'
+                : 'You can enable or disable booking models later from Settings, but this onboarding flow will make sure the ones above are ready to use straight away.'}
             </div>
           </div>
         )}
@@ -1741,27 +1839,33 @@ export default function OnboardingPage() {
         {currentStepKey === 'stripe_onboarding' && (
           <div>
             <h2 className="mb-1 text-lg font-bold text-slate-900">Payments (Stripe)</h2>
-            <p className="mb-4 text-sm text-slate-500">
-              Connect your Stripe account here — same setup as Settings → Payments. This step is optional: use{' '}
-              <span className="font-medium text-slate-700">Continue</span> below to finish onboarding and complete Stripe
-              later from the dashboard if you prefer.
+            <p className="mb-3 text-sm text-slate-600">
+              Use this step to connect Stripe so you can <strong className="font-medium text-slate-800">accept payments from your customers</strong>
+              {' '}(for example deposits, tickets, or paid bookings). Payments are processed by Stripe and go directly to your
+              business. Reserve NI does not hold customer funds.
             </p>
-            <div className="mb-6 rounded-xl border border-amber-200 bg-amber-50/80 px-4 py-3 text-sm text-amber-950">
-              <p className="font-medium">Skip if you are not ready</p>
-              <p className="mt-1 text-amber-900/90">
-                Press <span className="font-semibold">Continue</span> to move on without connecting Stripe. You can open{' '}
-                <Link
-                  href="/dashboard/settings?tab=payments"
-                  className="font-medium text-brand-700 underline hover:text-brand-800"
-                >
-                  Settings → Payments
-                </Link>{' '}
-                any time after onboarding.
-              </p>
-            </div>
+            <p className="mb-4 text-sm text-slate-600">
+              This setup is only for customer payments. Your <strong className="font-medium text-slate-800">Reserve NI subscription</strong>{' '}
+              is billed separately. Manage your plan and payment method under{' '}
+              <Link
+                href="/dashboard/settings?tab=plan"
+                className="font-medium text-brand-600 underline hover:text-brand-700"
+              >
+                Settings → Plan &amp; billing
+              </Link>
+              .
+            </p>
+            <p className="mb-4 text-sm text-slate-500">
+              Optional: use <span className="font-medium text-slate-700">Continue</span> to skip for now and connect later in{' '}
+              <Link href="/dashboard/settings?tab=payments" className="font-medium text-brand-600 underline hover:text-brand-700">
+                Settings → Payments
+              </Link>
+              .
+            </p>
             <StripeConnectSection
               stripeAccountId={venue.stripe_connected_account_id ?? null}
               isAdmin={venue.is_admin}
+              hideSectionTitle
               stripeAccountLinkPaths={{
                 return: '/onboarding?stripe=success',
                 refresh: '/onboarding?stripe=refresh',
@@ -1847,7 +1951,6 @@ export default function OnboardingPage() {
                   type="tel"
                   value={phone}
                   onChange={(e) => setPhone(e.target.value)}
-                  placeholder="028 9012 3456"
                   className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
                 />
               </div>
@@ -1952,10 +2055,12 @@ export default function OnboardingPage() {
             </h2>
             {isLightPlanVenue ? (
               <p className="mb-4 text-sm text-slate-500">
-                Your Appointments Light plan includes <strong>one calendar column</strong> for your business. Give it a
-                name (often your own name or your business name). You can set working hours and availability after this
-                step. Need more team members or calendars? You can upgrade to the full Appointments plan
-                (&pound;35/month) anytime under Settings.
+                Name your single calendar (often your name or your business). Working hours come in the next steps. To
+                add staff or more calendars, upgrade to full Appointments under{' '}
+                <Link href="/dashboard/settings?tab=plan" className="font-medium text-brand-600 underline hover:text-brand-700">
+                  Settings → Plan
+                </Link>
+                .
               </p>
             ) : venue.pricing_tier === 'founding' ? (
               <p className="mb-4 text-sm text-slate-500">
@@ -2085,15 +2190,6 @@ export default function OnboardingPage() {
                   + Add calendar
                 </button>
               )}
-              {isLightPlanVenue && (
-                <p className="text-center text-xs text-slate-500">
-                  Need more team members or calendars?{' '}
-                  <Link href="/dashboard/settings?tab=plan" className="font-medium text-brand-600 underline">
-                    Upgrade to Appointments
-                  </Link>{' '}
-                  (&pound;35/month) anytime.
-                </p>
-              )}
             </div>
           </div>
         )}
@@ -2108,17 +2204,34 @@ export default function OnboardingPage() {
                 {isAppointmentsPlanVenue ? 'Set up appointments' : 'Your services'}
               </h2>
               <p className="mb-6 text-sm text-slate-500">
-                Adding services is optional; add as many as you need using &quot;+ Add service&quot;. Use the same fields
-                as in the dashboard: duration, buffer, price, online payment, guest booking rules, which{' '}
-                {terms.staff.toLowerCase()} offers each service, and optional per-calendar customisation. You can refine
-                services later under{' '}
-                <Link
-                  href="/dashboard/appointment-services"
-                  className="font-medium text-brand-600 underline hover:text-brand-700"
-                >
-                  Services
-                </Link>
-                .
+                {isLightPlanVenue ? (
+                  <>
+                    Adding services is optional; add as many as you need using &quot;+ Add service&quot;. Use the same
+                    fields as in the dashboard: duration, buffer, price, online payment, and guest booking rules. You
+                    can refine services later under{' '}
+                    <Link
+                      href="/dashboard/appointment-services"
+                      className="font-medium text-brand-600 underline hover:text-brand-700"
+                    >
+                      Services
+                    </Link>
+                    .
+                  </>
+                ) : (
+                  <>
+                    Adding services is optional; add as many as you need using &quot;+ Add service&quot;. Use the same
+                    fields as in the dashboard: duration, buffer, price, online payment, guest booking rules, which{' '}
+                    {terms.staff.toLowerCase()} offers each service, and optional per-calendar customisation. You can
+                    refine services later under{' '}
+                    <Link
+                      href="/dashboard/appointment-services"
+                      className="font-medium text-brand-600 underline hover:text-brand-700"
+                    >
+                      Services
+                    </Link>
+                    .
+                  </>
+                )}
               </p>
               <OnboardingAppointmentServiceList
                 currencySymbol={currencySymbol(currency)}
@@ -2127,6 +2240,7 @@ export default function OnboardingPage() {
                 setServices={setServices}
                 roster={rosterList}
                 rosterIds={rosterIds}
+                hideStaffCustomization={isLightPlanVenue}
               />
             </div>
           )}
@@ -2200,7 +2314,7 @@ export default function OnboardingPage() {
               <div className="mb-6 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
                 <p className="font-medium text-slate-800">Optional step</p>
                 <p className="mt-1">
-                  Leave the form empty and click Continue to skip — or complete it to create a first event now.
+                  Leave the form empty and click Continue to skip, or complete it to create a first event now.
                 </p>
               </div>
             )}
@@ -2606,162 +2720,370 @@ export default function OnboardingPage() {
           <div>
             <h2 className="mb-1 text-lg font-bold text-slate-900">Class types</h2>
             <p className="mb-2 text-sm text-slate-500">
-              You are adding <strong>class types</strong> — the template for a class (name, description, duration,
-              price, which calendar it runs on). This matches <strong>Add class type</strong> on{' '}
+              You are adding <strong>class types</strong> using the same fields as <strong>Add class type</strong> on{' '}
               <Link href="/dashboard/class-timetable" className="font-medium text-brand-600 underline hover:text-brand-700">
                 Class timetable
               </Link>{' '}
-              in the dashboard.
+              (name, description, duration, capacity, price, online payment, guest booking rules, calendar, optional
+              instructor label, colour, and visibility).
             </p>
             <p className="mb-6 text-sm text-slate-500">
               <strong>Scheduling:</strong> day, time, and recurring sessions are set in the dashboard under the{' '}
               <strong>Classes</strong> tab (class timetable). There you can add timetable rules and generate bookable
               sessions for guests.
             </p>
-            <div className="space-y-3">
+            <div className="space-y-4">
               {classes.map((c, i) => (
-                <div key={i} className="rounded-xl border border-slate-200 p-4 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <input
-                      type="text"
-                      value={c.name}
-                      onChange={(e) => {
-                        const updated = [...classes];
-                        updated[i] = { ...c, name: e.target.value };
-                        setClasses(updated);
-                      }}
-                      placeholder="Class name (e.g. Beginners yoga, Open studio)"
-                      className="border-0 bg-transparent p-0 text-sm font-medium text-slate-900 focus:ring-0"
-                    />
+                <div key={i} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                  <div className="mb-3 flex items-center justify-between gap-2">
+                    <h3 className="text-sm font-semibold text-slate-800">
+                      {classes.length > 1 ? `Class type ${i + 1}` : 'New class type'}
+                    </h3>
                     {classes.length > 1 && (
                       <button
                         type="button"
                         onClick={() => setClasses(classes.filter((_, j) => j !== i))}
-                        className="text-xs text-slate-400 hover:text-red-500"
+                        className="text-xs font-medium text-slate-400 hover:text-red-500"
                       >
                         Remove
                       </button>
                     )}
                   </div>
-                  <div>
-                    <label className="mb-1 block text-xs font-medium text-slate-600">Description (optional)</label>
-                    <textarea
-                      value={c.description}
-                      onChange={(e) => {
-                        const updated = [...classes];
-                        updated[i] = { ...c, description: e.target.value };
-                        setClasses(updated);
-                      }}
-                      placeholder="Short description for guests (shown on your booking page when you publish sessions)."
-                      rows={3}
-                      className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
-                    />
-                  </div>
-                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  <div className="grid gap-3 sm:grid-cols-2">
                     <div className="sm:col-span-2">
-                      <label className="block text-[10px] font-medium text-slate-500">Calendar</label>
-                      <select
-                        value={c.instructor_id}
+                      <label className="mb-1 block text-xs font-medium text-slate-600">Name *</label>
+                      <input
+                        type="text"
+                        value={c.name}
                         onChange={(e) => {
                           const updated = [...classes];
-                          updated[i] = { ...c, instructor_id: e.target.value };
+                          updated[i] = { ...c, name: e.target.value };
                           setClasses(updated);
                         }}
-                        className="mt-0.5 w-full rounded border border-slate-200 px-2 py-1.5 text-xs"
-                      >
-                        {rosterList.length === 0 ? (
-                          <option value="">Loading calendars…</option>
-                        ) : (
-                          rosterList.map((cal) => (
-                            <option key={cal.id} value={cal.id}>
-                              {cal.name}
-                            </option>
-                          ))
-                        )}
-                      </select>
-                      <p className="mt-1 text-[10px] text-slate-400">
-                        Default calendar for this class type (same field as “calendar” in Add class type).
-                      </p>
+                        placeholder="e.g. Beginner session, Open studio"
+                        className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
+                      />
                     </div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                    <div className="sm:col-span-2">
+                      <label className="mb-1 block text-xs font-medium text-slate-600">Description</label>
+                      <textarea
+                        value={c.description}
+                        onChange={(e) => {
+                          const updated = [...classes];
+                          updated[i] = { ...c, description: e.target.value };
+                          setClasses(updated);
+                        }}
+                        rows={3}
+                        placeholder="Shown to guests on the booking page."
+                        className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
+                      />
+                    </div>
                     <div>
-                      <label className="block text-[10px] font-medium text-slate-500">
-                        Duration (min)
-                      </label>
+                      <label className="mb-1 block text-xs font-medium text-slate-600">Duration (minutes)</label>
                       <input
                         type="number"
+                        min={5}
+                        max={480}
                         value={c.duration_minutes}
                         onChange={(e) => {
                           const updated = [...classes];
                           updated[i] = {
                             ...c,
-                            duration_minutes: parseInt(e.target.value) || 60,
+                            duration_minutes: parseInt(e.target.value, 10) || 60,
                           };
                           setClasses(updated);
                         }}
-                        min={15}
-                        step={15}
-                        className="w-full rounded border border-slate-200 px-2 py-1.5 text-xs"
+                        className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
                       />
                     </div>
                     <div>
-                      <label className="block text-[10px] font-medium text-slate-500">
-                        Capacity
-                      </label>
+                      <label className="mb-1 block text-xs font-medium text-slate-600">Capacity (spots)</label>
                       <input
                         type="number"
+                        min={1}
                         value={c.capacity}
                         onChange={(e) => {
                           const updated = [...classes];
-                          updated[i] = { ...c, capacity: parseInt(e.target.value) || 15 };
+                          updated[i] = { ...c, capacity: parseInt(e.target.value, 10) || 1 };
                           setClasses(updated);
                         }}
-                        min={1}
-                        className="w-full rounded border border-slate-200 px-2 py-1.5 text-xs"
+                        className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
                       />
                     </div>
-                    <div className="col-span-2 sm:col-span-1">
-                      <label className="block text-[10px] font-medium text-slate-500">
-                        Price ({currencySymbol(currency)})
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-slate-600">
+                        Price ({sym}) <span className="font-normal text-slate-400">optional</span>
                       </label>
-                      <div className="relative">
-                        <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-slate-400">
-                          {currencySymbol(currency)}
-                        </span>
-                        <input
-                          type="number"
-                          value={c.price}
+                      <input
+                        type="number"
+                        min={0}
+                        step={0.01}
+                        value={c.price}
+                        onChange={(e) => {
+                          const updated = [...classes];
+                          updated[i] = { ...c, price: e.target.value };
+                          setClasses(updated);
+                        }}
+                        placeholder="0.00"
+                        className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
+                      />
+                    </div>
+                    <div className="sm:col-span-2">
+                      <label className="mb-2 block text-xs font-medium text-slate-600">Online payment (Stripe)</label>
+                      <div className="space-y-2">
+                        <label className="flex cursor-pointer items-start gap-2 text-sm text-slate-700">
+                          <input
+                            type="radio"
+                            name={`onb-class-${i}-payment`}
+                            className="mt-0.5"
+                            checked={c.payment_requirement === 'none'}
+                            onChange={() => {
+                              const updated = [...classes];
+                              updated[i] = { ...c, payment_requirement: 'none', deposit_pounds: '' };
+                              setClasses(updated);
+                            }}
+                          />
+                          <span>None - pay at venue or free class</span>
+                        </label>
+                        <label className="flex cursor-pointer items-start gap-2 text-sm text-slate-700">
+                          <input
+                            type="radio"
+                            name={`onb-class-${i}-payment`}
+                            className="mt-0.5"
+                            checked={c.payment_requirement === 'deposit'}
+                            onChange={() => {
+                              const updated = [...classes];
+                              updated[i] = { ...c, payment_requirement: 'deposit' };
+                              setClasses(updated);
+                            }}
+                          />
+                          <span>Deposit per person (partial payment online)</span>
+                        </label>
+                        <label className="flex cursor-pointer items-start gap-2 text-sm text-slate-700">
+                          <input
+                            type="radio"
+                            name={`onb-class-${i}-payment`}
+                            className="mt-0.5"
+                            checked={c.payment_requirement === 'full_payment'}
+                            onChange={() => {
+                              const updated = [...classes];
+                              updated[i] = { ...c, payment_requirement: 'full_payment', deposit_pounds: '' };
+                              setClasses(updated);
+                            }}
+                          />
+                          <span>Full payment online (per person)</span>
+                        </label>
+                      </div>
+                      {c.payment_requirement === 'deposit' && (
+                        <div className="mt-3 max-w-xs">
+                          <label className="mb-1 block text-xs font-medium text-slate-600">
+                            Deposit amount ({sym}) *
+                          </label>
+                          <input
+                            type="number"
+                            min={0}
+                            step={0.01}
+                            value={c.deposit_pounds}
+                            onChange={(e) => {
+                              const updated = [...classes];
+                              updated[i] = { ...c, deposit_pounds: e.target.value };
+                              setClasses(updated);
+                            }}
+                            placeholder="e.g. 5.00"
+                            className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
+                          />
+                        </div>
+                      )}
+                      <p className="mt-2 text-xs text-slate-500">
+                        Deposit and full payment require a price per person and a connected Stripe account.
+                      </p>
+                      <StripePaymentWarning
+                        stripeConnected={stripeConnected}
+                        requiresOnlinePayment={
+                          c.payment_requirement === 'deposit' || c.payment_requirement === 'full_payment'
+                        }
+                      />
+                    </div>
+                    <div className="sm:col-span-2 rounded-lg border border-slate-200 bg-slate-50/80 p-3">
+                      <p className="mb-2 text-xs font-medium text-slate-700">Guest booking rules</p>
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <div>
+                          <label className="mb-1 block text-xs font-medium text-slate-600">Max advance (days)</label>
+                          <input
+                            type="number"
+                            min={1}
+                            max={365}
+                            value={c.max_advance_booking_days}
+                            onChange={(e) => {
+                              const updated = [...classes];
+                              updated[i] = {
+                                ...c,
+                                max_advance_booking_days: parseInt(e.target.value, 10) || 1,
+                              };
+                              setClasses(updated);
+                            }}
+                            className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-xs font-medium text-slate-600">Min notice (hours)</label>
+                          <input
+                            type="number"
+                            min={0}
+                            max={168}
+                            value={c.min_booking_notice_hours}
+                            onChange={(e) => {
+                              const updated = [...classes];
+                              updated[i] = {
+                                ...c,
+                                min_booking_notice_hours: parseInt(e.target.value, 10) || 0,
+                              };
+                              setClasses(updated);
+                            }}
+                            className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-xs font-medium text-slate-600">
+                            Cancellation notice (hours)
+                          </label>
+                          <input
+                            type="number"
+                            min={0}
+                            max={168}
+                            value={c.cancellation_notice_hours}
+                            onChange={(e) => {
+                              const updated = [...classes];
+                              updated[i] = {
+                                ...c,
+                                cancellation_notice_hours: parseInt(e.target.value, 10) || 0,
+                              };
+                              setClasses(updated);
+                            }}
+                            className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                          />
+                        </div>
+                        <div className="flex items-end pb-1">
+                          <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
+                            <input
+                              type="checkbox"
+                              checked={c.allow_same_day_booking}
+                              onChange={(e) => {
+                                const updated = [...classes];
+                                updated[i] = { ...c, allow_same_day_booking: e.target.checked };
+                                setClasses(updated);
+                              }}
+                              className="h-4 w-4 rounded border-slate-300"
+                            />
+                            Allow same-day bookings
+                          </label>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="sm:col-span-2">
+                      <label className="mb-1 block text-xs font-medium text-slate-600">Select Calendar *</label>
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-start">
+                        <select
+                          value={c.instructor_id}
                           onChange={(e) => {
                             const updated = [...classes];
-                            updated[i] = { ...c, price: e.target.value };
+                            updated[i] = { ...c, instructor_id: e.target.value };
                             setClasses(updated);
                           }}
-                          min={0}
-                          step={0.01}
-                          placeholder="0.00"
-                          className="w-full rounded border border-slate-200 py-1.5 pl-5 pr-2 text-xs"
-                        />
+                          className="w-full max-w-md rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                          required
+                        >
+                          <option value="" disabled>
+                            Choose a calendar…
+                          </option>
+                          {rosterList.length > 0 && (
+                            <optgroup label="Calendar columns">
+                              {rosterList.map((cal) => (
+                                <option key={cal.id} value={cal.id}>
+                                  {cal.name}
+                                </option>
+                              ))}
+                            </optgroup>
+                          )}
+                        </select>
+                        <div className="min-w-0 flex-1">
+                          <label className="mb-1 block text-xs font-medium text-slate-600">Class Instructor</label>
+                          <input
+                            type="text"
+                            value={c.instructor_custom_name}
+                            onChange={(e) => {
+                              const updated = [...classes];
+                              updated[i] = { ...c, instructor_custom_name: e.target.value };
+                              setClasses(updated);
+                            }}
+                            placeholder="Optional. Shown to guests instead of calendar name"
+                            className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                          />
+                        </div>
                       </div>
+                      <p className="mt-1 text-xs text-slate-500">
+                        The class appears on this team calendar in the schedule. If you add a class instructor name,
+                        guests see that name instead of the calendar name when booking.
+                      </p>
+                      {venue.is_admin && (
+                        <div className="mt-3 rounded-lg border border-slate-100 bg-slate-50/90 p-3">
+                          <Link
+                            href="/dashboard/calendar-availability?tab=calendars"
+                            className="inline-flex w-full items-center justify-center rounded-lg border border-brand-200/90 bg-white px-3.5 py-2.5 text-sm font-semibold text-brand-700 shadow-sm transition-colors hover:border-brand-400 hover:bg-brand-50 hover:text-brand-800"
+                          >
+                            Add calendar
+                          </Link>
+                          <p className="mt-2 text-xs text-slate-500">
+                            Create another team calendar column in{' '}
+                            <Link
+                              href="/dashboard/calendar-availability?tab=calendars"
+                              className="font-medium text-brand-700 underline hover:text-brand-800"
+                            >
+                              Calendar availability
+                            </Link>
+                            , then return here if needed.
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-slate-600">Colour</label>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="color"
+                          value={c.colour}
+                          onChange={(e) => {
+                            const updated = [...classes];
+                            updated[i] = { ...c, colour: e.target.value };
+                            setClasses(updated);
+                          }}
+                          className="h-9 w-12 cursor-pointer rounded border border-slate-200 p-0.5"
+                        />
+                        <span className="text-xs text-slate-500">{c.colour}</span>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 pt-5">
+                      <input
+                        id={`onb-class-active-${i}`}
+                        type="checkbox"
+                        checked={c.is_active}
+                        onChange={(e) => {
+                          const updated = [...classes];
+                          updated[i] = { ...c, is_active: e.target.checked };
+                          setClasses(updated);
+                        }}
+                        className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                      />
+                      <label htmlFor={`onb-class-active-${i}`} className="text-sm text-slate-700">
+                        Active (visible to guests)
+                      </label>
                     </div>
                   </div>
                 </div>
               ))}
               <button
                 type="button"
-                onClick={() =>
-                  setClasses([
-                    ...classes,
-                    {
-                      name: '',
-                      description: '',
-                      instructor_id: rosterList[0]?.id ?? '',
-                      duration_minutes: 60,
-                      capacity: 15,
-                      price: '0.00',
-                    },
-                  ])
-                }
+                onClick={() => setClasses([...classes, createEmptyClassDraft(rosterList[0]?.id ?? '')])}
                 className="w-full rounded-xl border-2 border-dashed border-slate-200 py-3 text-sm text-slate-500 hover:border-brand-300 hover:text-brand-600"
               >
                 + Add another class type
@@ -2777,24 +3099,24 @@ export default function OnboardingPage() {
               {isAppointmentsPlanVenue ? 'Bookable resources (optional)' : 'Set up your resources'}
             </h2>
             <p className="mb-3 text-sm text-slate-600">
-              A <strong>resource</strong> is something guests book by the slot — for example a court, room, lane, desk, or
-              piece of equipment. Each resource has its own weekly availability, slot length, and pricing. Resources appear
-              on a <strong>team calendar column</strong> you choose so staff see them alongside appointments; guests book
-              from your public <strong>Resources</strong> tab.
+              A <strong>resource</strong> is something guests book by the slot: a court, room, lane, desk, or piece of
+              equipment, for example. Each resource has its own weekly availability, slot length, and pricing. Resources
+              appear on a <strong>team calendar column</strong> you choose so staff see them alongside appointments; guests
+              book from your public <strong>Resources</strong> tab.
             </p>
             <p className="mb-4 text-sm text-slate-500">
               This step matches the fields in{' '}
               <Link href="/dashboard/resource-timeline" className="font-medium text-brand-600 underline hover:text-brand-700">
                 Dashboard → Resource timeline
               </Link>{' '}
-              → Add resource. Date-specific exceptions (closures or custom hours) can be added there later — they are not
+              → Add resource. Date-specific exceptions (closures or custom hours) can be added there later; they are not
               required here.
             </p>
             {isAppointmentsPlanVenue && (
               <div className="mb-6 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
                 <p className="font-medium text-slate-800">Optional step</p>
                 <p className="mt-1">
-                  Leave the form below empty and click Continue to skip — or add one or more resources now.
+                  Leave the form below empty and click Continue to skip, or add one or more resources now.
                 </p>
               </div>
             )}
@@ -2995,7 +3317,7 @@ export default function OnboardingPage() {
                   <div>
                     <h3 className="mb-2 text-xs font-semibold text-slate-800">Weekly availability</h3>
                     <p className="mb-2 text-xs text-slate-500">
-                      When this resource can be booked (must overlap your team calendar hours — adjust in Availability if
+                      When this resource can be booked (must overlap your team calendar hours; adjust in Availability if
                       needed).
                     </p>
                     <WorkingHoursControl

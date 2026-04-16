@@ -179,7 +179,7 @@ export default function Home() {
                 <PricingFeature text="Client records with visit history" />
                 <PricingFeature text="Email support" />
               </ul>
-              <Link href="/signup/business-type" className="mt-8 inline-flex h-11 w-full items-center justify-center rounded-xl bg-brand-600 text-sm font-semibold text-white shadow-lg shadow-brand-600/20 transition-colors hover:bg-brand-700">
+              <Link href="/signup/appointments-light" className="mt-8 inline-flex h-11 w-full items-center justify-center rounded-xl bg-brand-600 text-sm font-semibold text-white shadow-lg shadow-brand-600/20 transition-colors hover:bg-brand-700">
                 Start Free
               </Link>
             </div>
@@ -287,10 +287,22 @@ export default function Home() {
       <footer className="border-t border-slate-100 bg-slate-50 py-10">
         <div className="mx-auto flex max-w-6xl flex-col items-center gap-4 px-6 text-sm text-slate-500 sm:flex-row sm:justify-between">
           <p>&copy; 2026 Reserve&nbsp;NI</p>
-          <div className="flex gap-6">
-            <Link href="/signup" className="transition-colors hover:text-slate-900">Sign up</Link>
-            <Link href="/login" className="transition-colors hover:text-slate-900">Login</Link>
-            <a href="mailto:hello@reserveni.com" className="transition-colors hover:text-slate-900">Contact</a>
+          <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 sm:justify-end">
+            <Link href="/signup" className="transition-colors hover:text-slate-900">
+              Sign up
+            </Link>
+            <Link href="/login" className="transition-colors hover:text-slate-900">
+              Login
+            </Link>
+            <a href="mailto:hello@reserveni.com" className="transition-colors hover:text-slate-900">
+              Contact
+            </a>
+            <Link href="/terms" className="transition-colors hover:text-slate-900">
+              Terms of Service
+            </Link>
+            <Link href="/privacy" className="transition-colors hover:text-slate-900">
+              Privacy policy
+            </Link>
           </div>
         </div>
       </footer>

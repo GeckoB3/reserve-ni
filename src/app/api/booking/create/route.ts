@@ -894,6 +894,8 @@ async function handleNonTableBooking(
     booking_date,
     booking_time: timeForDb,
     party_size,
+    /** Align with effectiveModel; default `table_reservation` would violate bookings_area_required_for_table_reservation when area_id is unset. */
+    booking_model: effectiveModel,
     status: requiresDeposit ? 'Pending' : 'Confirmed',
     source,
     dietary_notes: dietary_notes || null,

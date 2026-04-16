@@ -140,14 +140,10 @@ export default function SignupBookingModelsPage() {
       <div className="mb-8 text-center">
         <h1 className="text-2xl font-bold text-slate-900">Choose your starting booking models</h1>
         <p className="mt-2 text-sm text-slate-500">
-          Your Appointments plan includes all four models. Pick what you want to set up now, and you can enable or
-          disable others later from Settings.
+          Appointments, classes, events, and bookable resources are all included. Select what to configure first. You
+          can change this later in Settings. Next, onboarding will walk through your profile, hours, calendars, and these
+          choices.
         </p>
-      </div>
-
-      <div className="mb-6 rounded-2xl border border-brand-200 bg-brand-50/40 p-5 text-sm text-slate-700">
-        Reserve NI will guide you through business details, opening hours, calendars, staff users, and setup for each
-        booking model you enable here.
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2">

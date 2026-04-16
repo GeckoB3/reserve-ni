@@ -108,7 +108,7 @@ export default function SignupPage() {
     if (storedPlan && isSignupPaymentReady(storedPlan, storedBt)) {
       await persistPendingSignupSelection(
         storedPlan,
-        storedPlan === 'appointments' ? null : storedBt,
+        storedPlan === 'appointments' || storedPlan === 'light' ? null : storedBt,
       );
     }
 

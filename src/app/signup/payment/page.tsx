@@ -34,7 +34,7 @@ export default function PaymentPage() {
   const [hasSession, setHasSession] = useState(false);
   /** Plan + business type resolved from sessionStorage and/or server-persisted signup progress. */
   const [selectionHydrated, setSelectionHydrated] = useState(false);
-  /** Logged-in user already has the other plan family — block checkout before hitting Stripe. */
+  /** Logged-in user already has the other plan family: block checkout before hitting Stripe. */
   const [planFamilyBlocked, setPlanFamilyBlocked] = useState(false);
 
   useEffect(() => {
@@ -119,7 +119,9 @@ export default function PaymentPage() {
     } = await supabase.auth.getSession();
     if (!session) {
       setError(
-        'You must be signed in to pay. If you just registered, open the confirmation link in your email first, or sign in below.',
+        plan === 'light'
+          ? 'You must be signed in to continue. If you just registered, open the confirmation link in your email first, or sign in below.'
+          : 'You must be signed in to pay. If you just registered, open the confirmation link in your email first, or sign in below.',
       );
       setLoading(false);
       return;
@@ -193,7 +195,11 @@ export default function PaymentPage() {
       <div className="mb-8 text-center">
         <h1 className="text-2xl font-bold text-slate-900">Order summary</h1>
         <p className="mt-2 text-sm text-slate-500">
-          Review your selection before {isFounding ? 'completing setup' : 'proceeding to payment'}.
+          {isFounding
+            ? 'Review your selection before completing setup.'
+            : isLight
+              ? 'No credit card is required to sign up for Appointments Light or to start using Reserve NI. Confirm below to create your venue and continue to onboarding.'
+              : 'Review your selection before proceeding to payment.'}
         </p>
       </div>
 
@@ -216,7 +222,7 @@ export default function PaymentPage() {
                 </p>
               )}
             </>
-          ) : !businessType ? (
+          ) : !businessType && !isLight ? (
             <div className="rounded-lg border border-brand-100 bg-brand-50/60 px-3 py-2 text-xs text-brand-900">
               Appointments includes appointments, classes, events, and resources. After payment, you&apos;ll choose
               which booking models to enable first and can change them later in Settings.
@@ -239,10 +245,17 @@ export default function PaymentPage() {
             </div>
           ) : isLight ? (
             <div className="rounded-lg border border-brand-100 bg-brand-50/60 px-3 py-2 text-xs text-brand-900">
-              <p className="font-medium">Appointments Light — free for 3 months, then &pound;{APPOINTMENTS_LIGHT_PRICE}/month.</p>
-              <p className="mt-1 leading-relaxed">
-                Full access to appointments, classes, events, and resources with one calendar column and one login.
-                SMS is pay-as-you-go at {lightSmsPence}p per message when you enable it (no card required to start).
+              <p className="font-medium">
+                Appointments Light: free for 3 months, then &pound;{APPOINTMENTS_LIGHT_PRICE}/month.
+              </p>
+              <p className="mt-1.5 leading-relaxed">
+                One bookable calendar and one venue login. Appointments, classes, events, and bookable resources.
+                You choose which models to start with in onboarding; edit anytime in Settings. Email reminders are
+                included.
+              </p>
+              <p className="mt-1.5 leading-relaxed">
+                SMS is optional. Add payment details in the dashboard whenever you want to send SMS: pay as you go at{' '}
+                {lightSmsPence}p per message.
               </p>
             </div>
           ) : (
@@ -288,7 +301,9 @@ export default function PaymentPage() {
             <p className="mt-1 text-amber-800/90">
               {isFounding
                 ? 'Complete setup needs an active session.'
-                : 'Payment needs an active session.'}{' '}
+                : isLight
+                  ? 'You need an active session so we can create your venue and continue signup.'
+                  : 'Payment needs an active session.'}{' '}
               If you haven&apos;t confirmed your email yet, use the link we sent you, then return here. Already
               confirmed?{' '}
               <Link href="/login?redirectTo=/signup/payment" className="font-medium text-brand-700 underline">
@@ -314,14 +329,18 @@ export default function PaymentPage() {
                 : 'Proceed to payment'}
         </button>
 
-        <p className="mt-3 text-center text-xs text-slate-500">Cancel anytime with 30 days notice.</p>
+        {isLight ? (
+          <p className="mt-3 text-center text-xs text-slate-500">
+            When the free period ends, Appointments Light is &pound;{APPOINTMENTS_LIGHT_PRICE}/month. Cancel anytime
+            with 30 days notice.
+          </p>
+        ) : (
+          <p className="mt-3 text-center text-xs text-slate-500">Cancel anytime with 30 days notice.</p>
+        )}
         {!isFounding && !isLight && (
           <p className="mt-1 text-center text-xs text-slate-400">
             You&apos;ll be redirected to Stripe for secure payment.
           </p>
-        )}
-        {isLight && (
-          <p className="mt-1 text-center text-xs text-slate-500">No card required. We&apos;ll create your venue and you can continue to onboarding.</p>
         )}
       </div>
 

@@ -875,6 +875,10 @@ export async function POST(request: NextRequest) {
         booking_time: timeForDb,
         booking_end_time: bookingEndTime,
         party_size: 1,
+        /** Must not rely on DB default `table_reservation` — that requires area_id for multi-area venues. */
+        booking_model: useUnifiedAppointmentStorage
+          ? 'unified_scheduling'
+          : 'practitioner_appointment',
         status: requiresDeposit ? 'Pending' : 'Confirmed',
         source: (parsed.data.source ?? 'phone') as 'phone' | 'walk-in',
         guest_email: guest.email || null,

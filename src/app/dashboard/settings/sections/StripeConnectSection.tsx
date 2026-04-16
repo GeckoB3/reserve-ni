@@ -10,6 +10,8 @@ interface StripeConnectSectionProps {
    * Settings → Payments — e.g. onboarding so users return to the wizard after Stripe.
    */
   stripeAccountLinkPaths?: { return: string; refresh: string };
+  /** When true, omit the inner "Stripe payments" title (parent page already explains the step). */
+  hideSectionTitle?: boolean;
 }
 
 interface StripeStatus {
@@ -82,6 +84,7 @@ export function StripeConnectSection({
   stripeAccountId,
   isAdmin,
   stripeAccountLinkPaths,
+  hideSectionTitle = false,
 }: StripeConnectSectionProps) {
   const [state, setState] = useState<ViewState>(
     stripeAccountId ? { kind: 'loading' } : { kind: 'not_connected' },
@@ -151,7 +154,9 @@ export function StripeConnectSection({
 
   return (
     <section className="rounded-lg border border-neutral-200 bg-white p-6 shadow-sm">
-      <h2 className="mb-4 text-lg font-semibold text-neutral-900">Stripe payments</h2>
+      {!hideSectionTitle ? (
+        <h2 className="mb-4 text-lg font-semibold text-neutral-900">Stripe payments</h2>
+      ) : null}
 
       {state.kind === 'loading' && (
         <div className="animate-pulse space-y-2">
@@ -162,10 +167,14 @@ export function StripeConnectSection({
 
       {state.kind === 'not_connected' && (
         <div>
-          <p className="text-sm text-neutral-600 mb-4">
-            Connect your Stripe account to start accepting guest deposits directly into your bank account.
-            The setup is a two-step process:
-          </p>
+          {!hideSectionTitle ? (
+            <p className="mb-4 text-sm text-neutral-600">
+              Connect your Stripe account to start accepting guest deposits directly into your bank account.
+              The setup is a two-step process:
+            </p>
+          ) : (
+            <p className="mb-4 text-sm text-neutral-600">Two steps with Stripe: business and bank details, then identity verification.</p>
+          )}
           <StripeStepIndicator step1Done={false} step2Done={false} />
           {isAdmin ? (
             <button
