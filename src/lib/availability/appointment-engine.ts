@@ -199,6 +199,39 @@ function overlaps(startA: number, endA: number, startB: number, endB: number): b
   return startA < endB && startB < endA;
 }
 
+/**
+ * For rows already scoped to a calendar date: full-day rows add to `days_off` via Set; partial rows become
+ * practitioner block ranges (same shape as `practitioner_calendar_blocks` in the engine).
+ */
+export function leaveRowsToDaysOffAndBlocks(
+  leaveRows: Array<{
+    practitioner_id: string;
+    unavailable_start_time?: string | null;
+    unavailable_end_time?: string | null;
+  }>,
+): { fullDayPractitionerIds: Set<string>; partialBlocks: PractitionerCalendarBlockedRange[] } {
+  const fullDayPractitionerIds = new Set<string>();
+  const partialBlocks: PractitionerCalendarBlockedRange[] = [];
+
+  for (const row of leaveRows) {
+    const st = row.unavailable_start_time;
+    const en = row.unavailable_end_time;
+    if (st == null && en == null) {
+      fullDayPractitionerIds.add(row.practitioner_id);
+      continue;
+    }
+    if (st != null && en != null) {
+      const start = timeToMinutes(String(st).slice(0, 5));
+      const end = timeToMinutes(String(en).slice(0, 5));
+      if (end > start) {
+        partialBlocks.push({ practitioner_id: row.practitioner_id, start, end });
+      }
+    }
+  }
+
+  return { fullDayPractitionerIds, partialBlocks };
+}
+
 function appointmentBookingBusyEnd(b: AppointmentBooking): number {
   const bStart = timeToMinutes(b.booking_time);
   const bProc = b.processing_time_minutes ?? 0;
@@ -650,7 +683,7 @@ export async function fetchAppointmentInput(params: {
       .eq('block_date', date),
     supabase
       .from('practitioner_leave_periods')
-      .select('practitioner_id')
+      .select('practitioner_id, unavailable_start_time, unavailable_end_time')
       .eq('venue_id', venueId)
       .lte('start_date', date)
       .gte('end_date', date),
@@ -667,12 +700,18 @@ export async function fetchAppointmentInput(params: {
 
   let practitioners = (practitionersRes.data ?? []) as Practitioner[];
 
+  let leavePartialBlocks: PractitionerCalendarBlockedRange[] = [];
   if (!leaveRes.error && leaveRes.data?.length) {
-    const onLeaveIds = new Set(
-      (leaveRes.data as Array<{ practitioner_id: string }>).map((r) => r.practitioner_id),
+    const { fullDayPractitionerIds, partialBlocks } = leaveRowsToDaysOffAndBlocks(
+      leaveRes.data as Array<{
+        practitioner_id: string;
+        unavailable_start_time?: string | null;
+        unavailable_end_time?: string | null;
+      }>,
     );
+    leavePartialBlocks = partialBlocks;
     practitioners = practitioners.map((p) => {
-      if (!onLeaveIds.has(p.id)) return p;
+      if (!fullDayPractitionerIds.has(p.id)) return p;
       const existing = Array.isArray(p.days_off) ? [...p.days_off] : [];
       if (!existing.includes(date)) existing.push(date);
       return { ...p, days_off: existing };
@@ -730,15 +769,18 @@ export async function fetchAppointmentInput(params: {
     };
   });
 
-  const practitionerBlockedRanges: PractitionerCalendarBlockedRange[] = blocksRes.error
-    ? []
-    : (blocksRes.data ?? [])
-        .map((row: { practitioner_id: string; start_time: string; end_time: string }) => ({
-          practitioner_id: row.practitioner_id,
-          start: timeToMinutes(String(row.start_time).slice(0, 5)),
-          end: timeToMinutes(String(row.end_time).slice(0, 5)),
-        }))
-        .filter((b) => b.end > b.start);
+  const practitionerBlockedRanges: PractitionerCalendarBlockedRange[] = [
+    ...(blocksRes.error
+      ? []
+      : (blocksRes.data ?? [])
+          .map((row: { practitioner_id: string; start_time: string; end_time: string }) => ({
+            practitioner_id: row.practitioner_id,
+            start: timeToMinutes(String(row.start_time).slice(0, 5)),
+            end: timeToMinutes(String(row.end_time).slice(0, 5)),
+          }))
+          .filter((b) => b.end > b.start)),
+    ...leavePartialBlocks,
+  ];
 
   if (blocksRes.error) {
     console.warn('[fetchAppointmentInput] practitioner_calendar_blocks:', blocksRes.error.message);
@@ -881,20 +923,29 @@ export async function fetchCalendarAppointmentInput(params: {
 
   const { data: leaveRows, error: leaveErr } = await supabase
     .from('practitioner_leave_periods')
-    .select('practitioner_id')
+    .select('practitioner_id, unavailable_start_time, unavailable_end_time')
     .eq('venue_id', venueId)
+    .eq('practitioner_id', calendarId)
     .lte('start_date', date)
     .gte('end_date', date);
 
+  let leavePartialForCalendar: PractitionerCalendarBlockedRange[] = [];
   if (!leaveErr && leaveRows?.length) {
-    const onLeaveIds = new Set(
-      (leaveRows as Array<{ practitioner_id: string }>).map((r) => r.practitioner_id),
+    const { fullDayPractitionerIds, partialBlocks } = leaveRowsToDaysOffAndBlocks(
+      leaveRows as Array<{
+        practitioner_id: string;
+        unavailable_start_time?: string | null;
+        unavailable_end_time?: string | null;
+      }>,
     );
-    if (onLeaveIds.has(calendarId)) {
+    leavePartialForCalendar = partialBlocks;
+    if (fullDayPractitionerIds.has(calendarId)) {
       const existing = Array.isArray(practitioner.days_off) ? [...practitioner.days_off] : [];
       if (!existing.includes(date)) existing.push(date);
       practitioner = { ...practitioner, days_off: existing };
     }
+  } else if (leaveErr) {
+    console.warn('[fetchCalendarAppointmentInput] practitioner_leave_periods:', leaveErr.message);
   }
 
   const [bookingsRes, blocksRes, calBlocksRes, venueRes, siblingResourcesRes, venueBlocksRes] = await Promise.all([
@@ -999,6 +1050,7 @@ export async function fetchCalendarAppointmentInput(params: {
     ...legacyBlockRanges,
     ...unifiedCalBlockRanges,
     ...resourceHostBlockRanges,
+    ...leavePartialForCalendar,
   ];
 
   if (blocksRes.error) {

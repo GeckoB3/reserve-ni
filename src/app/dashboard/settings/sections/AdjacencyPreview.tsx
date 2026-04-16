@@ -6,6 +6,7 @@ import { getTableDimensions } from '@/types/table-management';
 import {
   getRotatedBoundingBox,
   getBoundingBoxGap,
+  isValidAxisAlignedCombinationPair,
   type CombinationTable,
 } from '@/lib/table-management/combination-engine';
 
@@ -13,6 +14,8 @@ interface Props {
   threshold: number;
   /** Increment this to trigger a silent re-fetch of table positions. */
   refreshKey?: number;
+  /** When set, only load tables in this dining area (multi-area floor plans). */
+  diningAreaId?: string | null;
 }
 
 function toCombinationTable(t: VenueTable): CombinationTable {
@@ -30,7 +33,7 @@ function toCombinationTable(t: VenueTable): CombinationTable {
   };
 }
 
-export function AdjacencyPreview({ threshold, refreshKey = 0 }: Props) {
+export function AdjacencyPreview({ threshold, refreshKey = 0, diningAreaId }: Props) {
   const [tables, setTables] = useState<VenueTable[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -40,7 +43,8 @@ export function AdjacencyPreview({ threshold, refreshKey = 0 }: Props) {
   const fetchTables = useCallback(async (showSpinner = false) => {
     if (showSpinner) setLoading(true);
     try {
-      const res = await fetch('/api/venue/tables');
+      const qs = diningAreaId ? `?area_id=${encodeURIComponent(diningAreaId)}` : '';
+      const res = await fetch(`/api/venue/tables${qs}`);
       if (!res.ok || !mountedRef.current) return;
       const data = await res.json();
       if (!mountedRef.current) return;
@@ -50,7 +54,7 @@ export function AdjacencyPreview({ threshold, refreshKey = 0 }: Props) {
     } finally {
       if (mountedRef.current) setLoading(false);
     }
-  }, []);
+  }, [diningAreaId]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -80,6 +84,7 @@ export function AdjacencyPreview({ threshold, refreshKey = 0 }: Props) {
     [tables],
   );
 
+  /** Same pairwise rule as {@link detectAdjacentTables}: gap ≤ threshold and same row or column (not diagonal-only). */
   const adjacentIds = useMemo(() => {
     if (!selectedId) return new Set<string>();
     const selected = comboTables.find((t) => t.id === selectedId);
@@ -89,9 +94,9 @@ export function AdjacencyPreview({ threshold, refreshKey = 0 }: Props) {
     for (const t of comboTables) {
       if (t.id === selectedId) continue;
       const box = getRotatedBoundingBox(t);
-      if (getBoundingBoxGap(selectedBox, box) <= threshold) {
-        result.add(t.id);
-      }
+      if (getBoundingBoxGap(selectedBox, box) > threshold) continue;
+      if (!isValidAxisAlignedCombinationPair(selectedBox, box)) continue;
+      result.add(t.id);
     }
     return result;
   }, [selectedId, comboTables, threshold]);
@@ -126,6 +131,14 @@ export function AdjacencyPreview({ threshold, refreshKey = 0 }: Props) {
     return `${minX - pad} ${minY - pad} ${maxX - minX + pad * 2} ${maxY - minY + pad * 2}`;
   }, [comboTables]);
 
+  const viewBoxRect = useMemo(() => {
+    const parts = viewBox.split(/\s+/).map(Number);
+    if (parts.length !== 4 || parts.some((n) => Number.isNaN(n))) {
+      return { x: 0, y: 0, w: 100, h: 100 };
+    }
+    return { x: parts[0]!, y: parts[1]!, w: parts[2]!, h: parts[3]! };
+  }, [viewBox]);
+
   if (loading) {
     return (
       <div className="mt-3 flex h-40 items-center justify-center rounded-lg border border-slate-200 bg-white">
@@ -149,8 +162,8 @@ export function AdjacencyPreview({ threshold, refreshKey = 0 }: Props) {
       <div className="mb-1.5 flex items-center justify-between">
         <p className="text-[11px] text-slate-400">
           {selectedId
-            ? `${adjacentCount} table${adjacentCount !== 1 ? 's' : ''} within combination range. Green tables will be considered adjacent.`
-            : 'Click a table to preview which tables are within combination range.'}
+            ? `${adjacentCount} table${adjacentCount !== 1 ? 's' : ''} on the same row or column within ${threshold}px gap. The cross shows the axes; green tables can combine.`
+            : 'Click a table to preview same-row/column neighbours within the detection distance (horizontal and vertical from the table centre, not a radius).'}
         </p>
         <button
           type="button"
@@ -168,16 +181,26 @@ export function AdjacencyPreview({ threshold, refreshKey = 0 }: Props) {
         onClick={() => setSelectedId(null)}
       >
         {selectedCenter && (
-          <circle
-            cx={selectedCenter.cx}
-            cy={selectedCenter.cy}
-            r={threshold}
-            fill="rgba(16, 185, 129, 0.07)"
-            stroke="rgba(16, 185, 129, 0.3)"
-            strokeWidth={0.3}
-            strokeDasharray="1 0.8"
-            pointerEvents="none"
-          />
+          <g pointerEvents="none">
+            <line
+              x1={viewBoxRect.x}
+              y1={selectedCenter.cy}
+              x2={viewBoxRect.x + viewBoxRect.w}
+              y2={selectedCenter.cy}
+              stroke="rgba(16, 185, 129, 0.45)"
+              strokeWidth={Math.max(0.15, viewBoxRect.w * 0.001)}
+              strokeDasharray="4 3"
+            />
+            <line
+              x1={selectedCenter.cx}
+              y1={viewBoxRect.y}
+              x2={selectedCenter.cx}
+              y2={viewBoxRect.y + viewBoxRect.h}
+              stroke="rgba(16, 185, 129, 0.45)"
+              strokeWidth={Math.max(0.15, viewBoxRect.w * 0.001)}
+              strokeDasharray="4 3"
+            />
+          </g>
         )}
 
         {comboTables.map((t) => {

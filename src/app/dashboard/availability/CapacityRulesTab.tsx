@@ -23,6 +23,7 @@ const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 interface Props {
   services: Service[];
   showToast: (msg: string) => void;
+  selectedAreaId?: string | null;
 }
 
 const defaultRule = (serviceId: string): Omit<CapacityRule, 'id'> => ({
@@ -36,7 +37,7 @@ const defaultRule = (serviceId: string): Omit<CapacityRule, 'id'> => ({
   time_range_end: null,
 });
 
-export function CapacityRulesTab({ services, showToast }: Props) {
+export function CapacityRulesTab({ services, showToast, selectedAreaId }: Props) {
   const [rules, setRules] = useState<CapacityRule[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -47,8 +48,13 @@ export function CapacityRulesTab({ services, showToast }: Props) {
 
   useEffect(() => {
     async function load() {
+      if (!selectedAreaId) {
+        setRules([]);
+        setLoading(false);
+        return;
+      }
       try {
-        const res = await fetch('/api/venue/capacity-rules');
+        const res = await fetch(`/api/venue/capacity-rules?area_id=${encodeURIComponent(selectedAreaId)}`);
         if (res.ok) {
           const data = await res.json();
           setRules(data.rules ?? []);
@@ -58,7 +64,7 @@ export function CapacityRulesTab({ services, showToast }: Props) {
       }
     }
     load();
-  }, []);
+  }, [selectedAreaId]);
 
   async function handleCreate() {
     if (!createDraft) return;

@@ -19,6 +19,14 @@ interface SlotStepProps {
   onSelect: (slot: AvailableSlot) => void;
   onBack: () => void;
   onDateChange?: (date: string) => void;
+  /** When true, show tabs to switch dining area (manual multi-area mode). */
+  showAreaTabs?: boolean;
+  areas?: Array<{ id: string; name: string; colour: string }>;
+  selectedAreaId?: string | null;
+  onAreaChange?: (areaId: string) => void;
+  /** Scope empty-state “nearby dates” fetch the same as the main availability call. */
+  availabilityAreaId?: string | null;
+  publicBookingAreaMode?: 'auto' | 'manual';
 }
 
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -29,7 +37,26 @@ function formatDateStr(date: string): string {
   return `${WEEKDAYS[d.getDay()]} ${d.getDate()} ${MONTHS[d.getMonth()]}`;
 }
 
-export function SlotStep({ date, slots, serviceGroups, loading, largePartyRedirect, largePartyMessage, venueId, partySize, phoneDefaultCountry = 'GB', onSelect, onBack, onDateChange }: SlotStepProps) {
+export function SlotStep({
+  date,
+  slots,
+  serviceGroups,
+  loading,
+  largePartyRedirect,
+  largePartyMessage,
+  venueId,
+  partySize,
+  phoneDefaultCountry = 'GB',
+  onSelect,
+  onBack,
+  onDateChange,
+  showAreaTabs = false,
+  areas = [],
+  selectedAreaId = null,
+  onAreaChange,
+  availabilityAreaId = null,
+  publicBookingAreaMode = 'auto',
+}: SlotStepProps) {
   const dateStr = formatDateStr(date);
   const [nearbyDates, setNearbyDates] = useState<Array<{ date: string; label: string; slotCount: number }>>([]);
   const [nearbyLoading, setNearbyLoading] = useState(false);
@@ -54,7 +81,11 @@ export function SlotStep({ date, slots, serviceGroups, loading, largePartyRedire
 
         const checkStr = `${checkDate.getFullYear()}-${String(checkDate.getMonth() + 1).padStart(2, '0')}-${String(checkDate.getDate()).padStart(2, '0')}`;
         try {
-          const res = await fetch(`/api/booking/availability?venue_id=${encodeURIComponent(venueId)}&date=${encodeURIComponent(checkStr)}&party_size=${partySize}`);
+          let nearbyUrl = `/api/booking/availability?venue_id=${encodeURIComponent(venueId)}&date=${encodeURIComponent(checkStr)}&party_size=${partySize}`;
+          if (publicBookingAreaMode === 'manual' && availabilityAreaId) {
+            nearbyUrl += `&area_id=${encodeURIComponent(availabilityAreaId)}`;
+          }
+          const res = await fetch(nearbyUrl);
           if (res.ok) {
             const data = await res.json();
             const slotCount = (data.slots ?? []).length;
@@ -71,7 +102,7 @@ export function SlotStep({ date, slots, serviceGroups, loading, largePartyRedire
     } finally {
       setNearbyLoading(false);
     }
-  }, [venueId, partySize, date, noAvailability]);
+  }, [venueId, partySize, date, noAvailability, publicBookingAreaMode, availabilityAreaId]);
 
   useEffect(() => {
     if (noAvailability && venueId && partySize) {
@@ -83,6 +114,26 @@ export function SlotStep({ date, slots, serviceGroups, loading, largePartyRedire
 
   return (
     <div className="space-y-5">
+      {showAreaTabs && areas.length > 1 && onAreaChange && (
+        <div className="flex flex-wrap gap-2 border-b border-slate-100 pb-3">
+          {areas.map((a) => (
+            <button
+              key={a.id}
+              type="button"
+              onClick={() => onAreaChange(a.id)}
+              className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${
+                selectedAreaId === a.id
+                  ? 'border-brand-500 bg-brand-50 text-brand-900'
+                  : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
+              }`}
+            >
+              <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: a.colour || '#6366F1' }} />
+              {a.name}
+            </button>
+          ))}
+        </div>
+      )}
+
       <div className="flex items-center gap-3">
         <button type="button" onClick={onBack} className="flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 text-slate-400 transition-colors hover:bg-slate-50 hover:text-slate-600" aria-label="Go back">
           <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">

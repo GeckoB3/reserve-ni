@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import type { TableGridData, UndoAction } from '@/types/table-management';
 import { TimelineGrid } from './TimelineGrid';
 import { UndoToast } from './UndoToast';
@@ -17,6 +18,11 @@ import type { ViewToolbarSummary } from '@/components/dashboard/ViewToolbar';
 import { coversInUseAtTime } from '@/lib/table-management/covers-at-time';
 import { computeNextBookingsSlot } from '@/lib/table-management/next-bookings-slot';
 import { bookingStatusDisplayLabel } from '@/lib/booking/infer-booking-row-model';
+import { CalendarDateTimePicker } from '@/components/calendar/CalendarDateTimePicker';
+import { getCalendarGridBounds } from '@/lib/venue-calendar-bounds';
+import { isBookingTimeInHourRange } from '@/lib/booking-time-window';
+import type { OpeningHours } from '@/types/availability';
+import type { VenueArea } from '@/types/areas';
 
 function formatDateInput(d: Date): string {
   const y = d.getFullYear();
@@ -112,6 +118,11 @@ export function TableGridView({
   bookingModel?: BookingModel;
   enabledModels?: BookingModel[];
 }) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const [diningAreas, setDiningAreas] = useState<VenueArea[]>([]);
+  const [diningAreaId, setDiningAreaId] = useState<string | null>(null);
+
   const [date, setDate] = useState(formatDateInput(new Date()));
   const [serviceId, setServiceId] = useState<string | null>(null);
   const [services, setServices] = useState<Array<{ id: string; name: string; start_time: string; end_time: string }>>([]);
@@ -160,6 +171,76 @@ export function TableGridView({
   const gridDataRef = useRef<TableGridData | null>(null);
   const { addToast } = useToast();
 
+  const [openingHours, setOpeningHours] = useState<OpeningHours | null>(null);
+  const [venueTimezone, setVenueTimezone] = useState<string>('Europe/London');
+  const [startHourOverride, setStartHourOverride] = useState<number | null>(null);
+  const [endHourOverride, setEndHourOverride] = useState<number | null>(null);
+  const [timeRangeFilterActive, setTimeRangeFilterActive] = useState(false);
+
+  const showDiningAreaChrome =
+    bookingModel === 'table_reservation' && diningAreas.filter((a) => a.is_active).length > 1;
+
+  useEffect(() => {
+    if (bookingModel !== 'table_reservation') return;
+    let cancelled = false;
+    void fetch('/api/venue/areas')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((j) => {
+        if (cancelled || !j?.areas) return;
+        setDiningAreas(j.areas as VenueArea[]);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [bookingModel]);
+
+  useEffect(() => {
+    if (bookingModel !== 'table_reservation') {
+      setDiningAreaId(null);
+      return;
+    }
+    const active = diningAreas.filter((a) => a.is_active);
+    if (active.length === 0) {
+      setDiningAreaId(null);
+      return;
+    }
+    if (active.length === 1) {
+      setDiningAreaId(active[0]!.id);
+      return;
+    }
+    const fromUrl = searchParams.get('area');
+    let fromLs: string | null = null;
+    try {
+      fromLs = window.localStorage.getItem(`diningArea:${venueId}`);
+    } catch {
+      /* ignore */
+    }
+    const pick =
+      fromUrl && active.some((a) => a.id === fromUrl)
+        ? fromUrl
+        : fromLs && active.some((a) => a.id === fromLs)
+          ? fromLs
+          : active[0]!.id;
+    setDiningAreaId(pick);
+  }, [bookingModel, diningAreas, searchParams, venueId]);
+
+  const setDiningAreaFilter = useCallback(
+    (id: string) => {
+      setDiningAreaId(id);
+      setServiceId(null);
+      try {
+        window.localStorage.setItem(`diningArea:${venueId}`, id);
+      } catch {
+        /* ignore */
+      }
+      const next = new URLSearchParams(searchParams.toString());
+      next.set('area', id);
+      router.replace(`/dashboard/table-grid?${next}`, { scroll: false });
+    },
+    [router, searchParams, venueId],
+  );
+
   const selectedBookingSnapshot = useMemo((): BookingDetailPanelSnapshot | null => {
     if (!selectedBookingId || !gridData) return null;
     const cellsWithBooking = gridData.cells.filter(
@@ -207,7 +288,11 @@ export function TableGridView({
 
   const fetchServices = useCallback(async () => {
     try {
-      const res = await fetch('/api/venue/services');
+      const qs =
+        bookingModel === 'table_reservation' && diningAreaId
+          ? `?area_id=${encodeURIComponent(diningAreaId)}`
+          : '';
+      const res = await fetch(`/api/venue/services${qs}`);
       if (res.ok) {
         const data = await res.json();
         const svc = (data.services ?? []).filter((s: { is_active: boolean }) => s.is_active);
@@ -216,7 +301,29 @@ export function TableGridView({
     } catch (err) {
       console.error('Fetch services failed:', err);
     }
+  }, [bookingModel, diningAreaId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetch('/api/venue')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((v) => {
+        if (cancelled || !v) return;
+        if (v.opening_hours) setOpeningHours(v.opening_hours as OpeningHours);
+        const tz = v.timezone;
+        if (typeof tz === 'string' && tz.trim() !== '') setVenueTimezone(tz.trim());
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
   }, []);
+
+  useEffect(() => {
+    setStartHourOverride(null);
+    setEndHourOverride(null);
+    setTimeRangeFilterActive(false);
+  }, [date]);
 
   const fetchGrid = useCallback(async (options?: FetchGridOptions) => {
     const silent = options?.silent ?? false;
@@ -227,6 +334,9 @@ export function TableGridView({
     try {
       const params = new URLSearchParams({ date });
       if (serviceId) params.set('service_id', serviceId);
+      if (bookingModel === 'table_reservation' && diningAreaId) {
+        params.set('area_id', diningAreaId);
+      }
 
       const res = await fetch(`/api/venue/tables/availability?${params}`);
       if (res.ok) {
@@ -240,7 +350,7 @@ export function TableGridView({
         setLoading(false);
       }
     }
-  }, [date, serviceId]);
+  }, [bookingModel, date, diningAreaId, serviceId]);
 
   const runSilentReconcile = useCallback(async () => {
     if (reconcileInFlightRef.current) {
@@ -291,7 +401,11 @@ export function TableGridView({
 
   const fetchCombinations = useCallback(async () => {
     try {
-      const res = await fetch('/api/venue/tables/combinations');
+      const areaQs =
+        bookingModel === 'table_reservation' && diningAreaId
+          ? `?area_id=${encodeURIComponent(diningAreaId)}`
+          : '';
+      const res = await fetch(`/api/venue/tables/combinations${areaQs}`);
       if (res.ok) {
         const data = await res.json();
         const combos: CombinationInfo[] = (data.combinations ?? [])
@@ -308,17 +422,23 @@ export function TableGridView({
     } catch (err) {
       console.error('Fetch combinations failed:', err);
     }
-  }, []);
+  }, [bookingModel, diningAreaId]);
 
   useEffect(() => {
-    fetch('/api/venue/tables').then(async (res) => {
-      if (res.ok) {
-        const data = await res.json();
-        setNoShowGraceMinutes(data.settings?.no_show_grace_minutes ?? 15);
-        setCombinationThreshold(data.settings?.combination_threshold ?? 80);
-      }
-    }).catch(() => {});
-  }, []);
+    const areaQs =
+      bookingModel === 'table_reservation' && diningAreaId
+        ? `?area_id=${encodeURIComponent(diningAreaId)}`
+        : '';
+    fetch(`/api/venue/tables${areaQs}`)
+      .then(async (res) => {
+        if (res.ok) {
+          const data = await res.json();
+          setNoShowGraceMinutes(data.settings?.no_show_grace_minutes ?? 15);
+          setCombinationThreshold(data.settings?.combination_threshold ?? 80);
+        }
+      })
+      .catch(() => {});
+  }, [bookingModel, diningAreaId]);
   useEffect(() => { fetchServices(); }, [fetchServices]);
   useEffect(() => { fetchGrid(); }, [fetchGrid]);
   useEffect(() => { fetchCombinations(); }, [fetchCombinations]);
@@ -898,7 +1018,55 @@ export function TableGridView({
     });
   }, [uniqueBlocks, date]);
 
+  const { startHour: derivedStartHour, endHour: derivedEndHour } = useMemo(
+    () => getCalendarGridBounds(date, openingHours ?? undefined, 7, 21, { timeZone: venueTimezone }),
+    [date, openingHours, venueTimezone],
+  );
+  const pickerStartHour = startHourOverride ?? derivedStartHour;
+  const pickerEndHour = endHourOverride ?? derivedEndHour;
+
   const selectedService = services.find((s) => s.id === serviceId);
+
+  const timelineStartTime = useMemo(() => {
+    if (timeRangeFilterActive) {
+      return `${String(pickerStartHour).padStart(2, '0')}:00`;
+    }
+    if (serviceId && selectedService) {
+      return selectedService.start_time;
+    }
+    return `${String(derivedStartHour).padStart(2, '0')}:00`;
+  }, [timeRangeFilterActive, pickerStartHour, serviceId, selectedService, derivedStartHour]);
+
+  const timelineEndTime = useMemo(() => {
+    if (timeRangeFilterActive) {
+      return `${String(pickerEndHour).padStart(2, '0')}:00`;
+    }
+    if (serviceId && selectedService) {
+      return selectedService.end_time;
+    }
+    return `${String(derivedEndHour).padStart(2, '0')}:00`;
+  }, [timeRangeFilterActive, pickerEndHour, serviceId, selectedService, derivedEndHour]);
+
+  const timelineCells = useMemo(() => {
+    if (!gridData?.cells) return [];
+    if (!timeRangeFilterActive) return gridData.cells;
+    return gridData.cells.map((c) => {
+      if (!c.booking_id || !c.booking_details) return c;
+      const start = c.booking_details.start_time.slice(0, 5);
+      if (!isBookingTimeInHourRange(start, pickerStartHour, pickerEndHour)) {
+        return { ...c, booking_id: null, booking_details: null };
+      }
+      return c;
+    });
+  }, [gridData, timeRangeFilterActive, pickerStartHour, pickerEndHour]);
+
+  const timelineUnassigned = useMemo(() => {
+    if (!gridData?.unassigned_bookings) return [];
+    if (!timeRangeFilterActive) return gridData.unassigned_bookings;
+    return gridData.unassigned_bookings.filter((b) =>
+      isBookingTimeInHourRange(b.start_time.slice(0, 5), pickerStartHour, pickerEndHour),
+    );
+  }, [gridData, timeRangeFilterActive, pickerStartHour, pickerEndHour]);
 
   const exportCsv = useCallback(async () => {
     if (!gridData) return;
@@ -1059,6 +1227,47 @@ export function TableGridView({
           onWalkIn={() => {
             setWalkInCell({ tableId: '', time: '' });
           }}
+          datePicker={(
+            <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+              <CalendarDateTimePicker
+                date={date}
+                onDateChange={setDate}
+                startHour={pickerStartHour}
+                endHour={pickerEndHour}
+                onTimeRangeChange={(start, end) => {
+                  setStartHourOverride(start);
+                  setEndHourOverride(end);
+                  setTimeRangeFilterActive(true);
+                }}
+              />
+              {timeRangeFilterActive && (
+                <div className="mt-2 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-2">
+                  <p className="text-xs text-slate-600">
+                    Showing bookings with start times from{' '}
+                    <span className="font-medium text-slate-800">
+                      {String(pickerStartHour).padStart(2, '0')}:00
+                    </span>{' '}
+                    up to{' '}
+                    <span className="font-medium text-slate-800">
+                      {String(pickerEndHour).padStart(2, '0')}:00
+                    </span>{' '}
+                    (not including the end hour).
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setStartHourOverride(null);
+                      setEndHourOverride(null);
+                      setTimeRangeFilterActive(false);
+                    }}
+                    className="shrink-0 text-xs font-medium text-brand-600 hover:text-brand-700 hover:underline"
+                  >
+                    Clear time filter
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
           secondaryActions={(
             <>
               <button
@@ -1080,6 +1289,22 @@ export function TableGridView({
         >
           <div className="flex w-full flex-col gap-2 lg:flex-row lg:items-center lg:justify-between lg:gap-3">
             <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5 sm:gap-2">
+              {showDiningAreaChrome && diningAreaId && (
+                <select
+                  value={diningAreaId}
+                  onChange={(e) => setDiningAreaFilter(e.target.value)}
+                  className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 sm:px-3 sm:py-2 sm:text-sm"
+                  aria-label="Dining area"
+                >
+                  {diningAreas
+                    .filter((a) => a.is_active)
+                    .map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.name}
+                      </option>
+                    ))}
+                </select>
+              )}
               <select
                 value={serviceId ?? ''}
                 onChange={(e) => setServiceId(e.target.value || null)}
@@ -1210,11 +1435,11 @@ export function TableGridView({
         ) : gridData ? (
           <TimelineGrid
             tables={filteredTables}
-            cells={gridData.cells}
-            unassignedBookings={gridData.unassigned_bookings}
+            cells={timelineCells}
+            unassignedBookings={timelineUnassigned}
             combinations={allCombinations}
-            serviceStartTime={selectedService?.start_time}
-            serviceEndTime={selectedService?.end_time}
+            serviceStartTime={timelineStartTime}
+            serviceEndTime={timelineEndTime}
             slotIntervalMinutes={gridData.slot_interval_minutes}
             statusFilter={statusFilter}
             showCancelled={showCancelled}

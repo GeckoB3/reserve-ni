@@ -244,6 +244,10 @@ export interface ServiceAvailableSlot {
   /** From `booking_restrictions` for this service (merged with exceptions). */
   cancellation_notice_hours?: number;
   limited: boolean;
+  /** Set when availability is computed per dining area (multi-area restaurants). */
+  area_id?: string;
+  area_name?: string;
+  area_colour?: string;
 }
 
 /** All data the engine needs to compute availability for a single date, pre-fetched. */

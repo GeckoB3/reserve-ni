@@ -5,6 +5,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { leaveRowsToDaysOffAndBlocks } from '@/lib/availability/appointment-engine';
 import type { ClassPaymentRequirement, Practitioner, AppointmentService, PractitionerService } from '@/types/booking-models';
 import { mergeAppointmentServiceWithPractitionerLink } from '@/lib/appointments/merge-service-with-overrides';
 import type { OpeningHours } from '@/types/availability';
@@ -148,7 +149,7 @@ export async function fetchUnifiedSchedulingAppointmentInput(params: {
       .in('calendar_id', calendarIds),
     supabase
       .from('practitioner_leave_periods')
-      .select('practitioner_id')
+      .select('practitioner_id, unavailable_start_time, unavailable_end_time')
       .eq('venue_id', venueId)
       .lte('start_date', date)
       .gte('end_date', date),
@@ -225,15 +226,22 @@ export async function fetchUnifiedSchedulingAppointmentInput(params: {
   }
 
   if (!leaveRes.error && leaveRes.data?.length) {
-    const onLeaveIds = new Set(
-      (leaveRes.data as Array<{ practitioner_id: string }>).map((r) => r.practitioner_id),
+    const { fullDayPractitionerIds, partialBlocks } = leaveRowsToDaysOffAndBlocks(
+      leaveRes.data as Array<{
+        practitioner_id: string;
+        unavailable_start_time?: string | null;
+        unavailable_end_time?: string | null;
+      }>,
     );
     for (let i = 0; i < practitioners.length; i++) {
       const p = practitioners[i]!;
-      if (!onLeaveIds.has(p.id)) continue;
+      if (!fullDayPractitionerIds.has(p.id)) continue;
       const existing = Array.isArray(p.days_off) ? [...p.days_off] : [];
       if (!existing.includes(date)) existing.push(date);
       practitioners[i] = { ...p, days_off: existing };
+    }
+    for (const b of partialBlocks) {
+      practitionerBlockedRanges.push(b);
     }
   } else if (leaveRes.error) {
     console.warn('[fetchUnifiedSchedulingAppointmentInput] practitioner_leave_periods:', leaveRes.error.message);

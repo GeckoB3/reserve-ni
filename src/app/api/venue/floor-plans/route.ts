@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 import { z } from 'zod';
+import { getDefaultAreaIdForVenue } from '@/lib/areas/resolve-default-area';
+import { getSupabaseAdminClient } from '@/lib/supabase';
 
 const MAX_FLOOR_PLANS = 24;
 
@@ -10,21 +12,26 @@ const createSchema = z.object({
   background_url: z.string().url().nullable().optional(),
   sort_order: z.number().int().optional(),
   copy_from_id: z.string().uuid().optional(),
+  area_id: z.string().uuid().optional(),
 });
 
-/** GET /api/venue/floor-plans — list all floor plans for the venue. */
-export async function GET() {
+/** GET /api/venue/floor-plans — list floor plans; optional `area_id` filters by dining area. */
+export async function GET(request: NextRequest) {
   try {
     const supabase = await createClient();
     const staff = await getVenueStaff(supabase);
     if (!staff) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
 
-    const { data: floorPlans, error } = await staff.db
+    const areaId = request.nextUrl.searchParams.get('area_id');
+
+    let fpQuery = staff.db
       .from('floor_plans')
       .select('id, name, background_url, sort_order, canvas_width, canvas_height, created_at, updated_at')
-      .eq('venue_id', staff.venue_id)
-      .order('sort_order')
-      .order('created_at');
+      .eq('venue_id', staff.venue_id);
+    if (areaId) {
+      fpQuery = fpQuery.eq('area_id', areaId);
+    }
+    const { data: floorPlans, error } = await fpQuery.order('sort_order').order('created_at');
 
     if (error) {
       console.error('GET /api/venue/floor-plans failed:', error);
@@ -66,13 +73,20 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { copy_from_id, ...fields } = parsed.data;
+    const { copy_from_id, area_id: bodyAreaId, ...fields } = parsed.data;
+
+    const admin = getSupabaseAdminClient();
+    const areaId = bodyAreaId ?? (await getDefaultAreaIdForVenue(admin, staff.venue_id));
+    if (!areaId) {
+      return NextResponse.json({ error: 'No dining area configured for this venue' }, { status: 400 });
+    }
 
     // Create the floor plan record
     const { data: newPlan, error: insertError } = await staff.db
       .from('floor_plans')
       .insert({
         venue_id: staff.venue_id,
+        area_id: areaId,
         name: fields.name,
         background_url: fields.background_url ?? null,
         sort_order: fields.sort_order ?? (count ?? 0),

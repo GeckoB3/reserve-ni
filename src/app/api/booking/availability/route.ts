@@ -27,6 +27,8 @@ import { isUnifiedSchedulingVenue, venueUsesUnifiedAppointmentData } from '@/lib
 import { venueExposesBookingModel } from '@/lib/booking/enabled-models';
 import type { BookingModel } from '@/types/booking-models';
 import { DEFAULT_ENTITY_BOOKING_WINDOW, loadServiceEntityBookingWindow } from '@/lib/booking/entity-booking-window';
+import { listActiveAreasForVenue } from '@/lib/areas/resolve-default-area';
+import type { EngineServiceResult, ServiceAvailableSlot } from '@/types/availability';
 
 /** Public availability can request C/D/E explicitly when the venue primary is another model (multi-tab embed). */
 const AVAILABILITY_REQUEST_MODELS = new Set<BookingModel>(['event_ticket', 'class_session', 'resource_booking']);
@@ -57,6 +59,7 @@ async function buildTableFilterByTime(
   slots: Array<{ start_time?: string; key?: string; end_time?: string }>,
   partySize: number,
   bookingModel: BookingModel = 'table_reservation',
+  areaId?: string | null,
 ): Promise<Set<string>> {
   const uniqueTimes = new Map<string, number>();
   for (const slot of slots) {
@@ -67,22 +70,46 @@ async function buildTableFilterByTime(
   }
   if (uniqueTimes.size === 0) return new Set();
 
+  let assignmentsQuery = supabase
+    .from('booking_table_assignments')
+    .select('table_id, booking:bookings!inner(id, booking_date, booking_time, estimated_end_time, party_size, status, area_id)')
+    .eq('booking.booking_date', date)
+    .in('booking.status', [...BOOKING_ACTIVE_STATUSES]);
+  if (areaId) {
+    assignmentsQuery = assignmentsQuery.eq('booking.area_id', areaId);
+  }
+
   const [venueRes, tablesRes, blocksRes, assignmentsRes, combinationsRes, overridesRes] = await Promise.all([
     supabase.from('venues').select('combination_threshold').eq('id', venueId).single(),
-    supabase.from('venue_tables').select('*').eq('venue_id', venueId).eq('is_active', true).order('sort_order'),
+    areaId
+      ? supabase
+          .from('venue_tables')
+          .select('*')
+          .eq('venue_id', venueId)
+          .eq('area_id', areaId)
+          .eq('is_active', true)
+          .order('sort_order')
+      : supabase.from('venue_tables').select('*').eq('venue_id', venueId).eq('is_active', true).order('sort_order'),
     supabase.from('table_blocks').select('id, table_id, start_at, end_at, reason')
       .eq('venue_id', venueId)
       .lt('start_at', `${date}T23:59:59.999Z`)
       .gt('end_at', `${date}T00:00:00.000Z`),
-    supabase.from('booking_table_assignments')
-      .select('table_id, booking:bookings!inner(id, booking_date, booking_time, estimated_end_time, party_size, status)')
-      .eq('booking.booking_date', date)
-      .in('booking.status', [...BOOKING_ACTIVE_STATUSES]),
-    supabase.from('table_combinations')
-      .select('*, members:table_combination_members(id, table_id)')
-      .eq('venue_id', venueId)
-      .eq('is_active', true),
-    supabase.from('combination_auto_overrides').select('*').eq('venue_id', venueId),
+    assignmentsQuery,
+    areaId
+      ? supabase
+          .from('table_combinations')
+          .select('*, members:table_combination_members(id, table_id)')
+          .eq('venue_id', venueId)
+          .eq('area_id', areaId)
+          .eq('is_active', true)
+      : supabase
+          .from('table_combinations')
+          .select('*, members:table_combination_members(id, table_id)')
+          .eq('venue_id', venueId)
+          .eq('is_active', true),
+    areaId
+      ? supabase.from('combination_auto_overrides').select('*').eq('venue_id', venueId).eq('area_id', areaId)
+      : supabase.from('combination_auto_overrides').select('*').eq('venue_id', venueId),
   ]);
 
   const tables = (tablesRes.data ?? []) as VenueTable[];
@@ -109,9 +136,14 @@ async function buildTableFilterByTime(
     position_x: t.position_x, position_y: t.position_y,
     width: t.width, height: t.height, rotation: t.rotation,
   }));
-  const algorithmBlocks: CombinationBlock[] = (blocksRes.data ?? []).map((b: { table_id: string; start_at: string; end_at: string }) => ({
-    table_id: b.table_id, start_at: b.start_at, end_at: b.end_at,
-  }));
+  const tableIdSet = new Set(tables.map((t) => t.id));
+  const algorithmBlocks: CombinationBlock[] = (blocksRes.data ?? [])
+    .filter((b: { table_id: string }) => tableIdSet.has(b.table_id))
+    .map((b: { table_id: string; start_at: string; end_at: string }) => ({
+      table_id: b.table_id,
+      start_at: b.start_at,
+      end_at: b.end_at,
+    }));
   const manualCombinations: ManualCombination[] = (combinationsRes.data ?? []).map((c: Record<string, unknown>) => ({
     id: c.id as string,
     name: c.name as string,
@@ -180,6 +212,77 @@ async function buildTableFilterByTime(
   }
 
   return timesWithTable;
+}
+
+function tagSlotsForArea(
+  slots: ServiceAvailableSlot[],
+  area: { id: string; name: string; colour: string },
+  multiArea: boolean,
+): ServiceAvailableSlot[] {
+  return slots.map((s) => ({
+    ...s,
+    key: multiArea ? `${area.id}_${s.key}` : s.key,
+    /** Keep label as the clock time only; area is on `area_id` / `area_name` for consumers that need it. */
+    label: s.label,
+    area_id: area.id,
+    area_name: area.name,
+    area_colour: area.colour,
+  }));
+}
+
+async function runTableReservationAvailabilityForArea(
+  supabase: ReturnType<typeof getSupabaseAdminClient>,
+  venueId: string,
+  dateStr: string,
+  partySize: number,
+  venueMode: Awaited<ReturnType<typeof resolveVenueMode>>,
+  area: { id: string; name: string; colour: string },
+  multiArea: boolean,
+): Promise<{
+  activeResults: EngineServiceResult[];
+  allSlots: ServiceAvailableSlot[];
+  largePartyRedirect: EngineServiceResult | undefined;
+}> {
+  const tablePartySize = partySize;
+  const engineInput = await fetchEngineInput({
+    supabase,
+    venueId,
+    date: dateStr,
+    partySize: tablePartySize,
+    areaId: area.id,
+  });
+  const results = computeAvailability(engineInput);
+  let activeResults = results.filter((r) => r.slots.length > 0 || r.large_party_redirect);
+
+  if (venueMode.tableManagementEnabled) {
+    const allSlotsRaw = activeResults.flatMap((r) => r.slots);
+    const timesWithTable = await buildTableFilterByTime(
+      supabase,
+      venueId,
+      dateStr,
+      allSlotsRaw.map((slot) => ({
+        start_time: slot.start_time,
+        end_time: slot.end_time,
+      })),
+      tablePartySize,
+      'table_reservation',
+      area.id,
+    );
+    activeResults = activeResults
+      .map((serviceResult) => ({
+        ...serviceResult,
+        slots: serviceResult.slots.filter((slot) => timesWithTable.has(slot.start_time)),
+      }))
+      .filter((serviceResult) => serviceResult.slots.length > 0 || serviceResult.large_party_redirect);
+  }
+
+  const tagged = activeResults.map((r) => ({
+    ...r,
+    slots: tagSlotsForArea(r.slots, area, multiArea),
+  }));
+  const allSlots = tagged.flatMap((r) => r.slots);
+  const largePartyRedirect = tagged.find((r) => r.large_party_redirect);
+  return { activeResults: tagged, allSlots, largePartyRedirect };
 }
 
 /** GET /api/booking/availability?venue_id=uuid&date=YYYY-MM-DD&party_size=N [&booking_model=event_ticket|class_session|resource_booking] */
@@ -272,56 +375,92 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: AVAILABILITY_SETUP_REQUIRED_MESSAGE }, { status: 503 });
     }
 
-    const engineInput = await fetchEngineInput({
-      supabase,
-      venueId,
-      date: dateStr,
-      partySize: partySize ?? 2,
-    });
+    const tablePartySize = partySize ?? 2;
 
-    const results = computeAvailability(engineInput);
+    const { data: venueAreaRow } = await supabase
+      .from('venues')
+      .select('public_booking_area_mode')
+      .eq('id', venueId)
+      .maybeSingle();
+    const publicBookingAreaMode =
+      (venueAreaRow as { public_booking_area_mode?: string } | null)?.public_booking_area_mode ?? 'auto';
 
-    let activeResults = results.filter((r) => r.slots.length > 0 || r.large_party_redirect);
-    let allSlots = activeResults.flatMap((r) => r.slots);
+    const areas = await listActiveAreasForVenue(supabase, venueId);
+    const areaIdParam = searchParams.get('area_id');
 
-    if (venueMode.tableManagementEnabled) {
-      const tablePartySize = partySize ?? 2;
-      const timesWithTable = await buildTableFilterByTime(
+    if (areas.length === 0) {
+      return NextResponse.json({ error: AVAILABILITY_SETUP_REQUIRED_MESSAGE }, { status: 503 });
+    }
+
+    const multiArea = areas.length > 1;
+
+    if (multiArea && publicBookingAreaMode === 'manual' && !areaIdParam) {
+      return NextResponse.json(
+        {
+          error: 'area_id is required for this venue',
+          public_booking_area_mode: publicBookingAreaMode,
+          areas,
+        },
+        { status: 400 },
+      );
+    }
+
+    const areasToEvaluate = areaIdParam
+      ? areas.filter((a) => a.id === areaIdParam)
+      : areas;
+
+    if (areasToEvaluate.length === 0) {
+      return NextResponse.json({ error: 'Invalid area_id' }, { status: 400 });
+    }
+
+    const mergedActive: EngineServiceResult[] = [];
+    const mergedSlots: ServiceAvailableSlot[] = [];
+    let mergedLarge: EngineServiceResult | undefined;
+
+    for (const area of areasToEvaluate) {
+      const { activeResults, allSlots, largePartyRedirect } = await runTableReservationAvailabilityForArea(
         supabase,
         venueId,
         dateStr,
-        allSlots.map((slot) => ({
-          start_time: slot.start_time,
-          end_time: slot.end_time,
-        })),
         tablePartySize,
+        venueMode,
+        area,
+        multiArea,
       );
-
-      activeResults = activeResults.map((serviceResult) => ({
-        ...serviceResult,
-        slots: serviceResult.slots.filter((slot) => timesWithTable.has(slot.start_time)),
-      })).filter((serviceResult) => serviceResult.slots.length > 0 || serviceResult.large_party_redirect);
-      allSlots = activeResults.flatMap((r) => r.slots);
+      mergedActive.push(...activeResults);
+      mergedSlots.push(...allSlots);
+      if (!mergedLarge && largePartyRedirect) {
+        mergedLarge = largePartyRedirect;
+      }
     }
 
-    allSlots.sort((a, b) => a.start_time.localeCompare(b.start_time));
+    mergedSlots.sort((a, b) => {
+      const t = a.start_time.localeCompare(b.start_time);
+      if (t !== 0) return t;
+      return (a.area_name ?? '').localeCompare(b.area_name ?? '');
+    });
 
-    const largePartyRedirect = activeResults.find((r) => r.large_party_redirect);
-
-    return NextResponse.json({
+    const responseBody: Record<string, unknown> = {
       date: dateStr,
       venue_id: venueId,
-      slots: allSlots,
-      services: activeResults.map((r) => ({
+      slots: mergedSlots,
+      services: mergedActive.map((r) => ({
         id: r.service.id,
         name: r.service.name,
         slots: r.slots,
         large_party_redirect: r.large_party_redirect,
         large_party_message: r.large_party_message,
       })),
-      large_party_redirect: largePartyRedirect?.large_party_redirect ?? false,
-      large_party_message: largePartyRedirect?.large_party_message ?? null,
-    });
+      large_party_redirect: mergedLarge?.large_party_redirect ?? false,
+      large_party_message: mergedLarge?.large_party_message ?? null,
+    };
+
+    if (multiArea) {
+      responseBody.public_booking_area_mode = publicBookingAreaMode;
+      responseBody.areas = areas;
+    }
+
+    return NextResponse.json(responseBody);
   } catch (error) {
     console.error('Availability fetch failed:', error);
     return NextResponse.json(

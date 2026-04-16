@@ -25,6 +25,7 @@ interface Restriction {
 interface Props {
   services: Service[];
   showToast: (msg: string) => void;
+  selectedAreaId?: string | null;
 }
 
 const defaultRestriction = (serviceId: string): Omit<Restriction, 'id'> => ({
@@ -40,7 +41,7 @@ const defaultRestriction = (serviceId: string): Omit<Restriction, 'id'> => ({
   cancellation_notice_hours: 48,
 });
 
-export function BookingRulesTab({ services, showToast }: Props) {
+export function BookingRulesTab({ services, showToast, selectedAreaId }: Props) {
   const [restrictions, setRestrictions] = useState<Restriction[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -49,8 +50,15 @@ export function BookingRulesTab({ services, showToast }: Props) {
 
   useEffect(() => {
     async function load() {
+      if (!selectedAreaId) {
+        setRestrictions([]);
+        setLoading(false);
+        return;
+      }
       try {
-        const restrictionsRes = await fetch('/api/venue/booking-restrictions');
+        const restrictionsRes = await fetch(
+          `/api/venue/booking-restrictions?area_id=${encodeURIComponent(selectedAreaId)}`,
+        );
         if (restrictionsRes.ok) {
           const data = await restrictionsRes.json();
           setRestrictions(data.restrictions ?? []);
@@ -60,7 +68,7 @@ export function BookingRulesTab({ services, showToast }: Props) {
       }
     }
     load();
-  }, []);
+  }, [selectedAreaId]);
 
   async function handleSave(serviceId: string, data: Restriction) {
     if (data.deposit_required_from_party_size != null) {

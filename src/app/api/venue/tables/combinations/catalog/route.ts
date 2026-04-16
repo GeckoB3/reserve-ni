@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff } from '@/lib/venue-auth';
 import {
@@ -15,27 +15,40 @@ function defaultComboName(tableNames: string[]): string {
 /**
  * GET /api/venue/tables/combinations/catalog
  * Auto-detected adjacent groups + merged override rows for the Combinations UI.
+ * Optional `area_id` — when set, only tables and overrides for that dining area (multi-area venues).
  */
-export async function GET() {
+export async function GET(request: NextRequest) {
   const supabase = await createClient();
   const staff = await getVenueStaff(supabase);
   if (!staff) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
 
+  const areaId = request.nextUrl.searchParams.get('area_id');
+
+  let tablesQuery = staff.db
+    .from('venue_tables')
+    .select('id, name, max_covers, is_active, position_x, position_y, width, height, rotation')
+    .eq('venue_id', staff.venue_id)
+    .eq('is_active', true)
+    .order('sort_order');
+  if (areaId) {
+    tablesQuery = tablesQuery.eq('area_id', areaId);
+  }
+
+  let overridesQuery = staff.db.from('combination_auto_overrides').select('*').eq('venue_id', staff.venue_id);
+  if (areaId) {
+    overridesQuery = overridesQuery.eq('area_id', areaId);
+  }
+
   const [{ data: venueRow }, { data: tablesData }, { data: overridesData }] = await Promise.all([
     staff.db.from('venues').select('combination_threshold').eq('id', staff.venue_id).single(),
-    staff.db
-      .from('venue_tables')
-      .select('id, name, max_covers, is_active, position_x, position_y, width, height, rotation')
-      .eq('venue_id', staff.venue_id)
-      .eq('is_active', true)
-      .order('sort_order'),
-    staff.db.from('combination_auto_overrides').select('*').eq('venue_id', staff.venue_id),
+    tablesQuery,
+    overridesQuery,
   ]);
 
   const threshold = venueRow?.combination_threshold ?? 80;
   const tables = (tablesData ?? []) as CombinationTable[];
   const adjacencyMap = detectAdjacentTables(tables, threshold);
-  const groups = enumerateAdjacentCombinationGroups(adjacencyMap, 4);
+  const groups = enumerateAdjacentCombinationGroups(adjacencyMap, 4, tables);
 
   const tableById = new Map(tables.map((t) => [t.id, t]));
   const overrideByKey = new Map((overridesData ?? []).map((r: { table_group_key: string }) => [r.table_group_key, r]));

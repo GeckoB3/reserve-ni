@@ -69,12 +69,6 @@ interface TableWithState {
   elapsed_pct: number;
 }
 
-interface DefinedCombination {
-  id: string;
-  name: string;
-  tableIds: string[];
-}
-
 export interface FloorDragEvent {
   bookingId: string;
   sourceTableIds: string[];
@@ -86,7 +80,6 @@ interface Props {
   selectedId: string | null;
   onSelect: (id: string | null) => void;
   combinedTableGroups?: Map<string, string[]>;
-  definedCombinations?: DefinedCombination[];
   validDropTargets?: Set<string> | null;
   validDropComboLabels?: Map<string, string> | null;
   reassignMode?: { bookingId: string; guestName: string } | null;
@@ -100,7 +93,6 @@ export default function LiveFloorCanvas({
   selectedId,
   onSelect,
   combinedTableGroups,
-  definedCombinations,
   validDropTargets,
   validDropComboLabels,
   reassignMode,
@@ -435,29 +427,7 @@ export default function LiveFloorCanvas({
         style={{ background: '#f8fafc', cursor: isDragging ? 'grabbing' : undefined }}
       >
         <Layer>
-          {/* Defined combination lines */}
-          {(definedCombinations ?? []).map((combo) => {
-            const pts: number[] = [];
-            for (const tid of combo.tableIds) {
-              const t = tables.find((tb) => tb.id === tid);
-              if (!t) continue;
-              pts.push(t.position_x != null ? (t.position_x / 100) * dimensions.width : dimensions.width / 2);
-              pts.push(t.position_y != null ? (t.position_y / 100) * dimensions.height : dimensions.height / 2);
-            }
-            if (pts.length < 4) return null;
-            return (
-              <Line
-                key={`def-combo-${combo.id}`}
-                points={pts}
-                stroke="#c4b5fd"
-                strokeWidth={2}
-                dash={[4, 4]}
-                opacity={0.5}
-              />
-            );
-          })}
-
-          {/* Active booking combination lines */}
+          {/* Combination lines only when a booking spans multiple tables (see combinationLines) */}
           {combinationLines().map((line) => (
             <Line
               key={line.key}

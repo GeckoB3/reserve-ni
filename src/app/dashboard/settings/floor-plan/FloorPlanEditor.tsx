@@ -42,6 +42,8 @@ interface Props {
   embedded?: boolean;
   /** Called after each debounced position save completes successfully. */
   onLayoutSaved?: () => void;
+  /** Scope floor plans and tables to this dining area (multi-area venues). */
+  diningAreaId?: string | null;
 }
 
 const SHAPE_OPTIONS: { shape: TableShape; label: string }[] = [
@@ -56,7 +58,9 @@ const SHAPE_OPTIONS: { shape: TableShape; label: string }[] = [
 // Main component
 // ---------------------------------------------------------------------------
 
-export function FloorPlanEditor({ className, embedded = false, onLayoutSaved }: Props) {
+export function FloorPlanEditor({ className, embedded = false, onLayoutSaved, diningAreaId }: Props) {
+  const areaQs = diningAreaId ? `?area_id=${encodeURIComponent(diningAreaId)}` : '';
+
   // Floor plans
   const [floorPlans, setFloorPlans] = useState<FloorPlan[]>([]);
   const [activeFloorPlanId, setActiveFloorPlanId] = useState<string | null>(null);
@@ -107,7 +111,7 @@ export function FloorPlanEditor({ className, embedded = false, onLayoutSaved }: 
 
   const fetchCombinations = useCallback(async () => {
     try {
-      const res = await fetch('/api/venue/tables/combinations');
+      const res = await fetch(`/api/venue/tables/combinations${areaQs}`);
       if (res.ok) {
         const data = await res.json();
         const links: CombinationLink[] = (data.combinations ?? []).map(
@@ -122,11 +126,11 @@ export function FloorPlanEditor({ className, embedded = false, onLayoutSaved }: 
     } catch (err) {
       console.error('Failed to load combinations:', err);
     }
-  }, []);
+  }, [areaQs]);
 
   const fetchFloorPlans = useCallback(async (): Promise<FloorPlan[]> => {
     try {
-      const res = await fetch('/api/venue/floor-plans');
+      const res = await fetch(`/api/venue/floor-plans${areaQs}`);
       if (res.ok) {
         const data = await res.json();
         const plans: FloorPlan[] = data.floor_plans ?? [];
@@ -137,14 +141,14 @@ export function FloorPlanEditor({ className, embedded = false, onLayoutSaved }: 
       console.error('Failed to load floor plans:', err);
     }
     return [];
-  }, []);
+  }, [areaQs]);
 
   const fetchTables = useCallback(async () => {
     setLoading(true);
     try {
       // Load floor plans and tables in parallel
       const [tablesRes, plans] = await Promise.all([
-        fetch('/api/venue/tables'),
+        fetch(`/api/venue/tables${areaQs}`),
         fetchFloorPlans(),
         fetchCombinations(),
       ]);
@@ -232,11 +236,16 @@ export function FloorPlanEditor({ className, embedded = false, onLayoutSaved }: 
     } finally {
       setLoading(false);
     }
-  }, [fetchFloorPlans, fetchCombinations]);
+  }, [fetchFloorPlans, fetchCombinations, areaQs]);
 
   useEffect(() => {
     fetchTables();
   }, [fetchTables]);
+
+  /** New area = fresh canvas: allow one-time grid auto-arrange for unpositioned tables in that area. */
+  useEffect(() => {
+    initialArrangeDone.current = false;
+  }, [diningAreaId]);
 
   useEffect(() => {
     return () => {
@@ -418,8 +427,8 @@ export function FloorPlanEditor({ className, embedded = false, onLayoutSaved }: 
 
   const handleLayoutResize = useCallback(
     (w: number, h: number, opts?: { anchor: LayoutResizeAnchor }) => {
-      const nextW = Math.max(1600, Math.min(12000, Math.round(w)));
-      const nextH = Math.max(1200, Math.min(9000, Math.round(h)));
+      const nextW = Math.max(1600, Math.min(12000, w));
+      const nextH = Math.max(1200, Math.min(9000, h));
       const anchor = opts?.anchor ?? 'se';
 
       // On the first frame of a resize gesture, snapshot current pixel positions.
@@ -475,6 +484,12 @@ export function FloorPlanEditor({ className, embedded = false, onLayoutSaved }: 
   const handleLayoutResizeEnd = useCallback(() => {
     layoutResizeSnapshotRef.current = null;
 
+    const w = Math.round(canvasDims.width);
+    const h = Math.round(canvasDims.height);
+    setLayoutWidth(w);
+    setLayoutHeight(h);
+    setCanvasDims({ width: w, height: h });
+
     // Persist table positions.
     setTables((prev) => {
       savePositions(prev);
@@ -482,8 +497,6 @@ export function FloorPlanEditor({ className, embedded = false, onLayoutSaved }: 
     });
 
     if (!activeFloorPlanId) return;
-    const w = canvasDims.width;
-    const h = canvasDims.height;
     void (async () => {
       try {
         await fetch(`/api/venue/floor-plans/${activeFloorPlanId}`, {
@@ -632,6 +645,7 @@ export function FloorPlanEditor({ className, embedded = false, onLayoutSaved }: 
             width: dims.width,
             height: dims.height,
             sort_order: tables.length,
+            ...(diningAreaId ? { area_id: diningAreaId } : {}),
           }),
         });
         if (res.ok) {
@@ -643,7 +657,7 @@ export function FloorPlanEditor({ className, embedded = false, onLayoutSaved }: 
         console.error('Failed to create table:', err);
       }
     },
-    [tables],
+    [tables, diningAreaId],
   );
 
   const handleDeleteTable = useCallback(async (id: string) => {
@@ -691,6 +705,7 @@ export function FloorPlanEditor({ className, embedded = false, onLayoutSaved }: 
             width: source.width ?? dims.width,
             height: source.height ?? dims.height,
             sort_order: tables.length,
+            ...(diningAreaId ? { area_id: diningAreaId } : {}),
           }),
         });
         if (res.ok) {
@@ -702,7 +717,7 @@ export function FloorPlanEditor({ className, embedded = false, onLayoutSaved }: 
         console.error('Failed to duplicate table:', err);
       }
     },
-    [tables],
+    [tables, diningAreaId],
   );
 
   // ---------------------------------------------------------------------------
@@ -732,6 +747,7 @@ export function FloorPlanEditor({ className, embedded = false, onLayoutSaved }: 
       } else {
         const { table } = await res.json();
         setTables((prev) => prev.map((t) => (t.id === table.id ? table : t)));
+        onLayoutSaved?.();
       }
     } catch (err) {
       console.error('Property save failed:', err);
@@ -739,7 +755,7 @@ export function FloorPlanEditor({ className, embedded = false, onLayoutSaved }: 
     } finally {
       setPropSaving(false);
     }
-  }, [selectedIds, propEdits]);
+  }, [selectedIds, propEdits, onLayoutSaved]);
 
   // ---------------------------------------------------------------------------
   // Combinations
@@ -864,7 +880,7 @@ export function FloorPlanEditor({ className, embedded = false, onLayoutSaved }: 
       // Load positions for the new floor plan
       try {
         const [tablesRes, posRes] = await Promise.all([
-          fetch('/api/venue/tables'),
+          fetch(`/api/venue/tables${areaQs}`),
           fetch(`/api/venue/floor-plans/${planId}/positions`),
         ]);
         if (tablesRes.ok && posRes.ok) {
@@ -893,7 +909,7 @@ export function FloorPlanEditor({ className, embedded = false, onLayoutSaved }: 
         console.error('Failed to switch floor plan:', err);
       }
     },
-    [floorPlans],
+    [floorPlans, areaQs],
   );
 
   const createFloorPlan = useCallback(
@@ -904,7 +920,11 @@ export function FloorPlanEditor({ className, embedded = false, onLayoutSaved }: 
         const res = await fetch('/api/venue/floor-plans', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: name.trim(), copy_from_id: copyFrom }),
+          body: JSON.stringify({
+            name: name.trim(),
+            copy_from_id: copyFrom,
+            ...(diningAreaId ? { area_id: diningAreaId } : {}),
+          }),
         });
         if (res.ok) {
           const { floor_plan } = await res.json();
@@ -922,7 +942,7 @@ export function FloorPlanEditor({ className, embedded = false, onLayoutSaved }: 
         setFloorPlanSaving(false);
       }
     },
-    [switchFloorPlan],
+    [switchFloorPlan, diningAreaId],
   );
 
   const renameFloorPlan = useCallback(
@@ -1084,6 +1104,7 @@ export function FloorPlanEditor({ className, embedded = false, onLayoutSaved }: 
             position_x: Math.max(2, Math.min(98, pctX)),
             position_y: Math.max(2, Math.min(98, pctY)),
             polygon_points: normalised,
+            ...(diningAreaId ? { area_id: diningAreaId } : {}),
           }),
         });
         if (!res.ok) return;
@@ -1094,7 +1115,7 @@ export function FloorPlanEditor({ className, embedded = false, onLayoutSaved }: 
         // error handled silently
       }
     },
-    [tables, polygonEditTableId],
+    [tables, polygonEditTableId, diningAreaId],
   );
 
   // ---------------------------------------------------------------------------
@@ -1408,6 +1429,7 @@ export function FloorPlanEditor({ className, embedded = false, onLayoutSaved }: 
             onResize={handleTableResize}
             onRotate={handleTableRotate}
             combinationLinks={combinations}
+            showCombinationLinkLines={!embedded}
             alignmentGuidesEnabled={alignmentGuidesEnabled}
             layoutWidth={layoutWidth}
             layoutHeight={layoutHeight}
@@ -1766,7 +1788,7 @@ export function FloorPlanEditor({ className, embedded = false, onLayoutSaved }: 
                   <li>• Shift+click to select multiple tables</li>
                   <li>• Delete key removes the selected table</li>
                   <li>• Scroll to zoom, drag empty area to pan</li>
-                  <li>• Purple lines show linked combinations</li>
+                  {!embedded && <li>• Purple lines show linked combinations</li>}
                   <li>• Use toolbar buttons to rotate the whole layout</li>
                 </ul>
               </div>

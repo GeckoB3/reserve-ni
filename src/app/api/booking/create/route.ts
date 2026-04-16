@@ -48,6 +48,7 @@ import { timeToMinutes } from '@/lib/availability';
 import { venueWideBlocksRejectBookingWindow } from '@/lib/availability/venue-wide-business-hours';
 import { fetchVenueOpeningHoursAndWideBlocksForDate } from '@/lib/availability/venue-wide-blocks-fetch';
 import { getResourceBookingEmailLabels } from '@/lib/booking/resource-booking-email-labels';
+import { listActiveAreasForVenue } from '@/lib/areas/resolve-default-area';
 
 function hhMmAfterAddingMinutes(startHhMm: string, durationMinutes: number): string {
   const base = timeToMinutes(startHhMm.slice(0, 5));
@@ -69,6 +70,8 @@ const createBookingSchema = z.object({
   occasion: z.string().max(200).optional(),
   source: z.enum(['online', 'phone', 'walk-in', 'widget', 'booking_page']),
   service_id: z.string().uuid().optional(),
+  /** Dining area (table_reservation); required when the venue has more than one active area. */
+  area_id: z.string().uuid().optional(),
   // Model B: appointment fields
   practitioner_id: z.string().uuid().optional(),
   appointment_service_id: z.string().uuid().optional(),
@@ -173,7 +176,27 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: AVAILABILITY_SETUP_REQUIRED_MESSAGE }, { status: 503 });
     }
 
-    const { min: minParty, max: maxParty } = await resolvePartySizeBoundsForVenueServices(supabase, venue_id);
+    const areas = await listActiveAreasForVenue(supabase, venue_id);
+    const requestAreaId = parsed.data.area_id ?? null;
+    let resolvedAreaId: string | null = requestAreaId;
+    if (areas.length > 1) {
+      if (!resolvedAreaId) {
+        return NextResponse.json({ error: 'area_id is required for this venue' }, { status: 400 });
+      }
+      if (!areas.some((a) => a.id === resolvedAreaId)) {
+        return NextResponse.json({ error: 'Invalid area_id' }, { status: 400 });
+      }
+    } else if (areas.length === 1) {
+      resolvedAreaId = areas[0]!.id;
+    } else {
+      return NextResponse.json({ error: AVAILABILITY_SETUP_REQUIRED_MESSAGE }, { status: 503 });
+    }
+
+    const { min: minParty, max: maxParty } = await resolvePartySizeBoundsForVenueServices(
+      supabase,
+      venue_id,
+      resolvedAreaId,
+    );
     if (party_size < minParty || party_size > maxParty) {
       return NextResponse.json(
         { error: `Party size must be between ${minParty} and ${maxParty}` },
@@ -194,11 +217,17 @@ export async function POST(request: NextRequest) {
       venueId: venue_id,
       date: booking_date,
       partySize: party_size,
+      areaId: resolvedAreaId,
     });
 
     const results = computeAvailability(engineInput);
     const allSlots = results.flatMap((r) => r.slots);
-    const slot = allSlots.find((s) => s.start_time === timeStr && (!requestServiceId || s.service_id === requestServiceId));
+    const slot = allSlots.find(
+      (s) =>
+        s.start_time === timeStr &&
+        (!requestServiceId || s.service_id === requestServiceId) &&
+        (!s.area_id || s.area_id === resolvedAreaId),
+    );
 
     if (!slot || slot.available_covers < party_size) {
       const alternatives = allSlots
@@ -278,6 +307,7 @@ export async function POST(request: NextRequest) {
       cancellation_policy_snapshot: cancellationPolicySnapshot,
       service_id: resolvedServiceId,
       estimated_end_time: estimatedEndTime,
+      area_id: resolvedAreaId,
     };
 
     const { data: booking, error: bookErr } = await supabase

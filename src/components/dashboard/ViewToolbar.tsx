@@ -1,5 +1,6 @@
 'use client';
 
+import type { ReactNode } from 'react';
 import { SummaryBar } from '@/components/dashboard/SummaryBar';
 import type { NextBookingsSlotSummary } from '@/lib/table-management/next-bookings-slot';
 
@@ -49,6 +50,11 @@ interface ViewToolbarProps {
   title: string;
   /** Extra controls in the top action row after Today (e.g. Print, Export). */
   secondaryActions?: React.ReactNode;
+  /**
+   * When set, replaces the simple prev/next day bar with this content (e.g. `CalendarDateTimePicker`
+   * from dashboard/bookings). When omitted, the default day navigator is shown.
+   */
+  datePicker?: ReactNode;
   /** Extra controls rendered in a filters/tools card below stats (zoom, filters, search). */
   children?: React.ReactNode;
 }
@@ -63,6 +69,7 @@ export function ViewToolbar({
   onWalkIn,
   title,
   secondaryActions,
+  datePicker,
   children,
 }: ViewToolbarProps) {
   const todayIso = formatDateInput(new Date());
@@ -130,33 +137,35 @@ export function ViewToolbar({
         </div>
       </div>
 
-      {/* Row 2 - date navigator (bookings-style) */}
-      <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-2 py-2 shadow-sm sm:px-3 sm:py-3 lg:px-4">
-        <button
-          type="button"
-          onClick={() => onDateChange(shiftDate(date, -1))}
-          className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-50 hover:text-slate-600 sm:p-2"
-          aria-label="Previous day"
-        >
-          <svg className="h-4 w-4 sm:h-5 sm:w-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" />
-          </svg>
-        </button>
-        <div className="min-w-0 flex-1 px-1 text-center sm:px-2">
-          <h2 className="truncate text-xs font-semibold text-slate-900 sm:text-sm lg:text-base">{formatDateHeading(date)}</h2>
-          {isToday && <span className="text-[10px] font-medium text-brand-600 sm:text-xs">Today</span>}
+      {/* Row 2 - date navigator or bookings-style picker */}
+      {datePicker ?? (
+        <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-2 py-2 shadow-sm sm:px-3 sm:py-3 lg:px-4">
+          <button
+            type="button"
+            onClick={() => onDateChange(shiftDate(date, -1))}
+            className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-50 hover:text-slate-600 sm:p-2"
+            aria-label="Previous day"
+          >
+            <svg className="h-4 w-4 sm:h-5 sm:w-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" />
+            </svg>
+          </button>
+          <div className="min-w-0 flex-1 px-1 text-center sm:px-2">
+            <h2 className="truncate text-xs font-semibold text-slate-900 sm:text-sm lg:text-base">{formatDateHeading(date)}</h2>
+            {isToday && <span className="text-[10px] font-medium text-brand-600 sm:text-xs">Today</span>}
+          </div>
+          <button
+            type="button"
+            onClick={() => onDateChange(shiftDate(date, 1))}
+            className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-50 hover:text-slate-600 sm:p-2"
+            aria-label="Next day"
+          >
+            <svg className="h-4 w-4 sm:h-5 sm:w-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
+            </svg>
+          </button>
         </div>
-        <button
-          type="button"
-          onClick={() => onDateChange(shiftDate(date, 1))}
-          className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-50 hover:text-slate-600 sm:p-2"
-          aria-label="Next day"
-        >
-          <svg className="h-4 w-4 sm:h-5 sm:w-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
-          </svg>
-        </button>
-      </div>
+      )}
 
       {/* Row 3 - stat cards (same grid language as bookings) */}
       <SummaryBar summary={summary} />

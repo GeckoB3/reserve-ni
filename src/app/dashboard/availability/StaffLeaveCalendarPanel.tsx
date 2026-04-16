@@ -12,26 +12,30 @@ export interface LeavePeriodRow {
   leave_type: PractitionerLeaveType;
   notes: string | null;
   created_at: string;
+  /** HH:mm; both null/undefined = full day off for each date in range. */
+  unavailable_start_time?: string | null;
+  unavailable_end_time?: string | null;
 }
 
-interface PractitionerOption {
+interface CalendarOption {
   id: string;
   name: string;
 }
 
-const LEAVE_LABELS: Record<PractitionerLeaveType, string> = {
-  annual: 'Annual leave',
-  sick: 'Sick leave',
+/** Display labels for DB enum `leave_type` (legacy values annual / sick / other). */
+const UNAVAILABILITY_LABELS: Record<PractitionerLeaveType, string> = {
+  annual: 'Closed',
+  sick: 'Unavailable',
   other: 'Other',
 };
 
-const LEAVE_DOT: Record<PractitionerLeaveType, string> = {
+const UNAVAILABILITY_DOT: Record<PractitionerLeaveType, string> = {
   annual: 'bg-sky-500',
   sick: 'bg-rose-500',
   other: 'bg-slate-400',
 };
 
-const LEAVE_RING: Record<PractitionerLeaveType, string> = {
+const UNAVAILABILITY_RING: Record<PractitionerLeaveType, string> = {
   annual: 'ring-sky-200',
   sick: 'ring-rose-200',
   other: 'ring-slate-200',
@@ -74,19 +78,32 @@ function periodCoversDate(p: LeavePeriodRow, iso: string): boolean {
   return p.start_date <= iso && p.end_date >= iso;
 }
 
+function isFullDayLeave(p: Pick<LeavePeriodRow, 'unavailable_start_time' | 'unavailable_end_time'>): boolean {
+  return (p.unavailable_start_time == null || p.unavailable_start_time === '') &&
+    (p.unavailable_end_time == null || p.unavailable_end_time === '');
+}
+
+function formatDailyWindow(p: LeavePeriodRow): string | null {
+  if (isFullDayLeave(p)) return null;
+  const a = p.unavailable_start_time ?? '';
+  const b = p.unavailable_end_time ?? '';
+  if (!a || !b) return null;
+  return `${a}–${b} each day`;
+}
+
 export function StaffLeaveCalendarPanel({
   practitioners,
   isAdmin,
   selfPractitionerId = null,
   onError,
 }: {
-  practitioners: PractitionerOption[];
+  practitioners: CalendarOption[];
   isAdmin: boolean;
-  /** When set, non-admin users can manage leave only for this practitioner (their own calendar). */
+  /** When set, non-admin users can manage unavailability only for this calendar column. */
   selfPractitionerId?: string | null;
   onError: (msg: string | null) => void;
 }) {
-  const canManageLeave = isAdmin || Boolean(selfPractitionerId);
+  const canManageUnavailability = isAdmin || Boolean(selfPractitionerId);
   const now = new Date();
   const [viewYear, setViewYear] = useState(now.getFullYear());
   const [viewMonth, setViewMonth] = useState(now.getMonth());
@@ -102,6 +119,9 @@ export function StaffLeaveCalendarPanel({
   const [formPractitionerId, setFormPractitionerId] = useState('');
   const [formWholeTeam, setFormWholeTeam] = useState(false);
   const [formNotes, setFormNotes] = useState('');
+  const [formFullDay, setFormFullDay] = useState(true);
+  const [formStartTime, setFormStartTime] = useState('09:00');
+  const [formEndTime, setFormEndTime] = useState('12:00');
   const [saving, setSaving] = useState(false);
 
   const monthLabel = useMemo(
@@ -121,14 +141,14 @@ export function StaffLeaveCalendarPanel({
       const res = await fetch(`/api/venue/practitioner-leave?${params}`);
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
-        onError(typeof j.error === 'string' ? j.error : 'Could not load time off');
+        onError(typeof j.error === 'string' ? j.error : 'Could not load calendar unavailability');
         setPeriods([]);
         return;
       }
       const data = (await res.json()) as { periods: LeavePeriodRow[] };
       setPeriods(data.periods ?? []);
     } catch {
-      onError('Could not load time off');
+      onError('Could not load calendar unavailability');
       setPeriods([]);
     } finally {
       setLoading(false);
@@ -150,7 +170,7 @@ export function StaffLeaveCalendarPanel({
 
   const grid = useMemo(() => monthGrid(viewYear, viewMonth), [viewYear, viewMonth]);
 
-  const canEditLeave = useCallback(
+  const canEditPeriod = useCallback(
     (p: LeavePeriodRow) => isAdmin || Boolean(selfPractitionerId && p.practitioner_id === selfPractitionerId),
     [isAdmin, selfPractitionerId],
   );
@@ -164,6 +184,9 @@ export function StaffLeaveCalendarPanel({
     setFormType('annual');
     setFormNotes('');
     setFormWholeTeam(false);
+    setFormFullDay(true);
+    setFormStartTime('09:00');
+    setFormEndTime('12:00');
     if (selfPractitionerId) {
       setFormPractitionerId(selfPractitionerId);
     } else if (filterId === 'all') {
@@ -182,26 +205,44 @@ export function StaffLeaveCalendarPanel({
     setFormNotes(p.notes ?? '');
     setFormPractitionerId(p.practitioner_id);
     setFormWholeTeam(false);
+    const fd = isFullDayLeave(p);
+    setFormFullDay(fd);
+    setFormStartTime(
+      p.unavailable_start_time && p.unavailable_start_time.length >= 5
+        ? p.unavailable_start_time.slice(0, 5)
+        : '09:00',
+    );
+    setFormEndTime(
+      p.unavailable_end_time && p.unavailable_end_time.length >= 5
+        ? p.unavailable_end_time.slice(0, 5)
+        : '12:00',
+    );
     setSheetOpen(true);
   }
 
   async function submitForm() {
-    if (!canManageLeave) return;
+    if (!canManageUnavailability) return;
     if (!formStart || !formEnd || formEnd < formStart) {
       onError('Choose a valid date range');
       return;
     }
     if (!editing && !formWholeTeam && !formPractitionerId && !selfPractitionerId) {
-      onError('Select a team member');
+      onError('Select a calendar');
       return;
+    }
+    if (!formFullDay) {
+      if (!formStartTime || !formEndTime || formEndTime <= formStartTime) {
+        onError('Set a valid time window (end must be after start)');
+        return;
+      }
     }
 
     setSaving(true);
     onError(null);
     try {
       if (editing) {
-        if (!canEditLeave(editing)) {
-          onError('You can only edit your own time off');
+        if (!canEditPeriod(editing)) {
+          onError('You can only edit unavailability on your own calendar');
           setSaving(false);
           return;
         }
@@ -214,6 +255,8 @@ export function StaffLeaveCalendarPanel({
             end_date: formEnd,
             leave_type: formType,
             notes: formNotes.trim() || null,
+            unavailable_start_time: formFullDay ? null : formStartTime,
+            unavailable_end_time: formFullDay ? null : formEndTime,
           }),
         });
         if (!res.ok) {
@@ -231,11 +274,13 @@ export function StaffLeaveCalendarPanel({
             end_date: formEnd,
             leave_type: formType,
             notes: formNotes.trim() || null,
+            unavailable_start_time: formFullDay ? null : formStartTime,
+            unavailable_end_time: formFullDay ? null : formEndTime,
           }),
         });
         if (!res.ok) {
           const j = await res.json().catch(() => ({}));
-          throw new Error(typeof j.error === 'string' ? j.error : 'Could not add leave');
+          throw new Error(typeof j.error === 'string' ? j.error : 'Could not add unavailability');
         }
       }
       setSheetOpen(false);
@@ -249,8 +294,8 @@ export function StaffLeaveCalendarPanel({
 
   async function removePeriod(id: string) {
     const row = periods.find((x) => x.id === id);
-    if (!row || !canEditLeave(row)) return;
-    if (!confirm('Remove this time off from the calendar?')) return;
+    if (!row || !canEditPeriod(row)) return;
+    if (!confirm('Remove this unavailability from the calendar?')) return;
     onError(null);
     try {
       const res = await fetch('/api/venue/practitioner-leave', {
@@ -280,17 +325,19 @@ export function StaffLeaveCalendarPanel({
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div className="max-w-xl space-y-1">
           <p className="text-sm text-slate-600">
-            Plan annual leave and sick leave in one place. Entries here block online booking for the affected team
-            members for every day in the range (full day off).
+            Block online booking per calendar: choose full days or a repeating time window on each day in your date
+            range (for example closed mornings all week). Weekly default hours still live under Availability; this tab is
+            for one-off or dated exceptions.
           </p>
           <p className="text-xs text-slate-500">
-            Tip: use <span className="font-medium text-slate-600">Whole team</span> for closures or training days.
+            Tip: use <span className="font-medium text-slate-600">All calendars</span> for venue-wide closures or the
+            same hours on every active column.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <>
             <label className="sr-only" htmlFor="leave-filter">
-              Show leave for
+              Show unavailability for
             </label>
             <select
               id="leave-filter"
@@ -298,7 +345,7 @@ export function StaffLeaveCalendarPanel({
               onChange={(e) => setFilterId(e.target.value)}
               className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
             >
-              <option value="all">Everyone</option>
+              <option value="all">All calendars</option>
               {practitioners.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.name}
@@ -306,13 +353,13 @@ export function StaffLeaveCalendarPanel({
               ))}
             </select>
           </>
-          {canManageLeave && (
+          {canManageUnavailability && (
             <button
               type="button"
               onClick={() => openAdd()}
               className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-700"
             >
-              Add time off
+              Add unavailability
             </button>
           )}
         </div>
@@ -364,10 +411,10 @@ export function StaffLeaveCalendarPanel({
           </button>
         </div>
         <div className="flex flex-wrap gap-3 text-xs text-slate-600">
-          {(Object.keys(LEAVE_LABELS) as PractitionerLeaveType[]).map((k) => (
+          {(Object.keys(UNAVAILABILITY_LABELS) as PractitionerLeaveType[]).map((k) => (
             <span key={k} className="inline-flex items-center gap-1.5">
-              <span className={`h-2 w-2 rounded-full ${LEAVE_DOT[k]}`} />
-              {LEAVE_LABELS[k]}
+              <span className={`h-2 w-2 rounded-full ${UNAVAILABILITY_DOT[k]}`} />
+              {UNAVAILABILITY_LABELS[k]}
             </span>
           ))}
         </div>
@@ -409,10 +456,10 @@ export function StaffLeaveCalendarPanel({
                         >
                           {day}
                         </span>
-                        {canManageLeave && (
+                        {canManageUnavailability && (
                           <button
                             type="button"
-                            title="Add time off on this day"
+                            title="Add unavailability on this day"
                             className="rounded p-0.5 text-slate-400 opacity-0 transition-opacity hover:bg-slate-100 hover:text-blue-600 group-hover:opacity-100"
                             onClick={() => openAdd(day)}
                           >
@@ -425,9 +472,12 @@ export function StaffLeaveCalendarPanel({
                       </div>
                       <div className="mt-1 flex flex-1 flex-col gap-0.5">
                         {dayPeriods.slice(0, 3).map((p) => {
-                          const editable = canEditLeave(p);
-                          const pillTitle = `${p.practitioner_name} · ${LEAVE_LABELS[p.leave_type]}`;
-                          const pillClass = `truncate rounded px-1 py-0.5 text-left text-[10px] font-medium ring-1 ring-inset ${LEAVE_RING[p.leave_type]} ${
+                          const editable = canEditPeriod(p);
+                          const timeLine = formatDailyWindow(p);
+                          const pillTitle = `${p.practitioner_name} · ${UNAVAILABILITY_LABELS[p.leave_type]}${
+                            timeLine ? ` · ${timeLine}` : ''
+                          }`;
+                          const pillClass = `truncate rounded px-1 py-0.5 text-left text-[10px] font-medium ring-1 ring-inset ${UNAVAILABILITY_RING[p.leave_type]} ${
                             p.leave_type === 'annual'
                               ? 'bg-sky-50 text-sky-900'
                               : p.leave_type === 'sick'
@@ -438,10 +488,22 @@ export function StaffLeaveCalendarPanel({
                             filterId === 'all' ? (
                               <>
                                 <span className="block truncate font-semibold">{p.practitioner_name}</span>
-                                <span className="block truncate opacity-80">{LEAVE_LABELS[p.leave_type]}</span>
+                                <span className="block truncate opacity-80">{UNAVAILABILITY_LABELS[p.leave_type]}</span>
+                                {timeLine && (
+                                  <span className="block truncate text-[9px] font-normal opacity-75">
+                                    {timeLine.replace(' each day', '')}
+                                  </span>
+                                )}
                               </>
                             ) : (
-                              <span className="block truncate">{LEAVE_LABELS[p.leave_type]}</span>
+                              <>
+                                <span className="block truncate">{UNAVAILABILITY_LABELS[p.leave_type]}</span>
+                                {timeLine && (
+                                  <span className="block truncate text-[9px] font-normal opacity-75">
+                                    {timeLine.replace(' each day', '')}
+                                  </span>
+                                )}
+                              </>
                             );
                           return editable ? (
                             <button
@@ -475,11 +537,13 @@ export function StaffLeaveCalendarPanel({
           <h3 className="text-sm font-semibold text-slate-900">This month</h3>
           <p className="mt-0.5 text-xs text-slate-500">
             {sortedPeriods.length === 0
-              ? 'No entries. Add leave or sick days to block booking.'
+              ? 'No entries. Add a closure or unavailability to block booking for those days.'
               : `${sortedPeriods.length} entr${sortedPeriods.length === 1 ? 'y' : 'ies'}`}
           </p>
           <ul className="mt-3 max-h-[28rem] space-y-2 overflow-y-auto pr-1">
-            {sortedPeriods.map((p) => (
+            {sortedPeriods.map((p) => {
+              const dailyWindow = formatDailyWindow(p);
+              return (
               <li
                 key={p.id}
                 className="rounded-xl border border-slate-200 bg-white p-3 text-sm shadow-sm transition hover:border-slate-300"
@@ -488,10 +552,13 @@ export function StaffLeaveCalendarPanel({
                   <div>
                     <p className="font-medium text-slate-900">{p.practitioner_name}</p>
                     <p className="text-xs text-slate-500">{formatRange(p.start_date, p.end_date)}</p>
-                    <p className="mt-1 text-xs font-medium text-slate-700">{LEAVE_LABELS[p.leave_type]}</p>
+                    {dailyWindow && (
+                      <p className="mt-0.5 text-xs font-medium text-slate-600">{dailyWindow}</p>
+                    )}
+                    <p className="mt-1 text-xs font-medium text-slate-700">{UNAVAILABILITY_LABELS[p.leave_type]}</p>
                     {p.notes && <p className="mt-1 text-xs text-slate-600 line-clamp-2">{p.notes}</p>}
                   </div>
-                  {canEditLeave(p) && (
+                  {canEditPeriod(p) && (
                     <div className="flex shrink-0 flex-col gap-1">
                       <button
                         type="button"
@@ -511,7 +578,8 @@ export function StaffLeaveCalendarPanel({
                   )}
                 </div>
               </li>
-            ))}
+            );
+            })}
           </ul>
         </div>
       </div>
@@ -531,7 +599,7 @@ export function StaffLeaveCalendarPanel({
           >
             <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
               <h2 id="leave-sheet-title" className="text-lg font-semibold text-slate-900">
-                {editing ? 'Edit time off' : 'Add time off'}
+                {editing ? 'Edit unavailability' : 'Add unavailability'}
               </h2>
               <button
                 type="button"
@@ -556,16 +624,17 @@ export function StaffLeaveCalendarPanel({
                         className="mt-1 h-4 w-4 rounded border-slate-300 text-blue-600"
                       />
                       <span>
-                        <span className="font-medium text-slate-900">Whole team (all active)</span>
+                        <span className="font-medium text-slate-900">All calendars (all active)</span>
                         <span className="mt-0.5 block text-xs text-slate-500">
-                          Creates the same leave for every active team member - ideal for bank holidays or training.
+                          Adds the same entry to every active calendar (full day or the same hours each day) — for
+                          venue-wide closures, bank holidays, or training.
                         </span>
                       </span>
                     </label>
                   )}
                   {!selfPractitionerId && !formWholeTeam && (
                     <div>
-                      <label className="mb-1 block text-sm font-medium text-slate-700">Team member</label>
+                      <label className="mb-1 block text-sm font-medium text-slate-700">Calendar</label>
                       <select
                         value={formPractitionerId}
                         onChange={(e) => setFormPractitionerId(e.target.value)}
@@ -588,9 +657,9 @@ export function StaffLeaveCalendarPanel({
                 </p>
               )}
               <div>
-                <label className="mb-1 block text-sm font-medium text-slate-700">Type</label>
+                <label className="mb-1 block text-sm font-medium text-slate-700">Category</label>
                 <div className="flex flex-wrap gap-2">
-                  {(Object.keys(LEAVE_LABELS) as PractitionerLeaveType[]).map((k) => (
+                  {(Object.keys(UNAVAILABILITY_LABELS) as PractitionerLeaveType[]).map((k) => (
                     <button
                       key={k}
                       type="button"
@@ -605,7 +674,7 @@ export function StaffLeaveCalendarPanel({
                           : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                       }`}
                     >
-                      {LEAVE_LABELS[k]}
+                      {UNAVAILABILITY_LABELS[k]}
                     </button>
                   ))}
                 </div>
@@ -630,14 +699,71 @@ export function StaffLeaveCalendarPanel({
                   />
                 </div>
               </div>
-              <p className="text-xs text-slate-500">Single day: set start and end to the same date.</p>
+              <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3">
+                <p className="mb-2 text-sm font-medium text-slate-800">Within each day</p>
+                <div className="flex flex-col gap-2">
+                  <label className="flex cursor-pointer items-center gap-2">
+                    <input
+                      type="radio"
+                      name="leave-coverage"
+                      checked={formFullDay}
+                      onChange={() => setFormFullDay(true)}
+                      className="h-4 w-4 border-slate-300 text-blue-600"
+                    />
+                    <span className="text-sm text-slate-700">Unavailable all day</span>
+                  </label>
+                  <label className="flex cursor-pointer items-center gap-2">
+                    <input
+                      type="radio"
+                      name="leave-coverage"
+                      checked={!formFullDay}
+                      onChange={() => setFormFullDay(false)}
+                      className="h-4 w-4 border-slate-300 text-blue-600"
+                    />
+                    <span className="text-sm text-slate-700">Unavailable between times (same window on every date)</span>
+                  </label>
+                </div>
+                {!formFullDay && (
+                  <div className="mt-3 grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-slate-600" htmlFor="leave-from-time">
+                        From
+                      </label>
+                      <input
+                        id="leave-from-time"
+                        type="time"
+                        value={formStartTime}
+                        onChange={(e) => setFormStartTime(e.target.value.slice(0, 5))}
+                        className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-slate-600" htmlFor="leave-to-time">
+                        To
+                      </label>
+                      <input
+                        id="leave-to-time"
+                        type="time"
+                        value={formEndTime}
+                        onChange={(e) => setFormEndTime(e.target.value.slice(0, 5))}
+                        className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+              <p className="text-xs text-slate-500">
+                {formFullDay
+                  ? 'One day only: set start and end date to the same day. No online bookings for that calendar on those whole days.'
+                  : 'Guests can still book outside this window on each date. The window repeats for every day from start through end date.'}
+              </p>
               <div>
                 <label className="mb-1 block text-sm font-medium text-slate-700">Notes (optional)</label>
                 <textarea
                   value={formNotes}
                   onChange={(e) => setFormNotes(e.target.value)}
                   rows={3}
-                  placeholder="e.g. Half-day not needed - full day blocked for simplicity"
+                  placeholder="e.g. Bank holiday closure · shortened hours — see Availability tab"
                   className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
                 />
               </div>
@@ -663,10 +789,10 @@ export function StaffLeaveCalendarPanel({
         </div>
       )}
 
-      {!canManageLeave && (
+      {!canManageUnavailability && (
         <p className="text-sm text-slate-500">
-          You cannot manage time off until your account is linked to a calendar. Ask an admin to link your staff profile
-          to your practitioner row.
+          You cannot manage calendar unavailability until your account is assigned to a calendar. Ask an admin to link
+          your staff profile to the right calendar column.
         </p>
       )}
     </div>

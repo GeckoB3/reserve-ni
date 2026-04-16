@@ -20,6 +20,8 @@ interface Props {
   services: Service[];
   setServices: (s: Service[]) => void;
   showToast: (msg: string) => void;
+  /** Dining area for new services (multi-area restaurants). */
+  areaId?: string | null;
 }
 
 const emptyService = (): Omit<Service, 'id'> => ({
@@ -32,7 +34,7 @@ const emptyService = (): Omit<Service, 'id'> => ({
   sort_order: 0,
 });
 
-export function ServicesTab({ services, setServices, showToast }: Props) {
+export function ServicesTab({ services, setServices, showToast, areaId }: Props) {
   const [editing, setEditing] = useState<Service | null>(null);
   const [creating, setCreating] = useState(false);
   const [draft, setDraft] = useState<Omit<Service, 'id'>>(emptyService());
@@ -44,7 +46,11 @@ export function ServicesTab({ services, setServices, showToast }: Props) {
       const res = await fetch('/api/venue/services', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...draft, sort_order: services.length }),
+        body: JSON.stringify({
+          ...draft,
+          sort_order: services.length,
+          ...(areaId ? { area_id: areaId } : {}),
+        }),
       });
       if (!res.ok) throw new Error('Failed to create service');
       const data = await res.json();

@@ -65,6 +65,8 @@ interface BookingDetail {
   combination_staff_notes?: string | null;
   /** Set by GET /api/venue/bookings/[id] for notes UI (table vs C/D/E). */
   inferred_booking_model?: BookingModel;
+  area_id?: string | null;
+  area_name?: string | null;
 }
 
 function timeToMinutes(value: string): number {
@@ -312,6 +314,9 @@ export function BookingDetailPanel({
         party_size: String(detail.party_size),
         booking_id: detail.id,
       });
+      if (detail.area_id) {
+        params.set('area_id', detail.area_id);
+      }
       const res = await fetch(`/api/venue/tables/combinations/suggest?${params.toString()}`);
       if (!res.ok) {
         setAssignmentSuggestions([]);
@@ -714,6 +719,7 @@ export function BookingDetailPanel({
               <div className="grid grid-cols-2 gap-x-3 gap-y-2">
                 <CompactInfo label="Date" value={formatDateNice(d.booking_date)} />
                 <CompactInfo label="Time" value={`${startTime} – ${endTime}`} />
+                {d.area_name ? <CompactInfo label="Area" value={d.area_name} /> : null}
                 <CompactInfo label="Covers" value={String(d.party_size)} />
                 <CompactInfo
                   label="Deposit"

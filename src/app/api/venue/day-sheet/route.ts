@@ -11,6 +11,7 @@ import {
 } from '@/lib/availability';
 import { nowInVenueTz, dietarySummary } from '@/lib/day-sheet';
 import { resolveVenueMode } from '@/lib/venue-mode';
+import { getDefaultAreaIdForVenue, listActiveAreasForVenue } from '@/lib/areas/resolve-default-area';
 
 interface DaySheetBookingRow {
   id: string;
@@ -38,6 +39,8 @@ interface DaySheetBookingRow {
   appointment_service_id: string | null;
   guest_attendance_confirmed_at: string | null;
   staff_attendance_confirmed_at: string | null;
+  service_id: string | null;
+  area_id: string | null;
 }
 
 export interface DaySheetBooking {
@@ -72,6 +75,8 @@ export interface DaySheetBooking {
   appointment_service_id: string | null;
   guest_attendance_confirmed_at: string | null;
   staff_attendance_confirmed_at: string | null;
+  /** Set when multiple dining areas exist and the sheet is not filtered to one area. */
+  area_name?: string | null;
 }
 
 export interface DaySheetPeriod {
@@ -122,11 +127,24 @@ export async function GET(request: NextRequest) {
       ? requestedDate
       : now.dateStr;
 
-    const { data: bookingRows, error: bookErr } = await staff.db
+    const areaUuidRe =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    const areaParamRaw = request.nextUrl.searchParams.get('area');
+    const areasForVenue = await listActiveAreasForVenue(staff.db, staff.venue_id);
+    const areaParam =
+      areaParamRaw && areaUuidRe.test(areaParamRaw) && areasForVenue.some((a) => a.id === areaParamRaw)
+        ? areaParamRaw
+        : null;
+
+    let bookingQuery = staff.db
       .from('bookings')
       .select('*')
       .eq('venue_id', staff.venue_id)
       .eq('booking_date', dateStr);
+    if (areaParam) {
+      bookingQuery = bookingQuery.eq('area_id', areaParam);
+    }
+    const { data: bookingRows, error: bookErr } = await bookingQuery;
 
     if (bookErr) {
       console.error('GET /api/venue/day-sheet bookings failed:', bookErr);
@@ -159,6 +177,8 @@ export async function GET(request: NextRequest) {
       appointment_service_id: (b.appointment_service_id as string | null) ?? null,
       guest_attendance_confirmed_at: (b.guest_attendance_confirmed_at as string | null) ?? null,
       staff_attendance_confirmed_at: (b.staff_attendance_confirmed_at as string | null) ?? null,
+      service_id: (b.service_id as string | null) ?? null,
+      area_id: (b.area_id as string | null) ?? null,
     }));
 
     // Fetch guest details with visit history
@@ -181,6 +201,9 @@ export async function GET(request: NextRequest) {
         tags?: string[] | null;
       }) => [g.id, g]),
     );
+
+    const areaNameById = new Map(areasForVenue.map((a) => [a.id, a.name]));
+    const showAreaNamesOnRows = !areaParam && areasForVenue.length > 1;
 
     function toSheetBooking(row: DaySheetBookingRow): DaySheetBooking {
       const guest = guestMap.get(row.guest_id);
@@ -216,6 +239,9 @@ export async function GET(request: NextRequest) {
         appointment_service_id: row.appointment_service_id,
         guest_attendance_confirmed_at: row.guest_attendance_confirmed_at,
         staff_attendance_confirmed_at: row.staff_attendance_confirmed_at,
+        ...(showAreaNamesOnRows && row.area_id
+          ? { area_name: areaNameById.get(row.area_id) ?? null }
+          : {}),
       };
     }
 
@@ -229,71 +255,157 @@ export async function GET(request: NextRequest) {
     const assignedBookingIds = new Set<string>();
 
     if (venueMode.availabilityEngine === 'service') {
-      const engineInput = await fetchEngineInput({
-        supabase: staff.db,
-        venueId: staff.venue_id,
-        date: dateStr,
-        partySize: 1,
-      });
-      const serviceResults = computeAvailability(engineInput);
-      if (engineInput.durations.length > 0) {
-        serviceDurationMin = engineInput.durations[0]!.duration_minutes;
+      const defaultAreaId = await getDefaultAreaIdForVenue(staff.db, staff.venue_id);
+      const engineAreas =
+        areaParam != null
+          ? [{ id: areaParam, name: areaNameById.get(areaParam) ?? 'Area' }]
+          : areasForVenue.length > 0
+            ? areasForVenue
+            : defaultAreaId
+              ? [{ id: defaultAreaId, name: 'Dining' }]
+              : [];
+
+      if (engineAreas.length === 0) {
+        const engineInput = await fetchEngineInput({
+          supabase: staff.db,
+          venueId: staff.venue_id,
+          date: dateStr,
+          partySize: 1,
+          areaId: null,
+        });
+        const serviceResults = computeAvailability(engineInput);
+        if (engineInput.durations.length > 0) {
+          serviceDurationMin = engineInput.durations[0]!.duration_minutes;
+        }
+        const dayOfWeek = getDayOfWeek(dateStr);
+        for (const result of serviceResults) {
+          const service = result.service;
+          const effectiveService = resolveServiceForDate(
+            service,
+            engineInput.schedule_exceptions,
+            staff.venue_id,
+            dateStr,
+            dayOfWeek,
+          );
+          if (!effectiveService) continue;
+          const startMin = timeToMinutes(effectiveService.start_time);
+          const endMin = timeToMinutes(effectiveService.end_time);
+          const rules = engineInput.capacity_rules.filter((r) => r.service_id === service.id);
+          const dayRule = rules.find((r) => r.day_of_week === dayOfWeek && !r.time_range_start);
+          const defaultRule = rules.find((r) => r.day_of_week == null && !r.time_range_start);
+          const rule = dayRule ?? defaultRule;
+          const effectiveMax = computeEffectiveMinSlotCoverCap(
+            engineInput,
+            service,
+            effectiveService,
+            dayOfWeek,
+          );
+          const maxCovers = effectiveMax ?? rule?.max_covers_per_slot ?? null;
+          if (maxCovers != null) capacityConfigured = true;
+          const periodBookings = allBookings
+            .filter((b) => {
+              if (assignedBookingIds.has(b.id)) return false;
+              const bMin = timeToMinutes(b.booking_time);
+              if (!(bMin >= startMin && bMin < endMin)) return false;
+              if (b.service_id && b.service_id !== service.id) return false;
+              return true;
+            })
+            .map((b) => {
+              assignedBookingIds.add(b.id);
+              return b;
+            })
+            .map(toSheetBooking)
+            .sort((a, b) => a.booking_time.localeCompare(b.booking_time));
+          const bookedCovers = periodBookings
+            .filter((b) => ACTIVE_STATUSES.includes(b.status))
+            .reduce((sum, b) => sum + b.party_size, 0);
+          periods.push({
+            key: service.id,
+            label: service.name,
+            start_time: effectiveService.start_time.slice(0, 5),
+            end_time: effectiveService.end_time.slice(0, 5),
+            max_covers: maxCovers,
+            booked_covers: bookedCovers,
+            bookings: periodBookings,
+          });
+        }
       }
 
-      const dayOfWeek = getDayOfWeek(dateStr);
-
-      for (const result of serviceResults) {
-        const service = result.service;
-
-        const effectiveService = resolveServiceForDate(
-          service,
-          engineInput.schedule_exceptions,
-          staff.venue_id,
-          dateStr,
-          dayOfWeek,
-        );
-        if (!effectiveService) continue;
-
-        const startMin = timeToMinutes(effectiveService.start_time);
-        const endMin = timeToMinutes(effectiveService.end_time);
-
-        const rules = engineInput.capacity_rules.filter((r) => r.service_id === service.id);
-        const dayRule = rules.find((r) => r.day_of_week === dayOfWeek && !r.time_range_start);
-        const defaultRule = rules.find((r) => r.day_of_week == null && !r.time_range_start);
-        const rule = dayRule ?? defaultRule;
-
-        const effectiveMax = computeEffectiveMinSlotCoverCap(
-          engineInput,
-          service,
-          effectiveService,
-          dayOfWeek,
-        );
-        const maxCovers = effectiveMax ?? rule?.max_covers_per_slot ?? null;
-        if (maxCovers != null) capacityConfigured = true;
-
-        const periodBookings = allBookings
-          .filter((b) => {
-            if (assignedBookingIds.has(b.id)) return false;
-            const bMin = timeToMinutes(b.booking_time);
-            return bMin >= startMin && bMin < endMin;
-          })
-          .map((b) => { assignedBookingIds.add(b.id); return b; })
-          .map(toSheetBooking)
-          .sort((a, b) => a.booking_time.localeCompare(b.booking_time));
-
-        const bookedCovers = periodBookings
-          .filter((b) => ACTIVE_STATUSES.includes(b.status))
-          .reduce((sum, b) => sum + b.party_size, 0);
-
-        periods.push({
-          key: service.id,
-          label: service.name,
-          start_time: effectiveService.start_time.slice(0, 5),
-          end_time: effectiveService.end_time.slice(0, 5),
-          max_covers: maxCovers,
-          booked_covers: bookedCovers,
-          bookings: periodBookings,
+      for (const area of engineAreas) {
+        const engineInput = await fetchEngineInput({
+          supabase: staff.db,
+          venueId: staff.venue_id,
+          date: dateStr,
+          partySize: 1,
+          areaId: area.id,
         });
+        const serviceResults = computeAvailability(engineInput);
+        if (serviceDurationMin == null && engineInput.durations.length > 0) {
+          serviceDurationMin = engineInput.durations[0]!.duration_minutes;
+        }
+
+        const dayOfWeek = getDayOfWeek(dateStr);
+        const multiAreaLabels = !areaParam && areasForVenue.length > 1;
+
+        for (const result of serviceResults) {
+          const service = result.service;
+
+          const effectiveService = resolveServiceForDate(
+            service,
+            engineInput.schedule_exceptions,
+            staff.venue_id,
+            dateStr,
+            dayOfWeek,
+          );
+          if (!effectiveService) continue;
+
+          const startMin = timeToMinutes(effectiveService.start_time);
+          const endMin = timeToMinutes(effectiveService.end_time);
+
+          const rules = engineInput.capacity_rules.filter((r) => r.service_id === service.id);
+          const dayRule = rules.find((r) => r.day_of_week === dayOfWeek && !r.time_range_start);
+          const defaultRule = rules.find((r) => r.day_of_week == null && !r.time_range_start);
+          const rule = dayRule ?? defaultRule;
+
+          const effectiveMax = computeEffectiveMinSlotCoverCap(
+            engineInput,
+            service,
+            effectiveService,
+            dayOfWeek,
+          );
+          const maxCovers = effectiveMax ?? rule?.max_covers_per_slot ?? null;
+          if (maxCovers != null) capacityConfigured = true;
+
+          const periodBookings = allBookings
+            .filter((b) => {
+              if (assignedBookingIds.has(b.id)) return false;
+              const bMin = timeToMinutes(b.booking_time);
+              if (!(bMin >= startMin && bMin < endMin)) return false;
+              if (b.service_id && b.service_id !== service.id) return false;
+              if (b.area_id && b.area_id !== area.id) return false;
+              return true;
+            })
+            .map((b) => {
+              assignedBookingIds.add(b.id);
+              return b;
+            })
+            .map(toSheetBooking)
+            .sort((a, b) => a.booking_time.localeCompare(b.booking_time));
+
+          const bookedCovers = periodBookings
+            .filter((b) => ACTIVE_STATUSES.includes(b.status))
+            .reduce((sum, b) => sum + b.party_size, 0);
+
+          periods.push({
+            key: multiAreaLabels ? `${area.id}:${service.id}` : service.id,
+            label: multiAreaLabels ? `${service.name} — ${area.name}` : service.name,
+            start_time: effectiveService.start_time.slice(0, 5),
+            end_time: effectiveService.end_time.slice(0, 5),
+            max_covers: maxCovers,
+            booked_covers: bookedCovers,
+            bookings: periodBookings,
+          });
+        }
       }
     } else {
       const mapped = allBookings
@@ -415,12 +527,16 @@ export async function GET(request: NextRequest) {
       : 0;
 
     // Fetch active venue tables for table status strip + selector
-    const { data: venueTablesRows } = await staff.db
+    let venueTablesQuery = staff.db
       .from('venue_tables')
       .select('id, name, max_covers, sort_order')
       .eq('venue_id', staff.venue_id)
       .eq('is_active', true)
       .order('sort_order');
+    if (areaParam) {
+      venueTablesQuery = venueTablesQuery.eq('area_id', areaParam);
+    }
+    const { data: venueTablesRows } = await venueTablesQuery;
     const activeTables = (venueTablesRows ?? []).map((t: { id: string; name: string; max_covers: number; sort_order: number }) => ({
       id: t.id,
       name: t.name,
@@ -462,6 +578,8 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       date: dateStr,
       venue_name: (venue.name as string) ?? '',
+      areas: areasForVenue.map((a) => ({ id: a.id, name: a.name, colour: a.colour })),
+      selected_area_id: areaParam,
       periods,
       summary: {
         total_bookings: totalBookings,

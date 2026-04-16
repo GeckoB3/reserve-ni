@@ -18,7 +18,7 @@ import type { VenueSettings } from '@/app/dashboard/settings/types';
 const VALID_TABS = ['services', 'capacity', 'duration', 'rules', 'table'] as const;
 type ValidTab = (typeof VALID_TABS)[number];
 
-const VALID_FLOOR_PLAN_TABS = ['layout', 'tables', 'combinations', 'areas'] as const;
+const VALID_FLOOR_PLAN_TABS = ['layout', 'tables', 'combinations'] as const;
 type ValidFloorPlanTab = (typeof VALID_FLOOR_PLAN_TABS)[number];
 
 function resolveInitialTab(tab: string | undefined): ValidTab | undefined {
@@ -77,7 +77,7 @@ export default async function AvailabilitySettingsPage({
   const { data: fullVenue, error: fullErr } = await staff.db
     .from('venues')
     .select(
-      'id, name, slug, address, phone, email, website_url, cover_photo_url, cuisine_type, price_band, no_show_grace_minutes, kitchen_email, communication_templates, opening_hours, venue_opening_exceptions, booking_rules, deposit_config, availability_config, stripe_connected_account_id, timezone, table_management_enabled, combination_threshold, pricing_tier, plan_status, subscription_current_period_end, calendar_count, booking_model, enabled_models, active_booking_models, sms_monthly_allowance',
+      'id, name, slug, address, phone, email, website_url, cover_photo_url, cuisine_type, price_band, no_show_grace_minutes, kitchen_email, communication_templates, opening_hours, venue_opening_exceptions, booking_rules, deposit_config, availability_config, stripe_connected_account_id, timezone, table_management_enabled, combination_threshold, pricing_tier, plan_status, subscription_current_period_end, calendar_count, booking_model, enabled_models, active_booking_models, sms_monthly_allowance, public_booking_area_mode',
     )
     .eq('id', venueId)
     .single();

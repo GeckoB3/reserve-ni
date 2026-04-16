@@ -16,11 +16,11 @@ import { isTableReservationBooking } from '@/lib/booking/infer-booking-row-model
  * `view=calendar` — staff schedule grid: narrower row shape, skips table-assignment query (faster for wide date ranges).
  */
 const BOOKINGS_LIST_SELECT_FULL =
-  'id, booking_date, booking_time, party_size, status, source, deposit_status, deposit_amount_pence, dietary_notes, occasion, special_requests, internal_notes, client_arrived_at, guest_attendance_confirmed_at, staff_attendance_confirmed_at, estimated_end_time, created_at, guest_id, practitioner_id, appointment_service_id, calendar_id, service_item_id, experience_event_id, class_instance_id, resource_id, booking_end_time, event_session_id, group_booking_id, person_label';
+  'id, booking_date, booking_time, party_size, status, source, deposit_status, deposit_amount_pence, dietary_notes, occasion, special_requests, internal_notes, client_arrived_at, guest_attendance_confirmed_at, staff_attendance_confirmed_at, estimated_end_time, created_at, guest_id, practitioner_id, appointment_service_id, calendar_id, service_item_id, experience_event_id, class_instance_id, resource_id, booking_end_time, event_session_id, group_booking_id, person_label, area_id';
 
 /** Omits columns not used by the practitioner calendar grid to reduce payload and DB I/O. */
 const BOOKINGS_LIST_SELECT_CALENDAR =
-  'id, booking_date, booking_time, party_size, status, source, deposit_status, deposit_amount_pence, special_requests, internal_notes, client_arrived_at, guest_attendance_confirmed_at, staff_attendance_confirmed_at, estimated_end_time, guest_id, practitioner_id, appointment_service_id, calendar_id, service_item_id, experience_event_id, class_instance_id, resource_id, booking_end_time, event_session_id, group_booking_id, person_label';
+  'id, booking_date, booking_time, party_size, status, source, deposit_status, deposit_amount_pence, special_requests, internal_notes, client_arrived_at, guest_attendance_confirmed_at, staff_attendance_confirmed_at, estimated_end_time, guest_id, practitioner_id, appointment_service_id, calendar_id, service_item_id, experience_event_id, class_instance_id, resource_id, booking_end_time, event_session_id, group_booking_id, person_label, area_id';
 
 export async function GET(request: NextRequest) {
   try {
@@ -41,6 +41,7 @@ export async function GET(request: NextRequest) {
     const groupBookingId = request.nextUrl.searchParams.get('group_booking_id');
     const unassignedTables = request.nextUrl.searchParams.get('unassigned_tables') === '1';
     const guestIdParam = request.nextUrl.searchParams.get('guest');
+    const areaIdParam = request.nextUrl.searchParams.get('area');
     const isoRe = /^\d{4}-\d{2}-\d{2}$/;
     const guestUuidRe =
       /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -62,6 +63,10 @@ export async function GET(request: NextRequest) {
 
     if (guestIdParam && guestUuidRe.test(guestIdParam)) {
       query = query.eq('guest_id', guestIdParam);
+    }
+
+    if (areaIdParam && guestUuidRe.test(areaIdParam)) {
+      query = query.eq('area_id', areaIdParam);
     }
 
     if (groupBookingId) {
@@ -109,8 +114,16 @@ export async function GET(request: NextRequest) {
       ),
     );
 
+    const areaIds = [...new Set(rawRows.map((r) => r.area_id).filter((x): x is string => typeof x === 'string'))];
+    const { data: areaRows } =
+      areaIds.length > 0
+        ? await staff.db.from('areas').select('id, name').in('id', areaIds)
+        : { data: [] as { id: string; name: string }[] };
+    const areaNameById = new Map((areaRows ?? []).map((a: { id: string; name: string }) => [a.id, a.name]));
+
     let bookings = rawRows.map((r) => {
       const guest = guestsMap.get(r.guest_id);
+      const aid = r.area_id as string | null | undefined;
       return {
         id: r.id,
         booking_date: r.booking_date,
@@ -146,6 +159,8 @@ export async function GET(request: NextRequest) {
         event_session_id: r.event_session_id ?? null,
         group_booking_id: r.group_booking_id ?? null,
         person_label: r.person_label ?? null,
+        area_id: aid ?? null,
+        area_name: aid ? areaNameById.get(aid) ?? null : null,
       };
     });
 

@@ -35,6 +35,7 @@ import { resolveCdeBookingContext } from '@/lib/booking/cde-booking-context';
 import { resolveBookingScopedCalendarId } from '@/lib/booking/staff-booking-calendar-scope';
 import { tableGroupKeyFromIds } from '@/lib/table-management/combination-rules';
 import type { BookingModel } from '@/types/booking-models';
+import { listActiveAreasForVenue } from '@/lib/areas/resolve-default-area';
 
 const statusSchema = z.enum(BOOKING_MUTABLE_STATUSES);
 
@@ -69,6 +70,18 @@ export async function GET(
 
     if (bookErr || !booking) {
       return NextResponse.json({ error: 'Booking not found' }, { status: 404 });
+    }
+
+    let area_name: string | null = null;
+    const bookingAreaId = (booking as { area_id?: string | null }).area_id;
+    if (bookingAreaId) {
+      const { data: ar } = await staff.db
+        .from('areas')
+        .select('name')
+        .eq('id', bookingAreaId)
+        .eq('venue_id', staff.venue_id)
+        .maybeSingle();
+      area_name = (ar as { name?: string } | null)?.name ?? null;
     }
 
     const { data: guest } = await staff.db
@@ -143,6 +156,7 @@ export async function GET(
 
     return NextResponse.json({
       ...booking,
+      area_name,
       booking_time: bookingTimeStr,
       guest: guest ?? null,
       events: events ?? [],
@@ -675,6 +689,10 @@ export async function PATCH(
       const isAppointment = Boolean(booking.practitioner_id || booking.calendar_id);
       const idLc = id.toLowerCase();
 
+      let tableRescheduleServiceId: string | null = null;
+      let tableRescheduleAreaId: string | null = null;
+      let tableAreaChanged = false;
+
       // --- Validate slot availability ---
       if (isAppointment) {
         const practId =
@@ -715,21 +733,54 @@ export async function PATCH(
           return NextResponse.json({ error: AVAILABILITY_SETUP_REQUIRED_MESSAGE }, { status: 503 });
         }
 
+        const bookingAreaId = (booking as { area_id?: string | null }).area_id ?? null;
+        let targetAreaId = bookingAreaId;
+        if (typeof body.area_id === 'string' && body.area_id.trim() !== '') {
+          const areas = await listActiveAreasForVenue(admin, staff.venue_id);
+          if (!areas.some((a) => a.id === body.area_id)) {
+            return NextResponse.json({ error: 'Invalid area_id' }, { status: 400 });
+          }
+          targetAreaId = body.area_id;
+        }
+        if (!targetAreaId) {
+          return NextResponse.json(
+            { error: 'Booking has no dining area; set area_id to reschedule.' },
+            { status: 400 },
+          );
+        }
+
+        const areaChanged =
+          typeof body.area_id === 'string' &&
+          body.area_id.trim() !== '' &&
+          body.area_id !== bookingAreaId;
+
         const engineInput = await fetchEngineInput({
           supabase: admin,
           venueId: staff.venue_id,
           date: newDate,
           partySize: newPartySize,
+          areaId: targetAreaId,
         });
         engineInput.bookings = engineInput.bookings.filter((b) => b.id.toLowerCase() !== idLc);
         const slots = computeAvailability(engineInput).flatMap((result) => result.slots);
-        const slot = slots.find((s) => s.start_time === timeStr && (!booking.service_id || s.service_id === booking.service_id));
+        const slot = areaChanged
+          ? slots.find((s) => s.start_time === timeStr)
+          : slots.find(
+              (s) =>
+                s.start_time === timeStr &&
+                (!(booking as { service_id?: string | null }).service_id ||
+                  s.service_id === (booking as { service_id?: string | null }).service_id),
+            );
         if (!slot || slot.available_covers < newPartySize) {
           return NextResponse.json(
             { error: 'Selected date/time is not available or has insufficient capacity' },
             { status: 409 },
           );
         }
+
+        tableRescheduleServiceId = slot.service_id;
+        tableRescheduleAreaId = targetAreaId;
+        tableAreaChanged = areaChanged;
       }
 
       const before = {
@@ -745,6 +796,13 @@ export async function PATCH(
         updated_at: new Date().toISOString(),
         cancellation_deadline: cancellationDeadline(newDate, timeStr),
       };
+
+      if (!isAppointment && tableRescheduleServiceId) {
+        bookingUpdate.service_id = tableRescheduleServiceId;
+      }
+      if (!isAppointment && tableAreaChanged && tableRescheduleAreaId) {
+        bookingUpdate.area_id = tableRescheduleAreaId;
+      }
 
       if (body.practitioner_id && isAppointment) {
         if (booking.calendar_id) {
@@ -871,12 +929,13 @@ export async function PATCH(
           await replaceBookingAssignments(admin, id, [], staff.id);
           await clearTableStatusesForBooking(admin, id, staff.id);
 
+          const serviceIdForDuration = tableRescheduleServiceId ?? (booking.service_id as string | null);
           const { durationMinutes, bufferMinutes } = await resolveTableAssignmentDurationBuffer(
             admin,
             staff.venue_id,
             newDate,
             newPartySize,
-            booking.service_id,
+            serviceIdForDuration,
           );
           const assigned = await autoAssignTable(
             admin,

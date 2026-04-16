@@ -5,6 +5,8 @@ import { z } from 'zod';
 
 const bodySchema = z.object({
   table_group_key: z.string().min(1),
+  /** Dining area for this override; if omitted, resolved from the first table id in `table_group_key`. */
+  area_id: z.string().uuid().optional(),
   disabled: z.boolean().optional(),
   display_name: z.string().max(200).nullable().optional(),
   combined_min_covers: z.number().int().min(1).nullable().optional(),
@@ -30,15 +32,34 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Invalid request', details: parsed.error.flatten() }, { status: 400 });
   }
 
+  const { area_id: bodyAreaId, ...fields } = parsed.data;
+  let resolvedAreaId = bodyAreaId ?? null;
+  if (!resolvedAreaId) {
+    const firstTableId = parsed.data.table_group_key.split('|')[0]?.trim();
+    if (firstTableId) {
+      const { data: trow } = await staff!.db
+        .from('venue_tables')
+        .select('area_id')
+        .eq('id', firstTableId)
+        .eq('venue_id', staff!.venue_id)
+        .maybeSingle();
+      resolvedAreaId = (trow?.area_id as string | undefined) ?? null;
+    }
+  }
+  if (!resolvedAreaId) {
+    return NextResponse.json({ error: 'Could not resolve dining area for this combination' }, { status: 400 });
+  }
+
   const row = {
     venue_id: staff!.venue_id,
-    ...parsed.data,
+    area_id: resolvedAreaId,
+    ...fields,
     updated_at: new Date().toISOString(),
   };
 
   const { data, error } = await staff!.db
     .from('combination_auto_overrides')
-    .upsert(row, { onConflict: 'venue_id,table_group_key' })
+    .upsert(row, { onConflict: 'venue_id,area_id,table_group_key' })
     .select('*')
     .single();
 

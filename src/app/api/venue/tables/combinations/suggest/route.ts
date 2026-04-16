@@ -31,9 +31,26 @@ export async function GET(request: NextRequest) {
   const partySize = parsePositiveInt(searchParams.get('party_size'), 0);
   const durationMinutes = parsePositiveInt(searchParams.get('duration_minutes'), 90);
   const excludeBookingId = searchParams.get('booking_id') ?? undefined;
+  const areaIdParam = searchParams.get('area_id');
+  const areaIdUuid =
+    areaIdParam && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(areaIdParam)
+      ? areaIdParam
+      : undefined;
 
   if (!date || !time || partySize < 1) {
     return NextResponse.json({ error: 'date, time and party_size are required' }, { status: 400 });
+  }
+
+  if (areaIdUuid) {
+    const { data: areaRow, error: areaErr } = await staff.db
+      .from('areas')
+      .select('id')
+      .eq('id', areaIdUuid)
+      .eq('venue_id', staff.venue_id)
+      .maybeSingle();
+    if (areaErr || !areaRow) {
+      return NextResponse.json({ error: 'Invalid area_id' }, { status: 400 });
+    }
   }
 
   const [venueRes, tablesRes, combosRes, bookingsRes, blocksRes, overridesRes] = await Promise.all([
@@ -42,18 +59,26 @@ export async function GET(request: NextRequest) {
       .select('combination_threshold')
       .eq('id', staff.venue_id)
       .single(),
-    staff.db
-      .from('venue_tables')
-      .select('id, name, max_covers, is_active, position_x, position_y, width, height, rotation')
-      .eq('venue_id', staff.venue_id)
-      .eq('is_active', true),
-    staff.db
-      .from('table_combinations')
-      .select(
-        'id, name, combined_min_covers, combined_max_covers, is_active, days_of_week, time_start, time_end, booking_type_filters, requires_manager_approval, internal_notes, members:table_combination_members(table_id)',
-      )
-      .eq('venue_id', staff.venue_id)
-      .eq('is_active', true),
+    (() => {
+      let q = staff.db
+        .from('venue_tables')
+        .select('id, name, max_covers, is_active, position_x, position_y, width, height, rotation')
+        .eq('venue_id', staff.venue_id)
+        .eq('is_active', true);
+      if (areaIdUuid) q = q.eq('area_id', areaIdUuid);
+      return q;
+    })(),
+    (() => {
+      let q = staff.db
+        .from('table_combinations')
+        .select(
+          'id, name, combined_min_covers, combined_max_covers, is_active, days_of_week, time_start, time_end, booking_type_filters, requires_manager_approval, internal_notes, members:table_combination_members(table_id)',
+        )
+        .eq('venue_id', staff.venue_id)
+        .eq('is_active', true);
+      if (areaIdUuid) q = q.eq('area_id', areaIdUuid);
+      return q;
+    })(),
     staff.db
       .from('bookings')
       .select('id, status, booking_time, estimated_end_time')
@@ -66,7 +91,11 @@ export async function GET(request: NextRequest) {
       .eq('venue_id', staff.venue_id)
       .lt('start_at', `${date}T23:59:59.999Z`)
       .gt('end_at', `${date}T00:00:00.000Z`),
-    staff.db.from('combination_auto_overrides').select('*').eq('venue_id', staff.venue_id),
+    (() => {
+      let q = staff.db.from('combination_auto_overrides').select('*').eq('venue_id', staff.venue_id);
+      if (areaIdUuid) q = q.eq('area_id', areaIdUuid);
+      return q;
+    })(),
   ]);
 
   if (tablesRes.error || combosRes.error || bookingsRes.error || blocksRes.error) {

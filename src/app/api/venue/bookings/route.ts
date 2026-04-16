@@ -44,6 +44,7 @@ import {
   isStaffWalkInBookingDateAllowed,
   loadServiceEntityBookingWindow,
 } from '@/lib/booking/entity-booking-window';
+import { listActiveAreasForVenue } from '@/lib/areas/resolve-default-area';
 
 const ticketLineSchema = z.object({
   ticket_type_id: z.string().uuid(),
@@ -72,6 +73,7 @@ const phoneBookingSchema = z.object({
   resource_id: z.string().uuid().optional(),
   booking_end_time: z.string().regex(/^([01]?[0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9])?$/).optional(),
   source: z.enum(['phone', 'walk-in']).optional(),
+  area_id: z.string().uuid().optional(),
 });
 
 function cancellationDeadline(bookingDate: string, bookingTime: string): string {
@@ -1033,11 +1035,27 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: AVAILABILITY_SETUP_REQUIRED_MESSAGE }, { status: 503 });
     }
 
+    const areas = await listActiveAreasForVenue(admin, venueId);
+    let resolvedAreaId: string | null = parsed.data.area_id ?? null;
+    if (areas.length > 1) {
+      if (!resolvedAreaId) {
+        return NextResponse.json({ error: 'area_id is required for this venue' }, { status: 400 });
+      }
+      if (!areas.some((a) => a.id === resolvedAreaId)) {
+        return NextResponse.json({ error: 'Invalid area_id' }, { status: 400 });
+      }
+    } else if (areas.length === 1) {
+      resolvedAreaId = areas[0]!.id;
+    } else {
+      return NextResponse.json({ error: AVAILABILITY_SETUP_REQUIRED_MESSAGE }, { status: 503 });
+    }
+
     const engineInput = await fetchEngineInput({
       supabase: admin,
       venueId,
       date: booking_date,
       partySize: party_size,
+      areaId: resolvedAreaId,
     });
     const slots = computeAvailability(engineInput).flatMap((result) => result.slots);
     const slot = slots.find((s) => s.start_time === timeStr);
@@ -1113,6 +1131,7 @@ export async function POST(request: NextRequest) {
       special_requests: special_requests?.trim() || null,
       service_id: slot.service_id,
       estimated_end_time: estimatedEndTime,
+      area_id: resolvedAreaId,
     };
 
     const { data: booking, error: bookErr } = await admin

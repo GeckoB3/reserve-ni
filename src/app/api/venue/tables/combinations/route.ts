@@ -18,16 +18,21 @@ const comboSchema = z.object({
   internal_notes: z.string().max(2000).nullable().optional(),
 });
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   const supabase = await createClient();
   const staff = await getVenueStaff(supabase);
   if (!staff) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
 
-  const { data, error } = await staff.db
+  const areaId = request.nextUrl.searchParams.get('area_id');
+
+  let comboQuery = staff.db
     .from('table_combinations')
     .select('*, members:table_combination_members(id, table_id, table:venue_tables(id, name, max_covers))')
-    .eq('venue_id', staff.venue_id)
-    .order('created_at');
+    .eq('venue_id', staff.venue_id);
+  if (areaId) {
+    comboQuery = comboQuery.eq('area_id', areaId);
+  }
+  const { data, error } = await comboQuery.order('created_at');
 
   if (error) {
     console.error('GET /api/venue/tables/combinations failed:', error);
@@ -57,11 +62,23 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'One or more tables do not belong to this venue' }, { status: 400 });
   }
 
+  const { data: firstTable } = await staff.db
+    .from('venue_tables')
+    .select('area_id')
+    .eq('id', table_ids[0]!)
+    .eq('venue_id', staff.venue_id)
+    .maybeSingle();
+  const combinationAreaId = firstTable?.area_id as string | undefined;
+  if (!combinationAreaId) {
+    return NextResponse.json({ error: 'Could not resolve dining area for these tables' }, { status: 400 });
+  }
+
   const table_group_key = tableGroupKeyFromIds(table_ids);
   const { data: dup } = await staff.db
     .from('table_combinations')
     .select('id')
     .eq('venue_id', staff.venue_id)
+    .eq('area_id', combinationAreaId)
     .eq('table_group_key', table_group_key)
     .maybeSingle();
   if (dup) {
@@ -75,6 +92,7 @@ export async function POST(request: NextRequest) {
     .from('table_combinations')
     .insert({
       venue_id: staff.venue_id,
+      area_id: combinationAreaId,
       table_group_key,
       ...comboData,
       requires_manager_approval: comboData.requires_manager_approval ?? false,

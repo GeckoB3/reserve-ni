@@ -43,6 +43,10 @@ export interface VenueSettings {
   sms_monthly_allowance?: number | null;
   /** Sent this calendar month (from sms_usage), when loaded. */
   sms_messages_sent_this_month?: number | null;
+  /**
+   * Multi-area table venues: `auto` = combined slot list on public + staff booking; `manual` = area tabs to view times per area.
+   */
+  public_booking_area_mode?: 'auto' | 'manual';
 }
 
 export type OpeningHoursDaySettings =

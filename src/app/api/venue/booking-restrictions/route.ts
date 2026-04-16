@@ -49,15 +49,21 @@ function mergedDepositInvariant(
   );
 }
 
-/** GET /api/venue/booking-restrictions */
-export async function GET() {
+/** GET /api/venue/booking-restrictions — optional `area_id` scopes to one dining area. */
+export async function GET(request: NextRequest) {
   try {
     const supabase = await createClient();
     const staff = await getVenueStaff(supabase);
     if (!staff) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
 
+    const areaId = request.nextUrl.searchParams.get('area_id');
+
     const admin = getSupabaseAdminClient();
-    const { data: services } = await admin.from('venue_services').select('id').eq('venue_id', staff.venue_id);
+    let svcQ = admin.from('venue_services').select('id').eq('venue_id', staff.venue_id);
+    if (areaId) {
+      svcQ = svcQ.eq('area_id', areaId);
+    }
+    const { data: services } = await svcQ;
     const serviceIds = (services ?? []).map((s) => s.id);
     if (serviceIds.length === 0) return NextResponse.json({ restrictions: [] });
 

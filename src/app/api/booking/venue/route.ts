@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { resolveVenueMode } from '@/lib/venue-mode';
+import { listActiveAreasForVenue } from '@/lib/areas/resolve-default-area';
 
 /**
  * GET /api/booking/venue?slug=venue-slug
@@ -21,7 +22,7 @@ export async function GET(request: NextRequest) {
     const supabase = getSupabaseAdminClient();
     const { data: venue, error } = await supabase
       .from('venues')
-      .select('id, name, slug, cover_photo_url, address, phone, website_url, deposit_config, booking_rules, opening_hours, timezone, booking_model, enabled_models, active_booking_models, terminology, currency')
+      .select('id, name, slug, cover_photo_url, address, phone, website_url, deposit_config, booking_rules, opening_hours, timezone, booking_model, enabled_models, active_booking_models, terminology, currency, public_booking_area_mode')
       .eq('slug', slug.trim())
       .single();
 
@@ -50,12 +51,18 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    let areas: Awaited<ReturnType<typeof listActiveAreasForVenue>> = [];
+    if (venueMode.bookingModel === 'table_reservation') {
+      areas = await listActiveAreasForVenue(supabase, venue.id);
+    }
+
     return NextResponse.json({
       ...venue,
       booking_model: venueMode.bookingModel,
       active_booking_models: venueMode.activeBookingModels,
       enabled_models: venueMode.enabledModels,
       terminology: venueMode.terminology,
+      areas,
     });
   } catch (err) {
     console.error('GET /api/booking/venue failed:', err);

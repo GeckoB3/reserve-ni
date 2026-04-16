@@ -2117,7 +2117,7 @@ export default function OnboardingPage() {
             <p className="mb-6 text-sm text-slate-500">
               {isAppointmentsPlanVenue
                 ? `Set when each ${terms.staff.toLowerCase()} or calendar can take bookings. A booking is available only where these hours overlap with your business opening hours.`
-                : `Set when the business accepts appointments and when each ${terms.staff.toLowerCase()} is available to take bookings. You can adjust breaks and time off later under Availability.`
+                : `Set when the business accepts appointments and when each ${terms.staff.toLowerCase()} is available to take bookings. You can adjust breaks, calendar closures, and schedules later under Calendar availability.`
               }
             </p>
             {!isAppointmentsPlanVenue && (
@@ -3085,7 +3085,7 @@ export default function OnboardingPage() {
                     <Link href="/dashboard/calendar-availability" className="font-medium text-brand-600 underline hover:text-brand-700">
                       Calendar availability
                     </Link>
-                    : breaks, time off, and fine-tune schedules anytime
+                    : breaks, closures, and fine-tune schedules anytime
                   </li>
                 </ul>
               </div>

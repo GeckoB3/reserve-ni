@@ -18,9 +18,10 @@ const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 interface Props {
   services: Service[];
   showToast: (msg: string) => void;
+  selectedAreaId?: string | null;
 }
 
-export function DiningDurationTab({ services, showToast }: Props) {
+export function DiningDurationTab({ services, showToast, selectedAreaId }: Props) {
   const [durations, setDurations] = useState<Duration[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -30,8 +31,13 @@ export function DiningDurationTab({ services, showToast }: Props) {
 
   useEffect(() => {
     async function load() {
+      if (!selectedAreaId) {
+        setDurations([]);
+        setLoading(false);
+        return;
+      }
       try {
-        const res = await fetch('/api/venue/party-size-durations');
+        const res = await fetch(`/api/venue/party-size-durations?area_id=${encodeURIComponent(selectedAreaId)}`);
         if (res.ok) {
           const data = await res.json();
           setDurations(data.durations ?? []);
@@ -41,7 +47,7 @@ export function DiningDurationTab({ services, showToast }: Props) {
       }
     }
     load();
-  }, []);
+  }, [selectedAreaId]);
 
   async function handleCreate(serviceId: string, minPs: number, maxPs: number, dur: number) {
     setSaving(true);

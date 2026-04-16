@@ -15,6 +15,7 @@ import type {
   ServiceScheduleException,
   VenueService,
 } from '@/types/availability';
+import { getDefaultAreaIdForVenue } from '@/lib/areas/resolve-default-area';
 
 export interface FetchEngineInputParams {
   supabase: SupabaseClient;
@@ -22,6 +23,8 @@ export interface FetchEngineInputParams {
   date: string;
   partySize: number;
   now?: Date;
+  /** Dining area for table-reservation service engine; defaults to first active area per venue. */
+  areaId?: string | null;
 }
 
 /**
@@ -31,12 +34,16 @@ export interface FetchEngineInputParams {
 export async function hasServiceConfig(
   supabase: SupabaseClient,
   venueId: string,
+  areaId?: string | null,
 ): Promise<boolean> {
+  const resolvedAreaId = areaId ?? (await getDefaultAreaIdForVenue(supabase, venueId));
+  if (!resolvedAreaId) return false;
   const { count } = await supabase
     .from('venue_services')
     .select('id', { count: 'exact', head: true })
     .eq('venue_id', venueId)
-    .eq('is_active', true);
+    .eq('is_active', true)
+    .eq('area_id', resolvedAreaId);
 
   return (count ?? 0) > 0;
 }
@@ -50,29 +57,39 @@ export async function fetchEngineInput({
   date,
   partySize,
   now,
+  areaId: areaIdParam,
 }: FetchEngineInputParams): Promise<EngineInput> {
+  const resolvedAreaId = areaIdParam ?? (await getDefaultAreaIdForVenue(supabase, venueId));
+
   const [
     servicesRes,
     bookingsRes,
     blocksRes,
     venueRes,
+    areaRes,
     restrictionExcRes,
     scheduleExcRes,
   ] = await Promise.all([
-    supabase
-      .from('venue_services')
-      .select('id, venue_id, name, days_of_week, start_time, end_time, last_booking_time, is_active, sort_order')
-      .eq('venue_id', venueId)
-      .eq('is_active', true),
-    supabase
-      .from('bookings')
-      .select('id, booking_date, booking_time, party_size, status, service_id, estimated_end_time')
-      .eq('venue_id', venueId)
-      .eq('booking_date', date),
+    resolvedAreaId
+      ? supabase
+          .from('venue_services')
+          .select('id, venue_id, name, days_of_week, start_time, end_time, last_booking_time, is_active, sort_order')
+          .eq('venue_id', venueId)
+          .eq('area_id', resolvedAreaId)
+          .eq('is_active', true)
+      : Promise.resolve({ data: [] as VenueService[], error: null }),
+    resolvedAreaId
+      ? supabase
+          .from('bookings')
+          .select('id, booking_date, booking_time, party_size, status, service_id, estimated_end_time')
+          .eq('venue_id', venueId)
+          .eq('booking_date', date)
+          .eq('area_id', resolvedAreaId)
+      : Promise.resolve({ data: [], error: null }),
     supabase
       .from('availability_blocks')
       .select(
-        'id, venue_id, service_id, block_type, date_start, date_end, time_start, time_end, override_max_covers, reason, yield_overrides, override_periods',
+        'id, venue_id, area_id, service_id, block_type, date_start, date_end, time_start, time_end, override_max_covers, reason, yield_overrides, override_periods',
       )
       .eq('venue_id', venueId)
       .lte('date_start', date)
@@ -82,6 +99,9 @@ export async function fetchEngineInput({
       .select('deposit_config')
       .eq('id', venueId)
       .single(),
+    resolvedAreaId
+      ? supabase.from('areas').select('deposit_config').eq('id', resolvedAreaId).maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
     supabase
       .from('booking_restriction_exceptions')
       .select(
@@ -103,7 +123,7 @@ export async function fetchEngineInput({
   let blocksData: unknown[] = blocksRes.data ?? [];
   if (
     blocksRes.error &&
-    (blocksRes.error.code === '42703' || blocksRes.error.message?.includes('yield_overrides') || blocksRes.error.message?.includes('override_periods'))
+    (blocksRes.error.code === '42703' || blocksRes.error.message?.includes('yield_overrides') || blocksRes.error.message?.includes('override_periods') || blocksRes.error.message?.includes('area_id'))
   ) {
     const retry = await supabase
       .from('availability_blocks')
@@ -121,6 +141,12 @@ export async function fetchEngineInput({
   } else if (blocksRes.error) {
     console.error('fetchEngineInput: availability_blocks', blocksRes.error.message);
   }
+
+  blocksData = (blocksData as Array<Record<string, unknown>>).filter((b) => {
+    if (!resolvedAreaId) return true;
+    const aid = b.area_id as string | null | undefined;
+    return aid == null || aid === resolvedAreaId;
+  });
 
   const services: VenueService[] = (servicesRes.data ?? []).map((r) => ({
     ...r,
@@ -164,11 +190,13 @@ export async function fetchEngineInput({
     estimated_end_time: b.estimated_end_time ?? null,
   }));
 
-  const depositConfig = venueRes.data?.deposit_config as { amount_per_person_gbp?: number } | null;
+  const depositFromJson = (cfg: unknown): number | null => {
+    if (!cfg || typeof cfg !== 'object') return null;
+    const n = (cfg as { amount_per_person_gbp?: unknown }).amount_per_person_gbp;
+    return typeof n === 'number' && !Number.isNaN(n) ? n : null;
+  };
   const deposit_legacy_amount_per_person_gbp =
-    typeof depositConfig?.amount_per_person_gbp === 'number' && !Number.isNaN(depositConfig.amount_per_person_gbp)
-      ? depositConfig.amount_per_person_gbp
-      : null;
+    depositFromJson(areaRes.data?.deposit_config) ?? depositFromJson(venueRes.data?.deposit_config);
 
   if (restrictionExcRes.error) {
     console.error('fetchEngineInput: booking_restriction_exceptions', restrictionExcRes.error.message);

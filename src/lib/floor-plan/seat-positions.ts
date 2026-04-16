@@ -231,8 +231,10 @@ export function calculateSeatPositions(
 
   // ---- Circular / oval tables ----
   if (shape === 'circle' || shape === 'oval') {
-    const rx = width / 2;
-    const ry = shape === 'oval' ? height / 2 : rx;
+    // Must match TableShape / LiveFloorCanvas: circle uses min(w,h)/2 as radius, not width/2,
+    // so seats stay on the same circle as the stroke when width ≠ height after resize.
+    const rx = shape === 'circle' ? Math.min(width, height) / 2 : width / 2;
+    const ry = shape === 'oval' ? height / 2 : Math.min(width, height) / 2;
     const positions: SeatPosition[] = [];
 
     for (let i = 0; i < maxCovers; i++) {

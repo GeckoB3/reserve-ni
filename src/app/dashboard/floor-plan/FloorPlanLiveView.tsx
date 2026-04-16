@@ -18,6 +18,9 @@ import { computeNextBookingsSlot } from '@/lib/table-management/next-bookings-sl
 import { computeValidMoveTargets, resolveDropTarget, type CombinationInfo, type BookingMoveContext } from '@/lib/table-management/move-validation';
 import type { FloorDragEvent } from './LiveFloorCanvas';
 import { bookingStatusDisplayLabel } from '@/lib/booking/infer-booking-row-model';
+import { CalendarDateTimePicker } from '@/components/calendar/CalendarDateTimePicker';
+import { getCalendarGridBounds } from '@/lib/venue-calendar-bounds';
+import type { OpeningHours } from '@/types/availability';
 
 const LiveFloorCanvas = dynamic(() => import('./LiveFloorCanvas'), { ssr: false });
 
@@ -37,12 +40,6 @@ interface TableWithState extends VenueTable {
   service_status: TableOperationalStatus;
   booking: BookingOnTable | null;
   elapsed_pct: number;
-}
-
-interface DefinedCombination {
-  id: string;
-  name: string;
-  tableIds: string[];
 }
 
 function formatDateInput(d: Date): string {
@@ -69,12 +66,15 @@ export function FloorPlanLiveView({
   currency,
   bookingModel = 'table_reservation',
   enabledModels = [],
+  diningAreaId = null,
 }: {
   isAdmin?: boolean;
   venueId: string;
   currency?: string;
   bookingModel?: BookingModel;
   enabledModels?: BookingModel[];
+  /** Scope tables, grid, and combinations to this dining area (multi-area venues). */
+  diningAreaId?: string | null;
 }) {
   const { addToast } = useToast();
   const [tables, setTables] = useState<VenueTable[]>([]);
@@ -84,7 +84,6 @@ export function FloorPlanLiveView({
   const [loading, setLoading] = useState(true);
   const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
   const [combinedTableGroups, setCombinedTableGroups] = useState<Map<string, string[]>>(new Map());
-  const [definedCombinations, setDefinedCombinations] = useState<DefinedCombination[]>([]);
   const [manualCombinations, setManualCombinations] = useState<CombinationInfo[]>([]);
   const [selectedDate, setSelectedDate] = useState(() => formatDateInput(new Date()));
   const [selectedTime, setSelectedTime] = useState(() => {
@@ -111,6 +110,12 @@ export function FloorPlanLiveView({
   const [floorBlockReason, setFloorBlockReason] = useState('');
   const [floorBlockSaving, setFloorBlockSaving] = useState(false);
 
+  const [openingHours, setOpeningHours] = useState<OpeningHours | null>(null);
+  const [venueTimezone, setVenueTimezone] = useState<string>('Europe/London');
+  const [startHourOverride, setStartHourOverride] = useState<number | null>(null);
+  const [endHourOverride, setEndHourOverride] = useState<number | null>(null);
+  const [timeRangeFilterActive, setTimeRangeFilterActive] = useState(false);
+
   // Drag/drop & reassign
   const [reassignMode, setReassignMode] = useState<{ bookingId: string; guestName: string; oldTableIds: string[] } | null>(null);
   const [validDropTargets, setValidDropTargets] = useState<Set<string> | null>(null);
@@ -122,26 +127,55 @@ export function FloorPlanLiveView({
     return () => clearTimeout(timeout);
   }, [selectedTime]);
 
+  useEffect(() => {
+    let cancelled = false;
+    void fetch('/api/venue')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((v) => {
+        if (cancelled || !v) return;
+        if (v.opening_hours) setOpeningHours(v.opening_hours as OpeningHours);
+        const tz = v.timezone;
+        if (typeof tz === 'string' && tz.trim() !== '') setVenueTimezone(tz.trim());
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    setStartHourOverride(null);
+    setEndHourOverride(null);
+    setTimeRangeFilterActive(false);
+  }, [selectedDate]);
+
+  const { startHour: derivedStartHour, endHour: derivedEndHour } = useMemo(
+    () => getCalendarGridBounds(selectedDate, openingHours ?? undefined, 7, 21, { timeZone: venueTimezone }),
+    [selectedDate, openingHours, venueTimezone],
+  );
+  const pickerStartHour = startHourOverride ?? derivedStartHour;
+  const pickerEndHour = endHourOverride ?? derivedEndHour;
+
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
+      const areaQs =
+        bookingModel === 'table_reservation' && diningAreaId
+          ? `?area_id=${encodeURIComponent(diningAreaId)}`
+          : '';
+      const availParams = new URLSearchParams({ date: selectedDate });
+      if (bookingModel === 'table_reservation' && diningAreaId) {
+        availParams.set('area_id', diningAreaId);
+      }
       const [tablesRes, gridRes, combosRes, blocksRes] = await Promise.all([
-        fetch('/api/venue/tables'),
-        fetch(`/api/venue/tables/availability?date=${selectedDate}`),
-        fetch('/api/venue/tables/combinations'),
+        fetch(`/api/venue/tables${areaQs}`),
+        fetch(`/api/venue/tables/availability?${availParams}`),
+        fetch(`/api/venue/tables/combinations${areaQs}`),
         fetch(`/api/venue/tables/blocks?date=${selectedDate}`),
       ]);
 
       if (combosRes.ok) {
         const cData = await combosRes.json();
-        const links: DefinedCombination[] = (cData.combinations ?? []).map(
-          (c: { id: string; name: string; members?: { table_id: string }[]; combined_max_covers?: number }) => ({
-            id: c.id,
-            name: c.name,
-            tableIds: (c.members ?? []).map((m: { table_id: string }) => m.table_id),
-          })
-        );
-        setDefinedCombinations(links);
         const manual: CombinationInfo[] = (cData.combinations ?? []).map(
           (c: { id: string; name: string; combined_min_covers?: number; combined_max_covers?: number; members?: { table_id: string }[] }) => ({
             id: c.id,
@@ -205,7 +239,7 @@ export function FloorPlanLiveView({
     } finally {
       setLoading(false);
     }
-  }, [selectedDate]);
+  }, [bookingModel, diningAreaId, selectedDate]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -736,6 +770,48 @@ export function FloorPlanLiveView({
         onRefresh={fetchData}
         onNewBooking={() => setShowNewBookingForm(true)}
         onWalkIn={() => setShowWalkInModal(true)}
+        datePicker={(
+          <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+            <CalendarDateTimePicker
+              date={selectedDate}
+              onDateChange={setSelectedDate}
+              startHour={pickerStartHour}
+              endHour={pickerEndHour}
+              onTimeRangeChange={(start, end) => {
+                setStartHourOverride(start);
+                setEndHourOverride(end);
+                setTimeRangeFilterActive(true);
+                setSelectedTime(`${String(start).padStart(2, '0')}:00`);
+              }}
+            />
+            {timeRangeFilterActive && (
+              <div className="mt-2 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-2">
+                <p className="text-xs text-slate-600">
+                  Showing bookings with start times from{' '}
+                  <span className="font-medium text-slate-800">
+                    {String(pickerStartHour).padStart(2, '0')}:00
+                  </span>{' '}
+                  up to{' '}
+                  <span className="font-medium text-slate-800">
+                    {String(pickerEndHour).padStart(2, '0')}:00
+                  </span>{' '}
+                  (not including the end hour).
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setStartHourOverride(null);
+                    setEndHourOverride(null);
+                    setTimeRangeFilterActive(false);
+                  }}
+                  className="shrink-0 text-xs font-medium text-brand-600 hover:text-brand-700 hover:underline"
+                >
+                  Clear time filter
+                </button>
+              </div>
+            )}
+          </div>
+        )}
       >
         <div className="flex flex-wrap items-center gap-2">
           <label className="text-xs font-medium text-slate-600 sm:text-sm">Timeline</label>
@@ -761,7 +837,6 @@ export function FloorPlanLiveView({
           tables={tablesWithState}
           selectedId={selectedTableId}
           combinedTableGroups={combinedTableGroups}
-          definedCombinations={definedCombinations}
           validDropTargets={validDropTargets}
           validDropComboLabels={validDropComboLabels}
           reassignMode={reassignMode ? { bookingId: reassignMode.bookingId, guestName: reassignMode.guestName } : null}

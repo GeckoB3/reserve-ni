@@ -31,15 +31,21 @@ async function verifyDurationOwnership(admin: ReturnType<typeof getSupabaseAdmin
   return verifyServiceOwnership(admin, duration.service_id, venueId);
 }
 
-/** GET /api/venue/party-size-durations */
-export async function GET() {
+/** GET /api/venue/party-size-durations — optional `area_id` scopes to one dining area. */
+export async function GET(request: NextRequest) {
   try {
     const supabase = await createClient();
     const staff = await getVenueStaff(supabase);
     if (!staff) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
 
+    const areaId = request.nextUrl.searchParams.get('area_id');
+
     const admin = getSupabaseAdminClient();
-    const { data: services } = await admin.from('venue_services').select('id').eq('venue_id', staff.venue_id);
+    let svcQ = admin.from('venue_services').select('id').eq('venue_id', staff.venue_id);
+    if (areaId) {
+      svcQ = svcQ.eq('area_id', areaId);
+    }
+    const { data: services } = await svcQ;
     const serviceIds = (services ?? []).map((s) => s.id);
     if (serviceIds.length === 0) return NextResponse.json({ durations: [] });
 

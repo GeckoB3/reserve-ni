@@ -19,5 +19,7 @@ export function mapApiVenueToVenuePublic(data: Record<string, unknown>): VenuePu
     enabled_models: data.enabled_models as BookingModel[] | undefined,
     terminology: data.terminology as VenuePublic['terminology'],
     currency: data.currency as string | undefined,
+    public_booking_area_mode:
+      data.public_booking_area_mode === 'manual' ? 'manual' : data.public_booking_area_mode === 'auto' ? 'auto' : undefined,
   };
 }

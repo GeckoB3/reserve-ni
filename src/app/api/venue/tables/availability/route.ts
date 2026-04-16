@@ -48,6 +48,12 @@ export async function GET(request: NextRequest) {
       if (rule) slotInterval = rule.slot_interval_minutes;
     }
 
+    const areaId = searchParams.get('area_id');
+    const areaUuidRe =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    const resolvedArea =
+      areaId && areaUuidRe.test(areaId) ? areaId : null;
+
     const grid = await getTableAvailabilityGrid(
       staff.db,
       staff.venue_id,
@@ -55,6 +61,7 @@ export async function GET(request: NextRequest) {
       serviceStart,
       serviceEnd,
       slotInterval,
+      resolvedArea,
     );
 
     return NextResponse.json(grid);

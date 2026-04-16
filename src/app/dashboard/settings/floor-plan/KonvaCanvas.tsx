@@ -83,6 +83,54 @@ function tableBounds(t: VenueTable, dims: { width: number; height: number }): { 
   };
 }
 
+/** Layout size from pointer delta — floats (no rounding) for smooth resize; clamped only. */
+function computeLayoutSizeFromDelta(
+  anchor: LayoutResizeAnchor,
+  startW: number,
+  startH: number,
+  dx: number,
+  dy: number,
+): { newW: number; newH: number } {
+  let newW = startW;
+  let newH = startH;
+  switch (anchor) {
+    case 'e':
+      newW = startW + dx;
+      break;
+    case 'w':
+      newW = startW - dx;
+      break;
+    case 's':
+      newH = startH + dy;
+      break;
+    case 'n':
+      newH = startH - dy;
+      break;
+    case 'se':
+      newW = startW + dx;
+      newH = startH + dy;
+      break;
+    case 'sw':
+      newW = startW - dx;
+      newH = startH + dy;
+      break;
+    case 'ne':
+      newW = startW + dx;
+      newH = startH - dy;
+      break;
+    case 'nw':
+      newW = startW - dx;
+      newH = startH - dy;
+      break;
+    default:
+      break;
+  }
+  return {
+    newW: Math.max(MIN_RESIZE_WIDTH, Math.min(MAX_LAYOUT_WIDTH, newW)),
+    newH: Math.max(MIN_RESIZE_HEIGHT, Math.min(MAX_LAYOUT_HEIGHT, newH)),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Component props
 // ---------------------------------------------------------------------------
@@ -103,6 +151,8 @@ interface Props {
   onResize: (id: string, w: number, h: number) => void;
   onRotate?: (id: string, rotation: number) => void;
   combinationLinks?: CombinationLink[];
+  /** When false, manual combination link lines are not drawn (e.g. embedded Layout tab). */
+  showCombinationLinkLines?: boolean;
   backgroundUrl?: string | null;
   alignmentGuidesEnabled?: boolean;
   /** Override the computed logical canvas dimensions (from saved floor plan). */
@@ -132,7 +182,9 @@ interface Props {
 
 export default function KonvaCanvas({
   tables, selectedId, selectedIds, onSelect, onMultiSelect, onMove, onResize, onRotate,
-  combinationLinks, backgroundUrl,
+  combinationLinks,
+  showCombinationLinkLines = true,
+  backgroundUrl,
   alignmentGuidesEnabled = false,
   layoutWidth, layoutHeight, onLayoutResize, onLayoutResizeEnd,
   onSeatDrag, onSeatDragEnd,
@@ -148,6 +200,10 @@ export default function KonvaCanvas({
   const [viewport, setViewport] = useState({ width: 0, height: 0 });
   const [scale, setScale] = useState(1);
   const [stagePos, setStagePos] = useState({ x: 0, y: 0 });
+  const stagePosRef = useRef(stagePos);
+  const scaleRef = useRef(scale);
+  stagePosRef.current = stagePos;
+  scaleRef.current = scale;
   const [, forceRender] = useState(0);
 
   // Drag state (refs to avoid re-renders during drag)
@@ -189,8 +245,22 @@ export default function KonvaCanvas({
     anchor: LayoutResizeAnchor;
     startW: number;
     startH: number;
-    startPointerLocal: { x: number; y: number };
+    /**
+     * Pointer position in **stage** coordinates at pointer-down (Konva `getPointerPosition()`).
+     * Deltas must be derived from this, not from layout-local coords: layout-local uses `stagePos`,
+     * which we change while resizing west/north, so `local - startLocal` would be wrong.
+     */
+    startPointerStage: { x: number; y: number };
+    /** Stage pan at pointer-down — used to keep content visually fixed when expanding west/north. */
+    startStagePos: { x: number; y: number };
+    startScale: number;
   } | null>(null);
+
+  /** Coalesce layout resize to one React update per animation frame for smooth borders. */
+  const layoutResizeRafRef = useRef<number | null>(null);
+  const layoutResizePendingRef = useRef<{ newW: number; newH: number } | null>(null);
+  const layoutResizeDocCleanupRef = useRef<(() => void) | null>(null);
+  const layoutResizePointerIdRef = useRef<number | undefined>(undefined);
 
   // Space-bar / middle-mouse temporary pan mode
   const [spacebarPan, setSpacebarPan] = useState(false);
@@ -269,6 +339,17 @@ export default function KonvaCanvas({
     return () => {
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
+    };
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      layoutResizeDocCleanupRef.current?.();
+      layoutResizeDocCleanupRef.current = null;
+      if (layoutResizeRafRef.current != null) {
+        cancelAnimationFrame(layoutResizeRafRef.current);
+        layoutResizeRafRef.current = null;
+      }
     };
   }, []);
 
@@ -486,60 +567,136 @@ export default function KonvaCanvas({
     };
   }, [stagePos, scale]);
 
+  const flushLayoutResizeToParent = useCallback(() => {
+    layoutResizeRafRef.current = null;
+    const r = layoutResizeRef.current;
+    const pending = layoutResizePendingRef.current;
+    if (!r || !pending || !onLayoutResize) return;
+    const { newW, newH } = pending;
+    onLayoutResize(newW, newH, { anchor: r.anchor });
+    const deltaW = newW - r.startW;
+    const deltaH = newH - r.startH;
+    const s = scaleRef.current;
+    let nx = r.startStagePos.x;
+    let ny = r.startStagePos.y;
+    if (r.anchor === 'w' || r.anchor === 'nw' || r.anchor === 'sw') {
+      nx -= deltaW * s;
+    }
+    if (r.anchor === 'n' || r.anchor === 'nw' || r.anchor === 'ne') {
+      ny -= deltaH * s;
+    }
+    setStagePos({ x: nx, y: ny });
+  }, [onLayoutResize]);
+
+  const scheduleLayoutResizeFlush = useCallback(() => {
+    if (layoutResizeRafRef.current != null) return;
+    layoutResizeRafRef.current = requestAnimationFrame(() => {
+      layoutResizeRafRef.current = null;
+      flushLayoutResizeToParent();
+    });
+  }, [flushLayoutResizeToParent]);
+
+  const endLayoutResizeGesture = useCallback(() => {
+    try {
+      const container = stageRef.current?.container();
+      const pid = layoutResizePointerIdRef.current;
+      if (container != null && pid !== undefined) {
+        container.releasePointerCapture(pid);
+      }
+    } catch {
+      /* ignore */
+    }
+    layoutResizePointerIdRef.current = undefined;
+
+    if (layoutResizeRafRef.current != null) {
+      cancelAnimationFrame(layoutResizeRafRef.current);
+      layoutResizeRafRef.current = null;
+    }
+    if (layoutResizeRef.current && layoutResizePendingRef.current) {
+      flushLayoutResizeToParent();
+    }
+    layoutResizePendingRef.current = null;
+    const hadResize = layoutResizeRef.current != null;
+    layoutResizeRef.current = null;
+    if (hadResize) {
+      onLayoutResizeEnd?.();
+    }
+    const container = stageRef.current?.container();
+    if (container) container.style.cursor = 'default';
+  }, [flushLayoutResizeToParent, onLayoutResizeEnd]);
+
+  const beginLayoutResize = useCallback(
+    (anchor: LayoutResizeAnchor, e: KonvaEventObject<MouseEvent>) => {
+      e.cancelBubble = true;
+      const stage = stageRef.current;
+      const posStage = stage?.getPointerPosition();
+      if (!stage || !posStage) return;
+      const W = dimensions.width;
+      const H = dimensions.height;
+
+      layoutResizeRef.current = {
+        anchor,
+        startW: W,
+        startH: H,
+        startPointerStage: { x: posStage.x, y: posStage.y },
+        startStagePos: { x: stagePos.x, y: stagePos.y },
+        startScale: scale,
+      };
+      layoutResizePendingRef.current = { newW: W, newH: H };
+
+      const onDocPointerMove = (ev: PointerEvent) => {
+        const st = stageRef.current;
+        const r = layoutResizeRef.current;
+        if (!st || !r) return;
+        const pos = st.getPointerPosition();
+        if (!pos) return;
+        const sc = scaleRef.current;
+        const dx = (pos.x - r.startPointerStage.x) / sc;
+        const dy = (pos.y - r.startPointerStage.y) / sc;
+        const { newW, newH } = computeLayoutSizeFromDelta(r.anchor, r.startW, r.startH, dx, dy);
+        layoutResizePendingRef.current = { newW, newH };
+        scheduleLayoutResizeFlush();
+        ev.preventDefault();
+      };
+
+      const onDocPointerEnd = () => {
+        document.removeEventListener('pointermove', onDocPointerMove);
+        document.removeEventListener('pointerup', onDocPointerEnd);
+        document.removeEventListener('pointercancel', onDocPointerEnd);
+        layoutResizeDocCleanupRef.current = null;
+        endLayoutResizeGesture();
+      };
+
+      document.addEventListener('pointermove', onDocPointerMove, { passive: false });
+      document.addEventListener('pointerup', onDocPointerEnd);
+      document.addEventListener('pointercancel', onDocPointerEnd);
+
+      layoutResizeDocCleanupRef.current = () => {
+        document.removeEventListener('pointermove', onDocPointerMove);
+        document.removeEventListener('pointerup', onDocPointerEnd);
+        document.removeEventListener('pointercancel', onDocPointerEnd);
+      };
+
+      const pointerEv = e.evt as PointerEvent;
+      layoutResizePointerIdRef.current = pointerEv.pointerId;
+      try {
+        const container = stageRef.current?.container();
+        if (container != null && pointerEv.pointerId !== undefined) {
+          container.setPointerCapture(pointerEv.pointerId);
+        }
+      } catch {
+        /* ignore */
+      }
+
+      scheduleLayoutResizeFlush();
+    },
+    [dimensions.width, dimensions.height, stagePos.x, stagePos.y, scale, scheduleLayoutResizeFlush, endLayoutResizeGesture],
+  );
+
   const handleStageMouseMove = useCallback(
     (e: KonvaEventObject<MouseEvent>) => {
       const stage = stageRef.current;
       if (!stage) return;
-
-      // ---- Layout canvas resize (pointer-tracking, NOT Konva drag) ----
-      if (layoutResizeRef.current && onLayoutResize) {
-        const local = pointerToLocal();
-        if (!local) return;
-        const r = layoutResizeRef.current;
-        const dx = local.x - r.startPointerLocal.x;
-        const dy = local.y - r.startPointerLocal.y;
-
-        let newW = r.startW;
-        let newH = r.startH;
-
-        switch (r.anchor) {
-          case 'e':
-            newW = r.startW + dx;
-            break;
-          case 'w':
-            newW = r.startW - dx;
-            break;
-          case 's':
-            newH = r.startH + dy;
-            break;
-          case 'n':
-            newH = r.startH - dy;
-            break;
-          case 'se':
-            newW = r.startW + dx;
-            newH = r.startH + dy;
-            break;
-          case 'sw':
-            newW = r.startW - dx;
-            newH = r.startH + dy;
-            break;
-          case 'ne':
-            newW = r.startW + dx;
-            newH = r.startH - dy;
-            break;
-          case 'nw':
-            newW = r.startW - dx;
-            newH = r.startH - dy;
-            break;
-        }
-
-        newW = Math.max(MIN_RESIZE_WIDTH, Math.min(MAX_LAYOUT_WIDTH, Math.round(newW)));
-        newH = Math.max(MIN_RESIZE_HEIGHT, Math.min(MAX_LAYOUT_HEIGHT, Math.round(newH)));
-
-        onLayoutResize(newW, newH, { anchor: r.anchor });
-        e.evt.preventDefault();
-        return;
-      }
 
       if (polygonDrawing.active) {
         const local = pointerToLocal();
@@ -566,19 +723,10 @@ export default function KonvaCanvas({
         e.evt.preventDefault();
       }
     },
-    [onRotate, stagePos, scale, polygonDrawing.active, onLayoutResize, pointerToLocal],
+    [onRotate, polygonDrawing.active, pointerToLocal],
   );
 
   const handleStageMouseUp = useCallback(() => {
-    // ---- Layout resize end ----
-    if (layoutResizeRef.current) {
-      layoutResizeRef.current = null;
-      onLayoutResizeEnd?.();
-      const container = stageRef.current?.container();
-      if (container) container.style.cursor = 'default';
-      return;
-    }
-
     if (marqueeRef.current?.active) {
       const { startX, startY, currentX, currentY } = marqueeRef.current;
       const minX = Math.min(startX, currentX);
@@ -596,7 +744,7 @@ export default function KonvaCanvas({
       forceRender((c) => c + 1);
     }
     rotatingRef.current = null;
-  }, [tables, getBounds, onMultiSelect, onLayoutResizeEnd]);
+  }, [tables, getBounds, onMultiSelect]);
 
   /** Scale that fits the full layout in the viewport — shown as 100% in the zoom indicator. */
   const [baselineScale, setBaselineScale] = useState(1);
@@ -868,8 +1016,9 @@ export default function KonvaCanvas({
             );
           })}
 
-          {/* ---- Combination link lines (manual combinations) ---- */}
-          {(combinationLinks ?? []).map((combo) => {
+          {/* ---- Combination link lines (manual combinations; hidden on embedded Layout tab) ---- */}
+          {showCombinationLinkLines &&
+            (combinationLinks ?? []).map((combo) => {
             const pts: number[] = [];
             for (const tid of combo.tableIds) {
               const t = tables.find((tb) => tb.id === tid);
@@ -1047,18 +1196,6 @@ export default function KonvaCanvas({
               if (container) container.style.cursor = c;
             };
 
-            const startResize = (anchor: LayoutResizeAnchor, e: KonvaEventObject<MouseEvent>) => {
-              e.cancelBubble = true;
-              const local = pointerToLocal();
-              if (!local) return;
-              layoutResizeRef.current = {
-                anchor,
-                startW: W,
-                startH: H,
-                startPointerLocal: local,
-              };
-            };
-
             const edges: Array<{
               anchor: LayoutResizeAnchor;
               x: number; y: number; w: number; h: number;
@@ -1092,7 +1229,7 @@ export default function KonvaCanvas({
                     fill="transparent"
                     onMouseEnter={() => setCur(ed.cursor)}
                     onMouseLeave={() => setCur('default')}
-                    onMouseDown={(e) => startResize(ed.anchor, e)}
+                    onMouseDown={(e) => beginLayoutResize(ed.anchor, e)}
                   />
                 ))}
                 {corners.map((cr) => (
@@ -1107,7 +1244,7 @@ export default function KonvaCanvas({
                     opacity={0.85}
                     onMouseEnter={() => setCur(cr.cursor)}
                     onMouseLeave={() => setCur('default')}
-                    onMouseDown={(e) => startResize(cr.anchor, e)}
+                    onMouseDown={(e) => beginLayoutResize(cr.anchor, e)}
                   />
                 ))}
                 <Line

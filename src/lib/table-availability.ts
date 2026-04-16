@@ -74,20 +74,32 @@ export async function getAvailableTablesForBooking(
   partySize: number,
   opts?: {
     bookingContext?: { bookingDate: string; bookingTime: string; bookingModel: BookingModel };
+    /** When set, only tables/combinations/bookings in this dining area are considered. */
+    areaId?: string | null;
   },
 ): Promise<TableAvailabilityCandidate[]> {
+  const areaId = opts?.areaId ?? null;
+
   const [venueRes, tablesRes, blocksRes] = await Promise.all([
     supabase
       .from('venues')
       .select('combination_threshold')
       .eq('id', venueId)
       .single(),
-    supabase
-      .from('venue_tables')
-      .select('*')
-      .eq('venue_id', venueId)
-      .eq('is_active', true)
-      .order('sort_order'),
+    areaId
+      ? supabase
+          .from('venue_tables')
+          .select('*')
+          .eq('venue_id', venueId)
+          .eq('area_id', areaId)
+          .eq('is_active', true)
+          .order('sort_order')
+      : supabase
+          .from('venue_tables')
+          .select('*')
+          .eq('venue_id', venueId)
+          .eq('is_active', true)
+          .order('sort_order'),
     supabase
       .from('table_blocks')
       .select('id, table_id, start_at, end_at, reason')
@@ -100,11 +112,15 @@ export async function getAvailableTablesForBooking(
 
   if (!tables?.length) return [];
 
-  const { data: assignments } = await supabase
+  let assignmentsQuery = supabase
     .from('booking_table_assignments')
-    .select('table_id, booking:bookings!inner(id, booking_date, booking_time, estimated_end_time, party_size, status)')
+    .select('table_id, booking:bookings!inner(id, booking_date, booking_time, estimated_end_time, party_size, status, area_id)')
     .eq('booking.booking_date', date)
     .in('booking.status', [...BOOKING_ACTIVE_STATUSES]);
+  if (areaId) {
+    assignmentsQuery = assignmentsQuery.eq('booking.area_id', areaId);
+  }
+  const { data: assignments } = await assignmentsQuery;
 
   const bookingsById = new Map<string, CombinationBooking>();
   if (assignments) {
@@ -131,8 +147,11 @@ export async function getAvailableTablesForBooking(
     }
   }
 
+  const tableIdSet = new Set((tables as VenueTable[]).map((t) => t.id));
+  const blocksForTables = blocks.filter((b) => tableIdSet.has(b.table_id));
+
   const blockRangesByTable = new Map<string, Array<{ startMin: number; endMin: number }>>();
-  for (const block of blocks) {
+  for (const block of blocksForTables) {
     const range = {
       startMin: timeToMinutes((block.start_at.split('T')[1] ?? '00:00:00').slice(0, 5)),
       endMin: timeToMinutes((block.end_at.split('T')[1] ?? '00:00:00').slice(0, 5)),
@@ -142,14 +161,25 @@ export async function getAvailableTablesForBooking(
     blockRangesByTable.set(block.table_id, existing);
   }
 
-  const { data: combinations } = await supabase
-    .from('table_combinations')
-    .select('*, members:table_combination_members(id, table_id)')
-    .eq('venue_id', venueId)
-    .eq('is_active', true);
+  const combinationsQuery = areaId
+    ? supabase
+        .from('table_combinations')
+        .select('*, members:table_combination_members(id, table_id)')
+        .eq('venue_id', venueId)
+        .eq('area_id', areaId)
+        .eq('is_active', true)
+    : supabase
+        .from('table_combinations')
+        .select('*, members:table_combination_members(id, table_id)')
+        .eq('venue_id', venueId)
+        .eq('is_active', true);
+
+  const { data: combinations } = await combinationsQuery;
 
   let overrideRows: Record<string, unknown>[] = [];
-  const ovRes = await supabase.from('combination_auto_overrides').select('*').eq('venue_id', venueId);
+  const ovRes = areaId
+    ? await supabase.from('combination_auto_overrides').select('*').eq('venue_id', venueId).eq('area_id', areaId)
+    : await supabase.from('combination_auto_overrides').select('*').eq('venue_id', venueId);
   if (ovRes.error) {
     console.error('load combination_auto_overrides:', ovRes.error.message);
   } else {
@@ -168,7 +198,7 @@ export async function getAvailableTablesForBooking(
     rotation: table.rotation,
   }));
 
-  const algorithmBlocks: CombinationBlock[] = blocks.map((block) => ({
+  const algorithmBlocks: CombinationBlock[] = blocksForTables.map((block) => ({
     table_id: block.table_id,
     start_at: block.start_at,
     end_at: block.end_at,
@@ -275,22 +305,31 @@ export async function getTableAvailabilityGrid(
   serviceStartTime?: string,
   serviceEndTime?: string,
   slotInterval = 15,
+  areaId?: string | null,
 ): Promise<TableGridData> {
+  const tablesQuery = supabase
+    .from('venue_tables')
+    .select('*')
+    .eq('venue_id', venueId)
+    .eq('is_active', true)
+    .order('sort_order');
+  const scopedTables = areaId ? tablesQuery.eq('area_id', areaId) : tablesQuery;
+
+  let bookingsQuery = supabase
+    .from('bookings')
+    .select(
+      'id, booking_time, estimated_end_time, party_size, status, deposit_status, dietary_notes, occasion, experience_event_id, class_instance_id, resource_id, event_session_id, calendar_id, service_item_id, practitioner_id, appointment_service_id, guest:guests!inner(name)',
+    )
+    .eq('venue_id', venueId)
+    .eq('booking_date', date)
+    .in('status', [...BOOKING_ACTIVE_STATUSES]);
+  if (areaId) {
+    bookingsQuery = bookingsQuery.eq('area_id', areaId);
+  }
+
   const [tablesRes, bookingsRes, blocksRes] = await Promise.all([
-    supabase
-      .from('venue_tables')
-      .select('*')
-      .eq('venue_id', venueId)
-      .eq('is_active', true)
-      .order('sort_order'),
-    supabase
-      .from('bookings')
-      .select(
-        'id, booking_time, estimated_end_time, party_size, status, deposit_status, dietary_notes, occasion, experience_event_id, class_instance_id, resource_id, event_session_id, calendar_id, service_item_id, practitioner_id, appointment_service_id, guest:guests!inner(name)',
-      )
-      .eq('venue_id', venueId)
-      .eq('booking_date', date)
-      .in('status', [...BOOKING_ACTIVE_STATUSES]),
+    scopedTables,
+    bookingsQuery,
     supabase
       .from('table_blocks')
       .select('id, table_id, start_at, end_at, reason')
@@ -301,6 +340,10 @@ export async function getTableAvailabilityGrid(
 
   const tables = (tablesRes.data ?? []) as VenueTable[];
   const activeTableIds = new Set(tables.map((table) => table.id));
+  const blocksRaw = (blocksRes.data ?? []) as TableBlock[];
+  const blocks = areaId
+    ? blocksRaw.filter((block) => activeTableIds.has(block.table_id))
+    : blocksRaw;
   const rawBookings = (bookingsRes.data ?? []) as Array<{
     id: string;
     booking_time: string;
@@ -320,8 +363,6 @@ export async function getTableAvailabilityGrid(
     appointment_service_id?: string | null;
     guest: { name: string } | { name: string }[];
   }>;
-  const blocks = (blocksRes.data ?? []) as TableBlock[];
-
   const bookingIds = rawBookings.map((b) => b.id);
 
   const assignmentMap = new Map<string, string[]>();
@@ -492,16 +533,17 @@ export async function autoAssignTable(
   bufferMinutes: number,
   partySize: number,
 ): Promise<TableAvailabilityCandidate | null> {
-  const { data: bookingRow } = await supabase
+    const { data: bookingRow } = await supabase
     .from('bookings')
     .select(
-      'experience_event_id, class_instance_id, resource_id, event_session_id, calendar_id, service_item_id, practitioner_id, appointment_service_id',
+      'experience_event_id, class_instance_id, resource_id, event_session_id, calendar_id, service_item_id, practitioner_id, appointment_service_id, area_id',
     )
     .eq('id', bookingId)
     .single();
 
   const timePart = startTime.length >= 5 ? startTime.slice(0, 5) : startTime;
   const bookingModel = inferBookingRowModel(bookingRow ?? {});
+  const areaId = (bookingRow as { area_id?: string | null } | null)?.area_id ?? null;
 
   const candidates = await getAvailableTablesForBooking(
     supabase,
@@ -517,6 +559,7 @@ export async function autoAssignTable(
         bookingTime: timePart,
         bookingModel,
       },
+      areaId,
     },
   );
 

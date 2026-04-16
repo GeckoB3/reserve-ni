@@ -72,9 +72,40 @@ export function WalkInModal({
   const [occupiedTableIds, setOccupiedTableIds] = useState<string[]>([]);
 
   const [prefetchedTables, setPrefetchedTables] = useState<MiniFloorTableRow[] | null>(null);
+  const [publicBookingAreaMode, setPublicBookingAreaMode] = useState<'auto' | 'manual'>('auto');
+  const [diningAreas, setDiningAreas] = useState<Array<{ id: string; name: string; colour: string }>>([]);
+  /** Which dining area layout to show; in manual tab mode also scopes table suggestions. */
+  const [floorPlanViewAreaId, setFloorPlanViewAreaId] = useState<string | null>(null);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void Promise.all([
+      fetch('/api/venue').then((r) => r.json()),
+      fetch('/api/venue/areas').then((r) => (r.ok ? r.json() : { areas: [] })),
+    ])
+      .then(([v, a]: [Record<string, unknown>, { areas?: Array<{ id: string; name: string; colour: string; is_active: boolean }> }]) => {
+        if (cancelled) return;
+        setPublicBookingAreaMode(v.public_booking_area_mode === 'manual' ? 'manual' : 'auto');
+        const active = (a.areas ?? []).filter((x) => x.is_active);
+        const mapped = active.map(({ id, name, colour }) => ({ id, name, colour }));
+        setDiningAreas(mapped);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (diningAreas.length === 0) return;
+    setFloorPlanViewAreaId((prev) => {
+      if (prev && diningAreas.some((x) => x.id === prev)) return prev;
+      return diningAreas[0]!.id;
+    });
+  }, [diningAreas]);
 
   // Pre-fetch tables in advanced mode so floor plan loads instantly
   useEffect(() => {
@@ -141,6 +172,9 @@ export function WalkInModal({
           party_size: String(partySize),
           duration_minutes: '90',
         });
+        if (publicBookingAreaMode === 'manual' && floorPlanViewAreaId) {
+          params.set('area_id', floorPlanViewAreaId);
+        }
         const res = await fetch(`/api/venue/tables/combinations/suggest?${params.toString()}`);
         if (!res.ok || cancelled) return;
         const payload = await res.json();
@@ -159,7 +193,14 @@ export function WalkInModal({
       }
     })();
     return () => { cancelled = true; };
-  }, [advancedMode, bookingDate, bookingTime, partySize]);
+  }, [advancedMode, bookingDate, bookingTime, partySize, publicBookingAreaMode, floorPlanViewAreaId]);
+
+  const tablesForFloorPlanPicker = useMemo(() => {
+    if (!prefetchedTables?.length) return null;
+    if (diningAreas.length <= 1) return prefetchedTables;
+    if (!floorPlanViewAreaId) return prefetchedTables;
+    return prefetchedTables.filter((t) => t.area_id === floorPlanViewAreaId);
+  }, [prefetchedTables, diningAreas.length, floorPlanViewAreaId]);
 
   const selectedSuggestion = useMemo(
     () => suggestions.find((s) => `${s.source}:${s.table_ids.join('|')}` === selectedSuggestionKey) ?? null,
@@ -562,14 +603,48 @@ export function WalkInModal({
               )}
 
               {tableAssignMode === 'floor' && (
-                <MiniFloorPlanPicker
-                  tables={prefetchedTables}
-                  selectedIds={manualTableIds}
-                  onChange={setManualTableIds}
-                  occupiedTableIds={occupiedTableIds}
-                  partySize={partySize}
-                  minHeight={220}
-                />
+                <>
+                  {diningAreas.length > 1 && (
+                    <div
+                      className="mb-2 flex flex-wrap gap-1.5"
+                      role="tablist"
+                      aria-label="Floor plan dining area"
+                    >
+                      {diningAreas.map((a) => {
+                        const active = floorPlanViewAreaId === a.id;
+                        return (
+                          <button
+                            key={a.id}
+                            type="button"
+                            role="tab"
+                            aria-selected={active}
+                            onClick={() => setFloorPlanViewAreaId(a.id)}
+                            className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                              active
+                                ? 'border-slate-800 bg-slate-900 text-white'
+                                : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                            }`}
+                          >
+                            <span
+                              className="h-2 w-2 shrink-0 rounded-full"
+                              style={{ background: a.colour || '#94a3b8' }}
+                              aria-hidden
+                            />
+                            {a.name}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                  <MiniFloorPlanPicker
+                    tables={tablesForFloorPlanPicker}
+                    selectedIds={manualTableIds}
+                    onChange={setManualTableIds}
+                    occupiedTableIds={occupiedTableIds}
+                    partySize={partySize}
+                    minHeight={220}
+                  />
+                </>
               )}
             </div>
           )}

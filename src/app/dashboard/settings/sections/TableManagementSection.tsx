@@ -4,15 +4,11 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import type { VenueSettings } from '../types';
-import { AdjacencyPreview } from './AdjacencyPreview';
-import { NumericInput } from '@/components/ui/NumericInput';
 
 interface Props {
   venue: VenueSettings;
   onUpdate: (patch: Partial<VenueSettings>) => void;
   isAdmin: boolean;
-  /** Incremented by the parent each time the floor plan editor saves positions. */
-  layoutSaveCount?: number;
 }
 
 interface ToggleFlags {
@@ -20,7 +16,7 @@ interface ToggleFlags {
   hasActiveAssignments: boolean;
 }
 
-export function TableManagementSection({ venue, onUpdate, isAdmin, layoutSaveCount = 0 }: Props) {
+export function TableManagementSection({ venue, onUpdate, isAdmin }: Props) {
   const router = useRouter();
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -30,10 +26,6 @@ export function TableManagementSection({ venue, onUpdate, isAdmin, layoutSaveCou
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewUnassignedCount, setPreviewUnassignedCount] = useState(0);
   const [assigningUnassigned, setAssigningUnassigned] = useState(false);
-  const [thresholdDraft, setThresholdDraft] = useState<number>(venue.combination_threshold ?? 25);
-  const [thresholdSaving, setThresholdSaving] = useState(false);
-  const [recalcLoading, setRecalcLoading] = useState(false);
-  const [recalcResult, setRecalcResult] = useState<string | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -53,10 +45,6 @@ export function TableManagementSection({ venue, onUpdate, isAdmin, layoutSaveCou
       mounted = false;
     };
   }, [venue.table_management_enabled]);
-
-  useEffect(() => {
-    setThresholdDraft(venue.combination_threshold ?? 25);
-  }, [venue.combination_threshold]);
 
   async function commitToggle(nextValue: boolean): Promise<{
     success: boolean;
@@ -172,60 +160,6 @@ export function TableManagementSection({ venue, onUpdate, isAdmin, layoutSaveCou
     }
   }
 
-  async function recalculateAdjacency() {
-    if (!isAdmin || recalcLoading) return;
-    setRecalcLoading(true);
-    setRecalcResult(null);
-    try {
-      const res = await fetch('/api/venue/tables/combinations/recalculate', { method: 'POST' });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setRecalcResult(data.error ?? 'Failed to recalculate adjacency.');
-        return;
-      }
-      setRecalcResult(`${data.adjacent_pairs ?? 0} adjacent table pair${(data.adjacent_pairs ?? 0) !== 1 ? 's' : ''} detected.`);
-    } catch {
-      setRecalcResult('Failed to recalculate adjacency.');
-    } finally {
-      setRecalcLoading(false);
-    }
-  }
-
-  async function saveThreshold() {
-    if (!isAdmin || thresholdSaving) return;
-    setThresholdSaving(true);
-    setNotice(null);
-    setRecalcResult(null);
-    try {
-      const res = await fetch('/api/venue/tables/settings', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ combination_threshold: thresholdDraft }),
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        setNotice(data.error ?? 'Failed to save combination threshold.');
-        return;
-      }
-      onUpdate({ combination_threshold: thresholdDraft } as Partial<VenueSettings>);
-      router.refresh();
-      // Recalculate immediately so the diagram and result reflect the new distance.
-      await recalculateAdjacency();
-    } catch {
-      setNotice('Failed to save combination threshold.');
-    } finally {
-      setThresholdSaving(false);
-    }
-  }
-
-  // Auto-recalculate adjacency whenever the floor plan editor saves a new layout.
-  // Skip the very first render (layoutSaveCount === 0).
-  useEffect(() => {
-    if (layoutSaveCount === 0 || !venue.table_management_enabled) return;
-    void recalculateAdjacency();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [layoutSaveCount]);
-
   const advanced = venue.table_management_enabled;
 
   return (
@@ -313,6 +247,12 @@ export function TableManagementSection({ venue, onUpdate, isAdmin, layoutSaveCou
                   </ul>
                 </div>
               </div>
+              <p className="mt-4 text-xs leading-relaxed text-slate-600">
+                <strong className="font-semibold text-slate-800">Covers and tables:</strong>{' '}
+                Covers cap how many guests you can take overall at one time. With advanced table management, a booking is
+                only offered when there is also a suitable free table or combination for that party. Spare capacity alone is
+                not enough if nothing can physically seat them.
+              </p>
             </div>
           </details>
 
@@ -390,38 +330,6 @@ export function TableManagementSection({ venue, onUpdate, isAdmin, layoutSaveCou
       </div>
 
       {notice && <p className="mt-3 text-xs text-slate-600">{notice}</p>}
-
-      {venue.table_management_enabled && (
-      <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
-        <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500">
-          Combination Detection Distance
-        </label>
-        <p className="mt-1 text-xs text-slate-500">
-          How close two tables need to be on your floor plan to be suggested as a combination. Default is 25 when you first turn on advanced table management.
-        </p>
-        <div className="mt-2 flex items-center gap-2">
-          <NumericInput
-            min={5}
-            max={300}
-            value={thresholdDraft}
-            onChange={(v) => setThresholdDraft(v)}
-            disabled={!isAdmin || thresholdSaving}
-            className="w-24 rounded-md border border-slate-300 px-2 py-1.5 text-sm"
-          />
-          <button
-            type="button"
-            onClick={saveThreshold}
-            disabled={!isAdmin || thresholdSaving || recalcLoading}
-            className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60"
-          >
-            {thresholdSaving || recalcLoading ? 'Saving…' : 'Save'}
-          </button>
-          {recalcResult && <p className="text-xs text-slate-500">{recalcResult}</p>}
-        </div>
-
-        <AdjacencyPreview threshold={thresholdDraft} refreshKey={layoutSaveCount} />
-      </div>
-      )}
 
       {showEnableAssignDialog && (
         <div className="mt-4 rounded-lg border border-brand-200 bg-brand-50 p-4">

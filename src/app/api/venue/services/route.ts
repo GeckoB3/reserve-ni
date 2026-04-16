@@ -4,6 +4,7 @@ import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { z } from 'zod';
 import { detectOverlaps, formatOverlapWarning } from '@/lib/service-overlap';
+import { getDefaultAreaIdForVenue } from '@/lib/areas/resolve-default-area';
 
 const serviceSchema = z.object({
   name: z.string().min(1).max(100),
@@ -13,31 +14,42 @@ const serviceSchema = z.object({
   last_booking_time: z.string().regex(/^\d{2}:\d{2}$/),
   is_active: z.boolean().optional(),
   sort_order: z.number().int().optional(),
+  area_id: z.string().uuid().optional(),
 });
 
-async function getOverlapWarnings(venueId: string): Promise<string[]> {
+async function getOverlapWarnings(venueId: string, areaId?: string | null): Promise<string[]> {
   const admin = getSupabaseAdminClient();
-  const { data } = await admin
+  let q = admin
     .from('venue_services')
     .select('name, days_of_week, start_time, end_time, is_active')
     .eq('venue_id', venueId);
+  if (areaId) {
+    q = q.eq('area_id', areaId);
+  }
+  const { data } = await q;
   if (!data || data.length < 2) return [];
   return detectOverlaps(data).map(formatOverlapWarning);
 }
 
-/** GET /api/venue/services - list services for the authenticated user's venue. */
-export async function GET() {
+/** GET /api/venue/services - list services for the authenticated user's venue. Optional `area_id` filters dining areas. */
+export async function GET(request: NextRequest) {
   try {
     const supabase = await createClient();
     const staff = await getVenueStaff(supabase);
     if (!staff) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
 
+    const areaId = request.nextUrl.searchParams.get('area_id');
+
     const admin = getSupabaseAdminClient();
-    const { data, error } = await admin
+    let query = admin
       .from('venue_services')
       .select('*')
       .eq('venue_id', staff.venue_id)
       .order('sort_order', { ascending: true });
+    if (areaId) {
+      query = query.eq('area_id', areaId);
+    }
+    const { data, error } = await query;
 
     if (error) {
       console.error('GET /api/venue/services failed:', error);
@@ -66,9 +78,15 @@ export async function POST(request: NextRequest) {
     }
 
     const admin = getSupabaseAdminClient();
+    const { area_id: bodyAreaId, ...serviceFields } = parsed.data;
+    const areaId = bodyAreaId ?? (await getDefaultAreaIdForVenue(admin, staff.venue_id));
+    if (!areaId) {
+      return NextResponse.json({ error: 'No dining area configured for this venue' }, { status: 400 });
+    }
+
     const { data, error } = await admin
       .from('venue_services')
-      .insert({ venue_id: staff.venue_id, ...parsed.data })
+      .insert({ venue_id: staff.venue_id, ...serviceFields, area_id: areaId })
       .select('*')
       .single();
 
@@ -77,7 +95,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to create service' }, { status: 500 });
     }
 
-    const overlapWarnings = await getOverlapWarnings(staff.venue_id);
+    const overlapWarnings = await getOverlapWarnings(staff.venue_id, areaId);
     return NextResponse.json({ service: data, overlapWarnings }, { status: 201 });
   } catch (err) {
     console.error('POST /api/venue/services failed:', err);
@@ -111,7 +129,10 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to update service' }, { status: 500 });
     }
 
-    const overlapWarnings = await getOverlapWarnings(staff.venue_id);
+    const overlapWarnings = await getOverlapWarnings(
+      staff.venue_id,
+      (data as { area_id?: string | null }).area_id ?? null,
+    );
     return NextResponse.json({ service: data, overlapWarnings });
   } catch (err) {
     console.error('PATCH /api/venue/services failed:', err);

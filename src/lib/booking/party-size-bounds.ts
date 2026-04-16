@@ -6,12 +6,17 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 export async function resolvePartySizeBoundsForVenueServices(
   supabase: SupabaseClient,
   venueId: string,
+  areaId?: string | null,
 ): Promise<{ min: number; max: number }> {
-  const { data: activeServices } = await supabase
+  let servicesQuery = supabase
     .from('venue_services')
     .select('id')
     .eq('venue_id', venueId)
     .eq('is_active', true);
+  if (areaId) {
+    servicesQuery = servicesQuery.eq('area_id', areaId);
+  }
+  const { data: activeServices } = await servicesQuery;
   const serviceIds = (activeServices ?? []).map((s) => s.id);
   let minParty = 1;
   let maxParty = 50;

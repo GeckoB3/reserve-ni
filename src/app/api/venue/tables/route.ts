@@ -4,6 +4,8 @@ import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 import { BOOKING_ACTIVE_STATUSES } from '@/lib/table-management/constants';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
+import { getDefaultAreaIdForVenue } from '@/lib/areas/resolve-default-area';
+import { getSupabaseAdminClient } from '@/lib/supabase';
 
 const TABLE_TYPE_VALUES = ['Regular', 'High-Top', 'Counter', 'Bar', 'Outdoor'] as const;
 
@@ -25,10 +27,12 @@ const tableSchema = z.object({
   server_section: z.string().max(100).nullable().optional(),
   is_active: z.boolean().default(true),
   polygon_points: z.array(z.object({ x: z.number(), y: z.number() })).nullable().optional(),
+  area_id: z.string().uuid().optional(),
 });
 
 const batchSchema = z.object({
-  tables: z.array(tableSchema).min(1).max(100),
+  tables: z.array(tableSchema.omit({ area_id: true })).min(1).max(100),
+  area_id: z.string().uuid().optional(),
 });
 
 const updateSchema = z.object({
@@ -74,16 +78,18 @@ async function hasFutureAssignedBookings(
   return (count ?? 0) > 0;
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   const supabase = await createClient();
   const staff = await getVenueStaff(supabase);
   if (!staff) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
 
-  const { data: tables, error } = await staff.db
-    .from('venue_tables')
-    .select('*')
-    .eq('venue_id', staff.venue_id)
-    .order('sort_order');
+  const areaId = request.nextUrl.searchParams.get('area_id');
+
+  let tblQuery = staff.db.from('venue_tables').select('*').eq('venue_id', staff.venue_id);
+  if (areaId) {
+    tblQuery = tblQuery.eq('area_id', areaId);
+  }
+  const { data: tables, error } = await tblQuery.order('sort_order');
 
   if (error) {
     console.error('GET /api/venue/tables failed:', error);
@@ -124,8 +130,15 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid request', details: parsed.error.flatten() }, { status: 400 });
     }
 
+    const admin = getSupabaseAdminClient();
+    const batchAreaId = parsed.data.area_id ?? (await getDefaultAreaIdForVenue(admin, staff.venue_id));
+    if (!batchAreaId) {
+      return NextResponse.json({ error: 'No dining area configured for this venue' }, { status: 400 });
+    }
+
     const inserts = parsed.data.tables.map((t, i) => ({
       venue_id: staff.venue_id,
+      area_id: batchAreaId,
       ...t,
       sort_order: t.sort_order || i,
     }));
@@ -148,9 +161,16 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Invalid request', details: parsed.error.flatten() }, { status: 400 });
   }
 
+  const admin = getSupabaseAdminClient();
+  const { area_id: rowAreaId, ...tableFields } = parsed.data;
+  const areaId = rowAreaId ?? (await getDefaultAreaIdForVenue(admin, staff.venue_id));
+  if (!areaId) {
+    return NextResponse.json({ error: 'No dining area configured for this venue' }, { status: 400 });
+  }
+
   const { data, error } = await staff.db
     .from('venue_tables')
-    .insert({ venue_id: staff.venue_id, ...parsed.data })
+    .insert({ venue_id: staff.venue_id, area_id: areaId, ...tableFields })
     .select('*')
     .single();
 

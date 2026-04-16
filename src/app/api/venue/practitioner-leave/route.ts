@@ -10,6 +10,7 @@ import { getSupabaseAdminClient } from '@/lib/supabase';
 import { z } from 'zod';
 
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+const hhmm = z.string().regex(/^\d{2}:\d{2}$/);
 
 const postSchema = z
   .object({
@@ -19,10 +20,12 @@ const postSchema = z
     end_date: isoDate,
     leave_type: z.enum(['annual', 'sick', 'other']),
     notes: z.string().max(500).optional().nullable(),
+    unavailable_start_time: z.union([hhmm, z.null()]).optional(),
+    unavailable_end_time: z.union([hhmm, z.null()]).optional(),
   })
   .refine((d) => d.end_date >= d.start_date, { message: 'End date must be on or after start date' })
   .refine((d) => Boolean(d.practitioner_id) || d.apply_to_all_active === true, {
-    message: 'Choose a team member or select “whole team”',
+    message: 'Choose a calendar or select all calendars',
   });
 
 const patchSchema = z.object({
@@ -31,7 +34,24 @@ const patchSchema = z.object({
   end_date: isoDate.optional(),
   leave_type: z.enum(['annual', 'sick', 'other']).optional(),
   notes: z.union([z.string().max(500), z.null()]).optional(),
+  unavailable_start_time: z.union([hhmm, z.null()]).optional(),
+  unavailable_end_time: z.union([hhmm, z.null()]).optional(),
 });
+
+/** Both null = full day; both HH:mm = partial; mismatched is invalid. */
+function normalizeUnavailableTimePair(
+  start: string | null | undefined,
+  end: string | null | undefined,
+): { ok: true; start: string | null; end: string | null } | { ok: false; error: string } {
+  const s = start === undefined ? null : start;
+  const e = end === undefined ? null : end;
+  if (s === null && e === null) return { ok: true, start: null, end: null };
+  if (s !== null && e !== null) {
+    if (s >= e) return { ok: false, error: 'End time must be after start time' };
+    return { ok: true, start: s, end: e };
+  }
+  return { ok: false, error: 'Provide both start and end times, or neither for a full day' };
+}
 
 /** GET ?from=YYYY-MM-DD&to=YYYY-MM-DD&practitioner_id=optional */
 export async function GET(request: NextRequest) {
@@ -58,7 +78,7 @@ export async function GET(request: NextRequest) {
     let query = admin
       .from('practitioner_leave_periods')
       .select(
-        'id, practitioner_id, start_date, end_date, leave_type, notes, created_at, practitioner:practitioners(name)',
+        'id, practitioner_id, start_date, end_date, leave_type, notes, created_at, unavailable_start_time, unavailable_end_time, practitioner:practitioners(name)',
       )
       .eq('venue_id', staff.venue_id)
       .lte('start_date', to)
@@ -76,7 +96,7 @@ export async function GET(request: NextRequest) {
           staff.venue_id,
           staff,
           filterPractitionerId,
-          'You can only view time off for calendars assigned to your account.',
+          'You can only view unavailability for calendars assigned to your account.',
         );
         if (!access.ok) {
           return NextResponse.json({ error: access.error }, { status: 403 });
@@ -92,7 +112,7 @@ export async function GET(request: NextRequest) {
         .eq('venue_id', staff.venue_id)
         .maybeSingle();
       if (!pRow) {
-        return NextResponse.json({ error: 'Practitioner not found' }, { status: 404 });
+        return NextResponse.json({ error: 'Calendar not found' }, { status: 404 });
       }
     }
 
@@ -104,20 +124,36 @@ export async function GET(request: NextRequest) {
 
     if (error) {
       console.error('GET /api/venue/practitioner-leave failed:', error);
-      return NextResponse.json({ error: 'Failed to load leave' }, { status: 500 });
+      return NextResponse.json({ error: 'Failed to load unavailability' }, { status: 500 });
     }
 
     const periods = (data ?? []).map((row: Record<string, unknown>) => {
       const pr = row.practitioner as { name?: string } | null;
+      const ust = row.unavailable_start_time;
+      const uen = row.unavailable_end_time;
+      const startT =
+        typeof ust === 'string'
+          ? ust.slice(0, 5)
+          : ust instanceof Date
+            ? ust.toISOString().slice(11, 16)
+            : null;
+      const endT =
+        typeof uen === 'string'
+          ? uen.slice(0, 5)
+          : uen instanceof Date
+            ? uen.toISOString().slice(11, 16)
+            : null;
       return {
         id: row.id,
         practitioner_id: row.practitioner_id,
-        practitioner_name: pr?.name ?? 'Team member',
+        practitioner_name: pr?.name ?? 'Calendar',
         start_date: row.start_date,
         end_date: row.end_date,
         leave_type: row.leave_type,
         notes: row.notes,
         created_at: row.created_at,
+        unavailable_start_time: startT,
+        unavailable_end_time: endT,
       };
     });
 
@@ -141,7 +177,21 @@ export async function POST(request: NextRequest) {
     }
 
     const admin = getSupabaseAdminClient();
-    const { practitioner_id, apply_to_all_active, start_date, end_date, leave_type, notes } = parsed.data;
+    const {
+      practitioner_id,
+      apply_to_all_active,
+      start_date,
+      end_date,
+      leave_type,
+      notes,
+      unavailable_start_time: ustIn,
+      unavailable_end_time: uenIn,
+    } = parsed.data;
+
+    const timeNorm = normalizeUnavailableTimePair(ustIn, uenIn);
+    if (!timeNorm.ok) {
+      return NextResponse.json({ error: timeNorm.error }, { status: 400 });
+    }
 
     if (staff.role !== 'admin') {
       const scope = await requireManagedCalendarIds(admin, staff.venue_id, staff);
@@ -149,14 +199,14 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: scope.error }, { status: 403 });
       }
       if (apply_to_all_active) {
-        return NextResponse.json({ error: 'Only admins can add whole-team time off' }, { status: 403 });
+        return NextResponse.json({ error: 'Only admins can add unavailability for all calendars' }, { status: 403 });
       }
       const access = await requireManagedCalendarAccess(
         admin,
         staff.venue_id,
         staff,
         practitioner_id,
-        'You can only add time off for calendars assigned to your account.',
+        'You can only add unavailability for calendars assigned to your account.',
       );
       if (!access.ok) {
         return NextResponse.json({ error: access.error }, { status: 403 });
@@ -169,12 +219,14 @@ export async function POST(request: NextRequest) {
           end_date,
           leave_type,
           notes: notes?.trim() ?? null,
+          unavailable_start_time: timeNorm.start,
+          unavailable_end_time: timeNorm.end,
         },
       ];
       const { data, error } = await admin.from('practitioner_leave_periods').insert(rows).select('id');
       if (error) {
         console.error('POST /api/venue/practitioner-leave (staff) failed:', error);
-        return NextResponse.json({ error: 'Failed to save leave' }, { status: 500 });
+        return NextResponse.json({ error: 'Failed to save unavailability' }, { status: 500 });
       }
       return NextResponse.json(
         { created: data?.length ?? 0, ids: (data ?? []).map((r: { id: string }) => r.id) },
@@ -193,11 +245,11 @@ export async function POST(request: NextRequest) {
         .eq('is_active', true);
       if (prErr) {
         console.error('POST practitioner-leave list practitioners:', prErr);
-        return NextResponse.json({ error: 'Failed to resolve team members' }, { status: 500 });
+        return NextResponse.json({ error: 'Failed to resolve calendars' }, { status: 500 });
       }
       practitionerIds = (pracs ?? []).map((p: { id: string }) => p.id);
       if (practitionerIds.length === 0) {
-        return NextResponse.json({ error: 'No active team members to add leave for' }, { status: 400 });
+        return NextResponse.json({ error: 'No active calendars to add unavailability for' }, { status: 400 });
       }
     } else if (practitioner_id) {
       const { data: one, error: oneErr } = await admin
@@ -207,7 +259,7 @@ export async function POST(request: NextRequest) {
         .eq('venue_id', staff.venue_id)
         .maybeSingle();
       if (oneErr || !one) {
-        return NextResponse.json({ error: 'Team member not found' }, { status: 404 });
+        return NextResponse.json({ error: 'Calendar not found' }, { status: 404 });
       }
       practitionerIds = [practitioner_id];
     }
@@ -219,13 +271,15 @@ export async function POST(request: NextRequest) {
       end_date,
       leave_type,
       notes: notes?.trim() || null,
+      unavailable_start_time: timeNorm.start,
+      unavailable_end_time: timeNorm.end,
     }));
 
     const { data, error } = await admin.from('practitioner_leave_periods').insert(rows).select('id');
 
     if (error) {
       console.error('POST /api/venue/practitioner-leave failed:', error);
-      return NextResponse.json({ error: 'Failed to save leave' }, { status: 500 });
+      return NextResponse.json({ error: 'Failed to save unavailability' }, { status: 500 });
     }
 
     return NextResponse.json({ created: data?.length ?? 0, ids: (data ?? []).map((r: { id: string }) => r.id) }, { status: 201 });
@@ -241,15 +295,39 @@ export async function PATCH(request: NextRequest) {
     const staff = await getVenueStaff(supabase);
     if (!staff) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
 
-    const body = await request.json();
+    const body = await request.json() as Record<string, unknown>;
     const parsed = patchSchema.safeParse(body);
     if (!parsed.success) {
       return NextResponse.json({ error: 'Invalid request', details: parsed.error.flatten() }, { status: 400 });
     }
 
-    const { id, ...rawUpdates } = parsed.data;
+    const { id, ...patchRest } = parsed.data;
+    const hasUst = 'unavailable_start_time' in body;
+    const hasUen = 'unavailable_end_time' in body;
+    if (hasUst !== hasUen) {
+      return NextResponse.json(
+        { error: 'Include both unavailable_start_time and unavailable_end_time when changing times' },
+        { status: 400 },
+      );
+    }
+    let mergedUpdates: Record<string, unknown> = { ...patchRest };
+    if (hasUst && hasUen) {
+      const tnorm = normalizeUnavailableTimePair(
+        parsed.data.unavailable_start_time as string | null | undefined,
+        parsed.data.unavailable_end_time as string | null | undefined,
+      );
+      if (!tnorm.ok) {
+        return NextResponse.json({ error: tnorm.error }, { status: 400 });
+      }
+      mergedUpdates = {
+        ...mergedUpdates,
+        unavailable_start_time: tnorm.start,
+        unavailable_end_time: tnorm.end,
+      };
+    }
+
     const updates = Object.fromEntries(
-      Object.entries(rawUpdates).filter(([, v]) => v !== undefined),
+      Object.entries(mergedUpdates).filter(([, v]) => v !== undefined),
     ) as Record<string, unknown>;
     if (Object.keys(updates).length === 0) {
       return NextResponse.json({ error: 'No fields to update' }, { status: 400 });
@@ -277,14 +355,14 @@ export async function PATCH(request: NextRequest) {
         .eq('venue_id', staff.venue_id)
         .maybeSingle();
       if (leaveErr || !leaveRow) {
-        return NextResponse.json({ error: 'Leave entry not found' }, { status: 404 });
+        return NextResponse.json({ error: 'Entry not found' }, { status: 404 });
       }
       const access = await requireManagedCalendarAccess(
         admin,
         staff.venue_id,
         staff,
         leaveRow.practitioner_id,
-        'You can only edit time off on calendars assigned to your account.',
+        'You can only edit unavailability on calendars assigned to your account.',
       );
       if (!access.ok) {
         return NextResponse.json({ error: access.error }, { status: 403 });
@@ -301,7 +379,7 @@ export async function PATCH(request: NextRequest) {
       .maybeSingle();
 
     if (exErr || !existing) {
-      return NextResponse.json({ error: 'Leave entry not found' }, { status: 404 });
+      return NextResponse.json({ error: 'Entry not found' }, { status: 404 });
     }
 
     const nextStart = (updates.start_date as string | undefined) ?? (existing as { start_date: string }).start_date;
@@ -320,7 +398,7 @@ export async function PATCH(request: NextRequest) {
 
     if (error) {
       console.error('PATCH /api/venue/practitioner-leave failed:', error);
-      return NextResponse.json({ error: 'Failed to update leave' }, { status: 500 });
+      return NextResponse.json({ error: 'Failed to update unavailability' }, { status: 500 });
     }
 
     return NextResponse.json(data);
@@ -354,14 +432,14 @@ export async function DELETE(request: NextRequest) {
         .eq('venue_id', staff.venue_id)
         .maybeSingle();
       if (leaveErr || !leaveRow) {
-        return NextResponse.json({ error: 'Leave entry not found' }, { status: 404 });
+        return NextResponse.json({ error: 'Entry not found' }, { status: 404 });
       }
       const access = await requireManagedCalendarAccess(
         admin,
         staff.venue_id,
         staff,
         leaveRow.practitioner_id,
-        'You can only delete time off on calendars assigned to your account.',
+        'You can only delete unavailability on calendars assigned to your account.',
       );
       if (!access.ok) {
         return NextResponse.json({ error: access.error }, { status: 403 });
@@ -378,7 +456,7 @@ export async function DELETE(request: NextRequest) {
 
     if (error) {
       console.error('DELETE /api/venue/practitioner-leave failed:', error);
-      return NextResponse.json({ error: 'Failed to delete leave' }, { status: 500 });
+      return NextResponse.json({ error: 'Failed to delete unavailability' }, { status: 500 });
     }
 
     return NextResponse.json({ success: true });

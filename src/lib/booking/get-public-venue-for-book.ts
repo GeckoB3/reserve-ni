@@ -1,6 +1,7 @@
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { resolveVenueMode } from '@/lib/venue-mode';
 import type { VenuePublic } from '@/components/booking/types';
+import { listActiveAreasForVenue } from '@/lib/areas/resolve-default-area';
 
 /** Loads a venue for the public /book/[slug] pages (admin client; slug is public). */
 export async function getPublicVenueForBookBySlug(slug: string): Promise<VenuePublic | null> {
@@ -8,7 +9,7 @@ export async function getPublicVenueForBookBySlug(slug: string): Promise<VenuePu
   const { data, error } = await supabase
     .from('venues')
     .select(
-      'id, name, slug, cover_photo_url, address, phone, website_url, deposit_config, booking_rules, opening_hours, timezone, booking_model, enabled_models, active_booking_models, terminology, currency',
+      'id, name, slug, cover_photo_url, address, phone, website_url, deposit_config, booking_rules, opening_hours, timezone, booking_model, enabled_models, active_booking_models, terminology, currency, public_booking_area_mode',
     )
     .eq('slug', slug)
     .single();
@@ -21,6 +22,7 @@ export async function getPublicVenueForBookBySlug(slug: string): Promise<VenuePu
   (data as VenuePublic).terminology = venueMode.terminology;
 
   if (venueMode.bookingModel === 'table_reservation') {
+    (data as VenuePublic).areas = await listActiveAreasForVenue(supabase, data.id);
     if (venueMode.availabilityEngine === 'service') {
       const { data: restriction } = await supabase
         .from('booking_restrictions')

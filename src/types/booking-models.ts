@@ -23,15 +23,17 @@ export interface VenueTerminology {
   client: string;   // Guest / Client / Patient / Member / Booker
   booking: string;  // Reservation / Appointment / Booking / Session
   staff: string;    // Staff / Barber / Stylist / Instructor / Manager
+  /** Dining section label (e.g. "Area", "Room", "Section") — table_reservation. */
+  area?: string;
 }
 
 export const DEFAULT_TERMINOLOGY: Record<BookingModel, VenueTerminology> = {
-  table_reservation:        { client: 'Guest',  booking: 'Reservation',  staff: 'Staff' },
-  practitioner_appointment: { client: 'Client', booking: 'Appointment',  staff: 'Staff' },
-  unified_scheduling:       { client: 'Client', booking: 'Appointment',  staff: 'Staff' },
-  event_ticket:             { client: 'Guest',  booking: 'Booking',      staff: 'Host' },
-  class_session:            { client: 'Member', booking: 'Booking',      staff: 'Instructor' },
-  resource_booking:         { client: 'Booker', booking: 'Booking',      staff: 'Manager' },
+  table_reservation:        { client: 'Guest',  booking: 'Reservation',  staff: 'Staff', area: 'Area' },
+  practitioner_appointment: { client: 'Client', booking: 'Appointment',  staff: 'Staff', area: 'Area' },
+  unified_scheduling:       { client: 'Client', booking: 'Appointment',  staff: 'Staff', area: 'Area' },
+  event_ticket:             { client: 'Guest',  booking: 'Booking',      staff: 'Host', area: 'Area' },
+  class_session:            { client: 'Member', booking: 'Booking',      staff: 'Instructor', area: 'Area' },
+  resource_booking:         { client: 'Booker', booking: 'Booking',      staff: 'Manager', area: 'Area' },
 };
 
 // ---------------------------------------------------------------------------
@@ -80,7 +82,10 @@ export interface Practitioner {
   parallel_clients?: number;
 }
 
-/** Dated time off (annual / sick) - stored in `practitioner_leave_periods`. */
+/**
+ * Full-day calendar unavailability — stored in `practitioner_leave_periods`.
+ * Enum values are legacy keys: map in UI to Closed / Unavailable / Other.
+ */
 export type PractitionerLeaveType = 'annual' | 'sick' | 'other';
 
 export interface PractitionerLeavePeriod {
@@ -92,6 +97,9 @@ export interface PractitionerLeavePeriod {
   leave_type: PractitionerLeaveType;
   notes: string | null;
   created_at: string;
+  /** When set with `unavailable_end_time`, blocks only this clock window on each date in the range (HH:mm). */
+  unavailable_start_time?: string | null;
+  unavailable_end_time?: string | null;
 }
 
 export interface AppointmentService {

@@ -41,6 +41,7 @@ interface Slot {
   start_time: string;
   end_time?: string;
   available_covers: number;
+  area_id?: string;
 }
 
 interface Suggestion {
@@ -75,34 +76,18 @@ export function UnifiedBookingForm({
 }: UnifiedBookingFormProps) {
   const { addToast } = useToast();
   const [venueCurrencyResolved, setVenueCurrencyResolved] = useState<string | null>(venueCurrencyProp ?? null);
-
-  useEffect(() => {
-    if (venueCurrencyProp != null) {
-      setVenueCurrencyResolved(venueCurrencyProp);
-      return;
-    }
-    let cancelled = false;
-    void fetch('/api/venue')
-      .then((r) => r.json())
-      .then((data: { currency?: string }) => {
-        if (!cancelled && data?.currency) setVenueCurrencyResolved(data.currency);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [venueCurrencyProp]);
-
-  const phoneDefaultCountry: CountryCode = useMemo(
-    () => defaultPhoneCountryForVenueCurrency(venueCurrencyResolved ?? undefined),
-    [venueCurrencyResolved],
-  );
-
   const [date, setDate] = useState(initialDate ?? new Date().toISOString().slice(0, 10));
   const [partySize, setPartySize] = useState(2);
   const [slots, setSlots] = useState<Slot[]>([]);
   const [loadingSlots, setLoadingSlots] = useState(false);
   const [selectedTime, setSelectedTime] = useState(initialTime ?? '');
+  /** Disambiguates duplicate clock times when combined multi-area availability returns one row per area. */
+  const [selectedSlotKey, setSelectedSlotKey] = useState<string | null>(null);
+  const [publicBookingAreaMode, setPublicBookingAreaMode] = useState<'auto' | 'manual'>('auto');
+  const [diningAreas, setDiningAreas] = useState<Array<{ id: string; name: string; colour: string }>>([]);
+  const [staffAreaId, setStaffAreaId] = useState<string | null>(null);
+  /** Avoid fetching `/api/booking/availability` with the wrong `area_id` before venue + areas are loaded. */
+  const [tableBookingPrefsReady, setTableBookingPrefsReady] = useState(false);
 
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
@@ -117,6 +102,8 @@ export function UnifiedBookingForm({
   const [manualTableIds, setManualTableIds] = useState<string[]>([]);
   const [occupiedTableIds, setOccupiedTableIds] = useState<string[]>([]);
   const [prefetchedTables, setPrefetchedTables] = useState<MiniFloorTableRow[] | null>(null);
+  /** Which dining area layout to show on the floor-plan tab (multi-area venues). */
+  const [floorPlanViewAreaId, setFloorPlanViewAreaId] = useState<string | null>(null);
 
   const [requireDeposit, setRequireDeposit] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -135,6 +122,79 @@ export function UnifiedBookingForm({
   const nameRef = useRef<HTMLInputElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+
+  const phoneDefaultCountry: CountryCode = useMemo(
+    () => defaultPhoneCountryForVenueCurrency(venueCurrencyResolved ?? undefined),
+    [venueCurrencyResolved],
+  );
+
+  const showStaffAreaTabs = useMemo(
+    () => diningAreas.length > 1 && publicBookingAreaMode === 'manual',
+    [diningAreas.length, publicBookingAreaMode],
+  );
+
+  useEffect(() => {
+    if (venueCurrencyProp != null) {
+      setVenueCurrencyResolved(venueCurrencyProp);
+      return;
+    }
+    let cancelled = false;
+    void fetch('/api/venue')
+      .then((r) => r.json())
+      .then((data: { currency?: string }) => {
+        if (!cancelled && data?.currency) setVenueCurrencyResolved(data.currency);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [venueCurrencyProp]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void Promise.all([
+      fetch('/api/venue').then((r) => r.json()),
+      fetch('/api/venue/areas').then((r) => (r.ok ? r.json() : { areas: [] })),
+    ])
+      .then(([v, a]: [Record<string, unknown>, { areas?: Array<{ id: string; name: string; colour: string; is_active: boolean }> }]) => {
+        if (cancelled) return;
+        setPublicBookingAreaMode(v.public_booking_area_mode === 'manual' ? 'manual' : 'auto');
+        const active = (a.areas ?? []).filter((x) => x.is_active);
+        const mapped = active.map(({ id, name, colour }) => ({ id, name, colour }));
+        setDiningAreas(mapped);
+        if (mapped.length > 1 && v.public_booking_area_mode === 'manual') {
+          setStaffAreaId((prev) => prev ?? mapped[0]!.id);
+        }
+        setTableBookingPrefsReady(true);
+      })
+      .catch(() => {
+        if (!cancelled) setTableBookingPrefsReady(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (diningAreas.length === 0) return;
+    setFloorPlanViewAreaId((prev) => {
+      if (prev && diningAreas.some((a) => a.id === prev)) return prev;
+      return diningAreas[0]!.id;
+    });
+  }, [diningAreas]);
+
+  useEffect(() => {
+    if (publicBookingAreaMode === 'manual' && staffAreaId) {
+      setFloorPlanViewAreaId(staffAreaId);
+    }
+  }, [publicBookingAreaMode, staffAreaId]);
+
+  useEffect(() => {
+    if (publicBookingAreaMode === 'manual') return;
+    if (!selectedSlotKey || slots.length === 0) return;
+    const sl = slots.find((s) => s.key === selectedSlotKey);
+    if (sl?.area_id) setFloorPlanViewAreaId(sl.area_id);
+  }, [publicBookingAreaMode, selectedSlotKey, slots]);
 
   // Focus guest name when form opens
   useEffect(() => {
@@ -160,6 +220,13 @@ export function UnifiedBookingForm({
       setSlots([]);
       return;
     }
+    if (!tableBookingPrefsReady) {
+      return;
+    }
+    if (diningAreas.length > 1 && publicBookingAreaMode === 'manual' && !staffAreaId) {
+      setSlots([]);
+      return;
+    }
     setLoadingSlots(true);
     setSelectedTime(initialTime ?? '');
     setGridCenter('20:00');
@@ -173,18 +240,22 @@ export function UnifiedBookingForm({
 
       (async () => {
         try {
-          const url = `/api/booking/availability?venue_id=${encodeURIComponent(venueId)}&date=${encodeURIComponent(date)}&party_size=${partySize}`;
+          let url = `/api/booking/availability?venue_id=${encodeURIComponent(venueId)}&date=${encodeURIComponent(date)}&party_size=${partySize}`;
+          if (publicBookingAreaMode === 'manual' && staffAreaId) {
+            url += `&area_id=${encodeURIComponent(staffAreaId)}`;
+          }
           const res = await fetch(url, { signal: controller.signal });
           if (controller.signal.aborted) return;
           if (!res.ok) throw new Error('Failed to load times');
           const data = await res.json();
           const rawSlots: Slot[] = (data.slots ?? [])
-            .map((s: Record<string, unknown>) => ({
-              key: (s.key as string) ?? (s.start_time as string) ?? '',
+            .map((s: Record<string, unknown>, idx: number) => ({
+              key: (s.key as string) ?? `${String(s.start_time ?? '')}-${idx}`,
               label: (s.label as string) ?? (s.start_time as string)?.slice(0, 5) ?? '',
               start_time: (s.start_time as string) ?? '',
               end_time: (s.end_time as string) ?? undefined,
               available_covers: (s.available_covers as number) ?? 0,
+              area_id: typeof s.area_id === 'string' ? s.area_id : undefined,
             }))
             .filter((s: Slot) => s.start_time);
           if (!controller.signal.aborted) {
@@ -199,6 +270,10 @@ export function UnifiedBookingForm({
                 if (dist < bestDist) { best = s; bestDist = dist; }
               }
               setSelectedTime(best.start_time);
+              setSelectedSlotKey(best.key);
+            } else if (initialTime && rawSlots.length > 0) {
+              const m = rawSlots.find((s) => s.start_time.slice(0, 5) === initialTime.slice(0, 5));
+              if (m) setSelectedSlotKey(m.key);
             }
           }
         } catch (err) {
@@ -218,9 +293,9 @@ export function UnifiedBookingForm({
       if (abortRef.current) abortRef.current.abort();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [addToast, date, partySize, venueId]);
+  }, [addToast, date, partySize, venueId, publicBookingAreaMode, staffAreaId, tableBookingPrefsReady, diningAreas.length]);
 
-  // Pre-fetch tables when advanced mode is on so floor plan loads instantly
+  // Pre-fetch all tables when advanced mode is on so floor plan can switch areas without extra round-trips
   useEffect(() => {
     if (!advancedMode) return;
     let cancelled = false;
@@ -232,7 +307,9 @@ export function UnifiedBookingForm({
         if (!cancelled) setPrefetchedTables((payload.tables ?? []) as MiniFloorTableRow[]);
       } catch { /* non-critical */ }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [advancedMode]);
 
   // Fetch table suggestions when in advanced mode and time is selected
@@ -255,6 +332,9 @@ export function UnifiedBookingForm({
           party_size: String(partySize),
           duration_minutes: '90',
         });
+        if (publicBookingAreaMode === 'manual' && staffAreaId) {
+          params.set('area_id', staffAreaId);
+        }
         const res = await fetch(`/api/venue/tables/combinations/suggest?${params.toString()}`);
         if (cancelled) return;
         if (!res.ok) {
@@ -282,7 +362,7 @@ export function UnifiedBookingForm({
       }
     })();
     return () => { cancelled = true; };
-  }, [advancedMode, date, selectedTime, partySize]);
+  }, [advancedMode, date, selectedTime, partySize, publicBookingAreaMode, staffAreaId]);
 
   const selectedSuggestion = useMemo(
     () => suggestions.find((s) => `${s.source}:${s.table_ids.join('|')}` === selectedSuggestionKey) ?? null,
@@ -295,6 +375,16 @@ export function UnifiedBookingForm({
       return selectedSuggestion.table_ids;
     return null;
   }, [manualTableIds, selectedSuggestion, tableAssignMode]);
+
+  const tablesForFloorPlanPicker = useMemo(() => {
+    if (!prefetchedTables?.length) return null;
+    if (publicBookingAreaMode === 'manual' && staffAreaId) {
+      return prefetchedTables.filter((t) => t.area_id === staffAreaId);
+    }
+    if (diningAreas.length <= 1) return prefetchedTables;
+    if (!floorPlanViewAreaId) return prefetchedTables;
+    return prefetchedTables.filter((t) => t.area_id === floorPlanViewAreaId);
+  }, [prefetchedTables, diningAreas.length, floorPlanViewAreaId, publicBookingAreaMode, staffAreaId]);
 
   const phoneE164 = normalizeToE164(phone, phoneDefaultCountry);
   const canSubmit = Boolean(date && selectedTime && name.trim() && phoneE164 && !saving);
@@ -349,6 +439,7 @@ export function UnifiedBookingForm({
     setCalendarMonth(new Date(new Date().getFullYear(), new Date().getMonth(), 1));
     setSlots([]);
     setSelectedTime(initialTime ?? '');
+    setSelectedSlotKey(null);
     setName('');
     setPhone('');
     setEmail('');
@@ -376,6 +467,17 @@ export function UnifiedBookingForm({
 
     setSaving(true);
     try {
+      const slotForArea =
+        selectedSlotKey ? slots.find((s) => s.key === selectedSlotKey) : slots.find((s) => s.start_time === selectedTime);
+      let resolvedAreaId: string | undefined;
+      if (diningAreas.length > 1) {
+        if (publicBookingAreaMode === 'manual' && staffAreaId) {
+          resolvedAreaId = staffAreaId;
+        } else {
+          resolvedAreaId = slotForArea?.area_id;
+        }
+      }
+
       const createRes = await fetch('/api/venue/bookings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -389,6 +491,7 @@ export function UnifiedBookingForm({
           dietary_notes: dietaryNotes.trim() || undefined,
           special_requests: notes.trim() || undefined,
           require_deposit: requireDeposit,
+          ...(resolvedAreaId ? { area_id: resolvedAreaId } : {}),
         }),
       });
 
@@ -701,7 +804,13 @@ export function UnifiedBookingForm({
                     <button
                       key={t}
                       type="button"
-                      onClick={() => { setGridCenter(t); setSelectedTime(t); setOpenPanel(null); }}
+                      onClick={() => {
+                        setGridCenter(t);
+                        setSelectedTime(t);
+                        const match = slots.find((s) => s.start_time.slice(0, 5) === t.slice(0, 5));
+                        setSelectedSlotKey(match?.key ?? null);
+                        setOpenPanel(null);
+                      }}
                       className={`w-full rounded-md px-3 py-2 text-left text-sm font-semibold tabular-nums transition-all ${
                         gridCenter === t
                           ? 'bg-brand-600 text-white shadow-sm'
@@ -717,6 +826,30 @@ export function UnifiedBookingForm({
           </div>
         </div>
       </div>
+
+      {/* ── Dining area tabs (staff, multi-area manual mode) ── */}
+      {showStaffAreaTabs && (
+        <div className="flex flex-wrap gap-2 rounded-lg border border-slate-100 bg-slate-50/80 p-2 sm:rounded-xl">
+          {diningAreas.map((a) => (
+            <button
+              key={a.id}
+              type="button"
+              onClick={() => {
+                setStaffAreaId(a.id);
+                setSelectedSlotKey(null);
+              }}
+              className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-medium transition-colors sm:text-sm ${
+                staffAreaId === a.id
+                  ? 'border-brand-500 bg-brand-50 text-brand-900'
+                  : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
+              }`}
+            >
+              <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: a.colour || '#6366F1' }} />
+              {a.name}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* ── Available Times Panel ── */}
       <div>
@@ -743,13 +876,16 @@ export function UnifiedBookingForm({
             </p>
             <div className="grid grid-cols-3 gap-1.5 rounded-lg border border-slate-200 bg-slate-50/50 p-1.5 sm:gap-2 sm:rounded-xl sm:p-2.5">
               {nearbySlots.map((slot) => {
-                const isActive = selectedTime === slot.start_time;
+                const isActive = selectedSlotKey ? selectedSlotKey === slot.key : selectedTime === slot.start_time;
                 const tight = slot.available_covers <= partySize;
                 return (
                   <button
                     key={slot.key}
                     type="button"
-                    onClick={() => setSelectedTime(slot.start_time)}
+                    onClick={() => {
+                      setSelectedTime(slot.start_time);
+                      setSelectedSlotKey(slot.key);
+                    }}
                     className={`touch-manipulation rounded-md py-2.5 text-center text-xs font-semibold tabular-nums transition-all sm:rounded-lg sm:py-3 sm:text-sm ${
                       isActive
                         ? 'bg-brand-100 text-brand-700 ring-2 ring-brand-400'
@@ -758,7 +894,7 @@ export function UnifiedBookingForm({
                           : 'border border-slate-200 bg-white text-slate-700 hover:border-brand-300 hover:bg-brand-50'
                     }`}
                   >
-                    {slot.label}
+                    {slot.start_time.slice(0, 5)}
                   </button>
                 );
               })}
@@ -935,14 +1071,48 @@ export function UnifiedBookingForm({
           )}
 
           {tableAssignMode === 'floor' && (
-            <MiniFloorPlanPicker
-              tables={prefetchedTables}
-              selectedIds={manualTableIds}
-              onChange={setManualTableIds}
-              occupiedTableIds={occupiedTableIds}
-              partySize={partySize}
-              minHeight={220}
-            />
+            <>
+              {diningAreas.length > 1 && publicBookingAreaMode === 'auto' && (
+                <div
+                  className="mb-2 flex flex-wrap gap-1.5"
+                  role="tablist"
+                  aria-label="Floor plan dining area"
+                >
+                  {diningAreas.map((a) => {
+                    const active = floorPlanViewAreaId === a.id;
+                    return (
+                      <button
+                        key={a.id}
+                        type="button"
+                        role="tab"
+                        aria-selected={active}
+                        onClick={() => setFloorPlanViewAreaId(a.id)}
+                        className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                          active
+                            ? 'border-slate-800 bg-slate-900 text-white'
+                            : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                        }`}
+                      >
+                        <span
+                          className="h-2 w-2 shrink-0 rounded-full"
+                          style={{ background: a.colour || '#94a3b8' }}
+                          aria-hidden
+                        />
+                        {a.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+              <MiniFloorPlanPicker
+                tables={tablesForFloorPlanPicker}
+                selectedIds={manualTableIds}
+                onChange={setManualTableIds}
+                occupiedTableIds={occupiedTableIds}
+                partySize={partySize}
+                minHeight={220}
+              />
+            </>
           )}
         </div>
       )}

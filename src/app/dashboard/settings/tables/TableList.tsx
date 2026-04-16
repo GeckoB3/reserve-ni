@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { VenueTable, TableShape, TableType } from '@/types/table-management';
 import { getTableDimensions, TABLE_TYPES } from '@/types/table-management';
 import { NumericInput } from '@/components/ui/NumericInput';
@@ -11,6 +11,8 @@ interface Props {
   isAdmin: boolean;
   onRefresh: () => void;
   variant?: 'full' | 'covers';
+  /** When set, new tables are created in this dining area (multi-area venues). */
+  diningAreaId?: string | null;
 }
 
 const SHAPES: { value: TableShape; label: string }[] = [
@@ -44,8 +46,12 @@ const emptyTable: EditingTable = {
   is_active: true,
 };
 
-export function TableList({ tables, setTables, isAdmin, onRefresh, variant = 'full' }: Props) {
+export function TableList({ tables, setTables, isAdmin, onRefresh, variant = 'full', diningAreaId }: Props) {
   const isCovers = variant === 'covers';
+  const totalSeatingAcrossTables = useMemo(() => {
+    if (tables.length === 0) return null;
+    return tables.reduce((sum, t) => sum + t.max_covers, 0);
+  }, [tables]);
   const [editing, setEditing] = useState<EditingTable | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -102,6 +108,7 @@ export function TableList({ tables, setTables, isAdmin, onRefresh, variant = 'fu
             sort_order: tables.length,
             width: dims.width,
             height: dims.height,
+            ...(diningAreaId ? { area_id: diningAreaId } : {}),
           }),
         });
         if (!res.ok) {
@@ -168,7 +175,10 @@ export function TableList({ tables, setTables, isAdmin, onRefresh, variant = 'fu
       const res = await fetch('/api/venue/tables', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tables: newTables }),
+        body: JSON.stringify({
+          tables: newTables,
+          ...(diningAreaId ? { area_id: diningAreaId } : {}),
+        }),
       });
 
       if (!res.ok) {
@@ -201,6 +211,18 @@ export function TableList({ tables, setTables, isAdmin, onRefresh, variant = 'fu
 
   return (
     <div className="space-y-4">
+      <p className="text-sm text-slate-600">
+        {totalSeatingAcrossTables == null ? (
+          'No tables yet.'
+        ) : (
+          <>
+            Total seating across all tables:{' '}
+            <span className="font-semibold text-slate-900">{totalSeatingAcrossTables}</span>
+            {isCovers ? ' seats' : ' covers'}.
+          </>
+        )}
+      </p>
+
       {isAdmin && (
         <div className="flex gap-2">
           <button

@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/browser';
 import { parseDietaryNotes, hasAllergyKeywords } from '@/lib/day-sheet';
 import { useToast } from '@/components/ui/Toast';
@@ -73,6 +74,7 @@ interface DaySheetBooking {
   appointment_service_id?: string | null;
   guest_attendance_confirmed_at?: string | null;
   staff_attendance_confirmed_at?: string | null;
+  area_name?: string | null;
 }
 
 interface ActiveTable {
@@ -117,6 +119,8 @@ interface DaySheetData {
   no_show_grace_minutes: number;
   capacity_configured: boolean;
   active_tables?: ActiveTable[];
+  areas?: Array<{ id: string; name: string; colour: string }>;
+  selected_area_id?: string | null;
 }
 
 interface BookingDetail {
@@ -146,6 +150,9 @@ const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Frida
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
 const POLL_INTERVAL_MS = 30_000;
+
+const AREA_UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const STATUS_STYLE: Record<string, { dot: string; bg: string; text: string; ring: string }> = {
   Pending:   { dot: 'bg-amber-500',   bg: 'bg-amber-50',   text: 'text-amber-700',   ring: 'ring-amber-200' },
@@ -703,6 +710,8 @@ export function DaySheetView({
   enabledModels?: BookingModel[];
 }) {
   const { addToast } = useToast();
+  const router = useRouter();
+  const searchParams = useSearchParams();
 
   // Core state
   const [date, setDate] = useState(todayISO);
@@ -793,10 +802,50 @@ export function DaySheetView({
     return map;
   }, [data, activeTables, changeTableBookingId]);
 
+  const setAreaFilter = useCallback(
+    (value: string) => {
+      const next = new URLSearchParams(searchParams.toString());
+      if (!value) next.delete('area');
+      else next.set('area', value);
+      try {
+        window.localStorage.setItem(`daySheetArea:${venueId}`, value || '');
+      } catch {
+        /* ignore */
+      }
+      const qs = next.toString();
+      router.replace(qs ? `/dashboard/day-sheet?${qs}` : '/dashboard/day-sheet', { scroll: false });
+    },
+    [router, searchParams, venueId],
+  );
+
+  const daySheetAreaHydrated = useRef(false);
+  useEffect(() => {
+    if (daySheetAreaHydrated.current) return;
+    const fromUrl = searchParams.get('area');
+    if (fromUrl && AREA_UUID_RE.test(fromUrl)) {
+      daySheetAreaHydrated.current = true;
+      return;
+    }
+    try {
+      const saved = window.localStorage.getItem(`daySheetArea:${venueId}`);
+      if (saved && AREA_UUID_RE.test(saved)) {
+        const next = new URLSearchParams(searchParams.toString());
+        next.set('area', saved);
+        router.replace(`/dashboard/day-sheet?${next}`, { scroll: false });
+      }
+    } catch {
+      /* ignore */
+    }
+    daySheetAreaHydrated.current = true;
+  }, [router, searchParams, venueId]);
+
   // Fetch data
   const fetchDaySheet = useCallback(async (): Promise<boolean> => {
     try {
-      const res = await fetch(`/api/venue/day-sheet?date=${date}`);
+      const qs = new URLSearchParams({ date });
+      const a = searchParams.get('area');
+      if (a && AREA_UUID_RE.test(a)) qs.set('area', a);
+      const res = await fetch(`/api/venue/day-sheet?${qs}`);
       if (!res.ok) return false;
       const json = await res.json();
       setData(json);
@@ -807,7 +856,7 @@ export function DaySheetView({
     } finally {
       setLoading(false);
     }
-  }, [date]);
+  }, [date, searchParams]);
 
   useEffect(() => { setLoading(true); void fetchDaySheet(); }, [fetchDaySheet]);
 
@@ -1185,6 +1234,21 @@ export function DaySheetView({
 
       {/* Row 4 - filters (toolbar tools card, same as grid/floor filter strip) */}
       <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm print:hidden sm:flex-row sm:flex-wrap sm:items-center">
+        {bookingModel === 'table_reservation' && data.areas && data.areas.length > 1 && (
+          <select
+            value={searchParams.get('area') && data.areas.some((x) => x.id === searchParams.get('area')) ? searchParams.get('area')! : ''}
+            onChange={(e) => setAreaFilter(e.target.value)}
+            className="rounded-lg border border-slate-200 px-2.5 py-2 text-sm font-medium text-slate-700 focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+            aria-label="Filter by dining area"
+          >
+            <option value="">All areas</option>
+            {data.areas.map((ar) => (
+              <option key={ar.id} value={ar.id}>
+                {ar.name}
+              </option>
+            ))}
+          </select>
+        )}
         <select
           value={filters.periodKey}
           onChange={(e) => setFilters((f) => ({ ...f, periodKey: e.target.value }))}
@@ -1422,6 +1486,11 @@ export function DaySheetView({
                             <span className={`truncate text-sm font-medium ${b.status === 'Cancelled' ? 'line-through text-slate-400' : 'text-slate-900'}`}>
                               {b.guest_name}
                             </span>
+                            {b.area_name && (
+                              <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[9px] font-medium text-slate-600 print:hidden">
+                                {b.area_name}
+                              </span>
+                            )}
                             {isReturning && <span className="text-amber-500" title={`${ordinal(b.visit_count + 1)} visit`}>★</span>}
                             {b.internal_notes && <span className="text-slate-400" title="Staff notes">📝</span>}
                             {b.source === 'Walk-in' && <span className="rounded bg-slate-100 px-1 py-0.5 text-[9px] font-medium text-slate-500 print:hidden">Walk-in</span>}

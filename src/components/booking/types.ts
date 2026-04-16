@@ -24,8 +24,12 @@ export interface VenuePublic {
   active_booking_models?: BookingModel[];
   /** Normalised secondary models (C/D/E); from `venues.enabled_models`. */
   enabled_models?: BookingModel[];
-  terminology?: { client: string; booking: string; staff: string };
+  terminology?: { client: string; booking: string; staff: string; area?: string };
   currency?: string;
+  /** Guest booking: combined slots vs pick-area-first (multi-area table venues). */
+  public_booking_area_mode?: 'auto' | 'manual';
+  /** Active dining areas when `booking_model` is table_reservation. */
+  areas?: Array<{ id: string; name: string; colour: string; sort_order: number }>;
 }
 
 export interface DepositConfigPublic {
@@ -62,6 +66,9 @@ export interface AvailableSlot {
   cancellation_notice_hours?: number;
   limited?: boolean;
   available_bookings?: number;
+  area_id?: string;
+  area_name?: string;
+  area_colour?: string;
 }
 
 export interface ServiceGroup {

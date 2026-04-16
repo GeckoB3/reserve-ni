@@ -95,7 +95,15 @@ function parseTabQueryParam(raw: string | null): Tab | null {
   if (r === 'hours' || r === 'availability') return 'hours';
   if (r === 'team' || r === 'calendars') return 'team';
   if (r === 'breaks') return 'breaks';
-  if (r === 'daysoff' || r === 'time-off' || r === 'timeoff') return 'daysoff';
+  if (
+    r === 'daysoff' ||
+    r === 'time-off' ||
+    r === 'timeoff' ||
+    r === 'closures' ||
+    r === 'unavailability'
+  ) {
+    return 'daysoff';
+  }
   return null;
 }
 
@@ -103,7 +111,7 @@ const ALL_TABS: Array<{ key: Tab; label: string }> = [
   { key: 'team', label: 'Calendars' },
   { key: 'hours', label: 'Availability' },
   { key: 'breaks', label: 'Breaks' },
-  { key: 'daysoff', label: 'Time off' },
+  { key: 'daysoff', label: 'Closures' },
 ];
 
 const DAY_LABELS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
@@ -1027,12 +1035,12 @@ export function AppointmentAvailabilitySettings({
             </div>
           )}
 
-          {/* ─── Working Hours / Breaks / Time off ─── */}
+          {/* ─── Working Hours / Breaks / Calendar closures ─── */}
           {tab === 'daysoff' && (
             <div>
               {appointmentCalendars.length === 0 ? (
                 <div className="rounded-xl border border-slate-200 bg-white p-12 text-center">
-                  <p className="text-slate-500">Add team members first to plan time off.</p>
+                  <p className="text-slate-500">Add calendars first to set full-day closures and unavailability.</p>
                 </div>
               ) : (
                 <>
@@ -1042,9 +1050,8 @@ export function AppointmentAvailabilitySettings({
                     <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
                       <p className="font-medium">Legacy blocked dates</p>
                       <p className="mt-1 text-amber-900/90">
-                        Some team members still have dates saved under the older per-person “days off” list. Those
-                        dates still block booking. Use this calendar for new annual leave and sick leave so everything
-                        stays visible in one place.
+                        Some calendars still have dates in the older per-calendar “days off” list. Those dates still
+                        block booking. Add new blocks here so full-day unavailability stays visible in one place.
                       </p>
                     </div>
                   )}

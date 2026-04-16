@@ -23,6 +23,16 @@ const steps: Array<'date' | 'slot' | 'details' | 'payment' | 'confirmation'> = [
 const STEP_LABELS = ['Date', 'Time', 'Details', 'Payment', 'Done'];
 
 export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, accentColour }: BookingFlowProps) {
+  const areaList = venue.areas ?? [];
+  const showAreaTabs = useMemo(() => {
+    return areaList.length > 1 && venue.public_booking_area_mode === 'manual';
+  }, [areaList.length, venue.public_booking_area_mode]);
+
+  const [guestAreaId, setGuestAreaId] = useState<string | null>(() => {
+    if (venue.public_booking_area_mode !== 'manual' || areaList.length <= 1) return null;
+    return areaList[0]!.id;
+  });
+
   const [stepIndex, setStepIndex] = useState(0);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [slots, setSlots] = useState<AvailableSlot[]>([]);
@@ -66,12 +76,17 @@ export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, 
     setStepIndex((i) => Math.max(0, i - 1));
   }, []);
 
-  const fetchSlots = useCallback(async (date: string) => {
+  const fetchSlots = useCallback(async (date: string, areaOverride?: string | null) => {
     setSlotsLoading(true);
     setLargePartyRedirect(false);
     setLargePartyMessage(null);
     try {
-      const res = await fetch(`/api/booking/availability?venue_id=${encodeURIComponent(venue.id)}&date=${encodeURIComponent(date)}&party_size=${partySize}`);
+      let url = `/api/booking/availability?venue_id=${encodeURIComponent(venue.id)}&date=${encodeURIComponent(date)}&party_size=${partySize}`;
+      const areaForQuery = areaOverride !== undefined ? areaOverride : guestAreaId;
+      if (venue.public_booking_area_mode === 'manual' && areaForQuery) {
+        url += `&area_id=${encodeURIComponent(areaForQuery)}`;
+      }
+      const res = await fetch(url);
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
         throw new Error(j.error ?? 'Failed to load times');
@@ -87,7 +102,7 @@ export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, 
     } finally {
       setSlotsLoading(false);
     }
-  }, [venue.id, partySize]);
+  }, [venue.id, partySize, venue.public_booking_area_mode, guestAreaId]);
 
   const handleDateSelect = useCallback((date: string) => {
     setSelectedDate(date);
@@ -100,6 +115,17 @@ export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, 
     setSelectedSlot(slot);
     goNext();
   }, [goNext]);
+
+  const handleGuestAreaTabChange = useCallback(
+    (areaId: string) => {
+      setGuestAreaId(areaId);
+      setSelectedSlot(null);
+      if (selectedDate) {
+        fetchSlots(selectedDate, areaId).catch((e) => setError(e instanceof Error ? e.message : 'Failed to load'));
+      }
+    },
+    [selectedDate, fetchSlots],
+  );
 
   const handleDetailsSubmit = useCallback(async (details: GuestDetails) => {
     setGuestDetails(details);
@@ -122,6 +148,7 @@ export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, 
           occasion: details.occasion || undefined,
           source: embed ? 'widget' : 'booking_page',
           service_id: selectedSlot.service_id || undefined,
+          area_id: selectedSlot.area_id ?? guestAreaId ?? undefined,
         }),
       });
       const data = await res.json();
@@ -146,7 +173,7 @@ export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, 
     } finally {
       setSubmitting(false);
     }
-  }, [venue.id, selectedDate, selectedSlot, partySize, embed]);
+  }, [venue.id, selectedDate, selectedSlot, partySize, embed, guestAreaId]);
 
   const handlePaymentComplete = useCallback(async () => {
     if (!createResult?.booking_id) {
@@ -260,6 +287,12 @@ export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, 
             setSelectedSlot(null);
             fetchSlots(newDate).catch((e) => setError(e instanceof Error ? e.message : 'Failed to load'));
           }}
+          showAreaTabs={showAreaTabs}
+          areas={areaList}
+          selectedAreaId={guestAreaId}
+          onAreaChange={handleGuestAreaTabChange}
+          availabilityAreaId={showAreaTabs ? guestAreaId : null}
+          publicBookingAreaMode={venue.public_booking_area_mode}
         />
       )}
       {step === 'details' && selectedSlot && (

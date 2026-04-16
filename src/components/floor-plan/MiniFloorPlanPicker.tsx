@@ -26,6 +26,8 @@ export interface MiniFloorTableRow {
   height: number | null;
   rotation: number | null;
   is_active: boolean;
+  /** Dining area; used when filtering tables for multi-area venues. */
+  area_id?: string | null;
 }
 
 export interface MiniFloorPlanPickerProps {

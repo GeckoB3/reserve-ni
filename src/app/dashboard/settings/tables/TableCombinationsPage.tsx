@@ -2,7 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import dynamic from 'next/dynamic';
+import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/browser';
+import { AdjacencyPreview } from '@/app/dashboard/settings/sections/AdjacencyPreview';
+import { NumericInput } from '@/components/ui/NumericInput';
 import type { VenueTable, TableCombination } from '@/types/table-management';
 import type { BookingModel } from '@/types/booking-models';
 const MiniFloorPlanPicker = dynamic(() => import('@/components/floor-plan/MiniFloorPlanPicker'), {
@@ -40,6 +43,12 @@ interface Props {
    * When this value changes after saving settings, the auto-detected groups list is refetched.
    */
   combinationThreshold?: number;
+  /** Incremented when the floor plan layout is saved (Availability → Table Management). Refreshes adjacency preview. */
+  layoutSaveCount?: number;
+  /** Called after a successful save of `combination_threshold` so parent venue state can stay in sync. */
+  onCombinationThresholdSaved?: (value: number) => void;
+  /** Scope auto-detected groups, overrides, and layout preview to this dining area (Availability → Table Management). */
+  diningAreaId?: string | null;
 }
 
 export function TableCombinationsPage({
@@ -49,13 +58,21 @@ export function TableCombinationsPage({
   isAdmin,
   onRefresh,
   combinationThreshold,
+  layoutSaveCount = 0,
+  onCombinationThresholdSaved,
+  diningAreaId = null,
 }: Props) {
+  const router = useRouter();
   const [catalogLoading, setCatalogLoading] = useState(true);
   const [autoGroups, setAutoGroups] = useState<CatalogAutoGroup[]>([]);
-  const [threshold, setThreshold] = useState(80);
+  const [thresholdDraft, setThresholdDraft] = useState(combinationThreshold ?? 80);
+  const [thresholdSaving, setThresholdSaving] = useState(false);
+  const [recalcLoading, setRecalcLoading] = useState(false);
+  const [recalcError, setRecalcError] = useState<string | null>(null);
   const [previewIds, setPreviewIds] = useState<string[]>([]);
   const [howItWorksOpen, setHowItWorksOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [combinationsSubTab, setCombinationsSubTab] = useState<'auto' | 'custom'>('auto');
 
   const [modal, setModal] = useState<
     | { mode: 'auto'; group: CatalogAutoGroup }
@@ -63,25 +80,88 @@ export function TableCombinationsPage({
     | null
   >(null);
 
-  const loadCatalog = useCallback(async () => {
-    setCatalogLoading(true);
+  const loadCatalog = useCallback(async (options?: { silent?: boolean }) => {
+    const showSpinner = !options?.silent;
+    if (showSpinner) setCatalogLoading(true);
     try {
-      const catRes = await fetch('/api/venue/tables/combinations/catalog');
+      const qs = diningAreaId ? `?area_id=${encodeURIComponent(diningAreaId)}` : '';
+      const catRes = await fetch(`/api/venue/tables/combinations/catalog${qs}`);
       if (catRes.ok) {
         const data = await catRes.json();
         setAutoGroups(data.auto_groups ?? []);
-        setThreshold(data.combination_threshold ?? 80);
+        setThresholdDraft(data.combination_threshold ?? 80);
       }
     } catch (e) {
       console.error('loadCatalog', e);
     } finally {
-      setCatalogLoading(false);
+      if (showSpinner) setCatalogLoading(false);
     }
-  }, []);
+  }, [diningAreaId]);
 
   useEffect(() => {
     void loadCatalog();
   }, [loadCatalog, combinationThreshold]);
+
+  useEffect(() => {
+    if (combinationThreshold != null) {
+      setThresholdDraft(combinationThreshold);
+    }
+  }, [combinationThreshold]);
+
+  const recalculateAdjacency = useCallback(async () => {
+    if (!isAdmin) return;
+    setRecalcLoading(true);
+    setRecalcError(null);
+    try {
+      const res = await fetch('/api/venue/tables/combinations/recalculate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(diningAreaId ? { area_id: diningAreaId } : {}),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setRecalcError((data as { error?: string }).error ?? 'Failed to recalculate adjacency.');
+        return;
+      }
+      await loadCatalog({ silent: true });
+    } catch {
+      setRecalcError('Failed to recalculate adjacency.');
+    } finally {
+      setRecalcLoading(false);
+    }
+  }, [isAdmin, loadCatalog, diningAreaId]);
+
+  async function saveThreshold() {
+    if (!isAdmin || thresholdSaving) return;
+    setThresholdSaving(true);
+    setRecalcError(null);
+    try {
+      const res = await fetch('/api/venue/tables/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ combination_threshold: thresholdDraft }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setToast((data as { error?: string }).error ?? 'Failed to save combination threshold.');
+        return;
+      }
+      onCombinationThresholdSaved?.(thresholdDraft);
+      router.refresh();
+      // Recalculate + refetch catalog so auto-detected counts and list use the new threshold.
+      await recalculateAdjacency();
+      setToast('Automatic table combinations updated.');
+    } catch {
+      setToast('Failed to save combination threshold.');
+    } finally {
+      setThresholdSaving(false);
+    }
+  }
+
+  useEffect(() => {
+    if (layoutSaveCount === 0) return;
+    void recalculateAdjacency();
+  }, [layoutSaveCount, recalculateAdjacency]);
 
   useEffect(() => {
     const supabase = createClient();
@@ -138,7 +218,10 @@ export function TableCombinationsPage({
     const res = await fetch('/api/venue/tables/combinations/auto-overrides', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+      body: JSON.stringify({
+        ...body,
+        ...(diningAreaId ? { area_id: diningAreaId } : {}),
+      }),
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
@@ -163,9 +246,8 @@ export function TableCombinationsPage({
           Control how tables can be joined to seat larger parties.
         </p>
         <p className="mt-2 text-sm text-slate-500">
-          ReserveNI automatically detects which tables can combine based on their position in your floor plan (gap ≤{' '}
-          {threshold}px). Use this page to disable auto-detected combinations, customise capacity or rules, or add custom
-          combinations.
+          ReserveNI automatically detects which tables can combine based on their position in your floor plan. Use this page
+          to adjust auto-detected combinations, or add custom combinations.
         </p>
         <button
           type="button"
@@ -178,206 +260,289 @@ export function TableCombinationsPage({
           <div className="mt-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
             <p>
               Single tables are tried first. If none fit the party size, the system considers adjacent table groups (2–4
-              tables) using your floor plan layout. Custom combinations from the list below are merged with the same
-              rules. Manual entries override auto-detected groups when they share the same set of tables.
+              tables) using your floor plan layout. Custom combinations are merged with the same rules. Manual entries
+              override auto-detected groups when they share the same set of tables.
             </p>
           </div>
         )}
       </header>
 
-      {allAutoDisabled && (
-        <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-          You&apos;ve disabled all auto-detected combinations. Bookings for parties larger than your biggest single table
-          may not find a table combination unless you add custom combinations.
-        </div>
-      )}
-
-      <div className="grid gap-6 lg:grid-cols-[1fr_min(320px,100%)]">
-        <div className="min-w-0 space-y-8">
-          <section>
-            <h3 className="text-sm font-semibold text-slate-900">Auto-detected combinations</h3>
-            <p className="mt-1 text-xs text-slate-500">
-              From adjacency on the floor plan (read-only). Disable or adjust rules without changing table positions.
+      <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+        <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500">
+          Combination Detection Distance
+        </label>
+        <p className="mt-1 text-xs text-slate-500">
+          How close two tables need to be on your floor plan to be suggested as a combination.
+        </p>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <NumericInput
+            min={5}
+            max={300}
+            value={thresholdDraft}
+            onChange={(v) => setThresholdDraft(v)}
+            disabled={!isAdmin || thresholdSaving}
+            className="w-24 rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+          />
+          <button
+            type="button"
+            onClick={() => void saveThreshold()}
+            disabled={!isAdmin || thresholdSaving || recalcLoading}
+            className="rounded-md border border-slate-300 bg-white px-3 py-2 text-left text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+          >
+            {thresholdSaving ? 'Updating…' : 'Update Automatic Table Combinations'}
+          </button>
+          {recalcError && <p className="text-xs text-red-600">{recalcError}</p>}
+          {!catalogLoading && (
+            <p className="text-xs text-slate-500">
+              {autoGroups.length} auto-detected combination{autoGroups.length !== 1 ? 's' : ''}.
             </p>
-            {catalogLoading ? (
-              <p className="mt-4 text-sm text-slate-500">Loading…</p>
-            ) : autoGroups.length === 0 ? (
-              <p className="mt-4 text-sm text-slate-500">No adjacent table pairs or groups found. Adjust the layout or combination threshold.</p>
-            ) : (
-              <ul className="mt-3 divide-y divide-slate-200 rounded-xl border border-slate-200 bg-white">
-                {autoGroups.map((g) => (
-                  <li
-                    key={g.table_group_key}
-                    className={`flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 text-sm ${
-                      g.status === 'disabled' ? 'bg-slate-50 opacity-70' : ''
-                    }`}
-                    onMouseEnter={() => setPreviewIds(g.table_ids)}
-                    onMouseLeave={() => setPreviewIds([])}
-                  >
-                    <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className={g.status === 'disabled' ? 'line-through text-slate-500' : 'font-medium text-slate-800'}>
-                          {g.default_name}
-                        </span>
-                        {g.status === 'modified' && (
-                          <span className="rounded bg-violet-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-violet-800">
-                            Modified
+          )}
+        </div>
+        <AdjacencyPreview threshold={thresholdDraft} refreshKey={layoutSaveCount} diningAreaId={diningAreaId} />
+      </div>
+
+      <div className="mt-4 space-y-4">
+        <div className="overflow-x-auto">
+          <div className="flex w-max gap-2">
+            <button
+              type="button"
+              onClick={() => setCombinationsSubTab('auto')}
+              className={`rounded-lg px-3 py-1.5 text-sm font-medium ${
+                combinationsSubTab === 'auto'
+                  ? 'bg-brand-600 text-white'
+                  : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
+              }`}
+            >
+              Auto-detected combinations
+              {!catalogLoading && (
+                <span className="ml-1 font-normal opacity-90">({autoGroups.length})</span>
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={() => setCombinationsSubTab('custom')}
+              className={`rounded-lg px-3 py-1.5 text-sm font-medium ${
+                combinationsSubTab === 'custom'
+                  ? 'bg-brand-600 text-white'
+                  : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
+              }`}
+            >
+              Custom combinations
+            </button>
+          </div>
+        </div>
+
+        {combinationsSubTab === 'auto' && allAutoDisabled && (
+          <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+            You&apos;ve disabled all auto-detected combinations. Bookings for parties larger than your biggest single table
+            may not find a table combination unless you add custom combinations.
+          </div>
+        )}
+
+        <div className="grid gap-6 lg:grid-cols-[1fr_min(320px,100%)]">
+        <div className="min-w-0">
+          {combinationsSubTab === 'auto' && (
+            <section>
+              <h3 className="text-sm font-semibold text-slate-900">
+                Auto-detected combinations
+                {!catalogLoading && (
+                  <span className="ml-2 font-normal text-slate-500">({autoGroups.length})</span>
+                )}
+              </h3>
+              <p className="mt-1 text-xs text-slate-500">
+                From adjacency on the floor plan (read-only). Disable or adjust rules without changing table positions.
+              </p>
+              {catalogLoading ? (
+                <p className="mt-4 text-sm text-slate-500">Loading…</p>
+              ) : autoGroups.length === 0 ? (
+                <p className="mt-4 text-sm text-slate-500">
+                  No adjacent table pairs or groups found. Adjust the layout or combination threshold.
+                </p>
+              ) : (
+                <ul className="mt-3 divide-y divide-slate-200 rounded-xl border border-slate-200 bg-white">
+                  {autoGroups.map((g) => (
+                    <li
+                      key={g.table_group_key}
+                      className={`flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 text-sm ${
+                        g.status === 'disabled' ? 'bg-slate-50 opacity-70' : ''
+                      }`}
+                      onMouseEnter={() => setPreviewIds(g.table_ids)}
+                      onMouseLeave={() => setPreviewIds([])}
+                    >
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span
+                            className={g.status === 'disabled' ? 'line-through text-slate-500' : 'font-medium text-slate-800'}
+                          >
+                            {g.default_name}
                           </span>
-                        )}
-                        {g.status === 'disabled' && (
-                          <span className="rounded bg-slate-200 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-slate-600">
-                            Disabled
-                          </span>
-                        )}
+                          {g.status === 'modified' && (
+                            <span className="rounded bg-violet-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-violet-800">
+                              Modified
+                            </span>
+                          )}
+                          {g.status === 'disabled' && (
+                            <span className="rounded bg-slate-200 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-slate-600">
+                              Disabled
+                            </span>
+                          )}
+                        </div>
+                        <p className="mt-0.5 text-xs text-slate-500">
+                          Up to {g.effective_max_covers} guests
+                          {g.override &&
+                          (g.override.combined_max_covers != null || g.override.combined_min_covers != null) ? (
+                            <span className="ml-1 rounded bg-slate-100 px-1 text-[10px] text-slate-600">Custom</span>
+                          ) : null}
+                        </p>
                       </div>
-                      <p className="mt-0.5 text-xs text-slate-500">
-                        Up to {g.effective_max_covers} guests
-                        {g.override && (g.override.combined_max_covers != null || g.override.combined_min_covers != null) ? (
-                          <span className="ml-1 rounded bg-slate-100 px-1 text-[10px] text-slate-600">Custom</span>
-                        ) : null}
-                      </p>
-                    </div>
-                    {isAdmin && (
-                      <div className="flex shrink-0 gap-1">
-                        <button
-                          type="button"
-                          className="rounded border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700 hover:bg-slate-50"
-                          onClick={() => setModal({ mode: 'auto', group: g })}
-                        >
-                          Edit
-                        </button>
-                        {g.status === 'disabled' ? (
+                      {isAdmin && (
+                        <div className="flex shrink-0 gap-1">
                           <button
                             type="button"
                             className="rounded border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700 hover:bg-slate-50"
-                            onClick={async () => {
-                              try {
-                                await saveAutoOverride({
-                                  table_group_key: g.table_group_key,
-                                  disabled: false,
-                                });
-                              } catch (e) {
-                                setToast((e as Error).message);
-                              }
-                            }}
+                            onClick={() => setModal({ mode: 'auto', group: g })}
                           >
-                            Enable
+                            Edit
                           </button>
-                        ) : (
+                          {g.status === 'disabled' ? (
+                            <button
+                              type="button"
+                              className="rounded border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700 hover:bg-slate-50"
+                              onClick={async () => {
+                                try {
+                                  await saveAutoOverride({
+                                    table_group_key: g.table_group_key,
+                                    disabled: false,
+                                  });
+                                } catch (e) {
+                                  setToast((e as Error).message);
+                                }
+                              }}
+                            >
+                              Enable
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              className="rounded border border-slate-200 bg-white px-2 py-1 text-xs text-red-700 hover:bg-red-50"
+                              onClick={async () => {
+                                if (!confirm(`${g.default_name} will no longer combine for bookings. Continue?`)) return;
+                                try {
+                                  await saveAutoOverride({
+                                    table_group_key: g.table_group_key,
+                                    disabled: true,
+                                  });
+                                  setToast(`${g.default_name} will no longer combine for bookings`);
+                                } catch (e) {
+                                  setToast((e as Error).message);
+                                }
+                              }}
+                            >
+                              Disable
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          )}
+
+          {combinationsSubTab === 'custom' && (
+            <section>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h3 className="text-sm font-semibold text-slate-900">Custom combinations</h3>
+                {isAdmin && (
+                  <button
+                    type="button"
+                    onClick={() => setModal({ mode: 'custom', combo: null })}
+                    className="rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-brand-700"
+                  >
+                    + Add custom combination
+                  </button>
+                )}
+              </div>
+              <p className="mt-1 text-xs text-slate-500">
+                For joins the auto-detector cannot see (e.g. tables you push together for events).
+              </p>
+              {combinations.length === 0 ? (
+                <div className="mt-4 rounded-xl border border-dashed border-slate-300 px-6 py-8 text-center text-sm text-slate-500">
+                  No custom combinations yet. Add one to define table joins that the auto-detector can&apos;t see (e.g.
+                  tables across the room for special events).
+                </div>
+              ) : (
+                <ul className="mt-3 divide-y divide-slate-200 rounded-xl border border-slate-200 bg-white">
+                  {combinations.map((combo) => (
+                    <li
+                      key={combo.id}
+                      className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 text-sm"
+                      onMouseEnter={() => setPreviewIds((combo.members ?? []).map((m) => m.table_id))}
+                      onMouseLeave={() => setPreviewIds([])}
+                    >
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium text-slate-800">{combo.name}</span>
+                          <span className="rounded bg-brand-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-brand-800">
+                            Custom
+                          </span>
+                        </div>
+                        <p className="mt-0.5 text-xs text-slate-500">
+                          {(combo.members ?? [])
+                            .map((m) => (m as { table?: { name?: string } }).table?.name ?? m.table_id)
+                            .join(', ')}
+                          {' · '}
+                          {combo.combined_min_covers}–{combo.combined_max_covers} guests
+                        </p>
+                      </div>
+                      {isAdmin && (
+                        <div className="flex gap-1">
+                          <button
+                            type="button"
+                            className="rounded border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700 hover:bg-slate-50"
+                            onClick={() => setModal({ mode: 'custom', combo })}
+                          >
+                            Edit
+                          </button>
                           <button
                             type="button"
                             className="rounded border border-slate-200 bg-white px-2 py-1 text-xs text-red-700 hover:bg-red-50"
                             onClick={async () => {
-                              if (!confirm(`${g.default_name} will no longer combine for bookings. Continue?`)) return;
-                              try {
-                                await saveAutoOverride({
-                                  table_group_key: g.table_group_key,
-                                  disabled: true,
-                                });
-                                setToast(`${g.default_name} will no longer combine for bookings`);
-                              } catch (e) {
-                                setToast((e as Error).message);
+                              if (!confirm('Delete this combination?')) return;
+                              const res = await fetch(`/api/venue/tables/combinations?id=${combo.id}`, { method: 'DELETE' });
+                              if (res.ok) {
+                                setCombinations(combinations.filter((c) => c.id !== combo.id));
+                                setToast('Combination deleted');
                               }
                             }}
                           >
-                            Disable
+                            Delete
                           </button>
-                        )}
-                      </div>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
-
-          <section>
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <h3 className="text-sm font-semibold text-slate-900">Custom combinations</h3>
-              {isAdmin && (
-                <button
-                  type="button"
-                  onClick={() => setModal({ mode: 'custom', combo: null })}
-                  className="rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-brand-700"
-                >
-                  + Add custom combination
-                </button>
+                        </div>
+                      )}
+                    </li>
+                  ))}
+                </ul>
               )}
-            </div>
-            <p className="mt-1 text-xs text-slate-500">
-              For joins the auto-detector cannot see (e.g. tables you push together for events).
-            </p>
-            {combinations.length === 0 ? (
-              <div className="mt-4 rounded-xl border border-dashed border-slate-300 px-6 py-8 text-center text-sm text-slate-500">
-                No custom combinations yet. Add one to define table joins that the auto-detector can&apos;t see (e.g.
-                tables across the room for special events).
-              </div>
-            ) : (
-              <ul className="mt-3 divide-y divide-slate-200 rounded-xl border border-slate-200 bg-white">
-                {combinations.map((combo) => (
-                  <li
-                    key={combo.id}
-                    className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 text-sm"
-                    onMouseEnter={() =>
-                      setPreviewIds((combo.members ?? []).map((m) => m.table_id))
-                    }
-                    onMouseLeave={() => setPreviewIds([])}
-                  >
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="font-medium text-slate-800">{combo.name}</span>
-                        <span className="rounded bg-brand-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-brand-800">
-                          Custom
-                        </span>
-                      </div>
-                      <p className="mt-0.5 text-xs text-slate-500">
-                        {(combo.members ?? []).map((m) => (m as { table?: { name?: string } }).table?.name ?? m.table_id).join(', ')}
-                        {' · '}
-                        {combo.combined_min_covers}–{combo.combined_max_covers} guests
-                      </p>
-                    </div>
-                    {isAdmin && (
-                      <div className="flex gap-1">
-                        <button
-                          type="button"
-                          className="rounded border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700 hover:bg-slate-50"
-                          onClick={() => setModal({ mode: 'custom', combo })}
-                        >
-                          Edit
-                        </button>
-                        <button
-                          type="button"
-                          className="rounded border border-slate-200 bg-white px-2 py-1 text-xs text-red-700 hover:bg-red-50"
-                          onClick={async () => {
-                            if (!confirm('Delete this combination?')) return;
-                            const res = await fetch(`/api/venue/tables/combinations?id=${combo.id}`, { method: 'DELETE' });
-                            if (res.ok) {
-                              setCombinations(combinations.filter((c) => c.id !== combo.id));
-                              setToast('Combination deleted');
-                            }
-                          }}
-                        >
-                          Delete
-                        </button>
-                      </div>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
+            </section>
+          )}
         </div>
 
-        <div className="hidden lg:block">
-          <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Preview</p>
-          <div className="sticky top-4 overflow-hidden rounded-xl border border-slate-200 bg-slate-50" style={{ minHeight: 320 }}>
-            <MiniFloorPlanPicker
-              tables={miniTables}
-              selectedIds={previewIds}
-              onChange={() => {}}
-              partySize={2}
-              className="min-h-[300px]"
-            />
+          <div className="hidden lg:block">
+            <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Preview</p>
+            <div
+              className="sticky top-4 overflow-hidden rounded-xl border border-slate-200 bg-slate-50"
+              style={{ minHeight: 320 }}
+            >
+              <MiniFloorPlanPicker
+                tables={miniTables}
+                selectedIds={previewIds}
+                onChange={() => {}}
+                partySize={2}
+                className="min-h-[300px]"
+              />
+            </div>
           </div>
         </div>
       </div>

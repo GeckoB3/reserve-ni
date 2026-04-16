@@ -6,7 +6,7 @@ import { TableList } from '@/app/dashboard/settings/tables/TableList';
 import { TableCombinationsPage } from '@/app/dashboard/settings/tables/TableCombinationsPage';
 import type { TableCombination, VenueTable } from '@/types/table-management';
 
-export type FloorPlanEditorTabKey = 'layout' | 'tables' | 'combinations' | 'areas';
+export type FloorPlanEditorTabKey = 'layout' | 'tables' | 'combinations';
 
 interface Props {
   isAdmin: boolean;
@@ -18,6 +18,12 @@ interface Props {
   onLayoutSaved?: () => void;
   /** When the venue saves a new Combination Detection Distance, pass it so the combinations catalog refreshes. */
   combinationThreshold?: number;
+  /** Incremented when the floor plan layout auto-saves; refreshes adjacency preview on the Combinations tab. */
+  layoutSaveCount?: number;
+  /** Keeps parent venue state in sync after saving combination detection distance on the Combinations tab. */
+  onCombinationThresholdSaved?: (value: number) => void;
+  /** When set, load tables and combinations for this dining area only. */
+  diningAreaId?: string | null;
 }
 
 export function FloorPlanEditorTabs({
@@ -27,21 +33,26 @@ export function FloorPlanEditorTabs({
   advancedTableManagement,
   onLayoutSaved,
   combinationThreshold,
+  layoutSaveCount = 0,
+  onCombinationThresholdSaved,
+  diningAreaId,
 }: Props) {
   const [tables, setTables] = useState<VenueTable[]>([]);
   const [combinations, setCombinations] = useState<TableCombination[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const fetchManagementData = useCallback(async () => {
-    setLoading(true);
+  const fetchManagementData = useCallback(async (options?: { silent?: boolean }) => {
+    const showSpinner = !options?.silent;
+    if (showSpinner) setLoading(true);
     try {
-      const tablesRes = await fetch('/api/venue/tables');
+      const areaQs = diningAreaId ? `?area_id=${encodeURIComponent(diningAreaId)}` : '';
+      const tablesRes = await fetch(`/api/venue/tables${areaQs}`);
       if (tablesRes.ok) {
         const data = await tablesRes.json();
         setTables(data.tables ?? []);
       }
       if (advancedTableManagement) {
-        const combosRes = await fetch('/api/venue/tables/combinations');
+        const combosRes = await fetch(`/api/venue/tables/combinations${areaQs}`);
         if (combosRes.ok) {
           const data = await combosRes.json();
           setCombinations(data.combinations ?? []);
@@ -50,9 +61,15 @@ export function FloorPlanEditorTabs({
         setCombinations([]);
       }
     } finally {
-      setLoading(false);
+      if (showSpinner) setLoading(false);
     }
-  }, [advancedTableManagement]);
+  }, [advancedTableManagement, diningAreaId]);
+
+  /** Keep Tables / Combinations list data in sync after Layout auto-save (positions, dimensions, seats). */
+  const handleLayoutSaved = useCallback(() => {
+    void fetchManagementData({ silent: true });
+    onLayoutSaved?.();
+  }, [fetchManagementData, onLayoutSaved]);
 
   useEffect(() => {
     void fetchManagementData();
@@ -61,13 +78,12 @@ export function FloorPlanEditorTabs({
   const tabLabel = useMemo(() => {
     if (activeTab === 'layout') return 'Layout';
     if (activeTab === 'tables') return 'Tables';
-    if (activeTab === 'combinations') return 'Combinations';
-    return 'Areas';
+    return 'Combinations';
   }, [activeTab]);
 
   const visibleTabKeys = useMemo((): FloorPlanEditorTabKey[] => {
     if (advancedTableManagement) {
-      return ['layout', 'tables', 'combinations', 'areas'];
+      return ['layout', 'tables', 'combinations'];
     }
     return ['tables'];
   }, [advancedTableManagement]);
@@ -106,7 +122,7 @@ export function FloorPlanEditorTabs({
 
       <div className="mt-4">
         {activeTab === 'layout' && advancedTableManagement && (
-          <FloorPlanEditor embedded onLayoutSaved={onLayoutSaved} />
+          <FloorPlanEditor embedded onLayoutSaved={handleLayoutSaved} diningAreaId={diningAreaId} />
         )}
 
         {activeTab === 'tables' && (
@@ -122,6 +138,7 @@ export function FloorPlanEditorTabs({
                 isAdmin={isAdmin}
                 onRefresh={fetchManagementData}
                 variant={advancedTableManagement ? 'full' : 'covers'}
+                diningAreaId={diningAreaId}
               />
             )}
           </div>
@@ -141,15 +158,11 @@ export function FloorPlanEditorTabs({
                 isAdmin={isAdmin}
                 onRefresh={fetchManagementData}
                 combinationThreshold={combinationThreshold}
+                layoutSaveCount={layoutSaveCount}
+                onCombinationThresholdSaved={onCombinationThresholdSaved}
+                diningAreaId={diningAreaId}
               />
             )}
-          </div>
-        )}
-
-        {activeTab === 'areas' && advancedTableManagement && (
-          <div className="rounded-xl border border-slate-200 bg-slate-50 px-6 py-10 text-center">
-            <h3 className="text-sm font-semibold text-slate-700">Areas</h3>
-            <p className="mt-2 text-sm text-slate-500">Coming soon.</p>
           </div>
         )}
       </div>

@@ -267,6 +267,9 @@ export function TableSettingsView({ isAdmin }: Props) {
               isAdmin={isAdmin}
               onRefresh={fetchData}
               combinationThreshold={settings.combination_threshold ?? 80}
+              onCombinationThresholdSaved={(v) =>
+                setSettings((prev) => ({ ...prev, combination_threshold: v }))
+              }
             />
           )}
 
