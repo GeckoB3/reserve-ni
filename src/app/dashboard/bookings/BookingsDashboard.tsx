@@ -913,13 +913,21 @@ export function BookingsDashboard({
       const outcomes = await Promise.all(
         ids.map(async (bookingId) => {
           const res = await fetch(`/api/venue/bookings/${bookingId}`, { method: 'DELETE' });
-          return res.ok;
+          const errPayload = !res.ok
+            ? ((await res.json().catch(() => ({}))) as { error?: string }).error ?? res.statusText
+            : null;
+          return { ok: res.ok, error: errPayload };
         }),
       );
-      const okIds = ids.filter((_, i) => outcomes[i]);
+      const okIds = ids.filter((_, i) => outcomes[i]?.ok);
       const okCount = okIds.length;
       if (okCount !== ids.length) {
-        setError(`Removed ${okCount}/${ids.length} bookings from the diary.`);
+        const firstErr = outcomes.find((o) => !o.ok)?.error;
+        setError(
+          firstErr
+            ? `Removed ${okCount}/${ids.length}. ${firstErr}`
+            : `Removed ${okCount}/${ids.length} bookings from the diary.`,
+        );
       } else {
         addToast(`${okCount} booking(s) removed from the diary`, 'success');
       }
