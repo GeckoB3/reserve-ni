@@ -573,6 +573,7 @@ export function SettingsView({
             enabledModels={normalizeEnabledModels(venue.enabled_models, (bookingModel as BookingModel) ?? 'table_reservation')}
             depositConfig={venue.deposit_config}
             serviceEngineTable={showRestaurantTableProfileSections && !isAppointment && hasServiceConfig}
+            hasStripeSubscription={Boolean(venue.stripe_subscription_id?.trim())}
           />
         )}
         {activeTab === 'staff' && isAdmin && (

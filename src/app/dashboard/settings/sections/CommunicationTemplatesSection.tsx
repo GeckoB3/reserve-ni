@@ -22,6 +22,8 @@ interface CommunicationTemplatesSectionProps {
   depositConfig?: unknown;
   serviceEngineTable?: boolean;
   onUpdate?: (patch: Record<string, unknown>) => void;
+  /** Stripe subscription present — Plan checkout completed; hide Light SMS “add a card” banner. */
+  hasStripeSubscription?: boolean;
 }
 
 const MESSAGE_CARDS: Array<{
@@ -360,15 +362,11 @@ export function CommunicationTemplatesSection({
           >
             Guest communications
           </h2>
-          <p className="mt-1 text-sm text-slate-600">
-            Each lane has its own policy bucket. Preview and live sends now use
-            the same renderer and routing layer.
-          </p>
         </div>
         <SaveIndicator status={saveStatus} />
       </div>
 
-      {pricingTier === "light" && (
+      {pricingTier === "light" && !hasStripeSubscription && (
         <div className="rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-950">
           <p className="font-medium">SMS on Appointments Light</p>
           <p className="mt-1 text-sky-900">
@@ -379,7 +377,7 @@ export function CommunicationTemplatesSection({
             >
               Settings → Plan
             </Link>{" "}
-            so Stripe can record usage after your free period.
+            to enable SMS sending.
           </p>
         </div>
       )}
