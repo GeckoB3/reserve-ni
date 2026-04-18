@@ -32,7 +32,16 @@ export async function runImportUndo(admin: SupabaseClient, sessionId: string, ve
 
   const bookingIds = rows.filter((r) => r.record_type === 'booking' && r.action === 'created').map((r) => r.record_id);
   if (bookingIds.length) {
-    await admin.from('bookings').delete().in('id', bookingIds);
+    // Legacy DBs: table_statuses.booking_id used to block deletes (NO ACTION). Clear before delete.
+    const { error: clearTsErr } = await admin.from('table_statuses').update({ booking_id: null }).in('booking_id', bookingIds);
+    if (clearTsErr) {
+      throw new Error(`Undo failed (table statuses): ${clearTsErr.message}`);
+    }
+
+    const { error: bookingDelErr } = await admin.from('bookings').delete().in('id', bookingIds);
+    if (bookingDelErr) {
+      throw new Error(`Undo failed (bookings): ${bookingDelErr.message}`);
+    }
   }
 
   const ucIds = rows

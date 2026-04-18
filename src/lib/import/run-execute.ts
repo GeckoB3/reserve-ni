@@ -12,6 +12,7 @@ import {
   parseCurrencyPence,
   parseIntSafe,
   mapBookingStatus,
+  resolveDepositFromImport,
   splitFullName,
   todayIsoLocal,
 } from '@/lib/import/normalize';
@@ -496,6 +497,9 @@ export async function runImportExecute(
         raw_client_name: string | null;
         raw_status: string | null;
         raw_price: string | null;
+        raw_deposit_amount: string | null;
+        raw_deposit_paid: string | null;
+        raw_deposit_status: string | null;
         raw_notes: string | null;
         resolved_service_id: string | null;
         resolved_calendar_id: string | null;
@@ -541,6 +545,12 @@ export async function runImportExecute(
         specialRequests = specialRequests ? `${specialRequests} — ${priceLabel}` : priceLabel;
       }
 
+      const depositFields = resolveDepositFromImport({
+        amountRaw: row.raw_deposit_amount,
+        paidRaw: row.raw_deposit_paid,
+        statusRaw: row.raw_deposit_status,
+      });
+
       const timeForDb =
         row.booking_time.length === 5 ? `${row.booking_time}:00` : row.booking_time;
       const bookingEndTime =
@@ -562,7 +572,8 @@ export async function runImportExecute(
         party_size: partySize,
         status,
         source: 'import',
-        deposit_status: 'Not Required',
+        deposit_status: depositFields.deposit_status,
+        deposit_amount_pence: depositFields.deposit_amount_pence,
         guest_email: em,
         special_requests: specialRequests,
         booking_model: bookingModel as BookingModel,
@@ -624,7 +635,7 @@ export async function runImportExecute(
         continue;
       }
 
-      await admin.from('import_records').insert({
+      const { error: recErr } = await admin.from('import_records').insert({
         session_id: sessionId,
         venue_id: venueId,
         record_type: 'booking',
@@ -632,6 +643,13 @@ export async function runImportExecute(
         action: 'created',
         previous_data: null,
       });
+      if (recErr) {
+        console.error('[import execute] import_records after staged booking', recErr);
+        await admin.from('bookings').delete().eq('id', booking.id);
+        skipped += 1;
+        await bumpProgress();
+        continue;
+      }
 
       importedBookings += 1;
       await bumpProgress();
@@ -701,6 +719,12 @@ export async function runImportExecute(
         specialRequests = specialRequests ? `${specialRequests} — ${priceLabel}` : priceLabel;
       }
 
+      const depositFields = resolveDepositFromImport({
+        amountRaw: targets.deposit_amount,
+        paidRaw: targets.deposit_paid,
+        statusRaw: targets.deposit_status,
+      });
+
       let calendarId = defaultCalendarId;
       let serviceItemId = defaultServiceItemId;
 
@@ -745,7 +769,8 @@ export async function runImportExecute(
         party_size: partySize,
         status,
         source: 'import',
-        deposit_status: 'Not Required',
+        deposit_status: depositFields.deposit_status,
+        deposit_amount_pence: depositFields.deposit_amount_pence,
         guest_email: em,
         special_requests: specialRequests,
         booking_model: bookingModel as BookingModel,
@@ -787,7 +812,7 @@ export async function runImportExecute(
         continue;
       }
 
-      await admin.from('import_records').insert({
+      const { error: recErr } = await admin.from('import_records').insert({
         session_id: sessionId,
         venue_id: venueId,
         record_type: 'booking',
@@ -795,6 +820,13 @@ export async function runImportExecute(
         action: 'created',
         previous_data: null,
       });
+      if (recErr) {
+        console.error('[import execute] import_records after booking', recErr);
+        await admin.from('bookings').delete().eq('id', booking.id);
+        skipped += 1;
+        await bumpProgress();
+        continue;
+      }
 
       importedBookings += 1;
       await bumpProgress();

@@ -54,14 +54,52 @@ export async function DELETE(
   const { staff } = ctx;
   const { sessionId } = await params;
 
-  const { error } = await staff.db
+  const { data: existing, error: findErr } = await staff.db
+    .from('import_sessions')
+    .select('id')
+    .eq('id', sessionId)
+    .eq('venue_id', staff.venue_id)
+    .maybeSingle();
+
+  if (findErr) {
+    console.error('[import session DELETE] lookup', findErr);
+    return NextResponse.json({ error: 'Failed to load session' }, { status: 500 });
+  }
+  if (!existing) {
+    return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  }
+
+  const { data: fileRows, error: filesErr } = await staff.db
+    .from('import_files')
+    .select('storage_path')
+    .eq('session_id', sessionId)
+    .eq('venue_id', staff.venue_id);
+
+  if (filesErr) {
+    console.error('[import session DELETE] files', filesErr);
+    return NextResponse.json({ error: 'Failed to list session files' }, { status: 500 });
+  }
+
+  const paths = (fileRows ?? [])
+    .map((r) => (r as { storage_path: string }).storage_path)
+    .filter((p): p is string => Boolean(p?.trim()));
+
+  if (paths.length > 0) {
+    const { error: storageErr } = await staff.db.storage.from('imports').remove(paths);
+    if (storageErr) {
+      console.error('[import session DELETE] storage', storageErr);
+      return NextResponse.json({ error: 'Failed to remove uploaded files from storage' }, { status: 500 });
+    }
+  }
+
+  const { error: delErr } = await staff.db
     .from('import_sessions')
     .delete()
     .eq('id', sessionId)
     .eq('venue_id', staff.venue_id);
 
-  if (error) {
-    console.error('[import session DELETE]', error);
+  if (delErr) {
+    console.error('[import session DELETE]', delErr);
     return NextResponse.json({ error: 'Failed to delete session' }, { status: 500 });
   }
 

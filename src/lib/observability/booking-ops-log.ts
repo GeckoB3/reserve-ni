@@ -4,7 +4,7 @@
  */
 
 export interface BookingOpLogFields {
-  operation: 'create' | 'confirm' | 'cancel' | 'refund_failed' | 'error';
+  operation: 'create' | 'confirm' | 'cancel' | 'delete' | 'refund_failed' | 'error';
   venue_id: string;
   booking_id?: string;
   booking_model?: string;

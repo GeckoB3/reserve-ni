@@ -9,6 +9,7 @@ import { defaultPhoneCountryForVenueCurrency } from '@/lib/phone/default-country
 import type { CountryCode } from 'libphonenumber-js';
 import { ModifyBookingInline } from '@/components/booking/ModifyBookingInline';
 import { BookingNotesEditablePanel } from '@/components/booking/BookingNotesEditablePanel';
+import { CustomerProfileNotesCard } from '@/components/booking/CustomerProfileNotesCard';
 import { GuestTagEditor } from '@/components/dashboard/GuestTagEditor';
 import type { BookingNotesVariant } from '@/components/booking/BookingNotesEditablePanel';
 import type { BookingModel } from '@/types/booking-models';
@@ -21,6 +22,8 @@ interface Guest {
   phone: string | null;
   visit_count: number;
   tags?: string[];
+  /** Staff notes on the guest profile; shown on every booking for this customer. */
+  customer_profile_notes?: string | null;
 }
 
 interface EventRow {
@@ -376,6 +379,23 @@ export function BookingDetailPanel({
       onUpdated();
     } finally { setActionLoading(false); }
   }, [bookingId, detail, load, onUpdated]);
+
+  const executePermanentDelete = useCallback(async () => {
+    setActionLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/venue/bookings/${bookingId}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        setError((j as { error?: string }).error ?? 'Could not delete booking');
+        return;
+      }
+      onUpdated();
+      onClose();
+    } finally {
+      setActionLoading(false);
+    }
+  }, [bookingId, onUpdated, onClose]);
 
   const updateStatus = useCallback(async (newStatus: string) => {
     if (!detail) return;
@@ -976,6 +996,20 @@ export function BookingDetailPanel({
             </div>
           )}
 
+          {d.guest?.id ? (
+            <CustomerProfileNotesCard
+              guestId={d.guest.id}
+              value={d.guest.customer_profile_notes}
+              disabled={!isHydrated}
+              onSaved={() => {
+                void (async () => {
+                  await load();
+                  onUpdated();
+                })();
+              }}
+            />
+          ) : null}
+
           <BookingNotesEditablePanel
             bookingId={bookingId}
             dietaryNotes={d.dietary_notes}
@@ -1038,6 +1072,29 @@ export function BookingDetailPanel({
               </div>
             );
           })()}
+
+          {d.status === 'Cancelled' && (
+            <div className="rounded-xl border border-red-100 bg-red-50/40 px-3 py-2.5">
+              <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-red-700/90">Remove from diary</p>
+              <p className="mb-2 text-xs text-slate-600">
+                Permanently delete this cancelled booking and its staff messages log for this booking. This cannot be undone.
+              </p>
+              <ActionButton
+                onClick={() => {
+                  setConfirmDialog({
+                    title: 'Delete booking permanently?',
+                    message: `${d.guest?.name ?? 'Guest'} (${d.party_size}) on ${d.booking_date} at ${d.booking_time?.slice(0, 5) ?? ''} will be removed from the system.`,
+                    confirmLabel: 'Delete permanently',
+                    onConfirm: () => { void executePermanentDelete(); },
+                  });
+                }}
+                disabled={actionLoading || !isHydrated}
+                variant="outline-danger"
+              >
+                Delete booking permanently
+              </ActionButton>
+            </div>
+          )}
 
           {/* Modify section */}
           {!showModify ? (

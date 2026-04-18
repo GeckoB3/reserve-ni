@@ -23,6 +23,7 @@ import {
   showDepositPendingPill,
 } from '@/lib/booking/booking-staff-indicators';
 import { formatBookablePricePence } from '@/lib/booking/format-price-display';
+import { CustomerProfileNotesCard } from '@/components/booking/CustomerProfileNotesCard';
 
 export interface DetailPractitionerOption {
   id: string;
@@ -68,6 +69,7 @@ interface GuestDetail {
   email: string | null;
   phone: string | null;
   visit_count: number | null;
+  customer_profile_notes?: string | null;
 }
 
 export interface BookingDetailRecord {
@@ -224,6 +226,7 @@ export function AppointmentDetailSheet({
   const [editDate, setEditDate] = useState('');
   const [editTime, setEditTime] = useState('');
   const [editPractitionerId, setEditPractitionerId] = useState('');
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
 
   const prefetchRef = useRef(prefetchedBooking);
   prefetchRef.current = prefetchedBooking;
@@ -286,6 +289,7 @@ export function AppointmentDetailSheet({
       setLoadError(null);
       setActionError(null);
       setEditOpen(false);
+      setDeleteConfirmOpen(false);
       setRefreshing(false);
       return;
     }
@@ -357,6 +361,27 @@ export function AppointmentDetailSheet({
 
   async function saveNotes() {
     await patchJson({ internal_notes: notesDraft.trim() || null });
+  }
+
+  async function deleteBookingPermanently() {
+    if (!bookingId) return;
+    setBusy(true);
+    setActionError(null);
+    try {
+      const res = await fetch(`/api/venue/bookings/${bookingId}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({ error: 'Request failed' }));
+        setActionError((data as { error?: string }).error ?? 'Delete failed');
+        return;
+      }
+      setDeleteConfirmOpen(false);
+      onClose();
+      onUpdated();
+    } catch {
+      setActionError('Network error');
+    } finally {
+      setBusy(false);
+    }
   }
 
   function openEditTime() {
@@ -722,6 +747,18 @@ export function AppointmentDetailSheet({
               </dl>
               )}
 
+              {detail.guest?.id && detail.guest.id !== '__prefetch__' ? (
+                <CustomerProfileNotesCard
+                  guestId={detail.guest.id}
+                  value={detail.guest.customer_profile_notes}
+                  disabled={busy}
+                  onSaved={() => {
+                    void loadDetail();
+                    onUpdated();
+                  }}
+                />
+              ) : null}
+
               <div>
                 <label htmlFor="internal-notes-detail" className="text-xs font-medium uppercase tracking-wide text-slate-500">
                   Staff comments
@@ -839,12 +876,61 @@ export function AppointmentDetailSheet({
                       Edit time
                     </button>
                   )}
+                  {detail.status === 'Cancelled' && (
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => setDeleteConfirmOpen(true)}
+                      className="rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-medium text-red-800 hover:bg-red-100 disabled:opacity-50"
+                    >
+                      Delete permanently
+                    </button>
+                  )}
                 </div>
               </div>
             </>
           )}
         </div>
       </div>
+
+      {deleteConfirmOpen && detail && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4"
+          onClick={() => !busy && setDeleteConfirmOpen(false)}
+        >
+          <div
+            role="dialog"
+            aria-labelledby="delete-booking-title"
+            className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 id="delete-booking-title" className="text-base font-semibold text-slate-900">
+              Delete booking permanently?
+            </h3>
+            <p className="mt-2 text-sm text-slate-600">
+              This removes the cancelled booking and its related staff logs from the system. This cannot be undone.
+            </p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => setDeleteConfirmOpen(false)}
+                className="rounded-lg px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => void deleteBookingPermanently()}
+                className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
+              >
+                {busy ? 'Deleting…' : 'Delete permanently'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {editOpen && detail?.practitioner_id && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4" onClick={() => setEditOpen(false)}>

@@ -11,6 +11,7 @@ import {
 } from '@/lib/table-management/booking-status';
 import { ModifyBookingInline } from '@/components/booking/ModifyBookingInline';
 import { BookingNotesEditablePanel } from '@/components/booking/BookingNotesEditablePanel';
+import { CustomerProfileNotesCard } from '@/components/booking/CustomerProfileNotesCard';
 import type { BookingNotesVariant } from '@/components/booking/BookingNotesEditablePanel';
 import type { BookingModel } from '@/types/booking-models';
 import {
@@ -53,10 +54,12 @@ interface BookingDetailLite {
   checked_in_at?: string | null;
   table_assignments?: Array<{ id: string; name: string }>;
   guest: {
+    id: string;
     name: string | null;
     email: string | null;
     phone: string | null;
     visit_count: number;
+    customer_profile_notes?: string | null;
   } | null;
   communications: Array<{ id: string; message_type: string; channel: string; status: string; created_at: string }>;
   events: Array<{ id: string; event_type: string; created_at: string }>;
@@ -280,6 +283,15 @@ export function ExpandedBookingContent({
             </div>
           )}
         </div>
+
+        {detail?.guest?.id ? (
+          <CustomerProfileNotesCard
+            guestId={detail.guest.id}
+            value={detail.guest.customer_profile_notes}
+            disabled={detailLoading}
+            onSaved={onDetailUpdated}
+          />
+        ) : null}
 
         <BookingNotesEditablePanel
           bookingId={booking.id}

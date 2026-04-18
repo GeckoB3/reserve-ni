@@ -12,10 +12,15 @@ const patchSchema = z
     email: z.string().email().max(255).optional().or(z.literal('')),
     phone: z.string().max(24).optional().or(z.literal('')),
     tags: z.array(z.string()).optional(),
+    customer_profile_notes: z.string().max(8000).nullable().optional(),
   })
   .refine(
     (d) =>
-      d.name !== undefined || d.email !== undefined || d.phone !== undefined || d.tags !== undefined,
+      d.name !== undefined ||
+      d.email !== undefined ||
+      d.phone !== undefined ||
+      d.tags !== undefined ||
+      d.customer_profile_notes !== undefined,
     { message: 'At least one field required' },
   );
 
@@ -51,7 +56,7 @@ export async function GET(
     const { data: guest, error: gErr } = await staff.db
       .from('guests')
       .select(
-        'id, venue_id, name, email, phone, tags, visit_count, no_show_count, last_visit_date, created_at, updated_at',
+        'id, venue_id, name, email, phone, tags, visit_count, no_show_count, last_visit_date, customer_profile_notes, created_at, updated_at',
       )
       .eq('id', guestId)
       .eq('venue_id', staff.venue_id)
@@ -256,6 +261,7 @@ export async function GET(
         visit_count: (guest as { visit_count?: number }).visit_count ?? 0,
         no_show_count: (guest as { no_show_count?: number }).no_show_count ?? 0,
         last_visit_date: (guest as { last_visit_date?: string | null }).last_visit_date ?? null,
+        customer_profile_notes: (guest as { customer_profile_notes?: string | null }).customer_profile_notes ?? null,
         created_at: (guest as { created_at?: string }).created_at,
         updated_at: (guest as { updated_at?: string }).updated_at,
       },
@@ -331,6 +337,10 @@ export async function PATCH(
     if (parsed.data.tags !== undefined) {
       update.tags = normaliseGuestTagsInput(parsed.data.tags);
     }
+    if (parsed.data.customer_profile_notes !== undefined) {
+      const t = parsed.data.customer_profile_notes;
+      update.customer_profile_notes = t === null || t.trim() === '' ? null : t.trim();
+    }
 
     const dataKeys = Object.keys(update).filter((k) => k !== 'updated_at');
     if (dataKeys.length === 0) {
@@ -343,7 +353,7 @@ export async function PATCH(
       .eq('id', guestId)
       .eq('venue_id', staff.venue_id)
       .select(
-        'id, name, email, phone, tags, visit_count, no_show_count, last_visit_date, created_at, updated_at',
+        'id, name, email, phone, tags, visit_count, no_show_count, last_visit_date, customer_profile_notes, created_at, updated_at',
       )
       .single();
 

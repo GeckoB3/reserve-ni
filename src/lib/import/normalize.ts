@@ -132,3 +132,68 @@ export function mapBookingStatus(raw: string | null | undefined): string {
   if (t.includes('pending') || t.includes('unconfirmed')) return 'Pending';
   return 'Confirmed';
 }
+
+const DEPOSIT_STATUS_ENUMS = [
+  'Not Required',
+  'Pending',
+  'Paid',
+  'Refunded',
+  'Forfeited',
+  'Waived',
+] as const;
+
+/**
+ * Maps CSV deposit columns to `bookings.deposit_status` and `deposit_amount_pence`.
+ * Prefer mapping **Deposit status** when the export uses explicit statuses; otherwise
+ * **Deposit amount** + **Deposit paid** (boolean) are combined.
+ */
+export function resolveDepositFromImport(params: {
+  amountRaw: string | null | undefined;
+  paidRaw: string | null | undefined;
+  statusRaw: string | null | undefined;
+}): { deposit_status: (typeof DEPOSIT_STATUS_ENUMS)[number]; deposit_amount_pence: number | null } {
+  const amountPence = parseCurrencyPence(params.amountRaw ?? null);
+  const statusText = params.statusRaw?.trim();
+
+  if (statusText) {
+    const t = statusText.toLowerCase();
+    if (t.includes('refund')) {
+      return { deposit_status: 'Refunded', deposit_amount_pence: amountPence };
+    }
+    if (t.includes('forfeit')) {
+      return { deposit_status: 'Forfeited', deposit_amount_pence: amountPence };
+    }
+    if (t.includes('waiv')) {
+      return { deposit_status: 'Waived', deposit_amount_pence: amountPence };
+    }
+    if (t.includes('not required') || t === 'n/a' || t === 'na' || t === 'none') {
+      return { deposit_status: 'Not Required', deposit_amount_pence: null };
+    }
+    if (t.includes('pending') || t.includes('due') || t.includes('unpaid') || t.includes('owing')) {
+      return { deposit_status: 'Pending', deposit_amount_pence: amountPence };
+    }
+    if (t.includes('paid') || t.includes('collected') || t === 'complete' || t === 'yes') {
+      return { deposit_status: 'Paid', deposit_amount_pence: amountPence };
+    }
+    const exact = DEPOSIT_STATUS_ENUMS.find((e) => e.toLowerCase() === t);
+    if (exact) {
+      return {
+        deposit_status: exact,
+        deposit_amount_pence: exact === 'Not Required' ? null : amountPence,
+      };
+    }
+  }
+
+  if (amountPence != null && amountPence > 0) {
+    const paid = normaliseBoolean(params.paidRaw);
+    if (paid === true) return { deposit_status: 'Paid', deposit_amount_pence: amountPence };
+    if (paid === false) return { deposit_status: 'Pending', deposit_amount_pence: amountPence };
+    return { deposit_status: 'Paid', deposit_amount_pence: amountPence };
+  }
+
+  if (normaliseBoolean(params.paidRaw) === true) {
+    return { deposit_status: 'Pending', deposit_amount_pence: null };
+  }
+
+  return { deposit_status: 'Not Required', deposit_amount_pence: null };
+}

@@ -86,7 +86,7 @@ export async function GET(
 
     const { data: guest } = await staff.db
       .from('guests')
-      .select('id, name, email, phone, visit_count, tags')
+      .select('id, name, email, phone, visit_count, tags, customer_profile_notes')
       .eq('id', booking.guest_id)
       .single();
 
@@ -1025,6 +1025,83 @@ export async function PATCH(
     return NextResponse.json({ error: 'Provide status or booking_date/booking_time/party_size' }, { status: 400 });
   } catch (err) {
     console.error('PATCH /api/venue/bookings/[id] failed:', err);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
+}
+
+/**
+ * DELETE /api/venue/bookings/[id] — permanently remove a cancelled booking (venue staff).
+ * Clears related rows that would otherwise remain with null booking_id.
+ */
+export async function DELETE(
+  _request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const supabase = await createClient();
+    const staff = await getVenueStaff(supabase);
+    if (!staff) {
+      return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
+    }
+
+    const { id } = await params;
+    const admin = getSupabaseAdminClient();
+
+    const { data: booking, error: fetchErr } = await staff.db
+      .from('bookings')
+      .select('id, venue_id, status')
+      .eq('id', id)
+      .eq('venue_id', staff.venue_id)
+      .single();
+
+    if (fetchErr || !booking) {
+      return NextResponse.json({ error: 'Booking not found' }, { status: 404 });
+    }
+
+    if (booking.status !== 'Cancelled') {
+      return NextResponse.json(
+        { error: 'Only cancelled bookings can be permanently deleted' },
+        { status: 400 },
+      );
+    }
+
+    await clearTableStatusesForBooking(admin, id, staff.id);
+
+    const { error: commErr } = await admin.from('communications').delete().eq('booking_id', id);
+    if (commErr) {
+      console.error('DELETE booking: communications delete failed:', commErr);
+      return NextResponse.json({ error: 'Could not delete booking' }, { status: 500 });
+    }
+
+    const { error: eventsErr } = await admin.from('events').delete().eq('booking_id', id);
+    if (eventsErr) {
+      console.error('DELETE booking: events delete failed:', eventsErr);
+      return NextResponse.json({ error: 'Could not delete booking' }, { status: 500 });
+    }
+
+    const { error: smsErr } = await admin.from('sms_log').delete().eq('booking_id', id);
+    if (smsErr) {
+      console.error('DELETE booking: sms_log delete failed:', smsErr);
+      return NextResponse.json({ error: 'Could not delete booking' }, { status: 500 });
+    }
+
+    const { error: recErr } = await admin.from('reconciliation_alerts').delete().eq('booking_id', id);
+    if (recErr) {
+      console.error('DELETE booking: reconciliation_alerts delete failed:', recErr);
+      return NextResponse.json({ error: 'Could not delete booking' }, { status: 500 });
+    }
+
+    const { error: delErr } = await admin.from('bookings').delete().eq('id', id).eq('venue_id', staff.venue_id);
+    if (delErr) {
+      console.error('DELETE booking: bookings delete failed:', delErr);
+      return NextResponse.json({ error: 'Could not delete booking' }, { status: 500 });
+    }
+
+    logBookingOp({ operation: 'delete', venue_id: staff.venue_id, booking_id: id });
+
+    return NextResponse.json({ success: true });
+  } catch (err) {
+    console.error('DELETE /api/venue/bookings/[id] failed:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

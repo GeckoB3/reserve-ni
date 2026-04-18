@@ -78,10 +78,12 @@ interface BookingDetailLite {
   checked_in_at?: string | null;
   table_assignments?: Array<{ id: string; name: string }>;
   guest: {
+    id: string;
     name: string | null;
     email: string | null;
     phone: string | null;
     visit_count: number;
+    customer_profile_notes?: string | null;
   } | null;
   communications: Array<{ id: string; message_type: string; channel: string; status: string; created_at: string }>;
   events: Array<{ id: string; event_type: string; created_at: string }>;
@@ -831,6 +833,133 @@ export function BookingsDashboard({
     }
   }, [selectedIds]);
 
+  /** Selected rows that can still transition to Cancelled (for bulk cancel). */
+  const bulkCancelEligibleIds = useMemo(() => {
+    return selectedIds.filter((id) => {
+      const b = bookings.find((x) => x.id === id);
+      return b != null && canTransitionBookingStatus(b.status, 'Cancelled');
+    });
+  }, [bookings, selectedIds]);
+
+  /** Selected rows that are already cancelled (for bulk permanent delete). */
+  const bulkDeleteEligibleIds = useMemo(() => {
+    return selectedIds.filter((id) => bookings.find((x) => x.id === id)?.status === 'Cancelled');
+  }, [bookings, selectedIds]);
+
+  const executeBulkCancel = useCallback(async () => {
+    const ids = [...bulkCancelEligibleIds];
+    if (ids.length === 0) return;
+    const previousMap = new Map(bookings.map((b) => [b.id, b.status]));
+    setBulkLoading(true);
+    setError(null);
+    setBookings((prev) => prev.map((b) => (ids.includes(b.id) ? { ...b, status: 'Cancelled' } : b)));
+    try {
+      const outcomes = await Promise.all(
+        ids.map(async (bookingId) => {
+          const res = await fetch(`/api/venue/bookings/${bookingId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: 'Cancelled' }),
+          });
+          return res.ok;
+        }),
+      );
+      const okCount = outcomes.filter(Boolean).length;
+      if (okCount !== ids.length) {
+        setError(`Cancelled ${okCount}/${ids.length} bookings.`);
+        setBookings((prev) =>
+          prev.map((booking) => {
+            const idx = ids.indexOf(booking.id);
+            if (idx === -1) return booking;
+            return outcomes[idx] ? booking : { ...booking, status: previousMap.get(booking.id) ?? booking.status };
+          }),
+        );
+      } else {
+        addToast(`${okCount} booking(s) cancelled`, 'success');
+      }
+      setSelectedIds([]);
+      void fetchBookings({ silent: true });
+    } finally {
+      setBulkLoading(false);
+    }
+  }, [addToast, bookings, bulkCancelEligibleIds, fetchBookings]);
+
+  const runBulkCancel = useCallback(() => {
+    if (bulkCancelEligibleIds.length === 0) return;
+    const affected = bookings.filter((b) => bulkCancelEligibleIds.includes(b.id));
+    const preview = affected.slice(0, 3).map((b) => `${b.guest_name} at ${b.booking_time.slice(0, 5)}`).join(', ');
+    const suffix = affected.length > 3 ? ` and ${affected.length - 3} more` : '';
+    const skipped = selectedIds.length - bulkCancelEligibleIds.length;
+    const skipNote =
+      skipped > 0
+        ? ` (${skipped} selected ${skipped === 1 ? 'booking cannot' : 'bookings cannot'} be cancelled — only active bookings will be updated).`
+        : '';
+    setConfirmDialog({
+      title: 'Cancel bookings',
+      message: `Cancel ${bulkCancelEligibleIds.length} booking(s)? ${preview}${suffix}.${skipNote}`,
+      confirmLabel: `Cancel ${bulkCancelEligibleIds.length} booking(s)`,
+      onConfirm: () => {
+        void executeBulkCancel();
+      },
+    });
+  }, [bookings, bulkCancelEligibleIds, executeBulkCancel, selectedIds.length]);
+
+  const executeBulkDelete = useCallback(async () => {
+    const ids = [...bulkDeleteEligibleIds];
+    if (ids.length === 0) return;
+    setBulkLoading(true);
+    setError(null);
+    try {
+      const outcomes = await Promise.all(
+        ids.map(async (bookingId) => {
+          const res = await fetch(`/api/venue/bookings/${bookingId}`, { method: 'DELETE' });
+          return res.ok;
+        }),
+      );
+      const okIds = ids.filter((_, i) => outcomes[i]);
+      const okCount = okIds.length;
+      if (okCount !== ids.length) {
+        setError(`Removed ${okCount}/${ids.length} bookings from the diary.`);
+      } else {
+        addToast(`${okCount} booking(s) removed from the diary`, 'success');
+      }
+      setBookings((prev) => prev.filter((b) => !okIds.includes(b.id)));
+      setDetailById((prev) => {
+        const next = { ...prev };
+        okIds.forEach((id) => {
+          delete next[id];
+        });
+        return next;
+      });
+      setExpandedIds((prev) => prev.filter((id) => !okIds.includes(id)));
+      setSelectedIds((prev) => prev.filter((id) => !okIds.includes(id)));
+      setSelectedId((cur) => (cur && okIds.includes(cur) ? null : cur));
+      void fetchBookings({ silent: true });
+    } finally {
+      setBulkLoading(false);
+    }
+  }, [addToast, bulkDeleteEligibleIds, fetchBookings]);
+
+  const runBulkDelete = useCallback(() => {
+    if (bulkDeleteEligibleIds.length === 0) return;
+    const affected = bookings.filter((b) => bulkDeleteEligibleIds.includes(b.id));
+    const preview = affected.slice(0, 3).map((b) => `${b.guest_name} at ${b.booking_time.slice(0, 5)}`).join(', ');
+    const suffix = affected.length > 3 ? ` and ${affected.length - 3} more` : '';
+    const skipped = selectedIds.length - bulkDeleteEligibleIds.length;
+    const skipNote =
+      skipped > 0
+        ? ` (${skipped} selected ${skipped === 1 ? 'booking is' : 'bookings are'} not cancelled — only cancelled bookings will be removed).`
+        : '';
+    setConfirmDialog({
+      title: 'Delete bookings permanently?',
+      message: `Permanently remove ${bulkDeleteEligibleIds.length} cancelled booking(s) from the system? This cannot be undone. ${preview}${suffix}.${skipNote}`,
+      confirmLabel: `Delete ${bulkDeleteEligibleIds.length} permanently`,
+      onConfirm: () => {
+        void executeBulkDelete();
+      },
+    });
+  }, [bookings, bulkDeleteEligibleIds, executeBulkDelete, selectedIds.length]);
+
   const navigate = (direction: -1 | 1) => {
     if (viewMode === 'day') setAnchorDate(addDays(anchorDate, direction));
     else if (viewMode === 'week') setAnchorDate(addDays(anchorDate, direction * 7));
@@ -1154,6 +1283,22 @@ export function BookingsDashboard({
           className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
         >
           Mark No-Show
+        </button>
+        <button
+          type="button"
+          disabled={bulkLoading || bulkCancelEligibleIds.length === 0}
+          onClick={() => void runBulkCancel()}
+          className="rounded-lg border border-amber-200 px-3 py-1.5 text-xs font-medium text-amber-900 hover:bg-amber-50 disabled:opacity-50"
+        >
+          Cancel bookings
+        </button>
+        <button
+          type="button"
+          disabled={bulkLoading || bulkDeleteEligibleIds.length === 0}
+          onClick={() => void runBulkDelete()}
+          className="rounded-lg border border-red-300 px-3 py-1.5 text-xs font-medium text-red-800 hover:bg-red-50 disabled:opacity-50"
+        >
+          Delete permanently
         </button>
         <button
           type="button"

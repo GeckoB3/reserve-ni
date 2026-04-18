@@ -71,6 +71,7 @@ export async function POST(request: NextRequest) {
         phone: null,
         global_guest_hash: null,
         dietary_preferences: null,
+        customer_profile_notes: null,
         marketing_opt_out: true,
         updated_at: new Date().toISOString(),
       })

@@ -150,6 +150,9 @@ export async function runExtractBookingReferences(
     raw_resource_name: string | null;
     raw_status: string | null;
     raw_price: string | null;
+    raw_deposit_amount: string | null;
+    raw_deposit_paid: string | null;
+    raw_deposit_status: string | null;
     raw_notes: string | null;
     raw_client_email: string | null;
     raw_client_phone: string | null;
@@ -202,6 +205,9 @@ export async function runExtractBookingReferences(
         raw_resource_name: targets.resource_name?.trim() || null,
         raw_status: targets.status?.trim() || null,
         raw_price: targets.price?.trim() || null,
+        raw_deposit_amount: targets.deposit_amount?.trim() || null,
+        raw_deposit_paid: targets.deposit_paid?.trim() || null,
+        raw_deposit_status: targets.deposit_status?.trim() || null,
         raw_notes: targets.notes?.trim() || null,
         raw_client_email: targets.client_email?.trim() || null,
         raw_client_phone: targets.client_phone?.trim() || null,
@@ -248,6 +254,9 @@ export async function runExtractBookingReferences(
     raw_table_ref: r.raw_table_ref,
     raw_status: r.raw_status,
     raw_price: r.raw_price,
+    raw_deposit_amount: r.raw_deposit_amount,
+    raw_deposit_paid: r.raw_deposit_paid,
+    raw_deposit_status: r.raw_deposit_status,
     raw_notes: r.raw_notes,
     raw_client_email: r.raw_client_email,
     raw_client_phone: r.raw_client_phone,

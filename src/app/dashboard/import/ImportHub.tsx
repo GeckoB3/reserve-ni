@@ -22,6 +22,7 @@ export function ImportHub() {
   const [sessions, setSessions] = useState<SessionRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -41,6 +42,20 @@ export function ImportHub() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  async function deleteSession(id: string) {
+    setDeletingId(id);
+    setError(null);
+    try {
+      const res = await fetch(`/api/import/sessions/${id}`, { method: 'DELETE' });
+      const data = (await res.json()) as { error?: string };
+      if (!res.ok) throw new Error(data.error ?? 'Failed to delete');
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to delete');
+    }
+    setDeletingId(null);
+  }
 
   async function startNew() {
     setCreating(true);
@@ -175,6 +190,23 @@ export function ImportHub() {
                       Undo
                     </button>
                   )}
+                  <button
+                    type="button"
+                    disabled={deletingId === s.id}
+                    className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-semibold text-red-800 hover:bg-red-50 disabled:opacity-50"
+                    onClick={() => {
+                      if (
+                        !window.confirm(
+                          'Remove this import from the list? Uploaded CSV files for this session will be deleted. This does not remove guests or bookings already written to your venue — use Undo on a completed import if you need to revert data.',
+                        )
+                      ) {
+                        return;
+                      }
+                      void deleteSession(s.id);
+                    }}
+                  >
+                    {deletingId === s.id ? 'Removing…' : 'Delete'}
+                  </button>
                 </div>
               </li>
             ))
