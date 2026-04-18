@@ -52,6 +52,7 @@ const TABS = [
   { key: 'payments', label: 'Payments' },
   { key: 'comms', label: 'Communications' },
   { key: 'staff', label: 'Staff' },
+  { key: 'data-import', label: 'Data Import' },
 ] as const;
 
 type TabKey = typeof TABS[number]['key'];
@@ -60,6 +61,7 @@ function resolveInitialTab(initialTab: string | undefined, isAdmin: boolean): Ta
   const t = initialTab as TabKey | undefined;
   if (t && TABS.some((x) => x.key === t)) {
     if (t === 'staff' && !isAdmin) return 'profile';
+    if (t === 'data-import' && !isAdmin) return 'profile';
     return t;
   }
   return 'profile';
@@ -400,7 +402,10 @@ export function SettingsView({
   const [venue, setVenue] = useState<VenueSettings | null>(initialVenue);
   const showRestaurantTableProfileSections =
     isAdmin && isRestaurantTableProductTier(venue?.pricing_tier ?? null);
-  const visibleTabs = useMemo(() => [...TABS], []);
+  const visibleTabs = useMemo(
+    () => (isAdmin ? [...TABS] : TABS.filter((x) => x.key !== 'data-import')),
+    [isAdmin],
+  );
   const [activeTab, setActiveTab] = useState<TabKey>(() => resolveInitialTab(initialTab, isAdmin));
   const [planBannerDismissed, setPlanBannerDismissed] = useState(false);
 
@@ -409,7 +414,7 @@ export function SettingsView({
   }, [initialVenue]);
 
   useEffect(() => {
-    if (!isAdmin && activeTab === 'staff') {
+    if (!isAdmin && (activeTab === 'staff' || activeTab === 'data-import')) {
       setActiveTab('profile');
     }
   }, [isAdmin, activeTab]);
@@ -577,6 +582,21 @@ export function SettingsView({
             bookingModel={bookingModel}
             enabledModels={normalizeEnabledModels(venue.enabled_models, (bookingModel as BookingModel) ?? 'table_reservation')}
           />
+        )}
+        {activeTab === 'data-import' && isAdmin && (
+          <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm space-y-3">
+            <h2 className="text-base font-semibold text-slate-900">Data import</h2>
+            <p className="text-sm text-slate-600">
+              Import clients and bookings from CSV exports (Fresha, Booksy, Vagaro, ResDiary, and more). The tool runs
+              column mapping, validation, and a reversible import with a 24-hour undo window.
+            </p>
+            <Link
+              href="/dashboard/import"
+              className="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700"
+            >
+              Open Data Import
+            </Link>
+          </div>
         )}
       </div>
     </div>

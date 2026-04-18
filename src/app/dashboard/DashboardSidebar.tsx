@@ -189,6 +189,16 @@ export function DashboardSidebar({
     return items;
   }, [isAdmin, bookingModel, enabledModels, isRestaurantPlanTier, calendarEligible]);
 
+  const navItemsWithImport = useMemo(() => {
+    if (!isAdmin) return navItems;
+    const idx = navItems.findIndex((i) => i.href === '/dashboard/settings');
+    const importItem: NavItem = { href: '/dashboard/import', label: 'Data Import', icon: ChartIcon };
+    if (idx >= 0) {
+      return [...navItems.slice(0, idx + 1), importItem, ...navItems.slice(idx + 1)];
+    }
+    return [...navItems, importItem];
+  }, [isAdmin, navItems]);
+
   async function handleSignOut() {
     const supabase = createClient();
     await supabase.auth.signOut();
@@ -244,7 +254,7 @@ export function DashboardSidebar({
 
         {/* Nav links */}
         <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-1">
-          {navItems.map((item) => {
+          {navItemsWithImport.map((item) => {
             if (item.href === '/dashboard/bookings' && !showTableManagementNav) {
               if (isRestaurantTablePrimary) {
                 /** Day Sheet + Bookings: restaurant table venues (with or without schedule calendar secondaries). */

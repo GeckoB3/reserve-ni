@@ -1,0 +1,223 @@
+/** ReserveNI import: target field definitions (aligned with Docs design). */
+
+export type FieldType =
+  | 'text'
+  | 'email'
+  | 'phone'
+  | 'date'
+  | 'time'
+  | 'number'
+  | 'boolean'
+  | 'currency'
+  | 'tags';
+
+export interface SchemaField {
+  key: string;
+  label: string;
+  required: boolean;
+  type: FieldType;
+  examples?: string[];
+}
+
+export const CLIENT_FIELDS: SchemaField[] = [
+  { key: 'first_name', label: 'First Name', required: true, type: 'text', examples: ['Sarah', 'John'] },
+  { key: 'last_name', label: 'Last Name', required: true, type: 'text', examples: ['Jones', 'Smith'] },
+  /** Single-column full name from exports (e.g. Booksy); import splits into first/last when first/last are empty. */
+  { key: 'full_name', label: 'Full Name', required: false, type: 'text' },
+  { key: 'email', label: 'Email Address', required: false, type: 'email', examples: ['sarah@email.com'] },
+  { key: 'phone', label: 'Phone Number', required: false, type: 'phone', examples: ['+447891234567'] },
+  { key: 'date_of_birth', label: 'Date of Birth', required: false, type: 'date' },
+  { key: 'gender', label: 'Gender', required: false, type: 'text' },
+  { key: 'marketing_consent', label: 'Marketing Consent', required: false, type: 'boolean' },
+  { key: 'first_visit_date', label: 'First Visit Date', required: false, type: 'date' },
+  { key: 'last_visit_date', label: 'Last Visit Date', required: false, type: 'date' },
+  { key: 'total_visits', label: 'Total Visits', required: false, type: 'number' },
+  { key: 'total_spent', label: 'Total Spent (£)', required: false, type: 'currency' },
+  { key: 'notes', label: 'Client Notes', required: false, type: 'text' },
+  { key: 'tags', label: 'Tags', required: false, type: 'tags', examples: ['VIP', 'VIP,Regular'] },
+];
+
+export const BOOKING_FIELDS: SchemaField[] = [
+  { key: 'client_email', label: 'Client Email', required: true, type: 'email' },
+  { key: 'party_size', label: 'Party size / covers', required: false, type: 'number' },
+  { key: 'client_phone', label: 'Client Phone', required: false, type: 'phone' },
+  { key: 'client_name', label: 'Client Name', required: false, type: 'text' },
+  { key: 'service_name', label: 'Service Name', required: false, type: 'text' },
+  { key: 'staff_name', label: 'Staff Member', required: false, type: 'text' },
+  { key: 'booking_date', label: 'Booking Date', required: true, type: 'date' },
+  { key: 'booking_time', label: 'Booking Time', required: true, type: 'time' },
+  { key: 'duration_minutes', label: 'Duration (minutes)', required: false, type: 'number' },
+  { key: 'status', label: 'Booking Status', required: false, type: 'text' },
+  { key: 'price', label: 'Price (£)', required: false, type: 'currency' },
+  { key: 'notes', label: 'Booking Notes', required: false, type: 'text' },
+  { key: 'table_ref', label: 'Table', required: false, type: 'text' },
+  { key: 'event_name', label: 'Event name', required: false, type: 'text' },
+  { key: 'class_name', label: 'Class name', required: false, type: 'text' },
+  { key: 'resource_name', label: 'Resource', required: false, type: 'text' },
+];
+
+export const CLIENT_FIELD_KEYS = new Set(CLIENT_FIELDS.map((f) => f.key));
+export const BOOKING_FIELD_KEYS = new Set(BOOKING_FIELDS.map((f) => f.key));
+
+export type PlatformId = 'fresha' | 'booksy' | 'vagaro' | 'resdiary' | 'timely' | 'unknown';
+
+export const PLATFORM_SIGNATURES: Record<
+  Exclude<PlatformId, 'unknown'>,
+  { columns: string[]; filenames: string[] }
+> = {
+  fresha: {
+    columns: [
+      'Client First Name',
+      'Client Last Name',
+      'Client Mobile',
+      'Client Email',
+      'Appointment Date',
+      'Appointment Time',
+      'Service Name',
+      'Staff Member',
+    ],
+    filenames: ['fresha', 'shedul'],
+  },
+  booksy: {
+    columns: ['Customer Name', 'Customer Phone', 'Customer Email', 'Service', 'Employee', 'Date', 'Start Time'],
+    filenames: ['booksy'],
+  },
+  vagaro: {
+    columns: ['First Name', 'Last Name', 'Cell Phone', 'Email', 'Service Date', 'Service Name', 'Provider'],
+    filenames: ['vagaro'],
+  },
+  resdiary: {
+    columns: ['Guest Name', 'Guest Email', 'Guest Phone', 'Covers', 'Reservation Date', 'Reservation Time', 'Table'],
+    filenames: ['resdiary', 'res_diary'],
+  },
+  timely: {
+    columns: ['Client first name', 'Client last name', 'Client email', 'Mobile', 'Appointment start', 'Service'],
+    filenames: ['timely'],
+  },
+};
+
+/** Direct column → ReserveNI field templates when a platform is detected. */
+export const PLATFORM_MAPPINGS: Record<string, Record<string, string>> = {
+  fresha_clients: {
+    'Client First Name': 'first_name',
+    'Client Last Name': 'last_name',
+    'Client Mobile': 'phone',
+    'Client Email': 'email',
+    'Date of Birth': 'date_of_birth',
+    'Client Notes': 'notes',
+    'Total Visits': 'total_visits',
+    'Marketing Consent': 'marketing_consent',
+    Tags: 'tags',
+  },
+  fresha_bookings: {
+    'Client Email': 'client_email',
+    'Appointment Date': 'booking_date',
+    'Appointment Time': 'booking_time',
+    'Service Name': 'service_name',
+    'Staff Member': 'staff_name',
+    Duration: 'duration_minutes',
+    Status: 'status',
+    Price: 'price',
+  },
+  booksy_clients: {
+    'Customer Name': 'full_name',
+    'Customer Phone': 'phone',
+    'Customer Email': 'email',
+  },
+  booksy_bookings: {
+    'Customer Email': 'client_email',
+    'Customer Phone': 'client_phone',
+    'Customer Name': 'client_name',
+    Service: 'service_name',
+    Employee: 'staff_name',
+    Date: 'booking_date',
+    'Start Time': 'booking_time',
+  },
+  vagaro_clients: {
+    'First Name': 'first_name',
+    'Last Name': 'last_name',
+    'Cell Phone': 'phone',
+    Email: 'email',
+  },
+  vagaro_bookings: {
+    Email: 'client_email',
+    'Cell Phone': 'client_phone',
+    'Service Date': 'booking_date',
+    'Service Name': 'service_name',
+    Provider: 'staff_name',
+  },
+  resdiary_clients: {
+    'Guest Name': 'full_name',
+    'Guest Email': 'email',
+    'Guest Phone': 'phone',
+  },
+  resdiary_bookings: {
+    'Guest Email': 'client_email',
+    'Guest Phone': 'client_phone',
+    'Guest Name': 'client_name',
+    'Reservation Date': 'booking_date',
+    'Reservation Time': 'booking_time',
+    Covers: 'party_size',
+  },
+  timely_clients: {
+    'Client first name': 'first_name',
+    'Client last name': 'last_name',
+    'Client email': 'email',
+    Mobile: 'phone',
+  },
+  timely_bookings: {
+    'Client email': 'client_email',
+    Mobile: 'client_phone',
+    'Appointment start': 'booking_date',
+    Service: 'service_name',
+  },
+};
+
+export function detectPlatform(
+  headers: string[],
+  filename: string,
+): { platform: PlatformId; score: number } {
+  const norm = (s: string) => s.trim().toLowerCase();
+  const headerSet = new Set(headers.map((h) => norm(h)));
+  const fname = norm(filename);
+
+  let best: PlatformId = 'unknown';
+  let bestScore = 0;
+
+  for (const pid of Object.keys(PLATFORM_SIGNATURES) as Exclude<PlatformId, 'unknown'>[]) {
+    const sig = PLATFORM_SIGNATURES[pid];
+    let score = 0;
+    for (const c of sig.columns) {
+      if (headerSet.has(norm(c))) score += 1;
+    }
+    for (const f of sig.filenames) {
+      if (fname.includes(f)) score += 1;
+    }
+    if (score > bestScore) {
+      bestScore = score;
+      best = pid;
+    }
+  }
+
+  const columnMatches = PLATFORM_SIGNATURES[best as Exclude<PlatformId, 'unknown'>]
+    ? PLATFORM_SIGNATURES[best as Exclude<PlatformId, 'unknown'>].columns.filter((c) =>
+        headerSet.has(norm(c)),
+      ).length
+    : 0;
+
+  if (columnMatches < 3 && best !== 'unknown') {
+    return { platform: 'unknown', score: 0 };
+  }
+
+  return { platform: bestScore >= 3 ? best : 'unknown', score: bestScore };
+}
+
+export function platformTemplateKey(
+  platform: PlatformId,
+  fileType: 'clients' | 'bookings' | 'staff' | 'unknown',
+): string | null {
+  if (platform === 'unknown') return null;
+  if (fileType === 'clients') return `${platform}_clients`;
+  if (fileType === 'bookings') return `${platform}_bookings`;
+  return null;
+}

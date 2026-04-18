@@ -1,0 +1,69 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { requireImportAdmin } from '@/lib/import/auth';
+
+export async function GET(
+  _request: NextRequest,
+  { params }: { params: Promise<{ sessionId: string }> },
+) {
+  const ctx = await requireImportAdmin();
+  if ('response' in ctx) return ctx.response;
+  const { staff } = ctx;
+  const { sessionId } = await params;
+
+  const { data: session, error: sErr } = await staff.db
+    .from('import_sessions')
+    .select('*')
+    .eq('id', sessionId)
+    .eq('venue_id', staff.venue_id)
+    .maybeSingle();
+
+  if (sErr || !session) {
+    return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  }
+
+  const [{ data: files }, { data: mappings }, { data: issues }, { data: bookingReferences }, { data: bookingRows }] =
+    await Promise.all([
+      staff.db.from('import_files').select('*').eq('session_id', sessionId).order('created_at'),
+      staff.db.from('import_column_mappings').select('*').eq('session_id', sessionId).order('sort_order'),
+      staff.db.from('import_validation_issues').select('*').eq('session_id', sessionId).order('row_number'),
+      staff.db.from('import_booking_references').select('*').eq('session_id', sessionId).order('reference_type'),
+      staff.db
+        .from('import_booking_rows')
+        .select('id, row_number, file_id, is_future_booking, import_status')
+        .eq('session_id', sessionId)
+        .order('file_id', { ascending: true })
+        .order('row_number', { ascending: true }),
+    ]);
+
+  return NextResponse.json({
+    session,
+    files: files ?? [],
+    mappings: mappings ?? [],
+    issues: issues ?? [],
+    booking_references: bookingReferences ?? [],
+    booking_rows_preview: bookingRows ?? [],
+  });
+}
+
+export async function DELETE(
+  _request: NextRequest,
+  { params }: { params: Promise<{ sessionId: string }> },
+) {
+  const ctx = await requireImportAdmin();
+  if ('response' in ctx) return ctx.response;
+  const { staff } = ctx;
+  const { sessionId } = await params;
+
+  const { error } = await staff.db
+    .from('import_sessions')
+    .delete()
+    .eq('id', sessionId)
+    .eq('venue_id', staff.venue_id);
+
+  if (error) {
+    console.error('[import session DELETE]', error);
+    return NextResponse.json({ error: 'Failed to delete session' }, { status: 500 });
+  }
+
+  return NextResponse.json({ ok: true });
+}

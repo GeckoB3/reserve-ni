@@ -10,7 +10,7 @@ import { isCdeBookingRow } from '@/lib/booking/cde-booking';
 
 const TOLERANCE_MS = 15 * 60 * 1000;
 const BOOKING_SELECT =
-  'id, venue_id, guest_id, guest_email, booking_date, booking_time, party_size, special_requests, dietary_notes, deposit_amount_pence, deposit_status, cancellation_deadline, status, experience_event_id, class_instance_id, resource_id, guest:guests(name, email, phone)';
+  'id, venue_id, guest_id, guest_email, booking_date, booking_time, party_size, special_requests, dietary_notes, deposit_amount_pence, deposit_status, cancellation_deadline, status, experience_event_id, class_instance_id, resource_id, suppress_import_comms, guest:guests(name, email, phone)';
 
 interface GuestInfo {
   name: string | null;
@@ -23,6 +23,7 @@ interface BookingRow {
   venue_id: string;
   guest_id: string;
   guest_email: string | null;
+  suppress_import_comms?: boolean | null;
   booking_date: string;
   booking_time: string;
   party_size: number;
@@ -158,6 +159,7 @@ async function runLaneReminder(opts: {
   const venueData = venueRowToEmailData(opts.venue);
   for (const row of normalizeBookings(data ?? [])) {
     try {
+      if (row.suppress_import_comms) continue;
       const isCde = isCdeBookingRow(row);
       if (opts.cdeOnly !== isCde) continue;
 
@@ -256,6 +258,7 @@ async function runLanePostVisit(opts: {
   const venueData = venueRowToEmailData(opts.venue);
   for (const row of normalizeBookings(data ?? [])) {
     try {
+      if (row.suppress_import_comms) continue;
       const isCde = isCdeBookingRow(row);
       if (opts.cdeOnly !== isCde) continue;
 

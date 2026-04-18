@@ -1,0 +1,351 @@
+import type { SupabaseClient } from '@supabase/supabase-js';
+import type { BookingModel } from '@/types/booking-models';
+import { applyMappingsToDataRow, type DbMappingRow } from '@/lib/import/apply-mappings';
+import { resolveVenueMode } from '@/lib/venue-mode';
+import { downloadAndParseCsv } from '@/lib/import/parse-storage-csv';
+import { parseDateString, parseIntSafe, parseTimeString, todayIsoLocal } from '@/lib/import/normalize';
+
+function isFutureBookingDate(iso: string, today: string): boolean {
+  return iso >= today;
+}
+
+export type ExtractBookingReferencesResult = {
+  referencesResolved: boolean;
+  futureRowCount: number;
+  extractedReferenceCount: number;
+  insertedBookingRowCount: number;
+  requiresTableConfirmation: boolean;
+  bookingModel: BookingModel;
+  mode:
+    | 'no_booking_file'
+    | 'no_booking_date_mapping'
+    | 'no_future_rows'
+    | 'table_pending'
+    | 'unified_refs_pending'
+    | 'ready';
+};
+
+/**
+ * Deletes staged rows/refs, re-parses booking CSVs, inserts `import_booking_rows` for future rows
+ * and `import_booking_references` for service/staff (non–table-reservation) where needed.
+ * Updates `import_sessions.references_resolved`.
+ */
+export async function runExtractBookingReferences(
+  admin: SupabaseClient,
+  sessionId: string,
+  venueId: string,
+): Promise<ExtractBookingReferencesResult> {
+  const today = todayIsoLocal();
+
+  const venueMode = await resolveVenueMode(admin, venueId);
+  const bookingModel = venueMode.bookingModel;
+
+  const { data: session } = await admin
+    .from('import_sessions')
+    .select('id, session_settings, has_booking_file')
+    .eq('id', sessionId)
+    .eq('venue_id', venueId)
+    .single();
+
+  if (!session) throw new Error('Session not found');
+
+  const settings = (session as { session_settings?: Record<string, unknown> }).session_settings ?? {};
+  const datePref = settings.ambiguous_date_format as 'dd/MM/yyyy' | 'MM/dd/yyyy' | null | undefined;
+
+  const hasBookingFile = Boolean((session as { has_booking_file?: boolean }).has_booking_file);
+
+  if (!hasBookingFile) {
+    await admin
+      .from('import_sessions')
+      .update({ references_resolved: true, updated_at: new Date().toISOString() })
+      .eq('id', sessionId);
+    return {
+      referencesResolved: true,
+      futureRowCount: 0,
+      extractedReferenceCount: 0,
+      insertedBookingRowCount: 0,
+      requiresTableConfirmation: false,
+      bookingModel,
+      mode: 'no_booking_file',
+    };
+  }
+
+  await admin.from('import_booking_rows').delete().eq('session_id', sessionId);
+  await admin.from('import_booking_references').delete().eq('session_id', sessionId);
+
+  const { data: files } = await admin
+    .from('import_files')
+    .select('id, storage_path, file_type')
+    .eq('session_id', sessionId)
+    .order('created_at');
+
+  const bookingFiles = (files ?? []).filter((f) => (f as { file_type: string }).file_type === 'bookings');
+  if (!bookingFiles.length) {
+    await admin
+      .from('import_sessions')
+      .update({ references_resolved: true, updated_at: new Date().toISOString() })
+      .eq('id', sessionId);
+    return {
+      referencesResolved: true,
+      futureRowCount: 0,
+      extractedReferenceCount: 0,
+      insertedBookingRowCount: 0,
+      requiresTableConfirmation: false,
+      bookingModel,
+      mode: 'no_booking_file',
+    };
+  }
+
+  const { data: mappingRows } = await admin
+    .from('import_column_mappings')
+    .select('*')
+    .eq('session_id', sessionId);
+
+  const byFile = new Map<string, DbMappingRow[]>();
+  for (const m of mappingRows ?? []) {
+    const fid = (m as { file_id: string }).file_id;
+    const list = byFile.get(fid) ?? [];
+    list.push(m as DbMappingRow);
+    byFile.set(fid, list);
+  }
+
+  let anyBookingDateMapping = false;
+  for (const f of bookingFiles) {
+    const maps = byFile.get((f as { id: string }).id) ?? [];
+    if (maps.some((m) => m.action === 'map' && m.target_field === 'booking_date')) {
+      anyBookingDateMapping = true;
+      break;
+    }
+  }
+
+  if (!anyBookingDateMapping) {
+    await admin
+      .from('import_sessions')
+      .update({ references_resolved: true, updated_at: new Date().toISOString() })
+      .eq('id', sessionId);
+    return {
+      referencesResolved: true,
+      futureRowCount: 0,
+      extractedReferenceCount: 0,
+      insertedBookingRowCount: 0,
+      requiresTableConfirmation: false,
+      bookingModel,
+      mode: 'no_booking_date_mapping',
+    };
+  }
+
+  type StagedRow = {
+    file_id: string;
+    row_number: number;
+    booking_date: string;
+    booking_time: string;
+    booking_end_time: string | null;
+    duration_minutes: number | null;
+    party_size: number | null;
+    raw_service_name: string | null;
+    raw_staff_name: string | null;
+    raw_table_ref: string | null;
+    raw_event_name: string | null;
+    raw_class_name: string | null;
+    raw_resource_name: string | null;
+    raw_status: string | null;
+    raw_price: string | null;
+    raw_notes: string | null;
+    raw_client_email: string | null;
+    raw_client_phone: string | null;
+    raw_client_name: string | null;
+    is_future_booking: boolean;
+  };
+
+  const staged: StagedRow[] = [];
+
+  for (const file of bookingFiles) {
+    const f = file as { id: string; storage_path: string };
+    const maps = byFile.get(f.id) ?? [];
+    const parsed = await downloadAndParseCsv(admin, f.storage_path);
+
+    for (let i = 0; i < parsed.rows.length; i++) {
+      const rowNum = i + 1;
+      const row = parsed.rows[i]!;
+      const { targets } = applyMappingsToDataRow(row, maps);
+      const bdRaw = targets.booking_date?.trim() ?? '';
+      const btRaw = targets.booking_time?.trim() ?? '';
+      const { iso: dateIso } = parseDateString(bdRaw, datePref ?? undefined);
+      const bt = parseTimeString(btRaw);
+      if (!dateIso || !bt) continue;
+
+      const duration = parseIntSafe(targets.duration_minutes) ?? 60;
+      const partySize =
+        parseIntSafe(targets.party_size) ?? (bookingModel === 'table_reservation' ? 2 : 1);
+      const timeForDb = bt.length === 5 ? `${bt}:00` : bt;
+      const endParts = timeForDb.slice(0, 5).split(':').map(Number);
+      const endMins = (endParts[0] ?? 0) * 60 + (endParts[1] ?? 0) + duration;
+      const eh = Math.floor(endMins / 60) % 24;
+      const emin = endMins % 60;
+      const bookingEndTime = `${String(eh).padStart(2, '0')}:${String(emin).padStart(2, '0')}:00`;
+
+      const isFuture = isFutureBookingDate(dateIso, today);
+
+      staged.push({
+        file_id: f.id,
+        row_number: rowNum,
+        booking_date: dateIso,
+        booking_time: timeForDb,
+        booking_end_time: bookingEndTime,
+        duration_minutes: duration,
+        party_size: partySize,
+        raw_service_name: targets.service_name?.trim() || null,
+        raw_staff_name: targets.staff_name?.trim() || null,
+        raw_table_ref: targets.table_ref?.trim() || null,
+        raw_event_name: targets.event_name?.trim() || null,
+        raw_class_name: targets.class_name?.trim() || null,
+        raw_resource_name: targets.resource_name?.trim() || null,
+        raw_status: targets.status?.trim() || null,
+        raw_price: targets.price?.trim() || null,
+        raw_notes: targets.notes?.trim() || null,
+        raw_client_email: targets.client_email?.trim() || null,
+        raw_client_phone: targets.client_phone?.trim() || null,
+        raw_client_name: targets.client_name?.trim() || null,
+        is_future_booking: isFuture,
+      });
+    }
+  }
+
+  const futureRows = staged.filter((r) => r.is_future_booking);
+  const futureRowCount = futureRows.length;
+
+  if (futureRowCount === 0) {
+    await admin
+      .from('import_sessions')
+      .update({ references_resolved: true, updated_at: new Date().toISOString() })
+      .eq('id', sessionId);
+    return {
+      referencesResolved: true,
+      futureRowCount: 0,
+      extractedReferenceCount: 0,
+      insertedBookingRowCount: 0,
+      requiresTableConfirmation: false,
+      bookingModel,
+      mode: 'no_future_rows',
+    };
+  }
+
+  const rowInserts = futureRows.map((r) => ({
+    session_id: sessionId,
+    file_id: r.file_id,
+    venue_id: venueId,
+    row_number: r.row_number,
+    booking_date: r.booking_date,
+    booking_time: r.booking_time,
+    booking_end_time: r.booking_end_time,
+    duration_minutes: r.duration_minutes,
+    party_size: r.party_size,
+    raw_service_name: r.raw_service_name,
+    raw_staff_name: r.raw_staff_name,
+    raw_event_name: r.raw_event_name,
+    raw_class_name: r.raw_class_name,
+    raw_resource_name: r.raw_resource_name,
+    raw_table_ref: r.raw_table_ref,
+    raw_status: r.raw_status,
+    raw_price: r.raw_price,
+    raw_notes: r.raw_notes,
+    raw_client_email: r.raw_client_email,
+    raw_client_phone: r.raw_client_phone,
+    raw_client_name: r.raw_client_name,
+    import_status: 'pending' as const,
+    is_future_booking: true,
+  }));
+
+  const { error: insRowErr } = await admin.from('import_booking_rows').insert(rowInserts);
+  if (insRowErr) {
+    console.error('[extract-booking-references] row insert', insRowErr);
+    throw new Error('Failed to stage booking rows');
+  }
+
+  /** Restaurant flow: acknowledge unassigned tables only (slice 2). */
+  if (bookingModel === 'table_reservation') {
+    await admin
+      .from('import_sessions')
+      .update({ references_resolved: false, updated_at: new Date().toISOString() })
+      .eq('id', sessionId);
+    return {
+      referencesResolved: false,
+      futureRowCount,
+      extractedReferenceCount: 0,
+      insertedBookingRowCount: rowInserts.length,
+      requiresTableConfirmation: true,
+      bookingModel,
+      mode: 'table_pending',
+    };
+  }
+
+  /** Non-table models: extract reference rows for resolution (Slice 3+). */
+  type Agg = { type: string; raw: string; count: number; fileId: string };
+  const aggregates: Agg[] = [];
+  const aggKey = (t: string, raw: string) => `${t}:::${raw.toLowerCase()}`;
+
+  const aggMap = new Map<string, Agg>();
+  for (const r of futureRows) {
+    const push = (type: string, raw: string | null, fileId: string) => {
+      if (!raw?.trim()) return;
+      const trimmed = raw.trim();
+      const k = aggKey(type, trimmed);
+      const ex = aggMap.get(k);
+      if (ex) ex.count += 1;
+      else {
+        const a: Agg = { type, raw: trimmed, count: 1, fileId };
+        aggMap.set(k, a);
+        aggregates.push(a);
+      }
+    };
+
+    if (bookingModel === 'unified_scheduling' || bookingModel === 'practitioner_appointment') {
+      push('service', r.raw_service_name, r.file_id);
+      push('staff', r.raw_staff_name, r.file_id);
+    } else if (bookingModel === 'event_ticket') {
+      push('event', r.raw_event_name, r.file_id);
+    } else if (bookingModel === 'class_session') {
+      push('class', r.raw_class_name, r.file_id);
+    } else if (bookingModel === 'resource_booking') {
+      push('resource', r.raw_resource_name, r.file_id);
+    }
+  }
+
+  const refRows = aggregates.map((a) => ({
+    session_id: sessionId,
+    file_id: a.fileId,
+    venue_id: venueId,
+    reference_type: a.type,
+    raw_value: a.raw,
+    booking_count: a.count,
+    is_resolved: false,
+  }));
+
+  if (refRows.length) {
+    const { error: refErr } = await admin.from('import_booking_references').insert(refRows);
+    if (refErr) {
+      console.error('[extract-booking-references] refs insert', refErr);
+      throw new Error('Failed to stage booking references');
+    }
+  }
+
+  const referencesResolved = refRows.length === 0;
+
+  await admin
+    .from('import_sessions')
+    .update({
+      references_resolved: referencesResolved,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', sessionId);
+
+  return {
+    referencesResolved,
+    futureRowCount,
+    extractedReferenceCount: refRows.length,
+    insertedBookingRowCount: rowInserts.length,
+    requiresTableConfirmation: false,
+    bookingModel,
+    mode: referencesResolved ? 'ready' : 'unified_refs_pending',
+  };
+}

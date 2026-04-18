@@ -1,0 +1,134 @@
+import { parse, isValid } from 'date-fns';
+import { normalizeToE164, normalizeToE164Lenient } from '@/lib/phone/e164';
+
+const DATE_FORMATS_TRY = [
+  'dd/MM/yyyy',
+  'd/M/yyyy',
+  'MM/dd/yyyy',
+  'M/d/yyyy',
+  'yyyy-MM-dd',
+  'dd-MM-yyyy',
+  'd MMMM yyyy',
+  'MMMM d, yyyy',
+] as const;
+
+export function normaliseEmail(raw: string | null | undefined): string | null {
+  const t = raw?.trim();
+  if (!t) return null;
+  return t.toLowerCase();
+}
+
+export function normalisePhoneUk(raw: string | null | undefined): { e164: string | null; warning: boolean } {
+  const t = raw?.trim();
+  if (!t) return { e164: null, warning: false };
+  const strict = normalizeToE164(t, 'GB');
+  if (strict) return { e164: strict, warning: false };
+  const lenient = normalizeToE164Lenient(t, 'GB');
+  if (lenient) return { e164: lenient, warning: false };
+  return { e164: t, warning: true };
+}
+
+export function normaliseBoolean(raw: string | null | undefined): boolean | null {
+  const t = raw?.trim().toLowerCase();
+  if (!t) return null;
+  if (['yes', 'true', '1', 'y', 'on', 'opted in'].includes(t)) return true;
+  if (['no', 'false', '0', 'n', 'off', 'opted out'].includes(t)) return false;
+  return null;
+}
+
+/** Local calendar date YYYY-MM-DD (matches extract-references future-row logic). */
+export function todayIsoLocal(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+export function parseDateString(
+  raw: string | null | undefined,
+  preferred?: 'dd/MM/yyyy' | 'MM/dd/yyyy' | null,
+): { iso: string | null; ambiguous: boolean } {
+  const t = raw?.trim();
+  if (!t) return { iso: null, ambiguous: false };
+
+  if (preferred === 'dd/MM/yyyy' || preferred === 'MM/dd/yyyy') {
+    const p = parse(t, preferred, new Date());
+    if (isValid(p)) return { iso: p.toISOString().slice(0, 10), ambiguous: false };
+  }
+
+  for (const fmt of DATE_FORMATS_TRY) {
+    const p = parse(t, fmt, new Date());
+    if (isValid(p)) {
+      const iso = p.toISOString().slice(0, 10);
+      if (/\d{1,2}\/\d{1,2}\/\d{4}/.test(t)) {
+        const parts = t.split(/[/.-]/);
+        if (parts.length === 3 && parts[0] && parts[1] && parts[2]) {
+          const a = Number.parseInt(parts[0], 10);
+          const b = Number.parseInt(parts[1], 10);
+          if (a <= 12 && b <= 12 && a !== b) {
+            return { iso, ambiguous: true };
+          }
+        }
+      }
+      return { iso, ambiguous: false };
+    }
+  }
+
+  const native = Date.parse(t);
+  if (!Number.isNaN(native)) {
+    const d = new Date(native);
+    return { iso: d.toISOString().slice(0, 10), ambiguous: false };
+  }
+
+  return { iso: null, ambiguous: false };
+}
+
+export function parseTimeString(raw: string | null | undefined): string | null {
+  const t = raw?.trim();
+  if (!t) return null;
+  if (/^\d{1,2}:\d{2}(:\d{2})?$/.test(t)) {
+    const [h, m] = t.split(':');
+    return `${String(Number(h)).padStart(2, '0')}:${String(Number(m)).padStart(2, '0')}:00`;
+  }
+  if (t.includes('T')) {
+    const part = (t.split('T')[1] ?? '').slice(0, 8);
+    if (part.length >= 5) return `${part.slice(0, 2)}:${part.slice(3, 5)}:00`;
+  }
+  return null;
+}
+
+export function parseCurrencyPence(raw: string | null | undefined): number | null {
+  const t = raw?.trim();
+  if (!t) return null;
+  const cleaned = t.replace(/[£$,]/g, '').trim();
+  const n = Number.parseFloat(cleaned);
+  if (!Number.isFinite(n)) return null;
+  return Math.round(n * 100);
+}
+
+export function parseIntSafe(raw: string | null | undefined): number | null {
+  const t = raw?.trim();
+  if (!t) return null;
+  const n = Number.parseInt(t.replace(/[, ]/g, ''), 10);
+  return Number.isFinite(n) ? n : null;
+}
+
+export function splitFullName(full: string): { first: string; last: string } {
+  const t = full.trim();
+  if (!t) return { first: '', last: '' };
+  const sp = t.indexOf(' ');
+  if (sp === -1) return { first: t, last: '' };
+  return { first: t.slice(0, sp).trim(), last: t.slice(sp + 1).trim() };
+}
+
+export function mapBookingStatus(raw: string | null | undefined): string {
+  const t = raw?.trim().toLowerCase() ?? '';
+  if (!t) return 'Confirmed';
+  if (t.includes('cancel')) return 'Cancelled';
+  if (t.includes('no-show') || t.includes('no show')) return 'No-Show';
+  if (t.includes('complete') || t.includes('completed')) return 'Completed';
+  if (t.includes('seat')) return 'Seated';
+  if (t.includes('pending') || t.includes('unconfirmed')) return 'Pending';
+  return 'Confirmed';
+}
