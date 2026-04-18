@@ -149,6 +149,7 @@ export function CommunicationTemplatesSection({
   pricingTier = "appointments",
   bookingModel,
   enabledModels = [],
+  hasStripeSubscription = false,
 }: CommunicationTemplatesSectionProps) {
   const primary =
     (bookingModel as BookingModel | undefined) ?? "table_reservation";
