@@ -10,6 +10,7 @@ import {
 import {
   subscriptionCancelAtPeriodEnd,
   subscriptionPeriodEndIso,
+  subscriptionPeriodStartIso,
 } from '@/lib/stripe/subscription-fields';
 import { updateVenueSmsMonthlyAllowance } from '@/lib/billing/sms-allowance';
 import { countUnifiedCalendarColumns } from '@/lib/light-plan';
@@ -120,6 +121,7 @@ export async function POST() {
 
     const ids = getPersistedSubscriptionItemIds(sub);
     const periodEndIso = subscriptionPeriodEndIso(sub);
+    const periodStartIso = subscriptionPeriodStartIso(sub);
     const cancelAtPeriodEnd = subscriptionCancelAtPeriodEnd(sub);
 
     await admin
@@ -129,6 +131,7 @@ export async function POST() {
         stripe_subscription_id: sub.id,
         stripe_subscription_item_id: ids.mainSubscriptionItemId,
         stripe_sms_subscription_item_id: ids.smsSubscriptionItemId,
+        subscription_current_period_start: periodStartIso,
         subscription_current_period_end: periodEndIso,
         calendar_count: null,
         light_plan_free_period_ends_at: null,

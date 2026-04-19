@@ -31,6 +31,8 @@ export interface VenueSettings {
   combination_threshold?: number;
   pricing_tier?: string;
   plan_status?: string;
+  /** Start of current Stripe billing period (ISO), for SMS tallies and metered billing alignment. */
+  subscription_current_period_start?: string | null;
   /** End of current Stripe billing period (ISO), for cancel-at-period-end messaging. */
   subscription_current_period_end?: string | null;
   calendar_count?: number | null;

@@ -67,7 +67,7 @@ export default async function SettingsPage({
   let hasServiceConfig = false;
   const { data: fullVenue, error: fullErr } = await staff.db
     .from('venues')
-    .select('id, name, slug, address, phone, email, website_url, cover_photo_url, cuisine_type, price_band, no_show_grace_minutes, kitchen_email, communication_templates, opening_hours, venue_opening_exceptions, booking_rules, deposit_config, availability_config, stripe_connected_account_id, timezone, table_management_enabled, combination_threshold, pricing_tier, plan_status, subscription_current_period_end, calendar_count, booking_model, enabled_models, active_booking_models, sms_monthly_allowance, stripe_subscription_id, created_at, light_plan_free_period_ends_at')
+    .select('id, name, slug, address, phone, email, website_url, cover_photo_url, cuisine_type, price_band, no_show_grace_minutes, kitchen_email, communication_templates, opening_hours, venue_opening_exceptions, booking_rules, deposit_config, availability_config, stripe_connected_account_id, timezone, table_management_enabled, combination_threshold, pricing_tier, plan_status, subscription_current_period_start, subscription_current_period_end, calendar_count, booking_model, enabled_models, active_booking_models, sms_monthly_allowance, stripe_subscription_id, created_at, light_plan_free_period_ends_at')
     .eq('id', venueId)
     .single();
 
@@ -158,16 +158,34 @@ export default async function SettingsPage({
 
   const isAdmin = staff.role === 'admin';
   let smsMessagesSentThisMonth: number | null = null;
-  if (venueId) {
-    const now = new Date();
-    const bm = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}-01`;
-    const { data: smsRow } = await staff.db
-      .from('sms_usage')
-      .select('messages_sent')
-      .eq('venue_id', venueId)
-      .eq('billing_month', bm)
-      .maybeSingle();
-    smsMessagesSentThisMonth = (smsRow as { messages_sent?: number } | null)?.messages_sent ?? 0;
+  let smsCountUsesStripePeriod = false;
+  if (venueId && venue) {
+    const tier = String((venue as { pricing_tier?: string | null }).pricing_tier ?? '').toLowerCase();
+    const periodStart = (venue as { subscription_current_period_start?: string | null }).subscription_current_period_start?.trim();
+    const periodEnd = (venue as { subscription_current_period_end?: string | null }).subscription_current_period_end?.trim();
+    if (tier === 'light' && periodStart && periodEnd) {
+      smsCountUsesStripePeriod = true;
+      const { count, error: smsCntErr } = await staff.db
+        .from('sms_log')
+        .select('id', { count: 'exact', head: true })
+        .eq('venue_id', venueId)
+        .gte('sent_at', periodStart)
+        .lt('sent_at', periodEnd);
+      if (smsCntErr) {
+        console.error('[settings] sms_log count failed:', smsCntErr.message);
+      }
+      smsMessagesSentThisMonth = count ?? 0;
+    } else {
+      const now = new Date();
+      const bm = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}-01`;
+      const { data: smsRow } = await staff.db
+        .from('sms_usage')
+        .select('messages_sent')
+        .eq('venue_id', venueId)
+        .eq('billing_month', bm)
+        .maybeSingle();
+      smsMessagesSentThisMonth = (smsRow as { messages_sent?: number } | null)?.messages_sent ?? 0;
+    }
   }
   const sp = await searchParams;
   const { tab } = sp;
@@ -194,6 +212,7 @@ export default async function SettingsPage({
           planCheckoutReturn={planCheckoutReturn}
           hasServiceConfig={hasServiceConfig}
           bookingModel={bookingModel}
+          smsCountUsesStripePeriod={smsCountUsesStripePeriod}
         />
       </div>
     </div>

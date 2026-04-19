@@ -6,6 +6,7 @@ import { getBusinessConfig } from '@/lib/business-config';
 import {
   subscriptionCancelAtPeriodEnd,
   subscriptionPeriodEndIso,
+  subscriptionPeriodStartIso,
 } from '@/lib/stripe/subscription-fields';
 import {
   findMainPlanSubscriptionItem,
@@ -162,6 +163,7 @@ async function handleCheckoutCompleted(
     let mainSubscriptionItemId: string | null = null;
     let smsSubscriptionItemId: string | null = null;
     let periodEndIso: string | null = null;
+    let periodStartIso: string | null = null;
     let cancelAtPeriodEnd = false;
     if (subscriptionId) {
       try {
@@ -170,6 +172,7 @@ async function handleCheckoutCompleted(
         mainSubscriptionItemId = ids.mainSubscriptionItemId;
         smsSubscriptionItemId = ids.smsSubscriptionItemId;
         periodEndIso = subscriptionPeriodEndIso(sub);
+        periodStartIso = subscriptionPeriodStartIso(sub);
         cancelAtPeriodEnd = subscriptionCancelAtPeriodEnd(sub);
       } catch {
         console.warn('[Subscription webhook] Could not retrieve new subscription item');
@@ -180,6 +183,7 @@ async function handleCheckoutCompleted(
       stripe_subscription_id: subscriptionId,
       stripe_subscription_item_id: mainSubscriptionItemId,
       stripe_sms_subscription_item_id: smsSubscriptionItemId,
+      subscription_current_period_start: periodStartIso,
       subscription_current_period_end: periodEndIso,
       plan_status: cancelAtPeriodEnd ? 'cancelling' : 'active',
     };
@@ -248,6 +252,7 @@ async function handleCheckoutCompleted(
   let mainSubscriptionItemId: string | null = null;
   let smsSubscriptionItemId: string | null = null;
   let periodEndIso: string | null = null;
+  let periodStartIso: string | null = null;
   let cancelAtPeriodEnd = false;
   if (subscriptionId) {
     try {
@@ -256,6 +261,7 @@ async function handleCheckoutCompleted(
       mainSubscriptionItemId = ids.mainSubscriptionItemId;
       smsSubscriptionItemId = ids.smsSubscriptionItemId;
       periodEndIso = subscriptionPeriodEndIso(sub);
+      periodStartIso = subscriptionPeriodStartIso(sub);
       cancelAtPeriodEnd = subscriptionCancelAtPeriodEnd(sub);
     } catch {
       console.warn('[Subscription webhook] Could not retrieve subscription item');
@@ -279,6 +285,7 @@ async function handleCheckoutCompleted(
       stripe_subscription_id: subscriptionId,
       stripe_subscription_item_id: mainSubscriptionItemId,
       stripe_sms_subscription_item_id: smsSubscriptionItemId,
+      subscription_current_period_start: periodStartIso,
       subscription_current_period_end: periodEndIso,
       calendar_count: null,
       onboarding_step: 0,
@@ -327,6 +334,7 @@ async function handleSubscriptionUpdated(
     stripe_subscription_id: subscription.id,
     stripe_subscription_item_id: ids.mainSubscriptionItemId,
     stripe_sms_subscription_item_id: ids.smsSubscriptionItemId,
+    subscription_current_period_start: subscriptionPeriodStartIso(subscriptionRaw),
     subscription_current_period_end: subscriptionPeriodEndIso(subscriptionRaw),
   };
 
@@ -423,6 +431,7 @@ async function handleSubscriptionDeleted(
         stripe_subscription_id: null,
         stripe_subscription_item_id: null,
         stripe_sms_subscription_item_id: null,
+        subscription_current_period_start: null,
         subscription_current_period_end: null,
       })
       .eq('id', vid);

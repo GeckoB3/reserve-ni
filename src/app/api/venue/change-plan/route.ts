@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { stripe } from '@/lib/stripe';
-import { subscriptionPeriodEndIso, subscriptionStatus } from '@/lib/stripe/subscription-fields';
+import { subscriptionPeriodEndIso, subscriptionPeriodStartIso, subscriptionStatus } from '@/lib/stripe/subscription-fields';
 import {
   buildCheckoutLineItems,
   buildLightPlanCheckoutLineItems,
@@ -76,10 +76,12 @@ export async function POST(request: Request) {
           cancel_at_period_end: true,
         });
         const periodEndIso = subscriptionPeriodEndIso(sub);
+        const periodStartIso = subscriptionPeriodStartIso(sub);
         await admin
           .from('venues')
           .update({
             plan_status: 'cancelling',
+            subscription_current_period_start: periodStartIso,
             subscription_current_period_end: periodEndIso,
           })
           .eq('id', venue.id);
@@ -94,11 +96,13 @@ export async function POST(request: Request) {
           cancel_at_period_end: false,
         });
         const periodEndIso = subscriptionPeriodEndIso(sub);
+        const periodStartIso = subscriptionPeriodStartIso(sub);
         const st = subscriptionStatus(sub);
         await admin
           .from('venues')
           .update({
             plan_status: st === 'trialing' ? 'trialing' : 'active',
+            subscription_current_period_start: periodStartIso,
             subscription_current_period_end: periodEndIso,
           })
           .eq('id', venue.id);

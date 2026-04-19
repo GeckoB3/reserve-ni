@@ -13,6 +13,7 @@ import {
 import {
   subscriptionCancelAtPeriodEnd,
   subscriptionPeriodEndIso,
+  subscriptionPeriodStartIso,
 } from '@/lib/stripe/subscription-fields';
 import { updateVenueSmsMonthlyAllowance } from '@/lib/billing/sms-allowance';
 
@@ -120,6 +121,7 @@ export async function handleLightSmsSetupCheckoutCompleted(
 
   const ids = getPersistedSubscriptionItemIds(sub);
   const periodEndIso = subscriptionPeriodEndIso(sub);
+  const periodStartIso = subscriptionPeriodStartIso(sub);
   const cancelAtPeriodEnd = subscriptionCancelAtPeriodEnd(sub);
 
   await supabase
@@ -128,6 +130,7 @@ export async function handleLightSmsSetupCheckoutCompleted(
       stripe_subscription_id: sub.id,
       stripe_subscription_item_id: ids.mainSubscriptionItemId,
       stripe_sms_subscription_item_id: ids.smsSubscriptionItemId,
+      subscription_current_period_start: periodStartIso,
       subscription_current_period_end: periodEndIso,
       plan_status: cancelAtPeriodEnd ? 'cancelling' : sub.status === 'trialing' ? 'trialing' : 'active',
     })

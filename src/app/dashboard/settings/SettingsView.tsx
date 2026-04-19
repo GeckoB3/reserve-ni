@@ -43,6 +43,8 @@ interface SettingsViewProps {
   planCheckoutReturn?: 'upgraded' | 'downgraded' | 'resubscribed' | 'light_sms_setup';
   hasServiceConfig?: boolean;
   bookingModel?: string;
+  /** Light plan: SMS count matches Stripe subscription period (sms_log). */
+  smsCountUsesStripePeriod?: boolean;
 }
 
 const TABS = [
@@ -70,9 +72,11 @@ function resolveInitialTab(initialTab: string | undefined, isAdmin: boolean): Ta
 function PlanSection({
   venue,
   bookingModel,
+  smsCountUsesStripePeriod = false,
 }: {
   venue: VenueSettings;
   bookingModel?: string;
+  smsCountUsesStripePeriod?: boolean;
 }) {
   const [loading, setLoading] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -108,6 +112,22 @@ function PlanSection({
   const billingActive = planStatus === 'active' || planStatus === 'trialing';
   const isCancelling = planStatus === 'cancelling';
   const hasStripeSub = Boolean(venue.stripe_subscription_id?.trim());
+
+  const freeEndMs = venue.light_plan_free_period_ends_at
+    ? new Date(venue.light_plan_free_period_ends_at).getTime()
+    : NaN;
+  const inFreeWindow = !Number.isNaN(freeEndMs) && freeEndMs > Date.now();
+
+  const lightTrialNoCard =
+    isLight && !hasStripeSub && inFreeWindow && billingActive && !isCancelling;
+  const lightTrialWithCard =
+    isLight && hasStripeSub && planStatus === 'trialing' && billingActive && !isCancelling;
+  const lightPaying = isLight && hasStripeSub && planStatus === 'active' && !isCancelling;
+  const lightCancelling = isLight && isCancelling;
+  const lightCancelled = isLight && planStatus === 'cancelled';
+
+  const standardPlanCancelled = !isLight && planStatus === 'cancelled';
+  const standardPlanCancelling = !isLight && isCancelling;
 
   useEffect(() => {
     if (planSuccessLoaded.current) return;
@@ -200,8 +220,66 @@ function PlanSection({
     <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm space-y-4">
       <h2 className="text-base font-semibold text-slate-900">Your Plan</h2>
       <p className="text-xs text-slate-600 leading-relaxed">
-        Billing runs through Stripe. If you cancel, you keep full access until the end of the period shown below; no
-        further charges after that.
+        {!isLight ? (
+          planStatus === 'past_due' ? (
+            <>
+              Your last payment failed. Update your payment method so Stripe can retry the invoice and restore your plan.
+            </>
+          ) : standardPlanCancelled ? (
+            <>
+              Your paid subscription is not active anymore. Use Resubscribe below when you want to return to {tierLabel}.
+            </>
+          ) : standardPlanCancelling ? (
+            <>
+              Your subscription is scheduled to end at the close of your current billing period. You keep full access as
+              normal until then; no further charges after that date.
+            </>
+          ) : (
+            <>
+              Billing runs through Stripe. If you cancel, you keep full access until the end of the period shown below; no
+              further charges after that.
+              {isRestaurantTier ? (
+                <>
+                  {' '}
+                  The Restaurant plan covers dining and table-management features for this venue.
+                </>
+              ) : null}
+              {tier === 'founding' ? (
+                <>
+                  {' '}
+                  Founding Partner pricing is shown in the note below.
+                </>
+              ) : null}
+            </>
+          )
+        ) : lightCancelled ? (
+          <>This subscription is not active. You can resubscribe below if you need the plan again.</>
+        ) : lightCancelling ? null : planStatus === 'past_due' ? (
+          <>Your last payment failed. Update your card below to restore billing and access.</>
+        ) : lightTrialNoCard ? (
+          <>
+            First three months are free for bookings and email (no card needed). The &pound;{APPOINTMENTS_LIGHT_PRICE}/month
+            plan fee starts when your free period ends, not when you add a card. Add a card anytime to send SMS at &pound;
+            {SMS_LIGHT_GBP_PER_MESSAGE.toFixed(2)} each. Add a card before your free period ends to stay on Light after that.
+          </>
+        ) : lightTrialWithCard ? (
+          <>
+            The &pound;{APPOINTMENTS_LIGHT_PRICE}/month subscription charge starts when your free period ends, not when you
+            added your card. SMS is &pound;{SMS_LIGHT_GBP_PER_MESSAGE.toFixed(2)} each (metered) when enabled. If you cancel,
+            you keep access until the billing period below ends.
+          </>
+        ) : lightPaying ? (
+          <>
+            You are on Appointments Light at &pound;{APPOINTMENTS_LIGHT_PRICE}/month. SMS is &pound;
+            {SMS_LIGHT_GBP_PER_MESSAGE.toFixed(2)} each (metered). If you cancel, you keep access until the billing period
+            below ends.
+          </>
+        ) : (
+          <>
+            Appointments Light: &pound;{APPOINTMENTS_LIGHT_PRICE}/month after your free period; SMS &pound;
+            {SMS_LIGHT_GBP_PER_MESSAGE.toFixed(2)} each (metered).
+          </>
+        )}
       </p>
       {planSuccess && (
         <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
@@ -244,38 +322,47 @@ function PlanSection({
                   : planStatus}
         </span>
       </div>
-      {periodEndLabel && tier !== 'founding' && billingActive && !isCancelling && hasStripeSub && (
+      {periodEndLabel && billingActive && !isCancelling && hasStripeSub && (
         <p className="text-xs text-slate-500">Current billing period ends on {periodEndLabel}.</p>
       )}
-      {isLight && freePeriodEndLabel && billingActive && (
+      {lightTrialNoCard && freePeriodEndLabel && (
         <p className="text-xs text-slate-600">
-          Included free period ends on <span className="font-medium text-slate-800">{freePeriodEndLabel}</span>. After
-          that, the plan continues at &pound;{APPOINTMENTS_LIGHT_PRICE}/month (see Stripe for taxes).
+          Included free period ends on <span className="font-medium text-slate-800">{freePeriodEndLabel}</span>.
         </p>
       )}
       {!isLight && (
-        <p className="text-sm text-slate-600">Unlimited calendars and team members.</p>
+        <p className="text-sm text-slate-600">
+          {isRestaurantTier
+            ? 'Table management, floor plan tools, and team access included for your venue (see Dining Availability and Staff).'
+            : tier === 'founding'
+              ? 'Full platform features for your venue during the founding period (see note below).'
+              : 'Unlimited calendars and team members.'}
+        </p>
       )}
       {isLight && (
-        <ul className="list-inside list-disc text-sm text-slate-600 space-y-1">
-          <li>One bookable calendar and one venue login (no extra team seats).</li>
-          <li>
-            After the free period: &pound;{APPOINTMENTS_LIGHT_PRICE}/month plus SMS at &pound;
-            {SMS_LIGHT_GBP_PER_MESSAGE.toFixed(2)} each (metered billing).
-          </li>
-        </ul>
+        <p className="text-sm text-slate-600">
+          One bookable calendar and one venue login (no extra team seats).
+        </p>
       )}
       <p className="text-sm text-slate-600">
-        SMS this billing month:{' '}
+        {isLight ? (
+          smsCountUsesStripePeriod ? (
+            <>SMS this billing period: </>
+          ) : (
+            <>SMS this calendar month: </>
+          )
+        ) : (
+          <>SMS this billing month: </>
+        )}{' '}
         <span className="font-semibold text-slate-900">{venue.sms_messages_sent_this_month ?? 0}</span>
-        {' / '}
         {isLight ? (
           <>
-            no bundle included — each SMS is billed at &pound;{SMS_LIGHT_GBP_PER_MESSAGE.toFixed(2)} (metered).
+            {' '}
+            (pay-as-you-go; each message is reported to Stripe at &pound;{SMS_LIGHT_GBP_PER_MESSAGE.toFixed(2)}).
           </>
         ) : (
           <>
-            {smsIncludedMonthly} included. Overage beyond your allowance is billed at &pound;
+            {' '}/ {smsIncludedMonthly} included. Overage beyond your allowance is billed at &pound;
             {SMS_OVERAGE_GBP_PER_MESSAGE.toFixed(2)} per SMS via Stripe metered billing.
           </>
         )}
@@ -285,13 +372,29 @@ function PlanSection({
           {actionError}
         </div>
       )}
-      {isCancelling && tier !== 'founding' && (
+      {isCancelling && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
           <p className="font-medium">Subscription ending</p>
           <p className="mt-1 text-amber-800">
             {periodEndLabel
               ? `Access continues until the end of your billing period (${periodEndLabel}). Stripe will not charge again after that.`
               : 'Access continues until the end of your current billing period. Stripe will not charge again after that.'}
+            {isLight ? (
+              <>
+                {' '}
+                On Appointments Light, SMS remains pay-as-you-go until then.
+              </>
+            ) : isRestaurantTier ? (
+              <>
+                {' '}
+                Restaurant features remain available until that time.
+              </>
+            ) : tier === 'founding' ? (
+              <>
+                {' '}
+                Founding Partner access continues until then.
+              </>
+            ) : null}
           </p>
           <button
             type="button"
@@ -311,12 +414,15 @@ function PlanSection({
       )}
       {isLight && (
         <div className="rounded-lg border border-sky-200 bg-sky-50/80 px-3 py-3 text-sm text-sky-950 space-y-2">
-          <p className="font-medium">SMS and plan billing</p>
-          <p className="text-sky-900">
-            {planStatus === 'past_due' && hasStripeSub
-              ? 'Your last payment failed. Add or replace your card so Stripe can retry the invoice and restore your booking page.'
-              : 'To send SMS after the free window, add a card once. We create your Light subscription (£5/month from the free end date, plus pay-as-you-go SMS on the same subscription).'}
-          </p>
+          <p className="font-medium">Payment method</p>
+          {planStatus === 'past_due' && hasStripeSub ? (
+            <p className="text-sky-900">
+              Your last payment failed. Add or replace your card so Stripe can retry the invoice and restore your booking
+              page.
+            </p>
+          ) : hasStripeSub && planStatus !== 'past_due' ? (
+            <p className="text-sky-900">Your card is on file for SMS and subscription billing.</p>
+          ) : null}
           {planStatus !== 'cancelled' && (!hasStripeSub || planStatus === 'past_due') && (
             <button
               type="button"
@@ -333,8 +439,8 @@ function PlanSection({
         <div className="rounded-lg border border-brand-200 bg-brand-50/80 px-3 py-3 text-sm text-brand-950">
           <p className="font-medium">Upgrade to full Appointments</p>
           <p className="mt-1 text-brand-900">
-            &pound;{APPOINTMENTS_PRICE}/month — unlimited calendars and team members, higher SMS bundle. Checkout replaces
-            your Light plan.
+            &pound;{APPOINTMENTS_PRICE}/month: unlimited calendars and team members, higher SMS bundle. Checkout replaces your
+            Light plan.
           </p>
           <button
             type="button"
@@ -396,6 +502,7 @@ export function SettingsView({
   planCheckoutReturn,
   hasServiceConfig = false,
   bookingModel = 'table_reservation',
+  smsCountUsesStripePeriod = false,
 }: SettingsViewProps) {
   const router = useRouter();
   const isAppointment = isUnifiedSchedulingVenue(bookingModel);
@@ -457,7 +564,7 @@ export function SettingsView({
       : planCheckoutReturn === 'downgraded'
         ? 'We are confirming your plan change. Details on the Plan tab will update shortly.'
         : planCheckoutReturn === 'light_sms_setup'
-          ? 'Card saved. We are creating your Light subscription in Stripe — the Plan tab may take a short moment to update.'
+          ? 'Card saved. We are creating your Light subscription in Stripe; the Plan tab may take a short moment to update.'
           : 'We are confirming your subscription. The Plan tab will update shortly.';
 
   if (!venue) {
@@ -559,7 +666,7 @@ export function SettingsView({
           <OpeningHoursSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} bookingModel={bookingModel ?? 'table_reservation'} />
         )}
         {activeTab === 'plan' && (
-          <PlanSection venue={venue} bookingModel={bookingModel} />
+          <PlanSection venue={venue} bookingModel={bookingModel} smsCountUsesStripePeriod={smsCountUsesStripePeriod} />
         )}
         {activeTab === 'payments' && (
           <StripeConnectSection stripeAccountId={venue.stripe_connected_account_id} isAdmin={isAdmin} />

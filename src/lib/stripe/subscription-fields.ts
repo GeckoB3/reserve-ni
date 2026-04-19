@@ -10,6 +10,13 @@ export function subscriptionPeriodEndIso(sub: unknown): string | null {
   return new Date(cpe * 1000).toISOString();
 }
 
+export function subscriptionPeriodStartIso(sub: unknown): string | null {
+  if (!sub || typeof sub !== 'object') return null;
+  const cps = (sub as { current_period_start?: number }).current_period_start;
+  if (typeof cps !== 'number') return null;
+  return new Date(cps * 1000).toISOString();
+}
+
 export function subscriptionCancelAtPeriodEnd(sub: unknown): boolean {
   if (!sub || typeof sub !== 'object') return false;
   return Boolean((sub as { cancel_at_period_end?: boolean }).cancel_at_period_end);
