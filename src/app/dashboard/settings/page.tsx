@@ -130,8 +130,9 @@ export default async function SettingsPage({
       activeBookingModels: (venue as { active_booking_models?: unknown }).active_booking_models,
     });
     const bm = getDefaultBookingModelFromActive(activeModels, (venue.booking_model as BookingModel) ?? 'table_reservation');
+    const venueForModels = venue as VenueSettings;
     venue = {
-      ...venue,
+      ...venueForModels,
       booking_model: bm,
       active_booking_models: activeModels,
       enabled_models: activeModelsToLegacyEnabledModels(activeModels, bm),
