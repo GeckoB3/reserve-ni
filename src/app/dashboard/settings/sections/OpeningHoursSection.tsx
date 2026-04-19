@@ -3,6 +3,7 @@
 import { useCallback, useState } from 'react';
 import type { VenueSettings, OpeningHoursSettings, OpeningHoursDaySettings } from '../types';
 import { BusinessClosuresSection } from './BusinessClosuresSection';
+import { OpeningHoursControl } from '@/components/scheduling/OpeningHoursControl';
 
 const DAYS: { key: string; label: string }[] = [
   { key: '0', label: 'Sunday' },
@@ -42,10 +43,6 @@ export function OpeningHoursSection({ venue, onUpdate, isAdmin, bookingModel }: 
     return o;
   });
 
-  const setDay = useCallback((day: string, config: OpeningHoursDaySettings) => {
-    setLocal((prev) => ({ ...prev, [day]: config }));
-  }, []);
-
   const save = useCallback(async () => {
     setError(null);
     setSaving(true);
@@ -73,96 +70,7 @@ export function OpeningHoursSection({ venue, onUpdate, isAdmin, bookingModel }: 
       <h2 className="mb-4 text-lg font-semibold text-neutral-900">Opening hours</h2>
       <p className="mb-4 text-sm text-neutral-600">Set your business opening hours</p>
 
-      <div className="space-y-4">
-        {DAYS.map(({ key, label }) => {
-          const config = local[key] ?? { closed: true };
-          const closed = 'closed' in config && config.closed;
-          const periods = !closed && 'periods' in config ? config.periods : [];
-          const p1 = periods[0] ?? { open: '09:00', close: '17:00' };
-          const p2 = periods[1];
-
-          return (
-            <div key={key} className="rounded border border-neutral-200 p-4">
-              <div className="flex flex-wrap items-center gap-4">
-                <span className="font-medium text-neutral-800 w-24">{label}</span>
-                {isAdmin ? (
-                  <>
-                    <label className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        checked={!closed}
-                        onChange={(e) => {
-                          if (e.target.checked) setDay(key, { periods: [{ open: '09:00', close: '17:00' }] });
-                          else setDay(key, { closed: true });
-                        }}
-                        className="rounded"
-                      />
-                      <span className="text-sm">Open</span>
-                    </label>
-                    {!closed && (
-                      <>
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="time"
-                            value={p1.open}
-                            onChange={(e) => setDay(key, { periods: [{ ...p1, open: e.target.value }, p2].filter(Boolean) as { open: string; close: string }[] })}
-                            className="rounded border border-neutral-300 px-2 py-1 text-sm"
-                          />
-                          <span className="text-neutral-500">–</span>
-                          <input
-                            type="time"
-                            value={p1.close}
-                            onChange={(e) => setDay(key, { periods: [{ ...p1, close: e.target.value }, p2].filter(Boolean) as { open: string; close: string }[] })}
-                            className="rounded border border-neutral-300 px-2 py-1 text-sm"
-                          />
-                        </div>
-                        {!p2 ? (
-                          <button
-                            type="button"
-                            onClick={() => setDay(key, { periods: [p1, { open: '17:00', close: '22:00' }] })}
-                            className="text-sm text-blue-600 hover:underline"
-                          >
-                            + Add second period
-                          </button>
-                        ) : (
-                          <>
-                            <div className="flex items-center gap-2">
-                              <input
-                                type="time"
-                                value={p2.open}
-                                onChange={(e) => setDay(key, { periods: [p1, { ...p2, open: e.target.value }] })}
-                                className="rounded border border-neutral-300 px-2 py-1 text-sm"
-                              />
-                              <span className="text-neutral-500">–</span>
-                              <input
-                                type="time"
-                                value={p2.close}
-                                onChange={(e) => setDay(key, { periods: [p1, { ...p2, close: e.target.value }] })}
-                                className="rounded border border-neutral-300 px-2 py-1 text-sm"
-                              />
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => setDay(key, { periods: [p1] })}
-                              className="text-sm text-red-600 hover:underline"
-                            >
-                              Remove second
-                            </button>
-                          </>
-                        )}
-                      </>
-                    )}
-                  </>
-                ) : (
-                  <span className="text-sm text-neutral-600">
-                    {closed ? 'Closed' : `${p1.open}–${p1.close}${p2 ? `, ${p2.open}–${p2.close}` : ''}`}
-                  </span>
-                )}
-              </div>
-            </div>
-          );
-        })}
-      </div>
+      <OpeningHoursControl value={local} onChange={setLocal} disabled={!isAdmin} />
 
       {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
       {isAdmin && (

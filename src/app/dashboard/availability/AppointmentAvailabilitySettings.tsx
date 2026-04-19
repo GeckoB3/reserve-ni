@@ -7,16 +7,8 @@ import { defaultNewUnifiedCalendarWorkingHours } from '@/lib/availability/practi
 import type { TimeRange, WorkingHours } from '@/types/booking-models';
 import { StaffLeaveCalendarPanel } from '@/app/dashboard/availability/StaffLeaveCalendarPanel';
 import { BookableCalendarsPanel } from '@/app/dashboard/availability/BookableCalendarsPanel';
-
-interface CalendarEntitlement {
-  pricing_tier: string;
-  calendar_count: number | null;
-  active_practitioners: number;
-  calendar_limit: number | null;
-  unlimited: boolean;
-  at_calendar_limit: boolean;
-  can_add_practitioner: boolean;
-}
+import { WorkingHoursControl } from '@/components/scheduling/WorkingHoursControl';
+import { useCalendarEntitlement } from '@/hooks/use-calendar-entitlement';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 interface Practitioner {
@@ -201,7 +193,7 @@ export function AppointmentAvailabilitySettings({
   const [experienceEvents, setExperienceEvents] = useState<ExperienceEventRow[]>([]);
   /** Team calendar id → conflict messages (resource + class/event on same column, overlapping resources, etc.). */
   const [calendarColumnAlerts, setCalendarColumnAlerts] = useState<Record<string, string[]>>({});
-  const [entitlement, setEntitlement] = useState<CalendarEntitlement | null>(null);
+  const { entitlement, refresh: refreshCalendarEntitlement } = useCalendarEntitlement(isAdmin);
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   /** Validation / API errors for the Add/Edit calendar modal only (not the page-level banner). */
   const [calendarModalError, setCalendarModalError] = useState<string | null>(null);
@@ -393,22 +385,6 @@ export function AppointmentAvailabilitySettings({
     fetchData();
   }, [fetchData]);
 
-  const fetchEntitlement = useCallback(async () => {
-    if (!isAdmin) return;
-    try {
-      const res = await fetch('/api/venue/calendar-entitlement');
-      if (!res.ok) return;
-      const data = (await res.json()) as CalendarEntitlement;
-      setEntitlement(data);
-    } catch {
-      // non-blocking
-    }
-  }, [isAdmin]);
-
-  useEffect(() => {
-    void fetchEntitlement();
-  }, [fetchEntitlement]);
-
   /** Keep `sort_order` in sync after drag-reorder PATCH — avoids full fetchData() and loading spinner. */
   const applyCalendarReorder = useCallback((orderedIds: string[]) => {
     setPractitioners((prev) =>
@@ -550,7 +526,7 @@ export function AppointmentAvailabilitySettings({
           limit?: number;
         };
         if (d.upgrade_required || res.status === 403) {
-          void fetchEntitlement();
+          void refreshCalendarEntitlement();
           setShowUpgradeModal(true);
           throw new Error(
             d.error ??
@@ -716,7 +692,7 @@ export function AppointmentAvailabilitySettings({
       setShowForm(false);
       flash(editingId ? 'Calendar updated' : 'Calendar added');
       await fetchData();
-      await fetchEntitlement();
+      await refreshCalendarEntitlement();
     } catch (err) {
       setCalendarModalError(err instanceof Error ? err.message : 'Failed to save');
     } finally {
@@ -823,7 +799,7 @@ export function AppointmentAvailabilitySettings({
                 entitlement={entitlement}
                 onCalendarsChanged={() => {
                   void fetchData();
-                  void fetchEntitlement();
+                  void refreshCalendarEntitlement();
                 }}
                 onCalendarReorderSaved={applyCalendarReorder}
                 onEditCalendar={openEdit}
@@ -1213,101 +1189,9 @@ function WorkingHoursEditor({
     setDraft(hours);
   }, [hours]);
 
-  function toggleDay(dayKey: string) {
-    setDraft((prev) => {
-      const copy = { ...prev };
-      if (copy[dayKey] && copy[dayKey].length > 0) {
-        delete copy[dayKey];
-      } else {
-        copy[dayKey] = [{ start: '09:00', end: '17:00' }];
-      }
-      return copy;
-    });
-  }
-
-  function updateRange(dayKey: string, index: number, field: 'start' | 'end', value: string) {
-    setDraft((prev) => {
-      const copy = { ...prev };
-      const ranges = [...(copy[dayKey] ?? [])];
-      ranges[index] = { ...ranges[index]!, [field]: value };
-      copy[dayKey] = ranges;
-      return copy;
-    });
-  }
-
-  function addRange(dayKey: string) {
-    setDraft((prev) => ({
-      ...prev,
-      [dayKey]: [...(prev[dayKey] ?? []), { start: '09:00', end: '17:00' }],
-    }));
-  }
-
-  function removeRange(dayKey: string, index: number) {
-    setDraft((prev) => {
-      const copy = { ...prev };
-      const ranges = [...(copy[dayKey] ?? [])];
-      ranges.splice(index, 1);
-      if (ranges.length === 0) delete copy[dayKey];
-      else copy[dayKey] = ranges;
-      return copy;
-    });
-  }
-
   return (
     <div className="space-y-3">
-      {DAY_KEYS.map((dayKey, i) => {
-        const ranges = draft[dayKey] ?? [];
-        const isWorking = ranges.length > 0;
-        return (
-          <div key={dayKey} className="rounded-xl border border-slate-200 bg-white px-4 py-3">
-            <div className="flex items-center justify-between">
-              <label className="flex items-center gap-3 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={isWorking}
-                  onChange={() => toggleDay(dayKey)}
-                  disabled={readOnly}
-                  className="h-4 w-4 rounded border-slate-300 text-blue-600 disabled:opacity-50"
-                />
-                <span className={`text-sm font-medium ${isWorking ? 'text-slate-900' : 'text-slate-400'}`}>
-                  {DAY_LABELS[i]}
-                </span>
-              </label>
-              {isWorking && !readOnly && (
-                <button type="button" onClick={() => addRange(dayKey)} className="text-xs text-blue-600 hover:underline">
-                  + Add split
-                </button>
-              )}
-            </div>
-            {isWorking && (
-              <div className="mt-2 space-y-2 pl-7">
-                {ranges.map((r, ri) => (
-                  <div key={ri} className="flex items-center gap-2">
-                    <input
-                      type="time"
-                      value={r.start}
-                      onChange={(e) => updateRange(dayKey, ri, 'start', e.target.value)}
-                      disabled={readOnly}
-                      className="rounded-lg border border-slate-300 px-2 py-1 text-sm disabled:bg-slate-50"
-                    />
-                    <span className="text-sm text-slate-400">to</span>
-                    <input
-                      type="time"
-                      value={r.end}
-                      onChange={(e) => updateRange(dayKey, ri, 'end', e.target.value)}
-                      disabled={readOnly}
-                      className="rounded-lg border border-slate-300 px-2 py-1 text-sm disabled:bg-slate-50"
-                    />
-                    {ranges.length > 1 && !readOnly && (
-                      <button type="button" onClick={() => removeRange(dayKey, ri)} className="text-xs text-red-500 hover:underline">Remove</button>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        );
-      })}
+      <WorkingHoursControl value={draft} onChange={setDraft} disabled={readOnly} />
 
       {!readOnly && (
         <button

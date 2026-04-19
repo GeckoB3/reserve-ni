@@ -6,7 +6,7 @@ import { stripe } from '@/lib/stripe';
 /**
  * POST /api/venue/light-plan/start-sms-setup
  * Opens Stripe Setup Checkout:
- * - No subscription yet → webhook creates Light sub (£5 deferred + metered SMS).
+ * - No subscription yet → webhook creates Light sub (£6/mo deferred + metered SMS).
  * - past_due with subscription → webhook attaches card and retries open invoices (`light_payment_method_update`).
  */
 export async function POST() {

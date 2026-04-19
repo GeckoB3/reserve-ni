@@ -13,6 +13,7 @@ import {
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { normalizePublicBaseUrl, publicBaseUrlHost } from '@/lib/public-base-url';
+import { isLightPlanTier } from '@/lib/tier-enforcement';
 const PUBLIC_BOOK_ORIGIN = normalizePublicBaseUrl(process.env.NEXT_PUBLIC_BASE_URL);
 const PUBLIC_BOOK_HOST = publicBaseUrlHost(PUBLIC_BOOK_ORIGIN);
 
@@ -696,17 +697,20 @@ export function BookableCalendarsPanel({
               <div>
                 <div className="flex flex-wrap items-center gap-2">
                   <h2 className="text-lg font-semibold tracking-tight text-slate-900">Calendars</h2>
-                  {entitlement && !entitlement.unlimited && entitlement.calendar_limit != null && (
-                    <span
-                      className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                        entitlement.at_calendar_limit
-                          ? 'bg-amber-100 text-amber-900 ring-1 ring-amber-200/80'
-                          : 'bg-slate-100 text-slate-700 ring-1 ring-slate-200/80'
-                      }`}
-                    >
-                      {entitlement.active_practitioners} / {entitlement.calendar_limit} on plan
-                    </span>
-                  )}
+                  {entitlement &&
+                    !entitlement.unlimited &&
+                    entitlement.calendar_limit != null &&
+                    !isLightPlanTier(entitlement.pricing_tier) && (
+                      <span
+                        className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                          entitlement.at_calendar_limit
+                            ? 'bg-amber-100 text-amber-900 ring-1 ring-amber-200/80'
+                            : 'bg-slate-100 text-slate-700 ring-1 ring-slate-200/80'
+                        }`}
+                      >
+                        {entitlement.active_practitioners} / {entitlement.calendar_limit} on plan
+                      </span>
+                    )}
                   {entitlement?.unlimited && (
                     <span className="rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-800 ring-1 ring-emerald-200/60">
                       Unlimited calendars
@@ -740,7 +744,7 @@ export function BookableCalendarsPanel({
                 </p>
               </div>
             </div>
-            {entitlement && (
+            {entitlement && (entitlement.unlimited || entitlement.can_add_practitioner) && (
               <button
                 type="button"
                 onClick={onAddCalendar}
@@ -759,12 +763,31 @@ export function BookableCalendarsPanel({
                 <AlertIcon className="h-5 w-5" />
               </span>
               <p>
-                You&apos;ve reached your plan&apos;s calendar limit
-                {entitlement.calendar_limit != null ? ` (${entitlement.calendar_limit})` : ''}. Visit{' '}
-                <a href="/dashboard/settings?tab=plan" className="font-semibold text-amber-950 underline underline-offset-2">
-                  Settings → Plan
-                </a>
-                .
+                {isLightPlanTier(entitlement.pricing_tier) ? (
+                  <>
+                    Appointments Light includes <strong className="font-semibold">one bookable calendar</strong>. To add
+                    more columns, upgrade to the full Appointments plan under{' '}
+                    <a
+                      href="/dashboard/settings?tab=plan"
+                      className="font-semibold text-amber-950 underline underline-offset-2"
+                    >
+                      Settings → Plan
+                    </a>
+                    .
+                  </>
+                ) : (
+                  <>
+                    You&apos;ve reached your plan&apos;s calendar limit
+                    {entitlement.calendar_limit != null ? ` (${entitlement.calendar_limit})` : ''}. Visit{' '}
+                    <a
+                      href="/dashboard/settings?tab=plan"
+                      className="font-semibold text-amber-950 underline underline-offset-2"
+                    >
+                      Settings → Plan
+                    </a>
+                    .
+                  </>
+                )}
               </p>
             </div>
           )}
@@ -802,11 +825,23 @@ export function BookableCalendarsPanel({
                   </>
                 ) : (
                   <>
-                    Add calendars during onboarding, or raise your limit under{' '}
-                    <a href="/dashboard/settings?tab=plan" className="font-medium text-brand-700 underline">
-                      Plan
-                    </a>
-                    .
+                    {isLightPlanTier(entitlement?.pricing_tier) ? (
+                      <>
+                        Appointments Light includes one bookable calendar. To add columns, upgrade under{' '}
+                        <a href="/dashboard/settings?tab=plan" className="font-medium text-brand-700 underline">
+                          Settings → Plan
+                        </a>
+                        .
+                      </>
+                    ) : (
+                      <>
+                        Add calendars during onboarding, or raise your limit under{' '}
+                        <a href="/dashboard/settings?tab=plan" className="font-medium text-brand-700 underline">
+                          Plan
+                        </a>
+                        .
+                      </>
+                    )}
                   </>
                 )}
               </p>

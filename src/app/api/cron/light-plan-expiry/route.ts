@@ -3,6 +3,7 @@ import { getSupabaseAdminClient } from '@/lib/supabase';
 import { requireCronAuthorisation } from '@/lib/cron-auth';
 import { stripe } from '@/lib/stripe';
 import { sendEmail } from '@/lib/emails/send-email';
+import { APPOINTMENTS_LIGHT_PRICE } from '@/lib/pricing-constants';
 
 /**
  * Daily: Appointments Light free-period reminders and expiry (9am UTC via vercel.json).
@@ -207,7 +208,7 @@ async function sendLightReminderEmail(
   const dateStr = end.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
   const body = `Hi,
 
-Your Appointments Light free period for ${venueName} ends on ${dateStr}. After that, your plan continues at £5/month. Add a payment method in the dashboard under Plan & Billing before that date to keep your booking page live.
+Your Appointments Light free period for ${venueName} ends on ${dateStr}. After that, your plan continues at £${APPOINTMENTS_LIGHT_PRICE}/month. Add a payment method in the dashboard under Plan & Billing before that date to keep your booking page live.
 
 All your bookings and settings stay in place.
 

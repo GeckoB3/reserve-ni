@@ -7,6 +7,8 @@ import { useToast } from '@/components/ui/Toast';
 import { normalizeTimeToHhMm, validateStartEndTimes } from '@/lib/experience-events/experience-event-validation';
 import { formatZodFlattenedError } from '@/lib/experience-events/experience-event-zod';
 import { downloadCsvFile, escapeCsvCell } from './event-manager-utils';
+import { canAddCalendarColumn, useCalendarEntitlement } from '@/hooks/use-calendar-entitlement';
+import { isLightPlanTier } from '@/lib/tier-enforcement';
 
 interface TicketType {
   id: string;
@@ -188,6 +190,19 @@ export function EventManagerView({
   const [addCalendarSubmitting, setAddCalendarSubmitting] = useState(false);
   const [addCalendarModalError, setAddCalendarModalError] = useState<string | null>(null);
 
+  const {
+    entitlement: calendarEntitlement,
+    entitlementLoaded,
+    refresh: refreshCalendarEntitlement,
+  } = useCalendarEntitlement(isAdmin);
+  const canAddCalendar = canAddCalendarColumn(calendarEntitlement, entitlementLoaded);
+
+  useEffect(() => {
+    if (entitlementLoaded && !canAddCalendar) {
+      setShowAddCalendarModal(false);
+    }
+  }, [entitlementLoaded, canAddCalendar]);
+
   const submitInlineNewCalendar = useCallback(async () => {
     const name = newCalendarName.trim();
     if (!name) {
@@ -214,6 +229,7 @@ export function EventManagerView({
       };
       if (!res.ok) {
         if (res.status === 403 && json.upgrade_required) {
+          void refreshCalendarEntitlement();
           setAddCalendarModalError(json.error ?? 'Calendar limit reached for your plan.');
         } else {
           setAddCalendarModalError(json.error ?? 'Could not create calendar');
@@ -234,12 +250,13 @@ export function EventManagerView({
       setNewCalendarName('');
       setShowAddCalendarModal(false);
       addToast(`Calendar "${newName}" created and selected.`, 'success');
+      void refreshCalendarEntitlement();
     } catch {
       setAddCalendarModalError('Could not create calendar');
     } finally {
       setAddCalendarSubmitting(false);
     }
-  }, [newCalendarName, addToast]);
+  }, [newCalendarName, addToast, refreshCalendarEntitlement]);
 
   const fetchEvents = useCallback(async () => {
     setLoading(true);
@@ -969,20 +986,49 @@ export function EventManagerView({
                 </div>
                 {isAdmin && (
                   <div className="mt-3 rounded-lg border border-slate-100 bg-slate-50/90 p-3">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setAddCalendarModalError(null);
-                        setNewCalendarName('');
-                        setShowAddCalendarModal(true);
-                      }}
-                      className="inline-flex w-full items-center justify-center rounded-lg border border-brand-200/90 bg-white px-3.5 py-2.5 text-sm font-semibold text-brand-700 shadow-sm transition-[color,background-color,border-color,box-shadow,transform] duration-150 ease-out hover:border-brand-400 hover:bg-brand-50 hover:text-brand-800 hover:shadow-md active:scale-[0.98] active:border-brand-500 active:bg-brand-100 active:shadow-inner motion-reduce:transition-colors motion-reduce:active:scale-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2"
-                    >
-                      Add calendar
-                    </button>
-                    <p className="mt-2 text-xs text-slate-500">
-                      Create a calendar column here and assign it to this event immediately.
-                    </p>
+                    {!entitlementLoaded ? (
+                      <p className="text-xs text-slate-500">Loading plan limits…</p>
+                    ) : canAddCalendar ? (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setAddCalendarModalError(null);
+                            setNewCalendarName('');
+                            setShowAddCalendarModal(true);
+                          }}
+                          className="inline-flex w-full items-center justify-center rounded-lg border border-brand-200/90 bg-white px-3.5 py-2.5 text-sm font-semibold text-brand-700 shadow-sm transition-[color,background-color,border-color,box-shadow,transform] duration-150 ease-out hover:border-brand-400 hover:bg-brand-50 hover:text-brand-800 hover:shadow-md active:scale-[0.98] active:border-brand-500 active:bg-brand-100 active:shadow-inner motion-reduce:transition-colors motion-reduce:active:scale-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2"
+                        >
+                          Add calendar
+                        </button>
+                        <p className="mt-2 text-xs text-slate-500">
+                          Create a calendar column here and assign it to this event immediately.
+                        </p>
+                      </>
+                    ) : calendarEntitlement && isLightPlanTier(calendarEntitlement.pricing_tier) ? (
+                      <p className="text-xs text-amber-950">
+                        Appointments Light includes <strong className="font-semibold">one bookable calendar</strong>. To
+                        add more columns, upgrade to the full Appointments plan under{' '}
+                        <a
+                          href="/dashboard/settings?tab=plan"
+                          className="font-medium text-brand-700 underline hover:text-brand-800"
+                        >
+                          Settings → Plan
+                        </a>
+                        .
+                      </p>
+                    ) : (
+                      <p className="text-xs text-amber-950">
+                        You&apos;ve reached your plan&apos;s calendar limit. Visit{' '}
+                        <a
+                          href="/dashboard/settings?tab=plan"
+                          className="font-medium text-brand-700 underline hover:text-brand-800"
+                        >
+                          Settings → Plan
+                        </a>
+                        .
+                      </p>
+                    )}
                   </div>
                 )}
               </div>

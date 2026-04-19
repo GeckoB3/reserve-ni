@@ -19,7 +19,7 @@ import { updateVenueSmsMonthlyAllowance } from '@/lib/billing/sms-allowance';
 
 /**
  * After Setup Checkout completes for Appointments Light SMS opt-in, create the subscription:
- * £5/mo item deferred with trial_end = light_plan_free_period_ends_at (when in the future),
+ * £6/mo item deferred with trial_end = light_plan_free_period_ends_at (when in the future),
  * plus metered SMS (8p) on the same subscription.
  */
 export async function handleLightSmsSetupCheckoutCompleted(

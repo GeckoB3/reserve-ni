@@ -1,7 +1,12 @@
 'use client';
 
+import { useState } from 'react';
 import { DEFAULT_ENTITY_BOOKING_WINDOW, entityBookingWindowFromRow } from '@/lib/booking/entity-booking-window';
-import type { ClassPaymentRequirement } from '@/types/booking-models';
+import { defaultNewUnifiedCalendarWorkingHours } from '@/lib/availability/practitioner-defaults';
+import { describeOnlineBookableWeeklySummary } from '@/lib/service-custom-availability';
+import type { ClassPaymentRequirement, WorkingHours } from '@/types/booking-models';
+import type { OpeningHours } from '@/types/availability';
+import { WorkingHoursControl } from '@/components/scheduling/WorkingHoursControl';
 
 export type StaffMayFlags = {
   name: boolean;
@@ -43,6 +48,8 @@ export interface AppointmentServiceFormDraft {
   min_booking_notice_hours: number;
   cancellation_notice_hours: number;
   allow_same_day_booking: boolean;
+  custom_availability_enabled: boolean;
+  custom_working_hours: WorkingHours;
 }
 
 const COLOUR_OPTIONS = [
@@ -89,6 +96,8 @@ export function createEmptyAppointmentServiceDraft(): AppointmentServiceFormDraf
     min_booking_notice_hours: DEFAULT_ENTITY_BOOKING_WINDOW.min_booking_notice_hours,
     cancellation_notice_hours: DEFAULT_ENTITY_BOOKING_WINDOW.cancellation_notice_hours,
     allow_same_day_booking: DEFAULT_ENTITY_BOOKING_WINDOW.allow_same_day_booking,
+    custom_availability_enabled: false,
+    custom_working_hours: {},
   };
 }
 
@@ -114,6 +123,8 @@ export function appointmentServiceDraftFromBusinessDefault(ds: {
     min_booking_notice_hours: DEFAULT_ENTITY_BOOKING_WINDOW.min_booking_notice_hours,
     cancellation_notice_hours: DEFAULT_ENTITY_BOOKING_WINDOW.cancellation_notice_hours,
     allow_same_day_booking: DEFAULT_ENTITY_BOOKING_WINDOW.allow_same_day_booking,
+    custom_availability_enabled: false,
+    custom_working_hours: {},
   };
 }
 
@@ -154,6 +165,11 @@ function appointmentServiceDraftFromApiRow(
     min_booking_notice_hours: win.min_booking_notice_hours,
     cancellation_notice_hours: win.cancellation_notice_hours,
     allow_same_day_booking: win.allow_same_day_booking,
+    custom_availability_enabled: Boolean(row.custom_availability_enabled),
+    custom_working_hours:
+      row.custom_availability_enabled && row.custom_working_hours && typeof row.custom_working_hours === 'object'
+        ? (JSON.parse(JSON.stringify(row.custom_working_hours)) as WorkingHours)
+        : {},
   };
 }
 
@@ -203,6 +219,8 @@ export function serviceDraftToApiPayload(draft: AppointmentServiceFormDraft): Re
     staff_may_customize_price: draft.staffMay.price,
     staff_may_customize_deposit: draft.staffMay.deposit,
     staff_may_customize_colour: draft.staffMay.colour,
+    custom_availability_enabled: draft.custom_availability_enabled,
+    custom_working_hours: draft.custom_availability_enabled ? draft.custom_working_hours : null,
   };
 }
 
@@ -216,6 +234,10 @@ interface OnboardingAppointmentServiceListProps {
   rosterIds: string[];
   /** Appointments Light: single calendar, hide per-staff field customisation UI */
   hideStaffCustomization?: boolean;
+  /** Business opening hours (omit for Appointments Light–style flows where only calendar hours apply). */
+  venueOpeningHours?: OpeningHours | null;
+  /** Draft or saved weekly hours per calendar; missing ids use the same default as new calendars. */
+  calendarWorkingHoursById?: Record<string, WorkingHours>;
 }
 
 export function OnboardingAppointmentServiceList({
@@ -226,8 +248,13 @@ export function OnboardingAppointmentServiceList({
   roster,
   rosterIds,
   hideStaffCustomization = false,
+  venueOpeningHours = null,
+  calendarWorkingHoursById = {},
 }: OnboardingAppointmentServiceListProps) {
   const sym = currencySymbol;
+  const [customModalKey, setCustomModalKey] = useState<string | null>(null);
+  const [customDraftEnabled, setCustomDraftEnabled] = useState(false);
+  const [customDraft, setCustomDraft] = useState<WorkingHours>({});
 
   function togglePractitioner(clientKey: string, pid: string) {
     setServices((prev) =>
@@ -245,6 +272,27 @@ export function OnboardingAppointmentServiceList({
     setServices((prev) =>
       prev.map((row) => (row.clientKey === clientKey ? { ...row, ...patch } : row)),
     );
+  }
+
+  function openCustomModal(s: AppointmentServiceFormDraft) {
+    setCustomModalKey(s.clientKey);
+    setCustomDraftEnabled(s.custom_availability_enabled);
+    setCustomDraft(
+      s.custom_availability_enabled && Object.keys(s.custom_working_hours).length > 0
+        ? (JSON.parse(JSON.stringify(s.custom_working_hours)) as WorkingHours)
+        : defaultNewUnifiedCalendarWorkingHours(),
+    );
+  }
+
+  function applyCustomModal() {
+    if (!customModalKey) return;
+    updateRow(customModalKey, {
+      custom_availability_enabled: customDraftEnabled,
+      custom_working_hours: customDraftEnabled
+        ? (JSON.parse(JSON.stringify(customDraft)) as WorkingHours)
+        : {},
+    });
+    setCustomModalKey(null);
   }
 
   return (
@@ -557,6 +605,32 @@ export function OnboardingAppointmentServiceList({
               </div>
             </div>
           )}
+
+          <div className="rounded-lg border border-slate-200 p-4 space-y-2">
+            <p className="text-sm font-medium text-slate-800">When this service can be booked online</p>
+            <p className="text-xs text-slate-500">
+              Guests can book only when three things line up: your venue is open, a linked calendar is working, and
+              this service is available at that time, including any custom hours you set.
+            </p>
+            <p className="text-sm text-slate-700 whitespace-pre-line">
+              {describeOnlineBookableWeeklySummary({
+                venueOpeningHours,
+                linkedCalendars: s.practitioner_ids.map((id) => ({
+                  id,
+                  working_hours: calendarWorkingHoursById[id] ?? defaultNewUnifiedCalendarWorkingHours(),
+                })),
+                customAvailabilityEnabled: s.custom_availability_enabled,
+                customWorkingHours: s.custom_working_hours,
+              })}
+            </p>
+            <button
+              type="button"
+              onClick={() => openCustomModal(s)}
+              className="inline-flex w-full items-center justify-center rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 sm:w-auto"
+            >
+              Set custom availability for this service
+            </button>
+          </div>
         </div>
       ))}
 
@@ -575,6 +649,60 @@ export function OnboardingAppointmentServiceList({
       >
         + Add service
       </button>
+
+      {customModalKey && (
+        <div
+          className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-4"
+          onClick={() => setCustomModalKey(null)}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="onboarding-service-custom-availability-title"
+            className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl bg-white p-6 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 id="onboarding-service-custom-availability-title" className="mb-3 text-lg font-semibold text-slate-900">
+              Custom availability for this service
+            </h2>
+            <p className="mb-4 text-sm text-slate-500">
+              When enabled, online slots are only offered inside these hours, after venue and calendar rules apply.
+            </p>
+            <label className="mb-4 flex cursor-pointer items-start gap-2 text-sm text-slate-800">
+              <input
+                type="checkbox"
+                className="mt-0.5 rounded border-slate-300"
+                checked={customDraftEnabled}
+                onChange={(e) => {
+                  const on = e.target.checked;
+                  setCustomDraftEnabled(on);
+                  if (on && Object.keys(customDraft).length === 0) {
+                    setCustomDraft(defaultNewUnifiedCalendarWorkingHours());
+                  }
+                }}
+              />
+              <span>Limit online booking to custom weekly hours</span>
+            </label>
+            <WorkingHoursControl value={customDraft} onChange={setCustomDraft} disabled={!customDraftEnabled} />
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setCustomModalKey(null)}
+                className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={applyCustomModal}
+                className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700"
+              >
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

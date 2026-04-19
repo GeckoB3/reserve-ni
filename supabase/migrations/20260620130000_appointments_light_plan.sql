@@ -4,7 +4,7 @@ ALTER TABLE venues ADD COLUMN IF NOT EXISTS light_plan_free_period_ends_at TIMES
 ALTER TABLE venues ADD COLUMN IF NOT EXISTS light_plan_converted_at TIMESTAMPTZ;
 
 COMMENT ON COLUMN venues.light_plan_free_period_ends_at IS 'Appointments Light: free period end (typically signup + 3 months). NULL for other tiers.';
-COMMENT ON COLUMN venues.light_plan_converted_at IS 'Appointments Light: when paid £5/month period started after free window. NULL if still in free period or not Light.';
+COMMENT ON COLUMN venues.light_plan_converted_at IS 'Appointments Light: when paid £6/month period started after free window. NULL if still in free period or not Light.';
 
 COMMENT ON COLUMN venues.pricing_tier IS 'appointments | light | restaurant | founding';
 

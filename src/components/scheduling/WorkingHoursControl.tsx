@@ -49,14 +49,38 @@ export function WorkingHoursControl({
     onChange(copy);
   }
 
+  function cloneRanges(ranges: { start: string; end: string }[]) {
+    return ranges.map((r) => ({ start: r.start, end: r.end }));
+  }
+
+  function copyThisDayToOtherWorkingDays(sourceKey: string) {
+    const sourceRanges = value[sourceKey];
+    if (!sourceRanges?.length) return;
+    const template = cloneRanges(sourceRanges);
+    const hasOtherWorking = DAY_KEYS.some((dk) => dk !== sourceKey && (value[dk]?.length ?? 0) > 0);
+    if (!hasOtherWorking) return;
+    const next: WorkingHours = { ...value };
+    for (const dk of DAY_KEYS) {
+      if (dk === sourceKey) continue;
+      if ((value[dk]?.length ?? 0) > 0) {
+        next[dk] = cloneRanges(template);
+      }
+    }
+    onChange(next);
+  }
+
   return (
     <div className="space-y-3">
       {DAY_KEYS.map((dayKey, i) => {
         const ranges = value[dayKey] ?? [];
         const isWorking = ranges.length > 0;
+        const canCopyElsewhere =
+          isWorking &&
+          !disabled &&
+          DAY_KEYS.some((dk) => dk !== dayKey && (value[dk]?.length ?? 0) > 0);
         return (
           <div key={dayKey} className="rounded-xl border border-slate-200 bg-white px-4 py-3">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <label className="flex cursor-pointer items-center gap-3">
                 <input
                   type="checkbox"
@@ -70,9 +94,21 @@ export function WorkingHoursControl({
                 </span>
               </label>
               {isWorking && !disabled && (
-                <button type="button" onClick={() => addRange(dayKey)} className="text-xs text-blue-600 hover:underline">
-                  + Add split
-                </button>
+                <div className="flex flex-wrap items-center gap-2">
+                  {canCopyElsewhere && (
+                    <button
+                      type="button"
+                      onClick={() => copyThisDayToOtherWorkingDays(dayKey)}
+                      className="rounded border border-slate-200 bg-slate-50 px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100"
+                      title="Apply this day’s hours to every other day that is ticked as working"
+                    >
+                      Copy to other open days
+                    </button>
+                  )}
+                  <button type="button" onClick={() => addRange(dayKey)} className="text-xs text-blue-600 hover:underline">
+                    + Add split
+                  </button>
+                </div>
               )}
             </div>
             {isWorking && (

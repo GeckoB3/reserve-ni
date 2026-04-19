@@ -1,5 +1,5 @@
 Cursor Prompt:
-"Implement the Appointments Light plan for ReserveNI. This is a new free-tier plan targeting sole traders that offers a single calendar with all non-restaurant booking models (appointments, classes, events, resources), email reminders included, and pay-as-you-go SMS at 8p per message. The plan is free for 3 months, then £5 per month. Users can upgrade to the full Appointments plan (£35/month) at any time.
+"Implement the Appointments Light plan for ReserveNI. This is a new free-tier plan targeting sole traders that offers a single calendar with all non-restaurant booking models (appointments, classes, events, resources), email reminders included, and pay-as-you-go SMS at 8p per message. The plan is free for 3 months, then £6 per month. Users can upgrade to the full Appointments plan (£35/month) at any time.
 The existing Appointments plan (£35/month unlimited) and Restaurant plan (£79/month) must remain completely unchanged. This work adds a third plan alongside them.
 
 DATABASE CHANGES
@@ -35,7 +35,7 @@ STRIPE CONFIGURATION
 Create the following Stripe product and prices:
 Product: "Reserve NI Appointments Light"
 
-Price: £5.00 GBP, recurring monthly
+Price: £6.00 GBP, recurring monthly
 Copy the Price ID → set as STRIPE_LIGHT_PRICE_ID
 
 Product: "Reserve NI SMS" (this product should already exist with a 6p price)
@@ -61,7 +61,7 @@ Update the pricing section to show three cards in this order:
 Card 1 — Appointments Light:
 
 Large text: 'Free for 3 months'
-Then: '£5/month after'
+Then: '£6/month after'
 Subtitle: 'For sole traders getting started'
 Benefits list:
 
@@ -113,7 +113,7 @@ When the user selects Appointments Light:
 
 No calendar count selector needed (fixed at 1)
 No Stripe Checkout during signup — the plan is free for 3 months
-Show a confirmation: 'Appointments Light — Free for 3 months, then £5/month. No card required to start.'
+Show a confirmation: 'Appointments Light — Free for 3 months, then £6/month. No card required to start.'
 CTA: 'Start Free'
 
 Payment flow for Light plan:
@@ -130,7 +130,7 @@ Check if the venue has a Stripe subscription. If not, show a payment method coll
 Create a Stripe Checkout session in 'setup' mode to collect the payment method without charging.
 After payment method is collected, create a Stripe subscription with TWO items:
 
-Item 1: STRIPE_LIGHT_PRICE_ID (£5/month recurring) — set to start billing on light_plan_free_period_ends_at date using trial_end so the £5 charge does not begin until the free period ends.
+Item 1: STRIPE_LIGHT_PRICE_ID (£6/month recurring) — set to start billing on light_plan_free_period_ends_at date using trial_end so the £6 charge does not begin until the free period ends.
 Item 2: STRIPE_SMS_LIGHT_PRICE_ID (£0.08 metered) — active immediately so SMS usage can be reported and billed from day one.
 
 
@@ -191,18 +191,18 @@ The cron job handles three stages:
 14 days before free period ends:
 Send an email to the venue owner:
 Subject: 'Your Reserve NI free period ends in 14 days'
-Body: 'Hi [name], your Appointments Light free period ends on [date]. After that, your plan continues at just £5/month. To keep using Reserve NI, please add a payment method before [date]. All your bookings, clients, and settings are safe — nothing changes except the small monthly charge. [Add Payment Method] Or upgrade to Appointments for £35/month and get unlimited team members and 300 SMS included. [Compare Plans]'
+Body: 'Hi [name], your Appointments Light free period ends on [date]. After that, your plan continues at just £6/month. To keep using Reserve NI, please add a payment method before [date]. All your bookings, clients, and settings are safe — nothing changes except the small monthly charge. [Add Payment Method] Or upgrade to Appointments for £35/month and get unlimited team members and 300 SMS included. [Compare Plans]'
 7 days before free period ends:
 Send a second reminder email with the same content, subject line updated to 'Your Reserve NI free period ends in 7 days'.
 On the day the free period ends:
 Check if the venue has a Stripe subscription (they would have one if they opted into SMS earlier):
 
-If subscription exists: the £5/month item billing was deferred to this date via trial_end. Stripe starts billing automatically. Set light_plan_converted_at = now(). No action needed beyond logging.
-If no subscription and no payment method: set plan_status = 'past_due'. Disable the public booking page — return a friendly page to clients: 'Online booking for [business name] is temporarily unavailable. Please contact them directly.' Show a persistent banner in the dashboard: 'Your free period has ended. Add a payment method to continue using Reserve NI at £5/month. Your booking page is paused.' [Add Payment Method button]
+If subscription exists: the £6/month item billing was deferred to this date via trial_end. Stripe starts billing automatically. Set light_plan_converted_at = now(). No action needed beyond logging.
+If no subscription and no payment method: set plan_status = 'past_due'. Disable the public booking page — return a friendly page to clients: 'Online booking for [business name] is temporarily unavailable. Please contact them directly.' Show a persistent banner in the dashboard: 'Your free period has ended. Add a payment method to continue using Reserve NI at £6/month. Your booking page is paused.' [Add Payment Method button]
 If no subscription but a payment method was previously saved (edge case): create the subscription immediately with both STRIPE_LIGHT_PRICE_ID and STRIPE_SMS_LIGHT_PRICE_ID, starting billing now. Reactivate the booking page.
 
 3 days after free period ends (if still past_due):
-Send a final email: 'Your Reserve NI booking page is currently paused. Add a payment method to reactivate for just £5/month. All your clients and bookings are safely stored — nothing has been deleted.' [Reactivate Now button]
+Send a final email: 'Your Reserve NI booking page is currently paused. Add a payment method to reactivate for just £6/month. All your clients and bookings are safely stored — nothing has been deleted.' [Reactivate Now button]
 Reactivation at any point after expiry:
 When a past_due Light plan venue adds a payment method via the dashboard billing settings, immediately create the Stripe subscription with both price items, set plan_status = 'active', reactivate the booking page, and show a success message: 'Your booking page is live again. Welcome back!'
 
@@ -224,7 +224,7 @@ Appointments Light        →    Appointments
 1 staff member                 Unlimited staff
 SMS at 8p each                 300 SMS included, then 6p
 Email support                  Phone and email support
-£5/month (or free now)         £35/month
+£6/month (or free now)         £35/month
 
 Your clients, bookings, and settings transfer automatically.
 Nothing is lost or disrupted.
@@ -239,7 +239,7 @@ STRIPE_STANDARD_PRICE_ID (£35/month recurring)
 STRIPE_SMS_OVERAGE_PRICE_ID (£0.06 metered — replaces the 8p Light SMS price)
 
 
-If the venue currently has a Light plan subscription (either the £5/month or just the SMS metered item), cancel it immediately on successful Checkout completion. Do not wait for the billing period to end.
+If the venue currently has a Light plan subscription (either the £6/month or just the SMS metered item), cancel it immediately on successful Checkout completion. Do not wait for the billing period to end.
 On successful payment (via checkout.session.completed webhook): update the venue record:
 
 pricing_tier = 'standard'
@@ -256,7 +256,7 @@ Immediately unlock all Appointments plan features: the 'Add team member' button 
 Show a confirmation screen: 'Welcome to the Appointments plan. You now have unlimited team members and 300 SMS per month included. Your existing clients and bookings are all here.' [Add a team member] [Go to Dashboard]
 
 Downgrade from Appointments to Light:
-Allow this only if the venue currently has 1 or fewer active calendars and 1 or fewer staff members. If they have more, show: 'To switch to Appointments Light, you will need to reduce to 1 active calendar and 1 staff member first.' On downgrade, cancel the Appointments subscription, create a new Light subscription (both STRIPE_LIGHT_PRICE_ID and STRIPE_SMS_LIGHT_PRICE_ID), update the venue record to pricing_tier = 'light', calendar_count = 1, sms_monthly_allowance = 0. Reset SMS toggles to OFF. The venue is not given another 3-month free period on downgrade — billing begins immediately at £5/month.
+Allow this only if the venue currently has 1 or fewer active calendars and 1 or fewer staff members. If they have more, show: 'To switch to Appointments Light, you will need to reduce to 1 active calendar and 1 staff member first.' On downgrade, cancel the Appointments subscription, create a new Light subscription (both STRIPE_LIGHT_PRICE_ID and STRIPE_SMS_LIGHT_PRICE_ID), update the venue record to pricing_tier = 'light', calendar_count = 1, sms_monthly_allowance = 0. Reset SMS toggles to OFF. The venue is not given another 3-month free period on downgrade — billing begins immediately at £6/month.
 
 ACCESS CONTROL AND MIDDLEWARE
 Update the existing access control middleware to handle the Light plan:
@@ -297,12 +297,12 @@ CALENDAR LIMIT ENFORCED IN UI: User tries to add a second practitioner → upgra
 CALENDAR LIMIT ENFORCED SERVER-SIDE: Direct API call to create a second practitioner on a Light plan venue → returns 403 with clear error message. The limit cannot be bypassed via the API.
 STAFF LIMIT: User tries to invite a staff member via settings → upgrade modal appears.
 FREE PERIOD WARNINGS: 14 days before expiry → email sent to venue owner. 7 days before → second email sent. Check cron logs to confirm both fired correctly.
-FREE PERIOD EXPIRY WITH PAYMENT METHOD: Venue has added a payment method (via SMS opt-in). On the expiry date, the Stripe subscription's trial_end is reached → Stripe automatically begins billing £5/month → light_plan_converted_at set → no disruption to dashboard or booking page.
+FREE PERIOD EXPIRY WITH PAYMENT METHOD: Venue has added a payment method (via SMS opt-in). On the expiry date, the Stripe subscription's trial_end is reached → Stripe automatically begins billing £6/month → light_plan_converted_at set → no disruption to dashboard or booking page.
 FREE PERIOD EXPIRY WITHOUT PAYMENT METHOD: Venue never added a payment method. On the expiry date, cron runs → plan_status set to 'past_due' → booking page disabled with friendly client message → dashboard shows banner with payment prompt.
 REACTIVATION: Venue in past_due state adds payment method → subscription created immediately → plan_status = 'active' → booking page reactivates → all historical data intact → success message shown.
 UPGRADE DURING FREE PERIOD: User upgrades during month 2 → Stripe Checkout for £35/month with 6p SMS → Light subscription cancelled → venue unlocks unlimited calendars → can add team members immediately → SMS allowance becomes 300 → SMS toggles default to ON.
-UPGRADE POST FREE PERIOD: User on £5/month billing upgrades to Appointments → old Light subscription cancelled → new £35/month subscription created → features unlock immediately → SMS item switches from STRIPE_SMS_LIGHT_PRICE_ID (8p) to STRIPE_SMS_OVERAGE_PRICE_ID (6p).
-DOWNGRADE: Appointments user with 1 calendar and 1 staff downgrades to Light → new subscription at £5/month → calendar limit enforced → SMS allowance drops to 0 → SMS toggles reset to OFF → no new free period granted.
+UPGRADE POST FREE PERIOD: User on £6/month billing upgrades to Appointments → old Light subscription cancelled → new £35/month subscription created → features unlock immediately → SMS item switches from STRIPE_SMS_LIGHT_PRICE_ID (8p) to STRIPE_SMS_OVERAGE_PRICE_ID (6p).
+DOWNGRADE: Appointments user with 1 calendar and 1 staff downgrades to Light → new subscription at £6/month → calendar limit enforced → SMS allowance drops to 0 → SMS toggles reset to OFF → no new free period granted.
 SMS BILLING LIGHT PLAN: Light plan user sends 50 SMS in a month → overage billing cron reports 50 units to STRIPE_SMS_LIGHT_PRICE_ID subscription item → Stripe calculates 50 × £0.08 = £4.00 → charge appears on next invoice at the correct 8p rate.
 SMS PRICE ISOLATION: Verify that reporting usage for a Light plan venue uses STRIPE_SMS_LIGHT_PRICE_ID (8p). Verify that reporting usage for an Appointments plan venue uses STRIPE_SMS_OVERAGE_PRICE_ID (6p). Verify that upgrading from Light to Appointments switches the SMS subscription item from the 8p price to the 6p price. The two rates must never be mixed on the same venue at the same time.
 RESTAURANT PLAN UNAFFECTED: Restaurant venue sees no changes to their experience. No Light plan option visible anywhere. Table management, floor plan, day sheet, and all restaurant features work as before.
@@ -319,5 +319,5 @@ SMS toggles default to OFF on the Light plan to prevent unexpected charges. SMS 
 Every SMS sent by a Light plan venue must be logged, tracked, and reported to Stripe for billing in the same request lifecycle as the send. There is no free SMS on this plan. Missing a usage report to Stripe means the SMS is sent but never billed — this is a revenue leak.
 The Light plan calendar limit of 1 is enforced both in the UI and on every server-side creation endpoint. The limit cannot be bypassed by calling the API directly.
 SMS billing uses two separate Stripe price IDs with different unit rates. STRIPE_SMS_LIGHT_PRICE_ID (8p) is ONLY attached to Light plan subscriptions. STRIPE_SMS_OVERAGE_PRICE_ID (6p) is ONLY attached to Appointments and Restaurant plan subscriptions. The application never calculates SMS costs — it reports usage quantities to Stripe and the attached price ID determines the rate. When a venue upgrades from Light to Appointments, the SMS subscription item must be switched from the 8p price to the 6p price as part of the upgrade webhook handler.
-When the Light plan subscription is created with a deferred start date (using trial_end set to light_plan_free_period_ends_at), the SMS metered item must be active from day one. Only the £5/month recurring item should be deferred. SMS usage must be billable from the moment the user opts in.
-The downgrade path from Appointments to Light does not grant a new free period. Billing begins at £5/month immediately on downgrade."
+When the Light plan subscription is created with a deferred start date (using trial_end set to light_plan_free_period_ends_at), the SMS metered item must be active from day one. Only the £6/month recurring item should be deferred. SMS usage must be billable from the moment the user opts in.
+The downgrade path from Appointments to Light does not grant a new free period. Billing begins at £6/month immediately on downgrade."

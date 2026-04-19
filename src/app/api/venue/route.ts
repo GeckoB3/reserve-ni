@@ -11,6 +11,7 @@ import {
 } from '@/lib/booking/active-models';
 import type { BookingModel } from '@/types/booking-models';
 import { isAppointmentPlanTier } from '@/lib/tier-enforcement';
+import { backfillVenueEmailIfEmptyFromStaff } from '@/lib/venue-contact-email';
 
 const venueProfileSchema = z.object({
   name: z.string().min(1).max(200).optional(),
@@ -66,6 +67,18 @@ export async function GET() {
     if (!venue) {
       console.error('GET /api/venue: venue not found', error?.message);
       return NextResponse.json({ error: 'Venue not found' }, { status: 404 });
+    }
+
+    if (staff.role === 'admin') {
+      const nextEmail = await backfillVenueEmailIfEmptyFromStaff(
+        staff.db,
+        staff.venue_id,
+        (venue as { email?: string | null }).email,
+        staff.email,
+      );
+      if (nextEmail) {
+        venue = { ...(venue as object), email: nextEmail } as typeof venue;
+      }
     }
 
     const v = venue as Record<string, unknown>;

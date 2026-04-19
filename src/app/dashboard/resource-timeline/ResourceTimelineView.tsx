@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { StripePaymentWarning } from '@/components/dashboard/StripePaymentWarning';
+import { canAddCalendarColumn, useCalendarEntitlement } from '@/hooks/use-calendar-entitlement';
+import { isLightPlanTier } from '@/lib/tier-enforcement';
 import { ResourceExceptionsCalendar } from './ResourceExceptionsCalendar';
 
 // ---------------------------------------------------------------------------
@@ -232,6 +234,9 @@ export function ResourceTimelineView({
   const [hostCalendars, setHostCalendars] = useState<Array<{ id: string; name: string }>>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const { entitlement: calendarEntitlement, entitlementLoaded } = useCalendarEntitlement(Boolean(isAdmin));
+  const canAddCalendar = canAddCalendarColumn(calendarEntitlement, entitlementLoaded);
 
   // Bookings for selected resource
   const [bookingsDate, setBookingsDate] = useState(() => new Date().toISOString().slice(0, 10));
@@ -830,16 +835,45 @@ export function ResourceTimelineView({
               </select>
               {isAdmin && (
                 <div className="mt-3 rounded-lg border border-slate-100 bg-slate-50/90 p-3">
-                  <Link
-                    href="/dashboard/calendar-availability?tab=calendars&addCalendar=1"
-                    className="inline-flex w-full items-center justify-center rounded-lg border border-brand-200/90 bg-white px-3.5 py-2.5 text-sm font-semibold text-brand-700 shadow-sm transition-[color,background-color,border-color,box-shadow,transform] duration-150 ease-out hover:border-brand-400 hover:bg-brand-50 hover:text-brand-800 hover:shadow-md active:scale-[0.98] active:border-brand-500 active:bg-brand-100 active:shadow-inner motion-reduce:transition-colors motion-reduce:active:scale-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2"
-                  >
-                    Add calendar
-                  </Link>
-                  <p className="mt-2 text-xs text-slate-500">
-                    Opens the same Add calendar form as the Calendars tab. When you are done, return here and refresh
-                    if your new column does not appear in the list yet.
-                  </p>
+                  {!entitlementLoaded ? (
+                    <p className="text-xs text-slate-500">Loading plan limits…</p>
+                  ) : canAddCalendar ? (
+                    <>
+                      <Link
+                        href="/dashboard/calendar-availability?tab=calendars&addCalendar=1"
+                        className="inline-flex w-full items-center justify-center rounded-lg border border-brand-200/90 bg-white px-3.5 py-2.5 text-sm font-semibold text-brand-700 shadow-sm transition-[color,background-color,border-color,box-shadow,transform] duration-150 ease-out hover:border-brand-400 hover:bg-brand-50 hover:text-brand-800 hover:shadow-md active:scale-[0.98] active:border-brand-500 active:bg-brand-100 active:shadow-inner motion-reduce:transition-colors motion-reduce:active:scale-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2"
+                      >
+                        Add calendar
+                      </Link>
+                      <p className="mt-2 text-xs text-slate-500">
+                        Opens the same Add calendar form as the Calendars tab. When you are done, return here and refresh
+                        if your new column does not appear in the list yet.
+                      </p>
+                    </>
+                  ) : calendarEntitlement && isLightPlanTier(calendarEntitlement.pricing_tier) ? (
+                    <p className="text-xs text-amber-950">
+                      Appointments Light includes <strong className="font-semibold">one bookable calendar</strong>. To
+                      add more columns, upgrade to the full Appointments plan under{' '}
+                      <a
+                        href="/dashboard/settings?tab=plan"
+                        className="font-medium text-brand-700 underline hover:text-brand-800"
+                      >
+                        Settings → Plan
+                      </a>
+                      .
+                    </p>
+                  ) : (
+                    <p className="text-xs text-amber-950">
+                      You&apos;ve reached your plan&apos;s calendar limit. Visit{' '}
+                      <a
+                        href="/dashboard/settings?tab=plan"
+                        className="font-medium text-brand-700 underline hover:text-brand-800"
+                      >
+                        Settings → Plan
+                      </a>
+                      .
+                    </p>
+                  )}
                 </div>
               )}
               <p className="mt-1 text-xs text-slate-500">

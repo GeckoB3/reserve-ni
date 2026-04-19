@@ -90,7 +90,7 @@ export function buildCheckoutLineItems(mainPriceId: string, mainQuantity: number
 }
 
 /**
- * Appointments Light Checkout: flat £5 (deferred via subscription trial in API/webhook) + metered SMS at 8p.
+ * Appointments Light Checkout: flat £6/mo (deferred via subscription trial in API/webhook) + metered SMS at 8p.
  * Quantity only applies to the main recurring price.
  */
 export function buildLightPlanCheckoutLineItems(mainQuantity: number): Stripe.Checkout.SessionCreateParams.LineItem[] {

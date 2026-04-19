@@ -116,7 +116,13 @@ function PlanSection({
   const freeEndMs = venue.light_plan_free_period_ends_at
     ? new Date(venue.light_plan_free_period_ends_at).getTime()
     : NaN;
-  const inFreeWindow = !Number.isNaN(freeEndMs) && freeEndMs > Date.now();
+  /** Clock for “still in free window” — updated on an interval so render stays pure (no Date.now() in render). */
+  const [planClockMs, setPlanClockMs] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setPlanClockMs(Date.now()), 60_000);
+    return () => clearInterval(id);
+  }, []);
+  const inFreeWindow = !Number.isNaN(freeEndMs) && freeEndMs > planClockMs;
 
   const lightTrialNoCard =
     isLight && !hasStripeSub && inFreeWindow && billingActive && !isCancelling;
@@ -207,7 +213,7 @@ function PlanSection({
 
   async function confirmDowngradeToLight() {
     const ok = window.confirm(
-      'Downgrade to Appointments Light? You must have only one bookable calendar and one team login. Your Appointments subscription will be replaced by Light billing (£5/month + pay-as-you-go SMS). This cannot be undone without upgrading again.',
+      `Downgrade to Appointments Light? You must have only one bookable calendar and one team login. Your Appointments subscription will be replaced by Light billing (£${APPOINTMENTS_LIGHT_PRICE}/month + pay-as-you-go SMS). This cannot be undone without upgrading again.`,
     );
     if (!ok) return;
     await postLightPlan('/api/venue/light-plan/downgrade-to-light');
@@ -689,6 +695,7 @@ export function SettingsView({
             isAdmin={isAdmin}
             bookingModel={bookingModel}
             enabledModels={normalizeEnabledModels(venue.enabled_models, (bookingModel as BookingModel) ?? 'table_reservation')}
+            pricingTier={venue.pricing_tier ?? null}
           />
         )}
         {activeTab === 'data-import' && isAdmin && (

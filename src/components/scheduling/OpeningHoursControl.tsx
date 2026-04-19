@@ -23,6 +23,19 @@ function getDayConfig(oh: OpeningHoursSettings | null, day: string): OpeningHour
   return { closed: true };
 }
 
+function cloneOpeningDayConfig(config: OpeningHoursDaySettings): OpeningHoursDaySettings {
+  if ('closed' in config && config.closed) return { closed: true };
+  if ('periods' in config && config.periods?.length) {
+    return { periods: config.periods.map((p) => ({ open: p.open, close: p.close })) };
+  }
+  return { closed: true };
+}
+
+function isOpeningDayOpen(oh: OpeningHoursSettings | null, dayKey: string): boolean {
+  const c = oh?.[dayKey] ? getDayConfig(oh, dayKey) : getDayConfig(null, dayKey);
+  return !('closed' in c && c.closed);
+}
+
 interface OpeningHoursControlProps {
   value: OpeningHoursSettings;
   onChange: (next: OpeningHoursSettings) => void;
@@ -37,6 +50,22 @@ export function OpeningHoursControl({ value, onChange, disabled = false }: Openi
     onChange({ ...value, [day]: config });
   };
 
+  function copyThisDayToOtherOpenDays(sourceKey: string) {
+    const raw = value[sourceKey] ?? getDayConfig(null, sourceKey);
+    if ('closed' in raw && raw.closed) return;
+    const template = cloneOpeningDayConfig(raw);
+    const otherOpen = DAYS.some(({ key }) => key !== sourceKey && isOpeningDayOpen(value, key));
+    if (!otherOpen) return;
+    const next: OpeningHoursSettings = { ...value };
+    for (const { key } of DAYS) {
+      if (key === sourceKey) continue;
+      if (isOpeningDayOpen(value, key)) {
+        next[key] = cloneOpeningDayConfig(template);
+      }
+    }
+    onChange(next);
+  }
+
   return (
     <div className="space-y-4">
       {DAYS.map(({ key, label }) => {
@@ -45,6 +74,10 @@ export function OpeningHoursControl({ value, onChange, disabled = false }: Openi
         const periods = !closed && 'periods' in config ? config.periods : [];
         const p1 = periods[0] ?? { open: '09:00', close: '17:00' };
         const p2 = periods[1];
+        const canCopyElsewhere =
+          !closed &&
+          !disabled &&
+          DAYS.some(({ key: k }) => k !== key && isOpeningDayOpen(value, k));
 
         return (
           <div key={key} className="rounded border border-slate-200 p-4">
@@ -66,6 +99,16 @@ export function OpeningHoursControl({ value, onChange, disabled = false }: Openi
                   </label>
                   {!closed && (
                     <>
+                      {canCopyElsewhere && (
+                        <button
+                          type="button"
+                          onClick={() => copyThisDayToOtherOpenDays(key)}
+                          className="rounded border border-slate-200 bg-slate-50 px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100"
+                          title="Apply this day’s hours to every other day that is set to Open"
+                        >
+                          Copy to other open days
+                        </button>
+                      )}
                       <div className="flex items-center gap-2">
                         <input
                           type="time"

@@ -27,6 +27,11 @@ const staffMaySchema = {
 };
 
 const paymentRequirementSchema = z.enum(['none', 'deposit', 'full_payment']);
+
+const customWorkingHoursSchema = z
+  .record(z.string(), z.array(z.object({ start: z.string(), end: z.string() })))
+  .optional()
+  .nullable();
 const STAFF_SERVICE_FIELD_PERMISSIONS = {
   name: 'staff_may_customize_name',
   description: 'staff_may_customize_description',
@@ -53,6 +58,8 @@ const serviceSchema = z
     min_booking_notice_hours: z.number().int().min(0).max(168).optional(),
     cancellation_notice_hours: z.number().int().min(0).max(168).optional(),
     allow_same_day_booking: z.boolean().optional(),
+    custom_availability_enabled: z.boolean().optional(),
+    custom_working_hours: customWorkingHoursSchema,
     ...staffMaySchema,
   })
   .superRefine((data, ctx) => {
@@ -97,6 +104,8 @@ const servicePatchSchema = z
     min_booking_notice_hours: z.number().int().min(0).max(168).optional(),
     cancellation_notice_hours: z.number().int().min(0).max(168).optional(),
     allow_same_day_booking: z.boolean().optional(),
+    custom_availability_enabled: z.boolean().optional(),
+    custom_working_hours: customWorkingHoursSchema,
     ...staffMaySchema,
   })
   .superRefine((data, ctx) => {
@@ -138,6 +147,7 @@ function mapServiceItemRowForDashboard(row: Record<string, unknown>): Record<str
   return {
     ...row,
     colour: row.colour ?? '#3B82F6',
+    custom_availability_enabled: (row.custom_availability_enabled as boolean | undefined) ?? false,
     staff_may_customize_name: (row.staff_may_customize_name as boolean | undefined) ?? false,
     staff_may_customize_description: (row.staff_may_customize_description as boolean | undefined) ?? false,
     staff_may_customize_duration: (row.staff_may_customize_duration as boolean | undefined) ?? false,
@@ -406,6 +416,18 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid request', details: parsed.error.flatten() }, { status: 400 });
     }
 
+    if (staff.role !== 'admin') {
+      if (
+        Object.prototype.hasOwnProperty.call(body, 'custom_availability_enabled') ||
+        Object.prototype.hasOwnProperty.call(body, 'custom_working_hours')
+      ) {
+        return NextResponse.json(
+          { error: 'Only venue admins can set per-service availability hours.' },
+          { status: 403 },
+        );
+      }
+    }
+
     const admin = getSupabaseAdminClient();
     const useUnified = await venueUsesUnifiedServiceItems(admin, staff.venue_id);
     const practitionerIdsForLinks = normalizePractitionerIdsInput(body.practitioner_ids) ?? [];
@@ -476,6 +498,15 @@ export async function POST(request: NextRequest) {
         min_booking_notice_hours: parsed.data.min_booking_notice_hours ?? 1,
         cancellation_notice_hours: parsed.data.cancellation_notice_hours ?? 48,
         allow_same_day_booking: parsed.data.allow_same_day_booking ?? true,
+        ...(staff.role === 'admin'
+          ? {
+              custom_availability_enabled: parsed.data.custom_availability_enabled ?? false,
+              custom_working_hours:
+                parsed.data.custom_availability_enabled === true
+                  ? (parsed.data.custom_working_hours ?? null)
+                  : null,
+            }
+          : {}),
       };
       const { data, error } = await admin.from('service_items').insert(insertRow).select().single();
 
@@ -568,6 +599,15 @@ export async function PATCH(request: NextRequest) {
     }
 
     if (staff.role !== 'admin') {
+      if (
+        Object.prototype.hasOwnProperty.call(rest, 'custom_availability_enabled') ||
+        Object.prototype.hasOwnProperty.call(rest, 'custom_working_hours')
+      ) {
+        return NextResponse.json(
+          { error: 'Only venue admins can set per-service availability hours.' },
+          { status: 403 },
+        );
+      }
       for (const key of STAFF_MAY_PERMISSION_KEYS) {
         if (Object.prototype.hasOwnProperty.call(rest, key)) {
           return NextResponse.json(
@@ -711,6 +751,10 @@ export async function PATCH(request: NextRequest) {
         const dp = parsed.data.deposit_pence ?? 0;
         updatePayload.payment_requirement = dp > 0 ? 'deposit' : 'none';
         updatePayload.deposit_pence = dp > 0 ? dp : null;
+      }
+
+      if (staff.role === 'admin' && parsed.data.custom_availability_enabled === false) {
+        updatePayload.custom_working_hours = null;
       }
 
       let savedRow = serviceRow as Record<string, unknown>;
@@ -861,6 +905,10 @@ export async function PATCH(request: NextRequest) {
       const dp = parsed.data.deposit_pence ?? 0;
       patchPayload.payment_requirement = dp > 0 ? 'deposit' : 'none';
       patchPayload.deposit_pence = dp > 0 ? dp : null;
+    }
+
+    if (staff.role === 'admin' && parsed.data.custom_availability_enabled === false) {
+      patchPayload.custom_working_hours = null;
     }
 
     let savedRow = serviceRow as Record<string, unknown>;

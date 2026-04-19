@@ -82,6 +82,8 @@ export async function POST(request: Request) {
       const foundingEnd = new Date();
       foundingEnd.setMonth(foundingEnd.getMonth() + 6);
 
+      const ownerEmail = (user.email ?? '').trim().toLowerCase() || null;
+
       const { data: venue, error: venueError } = await admin
         .from('venues')
         .insert({
@@ -97,6 +99,7 @@ export async function POST(request: Request) {
           onboarding_step: 0,
           onboarding_completed: false,
           founding_free_period_ends_at: foundingEnd.toISOString(),
+          email: ownerEmail,
         })
         .select('id')
         .single();
@@ -158,6 +161,8 @@ export async function POST(request: Request) {
       const commPolicies = communicationPoliciesEmailOnlyAppointmentsLane();
       const notifDefaults = defaultNotificationSettingsForLightPlan();
 
+      const ownerEmail = (user.email ?? '').trim().toLowerCase() || null;
+
       const { data: venue, error: venueError } = await admin
         .from('venues')
         .insert({
@@ -180,6 +185,7 @@ export async function POST(request: Request) {
           onboarding_completed: false,
           communication_policies: commPolicies as unknown as Record<string, never>,
           notification_settings: notifDefaults as unknown as Record<string, never>,
+          email: ownerEmail,
         })
         .select('id')
         .single();

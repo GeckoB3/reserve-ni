@@ -11,6 +11,8 @@ import {
   resolveActiveBookingModels,
 } from '@/lib/booking/active-models';
 import type { BookingModel } from '@/types/booking-models';
+import { APPOINTMENTS_LIGHT_PRICE } from '@/lib/pricing-constants';
+
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -139,7 +141,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
             <div className="flex flex-wrap items-center justify-between gap-2">
               <p className="text-sm text-red-800">
                 {pricingTier === 'light'
-                  ? 'Your free period has ended. Add a payment method to continue using Reserve NI at £5/month. Your public booking page is paused until billing is active.'
+                  ? `Your free period has ended. Add a payment method to continue using Reserve NI at £${APPOINTMENTS_LIGHT_PRICE}/month. Your public booking page is paused until billing is active.`
                   : 'Your last payment failed. Please update your payment method to avoid service interruption.'}
               </p>
               <a

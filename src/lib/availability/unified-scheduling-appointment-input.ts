@@ -16,6 +16,7 @@ import type {
   PractitionerCalendarBlockedRange,
 } from '@/lib/availability/appointment-engine';
 import { unifiedCalendarRowToPractitioner } from '@/lib/availability/unified-calendar-mapper';
+import { parseCustomWorkingHoursFromDb } from '@/lib/service-custom-availability';
 
 const CAPACITY_STATUSES = ['Confirmed', 'Pending', 'Seated'];
 
@@ -35,6 +36,8 @@ function serviceItemToAppointmentService(row: Record<string, unknown>): Appointm
     is_active: row.is_active !== false,
     sort_order: (row.sort_order as number) ?? 0,
     created_at: (row.created_at as string) ?? new Date().toISOString(),
+    custom_availability_enabled: Boolean(row.custom_availability_enabled),
+    custom_working_hours: parseCustomWorkingHoursFromDb(row.custom_working_hours),
   };
 }
 

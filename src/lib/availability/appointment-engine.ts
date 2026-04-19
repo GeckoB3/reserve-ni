@@ -23,6 +23,7 @@ import type { VenueOpeningException } from '@/types/venue-opening-exceptions';
 import { parseVenueOpeningExceptions } from '@/types/venue-opening-exceptions';
 import type { AvailabilityBlock } from '@/types/availability';
 import { blocksToVenueOpeningExceptions } from '@/lib/availability/venue-exceptions-adapter';
+import { intersectEffectiveRangesWithServiceCustom, parseCustomWorkingHoursFromDb } from '@/lib/service-custom-availability';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -461,7 +462,13 @@ export function computeAppointmentAvailability(input: AppointmentEngineInput, no
         payment_requirement: svc.payment_requirement,
       });
 
-      for (const range of effectiveWorkingRanges) {
+      const serviceEffectiveRanges = intersectEffectiveRangesWithServiceCustom(
+        effectiveWorkingRanges,
+        svc,
+        date,
+      );
+
+      for (const range of serviceEffectiveRanges) {
         for (let t = range.start; t + totalDuration <= range.end; t += 15) {
           // Guest flow: venue-local “now” + minimum notice (hours). Staff reschedule uses skipPastSlotFilter.
           if (isToday && !skipPastSlotFilter && t < currentMinute + minNoticeMinutes) continue;
@@ -581,7 +588,12 @@ export function validateExactAppointmentStart(
     return { ok: false, reason: 'Outside opening hours' };
   }
 
-  const fitsInRange = effectiveWorkingRanges.some((r) => t >= r.start && slotEnd <= r.end);
+  const afterServiceCustom = intersectEffectiveRangesWithServiceCustom(effectiveWorkingRanges, svc, date);
+  if (afterServiceCustom.length === 0) {
+    return { ok: false, reason: 'Outside service availability hours' };
+  }
+
+  const fitsInRange = afterServiceCustom.some((r) => t >= r.start && slotEnd <= r.end);
   if (!fitsInRange) {
     return { ok: false, reason: 'Outside working hours' };
   }
@@ -899,6 +911,8 @@ export async function fetchCalendarAppointmentInput(params: {
       is_active: true,
       sort_order: (s.sort_order as number) ?? 0,
       created_at: (s.created_at as string) ?? new Date().toISOString(),
+      custom_availability_enabled: Boolean(s.custom_availability_enabled),
+      custom_working_hours: parseCustomWorkingHoursFromDb(s.custom_working_hours),
     };
   });
   if (serviceId) {

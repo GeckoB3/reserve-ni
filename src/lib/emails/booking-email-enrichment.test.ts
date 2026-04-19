@@ -28,16 +28,21 @@ describe('enrichBookingEmailForComms', () => {
     return {
       from: (table: string) => ({
         select: () => ({
-          eq: () => ({
-            maybeSingle: async () => {
-              const row = rows[callIndex];
-              callIndex += 1;
-              if (!row || row.table !== table) {
-                return { data: null, error: { message: 'unexpected query' } };
-              }
-              return { data: row.data, error: null };
-            },
-          }),
+          eq: () => {
+            if (table === 'booking_ticket_lines') {
+              return Promise.resolve({ data: [], error: null });
+            }
+            return {
+              maybeSingle: async () => {
+                const row = rows[callIndex];
+                callIndex += 1;
+                if (!row || row.table !== table) {
+                  return { data: null, error: { message: 'unexpected query' } };
+                }
+                return { data: row.data, error: null };
+              },
+            };
+          },
         }),
       }),
     } as unknown as SupabaseClient;
@@ -64,6 +69,8 @@ describe('enrichBookingEmailForComms', () => {
           class_instance_id: null,
           resource_id: null,
           booking_end_time: null,
+          booking_time: '14:00:00',
+          party_size: 2,
         },
       },
       {
@@ -100,6 +107,8 @@ describe('enrichBookingEmailForComms', () => {
           class_instance_id: 'inst-uuid',
           resource_id: null,
           booking_end_time: null,
+          booking_time: '14:00:00',
+          party_size: 2,
         },
       },
       {
@@ -108,7 +117,7 @@ describe('enrichBookingEmailForComms', () => {
       },
       {
         table: 'class_types',
-        data: { name: 'Vinyasa Flow' },
+        data: { name: 'Vinyasa Flow', price_pence: 1200 },
       },
     ]);
 
@@ -116,6 +125,8 @@ describe('enrichBookingEmailForComms', () => {
 
     expect(out.booking_model).toBe('class_session');
     expect(out.appointment_service_name).toBe('Vinyasa Flow');
+    expect(out.booking_total_price_pence).toBe(2400);
+    expect(out.appointment_price_display).toBe('£24.00');
   });
 
   it('adds resource name and host calendar name for resource_booking rows', async () => {
@@ -139,15 +150,31 @@ describe('enrichBookingEmailForComms', () => {
           class_instance_id: null,
           resource_id: 'res-uuid',
           booking_end_time: '16:30:00',
+          booking_time: '14:00:00',
+          party_size: 1,
         },
       },
       {
         table: 'venue_resources',
-        data: { name: 'Court 2', display_on_calendar_id: 'host-cal-uuid' },
+        data: {
+          name: 'Court 2',
+          display_on_calendar_id: 'host-cal-uuid',
+          price_per_slot_pence: 500,
+          slot_interval_minutes: 30,
+        },
       },
       {
         table: 'unified_calendars',
         data: { name: 'Reception' },
+      },
+      {
+        table: 'venue_resources',
+        data: {
+          name: 'Court 2',
+          display_on_calendar_id: 'host-cal-uuid',
+          price_per_slot_pence: 500,
+          slot_interval_minutes: 30,
+        },
       },
     ]);
 
@@ -156,5 +183,7 @@ describe('enrichBookingEmailForComms', () => {
     expect(out.booking_model).toBe('resource_booking');
     expect(out.appointment_service_name).toBe('Court 2');
     expect(out.practitioner_name).toBe('Reception');
+    expect(out.booking_total_price_pence).toBe(2500);
+    expect(out.appointment_price_display).toBe('£25.00');
   });
 });

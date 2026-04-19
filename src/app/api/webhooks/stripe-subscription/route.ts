@@ -133,7 +133,7 @@ async function handleCheckoutCompleted(
     return;
   }
 
-  /** Appointments Light: collect default payment method, then create £5 + metered SMS subscription (webhook). */
+  /** Appointments Light: collect default payment method, then create £6 + metered SMS subscription (webhook). */
   if (session.mode === 'setup' && metadata.action === 'light_sms_setup' && metadata.venue_id) {
     await handleLightSmsSetupCheckoutCompleted(supabase, session);
     return;

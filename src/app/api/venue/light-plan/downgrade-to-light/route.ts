@@ -15,6 +15,7 @@ import {
 import { updateVenueSmsMonthlyAllowance } from '@/lib/billing/sms-allowance';
 import { countUnifiedCalendarColumns } from '@/lib/light-plan';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
+import { APPOINTMENTS_LIGHT_PRICE } from '@/lib/pricing-constants';
 
 /**
  * POST /api/venue/light-plan/downgrade-to-light
@@ -144,8 +145,7 @@ export async function POST() {
 
     return NextResponse.json({
       ok: true,
-      message:
-        'You are now on Appointments Light (£5/month + pay-as-you-go SMS). Your calendar and team limits match this plan.',
+      message: `You are now on Appointments Light (£${APPOINTMENTS_LIGHT_PRICE}/month + pay-as-you-go SMS). Your calendar and team limits match this plan.`,
     });
   } catch (err) {
     console.error('[downgrade-to-light] Error:', err);

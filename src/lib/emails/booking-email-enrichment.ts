@@ -30,6 +30,7 @@ async function resolveAppointmentLabels(
   practitionerName: string | null;
   serviceName: string | null;
   appointmentPriceDisplay: string | null;
+  servicePricePence: number | null;
 } | null> {
   const legacyPr = row.practitioner_id;
   const legacySvc = row.appointment_service_id;
@@ -41,10 +42,12 @@ async function resolveAppointmentLabels(
       supabase.from('practitioners').select('name').eq('id', legacyPr).maybeSingle(),
       supabase.from('appointment_services').select('name, price_pence').eq('id', legacySvc).maybeSingle(),
     ]);
+    const pp = svc?.price_pence ?? null;
     return {
       practitionerName: pr?.name ?? null,
       serviceName: svc?.name ?? null,
-      appointmentPriceDisplay: priceDisplayFromPence(svc?.price_pence ?? null),
+      appointmentPriceDisplay: priceDisplayFromPence(pp),
+      servicePricePence: pp,
     };
   }
 
@@ -53,10 +56,12 @@ async function resolveAppointmentLabels(
       supabase.from('unified_calendars').select('name').eq('id', cal).maybeSingle(),
       supabase.from('service_items').select('name, price_pence').eq('id', item).maybeSingle(),
     ]);
+    const pp = si?.price_pence ?? null;
     return {
       practitionerName: uc?.name ?? null,
       serviceName: si?.name ?? null,
-      appointmentPriceDisplay: priceDisplayFromPence(si?.price_pence ?? null),
+      appointmentPriceDisplay: priceDisplayFromPence(pp),
+      servicePricePence: pp,
     };
   }
 
@@ -66,6 +71,7 @@ async function resolveAppointmentLabels(
       practitionerName: uc?.name ?? null,
       serviceName: null,
       appointmentPriceDisplay: null,
+      servicePricePence: null,
     };
   }
 
@@ -99,9 +105,10 @@ export async function enrichBookingEmailForAppointment(
     return base;
   }
 
-  const { practitionerName, serviceName, appointmentPriceDisplay } = resolved;
+  const { practitionerName, serviceName, appointmentPriceDisplay, servicePricePence } = resolved;
 
   let groupAppointments: GroupAppointmentLine[] | undefined;
+  let groupTotalPricePence: number | null = null;
 
   if (anchor.group_booking_id && anchor.guest_id) {
     const { data: siblings } = await supabase
@@ -142,6 +149,8 @@ export async function enrichBookingEmailForAppointment(
         ]),
       );
 
+      let sumPence = 0;
+      let anyPrice = false;
       groupAppointments = siblings.map((s) => {
         const label = (s.person_label as string | null)?.trim() || 'Guest';
         const timeStr = typeof s.booking_time === 'string' ? s.booking_time.slice(0, 5) : '00:00';
@@ -158,12 +167,22 @@ export async function enrichBookingEmailForAppointment(
           practitionerNameLine = prMap.get(pid) ?? 'Staff';
           const sv = svMap.get(sid);
           serviceNameLine = sv?.name ?? 'Treatment';
-          priceDisplay = priceDisplayFromPence(sv?.price_pence ?? null);
+          const pp = sv?.price_pence ?? null;
+          priceDisplay = priceDisplayFromPence(pp);
+          if (pp != null) {
+            sumPence += pp;
+            anyPrice = true;
+          }
         } else if (cid && iid) {
           practitionerNameLine = calMap.get(cid) ?? 'Staff';
           const it = itemMap.get(iid);
           serviceNameLine = it?.name ?? 'Treatment';
-          priceDisplay = priceDisplayFromPence(it?.price_pence ?? null);
+          const pp = it?.price_pence ?? null;
+          priceDisplay = priceDisplayFromPence(pp);
+          if (pp != null) {
+            sumPence += pp;
+            anyPrice = true;
+          }
         }
 
         return {
@@ -175,15 +194,25 @@ export async function enrichBookingEmailForAppointment(
           price_display: priceDisplay,
         };
       });
+      if (anyPrice) {
+        groupTotalPricePence = sumPence;
+      }
     }
   }
+
+  const totalFromSingleOrGroup =
+    groupTotalPricePence != null ? groupTotalPricePence : servicePricePence ?? null;
 
   return {
     ...base,
     email_variant: 'appointment',
     practitioner_name: practitionerName,
     appointment_service_name: serviceName,
-    appointment_price_display: appointmentPriceDisplay,
+    appointment_price_display: base.appointment_price_display ?? appointmentPriceDisplay,
+    booking_total_price_pence:
+      base.booking_total_price_pence != null
+        ? base.booking_total_price_pence
+        : totalFromSingleOrGroup,
     ...(groupAppointments && groupAppointments.length > 0 ? { group_appointments: groupAppointments } : {}),
   };
 }
@@ -199,7 +228,9 @@ export async function enrichBookingEmailForSecondaryModels(
 ): Promise<BookingEmailData> {
   const { data: row, error } = await supabase
     .from('bookings')
-    .select('experience_event_id, class_instance_id, resource_id, booking_end_time')
+    .select(
+      'experience_event_id, class_instance_id, resource_id, booking_end_time, booking_time, party_size',
+    )
     .eq('id', bookingId)
     .maybeSingle();
 
@@ -210,6 +241,8 @@ export async function enrichBookingEmailForSecondaryModels(
     class_instance_id: string | null;
     resource_id: string | null;
     booking_end_time: string | null;
+    booking_time: string | null;
+    party_size: number | null;
   };
 
   if (r.experience_event_id) {
@@ -218,11 +251,33 @@ export async function enrichBookingEmailForSecondaryModels(
       .select('name')
       .eq('id', r.experience_event_id)
       .maybeSingle();
+
+    const { data: ticketLines } = await supabase
+      .from('booking_ticket_lines')
+      .select('quantity, unit_price_pence')
+      .eq('booking_id', bookingId);
+
+    let totalPence = 0;
+    for (const line of ticketLines ?? []) {
+      const q = (line as { quantity?: number }).quantity ?? 0;
+      const unit = (line as { unit_price_pence?: number }).unit_price_pence ?? 0;
+      totalPence += q * unit;
+    }
+
     return {
       ...base,
       email_variant: 'appointment',
       booking_model: 'event_ticket',
       appointment_service_name: ev?.name ?? base.appointment_service_name ?? null,
+      appointment_price_display:
+        base.appointment_price_display ??
+        (totalPence > 0 ? priceDisplayFromPence(totalPence) : null),
+      booking_total_price_pence:
+        base.booking_total_price_pence != null
+          ? base.booking_total_price_pence
+          : totalPence > 0
+            ? totalPence
+            : null,
     };
   }
 
@@ -234,12 +289,28 @@ export async function enrichBookingEmailForSecondaryModels(
       .maybeSingle();
     const ctId = inst?.class_type_id;
     if (ctId) {
-      const { data: ct } = await supabase.from('class_types').select('name').eq('id', ctId).maybeSingle();
+      const { data: ct } = await supabase
+        .from('class_types')
+        .select('name, price_pence')
+        .eq('id', ctId)
+        .maybeSingle();
+      const party = typeof r.party_size === 'number' && r.party_size > 0 ? r.party_size : 1;
+      const unitP = ct?.price_pence ?? null;
+      const totalPence = unitP != null ? unitP * party : null;
       return {
         ...base,
         email_variant: 'appointment',
         booking_model: 'class_session',
         appointment_service_name: ct?.name ?? base.appointment_service_name ?? null,
+        appointment_price_display:
+          base.appointment_price_display ??
+          (totalPence != null && totalPence > 0 ? priceDisplayFromPence(totalPence) : null),
+        booking_total_price_pence:
+          base.booking_total_price_pence != null
+            ? base.booking_total_price_pence
+            : totalPence != null && totalPence > 0
+              ? totalPence
+              : null,
       };
     }
   }
@@ -249,12 +320,34 @@ export async function enrichBookingEmailForSecondaryModels(
       supabase,
       r.resource_id,
     );
+    const { data: vr } = await supabase
+      .from('venue_resources')
+      .select('price_per_slot_pence, slot_interval_minutes')
+      .eq('id', r.resource_id)
+      .maybeSingle();
+
+    const totalPence = resourceBookingTotalPence({
+      bookingTime: r.booking_time,
+      bookingEndTime: r.booking_end_time,
+      pricePerSlotPence: vr?.price_per_slot_pence ?? null,
+      slotIntervalMinutes: vr?.slot_interval_minutes ?? null,
+    });
+
     return {
       ...base,
       email_variant: 'appointment',
       booking_model: 'resource_booking',
       appointment_service_name: resourceName ?? base.appointment_service_name ?? null,
       practitioner_name: hostCalendarName ?? base.practitioner_name ?? null,
+      appointment_price_display:
+        base.appointment_price_display ??
+        (totalPence != null && totalPence > 0 ? priceDisplayFromPence(totalPence) : null),
+      booking_total_price_pence:
+        base.booking_total_price_pence != null
+          ? base.booking_total_price_pence
+          : totalPence != null && totalPence > 0
+            ? totalPence
+            : null,
     };
   }
 
@@ -269,4 +362,24 @@ export async function enrichBookingEmailForComms(
 ): Promise<BookingEmailData> {
   const appt = await enrichBookingEmailForAppointment(supabase, bookingId, base);
   return enrichBookingEmailForSecondaryModels(supabase, bookingId, appt);
+}
+
+function resourceBookingTotalPence(params: {
+  bookingTime: string | null | undefined;
+  bookingEndTime: string | null | undefined;
+  pricePerSlotPence: number | null | undefined;
+  slotIntervalMinutes: number | null | undefined;
+}): number | null {
+  const { bookingTime, bookingEndTime, pricePerSlotPence, slotIntervalMinutes } = params;
+  if (pricePerSlotPence == null || pricePerSlotPence <= 0) return null;
+  const start = (bookingTime ?? '').slice(0, 5);
+  const end = (bookingEndTime ?? '').slice(0, 5);
+  if (!start || !end) return null;
+  const durationMinutes =
+    (parseInt(end.slice(0, 2), 10) * 60 + parseInt(end.slice(3, 5), 10)) -
+    (parseInt(start.slice(0, 2), 10) * 60 + parseInt(start.slice(3, 5), 10));
+  if (!Number.isFinite(durationMinutes) || durationMinutes <= 0) return null;
+  const interval = slotIntervalMinutes ?? 30;
+  const numSlots = Math.ceil(durationMinutes / interval);
+  return pricePerSlotPence * numSlots;
 }

@@ -16,6 +16,7 @@ import { venueUsesUnifiedAppointmentData } from '@/lib/booking/unified-schedulin
 import { entityBookingWindowFromRow } from '@/lib/booking/entity-booking-window';
 import { getOfferedAppointmentServicesForPractitioner } from '@/lib/availability/appointment-engine';
 import { unifiedCalendarRowToPractitioner } from '@/lib/availability/unified-calendar-mapper';
+import { parseCustomWorkingHoursFromDb } from '@/lib/service-custom-availability';
 
 export interface AppointmentCatalogPractitioner {
   id: string;
@@ -53,6 +54,8 @@ function serviceItemRowToAppointmentService(row: Record<string, unknown>): Appoi
     min_booking_notice_hours: entityBookingWindowFromRow(row).min_booking_notice_hours,
     cancellation_notice_hours: entityBookingWindowFromRow(row).cancellation_notice_hours,
     allow_same_day_booking: entityBookingWindowFromRow(row).allow_same_day_booking,
+    custom_availability_enabled: Boolean(row.custom_availability_enabled),
+    custom_working_hours: parseCustomWorkingHoursFromDb(row.custom_working_hours),
   };
 }
 

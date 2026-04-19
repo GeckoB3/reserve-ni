@@ -103,6 +103,8 @@ export async function POST(request: Request) {
     // Do not send active_booking_models here: older databases may not have the column yet.
     // When the column exists (migration applied), NOT NULL DEFAULT '[]'::jsonb matches
     // appointments post-payment (choose models next) and resolves correctly for restaurant via booking_model.
+    const ownerEmail = (user.email ?? '').trim().toLowerCase() || null;
+
     const { data: venue, error: venueError } = await admin
       .from('venues')
       .insert({
@@ -121,6 +123,7 @@ export async function POST(request: Request) {
         calendar_count: null,
         onboarding_step: 0,
         onboarding_completed: false,
+        email: ownerEmail,
       })
       .select('id')
       .single();

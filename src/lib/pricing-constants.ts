@@ -2,7 +2,7 @@
 export const APPOINTMENTS_PRICE = 35;
 
 /** Appointments Light plan: after free period (GBP). */
-export const APPOINTMENTS_LIGHT_PRICE = 5;
+export const APPOINTMENTS_LIGHT_PRICE = 6;
 
 /** Restaurant plan: flat monthly price (GBP). */
 export const RESTAURANT_PRICE = 79;

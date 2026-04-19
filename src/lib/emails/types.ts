@@ -53,6 +53,11 @@ export interface BookingEmailData {
   appointment_service_name?: string | null;
   /** Model B: formatted price, e.g. "£45.00"; omit if POA */
   appointment_price_display?: string | null;
+  /**
+   * Total booking price in pence when known (deposit vs full comparison, payment copy).
+   * Optional; enriched from DB when not set by the booking API.
+   */
+  booking_total_price_pence?: number | null;
   /** Model B group: one row per person/treatment (omit for single appointment). */
   group_appointments?: GroupAppointmentLine[];
   /**

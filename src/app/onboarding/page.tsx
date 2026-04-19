@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import type { BookingModel } from '@/types/booking-models';
@@ -9,9 +9,13 @@ import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 import { normalizeEnabledModels } from '@/lib/booking/enabled-models';
 import { APPOINTMENTS_ACTIVE_MODEL_ORDER } from '@/lib/booking/active-models';
 import { buildAddress, parseAddress } from '@/lib/venue/address-format';
-import { defaultPractitionerWorkingHours } from '@/lib/availability/practitioner-defaults';
+import {
+  defaultNewUnifiedCalendarWorkingHours,
+  defaultPractitionerWorkingHours,
+} from '@/lib/availability/practitioner-defaults';
 import { DEFAULT_ENTITY_BOOKING_WINDOW } from '@/lib/booking/entity-booking-window';
 import type { WorkingHours } from '@/types/booking-models';
+import type { OpeningHours } from '@/types/availability';
 import type { OpeningHoursSettings } from '@/app/dashboard/settings/types';
 import { OpeningHoursControl, defaultOpeningHoursSettings } from '@/components/scheduling/OpeningHoursControl';
 import { WorkingHoursControl } from '@/components/scheduling/WorkingHoursControl';
@@ -36,6 +40,7 @@ import { BookingRulesStep } from './steps/restaurant/BookingRulesStep';
 import { TableModeStep } from './steps/restaurant/TableModeStep';
 import { TableSetupStep } from './steps/restaurant/TableSetupStep';
 import { DashboardOrientationStep } from './steps/restaurant/DashboardOrientationStep';
+import { canAddCalendarColumn, useCalendarEntitlement } from '@/hooks/use-calendar-entitlement';
 
 type Currency = 'GBP' | 'EUR';
 
@@ -508,6 +513,11 @@ export default function OnboardingPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const { entitlement, entitlementLoaded, refresh: refreshCalendarEntitlement } = useCalendarEntitlement(
+    Boolean(venue?.is_admin),
+  );
+  const canAddCalendar = canAddCalendarColumn(entitlement, entitlementLoaded);
+
   // Step 1: Business profile (address fields match Settings → Venue profile)
   const [name, setName] = useState('');
   const [addressName, setAddressName] = useState('');
@@ -577,6 +587,121 @@ export default function OnboardingPage() {
   // Model E: Resources
   const [resources, setResources] = useState<ResourceDraft[]>(() => [createEmptyResourceDraft('')]);
   const [staffInvites, setStaffInvites] = useState<StaffInviteDraft[]>([{ email: '', role: 'staff' }]);
+
+  type InlineCalendarTarget =
+    | { kind: 'event' }
+    | { kind: 'class'; index: number }
+    | { kind: 'resource'; index: number };
+
+  const [showAddCalendarModal, setShowAddCalendarModal] = useState(false);
+  const [inlineCalendarTarget, setInlineCalendarTarget] = useState<InlineCalendarTarget | null>(null);
+  const [newCalendarName, setNewCalendarName] = useState('');
+  const [addCalendarSubmitting, setAddCalendarSubmitting] = useState(false);
+  const [addCalendarModalError, setAddCalendarModalError] = useState<string | null>(null);
+
+  const openInlineAddCalendar = useCallback(
+    (target: InlineCalendarTarget) => {
+      if (venue?.pricing_tier === 'light' && !canAddCalendar) return;
+      setInlineCalendarTarget(target);
+      setAddCalendarModalError(null);
+      setNewCalendarName('');
+      setShowAddCalendarModal(true);
+    },
+    [venue?.pricing_tier, canAddCalendar],
+  );
+
+  const closeInlineAddCalendar = useCallback(() => {
+    if (addCalendarSubmitting) return;
+    setShowAddCalendarModal(false);
+    setAddCalendarModalError(null);
+    setInlineCalendarTarget(null);
+  }, [addCalendarSubmitting]);
+
+  const submitInlineNewCalendar = useCallback(async () => {
+    const name = newCalendarName.trim();
+    const target = inlineCalendarTarget;
+    if (!name) {
+      setAddCalendarModalError('Enter a display name for the calendar.');
+      return;
+    }
+    if (!target) {
+      setAddCalendarModalError('Something went wrong. Close and try again.');
+      return;
+    }
+    setAddCalendarSubmitting(true);
+    setAddCalendarModalError(null);
+    try {
+      const res = await fetch('/api/venue/practitioners', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name,
+          is_active: true,
+          working_hours: defaultNewUnifiedCalendarWorkingHours(),
+          break_times: [],
+          days_off: [],
+        }),
+      });
+      const json = (await res.json()) as {
+        error?: string;
+        id?: string;
+        name?: string;
+        upgrade_required?: boolean;
+      };
+      if (!res.ok) {
+        if (res.status === 403 && json.upgrade_required) {
+          void refreshCalendarEntitlement();
+          setAddCalendarModalError(json.error ?? 'Calendar limit reached for your plan.');
+        } else {
+          setAddCalendarModalError(json.error ?? 'Could not create calendar');
+        }
+        return;
+      }
+      const newId = json.id;
+      const newNameResolved = typeof json.name === 'string' ? json.name : name;
+      if (!newId) {
+        setAddCalendarModalError('Calendar was created but no id was returned. Refresh the page.');
+        return;
+      }
+      setRosterList((prev) => {
+        if (prev.some((c) => c.id === newId)) return prev;
+        return [...prev, { id: newId, name: newNameResolved }].sort((a, b) => a.name.localeCompare(b.name));
+      });
+      setCalendarWorkingDraft((prev) => ({
+        ...prev,
+        [newId]: defaultNewUnifiedCalendarWorkingHours(),
+      }));
+      if (target.kind === 'event') {
+        setEventDraft((f) => ({ ...f, calendar_id: newId }));
+      } else if (target.kind === 'class') {
+        setClasses((prev) => {
+          const next = [...prev];
+          const row = next[target.index];
+          if (row) {
+            next[target.index] = { ...row, instructor_id: newId };
+          }
+          return next;
+        });
+      } else {
+        setResources((prev) => {
+          const next = [...prev];
+          const row = next[target.index];
+          if (row) {
+            next[target.index] = { ...row, display_on_calendar_id: newId };
+          }
+          return next;
+        });
+      }
+      setNewCalendarName('');
+      setShowAddCalendarModal(false);
+      setInlineCalendarTarget(null);
+      void refreshCalendarEntitlement();
+    } catch {
+      setAddCalendarModalError('Could not create calendar');
+    } finally {
+      setAddCalendarSubmitting(false);
+    }
+  }, [newCalendarName, inlineCalendarTarget, refreshCalendarEntitlement]);
 
   useEffect(() => {
     async function loadVenue() {
@@ -715,6 +840,17 @@ export default function OnboardingPage() {
 
   const isAppointmentsPlanVenue = isAppointmentsPlanSku(venue?.pricing_tier);
   const isLightPlanVenue = venue?.pricing_tier === 'light';
+  const showOnboardingInlineAddCalendar = useMemo(
+    () => !isLightPlanVenue || canAddCalendar,
+    [isLightPlanVenue, canAddCalendar],
+  );
+
+  useEffect(() => {
+    if (isLightPlanVenue && entitlementLoaded && !canAddCalendar) {
+      setShowAddCalendarModal(false);
+    }
+  }, [isLightPlanVenue, entitlementLoaded, canAddCalendar]);
+
   const activeAppointmentsModels: AppointmentPlanModel[] = useMemo(
     () => (venue?.active_booking_models ?? []).filter(isAppointmentPlanModel),
     [venue?.active_booking_models],
@@ -962,6 +1098,67 @@ export default function OnboardingPage() {
     },
     []
   );
+
+  /** Latest step for unload / tab backgrounding (must survive React commit timing). */
+  const stepRef = useRef(step);
+  stepRef.current = step;
+
+  /**
+   * Keep `venues.onboarding_step` aligned with the visible step so users resume here after closing the tab,
+   * navigating away, or logging in again — not only after clicking Continue.
+   */
+  useEffect(() => {
+    if (!venue || venue.onboarding_completed) return;
+    if (modelSteps.length === 0) return;
+    const maxIdx = modelSteps.length - 1;
+    const clamped = Math.min(Math.max(0, step), maxIdx);
+    if (clamped !== step) {
+      setStep(clamped);
+    }
+  }, [venue, modelSteps.length, step, venue?.onboarding_completed]);
+
+  useEffect(() => {
+    if (!venue || venue.onboarding_completed) return;
+    if (modelSteps.length === 0) return;
+    const maxIdx = modelSteps.length - 1;
+    if (step < 0 || step > maxIdx) return;
+
+    const t = setTimeout(() => {
+      void fetch('/api/venue/onboarding', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ onboarding_step: step }),
+      });
+    }, 400);
+    return () => clearTimeout(t);
+  }, [step, venue?.id, venue?.onboarding_completed, modelSteps.length]);
+
+  useEffect(() => {
+    if (!venue || venue.onboarding_completed) return;
+
+    const persistNow = () => {
+      const idx = stepRef.current;
+      void fetch('/api/venue/onboarding', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ onboarding_step: idx }),
+        keepalive: true,
+      });
+    };
+
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') {
+        persistNow();
+      }
+    };
+
+    window.addEventListener('pagehide', persistNow);
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      window.removeEventListener('pagehide', persistNow);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, [venue?.id, venue?.onboarding_completed]);
 
   async function handleNext() {
     setError(null);
@@ -1770,7 +1967,8 @@ export default function OnboardingPage() {
     (currentStepKey === 'hours' &&
       (isAppointmentsPlanVenue || isUnifiedSchedulingVenue(venue.booking_model))) ||
     (currentStepKey === 'services' && isUnifiedSchedulingVenue(venue.booking_model)) ||
-    currentStepKey === 'classes';
+    currentStepKey === 'classes' ||
+    currentStepKey === 'resources';
 
   return (
     <div className={`w-full ${wideOnboardingStep ? 'max-w-3xl' : 'max-w-xl'}`}>
@@ -2241,6 +2439,8 @@ export default function OnboardingPage() {
                 roster={rosterList}
                 rosterIds={rosterIds}
                 hideStaffCustomization={isLightPlanVenue}
+                venueOpeningHours={isAppointmentsPlanVenue ? null : (openingHoursDraft as unknown as OpeningHours)}
+                calendarWorkingHoursById={calendarWorkingDraft}
               />
             </div>
           )}
@@ -2541,6 +2741,39 @@ export default function OnboardingPage() {
                           </option>
                         ))}
                       </select>
+                      {venue.is_admin && (
+                        <div className="mt-2">
+                          {!entitlementLoaded ? (
+                            <p className="text-xs text-slate-500">Loading plan limits…</p>
+                          ) : showOnboardingInlineAddCalendar ? (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => openInlineAddCalendar({ kind: 'event' })}
+                                className="text-sm font-semibold text-brand-600 hover:text-brand-800"
+                              >
+                                + Add calendar
+                              </button>
+                              <p className="mt-1 text-xs text-slate-500">
+                                Create a new team calendar column here without leaving onboarding. It is selected for
+                                this event automatically.
+                              </p>
+                            </>
+                          ) : (
+                            <p className="mt-1 text-xs text-amber-950">
+                              Appointments Light includes <strong className="font-semibold">one bookable calendar</strong>
+                              . To add more columns, upgrade to the full Appointments plan under{' '}
+                              <Link
+                                href="/dashboard/settings?tab=plan"
+                                className="font-medium text-brand-700 underline hover:text-brand-800"
+                              >
+                                Settings → Plan
+                              </Link>
+                              .
+                            </p>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
                   <div className="sm:col-span-2">
@@ -3027,22 +3260,42 @@ export default function OnboardingPage() {
                       </p>
                       {venue.is_admin && (
                         <div className="mt-3 rounded-lg border border-slate-100 bg-slate-50/90 p-3">
-                          <Link
-                            href="/dashboard/calendar-availability?tab=calendars"
-                            className="inline-flex w-full items-center justify-center rounded-lg border border-brand-200/90 bg-white px-3.5 py-2.5 text-sm font-semibold text-brand-700 shadow-sm transition-colors hover:border-brand-400 hover:bg-brand-50 hover:text-brand-800"
-                          >
-                            Add calendar
-                          </Link>
-                          <p className="mt-2 text-xs text-slate-500">
-                            Create another team calendar column in{' '}
-                            <Link
-                              href="/dashboard/calendar-availability?tab=calendars"
-                              className="font-medium text-brand-700 underline hover:text-brand-800"
-                            >
-                              Calendar availability
-                            </Link>
-                            , then return here if needed.
-                          </p>
+                          {!entitlementLoaded ? (
+                            <p className="text-xs text-slate-500">Loading plan limits…</p>
+                          ) : showOnboardingInlineAddCalendar ? (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => openInlineAddCalendar({ kind: 'class', index: i })}
+                                className="inline-flex w-full items-center justify-center rounded-lg border border-brand-200/90 bg-white px-3.5 py-2.5 text-sm font-semibold text-brand-700 shadow-sm transition-colors hover:border-brand-400 hover:bg-brand-50 hover:text-brand-800"
+                              >
+                                Add calendar
+                              </button>
+                              <p className="mt-2 text-xs text-slate-500">
+                                Create a new team calendar column without leaving onboarding. It is selected for this
+                                class type automatically. You can edit weekly hours anytime in{' '}
+                                <Link
+                                  href="/dashboard/calendar-availability"
+                                  className="font-medium text-brand-700 underline hover:text-brand-800"
+                                >
+                                  Calendar availability
+                                </Link>
+                                .
+                              </p>
+                            </>
+                          ) : (
+                            <p className="text-xs text-amber-950">
+                              Appointments Light includes <strong className="font-semibold">one bookable calendar</strong>
+                              . To add more columns, upgrade to the full Appointments plan under{' '}
+                              <Link
+                                href="/dashboard/settings?tab=plan"
+                                className="font-medium text-brand-700 underline hover:text-brand-800"
+                              >
+                                Settings → Plan
+                              </Link>
+                              .
+                            </p>
+                          )}
                         </div>
                       )}
                     </div>
@@ -3189,6 +3442,46 @@ export default function OnboardingPage() {
                     <p className="mt-1 text-xs text-slate-500">
                       The resource appears on this staff calendar column (same as Resource timeline).
                     </p>
+                    {venue.is_admin && (
+                      <div className="mt-3 rounded-lg border border-slate-100 bg-slate-50/90 p-3">
+                        {!entitlementLoaded ? (
+                          <p className="text-xs text-slate-500">Loading plan limits…</p>
+                        ) : showOnboardingInlineAddCalendar ? (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => openInlineAddCalendar({ kind: 'resource', index: i })}
+                              className="inline-flex w-full items-center justify-center rounded-lg border border-brand-200/90 bg-white px-3.5 py-2.5 text-sm font-semibold text-brand-700 shadow-sm transition-colors hover:border-brand-400 hover:bg-brand-50 hover:text-brand-800"
+                            >
+                              Add calendar
+                            </button>
+                            <p className="mt-2 text-xs text-slate-500">
+                              Create a new team calendar column without leaving onboarding. It is selected for this
+                              resource automatically. You can edit weekly hours anytime in{' '}
+                              <Link
+                                href="/dashboard/calendar-availability"
+                                className="font-medium text-brand-700 underline hover:text-brand-800"
+                              >
+                                Calendar availability
+                              </Link>
+                              .
+                            </p>
+                          </>
+                        ) : (
+                          <p className="text-xs text-amber-950">
+                            Appointments Light includes <strong className="font-semibold">one bookable calendar</strong>.
+                            To add more columns, upgrade to the full Appointments plan under{' '}
+                            <Link
+                              href="/dashboard/settings?tab=plan"
+                              className="font-medium text-brand-700 underline hover:text-brand-800"
+                            >
+                              Settings → Plan
+                            </Link>
+                            .
+                          </p>
+                        )}
+                      </div>
+                    )}
                   </div>
                   <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                     <div>
@@ -3541,6 +3834,73 @@ export default function OnboardingPage() {
           </div>
         )}
       </div>
+
+      {showAddCalendarModal && venue.is_admin && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4"
+          onClick={() => {
+            if (addCalendarSubmitting) return;
+            closeInlineAddCalendar();
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="onb-add-calendar-title"
+            className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-6 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 id="onb-add-calendar-title" className="mb-1 text-lg font-semibold text-slate-900">
+              Add calendar
+            </h2>
+            <p className="mb-4 text-sm text-slate-500">
+              Same defaults as Calendar availability: weekly hours are set automatically; you can edit them later.
+            </p>
+            {addCalendarModalError && (
+              <div
+                role="alert"
+                className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800"
+              >
+                {addCalendarModalError}
+              </div>
+            )}
+            <label className="mb-1 block text-xs font-medium text-slate-600">Display name *</label>
+            <input
+              type="text"
+              value={newCalendarName}
+              onChange={(e) => setNewCalendarName(e.target.value)}
+              placeholder="e.g. Studio A, Front desk"
+              disabled={addCalendarSubmitting}
+              className="mb-4 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 disabled:opacity-60"
+              autoFocus
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  void submitInlineNewCalendar();
+                }
+              }}
+            />
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => void submitInlineNewCalendar()}
+                disabled={addCalendarSubmitting}
+                className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
+              >
+                {addCalendarSubmitting ? 'Creating…' : 'Create and use'}
+              </button>
+              <button
+                type="button"
+                onClick={() => closeInlineAddCalendar()}
+                disabled={addCalendarSubmitting}
+                className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

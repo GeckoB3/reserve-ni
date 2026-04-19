@@ -3,12 +3,15 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { BookingModel } from '@/types/booking-models';
 import type { StaffMember } from '../types';
+import { isLightPlanTier } from '@/lib/tier-enforcement';
 
 interface StaffSectionProps {
   venueId: string;
   isAdmin: boolean;
   bookingModel?: string;
   enabledModels?: BookingModel[];
+  /** When `light`, at most one staff row — hide add-user UI once the venue has a team member. */
+  pricingTier?: string | null;
 }
 
 interface PractitionerOption {
@@ -26,6 +29,7 @@ export function StaffSection({
   isAdmin,
   bookingModel: _bookingModel,
   enabledModels: _enabledModels = [],
+  pricingTier = null,
 }: StaffSectionProps) {
   const [staff, setStaff] = useState<StaffMember[]>([]);
   const [loading, setLoading] = useState(true);
@@ -82,6 +86,14 @@ export function StaffSection({
     const { staff: list } = await res.json();
     setStaff(list ?? []);
   }, []);
+
+  const lightPlanStaffLimitReached = isLightPlanTier(pricingTier) && staff.length >= 1;
+
+  useEffect(() => {
+    if (lightPlanStaffLimitReached) {
+      setShowCreateForm(false);
+    }
+  }, [lightPlanStaffLimitReached]);
 
   const loadSessionSettings = useCallback(async () => {
     try {
@@ -504,7 +516,7 @@ export function StaffSection({
               {isAdmin ? 'Manage team members, roles, and access.' : 'View your team members.'}
             </p>
           </div>
-          {isAdmin && (
+          {isAdmin && !lightPlanStaffLimitReached && (
             <button
               type="button"
               onClick={() => {
@@ -521,6 +533,16 @@ export function StaffSection({
         </div>
 
         <div className="px-6 py-4 space-y-4">
+          {isAdmin && lightPlanStaffLimitReached && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50/90 px-4 py-3 text-sm text-amber-950">
+              Appointments Light includes <strong>one team login</strong>. To invite more people, upgrade to the full
+              Appointments plan under{' '}
+              <a href="/dashboard/settings?tab=plan" className="font-medium text-brand-700 underline hover:text-brand-800">
+                Settings → Plan
+              </a>
+              .
+            </div>
+          )}
           {isAdmin && calendarError && (
             <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-700">{calendarError}</div>
           )}

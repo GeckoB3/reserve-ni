@@ -132,6 +132,13 @@ export interface AppointmentService {
   min_booking_notice_hours?: number;
   cancellation_notice_hours?: number;
   allow_same_day_booking?: boolean;
+  /**
+   * When true, guest bookable slots for this service are the intersection of
+   * venue + calendar hours with `custom_working_hours` for each calendar day.
+   */
+  custom_availability_enabled?: boolean;
+  /** Weekly TimeRange map (keys "0"–"6", JS getDay); used when `custom_availability_enabled` is true. */
+  custom_working_hours?: WorkingHours | null;
 }
 
 export interface PractitionerService {

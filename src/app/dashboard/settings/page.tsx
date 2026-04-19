@@ -13,6 +13,7 @@ import type { BookingModel } from '@/types/booking-models';
 import { computeSmsMonthlyAllowance, updateVenueSmsMonthlyAllowance } from '@/lib/billing/sms-allowance';
 import { parseVenueOpeningExceptions } from '@/types/venue-opening-exceptions';
 import type { VenueSettings } from './types';
+import { backfillVenueEmailIfEmptyFromStaff } from '@/lib/venue-contact-email';
 
 export default async function SettingsPage({
   searchParams,
@@ -123,6 +124,15 @@ export default async function SettingsPage({
   }
 
   if (venue) {
+    const nextEmail = await backfillVenueEmailIfEmptyFromStaff(
+      staff.db,
+      venueId,
+      (venue as { email?: string | null }).email,
+      user.email,
+    );
+    if (nextEmail) {
+      venue = { ...(venue as object), email: nextEmail } as typeof venue;
+    }
     const activeModels = resolveActiveBookingModels({
       pricingTier: (venue as { pricing_tier?: string | null }).pricing_tier,
       bookingModel: venue.booking_model as BookingModel | undefined,

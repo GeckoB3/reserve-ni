@@ -4,12 +4,22 @@ import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { defaultNewUnifiedCalendarWorkingHours } from '@/lib/availability/practitioner-defaults';
 import { mergeAppointmentServiceWithPractitionerLink } from '@/lib/appointments/merge-service-with-overrides';
-import type { AppointmentService, ClassPaymentRequirement, PractitionerService } from '@/types/booking-models';
+import { describeOnlineBookableWeeklySummary } from '@/lib/service-custom-availability';
+import type {
+  AppointmentService,
+  ClassPaymentRequirement,
+  PractitionerService,
+  WorkingHours,
+} from '@/types/booking-models';
+import { WorkingHoursControl } from '@/components/scheduling/WorkingHoursControl';
 import { DEFAULT_ENTITY_BOOKING_WINDOW } from '@/lib/booking/entity-booking-window';
+import type { OpeningHours } from '@/types/availability';
 import { formatPricePenceForServiceCatalog } from '@/lib/booking/format-price-display';
 import { StripePaymentWarning } from '@/components/dashboard/StripePaymentWarning';
 import { HelpTooltip } from '@/components/dashboard/HelpTooltip';
 import { StaffServiceOverrideModal } from './StaffServiceOverrideModal';
+import { canAddCalendarColumn, useCalendarEntitlement } from '@/hooks/use-calendar-entitlement';
+import { isLightPlanTier } from '@/lib/tier-enforcement';
 
 interface Service {
   id: string;
@@ -34,6 +44,8 @@ interface Service {
   staff_may_customize_price?: boolean;
   staff_may_customize_deposit?: boolean;
   staff_may_customize_colour?: boolean;
+  custom_availability_enabled?: boolean;
+  custom_working_hours?: WorkingHours | null;
 }
 
 interface Practitioner {
@@ -42,6 +54,7 @@ interface Practitioner {
   /** When false, the calendar is hidden from allocation (still listed for resolving names on existing links). */
   is_active?: boolean;
   calendar_type?: string;
+  working_hours?: WorkingHours | null;
 }
 
 interface PractitionerServiceLink {
@@ -80,6 +93,8 @@ interface ServiceFormData {
   min_booking_notice_hours: number;
   cancellation_notice_hours: number;
   allow_same_day_booking: boolean;
+  custom_availability_enabled: boolean;
+  custom_working_hours: WorkingHours;
 }
 
 const COLOUR_OPTIONS = [
@@ -113,6 +128,8 @@ const DEFAULT_FORM: ServiceFormData = {
   min_booking_notice_hours: DEFAULT_ENTITY_BOOKING_WINDOW.min_booking_notice_hours,
   cancellation_notice_hours: 24,
   allow_same_day_booking: DEFAULT_ENTITY_BOOKING_WINDOW.allow_same_day_booking,
+  custom_availability_enabled: false,
+  custom_working_hours: {},
 };
 
 function formatDuration(mins: number): string {
@@ -171,18 +188,40 @@ export function AppointmentServicesView({
   const [newCalendarName, setNewCalendarName] = useState('');
   const [creatingCalendar, setCreatingCalendar] = useState(false);
   const [addCalendarModalError, setAddCalendarModalError] = useState<string | null>(null);
+  const [showCustomAvailabilityModal, setShowCustomAvailabilityModal] = useState(false);
+  const [customAvailabilityDraftEnabled, setCustomAvailabilityDraftEnabled] = useState(false);
+  const [customAvailabilityDraft, setCustomAvailabilityDraft] = useState<WorkingHours>({});
+  const [venueOpeningHours, setVenueOpeningHours] = useState<OpeningHours | null>(null);
+
+  const {
+    entitlement: calendarEntitlement,
+    entitlementLoaded,
+    refresh: refreshCalendarEntitlement,
+  } = useCalendarEntitlement(isAdmin);
+  const canAddCalendar = canAddCalendarColumn(calendarEntitlement, entitlementLoaded);
+
+  useEffect(() => {
+    if (entitlementLoaded && !canAddCalendar) {
+      setShowAddCalendarModal(false);
+    }
+  }, [entitlementLoaded, canAddCalendar]);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [svcRes, practRes] = await Promise.all([
+      const [venueRes, svcRes, practRes] = await Promise.all([
+        fetch('/api/venue'),
         fetch('/api/venue/appointment-services'),
         fetch('/api/venue/practitioners?roster=1'),
       ]);
       if (!svcRes.ok || !practRes.ok) {
         setError('Failed to load services. Please refresh the page.');
         return;
+      }
+      if (venueRes.ok) {
+        const venueData = (await venueRes.json()) as { opening_hours?: OpeningHours | null };
+        setVenueOpeningHours(venueData.opening_hours ?? null);
       }
       const svcData = await svcRes.json();
       const practData = await practRes.json();
@@ -226,6 +265,28 @@ export function AppointmentServicesView({
       ),
     [form.practitioner_ids, allocatableCalendars],
   );
+
+  const onlineBookableSummaryText = useMemo(() => {
+    const linked = form.practitioner_ids
+      .map((id) => practitioners.find((p) => p.id === id))
+      .filter((p): p is Practitioner => Boolean(p))
+      .map((p) => ({
+        id: p.id,
+        working_hours: p.working_hours ?? {},
+      }));
+    return describeOnlineBookableWeeklySummary({
+      venueOpeningHours,
+      linkedCalendars: linked,
+      customAvailabilityEnabled: form.custom_availability_enabled,
+      customWorkingHours: form.custom_working_hours,
+    });
+  }, [
+    venueOpeningHours,
+    form.practitioner_ids,
+    form.custom_availability_enabled,
+    form.custom_working_hours,
+    practitioners,
+  ]);
 
   /** Admins manage definitions for everyone. Non-admins see the full venue list read-only; they edit what they offer under Availability. */
   const visibleServices = useMemo(() => {
@@ -349,6 +410,11 @@ export function AppointmentServicesView({
         svc.cancellation_notice_hours ?? DEFAULT_ENTITY_BOOKING_WINDOW.cancellation_notice_hours,
       allow_same_day_booking:
         svc.allow_same_day_booking ?? DEFAULT_ENTITY_BOOKING_WINDOW.allow_same_day_booking,
+      custom_availability_enabled: svc.custom_availability_enabled ?? false,
+      custom_working_hours:
+        svc.custom_availability_enabled && svc.custom_working_hours && typeof svc.custom_working_hours === 'object'
+          ? (JSON.parse(JSON.stringify(svc.custom_working_hours)) as WorkingHours)
+          : {},
     });
     setEditingId(svc.id);
     setError(null);
@@ -398,6 +464,7 @@ export function AppointmentServicesView({
         return;
       }
       await fetchAll();
+      void refreshCalendarEntitlement();
       setForm((f) => ({
         ...f,
         practitioner_ids: f.practitioner_ids.includes(newId) ? f.practitioner_ids : [...f.practitioner_ids, newId],
@@ -470,6 +537,10 @@ export function AppointmentServicesView({
         payload.staff_may_customize_price = form.staffMay.price;
         payload.staff_may_customize_deposit = form.staffMay.deposit;
         payload.staff_may_customize_colour = form.staffMay.colour;
+        payload.custom_availability_enabled = form.custom_availability_enabled;
+        payload.custom_working_hours = form.custom_availability_enabled
+          ? form.custom_working_hours
+          : null;
       }
 
       const res = await fetch('/api/venue/appointment-services', {
@@ -524,6 +595,27 @@ export function AppointmentServicesView({
       ...prev,
       practitioner_ids: prev.practitioner_ids.filter((p) => p !== calendarId),
     }));
+  }
+
+  function openCustomAvailabilityModal() {
+    setCustomAvailabilityDraftEnabled(form.custom_availability_enabled);
+    setCustomAvailabilityDraft(
+      form.custom_availability_enabled && Object.keys(form.custom_working_hours).length > 0
+        ? (JSON.parse(JSON.stringify(form.custom_working_hours)) as WorkingHours)
+        : defaultNewUnifiedCalendarWorkingHours(),
+    );
+    setShowCustomAvailabilityModal(true);
+  }
+
+  function applyCustomAvailabilityModal() {
+    setForm((f) => ({
+      ...f,
+      custom_availability_enabled: customAvailabilityDraftEnabled,
+      custom_working_hours: customAvailabilityDraftEnabled
+        ? (JSON.parse(JSON.stringify(customAvailabilityDraft)) as WorkingHours)
+        : {},
+    }));
+    setShowCustomAvailabilityModal(false);
   }
 
   function practitionersForService(serviceId: string): Array<{ id: string; name: string }> {
@@ -1073,23 +1165,52 @@ export function AppointmentServicesView({
                   </p>
                   {isAdmin && (
                     <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setAddCalendarModalError(null);
-                          setNewCalendarName('');
-                          setShowAddCalendarModal(true);
-                        }}
-                        className="inline-flex w-full items-center justify-center rounded-lg border border-brand-200/90 bg-white px-3.5 py-2.5 text-sm font-semibold text-brand-700 shadow-sm transition-[color,background-color,border-color,box-shadow,transform] duration-150 ease-out hover:border-brand-400 hover:bg-brand-50 hover:text-brand-800 hover:shadow-md active:scale-[0.98] active:border-brand-500 active:bg-brand-100 active:shadow-inner motion-reduce:transition-colors motion-reduce:active:scale-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 sm:w-auto"
-                      >
-                        Add calendar
-                      </button>
-                      <Link
-                        href="/dashboard/calendar-availability?tab=calendars"
-                        className="text-sm text-slate-600 underline hover:text-slate-800"
-                      >
-                        Calendar availability
-                      </Link>
+                      {!entitlementLoaded ? (
+                        <p className="text-xs text-slate-500">Loading plan limits…</p>
+                      ) : canAddCalendar ? (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAddCalendarModalError(null);
+                              setNewCalendarName('');
+                              setShowAddCalendarModal(true);
+                            }}
+                            className="inline-flex w-full items-center justify-center rounded-lg border border-brand-200/90 bg-white px-3.5 py-2.5 text-sm font-semibold text-brand-700 shadow-sm transition-[color,background-color,border-color,box-shadow,transform] duration-150 ease-out hover:border-brand-400 hover:bg-brand-50 hover:text-brand-800 hover:shadow-md active:scale-[0.98] active:border-brand-500 active:bg-brand-100 active:shadow-inner motion-reduce:transition-colors motion-reduce:active:scale-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 sm:w-auto"
+                          >
+                            Add calendar
+                          </button>
+                          <Link
+                            href="/dashboard/calendar-availability?tab=calendars"
+                            className="text-sm text-slate-600 underline hover:text-slate-800"
+                          >
+                            Calendar availability
+                          </Link>
+                        </>
+                      ) : calendarEntitlement && isLightPlanTier(calendarEntitlement.pricing_tier) ? (
+                        <div className="rounded-lg border border-amber-200 bg-amber-50/90 px-4 py-3 text-sm text-amber-950">
+                          Appointments Light includes <strong className="font-semibold">one bookable calendar</strong>.
+                          To add more columns, upgrade to the full Appointments plan under{' '}
+                          <a
+                            href="/dashboard/settings?tab=plan"
+                            className="font-medium text-brand-700 underline hover:text-brand-800"
+                          >
+                            Settings → Plan
+                          </a>
+                          .
+                        </div>
+                      ) : (
+                        <div className="rounded-lg border border-amber-200 bg-amber-50/90 px-4 py-3 text-sm text-amber-950">
+                          You&apos;ve reached your plan&apos;s calendar limit. Visit{' '}
+                          <a
+                            href="/dashboard/settings?tab=plan"
+                            className="font-medium text-brand-700 underline hover:text-brand-800"
+                          >
+                            Settings → Plan
+                          </a>
+                          .
+                        </div>
+                      )}
                     </div>
                   )}
                   {practitioners.length === 0 && (
@@ -1149,6 +1270,27 @@ export function AppointmentServicesView({
                     ) : null)}
                 </div>
               )}
+
+              <div className="rounded-lg border border-slate-200 p-4 space-y-2">
+                <p className="text-sm font-medium text-slate-800">When this service can be booked online</p>
+                <p className="text-xs text-slate-500">
+                  Guests can book only when three things line up: your venue is open, a linked calendar is working, and
+                  this service is available at that time, including any custom hours you set.
+                </p>
+                <p className="text-sm text-slate-700 whitespace-pre-line">{onlineBookableSummaryText}</p>
+                {isAdmin && (
+                  <button
+                    type="button"
+                    onClick={openCustomAvailabilityModal}
+                    className="inline-flex w-full items-center justify-center rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 sm:w-auto"
+                  >
+                    Set custom availability for this service
+                  </button>
+                )}
+                {!isAdmin && (
+                  <p className="text-xs text-slate-500">Only venue admins can change per-service hours.</p>
+                )}
+              </div>
             </div>
 
             <div className="mt-6 flex justify-end gap-3">
@@ -1164,6 +1306,65 @@ export function AppointmentServicesView({
                 className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
               >
                 {saving ? 'Saving...' : editingId ? 'Save Changes' : 'Create Service'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showCustomAvailabilityModal && isAdmin && (
+        <div
+          className="fixed inset-0 z-[61] flex items-center justify-center bg-black/50 p-4"
+          onClick={() => setShowCustomAvailabilityModal(false)}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="service-custom-availability-title"
+            className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl bg-white p-6 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 id="service-custom-availability-title" className="mb-3 text-lg font-semibold text-slate-900">
+              Custom availability for this service
+            </h2>
+            <p className="mb-4 text-sm text-slate-500">
+              When enabled, online slots for this service are only offered inside these hours, after venue and calendar
+              rules are applied.
+            </p>
+            <label className="mb-4 flex cursor-pointer items-start gap-2 text-sm text-slate-800">
+              <input
+                type="checkbox"
+                className="mt-0.5 rounded border-slate-300"
+                checked={customAvailabilityDraftEnabled}
+                onChange={(e) => {
+                  const on = e.target.checked;
+                  setCustomAvailabilityDraftEnabled(on);
+                  if (on && Object.keys(customAvailabilityDraft).length === 0) {
+                    setCustomAvailabilityDraft(defaultNewUnifiedCalendarWorkingHours());
+                  }
+                }}
+              />
+              <span>Limit online booking to custom weekly hours</span>
+            </label>
+            <WorkingHoursControl
+              value={customAvailabilityDraft}
+              onChange={setCustomAvailabilityDraft}
+              disabled={!customAvailabilityDraftEnabled}
+            />
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setShowCustomAvailabilityModal(false)}
+                className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={applyCustomAvailabilityModal}
+                className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700"
+              >
+                Apply
               </button>
             </div>
           </div>
