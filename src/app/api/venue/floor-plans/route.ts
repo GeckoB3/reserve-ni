@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 import { z } from 'zod';
-import { getDefaultAreaIdForVenue } from '@/lib/areas/resolve-default-area';
+import { ensureDefaultDiningAreaForVenue } from '@/lib/areas/resolve-default-area';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 
 const MAX_FLOOR_PLANS = 24;
@@ -76,7 +76,7 @@ export async function POST(request: NextRequest) {
     const { copy_from_id, area_id: bodyAreaId, ...fields } = parsed.data;
 
     const admin = getSupabaseAdminClient();
-    const areaId = bodyAreaId ?? (await getDefaultAreaIdForVenue(admin, staff.venue_id));
+    const areaId = bodyAreaId ?? (await ensureDefaultDiningAreaForVenue(admin, staff.venue_id));
     if (!areaId) {
       return NextResponse.json({ error: 'No dining area configured for this venue' }, { status: 400 });
     }

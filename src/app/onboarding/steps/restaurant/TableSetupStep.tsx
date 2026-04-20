@@ -19,15 +19,15 @@ export function TableSetupStep({ onDone }: Props) {
           <ul className="space-y-2 text-sm text-slate-600">
             <li className="flex items-start gap-2">
               <span className="mt-0.5 h-5 w-5 shrink-0 rounded-full bg-brand-100 text-center text-xs font-bold leading-5 text-brand-700">1</span>
-              <span><strong>Add tables</strong> — give each table a name or number and set its minimum and maximum covers.</span>
+              <span><strong>Add tables:</strong> give each table a name or number and set its minimum and maximum covers.</span>
             </li>
             <li className="flex items-start gap-2">
               <span className="mt-0.5 h-5 w-5 shrink-0 rounded-full bg-brand-100 text-center text-xs font-bold leading-5 text-brand-700">2</span>
-              <span><strong>Arrange the floor plan</strong> — drag tables onto a visual layout of your room.</span>
+              <span><strong>Arrange the floor plan:</strong> drag tables onto a visual layout of your room.</span>
             </li>
             <li className="flex items-start gap-2">
               <span className="mt-0.5 h-5 w-5 shrink-0 rounded-full bg-brand-100 text-center text-xs font-bold leading-5 text-brand-700">3</span>
-              <span><strong>Set combinations</strong> (optional) — define which tables can be pushed together for larger parties.</span>
+              <span><strong>Set combinations</strong> (optional): define which tables can be pushed together for larger parties.</span>
             </li>
           </ul>
         </div>

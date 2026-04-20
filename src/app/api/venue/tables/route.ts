@@ -4,7 +4,7 @@ import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 import { BOOKING_ACTIVE_STATUSES } from '@/lib/table-management/constants';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
-import { getDefaultAreaIdForVenue } from '@/lib/areas/resolve-default-area';
+import { ensureDefaultDiningAreaForVenue } from '@/lib/areas/resolve-default-area';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 
 const TABLE_TYPE_VALUES = ['Regular', 'High-Top', 'Counter', 'Bar', 'Outdoor'] as const;
@@ -131,7 +131,7 @@ export async function POST(request: NextRequest) {
     }
 
     const admin = getSupabaseAdminClient();
-    const batchAreaId = parsed.data.area_id ?? (await getDefaultAreaIdForVenue(admin, staff.venue_id));
+    const batchAreaId = parsed.data.area_id ?? (await ensureDefaultDiningAreaForVenue(admin, staff.venue_id));
     if (!batchAreaId) {
       return NextResponse.json({ error: 'No dining area configured for this venue' }, { status: 400 });
     }
@@ -163,7 +163,7 @@ export async function POST(request: NextRequest) {
 
   const admin = getSupabaseAdminClient();
   const { area_id: rowAreaId, ...tableFields } = parsed.data;
-  const areaId = rowAreaId ?? (await getDefaultAreaIdForVenue(admin, staff.venue_id));
+  const areaId = rowAreaId ?? (await ensureDefaultDiningAreaForVenue(admin, staff.venue_id));
   if (!areaId) {
     return NextResponse.json({ error: 'No dining area configured for this venue' }, { status: 400 });
   }

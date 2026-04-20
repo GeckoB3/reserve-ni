@@ -4,7 +4,7 @@ import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { z } from 'zod';
 import { detectOverlaps, formatOverlapWarning } from '@/lib/service-overlap';
-import { getDefaultAreaIdForVenue } from '@/lib/areas/resolve-default-area';
+import { ensureDefaultDiningAreaForVenue } from '@/lib/areas/resolve-default-area';
 
 const serviceSchema = z.object({
   name: z.string().min(1).max(100),
@@ -79,7 +79,7 @@ export async function POST(request: NextRequest) {
 
     const admin = getSupabaseAdminClient();
     const { area_id: bodyAreaId, ...serviceFields } = parsed.data;
-    const areaId = bodyAreaId ?? (await getDefaultAreaIdForVenue(admin, staff.venue_id));
+    const areaId = bodyAreaId ?? (await ensureDefaultDiningAreaForVenue(admin, staff.venue_id));
     if (!areaId) {
       return NextResponse.json({ error: 'No dining area configured for this venue' }, { status: 400 });
     }
