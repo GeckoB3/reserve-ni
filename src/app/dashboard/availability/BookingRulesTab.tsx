@@ -50,24 +50,23 @@ export function BookingRulesTab({ services, showToast, selectedAreaId }: Props) 
 
   useEffect(() => {
     async function load() {
-      if (!selectedAreaId) {
-        setRestrictions([]);
-        setLoading(false);
-        return;
-      }
+      setLoading(true);
       try {
-        const restrictionsRes = await fetch(
-          `/api/venue/booking-restrictions?area_id=${encodeURIComponent(selectedAreaId)}`,
-        );
+        const url = selectedAreaId
+          ? `/api/venue/booking-restrictions?area_id=${encodeURIComponent(selectedAreaId)}`
+          : '/api/venue/booking-restrictions';
+        const restrictionsRes = await fetch(url);
         if (restrictionsRes.ok) {
           const data = await restrictionsRes.json();
           setRestrictions(data.restrictions ?? []);
+        } else {
+          setRestrictions([]);
         }
       } finally {
         setLoading(false);
       }
     }
-    load();
+    void load();
   }, [selectedAreaId]);
 
   async function handleSave(serviceId: string, data: Restriction) {

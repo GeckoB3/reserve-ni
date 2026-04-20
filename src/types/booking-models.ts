@@ -48,6 +48,31 @@ export interface TimeRange {
 /** Day-keyed working hours: keys are lowercase day names or "0"–"6". */
 export type WorkingHours = Record<string, TimeRange[]>;
 
+/**
+ * Optional per-service online availability (intersected with venue + calendar hours).
+ * @see ServiceCustomScheduleV2 — supports weekly, one-off dates, and date-range patterns combined.
+ */
+export type ServiceCustomRule =
+  | { id: string; kind: 'weekly'; windows: WorkingHours }
+  | { id: string; kind: 'specific_dates'; entries: Array<{ date: string; ranges: TimeRange[] }> }
+  | {
+      id: string;
+      kind: 'date_range_pattern';
+      start_date: string;
+      end_date: string;
+      /** JS weekday: 0 = Sunday … 6 = Saturday */
+      days_of_week: number[];
+      ranges: TimeRange[];
+    };
+
+export interface ServiceCustomScheduleV2 {
+  version: 2;
+  rules: ServiceCustomRule[];
+}
+
+/** Stored JSON in `custom_working_hours`: legacy weekly map or versioned rule list. */
+export type ServiceCustomScheduleStored = WorkingHours | ServiceCustomScheduleV2;
+
 // ---------------------------------------------------------------------------
 // Model B: Practitioner appointment
 // ---------------------------------------------------------------------------
@@ -137,8 +162,11 @@ export interface AppointmentService {
    * venue + calendar hours with `custom_working_hours` for each calendar day.
    */
   custom_availability_enabled?: boolean;
-  /** Weekly TimeRange map (keys "0"–"6", JS getDay); used when `custom_availability_enabled` is true. */
-  custom_working_hours?: WorkingHours | null;
+  /**
+   * When `custom_availability_enabled`, guest slots are intersected with this schedule (weekly map,
+   * or `{ version: 2, rules }` with weekly / specific dates / date-range patterns — union of rules).
+   */
+  custom_working_hours?: ServiceCustomScheduleStored | null;
 }
 
 export interface PractitionerService {

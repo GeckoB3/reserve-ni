@@ -1,6 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
+import type { VenueSettings } from '@/app/dashboard/settings/types';
+import { TableManagementSection } from '@/app/dashboard/settings/sections/TableManagementSection';
 
 interface Props {
   onDone: () => Promise<void>;
@@ -8,123 +11,104 @@ interface Props {
 }
 
 export function TableModeStep({ onDone, onModeSelected }: Props) {
-  const [selected, setSelected] = useState<'simple' | 'advanced'>('simple');
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [venue, setVenue] = useState<VenueSettings | null>(null);
+  const [loading, setLoading] = useState(true);
 
-  async function handleContinue() {
-    setSaving(true);
-    setError(null);
-    try {
-      const res = await fetch('/api/venue/tables/settings', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ table_management_enabled: selected === 'advanced' }),
-      });
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({})) as { error?: string };
-        throw new Error(j.error ?? 'Failed to save table management setting');
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const [vRes, tRes] = await Promise.all([fetch('/api/venue'), fetch('/api/venue/tables/settings')]);
+        if (!vRes.ok || !tRes.ok) {
+          if (!cancelled) setLoading(false);
+          return;
+        }
+        const vData = (await vRes.json()) as Record<string, unknown>;
+        const tData = (await tRes.json()) as {
+          settings?: { table_management_enabled?: boolean; combination_threshold?: number };
+        };
+        if (cancelled) return;
+        const tm = Boolean(tData.settings?.table_management_enabled);
+        const ct = Number(tData.settings?.combination_threshold ?? 80);
+        onModeSelected(tm);
+        setVenue({
+          id: vData.id as string,
+          name: (vData.name as string) ?? '',
+          slug: (vData.slug as string) ?? '',
+          address: (vData.address as string | null) ?? null,
+          phone: (vData.phone as string | null) ?? null,
+          email: (vData.email as string | null) ?? null,
+          website_url: (vData.website_url as string | null) ?? null,
+          cover_photo_url: (vData.cover_photo_url as string | null) ?? null,
+          cuisine_type: (vData.cuisine_type as string | null) ?? null,
+          price_band: (vData.price_band as string | null) ?? null,
+          no_show_grace_minutes: (vData.no_show_grace_minutes as number) ?? 15,
+          kitchen_email: (vData.kitchen_email as string | null) ?? null,
+          communication_templates:
+            (vData.communication_templates as VenueSettings['communication_templates']) ?? null,
+          opening_hours: (vData.opening_hours as VenueSettings['opening_hours']) ?? null,
+          booking_rules: (vData.booking_rules as VenueSettings['booking_rules']) ?? null,
+          deposit_config: (vData.deposit_config as VenueSettings['deposit_config']) ?? null,
+          availability_config: (vData.availability_config as VenueSettings['availability_config']) ?? null,
+          stripe_connected_account_id: (vData.stripe_connected_account_id as string | null) ?? null,
+          timezone: (vData.timezone as string) ?? 'Europe/London',
+          table_management_enabled: tm,
+          combination_threshold: ct,
+          pricing_tier: vData.pricing_tier as string | undefined,
+        });
+      } finally {
+        if (!cancelled) setLoading(false);
       }
-      onModeSelected(selected === 'advanced');
-      await onDone();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save. Please try again.');
-      setSaving(false);
     }
+    void load();
+    return () => {
+      cancelled = true;
+    };
+    // Intentionally once on mount: sync initial table mode; parent onModeSelected is not stable.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const onUpdate = useCallback(
+    (patch: Partial<VenueSettings>) => {
+      setVenue((prev) => (prev ? { ...prev, ...patch } : null));
+      if (patch.table_management_enabled != null) {
+        onModeSelected(patch.table_management_enabled);
+      }
+    },
+    [onModeSelected],
+  );
+
+  if (loading || !venue) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <div className="h-6 w-6 animate-spin rounded-full border-2 border-brand-600 border-t-transparent" />
+      </div>
+    );
   }
 
   return (
     <div>
       <h2 className="mb-1 text-lg font-bold text-slate-900">Table management</h2>
-      <p className="mb-6 text-sm text-slate-500">
-        Choose how you want to manage seating. You can switch modes at any time from{' '}
-        <span className="font-medium text-slate-700">Availability → Table</span>.
+      <p className="mb-4 text-sm text-slate-500">
+        Same controls as{' '}
+        <Link
+          href="/dashboard/availability?tab=table"
+          className="font-medium text-brand-600 underline hover:text-brand-700"
+        >
+          Availability → Table Management
+        </Link>
+        . Toggle advanced mode, then continue to lay out tables if it is on.
       </p>
 
-      {error && (
-        <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
-      )}
-
-      <div className="space-y-4">
-        <button
-          type="button"
-          onClick={() => setSelected('simple')}
-          disabled={saving}
-          className={`w-full rounded-2xl border-2 p-5 text-left transition-all ${
-            selected === 'simple'
-              ? 'border-brand-500 bg-brand-50'
-              : 'border-slate-200 bg-white hover:border-slate-300'
-          }`}
-        >
-          <div className="flex items-start gap-4">
-            <div className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 ${
-              selected === 'simple' ? 'border-brand-500 bg-brand-500' : 'border-slate-300'
-            }`}>
-              {selected === 'simple' && (
-                <div className="h-2 w-2 rounded-full bg-white" />
-              )}
-            </div>
-            <div>
-              <p className="font-semibold text-slate-900">Simple covers mode</p>
-              <p className="mt-1 text-sm text-slate-600">
-                Track bookings by total cover count. The Day Sheet gives you a chronological view of all
-                reservations for the day. No need to set up individual tables — ideal if you manage seating
-                manually on the day.
-              </p>
-              <ul className="mt-3 space-y-1 text-xs text-slate-500">
-                <li>• Day Sheet: timeline of all reservations</li>
-                <li>• Capacity managed by covers per slot</li>
-                <li>• No floor plan required</li>
-                <li>• Good starting point — you can upgrade to Advanced later</li>
-              </ul>
-            </div>
-          </div>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setSelected('advanced')}
-          disabled={saving}
-          className={`w-full rounded-2xl border-2 p-5 text-left transition-all ${
-            selected === 'advanced'
-              ? 'border-brand-500 bg-brand-50'
-              : 'border-slate-200 bg-white hover:border-slate-300'
-          }`}
-        >
-          <div className="flex items-start gap-4">
-            <div className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 ${
-              selected === 'advanced' ? 'border-brand-500 bg-brand-500' : 'border-slate-300'
-            }`}>
-              {selected === 'advanced' && (
-                <div className="h-2 w-2 rounded-full bg-white" />
-              )}
-            </div>
-            <div>
-              <p className="font-semibold text-slate-900">Advanced table management</p>
-              <p className="mt-1 text-sm text-slate-600">
-                Assign each booking to a specific table. Use the interactive Table Grid and Floor Plan to see
-                your room at a glance, manage seating assignments, and spot availability across tables in real
-                time. Requires setting up your tables and floor plan.
-              </p>
-              <ul className="mt-3 space-y-1 text-xs text-slate-500">
-                <li>• Table Grid: per-table timeline of reservations</li>
-                <li>• Floor Plan: visual room layout with live status</li>
-                <li>• Table combinations for large parties</li>
-                <li>• Recommended for venues managing precise seating</li>
-              </ul>
-            </div>
-          </div>
-        </button>
-      </div>
+      <TableManagementSection venue={venue} onUpdate={onUpdate} isAdmin />
 
       <div className="mt-8 flex justify-end">
         <button
           type="button"
-          onClick={handleContinue}
-          disabled={saving}
-          className="rounded-lg bg-brand-600 px-6 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
+          onClick={() => void onDone()}
+          className="rounded-lg bg-brand-600 px-6 py-2 text-sm font-medium text-white hover:bg-brand-700"
         >
-          {saving ? 'Saving…' : 'Continue'}
+          Continue
         </button>
       </div>
     </div>

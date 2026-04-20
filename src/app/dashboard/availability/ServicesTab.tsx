@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react';
 import { detectOverlaps, formatOverlapWarning } from '@/lib/service-overlap';
 
-interface Service {
+export interface VenueServiceRow {
   id: string;
   name: string;
   days_of_week: number[];
@@ -13,6 +13,9 @@ interface Service {
   is_active: boolean;
   sort_order: number;
 }
+
+/** @deprecated Use VenueServiceRow */
+type Service = VenueServiceRow;
 
 const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 

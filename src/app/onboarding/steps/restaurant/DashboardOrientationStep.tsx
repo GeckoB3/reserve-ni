@@ -22,14 +22,14 @@ export function DashboardOrientationStep({ onDone, tableManagementEnabled }: Pro
       description: 'Chronological list of all reservations for the day.',
       detail: tableManagementEnabled
         ? 'Available in Simple covers mode. In Advanced table management, the Floor Plan is your live view.'
-        : 'Your main operations view — shows reservations in time order with guest details, party size, dietary notes, and check-in status.',
+        : 'Your main operations view: reservations in time order with guest details, party size, dietary notes, and check-in status.',
       active: !tableManagementEnabled,
       badge: !tableManagementEnabled ? 'Your main view' : undefined,
     },
     {
       title: 'Bookings',
       href: '/dashboard/bookings',
-      description: 'Full booking management — search, filter, create, and edit reservations.',
+      description: 'Full booking management: search, filter, create, and edit reservations.',
       detail: 'Available in all modes. Use this to find any booking, add walk-ins, or edit existing reservations. Your staff can also create bookings from here.',
       active: true,
       badge: 'All modes',
@@ -49,7 +49,7 @@ export function DashboardOrientationStep({ onDone, tableManagementEnabled }: Pro
       href: '/dashboard/floor-plan',
       description: 'Visual room layout with live table status during service.',
       detail: tableManagementEnabled
-        ? 'Your live operations view in Advanced mode — see table status at a glance, assign bookings, mark tables as seated or cleared, and manage the room in real time.'
+        ? 'Your live operations view in Advanced mode: see table status at a glance, assign bookings, mark tables as seated or cleared, and manage the room in real time.'
         : 'Requires Advanced table management. Switch mode from Availability → Table when you are ready.',
       active: tableManagementEnabled,
       badge: tableManagementEnabled ? 'Your main view' : undefined,
@@ -60,7 +60,7 @@ export function DashboardOrientationStep({ onDone, tableManagementEnabled }: Pro
     <div>
       <h2 className="mb-1 text-lg font-bold text-slate-900">Your dashboard</h2>
       <p className="mb-2 text-sm text-slate-500">
-        Here&apos;s what each view does — and when to use it based on your{' '}
+        Here&apos;s what each view does, and when to use it based on your{' '}
         <strong>{tableManagementEnabled ? 'Advanced table management' : 'Simple covers'}</strong> mode.
       </p>
 

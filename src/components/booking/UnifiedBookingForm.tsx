@@ -635,9 +635,9 @@ export function UnifiedBookingForm({
                 <div className="mt-2 flex items-center gap-2 border-t border-slate-100 pt-2">
                   <span className="text-xs text-slate-400">Other:</span>
                   <input
-                    type="number"
-                    min={1}
-                    max={50}
+                    type="text"
+                    inputMode="numeric"
+                    autoComplete="off"
                     placeholder="13+"
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') {

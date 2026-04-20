@@ -8,6 +8,7 @@ import { ClassScheduleModal } from './ClassScheduleModal';
 import { ClassTimetableReadOnlyCalendar } from './ClassTimetableReadOnlyCalendar';
 import { canAddCalendarColumn, useCalendarEntitlement } from '@/hooks/use-calendar-entitlement';
 import { isLightPlanTier } from '@/lib/tier-enforcement';
+import { NumericInput } from '@/components/ui/NumericInput';
 
 interface PractitionerOption {
   id: string;
@@ -980,22 +981,20 @@ export function ClassTimetableView({
                 </div>
                 <div>
                   <label className="mb-1 block text-xs font-medium text-slate-600">Duration (minutes)</label>
-                  <input
-                    type="number"
+                  <NumericInput
                     min={5}
                     max={480}
                     value={classTypeForm.duration_minutes}
-                    onChange={(e) => setClassTypeForm((f) => ({ ...f, duration_minutes: parseInt(e.target.value) || 60 }))}
+                    onChange={(v) => setClassTypeForm((f) => ({ ...f, duration_minutes: v }))}
                     className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
                   />
                 </div>
                 <div>
                   <label className="mb-1 block text-xs font-medium text-slate-600">Capacity (spots)</label>
-                  <input
-                    type="number"
+                  <NumericInput
                     min={1}
                     value={classTypeForm.capacity}
-                    onChange={(e) => setClassTypeForm((f) => ({ ...f, capacity: parseInt(e.target.value) || 1 }))}
+                    onChange={(v) => setClassTypeForm((f) => ({ ...f, capacity: v }))}
                     className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
                   />
                 </div>
@@ -1004,9 +1003,9 @@ export function ClassTimetableView({
                     Price ({sym}) <span className="font-normal text-slate-400">optional</span>
                   </label>
                   <input
-                    type="number"
-                    min={0}
-                    step={0.01}
+                    type="text"
+                    inputMode="decimal"
+                    autoComplete="off"
                     value={classTypeForm.price_pence}
                     onChange={(e) => setClassTypeForm((f) => ({ ...f, price_pence: e.target.value }))}
                     placeholder="0.00"
@@ -1055,9 +1054,9 @@ export function ClassTimetableView({
                     <div className="mt-3 max-w-xs">
                       <label className="mb-1 block text-xs font-medium text-slate-600">Deposit amount ({sym}) *</label>
                       <input
-                        type="number"
-                        min={0}
-                        step={0.01}
+                        type="text"
+                        inputMode="decimal"
+                        autoComplete="off"
                         value={classTypeForm.deposit_pounds}
                         onChange={(e) => setClassTypeForm((f) => ({ ...f, deposit_pounds: e.target.value }))}
                         placeholder="e.g. 5.00"
@@ -1081,15 +1080,14 @@ export function ClassTimetableView({
                   <div className="grid gap-3 sm:grid-cols-2">
                     <div>
                       <label className="mb-1 block text-xs font-medium text-slate-600">Max advance (days)</label>
-                      <input
-                        type="number"
+                      <NumericInput
                         min={1}
                         max={365}
                         value={classTypeForm.max_advance_booking_days}
-                        onChange={(e) =>
+                        onChange={(v) =>
                           setClassTypeForm((f) => ({
                             ...f,
-                            max_advance_booking_days: parseInt(e.target.value, 10) || 1,
+                            max_advance_booking_days: v,
                           }))
                         }
                         className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
@@ -1097,15 +1095,14 @@ export function ClassTimetableView({
                     </div>
                     <div>
                       <label className="mb-1 block text-xs font-medium text-slate-600">Min notice (hours)</label>
-                      <input
-                        type="number"
+                      <NumericInput
                         min={0}
                         max={168}
                         value={classTypeForm.min_booking_notice_hours}
-                        onChange={(e) =>
+                        onChange={(v) =>
                           setClassTypeForm((f) => ({
                             ...f,
-                            min_booking_notice_hours: parseInt(e.target.value, 10) || 0,
+                            min_booking_notice_hours: v,
                           }))
                         }
                         className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
@@ -1113,15 +1110,14 @@ export function ClassTimetableView({
                     </div>
                     <div>
                       <label className="mb-1 block text-xs font-medium text-slate-600">Cancellation notice (hours)</label>
-                      <input
-                        type="number"
+                      <NumericInput
                         min={0}
                         max={168}
                         value={classTypeForm.cancellation_notice_hours}
-                        onChange={(e) =>
+                        onChange={(v) =>
                           setClassTypeForm((f) => ({
                             ...f,
-                            cancellation_notice_hours: parseInt(e.target.value, 10) || 0,
+                            cancellation_notice_hours: v,
                           }))
                         }
                         className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
@@ -1568,12 +1564,13 @@ export function ClassTimetableView({
                   </label>
                   {timetableForm.end_condition === 'count' && (
                     <input
-                      type="number"
-                      min={1}
+                      type="text"
+                      inputMode="numeric"
+                      autoComplete="off"
                       placeholder="e.g. 12"
                       value={timetableForm.total_occurrences}
                       onChange={(e) =>
-                        setTimetableForm((f) => ({ ...f, total_occurrences: e.target.value }))
+                        setTimetableForm((f) => ({ ...f, total_occurrences: e.target.value.replace(/[^0-9]/g, '') }))
                       }
                       className="ml-6 w-full max-w-xs rounded-lg border border-slate-200 px-3 py-2 text-sm"
                     />
@@ -1633,10 +1630,11 @@ export function ClassTimetableView({
               <div>
                 <label className="mb-1 block text-xs font-medium text-slate-600">Capacity override (optional)</label>
                 <input
-                  type="number"
-                  min={1}
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="off"
                   value={editInstanceForm.capacity}
-                  onChange={(e) => setEditInstanceForm((f) => ({ ...f, capacity: e.target.value }))}
+                  onChange={(e) => setEditInstanceForm((f) => ({ ...f, capacity: e.target.value.replace(/[^0-9]/g, '') }))}
                   className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
                 />
               </div>

@@ -6,6 +6,7 @@ import type { VenueTable, TableShape, TableType, FloorPlan } from '@/types/table
 import { getTableDimensions, computeGridPositions, TABLE_TYPES } from '@/types/table-management';
 import type { LayoutResizeAnchor } from '@/app/dashboard/settings/floor-plan/KonvaCanvas';
 import Link from 'next/link';
+import { NumericInput } from '@/components/ui/NumericInput';
 
 const KonvaCanvas = dynamic(() => import('./KonvaCanvas'), { ssr: false });
 
@@ -1290,28 +1291,24 @@ export function FloorPlanEditor({ className, embedded = false, onLayoutSaved, di
         {/* Layout size controls */}
         <div className="hidden lg:flex items-center gap-1.5 rounded border border-slate-200 bg-white px-2 py-1">
           <span className="text-[10px] font-medium text-slate-500">Layout</span>
-          <input
-            type="number"
+          <NumericInput
             min={1600}
             max={12000}
-            step={50}
             value={Math.round(layoutWidth ?? canvasDims.width)}
-            onChange={(e) => {
-              handleLayoutResize(Number(e.target.value || 0), Math.round(layoutHeight ?? canvasDims.height));
+            onChange={(v) => {
+              handleLayoutResize(v, Math.round(layoutHeight ?? canvasDims.height));
               setTimeout(handleLayoutResizeEnd, 0);
             }}
             className="w-20 rounded border border-slate-200 px-1.5 py-0.5 text-[10px] text-slate-600 focus:border-brand-400 focus:outline-none"
             title="Canvas width in pixels"
           />
           <span className="text-[10px] text-slate-400">×</span>
-          <input
-            type="number"
+          <NumericInput
             min={1200}
             max={9000}
-            step={50}
             value={Math.round(layoutHeight ?? canvasDims.height)}
-            onChange={(e) => {
-              handleLayoutResize(Math.round(layoutWidth ?? canvasDims.width), Number(e.target.value || 0));
+            onChange={(v) => {
+              handleLayoutResize(Math.round(layoutWidth ?? canvasDims.width), v);
               setTimeout(handleLayoutResizeEnd, 0);
             }}
             className="w-20 rounded border border-slate-200 px-1.5 py-0.5 text-[10px] text-slate-600 focus:border-brand-400 focus:outline-none"
@@ -1528,12 +1525,11 @@ export function FloorPlanEditor({ className, embedded = false, onLayoutSaved, di
                       <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-400">
                         Min
                       </label>
-                      <input
-                        type="number"
+                      <NumericInput
                         min={1}
                         max={50}
                         value={propEdits.min_covers}
-                        onChange={(e) => setPropEdits({ ...propEdits, min_covers: Number(e.target.value) })}
+                        onChange={(v) => setPropEdits({ ...propEdits, min_covers: v })}
                         className="mt-1 w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm focus:border-brand-400 focus:outline-none"
                       />
                     </div>
@@ -1541,12 +1537,11 @@ export function FloorPlanEditor({ className, embedded = false, onLayoutSaved, di
                       <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-400">
                         Max
                       </label>
-                      <input
-                        type="number"
+                      <NumericInput
                         min={1}
                         max={50}
                         value={propEdits.max_covers}
-                        onChange={(e) => setPropEdits({ ...propEdits, max_covers: Number(e.target.value) })}
+                        onChange={(v) => setPropEdits({ ...propEdits, max_covers: v })}
                         className="mt-1 w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm focus:border-brand-400 focus:outline-none"
                       />
                     </div>

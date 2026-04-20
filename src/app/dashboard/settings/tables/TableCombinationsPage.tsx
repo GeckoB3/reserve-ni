@@ -660,21 +660,31 @@ function AutoOverrideModal({
           <div>
             <label className="text-xs font-medium text-slate-600">Min party (optional)</label>
             <input
-              type="number"
+              type="text"
+              inputMode="numeric"
+              autoComplete="off"
               className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
               placeholder="1"
-              value={minC}
-              onChange={(e) => setMinC(e.target.value === '' ? '' : Number(e.target.value))}
+              value={minC === '' ? '' : String(minC)}
+              onChange={(e) => {
+                const v = e.target.value.replace(/[^0-9]/g, '');
+                setMinC(v === '' ? '' : parseInt(v, 10));
+              }}
             />
           </div>
           <div>
             <label className="text-xs font-medium text-slate-600">Max party (optional)</label>
             <input
-              type="number"
+              type="text"
+              inputMode="numeric"
+              autoComplete="off"
               className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
               placeholder={`Auto: ${group.default_capacity}`}
-              value={maxC}
-              onChange={(e) => setMaxC(e.target.value === '' ? '' : Number(e.target.value))}
+              value={maxC === '' ? '' : String(maxC)}
+              onChange={(e) => {
+                const v = e.target.value.replace(/[^0-9]/g, '');
+                setMaxC(v === '' ? '' : parseInt(v, 10));
+              }}
             />
           </div>
         </div>
@@ -869,11 +879,21 @@ function CustomComboModal({
         <div className="mt-3 grid grid-cols-2 gap-2">
           <div>
             <label className="text-xs font-medium text-slate-600">Min covers</label>
-            <input type="number" className="mt-1 w-full rounded border border-slate-300 px-2 py-1 text-sm" value={minC} min={1} onChange={(e) => setMinC(Number(e.target.value))} />
+            <NumericInput
+              className="mt-1 w-full rounded border border-slate-300 px-2 py-1 text-sm"
+              value={minC}
+              min={1}
+              onChange={setMinC}
+            />
           </div>
           <div>
             <label className="text-xs font-medium text-slate-600">Max covers</label>
-            <input type="number" className="mt-1 w-full rounded border border-slate-300 px-2 py-1 text-sm" value={maxC} min={1} onChange={(e) => setMaxC(Number(e.target.value))} />
+            <NumericInput
+              className="mt-1 w-full rounded border border-slate-300 px-2 py-1 text-sm"
+              value={maxC}
+              min={1}
+              onChange={setMaxC}
+            />
           </div>
         </div>
         <div className="mt-5 flex justify-end gap-2">

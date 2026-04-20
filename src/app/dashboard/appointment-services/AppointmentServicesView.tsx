@@ -4,22 +4,31 @@ import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { defaultNewUnifiedCalendarWorkingHours } from '@/lib/availability/practitioner-defaults';
 import { mergeAppointmentServiceWithPractitionerLink } from '@/lib/appointments/merge-service-with-overrides';
-import { describeOnlineBookableWeeklySummary } from '@/lib/service-custom-availability';
+import {
+  getOnlineBookableWeeklySummaryParts,
+  isServiceCustomScheduleEmpty,
+  toServiceCustomScheduleV2,
+} from '@/lib/service-custom-availability';
 import type {
   AppointmentService,
   ClassPaymentRequirement,
   PractitionerService,
+  ServiceCustomScheduleStored,
+  ServiceCustomScheduleV2,
   WorkingHours,
 } from '@/types/booking-models';
-import { WorkingHoursControl } from '@/components/scheduling/WorkingHoursControl';
+import { ServiceCustomAvailabilityEditor } from '@/components/scheduling/ServiceCustomAvailabilityEditor';
 import { DEFAULT_ENTITY_BOOKING_WINDOW } from '@/lib/booking/entity-booking-window';
 import type { OpeningHours } from '@/types/availability';
+import type { VenueOpeningException } from '@/types/venue-opening-exceptions';
+import { parseVenueOpeningExceptions } from '@/types/venue-opening-exceptions';
 import { formatPricePenceForServiceCatalog } from '@/lib/booking/format-price-display';
 import { StripePaymentWarning } from '@/components/dashboard/StripePaymentWarning';
 import { HelpTooltip } from '@/components/dashboard/HelpTooltip';
 import { StaffServiceOverrideModal } from './StaffServiceOverrideModal';
 import { canAddCalendarColumn, useCalendarEntitlement } from '@/hooks/use-calendar-entitlement';
 import { isLightPlanTier } from '@/lib/tier-enforcement';
+import { NumericInput } from '@/components/ui/NumericInput';
 
 interface Service {
   id: string;
@@ -45,7 +54,7 @@ interface Service {
   staff_may_customize_deposit?: boolean;
   staff_may_customize_colour?: boolean;
   custom_availability_enabled?: boolean;
-  custom_working_hours?: WorkingHours | null;
+  custom_working_hours?: ServiceCustomScheduleStored | null;
 }
 
 interface Practitioner {
@@ -94,7 +103,7 @@ interface ServiceFormData {
   cancellation_notice_hours: number;
   allow_same_day_booking: boolean;
   custom_availability_enabled: boolean;
-  custom_working_hours: WorkingHours;
+  custom_working_hours: ServiceCustomScheduleStored;
 }
 
 const COLOUR_OPTIONS = [
@@ -190,8 +199,11 @@ export function AppointmentServicesView({
   const [addCalendarModalError, setAddCalendarModalError] = useState<string | null>(null);
   const [showCustomAvailabilityModal, setShowCustomAvailabilityModal] = useState(false);
   const [customAvailabilityDraftEnabled, setCustomAvailabilityDraftEnabled] = useState(false);
-  const [customAvailabilityDraft, setCustomAvailabilityDraft] = useState<WorkingHours>({});
+  const [customAvailabilityDraft, setCustomAvailabilityDraft] = useState<ServiceCustomScheduleV2>(() =>
+    toServiceCustomScheduleV2({}),
+  );
   const [venueOpeningHours, setVenueOpeningHours] = useState<OpeningHours | null>(null);
+  const [venueOpeningExceptions, setVenueOpeningExceptions] = useState<VenueOpeningException[]>([]);
 
   const {
     entitlement: calendarEntitlement,
@@ -220,8 +232,12 @@ export function AppointmentServicesView({
         return;
       }
       if (venueRes.ok) {
-        const venueData = (await venueRes.json()) as { opening_hours?: OpeningHours | null };
+        const venueData = (await venueRes.json()) as {
+          opening_hours?: OpeningHours | null;
+          venue_opening_exceptions?: unknown;
+        };
         setVenueOpeningHours(venueData.opening_hours ?? null);
+        setVenueOpeningExceptions(parseVenueOpeningExceptions(venueData.venue_opening_exceptions));
       }
       const svcData = await svcRes.json();
       const practData = await practRes.json();
@@ -266,7 +282,7 @@ export function AppointmentServicesView({
     [form.practitioner_ids, allocatableCalendars],
   );
 
-  const onlineBookableSummaryText = useMemo(() => {
+  const onlineBookableSummary = useMemo(() => {
     const linked = form.practitioner_ids
       .map((id) => practitioners.find((p) => p.id === id))
       .filter((p): p is Practitioner => Boolean(p))
@@ -274,14 +290,16 @@ export function AppointmentServicesView({
         id: p.id,
         working_hours: p.working_hours ?? {},
       }));
-    return describeOnlineBookableWeeklySummary({
+    return getOnlineBookableWeeklySummaryParts({
       venueOpeningHours,
+      venueOpeningExceptions,
       linkedCalendars: linked,
       customAvailabilityEnabled: form.custom_availability_enabled,
       customWorkingHours: form.custom_working_hours,
     });
   }, [
     venueOpeningHours,
+    venueOpeningExceptions,
     form.practitioner_ids,
     form.custom_availability_enabled,
     form.custom_working_hours,
@@ -413,7 +431,7 @@ export function AppointmentServicesView({
       custom_availability_enabled: svc.custom_availability_enabled ?? false,
       custom_working_hours:
         svc.custom_availability_enabled && svc.custom_working_hours && typeof svc.custom_working_hours === 'object'
-          ? (JSON.parse(JSON.stringify(svc.custom_working_hours)) as WorkingHours)
+          ? (JSON.parse(JSON.stringify(svc.custom_working_hours)) as ServiceCustomScheduleStored)
           : {},
     });
     setEditingId(svc.id);
@@ -500,6 +518,11 @@ export function AppointmentServicesView({
         setError('Set a price when charging full payment online');
         return;
       }
+    }
+
+    if (isAdmin && form.custom_availability_enabled && isServiceCustomScheduleEmpty(form.custom_working_hours)) {
+      setError('Add at least one custom schedule rule, or turn off custom availability.');
+      return;
     }
 
     if (!isAdmin && !editingId && form.practitioner_ids.length === 0) {
@@ -600,9 +623,7 @@ export function AppointmentServicesView({
   function openCustomAvailabilityModal() {
     setCustomAvailabilityDraftEnabled(form.custom_availability_enabled);
     setCustomAvailabilityDraft(
-      form.custom_availability_enabled && Object.keys(form.custom_working_hours).length > 0
-        ? (JSON.parse(JSON.stringify(form.custom_working_hours)) as WorkingHours)
-        : defaultNewUnifiedCalendarWorkingHours(),
+      toServiceCustomScheduleV2(form.custom_availability_enabled ? form.custom_working_hours : {}),
     );
     setShowCustomAvailabilityModal(true);
   }
@@ -612,7 +633,7 @@ export function AppointmentServicesView({
       ...f,
       custom_availability_enabled: customAvailabilityDraftEnabled,
       custom_working_hours: customAvailabilityDraftEnabled
-        ? (JSON.parse(JSON.stringify(customAvailabilityDraft)) as WorkingHours)
+        ? (JSON.parse(JSON.stringify(customAvailabilityDraft)) as ServiceCustomScheduleStored)
         : {},
     }));
     setShowCustomAvailabilityModal(false);
@@ -856,7 +877,7 @@ export function AppointmentServicesView({
       {/* Create / Edit Modal */}
       {showModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div role="dialog" aria-modal="true" aria-labelledby="service-modal-title" className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl max-h-[90vh] overflow-y-auto">
+          <div role="dialog" aria-modal="true" aria-labelledby="service-modal-title" className="w-full max-w-4xl rounded-2xl bg-white p-6 shadow-xl max-h-[90vh] overflow-y-auto">
             <div className="mb-5 flex items-center justify-between">
               <h2 id="service-modal-title" className="text-lg font-semibold text-slate-900">
                 {editingId ? 'Edit Service' : 'Add Service'}
@@ -906,10 +927,9 @@ export function AppointmentServicesView({
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="mb-1 block text-sm font-medium text-slate-700">Duration (mins) *</label>
-                  <input
-                    type="number"
+                  <NumericInput
                     value={form.duration_minutes}
-                    onChange={(e) => setForm({ ...form, duration_minutes: parseInt(e.target.value) || 0 })}
+                    onChange={(v) => setForm({ ...form, duration_minutes: v })}
                     className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                     min={5}
                     max={480}
@@ -917,10 +937,9 @@ export function AppointmentServicesView({
                 </div>
                 <div>
                   <label className="mb-1 block text-sm font-medium text-slate-700">Buffer (mins)</label>
-                  <input
-                    type="number"
+                  <NumericInput
                     value={form.buffer_minutes}
-                    onChange={(e) => setForm({ ...form, buffer_minutes: parseInt(e.target.value) || 0 })}
+                    onChange={(v) => setForm({ ...form, buffer_minutes: v })}
                     className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                     min={0}
                     max={120}
@@ -1017,27 +1036,21 @@ export function AppointmentServicesView({
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="mb-1 block text-sm text-slate-700">Max advance (days)</label>
-                    <input
-                      type="number"
+                    <NumericInput
                       min={1}
                       max={365}
                       value={form.max_advance_booking_days}
-                      onChange={(e) =>
-                        setForm({ ...form, max_advance_booking_days: parseInt(e.target.value, 10) || 1 })
-                      }
+                      onChange={(v) => setForm({ ...form, max_advance_booking_days: v })}
                       className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                     />
                   </div>
                   <div>
                     <label className="mb-1 block text-sm text-slate-700">Min booking notice (hours)</label>
-                    <input
-                      type="number"
+                    <NumericInput
                       min={0}
                       max={168}
                       value={form.min_booking_notice_hours}
-                      onChange={(e) =>
-                        setForm({ ...form, min_booking_notice_hours: parseInt(e.target.value, 10) || 0 })
-                      }
+                      onChange={(v) => setForm({ ...form, min_booking_notice_hours: v })}
                       className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                     />
                   </div>
@@ -1049,15 +1062,12 @@ export function AppointmentServicesView({
                         content="This sets when deposits and online payments are refundable until: guests who cancel at least this many hours before the start time get a full refund (subject to your payment settings)."
                       />
                     </label>
-                    <input
+                    <NumericInput
                       id="service-cancellation-notice-hours"
-                      type="number"
                       min={0}
                       max={168}
                       value={form.cancellation_notice_hours}
-                      onChange={(e) =>
-                        setForm({ ...form, cancellation_notice_hours: parseInt(e.target.value, 10) || 0 })
-                      }
+                      onChange={(v) => setForm({ ...form, cancellation_notice_hours: v })}
                       className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                     />
                   </div>
@@ -1271,20 +1281,43 @@ export function AppointmentServicesView({
                 </div>
               )}
 
-              <div className="rounded-lg border border-slate-200 p-4 space-y-2">
-                <p className="text-sm font-medium text-slate-800">When this service can be booked online</p>
-                <p className="text-xs text-slate-500">
-                  Guests can book only when three things line up: your venue is open, a linked calendar is working, and
-                  this service is available at that time, including any custom hours you set.
-                </p>
-                <p className="text-sm text-slate-700 whitespace-pre-line">{onlineBookableSummaryText}</p>
+              <div className="rounded-lg border border-slate-200 p-4 space-y-3">
+                <p className="text-sm font-medium text-slate-800">When guests can book this service online</p>
+                <p className="text-xs text-slate-600">A slot appears only when:</p>
+                <ul className="list-disc space-y-0.5 pl-4 text-xs text-slate-600">
+                  <li>The venue is open</li>
+                  <li>At least one linked calendar is available then</li>
+                  <li>This service allows that time (including any custom schedule)</li>
+                </ul>
+                <p className="text-xs text-slate-500">Blocks and breaks on calendars still remove time inside those windows.</p>
+                {onlineBookableSummary.noCalendarsMessage ? (
+                  <p className="text-sm text-slate-600">{onlineBookableSummary.noCalendarsMessage}</p>
+                ) : (
+                  <div className="rounded-lg border border-slate-100 bg-slate-50/80 p-3 space-y-2">
+                    {onlineBookableSummary.contextualNote ? (
+                      <p className="text-xs leading-relaxed text-slate-700">{onlineBookableSummary.contextualNote}</p>
+                    ) : null}
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Sample week</p>
+                    <p className="text-xs text-slate-500">
+                      Sample week: example Mon–Sun times only. Venue hours follow the date on each row (including closed
+                      or amended days). Linked calendars show their usual weekly pattern; one-off calendar blocks are not
+                      shown. This is not a live booking view.
+                    </p>
+                    <p className="text-sm text-slate-800 whitespace-pre-line tabular-nums">
+                      {onlineBookableSummary.weekLines}
+                    </p>
+                    {onlineBookableSummary.previewDatesNote ? (
+                      <p className="text-xs leading-relaxed text-slate-600">{onlineBookableSummary.previewDatesNote}</p>
+                    ) : null}
+                  </div>
+                )}
                 {isAdmin && (
                   <button
                     type="button"
                     onClick={openCustomAvailabilityModal}
                     className="inline-flex w-full items-center justify-center rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 sm:w-auto"
                   >
-                    Set custom availability for this service
+                    Custom schedule for this service
                   </button>
                 )}
                 {!isAdmin && (
@@ -1321,15 +1354,15 @@ export function AppointmentServicesView({
             role="dialog"
             aria-modal="true"
             aria-labelledby="service-custom-availability-title"
-            className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl bg-white p-6 shadow-xl"
+            className="w-full max-w-6xl max-h-[90vh] overflow-y-auto rounded-2xl bg-white p-6 shadow-xl"
             onClick={(e) => e.stopPropagation()}
           >
-            <h2 id="service-custom-availability-title" className="mb-3 text-lg font-semibold text-slate-900">
-              Custom availability for this service
+            <h2 id="service-custom-availability-title" className="mb-1 text-lg font-semibold text-slate-900">
+              When can this service be booked?
             </h2>
-            <p className="mb-4 text-sm text-slate-500">
-              When enabled, online slots for this service are only offered inside these hours, after venue and calendar
-              rules are applied.
+            <p className="mb-4 text-xs text-slate-500">
+              Turn this on to narrow online booking beyond venue and calendar hours. Effective slots are always the
+              overlap of venue, calendar, and these rules. Apply updates this form; save the service to keep them.
             </p>
             <label className="mb-4 flex cursor-pointer items-start gap-2 text-sm text-slate-800">
               <input
@@ -1337,21 +1370,20 @@ export function AppointmentServicesView({
                 className="mt-0.5 rounded border-slate-300"
                 checked={customAvailabilityDraftEnabled}
                 onChange={(e) => {
-                  const on = e.target.checked;
-                  setCustomAvailabilityDraftEnabled(on);
-                  if (on && Object.keys(customAvailabilityDraft).length === 0) {
-                    setCustomAvailabilityDraft(defaultNewUnifiedCalendarWorkingHours());
-                  }
+                  setCustomAvailabilityDraftEnabled(e.target.checked);
                 }}
               />
-              <span>Limit online booking to custom weekly hours</span>
+              <span>Use a custom schedule for online booking</span>
             </label>
-            <WorkingHoursControl
+            <ServiceCustomAvailabilityEditor
               value={customAvailabilityDraft}
               onChange={setCustomAvailabilityDraft}
               disabled={!customAvailabilityDraftEnabled}
             />
-            <div className="mt-6 flex justify-end gap-3">
+            <p className="mt-4 text-center text-[11px] text-slate-500">
+              Apply updates this form only — choose Save on the service to store changes.
+            </p>
+            <div className="mt-2 flex justify-end gap-3">
               <button
                 type="button"
                 onClick={() => setShowCustomAvailabilityModal(false)}
@@ -1364,7 +1396,7 @@ export function AppointmentServicesView({
                 onClick={applyCustomAvailabilityModal}
                 className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700"
               >
-                Apply
+                Apply to form
               </button>
             </div>
           </div>

@@ -6,6 +6,7 @@ import { StripePaymentWarning } from '@/components/dashboard/StripePaymentWarnin
 import { canAddCalendarColumn, useCalendarEntitlement } from '@/hooks/use-calendar-entitlement';
 import { isLightPlanTier } from '@/lib/tier-enforcement';
 import { ResourceExceptionsCalendar } from './ResourceExceptionsCalendar';
+import { NumericInput } from '@/components/ui/NumericInput';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -893,13 +894,11 @@ export function ResourceTimelineView({
               <div>
                 <label className="mb-1 block text-xs font-medium text-slate-600">Slot interval (minutes)</label>
                 <input
-                  type="number"
-                  min={SLOT_INTERVAL_MIN}
-                  max={SLOT_INTERVAL_MAX}
-                  step={1}
+                  type="text"
                   inputMode="numeric"
+                  autoComplete="off"
                   value={formSlotStr}
-                  onChange={(e) => setFormSlotStr(e.target.value)}
+                  onChange={(e) => setFormSlotStr(e.target.value.replace(/[^0-9]/g, ''))}
                   className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
                 />
                 <p className="mt-1 text-[11px] text-slate-500">
@@ -909,13 +908,11 @@ export function ResourceTimelineView({
               <div>
                 <label className="mb-1 block text-xs font-medium text-slate-600">Min booking (minutes)</label>
                 <input
-                  type="number"
-                  min={MIN_BOOKING_MIN}
-                  max={MIN_BOOKING_MAX}
-                  step={1}
+                  type="text"
                   inputMode="numeric"
+                  autoComplete="off"
                   value={formMinStr}
-                  onChange={(e) => setFormMinStr(e.target.value)}
+                  onChange={(e) => setFormMinStr(e.target.value.replace(/[^0-9]/g, ''))}
                   className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
                 />
                 <p className="mt-1 text-[11px] text-slate-500">
@@ -925,13 +922,11 @@ export function ResourceTimelineView({
               <div>
                 <label className="mb-1 block text-xs font-medium text-slate-600">Max booking (minutes)</label>
                 <input
-                  type="number"
-                  min={MAX_BOOKING_MIN}
-                  max={MAX_BOOKING_MAX}
-                  step={1}
+                  type="text"
                   inputMode="numeric"
+                  autoComplete="off"
                   value={formMaxStr}
-                  onChange={(e) => setFormMaxStr(e.target.value)}
+                  onChange={(e) => setFormMaxStr(e.target.value.replace(/[^0-9]/g, ''))}
                   className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
                 />
                 <p className="mt-1 text-[11px] text-slate-500">
@@ -944,34 +939,31 @@ export function ResourceTimelineView({
               <div className="grid gap-3 sm:grid-cols-2">
                 <div>
                   <label className="mb-1 block text-xs font-medium text-slate-600">Max advance (days)</label>
-                  <input
-                    type="number"
+                  <NumericInput
                     min={1}
                     max={365}
                     value={formMaxAdvanceDays}
-                    onChange={(e) => setFormMaxAdvanceDays(parseInt(e.target.value, 10) || 1)}
+                    onChange={setFormMaxAdvanceDays}
                     className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
                   />
                 </div>
                 <div>
                   <label className="mb-1 block text-xs font-medium text-slate-600">Min notice (hours)</label>
-                  <input
-                    type="number"
+                  <NumericInput
                     min={0}
                     max={168}
                     value={formMinNoticeHours}
-                    onChange={(e) => setFormMinNoticeHours(parseInt(e.target.value, 10) || 0)}
+                    onChange={setFormMinNoticeHours}
                     className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
                   />
                 </div>
                 <div>
                   <label className="mb-1 block text-xs font-medium text-slate-600">Cancellation notice (hours)</label>
-                  <input
-                    type="number"
+                  <NumericInput
                     min={0}
                     max={168}
                     value={formCancellationHours}
-                    onChange={(e) => setFormCancellationHours(parseInt(e.target.value, 10) || 0)}
+                    onChange={setFormCancellationHours}
                     className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
                   />
                 </div>
@@ -991,7 +983,7 @@ export function ResourceTimelineView({
             <div className="mt-3 grid gap-4 sm:grid-cols-2">
               <div>
                 <label className="mb-1 block text-xs font-medium text-slate-600">Price per slot ({sym})</label>
-                <input type="number" min={0} step={0.01} value={formPrice} onChange={(e) => setFormPrice(e.target.value)} placeholder="Leave blank for free" className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
+                <input type="text" inputMode="decimal" autoComplete="off" value={formPrice} onChange={(e) => setFormPrice(e.target.value)} placeholder="Leave blank for free" className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
               </div>
               <div className="flex items-end pb-1">
                 <label className="flex items-center gap-2 text-sm text-slate-700">
@@ -1035,9 +1027,9 @@ export function ResourceTimelineView({
                 <div className="mt-3 max-w-xs">
                   <label className="mb-1 block text-xs font-medium text-slate-600">Deposit amount ({sym})</label>
                   <input
-                    type="number"
-                    min={0}
-                    step={0.01}
+                    type="text"
+                    inputMode="decimal"
+                    autoComplete="off"
                     value={formDeposit}
                     onChange={(e) => setFormDeposit(e.target.value)}
                     placeholder="e.g. 10.00"

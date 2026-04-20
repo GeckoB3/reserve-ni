@@ -14,6 +14,8 @@ import { GuestTagEditor } from '@/components/dashboard/GuestTagEditor';
 import type { BookingNotesVariant } from '@/components/booking/BookingNotesEditablePanel';
 import type { BookingModel } from '@/types/booking-models';
 import { bookingStatusDisplayLabel } from '@/lib/booking/infer-booking-row-model';
+import { GuestMessageChannelSelect } from '@/components/booking/GuestMessageChannelSelect';
+import type { GuestMessageChannel } from '@/lib/booking/guest-message-channel';
 
 interface Guest {
   id: string;
@@ -226,6 +228,7 @@ export function BookingDetailPanel({
   const [showAssignModal, setShowAssignModal] = useState(false);
   const [recommendedTableIds, setRecommendedTableIds] = useState<string[]>([]);
   const [customMessage, setCustomMessage] = useState('');
+  const [guestMessageChannel, setGuestMessageChannel] = useState<GuestMessageChannel>('both');
   const [assignmentSuggestions, setAssignmentSuggestions] = useState<AssignmentSuggestion[]>([]);
   const [suggestionsLoading, setSuggestionsLoading] = useState(false);
   const [confirmDialog, setConfirmDialog] = useState<{ title: string; message: string; confirmLabel: string; onConfirm: () => void } | null>(null);
@@ -1256,6 +1259,14 @@ export function BookingDetailPanel({
             )}
             <div className="rounded-lg border border-slate-100 bg-slate-50/80 p-2.5">
               <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Custom message</p>
+              <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                <span className="text-[10px] text-slate-500">Via</span>
+                <GuestMessageChannelSelect
+                  value={guestMessageChannel}
+                  onChange={setGuestMessageChannel}
+                  disabled={actionLoading || !isHydrated}
+                />
+              </div>
               <textarea
                 value={customMessage}
                 onChange={(e) => setCustomMessage(e.target.value)}
@@ -1272,7 +1283,7 @@ export function BookingDetailPanel({
                     const res = await fetch(`/api/venue/bookings/${bookingId}/message`, {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ message: customMessage }),
+                      body: JSON.stringify({ message: customMessage, channel: guestMessageChannel }),
                     });
                     if (!res.ok) {
                       const payload = await res.json().catch(() => ({}));

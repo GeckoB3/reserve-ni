@@ -12,7 +12,9 @@ import {
   SERVICE_REMOVAL_BLOCKED_BY_BOOKINGS,
 } from '@/lib/venue/service-calendar-removal';
 import { z } from 'zod';
-import type { ClassPaymentRequirement, PractitionerService } from '@/types/booking-models';
+import type { ClassPaymentRequirement, PractitionerService, ServiceCustomScheduleStored } from '@/types/booking-models';
+import { customWorkingHoursRequestSchema } from '@/lib/service-custom-schedule-zod';
+import { isServiceCustomScheduleEmpty, parseCustomWorkingHoursFromDb } from '@/lib/service-custom-availability';
 import { ensureUnifiedMirrorForPractitionerId } from '@/lib/class-instances/instructor-calendar-block';
 import { venueUsesUnifiedAppointmentServiceData } from '@/lib/booking/uses-unified-appointment-data';
 
@@ -28,10 +30,7 @@ const staffMaySchema = {
 
 const paymentRequirementSchema = z.enum(['none', 'deposit', 'full_payment']);
 
-const customWorkingHoursSchema = z
-  .record(z.string(), z.array(z.object({ start: z.string(), end: z.string() })))
-  .optional()
-  .nullable();
+const customWorkingHoursSchema = customWorkingHoursRequestSchema;
 const STAFF_SERVICE_FIELD_PERMISSIONS = {
   name: 'staff_may_customize_name',
   description: 'staff_may_customize_description',
@@ -86,6 +85,13 @@ const serviceSchema = z
         });
       }
     }
+    if (data.custom_availability_enabled === true && isServiceCustomScheduleEmpty(data.custom_working_hours ?? null)) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'When custom availability is enabled, add at least one schedule rule.',
+        path: ['custom_working_hours'],
+      });
+    }
   });
 
 const servicePatchSchema = z
@@ -130,6 +136,31 @@ const servicePatchSchema = z
       }
     }
   });
+
+function assertPatchCustomAvailabilityCoherent(params: {
+  patch: z.infer<typeof servicePatchSchema>;
+  currentRow: Record<string, unknown>;
+}): { ok: true } | { ok: false; message: string } {
+  const { patch, currentRow } = params;
+  const curEnabled = Boolean(currentRow.custom_availability_enabled);
+  const curHours = parseCustomWorkingHoursFromDb(currentRow.custom_working_hours) as ServiceCustomScheduleStored | null;
+
+  const nextEnabled =
+    patch.custom_availability_enabled !== undefined ? patch.custom_availability_enabled : curEnabled;
+
+  const nextHours: ServiceCustomScheduleStored | null =
+    patch.custom_working_hours !== undefined
+      ? (patch.custom_working_hours as ServiceCustomScheduleStored | null)
+      : curHours;
+
+  if (nextEnabled && isServiceCustomScheduleEmpty(nextHours)) {
+    return {
+      ok: false,
+      message: 'When custom availability is enabled, add at least one schedule rule.',
+    };
+  }
+  return { ok: true };
+}
 
 function normalizeServicePaymentFields(data: {
   payment_requirement?: ClassPaymentRequirement;
@@ -633,6 +664,14 @@ export async function PATCH(request: NextRequest) {
         return NextResponse.json({ error: 'Service not found' }, { status: 404 });
       }
 
+      const customCoherent = assertPatchCustomAvailabilityCoherent({
+        patch: parsed.data,
+        currentRow: serviceRow as Record<string, unknown>,
+      });
+      if (!customCoherent.ok) {
+        return NextResponse.json({ error: customCoherent.message }, { status: 400 });
+      }
+
       let managedScope: Awaited<ReturnType<typeof requireManagedCalendarIds>> | null = null;
       let requestedManagedCalendarIds = practitioner_ids;
       let updatePayload: Record<string, unknown> = { ...parsed.data };
@@ -788,6 +827,14 @@ export async function PATCH(request: NextRequest) {
 
     if (serviceErr || !serviceRow) {
       return NextResponse.json({ error: 'Service not found' }, { status: 404 });
+    }
+
+    const legacyCustomCoherent = assertPatchCustomAvailabilityCoherent({
+      patch: parsed.data,
+      currentRow: serviceRow as Record<string, unknown>,
+    });
+    if (!legacyCustomCoherent.ok) {
+      return NextResponse.json({ error: legacyCustomCoherent.message }, { status: 400 });
     }
 
     let managedScope: Awaited<ReturnType<typeof requireManagedCalendarIds>> | null = null;

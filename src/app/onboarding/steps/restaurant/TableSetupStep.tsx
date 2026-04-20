@@ -1,68 +1,111 @@
 'use client';
 
+import { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
+import { FloorPlanEditorTabs, type FloorPlanEditorTabKey } from '@/app/dashboard/availability/FloorPlanEditorTabs';
+import { useRestaurantOnboardingAvailability } from '@/hooks/use-restaurant-onboarding-availability';
+
 interface Props {
   onDone: () => Promise<void>;
 }
 
 export function TableSetupStep({ onDone }: Props) {
+  const { selectedAreaId, loading: areaLoading } = useRestaurantOnboardingAvailability();
+  const [floorTab, setFloorTab] = useState<FloorPlanEditorTabKey>('layout');
+  const [layoutSaveCount, setLayoutSaveCount] = useState(0);
+  const [combinationThreshold, setCombinationThreshold] = useState(80);
+  const [settingsLoading, setSettingsLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const res = await fetch('/api/venue/tables/settings');
+        if (res.ok && !cancelled) {
+          const data = (await res.json()) as {
+            settings?: { combination_threshold?: number };
+          };
+          const ct = data.settings?.combination_threshold;
+          if (typeof ct === 'number') setCombinationThreshold(ct);
+        }
+      } finally {
+        if (!cancelled) setSettingsLoading(false);
+      }
+    }
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const onLayoutSaved = useCallback(() => {
+    setLayoutSaveCount((n) => n + 1);
+  }, []);
+
+  if (areaLoading || settingsLoading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <div className="h-6 w-6 animate-spin rounded-full border-2 border-brand-600 border-t-transparent" />
+      </div>
+    );
+  }
+
   return (
     <div>
       <h2 className="mb-1 text-lg font-bold text-slate-900">Set up your tables</h2>
-      <p className="mb-6 text-sm text-slate-500">
-        You&apos;ve chosen Advanced table management. To get the most from the Table Grid and Floor Plan, add your
-        tables and arrange your floor plan. You can do this now or come back to it later.
+      <p className="mb-2 text-sm text-slate-500">
+        You chose Advanced table management. Use the same floor plan tools as{' '}
+        <Link
+          href="/dashboard/availability?tab=table&fp=layout"
+          className="font-medium text-brand-600 underline hover:text-brand-700"
+        >
+          Availability → Table Management
+        </Link>
+        . Layout saves as you work. You can also open the floor plan in a new tab anytime from the dashboard.
+      </p>
+      <p className="mb-4 text-xs text-slate-500">
+        If you are short on time, continue now and finish layout later from Availability.
       </p>
 
-      <div className="space-y-4">
-        <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-5">
-          <p className="mb-2 text-sm font-semibold text-slate-800">What you&apos;ll set up</p>
-          <ul className="space-y-2 text-sm text-slate-600">
-            <li className="flex items-start gap-2">
-              <span className="mt-0.5 h-5 w-5 shrink-0 rounded-full bg-brand-100 text-center text-xs font-bold leading-5 text-brand-700">1</span>
-              <span><strong>Add tables:</strong> give each table a name or number and set its minimum and maximum covers.</span>
-            </li>
-            <li className="flex items-start gap-2">
-              <span className="mt-0.5 h-5 w-5 shrink-0 rounded-full bg-brand-100 text-center text-xs font-bold leading-5 text-brand-700">2</span>
-              <span><strong>Arrange the floor plan:</strong> drag tables onto a visual layout of your room.</span>
-            </li>
-            <li className="flex items-start gap-2">
-              <span className="mt-0.5 h-5 w-5 shrink-0 rounded-full bg-brand-100 text-center text-xs font-bold leading-5 text-brand-700">3</span>
-              <span><strong>Set combinations</strong> (optional): define which tables can be pushed together for larger parties.</span>
-            </li>
-          </ul>
-        </div>
-
-        <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-4 text-sm text-amber-900">
-          <p className="font-medium">You can skip this for now</p>
-          <p className="mt-1 text-amber-800/90">
-            Your dashboard will work straight away. Set up your tables whenever you&apos;re ready from{' '}
-            <strong>Dashboard → Floor Plan</strong>. Bookings can be assigned to tables once your floor plan is
-            configured.
-          </p>
-        </div>
-      </div>
+      <FloorPlanEditorTabs
+        isAdmin
+        activeTab={floorTab}
+        onTabChange={setFloorTab}
+        advancedTableManagement
+        hideHeading
+        onLayoutSaved={onLayoutSaved}
+        combinationThreshold={combinationThreshold}
+        layoutSaveCount={layoutSaveCount}
+        onCombinationThresholdSaved={setCombinationThreshold}
+        diningAreaId={selectedAreaId}
+      />
 
       <div className="mt-8 flex items-center justify-between">
         <button
           type="button"
-          onClick={onDone}
+          onClick={() => void onDone()}
           className="text-sm text-slate-500 hover:text-slate-700"
         >
           Skip for now
         </button>
-        <a
-          href="/dashboard/floor-plan"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="rounded-lg bg-brand-600 px-6 py-2 text-sm font-medium text-white hover:bg-brand-700"
-        >
-          Set up my tables ↗
-        </a>
+        <div className="flex items-center gap-3">
+          <a
+            href="/dashboard/floor-plan"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-sm font-medium text-brand-600 hover:text-brand-700"
+          >
+            Open floor plan in new tab ↗
+          </a>
+          <button
+            type="button"
+            onClick={() => void onDone()}
+            className="rounded-lg bg-brand-600 px-6 py-2 text-sm font-medium text-white hover:bg-brand-700"
+          >
+            Continue
+          </button>
+        </div>
       </div>
-
-      <p className="mt-4 text-center text-xs text-slate-400">
-        The floor plan editor opens in a new tab. Come back here to continue onboarding when you&apos;re ready.
-      </p>
     </div>
   );
 }

@@ -11,6 +11,7 @@
     "test:watch": "vitest",
     "smoke:cron": "node scripts/smoke-cron.mjs",
     "seed:dev-use-account": "node scripts/seed-dev-use-standard-account.mjs",
+    "seed:dev-restaurant1": "node scripts/seed-dev-restaurant1-account.mjs",
     "delete:user-venue": "node scripts/delete-user-and-venue.mjs",
     "supabase": "supabase"
   },

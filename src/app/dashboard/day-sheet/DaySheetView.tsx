@@ -5,7 +5,6 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/browser';
 import { parseDietaryNotes, hasAllergyKeywords } from '@/lib/day-sheet';
 import { useToast } from '@/components/ui/Toast';
-import { NumericInput } from '@/components/ui/NumericInput';
 import {
   BOOKING_PRIMARY_ACTIONS,
   BOOKING_REVERT_ACTIONS,
@@ -33,11 +32,11 @@ import {
 } from '@/lib/table-management/next-bookings-slot';
 import { TableSelector } from '@/components/table-tracking/TableSelector';
 import type { OccupancyMap } from '@/components/table-tracking/TableSelector';
-import type { CountryCode } from 'libphonenumber-js';
 import { PhoneWithCountryField } from '@/components/phone/PhoneWithCountryField';
 import { normalizeToE164 } from '@/lib/phone/e164';
-import { defaultPhoneCountryForVenueCurrency } from '@/lib/phone/default-country';
 import { HorizontalScrollHint } from '@/components/ui/HorizontalScrollHint';
+import { GuestMessageChannelSelect } from '@/components/booking/GuestMessageChannelSelect';
+import type { GuestMessageChannel } from '@/lib/booking/guest-message-channel';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -423,16 +422,17 @@ function SendMessageDialog({ bookingId, onClose, onSent }: { bookingId: string; 
   const [message, setMessage] = useState('');
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [channel, setChannel] = useState<GuestMessageChannel>('both');
 
   const send = async () => {
     if (!message.trim()) return;
     setSending(true);
     setError(null);
     try {
-      const res = await fetch(`/api/venue/bookings/${bookingId}`, {
-        method: 'PATCH',
+      const res = await fetch(`/api/venue/bookings/${bookingId}/message`, {
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ custom_message: message.trim() }),
+        body: JSON.stringify({ message: message.trim(), channel }),
       });
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
@@ -452,6 +452,18 @@ function SendMessageDialog({ bookingId, onClose, onSent }: { bookingId: string; 
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm p-4" onClick={onClose}>
       <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
         <h3 className="text-base font-semibold text-slate-900">Send Message to Guest</h3>
+        <label htmlFor="day-sheet-msg-channel" className="mt-3 block text-xs font-medium text-slate-600">
+          Channel
+        </label>
+        <div className="mt-1">
+          <GuestMessageChannelSelect
+            id="day-sheet-msg-channel"
+            value={channel}
+            onChange={setChannel}
+            disabled={sending}
+            className="w-full min-h-[40px] text-sm"
+          />
+        </div>
         <textarea
           value={message}
           onChange={(e) => setMessage(e.target.value)}

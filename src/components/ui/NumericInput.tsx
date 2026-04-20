@@ -1,92 +1,26 @@
 'use client';
 
 /**
- * Adaptive numeric input - mobile-friendly while preserving desktop UX.
+ * Numeric input that can be fully cleared while editing (desktop + mobile).
  *
- * Desktop: renders a standard type="number" input with native spinners.
- * Mobile/touch: renders type="text" + inputMode="numeric" so the numeric
- * keyboard appears and the field can be fully cleared before typing a new
- * value (the core mobile usability issue with type="number").
- *
- * On blur the field snaps to the nearest valid value if left empty.
+ * Uses type="text" + inputMode so the numeric keyboard appears on mobile and
+ * controlled `type="number"` re-fill issues (parseInt(...) || default in parents)
+ * never block deleting digits. On blur, empty input snaps to `min` if set, else 0.
  */
 
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
-import { useIsTouchDevice } from '@/hooks/useIsTouchDevice';
 
 export interface NumericInputProps
   extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'type' | 'value' | 'onChange'> {
   value: number | null | undefined;
   onChange: (value: number) => void;
-  /** Allow decimal values (uses inputMode="decimal" on mobile). Default: false. */
+  /** Allow decimal values (uses inputMode="decimal"). Default: false. */
   allowFloat?: boolean;
   min?: number;
   max?: number;
 }
 
-export const NumericInput = forwardRef<HTMLInputElement, NumericInputProps>(
-  function NumericInput(
-    { value, onChange, allowFloat = false, min, max, className, onBlur, ...rest },
-    ref,
-  ) {
-    const isTouch = useIsTouchDevice();
-    const inputRef = useRef<HTMLInputElement>(null);
-    useImperativeHandle(ref, () => inputRef.current as HTMLInputElement);
-
-    // ─── Desktop path ────────────────────────────────────────────────
-    // Standard type="number" - spinners, native validation, no change.
-    if (!isTouch) {
-      return (
-        <input
-          {...rest}
-          ref={inputRef}
-          type="number"
-          min={min}
-          max={max}
-          step={allowFloat ? 'any' : 1}
-          value={value ?? ''}
-          onChange={(e) => {
-            const raw = e.target.value;
-            if (raw === '') return;
-            const n = allowFloat ? parseFloat(raw) : parseInt(raw, 10);
-            if (!Number.isNaN(n)) onChange(clamp(n, min, max));
-          }}
-          onBlur={(e) => {
-            if (e.target.value === '' && value == null) {
-              const fallback = min ?? 0;
-              onChange(fallback);
-            }
-            onBlur?.(e);
-          }}
-          className={className}
-        />
-      );
-    }
-
-    // ─── Mobile / touch path ─────────────────────────────────────────
-    // type="text" + inputMode so the field can be fully cleared.
-    return (
-      <MobileFriendlyNumericInput
-        ref={inputRef}
-        value={value}
-        onChange={onChange}
-        allowFloat={allowFloat}
-        min={min}
-        max={max}
-        className={className}
-        onBlur={onBlur}
-        {...rest}
-      />
-    );
-  },
-);
-
-// Extracted into a sub-component so the string display state only lives
-// in the mobile render path.
-const MobileFriendlyNumericInput = forwardRef<
-  HTMLInputElement,
-  NumericInputProps
->(function MobileFriendlyNumericInput(
+export const NumericInput = forwardRef<HTMLInputElement, NumericInputProps>(function NumericInput(
   { value, onChange, allowFloat = false, min, max, className, onBlur, ...rest },
   ref,
 ) {

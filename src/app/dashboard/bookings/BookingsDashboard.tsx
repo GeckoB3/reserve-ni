@@ -34,6 +34,8 @@ import { CalendarDateTimePicker } from '@/components/calendar/CalendarDateTimePi
 import { getCalendarGridBounds } from '@/lib/venue-calendar-bounds';
 import { isBookingTimeInHourRange } from '@/lib/booking-time-window';
 import type { OpeningHours } from '@/types/availability';
+import { BulkGuestMessageModal } from '@/components/booking/BulkGuestMessageModal';
+import type { GuestMessageChannel } from '@/lib/booking/guest-message-channel';
 
 interface BookingRow {
   id: string;
@@ -218,6 +220,7 @@ export function BookingsDashboard({
   const [realtimeConnected, setRealtimeConnected] = useState<boolean | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [bulkGuestMessageOpen, setBulkGuestMessageOpen] = useState(false);
   const [bulkLoading, setBulkLoading] = useState(false);
   const [expandedIds, setExpandedIds] = useState<string[]>([]);
   const [detailById, setDetailById] = useState<Record<string, BookingDetailLite>>({});
@@ -676,7 +679,7 @@ export function BookingsDashboard({
     }
   }, [bookings, fetchBookings, addToast]);
 
-  const sendMessageToBooking = useCallback(async (bookingId: string, message: string) => {
+  const sendMessageToBooking = useCallback(async (bookingId: string, message: string, channel: GuestMessageChannel = 'both') => {
     const trimmedMessage = message.trim();
     if (trimmedMessage.length === 0) return;
     setSendingMessageIds((prev) => [...prev, bookingId]);
@@ -684,7 +687,7 @@ export function BookingsDashboard({
       const res = await fetch(`/api/venue/bookings/${bookingId}/message`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: trimmedMessage }),
+        body: JSON.stringify({ message: trimmedMessage, channel }),
       });
       if (!res.ok) {
         const payload = await res.json().catch(() => ({}));
@@ -808,10 +811,8 @@ export function BookingsDashboard({
     void updateBookingStatus(booking.id, nextStatus);
   }, [updateBookingStatus, noShowGraceMinutes]);
 
-  const runBulkMessage = useCallback(async () => {
+  const runBulkMessage = useCallback(async (message: string, channel: GuestMessageChannel) => {
     if (selectedIds.length === 0) return;
-    const message = window.prompt('Message to send to selected guests:');
-    if (!message || message.trim().length === 0) return;
     setBulkLoading(true);
     setError(null);
     try {
@@ -819,15 +820,16 @@ export function BookingsDashboard({
         const res = await fetch(`/api/venue/bookings/${bookingId}/message`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: message.trim() }),
+          body: JSON.stringify({ message, channel }),
         });
         return res.ok;
       }));
       const okCount = outcomes.filter(Boolean).length;
       if (okCount !== selectedIds.length) {
-        setError(`Sent messages to ${okCount}/${selectedIds.length} bookings.`);
+        setError(`Sent messages to ${okCount}/${selectedIds.length} bookings. Some guests may be missing the chosen contact method.`);
       }
       setSelectedIds([]);
+      setBulkGuestMessageOpen(false);
     } finally {
       setBulkLoading(false);
     }
@@ -1311,10 +1313,10 @@ export function BookingsDashboard({
         <button
           type="button"
           disabled={bulkLoading || selectedIds.length === 0}
-          onClick={() => void runBulkMessage()}
+          onClick={() => setBulkGuestMessageOpen(true)}
           className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
         >
-          Send Batch Message
+          Send batch message
         </button>
         {isRefreshing && (
           <span className="text-xs text-slate-500">Syncing latest updates...</span>
@@ -1392,6 +1394,15 @@ export function BookingsDashboard({
             </div>
           ))}
         </div>
+      )}
+
+      {bulkGuestMessageOpen && (
+        <BulkGuestMessageModal
+          onClose={() => setBulkGuestMessageOpen(false)}
+          recipientCount={selectedIds.length}
+          sending={bulkLoading}
+          onSend={(message, channel) => { void runBulkMessage(message, channel); }}
+        />
       )}
 
       {selectedId && (
@@ -1603,7 +1614,7 @@ function BookingsAccordionList({
   venueId: string;
   onToggleExpand: (id: string) => void;
   onOpenPanel: (id: string) => void;
-  onSendMessage: (id: string, message: string) => void;
+  onSendMessage: (id: string, message: string, channel?: GuestMessageChannel) => void;
   onStatusAction: (booking: BookingRow, status: BookingStatus) => void;
   onDetailUpdated: (bookingId: string) => void;
   showModelBadges?: boolean;
@@ -1800,7 +1811,7 @@ function BookingsAccordionList({
                   draftMessage={draftMessage}
                   sendingMessage={sendingMessage}
                   onMessageDraftChange={(value) => setMessageDraftById((prev) => ({ ...prev, [booking.id]: value }))}
-                  onSendMessage={() => { void onSendMessage(booking.id, draftMessage); }}
+                  onSendMessage={(ch) => { void onSendMessage(booking.id, draftMessage, ch); }}
                   onStatusAction={(status) => { onStatusAction(booking, status); }}
                   onOpenPanel={() => onOpenPanel(booking.id)}
                   onDetailUpdated={() => onDetailUpdated(booking.id)}

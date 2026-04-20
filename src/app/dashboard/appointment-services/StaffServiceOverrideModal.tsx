@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { mergeAppointmentServiceWithPractitionerLink } from '@/lib/appointments/merge-service-with-overrides';
 import type { AppointmentService, PractitionerService } from '@/types/booking-models';
+import { NumericInput } from '@/components/ui/NumericInput';
 
 const COLOUR_OPTIONS = [
   '#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6',
@@ -259,12 +260,11 @@ export function StaffServiceOverrideModal({
           {service.staff_may_customize_duration && (
             <div>
               <label className="mb-1 block text-sm font-medium text-slate-700">Duration (minutes)</label>
-              <input
-                type="number"
+              <NumericInput
                 min={5}
                 max={480}
                 value={durationMinutes}
-                onChange={(e) => setDurationMinutes(parseInt(e.target.value, 10) || 0)}
+                onChange={setDurationMinutes}
                 className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
               />
               <p className="mt-1 text-xs text-slate-500">Venue default: {base.duration_minutes} min</p>
@@ -273,12 +273,11 @@ export function StaffServiceOverrideModal({
           {service.staff_may_customize_buffer && (
             <div>
               <label className="mb-1 block text-sm font-medium text-slate-700">Buffer (minutes)</label>
-              <input
-                type="number"
+              <NumericInput
                 min={0}
                 max={120}
                 value={bufferMinutes}
-                onChange={(e) => setBufferMinutes(parseInt(e.target.value, 10) || 0)}
+                onChange={setBufferMinutes}
                 className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
               />
             </div>

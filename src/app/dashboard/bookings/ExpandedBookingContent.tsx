@@ -19,6 +19,8 @@ import {
   inferBookingRowModel,
   isTableReservationBooking,
 } from '@/lib/booking/infer-booking-row-model';
+import { GuestMessageChannelSelect } from '@/components/booking/GuestMessageChannelSelect';
+import type { GuestMessageChannel } from '@/lib/booking/guest-message-channel';
 
 interface BookingRow {
   id: string;
@@ -113,7 +115,7 @@ export function ExpandedBookingContent({
   draftMessage: string;
   sendingMessage: boolean;
   onMessageDraftChange: (value: string) => void;
-  onSendMessage: () => void;
+  onSendMessage: (channel: GuestMessageChannel) => void;
   onStatusAction: (status: BookingStatus) => void;
   onOpenPanel: () => void;
   onDetailUpdated: () => void;
@@ -121,6 +123,7 @@ export function ExpandedBookingContent({
   isAppointment?: boolean;
 }) {
   const [showMessageBox, setShowMessageBox] = useState(false);
+  const [guestMessageChannel, setGuestMessageChannel] = useState<GuestMessageChannel>('both');
   const [showModify, setShowModify] = useState(false);
   const [confirmAction, setConfirmAction] = useState<{ status: BookingStatus; label: string } | null>(null);
   const [linkedBookings, setLinkedBookings] = useState<Array<{ id: string; person_label: string | null; booking_time: string; status: string }>>([]);
@@ -487,12 +490,22 @@ export function ExpandedBookingContent({
             className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700 placeholder:text-slate-400 focus:border-brand-300 focus:outline-none focus:ring-2 focus:ring-brand-100"
             placeholder="Write a message to the guest..."
           />
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <label className="flex items-center gap-1.5 text-[10px] font-medium text-slate-500">
+              Via
+              <GuestMessageChannelSelect
+                value={guestMessageChannel}
+                onChange={setGuestMessageChannel}
+                disabled={sendingMessage}
+              />
+            </label>
+          </div>
           <div className="mt-2 flex items-center justify-between">
             <div className="flex gap-2">
               <button
                 type="button"
                 disabled={sendingMessage || draftMessage.trim().length === 0}
-                onClick={onSendMessage}
+                onClick={() => onSendMessage(guestMessageChannel)}
                 className="rounded-lg bg-slate-800 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-slate-900 disabled:opacity-50"
               >
                 {sendingMessage ? 'Sending...' : 'Send'}

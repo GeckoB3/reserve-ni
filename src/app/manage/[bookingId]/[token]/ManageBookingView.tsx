@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { bookingModelShortLabel } from '@/lib/booking/infer-booking-row-model';
 import type { BookingModel } from '@/types/booking-models';
+import { NumericInput } from '@/components/ui/NumericInput';
 
 interface BookingDetails {
   booking_id: string;
@@ -813,16 +814,11 @@ function ModifyTableBookingSection({
         </div>
         <div>
           <label className="mb-1 block text-xs font-medium text-slate-500">Party size</label>
-          <input
-            type="number"
-            inputMode="numeric"
+          <NumericInput
             min={1}
             max={50}
             value={partySize}
-            onChange={(e) => {
-              const v = parseInt(e.target.value, 10);
-              if (!isNaN(v) && v >= 1) setPartySize(v);
-            }}
+            onChange={setPartySize}
             className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500/20"
           />
         </div>

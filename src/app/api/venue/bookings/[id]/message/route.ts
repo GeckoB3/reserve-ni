@@ -3,9 +3,11 @@ import { z } from 'zod';
 import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff } from '@/lib/venue-auth';
 import { sendCommunication } from '@/lib/communications';
+import type { GuestMessageChannel } from '@/lib/booking/guest-message-channel';
 
 const schema = z.object({
-  message: z.string().min(1).max(500),
+  message: z.string().min(1).max(2000),
+  channel: z.enum(['email', 'sms', 'both']).optional().default('both'),
 });
 
 export async function POST(
@@ -36,9 +38,30 @@ export async function POST(
 
   if (!guest || !venue?.name) return NextResponse.json({ error: 'Guest or venue not found' }, { status: 400 });
 
+  const channel = parsed.data.channel as GuestMessageChannel;
+  const email = typeof guest.email === 'string' && guest.email.trim() ? guest.email.trim() : undefined;
+  const phone = typeof guest.phone === 'string' && guest.phone.trim() ? guest.phone.trim() : undefined;
+
+  if (channel === 'email' && !email) {
+    return NextResponse.json({ error: 'Guest has no email on file' }, { status: 400 });
+  }
+  if (channel === 'sms' && !phone) {
+    return NextResponse.json({ error: 'Guest has no phone on file' }, { status: 400 });
+  }
+  if (channel === 'both' && !email && !phone) {
+    return NextResponse.json({ error: 'Guest has no email or phone on file' }, { status: 400 });
+  }
+
+  const recipient =
+    channel === 'sms'
+      ? { phone }
+      : channel === 'email'
+        ? { email }
+        : { email, phone };
+
   await sendCommunication({
     type: 'custom_message',
-    recipient: { email: guest.email ?? undefined, phone: guest.phone ?? undefined },
+    recipient,
     payload: {
       guest_name: guest.name ?? 'Guest',
       venue_name: venue.name,

@@ -12,6 +12,7 @@ import {
   shouldShowAppointmentsOtherLane,
 } from "@/lib/communications/policies";
 import { isRestaurantCommsTier } from "@/lib/tier-enforcement";
+import { NumericInput } from "@/components/ui/NumericInput";
 
 interface CommunicationTemplatesSectionProps {
   venue: { id: string };
@@ -541,8 +542,7 @@ function MessagePolicyCard({
             {card.timing && (
               <label className="flex items-center gap-2 text-sm text-slate-600">
                 <span>{card.timingLabel}</span>
-                <input
-                  type="number"
+                <NumericInput
                   min={1}
                   max={168}
                   disabled={!isAdmin}
@@ -551,20 +551,16 @@ function MessagePolicyCard({
                       ? policy.hoursBefore ?? 1
                       : policy.hoursAfter ?? 1
                   }
-                  onChange={(event) => {
-                    const next = Math.max(
-                      1,
-                      Math.min(168, parseInt(event.target.value, 10) || 1),
-                    );
+                  onChange={(v) => {
                     onUpdate(
                       lane,
                       card.key,
                       card.timing === "hoursBefore"
-                        ? { hoursBefore: next }
-                        : { hoursAfter: next },
+                        ? { hoursBefore: v }
+                        : { hoursAfter: v },
                     );
                   }}
-                  className="w-16 rounded-lg border border-slate-200 px-2 py-1 text-center text-xs text-slate-700 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500/20"
+                  className="w-16 rounded-lg border border-slate-200 px-2 py-1 text-center text-xs text-slate-700 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500/20 disabled:opacity-50"
                 />
               </label>
             )}

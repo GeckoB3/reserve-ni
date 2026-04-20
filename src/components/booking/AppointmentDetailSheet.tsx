@@ -24,6 +24,8 @@ import {
 } from '@/lib/booking/booking-staff-indicators';
 import { formatBookablePricePence } from '@/lib/booking/format-price-display';
 import { CustomerProfileNotesCard } from '@/components/booking/CustomerProfileNotesCard';
+import { GuestMessageChannelSelect } from '@/components/booking/GuestMessageChannelSelect';
+import type { GuestMessageChannel } from '@/lib/booking/guest-message-channel';
 
 export interface DetailPractitionerOption {
   id: string;
@@ -105,6 +107,7 @@ export interface BookingDetailRecord {
     subtitle?: string | null;
   } | null;
   inferred_booking_model?: BookingModel;
+  communications?: Array<{ id: string; message_type: string; channel: string; status: string; created_at: string }>;
 }
 
 function prefetchToDetailRecord(p: AppointmentDetailPrefetch): BookingDetailRecord {
@@ -132,17 +135,9 @@ function prefetchToDetailRecord(p: AppointmentDetailPrefetch): BookingDetailReco
       phone: p.guest_phone,
       visit_count: p.guest_visit_count,
     },
+    communications: [],
   };
 }
-
-const STATUS_LABELS: Record<string, string> = {
-  Pending: 'Pending',
-  Confirmed: 'Confirmed',
-  Seated: 'In Progress',
-  Completed: 'Completed',
-  'No-Show': 'No Show',
-  Cancelled: 'Cancelled',
-};
 
 const STATUS_STYLES: Record<string, string> = {
   Pending: 'bg-orange-100 text-orange-900 ring-1 ring-orange-200/80',
@@ -227,6 +222,9 @@ export function AppointmentDetailSheet({
   const [editTime, setEditTime] = useState('');
   const [editPractitionerId, setEditPractitionerId] = useState('');
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [guestMessageDraft, setGuestMessageDraft] = useState('');
+  const [guestMessageChannel, setGuestMessageChannel] = useState<GuestMessageChannel>('both');
+  const [guestMessageSending, setGuestMessageSending] = useState(false);
 
   const prefetchRef = useRef(prefetchedBooking);
   prefetchRef.current = prefetchedBooking;
@@ -291,6 +289,7 @@ export function AppointmentDetailSheet({
       setEditOpen(false);
       setDeleteConfirmOpen(false);
       setRefreshing(false);
+      setGuestMessageDraft('');
       return;
     }
     void loadDetail();
@@ -361,6 +360,31 @@ export function AppointmentDetailSheet({
 
   async function saveNotes() {
     await patchJson({ internal_notes: notesDraft.trim() || null });
+  }
+
+  async function sendGuestMessage() {
+    if (!bookingId || !guestMessageDraft.trim()) return;
+    setGuestMessageSending(true);
+    setActionError(null);
+    try {
+      const res = await fetch(`/api/venue/bookings/${bookingId}/message`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: guestMessageDraft.trim(), channel: guestMessageChannel }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setActionError((data as { error?: string }).error ?? 'Could not send message');
+        return;
+      }
+      setGuestMessageDraft('');
+      await loadDetail();
+      onUpdated();
+    } catch {
+      setActionError('Network error');
+    } finally {
+      setGuestMessageSending(false);
+    }
   }
 
   async function deleteBookingPermanently() {
@@ -785,6 +809,54 @@ export function AppointmentDetailSheet({
                   className="mt-2 rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
                 >
                   Save notes
+                </button>
+              </div>
+
+              <div className="border-t border-slate-100 pt-4">
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Message guest</p>
+                {detail.communications && detail.communications.length > 0 && (
+                  <div className="mt-2 max-h-28 space-y-1 overflow-y-auto rounded-lg border border-slate-100 bg-slate-50/80 p-2">
+                    {detail.communications.slice(-5).map((c) => (
+                      <div key={c.id} className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-slate-600">
+                        <span
+                          className={`rounded px-1 py-0.5 text-[10px] font-semibold ${
+                            c.channel === 'email' ? 'bg-blue-50 text-blue-800' : 'bg-green-50 text-green-800'
+                          }`}
+                        >
+                          {c.channel}
+                        </span>
+                        <span className="text-slate-500">{c.message_type.replace(/_/g, ' ')}</span>
+                        <span className={c.status === 'sent' ? 'text-emerald-600' : 'text-red-600'}>{c.status}</span>
+                        <span className="text-slate-400">
+                          {new Date(c.created_at).toLocaleString('en-GB', { dateStyle: 'short', timeStyle: 'short' })}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <span className="text-xs text-slate-500">Via</span>
+                  <GuestMessageChannelSelect
+                    value={guestMessageChannel}
+                    onChange={setGuestMessageChannel}
+                    disabled={guestMessageSending || busy}
+                  />
+                </div>
+                <textarea
+                  value={guestMessageDraft}
+                  onChange={(e) => setGuestMessageDraft(e.target.value)}
+                  rows={3}
+                  disabled={guestMessageSending || busy}
+                  placeholder="Email or SMS to the guest (uses templates and venue settings)"
+                  className="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 disabled:opacity-60"
+                />
+                <button
+                  type="button"
+                  disabled={guestMessageSending || busy || guestMessageDraft.trim().length === 0}
+                  onClick={() => void sendGuestMessage()}
+                  className="mt-2 rounded-lg bg-slate-800 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-900 disabled:opacity-50"
+                >
+                  {guestMessageSending ? 'Sending…' : 'Send to guest'}
                 </button>
               </div>
 

@@ -21,6 +21,8 @@ import { CalendarDateTimePicker } from '@/components/calendar/CalendarDateTimePi
 import { getCalendarGridBounds } from '@/lib/venue-calendar-bounds';
 import { isBookingTimeInHourRange } from '@/lib/booking-time-window';
 import type { OpeningHours } from '@/types/availability';
+import { BulkGuestMessageModal } from '@/components/booking/BulkGuestMessageModal';
+import type { GuestMessageChannel } from '@/lib/booking/guest-message-channel';
 
 type ViewMode = 'day' | 'week' | 'month' | 'custom';
 
@@ -291,6 +293,9 @@ export function AppointmentBookingsDashboard({
   const [endHourOverride, setEndHourOverride] = useState<number | null>(null);
   /** When true, day view list/stats are filtered to the hour window from the time dropdown. */
   const [timeRangeFilterActive, setTimeRangeFilterActive] = useState(false);
+  const [selectedBookingIds, setSelectedBookingIds] = useState<string[]>([]);
+  const [bulkGuestMessageOpen, setBulkGuestMessageOpen] = useState(false);
+  const [bulkGuestMessageSending, setBulkGuestMessageSending] = useState(false);
 
   const selectedStatusFilter = STATUS_FILTERS.find((f) => f.label === statusKey);
 
@@ -871,6 +876,50 @@ export function AppointmentBookingsDashboard({
 
   const activePractitioners = useMemo(() => practitioners.filter((p) => p.is_active), [practitioners]);
 
+  const toggleBookingSelected = useCallback((id: string, checked: boolean) => {
+    setSelectedBookingIds((prev) => (checked ? [...prev, id] : prev.filter((x) => x !== id)));
+  }, []);
+
+  const toggleAllInList = useCallback((list: RegistryAppointment[], checked: boolean) => {
+    setSelectedBookingIds((prev) => {
+      const ids = new Set(list.map((b) => b.id));
+      if (checked) return [...new Set([...prev, ...ids])];
+      return prev.filter((bid) => !ids.has(bid));
+    });
+  }, []);
+
+  const runBulkGuestMessage = useCallback(
+    async (message: string, channel: GuestMessageChannel) => {
+      if (selectedBookingIds.length === 0) return;
+      setBulkGuestMessageSending(true);
+      setError(null);
+      try {
+        const ids = [...selectedBookingIds];
+        const outcomes = await Promise.all(
+          ids.map(async (bookingId) => {
+            const res = await fetch(`/api/venue/bookings/${bookingId}/message`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ message, channel }),
+            });
+            return res.ok;
+          }),
+        );
+        const okCount = outcomes.filter(Boolean).length;
+        if (okCount !== ids.length) {
+          setError(`Sent to ${okCount}/${ids.length} guests. Some may lack the chosen contact method.`);
+        } else {
+          addToast(`Message sent to ${okCount} guest(s)`, 'success');
+        }
+        setSelectedBookingIds([]);
+        setBulkGuestMessageOpen(false);
+      } finally {
+        setBulkGuestMessageSending(false);
+      }
+    },
+    [addToast, selectedBookingIds],
+  );
+
   function SortTh({ k, label, className = '' }: { k: SortKey; label: string; className?: string }) {
     const active = sortKey === k;
     return (
@@ -902,6 +951,14 @@ export function AppointmentBookingsDashboard({
           : b.deposit_status;
       return (
         <tr key={b.id} className="border-b border-slate-100 hover:bg-slate-50/80">
+          <td className="px-2 py-2.5 align-middle">
+            <input
+              type="checkbox"
+              checked={selectedBookingIds.includes(b.id)}
+              onChange={(e) => toggleBookingSelected(b.id, e.target.checked)}
+              aria-label={`Select booking for ${b.guest_name}`}
+            />
+          </td>
           <td className="whitespace-nowrap px-3 py-2.5 text-sm text-slate-800">{b.booking_date}</td>
           <td className="whitespace-nowrap px-3 py-2.5 text-sm text-slate-800">{b.booking_time.slice(0, 5)}</td>
           <td className="whitespace-nowrap px-2 py-2.5 sm:px-3">
@@ -999,7 +1056,15 @@ export function AppointmentBookingsDashboard({
               key={b.id}
               className="rounded-xl border border-slate-200 bg-white p-3.5 shadow-sm ring-1 ring-slate-100/80 sm:p-4"
             >
-              <div className="min-w-0">
+              <div className="flex items-start gap-2">
+                <input
+                  type="checkbox"
+                  className="mt-1"
+                  checked={selectedBookingIds.includes(b.id)}
+                  onChange={(e) => toggleBookingSelected(b.id, e.target.checked)}
+                  aria-label={`Select booking for ${b.guest_name}`}
+                />
+                <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
                   <p className="break-words font-semibold leading-snug text-slate-900">{b.guest_name}</p>
                   <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
@@ -1025,7 +1090,6 @@ export function AppointmentBookingsDashboard({
                   {svcName} · {pracName}
                 </p>
                 <p className="mt-1.5 text-xs font-medium text-slate-600">Deposit: {dep}</p>
-              </div>
               <label className="mt-3 block text-xs font-medium text-slate-500">Status</label>
               <select
                 value={b.status}
@@ -1066,6 +1130,8 @@ export function AppointmentBookingsDashboard({
               >
                 View details
               </button>
+                </div>
+              </div>
             </div>
           );
         })}
@@ -1410,6 +1476,29 @@ export function AppointmentBookingsDashboard({
         {isRefreshing && <p className="text-xs text-slate-500">Syncing…</p>}
       </div>
 
+      {selectedBookingIds.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 shadow-sm">
+          <span className="text-xs font-medium text-slate-600">
+            {selectedBookingIds.length} selected
+          </span>
+          <button
+            type="button"
+            disabled={bulkGuestMessageSending}
+            onClick={() => setBulkGuestMessageOpen(true)}
+            className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+          >
+            Send message…
+          </button>
+          <button
+            type="button"
+            onClick={() => setSelectedBookingIds([])}
+            className="rounded-lg px-3 py-1.5 text-xs font-medium text-slate-500 hover:bg-slate-50"
+          >
+            Clear selection
+          </button>
+        </div>
+      )}
+
       {loading ? (
         <div className="space-y-2">
           {[1, 2, 3, 4, 5].map((i) => (
@@ -1428,6 +1517,17 @@ export function AppointmentBookingsDashboard({
             <table className="w-full min-w-[800px] border-collapse text-left">
               <thead>
                 <tr className="border-b border-slate-200 bg-slate-50">
+                  <th className="w-10 px-2 py-2 text-left align-middle">
+                    <input
+                      type="checkbox"
+                      checked={
+                        sortedBookings.length > 0 &&
+                        sortedBookings.every((b) => selectedBookingIds.includes(b.id))
+                      }
+                      onChange={(e) => toggleAllInList(sortedBookings, e.target.checked)}
+                      aria-label="Select all bookings in this list"
+                    />
+                  </th>
                   <SortTh k="date" label="Date" />
                   <SortTh k="time" label="Time" />
                   <SortTh k="type" label="Type" />
@@ -1467,6 +1567,17 @@ export function AppointmentBookingsDashboard({
                     <table className="w-full min-w-[800px] border-collapse text-left">
                       <thead>
                         <tr className="border-b border-slate-200 bg-white">
+                          <th className="w-10 px-2 py-2 text-left align-middle">
+                            <input
+                              type="checkbox"
+                              checked={
+                                dayBookings.length > 0 &&
+                                dayBookings.every((b) => selectedBookingIds.includes(b.id))
+                              }
+                              onChange={(e) => toggleAllInList(dayBookings, e.target.checked)}
+                              aria-label={`Select all bookings on ${date}`}
+                            />
+                          </th>
                           <SortTh k="date" label="Date" />
                           <SortTh k="time" label="Time" />
                           <SortTh k="type" label="Type" />
@@ -1551,6 +1662,17 @@ export function AppointmentBookingsDashboard({
             </div>
           </div>
         </div>
+      )}
+
+      {bulkGuestMessageOpen && (
+        <BulkGuestMessageModal
+          onClose={() => setBulkGuestMessageOpen(false)}
+          recipientCount={selectedBookingIds.length}
+          sending={bulkGuestMessageSending}
+          onSend={(message, channel) => {
+            void runBulkGuestMessage(message, channel);
+          }}
+        />
       )}
 
       <DashboardStaffBookingModal

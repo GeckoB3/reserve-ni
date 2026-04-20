@@ -10,6 +10,7 @@ import {
 } from '@/components/booking/AppointmentDetailSheet';
 import type { ClassPaymentRequirement } from '@/types/booking-models';
 import { showAttendanceConfirmedPill, showDepositPendingPill } from '@/lib/booking/booking-staff-indicators';
+import { NumericInput } from '@/components/ui/NumericInput';
 
 const SLOT_HEIGHT = 48;
 const SLOT_MINUTES = 15;
@@ -336,12 +337,11 @@ export function ResourceCalendarGrid({
           {showAvailability && (
             <div className="flex items-center gap-1 text-sm text-slate-600">
               <span>Duration</span>
-              <input
-                type="number"
+              <NumericInput
                 min={5}
                 max={480}
                 value={availabilityDuration}
-                onChange={(e) => setAvailabilityDuration(Math.max(5, parseInt(e.target.value, 10) || 60))}
+                onChange={setAvailabilityDuration}
                 className="w-16 rounded border border-slate-200 px-1 py-0.5 text-sm"
               />
               <span>min</span>

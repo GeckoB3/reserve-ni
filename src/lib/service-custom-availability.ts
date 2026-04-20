@@ -1,14 +1,32 @@
 /**
- * Optional per-service weekly hours: intersected with venue + calendar effective ranges in the appointment engine.
+ * Per-service online availability: intersected with venue + practitioner calendar in the appointment engine.
+ * Supports legacy weekly maps and v2 rule sets (weekly + specific dates + date-range patterns, unioned).
  */
 
-import type { AppointmentService } from '@/types/booking-models';
-import type { WorkingHours } from '@/types/booking-models';
+import type {
+  AppointmentService,
+  ServiceCustomRule,
+  ServiceCustomScheduleStored,
+  ServiceCustomScheduleV2,
+  TimeRange,
+  WorkingHours,
+} from '@/types/booking-models';
 import type { OpeningHours } from '@/types/availability';
+import type { VenueOpeningException } from '@/types/venue-opening-exceptions';
 import { getDayOfWeek } from '@/lib/availability/engine';
 import { getOpeningPeriodsForDay, minutesToTime, timeToMinutes } from '@/lib/availability';
 
 const DAY_NAMES = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const;
+
+export const DAY_ORDER: Array<{ key: string; label: string }> = [
+  { key: '1', label: 'Monday' },
+  { key: '2', label: 'Tuesday' },
+  { key: '3', label: 'Wednesday' },
+  { key: '4', label: 'Thursday' },
+  { key: '5', label: 'Friday' },
+  { key: '6', label: 'Saturday' },
+  { key: '0', label: 'Sunday' },
+];
 
 function dayKeyForDate(dateStr: string): string {
   return String(getDayOfWeek(dateStr));
@@ -17,6 +35,93 @@ function dayKeyForDate(dateStr: string): string {
 function dayNameForDate(dateStr: string): string {
   const dow = getDayOfWeek(dateStr);
   return DAY_NAMES[dow]!;
+}
+
+function compareIsoDate(a: string, b: string): number {
+  if (a < b) return -1;
+  if (a > b) return 1;
+  return 0;
+}
+
+export function isServiceCustomScheduleV2(x: unknown): x is ServiceCustomScheduleV2 {
+  return (
+    x !== null &&
+    typeof x === 'object' &&
+    !Array.isArray(x) &&
+    (x as ServiceCustomScheduleV2).version === 2 &&
+    Array.isArray((x as ServiceCustomScheduleV2).rules)
+  );
+}
+
+export function isServiceCustomScheduleEmpty(s: ServiceCustomScheduleStored | null | undefined): boolean {
+  if (s == null) return true;
+  if (isServiceCustomScheduleV2(s)) return s.rules.length === 0;
+  return Object.keys(s as WorkingHours).length === 0;
+}
+
+export function newRuleId(): string {
+  return typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `r-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
+/** Editor bootstrap: legacy weekly map → v2; empty → no rules (user adds blocks explicitly). */
+export function toServiceCustomScheduleV2(
+  stored: ServiceCustomScheduleStored | Record<string, never>,
+): ServiceCustomScheduleV2 {
+  if (isServiceCustomScheduleV2(stored)) {
+    return JSON.parse(JSON.stringify(stored)) as ServiceCustomScheduleV2;
+  }
+  const wh = stored as WorkingHours;
+  if (wh && Object.keys(wh).length > 0) {
+    return { version: 2, rules: [{ id: newRuleId(), kind: 'weekly', windows: JSON.parse(JSON.stringify(wh)) }] };
+  }
+  return { version: 2, rules: [] };
+}
+
+function rangesToMinutes(ranges: TimeRange[]): Array<{ start: number; end: number }> {
+  return ranges.map((r) => ({
+    start: timeToMinutes(String(r.start).slice(0, 5)),
+    end: timeToMinutes(String(r.end).slice(0, 5)),
+  }));
+}
+
+function minuteRangesForRuleOnDate(rule: ServiceCustomRule, dateStr: string): Array<{ start: number; end: number }> {
+  const dow = getDayOfWeek(dateStr);
+  switch (rule.kind) {
+    case 'weekly':
+      return getMinuteRangesFromWorkingHoursForDate(rule.windows, dateStr);
+    case 'specific_dates': {
+      const out: Array<{ start: number; end: number }> = [];
+      for (const e of rule.entries) {
+        if (e.date === dateStr) out.push(...rangesToMinutes(e.ranges));
+      }
+      return out;
+    }
+    case 'date_range_pattern': {
+      if (compareIsoDate(dateStr, rule.start_date) < 0 || compareIsoDate(dateStr, rule.end_date) > 0) return [];
+      if (!rule.days_of_week.includes(dow)) return [];
+      return rangesToMinutes(rule.ranges);
+    }
+    default:
+      return [];
+  }
+}
+
+/**
+ * Union of all service custom rules for a calendar date (minutes since midnight).
+ */
+export function getServiceCustomMinuteRangesForDate(
+  schedule: ServiceCustomScheduleStored | null | undefined,
+  dateStr: string,
+): Array<{ start: number; end: number }> {
+  if (!schedule) return [];
+  if (isServiceCustomScheduleV2(schedule)) {
+    const all: Array<{ start: number; end: number }> = [];
+    for (const rule of schedule.rules) {
+      all.push(...minuteRangesForRuleOnDate(rule, dateStr));
+    }
+    return mergeUnionRanges(all);
+  }
+  return getMinuteRangesFromWorkingHoursForDate(schedule as WorkingHours, dateStr);
 }
 
 /** Minute ranges for one calendar date from a WorkingHours map (keys "0"–"6" or sun–sat). */
@@ -52,7 +157,7 @@ export function intersectMinuteRanges(
 }
 
 /**
- * After venue + calendar clipping: optionally intersect with per-service weekly hours.
+ * After venue + calendar clipping: optionally intersect with per-service schedule (weekly and/or v2 rules).
  */
 export function intersectEffectiveRangesWithServiceCustom(
   effectiveWorkingRanges: Array<{ start: number; end: number }>,
@@ -62,22 +167,12 @@ export function intersectEffectiveRangesWithServiceCustom(
   if (!svc.custom_availability_enabled || !svc.custom_working_hours) {
     return effectiveWorkingRanges;
   }
-  const custom = getMinuteRangesFromWorkingHoursForDate(svc.custom_working_hours, dateStr);
+  const custom = getServiceCustomMinuteRangesForDate(svc.custom_working_hours, dateStr);
   if (custom.length === 0) return [];
   return intersectMinuteRanges(effectiveWorkingRanges, custom);
 }
 
-const DAY_ORDER: Array<{ key: string; label: string }> = [
-  { key: '1', label: 'Monday' },
-  { key: '2', label: 'Tuesday' },
-  { key: '3', label: 'Wednesday' },
-  { key: '4', label: 'Thursday' },
-  { key: '5', label: 'Friday' },
-  { key: '6', label: 'Saturday' },
-  { key: '0', label: 'Sunday' },
-];
-
-/** Human-readable summary for UI (custom schedule). */
+/** Human-readable summary for UI (legacy weekly map). */
 export function formatWorkingHoursSummary(wh: WorkingHours | null | undefined): string {
   if (!wh || typeof wh !== 'object') return 'No custom hours set.';
   const parts: string[] = [];
@@ -90,39 +185,175 @@ export function formatWorkingHoursSummary(wh: WorkingHours | null | undefined): 
   return parts.length > 0 ? parts.join(' · ') : 'Closed every day.';
 }
 
-export function parseCustomWorkingHoursFromDb(raw: unknown): WorkingHours | null {
-  if (raw == null) return null;
-  if (typeof raw !== 'object' || Array.isArray(raw)) return null;
+function sanitizeTimeRange(item: unknown): TimeRange | null {
+  if (!item || typeof item !== 'object') return null;
+  const start = typeof (item as { start?: unknown }).start === 'string' ? (item as { start: string }).start : '';
+  const end = typeof (item as { end?: unknown }).end === 'string' ? (item as { end: string }).end : '';
+  if (!start || !end) return null;
+  return { start: start.slice(0, 5), end: end.slice(0, 5) };
+}
+
+function sanitizeRule(raw: unknown): ServiceCustomRule | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const o = raw as Record<string, unknown>;
+  const id = typeof o.id === 'string' && o.id.length > 0 ? o.id : newRuleId();
+  const kind = o.kind;
+  if (kind === 'weekly' && o.windows && typeof o.windows === 'object' && !Array.isArray(o.windows)) {
+    const wh = parseLegacyWorkingHoursObject(o.windows as Record<string, unknown>);
+    if (!wh || Object.keys(wh).length === 0) return null;
+    return { id, kind: 'weekly', windows: wh };
+  }
+  if (kind === 'specific_dates' && Array.isArray(o.entries)) {
+    const entries: Array<{ date: string; ranges: TimeRange[] }> = [];
+    for (const ent of o.entries) {
+      if (!ent || typeof ent !== 'object') continue;
+      const date = typeof (ent as { date?: unknown }).date === 'string' ? (ent as { date: string }).date.slice(0, 10) : '';
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
+      const rangesRaw = (ent as { ranges?: unknown }).ranges;
+      if (!Array.isArray(rangesRaw)) continue;
+      const ranges = rangesRaw.map(sanitizeTimeRange).filter((x): x is TimeRange => x != null);
+      if (ranges.length > 0) entries.push({ date, ranges });
+    }
+    if (entries.length === 0) return null;
+    return { id, kind: 'specific_dates', entries };
+  }
+  if (kind === 'date_range_pattern') {
+    const start_date =
+      typeof o.start_date === 'string' ? o.start_date.slice(0, 10) : '';
+    const end_date = typeof o.end_date === 'string' ? o.end_date.slice(0, 10) : '';
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(start_date) || !/^\d{4}-\d{2}-\d{2}$/.test(end_date)) return null;
+    if (compareIsoDate(start_date, end_date) > 0) return null;
+    const daysRaw = o.days_of_week;
+    const days_of_week = Array.isArray(daysRaw)
+      ? [...new Set(daysRaw.filter((x): x is number => typeof x === 'number' && x >= 0 && x <= 6))]
+      : [];
+    if (days_of_week.length === 0) return null;
+    const rangesRaw = o.ranges;
+    if (!Array.isArray(rangesRaw)) return null;
+    const ranges = rangesRaw.map(sanitizeTimeRange).filter((x): x is TimeRange => x != null);
+    if (ranges.length === 0) return null;
+    return { id, kind: 'date_range_pattern', start_date, end_date, days_of_week, ranges };
+  }
+  return null;
+}
+
+function parseLegacyWorkingHoursObject(raw: Record<string, unknown>): WorkingHours | null {
   const out: WorkingHours = {};
   for (const [k, v] of Object.entries(raw)) {
     if (!Array.isArray(v)) continue;
-    const ranges: { start: string; end: string }[] = [];
+    const ranges: TimeRange[] = [];
     for (const item of v) {
-      if (!item || typeof item !== 'object') continue;
-      const start = typeof (item as { start?: unknown }).start === 'string' ? (item as { start: string }).start : '';
-      const end = typeof (item as { end?: unknown }).end === 'string' ? (item as { end: string }).end : '';
-      if (start && end) ranges.push({ start: start.slice(0, 5), end: end.slice(0, 5) });
+      const tr = sanitizeTimeRange(item);
+      if (tr) ranges.push(tr);
     }
     if (ranges.length > 0) out[k] = ranges;
   }
   return Object.keys(out).length > 0 ? out : null;
 }
 
+/** Parse DB JSON: legacy weekly map or `{ version: 2, rules }`. */
+export function parseCustomWorkingHoursFromDb(raw: unknown): ServiceCustomScheduleStored | null {
+  if (raw == null) return null;
+  if (typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const o = raw as Record<string, unknown>;
+  if (o.version === 2 && Array.isArray(o.rules)) {
+    const rules: ServiceCustomRule[] = [];
+    for (const r of o.rules) {
+      const sr = sanitizeRule(r);
+      if (sr) rules.push(sr);
+    }
+    return rules.length > 0 ? { version: 2, rules } : null;
+  }
+  const wh = parseLegacyWorkingHoursObject(o);
+  return wh;
+}
+
+export function formatServiceCustomScheduleSummary(schedule: ServiceCustomScheduleStored | null | undefined): string {
+  if (!schedule) return 'No custom schedule.';
+  if (!isServiceCustomScheduleV2(schedule)) {
+    return formatWorkingHoursSummary(schedule as WorkingHours);
+  }
+  if (schedule.rules.length === 0) return 'No rules — service not bookable online with custom hours enabled.';
+  const parts: string[] = [];
+  for (const rule of schedule.rules) {
+    switch (rule.kind) {
+      case 'weekly':
+        parts.push(`Weekly: ${formatWorkingHoursSummary(rule.windows).replace(/^No custom hours set\.$/, '—')}`);
+        break;
+      case 'specific_dates':
+        parts.push(
+          rule.entries.length === 0
+            ? 'Chosen dates: (no dates added yet)'
+            : `Specific dates (${rule.entries.length}): ${rule.entries
+                .map((e) => `${e.date} ${e.ranges.map((r) => `${r.start}–${r.end}`).join(', ')}`)
+                .join('; ')}`,
+        );
+        break;
+      case 'date_range_pattern': {
+        const days = [...rule.days_of_week].sort((a, b) => a - b).join(', ');
+        const times = rule.ranges.map((r) => `${r.start}–${r.end}`).join(', ');
+        parts.push(`Range ${rule.start_date} → ${rule.end_date}, days [${days}], ${times}`);
+        break;
+      }
+      default:
+        break;
+    }
+  }
+  return parts.join('\n');
+}
+
 function isVenueOpeningHoursConfigured(openingHours: OpeningHours | null | undefined): boolean {
   return openingHours != null && typeof openingHours === 'object' && Object.keys(openingHours).length > 0;
 }
 
-function venueMinuteRangesForDay(
+/** Keep in sync with `venueMinuteRangesForAppointmentDate` in appointment-engine.ts */
+function findApplicableVenueOpeningException(
+  exceptions: VenueOpeningException[] | null | undefined,
+  dateStr: string,
+): VenueOpeningException | null {
+  if (!exceptions?.length) return null;
+  for (const ex of exceptions) {
+    if (ex.date_start <= dateStr && dateStr <= ex.date_end) return ex;
+  }
+  return null;
+}
+
+function venueMinuteRangesForSummaryDate(
   venueOpeningHours: OpeningHours | null | undefined,
-  dow: number,
+  dateStr: string,
+  exceptions: VenueOpeningException[] | null | undefined,
 ): Array<{ start: number; end: number }> | null {
-  if (!isVenueOpeningHoursConfigured(venueOpeningHours)) return null;
-  const periods = getOpeningPeriodsForDay(venueOpeningHours, dow);
-  if (periods.length === 0) return [];
-  return periods.map((p) => ({
-    start: timeToMinutes(p.open.slice(0, 5)),
-    end: timeToMinutes(p.close.slice(0, 5)),
-  }));
+  const ex = findApplicableVenueOpeningException(exceptions, dateStr);
+  if (ex) {
+    if (ex.closed) return [];
+    if (ex.periods?.length) {
+      return ex.periods.map((p) => ({
+        start: timeToMinutes(p.open.slice(0, 5)),
+        end: timeToMinutes(p.close.slice(0, 5)),
+      }));
+    }
+  }
+  if (isVenueOpeningHoursConfigured(venueOpeningHours)) {
+    const day = getDayOfWeek(dateStr);
+    const periods = getOpeningPeriodsForDay(venueOpeningHours, day);
+    if (periods.length === 0) return [];
+    return periods.map((p) => ({
+      start: timeToMinutes(p.open.slice(0, 5)),
+      end: timeToMinutes(p.close.slice(0, 5)),
+    }));
+  }
+  return null;
+}
+
+/** Next calendar date from local today within `maxDays` where `getDay()` equals `dow` (0=Sun … 6=Sat). */
+function nextCalendarDateForDowFromToday(dow: number, maxDays = 370): string {
+  const now = new Date();
+  for (let i = 0; i < maxDays; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() + i);
+    if (d.getDay() !== dow) continue;
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 }
 
 function minuteRangesForWorkingHoursDay(
@@ -158,25 +389,99 @@ function mergeUnionRanges(ranges: Array<{ start: number; end: number }>): Array<
   return out;
 }
 
+/** Next ISO date (from local today) within `maxDays` where schedule has any custom window and weekday = `dow`. */
+function findSampleDateForWeekdaySummary(
+  schedule: ServiceCustomScheduleStored,
+  dow: number,
+  maxDays = 370,
+): string | null {
+  const now = new Date();
+  for (let i = 0; i < maxDays; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() + i);
+    if (d.getDay() !== dow) continue;
+    const ymd = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    if (getServiceCustomMinuteRangesForDate(schedule, ymd).length > 0) return ymd;
+  }
+  return null;
+}
+
+export interface OnlineBookableWeeklySummaryParts {
+  /** When set, show this instead of the week grid (no linked calendars). */
+  noCalendarsMessage: string | null;
+  /** Shown above the week grid when custom rules include specific dates or a date band (not weekly-only). */
+  contextualNote: string | null;
+  /** Monday–Sunday lines: venue × calendars × custom schedule (sample). */
+  weekLines: string;
+  /**
+   * When non-null, lists the concrete calendar date used per weekday row for venue + this service
+   * (one-off / seasonal service rules).
+   */
+  previewDatesNote: string | null;
+}
+
 /**
- * Typical week of clock windows when online appointment slots may appear (venue + linked calendars, then optional
- * per-service custom hours). Union across calendars = a guest can book someone offering this service that day.
+ * Structured summary for UI: separate “why the grid looks this way” from Mon–Sun lines.
+ * For custom schedules with specific dates or date-range rules, each weekday uses the next matching calendar date
+ * within about a year (see `findSampleDateForWeekdaySummary`).
  */
-export function describeOnlineBookableWeeklySummary(params: {
+export function getOnlineBookableWeeklySummaryParts(params: {
   venueOpeningHours: OpeningHours | null | undefined;
+  venueOpeningExceptions?: VenueOpeningException[] | null;
   linkedCalendars: Array<{ id: string; working_hours: WorkingHours | null | undefined }>;
   customAvailabilityEnabled: boolean;
-  customWorkingHours: WorkingHours | null | undefined;
-}): string {
-  const { venueOpeningHours, linkedCalendars, customAvailabilityEnabled, customWorkingHours } = params;
+  customWorkingHours: ServiceCustomScheduleStored | null | undefined;
+}): OnlineBookableWeeklySummaryParts {
+  const { venueOpeningHours, venueOpeningExceptions, linkedCalendars, customAvailabilityEnabled, customWorkingHours } =
+    params;
   if (linkedCalendars.length === 0) {
-    return 'Link at least one calendar to this service to see bookable times.';
+    return {
+      noCalendarsMessage: 'Link at least one calendar to this service to see a sample week.',
+      contextualNote: null,
+      weekLines: '',
+      previewDatesNote: null,
+    };
   }
 
+  const hasComplexCustom =
+    customAvailabilityEnabled &&
+    customWorkingHours &&
+    isServiceCustomScheduleV2(customWorkingHours) &&
+    customWorkingHours.rules.some((r) => r.kind !== 'weekly');
+
+  const contextualNote = hasComplexCustom
+    ? "This service uses date-specific rules, so real availability can change by week. Each row picks one sample date (first matching weekday in the next ~12 months where online booking is allowed). The preview combines venue hours for that date, each linked calendar's recurring weekly hours, and this service's hours. Staff blocks and one-off calendar changes are not included."
+    : null;
+
   const lines: string[] = [];
+  const previewDateParts: string[] = [];
+
   for (const { key, label } of DAY_ORDER) {
     const dow = parseInt(key, 10);
-    const venueRanges = venueMinuteRangesForDay(venueOpeningHours, dow);
+
+    let customRanges: Array<{ start: number; end: number }> = [];
+    let serviceSampleYmd: string | null = null;
+
+    if (customAvailabilityEnabled && customWorkingHours) {
+      if (isServiceCustomScheduleV2(customWorkingHours)) {
+        serviceSampleYmd = findSampleDateForWeekdaySummary(customWorkingHours, dow);
+        customRanges = serviceSampleYmd
+          ? getServiceCustomMinuteRangesForDate(customWorkingHours, serviceSampleYmd)
+          : [];
+      } else {
+        customRanges = minuteRangesForWorkingHoursDay(customWorkingHours as WorkingHours, dow);
+      }
+    }
+
+    const anchorYmd =
+      customAvailabilityEnabled && customWorkingHours && isServiceCustomScheduleV2(customWorkingHours)
+        ? (serviceSampleYmd ?? nextCalendarDateForDowFromToday(dow))
+        : nextCalendarDateForDowFromToday(dow);
+
+    if (hasComplexCustom) {
+      previewDateParts.push(`${label.slice(0, 3)} ${anchorYmd}`);
+    }
+
+    const venueRanges = venueMinuteRangesForSummaryDate(venueOpeningHours, anchorYmd, venueOpeningExceptions);
     const all: Array<{ start: number; end: number }> = [];
     for (const cal of linkedCalendars) {
       const calRanges = minuteRangesForWorkingHoursDay(cal.working_hours, dow);
@@ -186,11 +491,10 @@ export function describeOnlineBookableWeeklySummary(params: {
     }
     let union = mergeUnionRanges(all);
     if (customAvailabilityEnabled && customWorkingHours) {
-      const customRanges = minuteRangesForWorkingHoursDay(customWorkingHours, dow);
       if (customRanges.length === 0) {
         union = [];
       } else {
-        union = intersectMinuteRanges(union, customRanges);
+        union = mergeUnionRanges(intersectMinuteRanges(union, customRanges));
       }
     }
     if (union.length === 0) {
@@ -200,5 +504,37 @@ export function describeOnlineBookableWeeklySummary(params: {
       lines.push(`${label}: ${segs}`);
     }
   }
-  return lines.join('\n');
+
+  const complexDatesNote =
+    previewDateParts.length > 0
+      ? `Dates used for venue + this service in each row: ${previewDateParts.join(' · ')}.`
+      : null;
+
+  const venueExceptionNote =
+    !hasComplexCustom && venueOpeningExceptions && venueOpeningExceptions.length > 0
+      ? 'Venue closed or amended days on the calendar use the next occurrence of each weekday from today (service hours follow the usual weekly pattern).'
+      : null;
+
+  const previewFootnotes = [complexDatesNote, venueExceptionNote].filter(Boolean);
+  const previewDatesNote = previewFootnotes.length > 0 ? previewFootnotes.join(' ') : null;
+
+  return {
+    noCalendarsMessage: null,
+    contextualNote,
+    weekLines: lines.join('\n'),
+    previewDatesNote,
+  };
+}
+
+/** Single string for simple callers; dashboard uses {@link getOnlineBookableWeeklySummaryParts}. */
+export function describeOnlineBookableWeeklySummary(params: {
+  venueOpeningHours: OpeningHours | null | undefined;
+  venueOpeningExceptions?: VenueOpeningException[] | null;
+  linkedCalendars: Array<{ id: string; working_hours: WorkingHours | null | undefined }>;
+  customAvailabilityEnabled: boolean;
+  customWorkingHours: ServiceCustomScheduleStored | null | undefined;
+}): string {
+  const r = getOnlineBookableWeeklySummaryParts(params);
+  if (r.noCalendarsMessage) return r.noCalendarsMessage;
+  return [r.contextualNote, r.weekLines, r.previewDatesNote].filter(Boolean).join('\n\n');
 }

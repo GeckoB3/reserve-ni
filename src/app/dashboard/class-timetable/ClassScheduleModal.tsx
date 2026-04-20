@@ -835,11 +835,12 @@ export function ClassScheduleModal({
                           Capacity override <span className="font-normal text-slate-400">(optional)</span>
                         </label>
                         <input
-                          type="number"
-                          min={1}
+                          type="text"
+                          inputMode="numeric"
+                          autoComplete="off"
                           placeholder={selectedClass ? 'Leave blank for class default' : 'optional'}
                           value={singleCapacity}
-                          onChange={(e) => setSingleCapacity(e.target.value)}
+                          onChange={(e) => setSingleCapacity(e.target.value.replace(/[^0-9]/g, ''))}
                           className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
                         />
                       </div>
@@ -888,12 +889,12 @@ export function ClassScheduleModal({
                             />
                             For the next
                             <input
-                              type="number"
-                              min={1}
-                              max={52}
+                              type="text"
+                              inputMode="numeric"
+                              autoComplete="off"
                               disabled={weeklyScope !== 'weeks'}
                               value={weeklyHorizonWeeks}
-                              onChange={(e) => setWeeklyHorizonWeeks(e.target.value)}
+                              onChange={(e) => setWeeklyHorizonWeeks(e.target.value.replace(/[^0-9]/g, ''))}
                               className="w-14 rounded-lg border border-slate-200 px-2 py-1 text-sm disabled:opacity-50"
                             />
                             <span className="text-slate-600">weeks</span>
@@ -971,11 +972,11 @@ export function ClassScheduleModal({
                         </label>
                         {intervalEnd === 'count' && (
                           <input
-                            type="number"
-                            min={1}
-                            max={100}
+                            type="text"
+                            inputMode="numeric"
+                            autoComplete="off"
                             value={intervalOccurrences}
-                            onChange={(e) => setIntervalOccurrences(e.target.value)}
+                            onChange={(e) => setIntervalOccurrences(e.target.value.replace(/[^0-9]/g, ''))}
                             className="mb-3 ml-6 w-24 rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
                           />
                         )}

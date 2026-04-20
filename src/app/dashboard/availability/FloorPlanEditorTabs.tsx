@@ -14,6 +14,8 @@ interface Props {
   onTabChange: (tab: FloorPlanEditorTabKey) => void;
   /** When false, only the Tables tab is shown (simple covers mode). */
   advancedTableManagement: boolean;
+  /** Hide the built-in section title and intro (e.g. when the parent screen already has a heading). */
+  hideHeading?: boolean;
   /** Called after each successful layout auto-save so siblings can react. */
   onLayoutSaved?: () => void;
   /** When the venue saves a new Combination Detection Distance, pass it so the combinations catalog refreshes. */
@@ -31,6 +33,7 @@ export function FloorPlanEditorTabs({
   activeTab,
   onTabChange,
   advancedTableManagement,
+  hideHeading = false,
   onLayoutSaved,
   combinationThreshold,
   layoutSaveCount = 0,
@@ -90,12 +93,16 @@ export function FloorPlanEditorTabs({
 
   return (
     <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-      <h2 className="mb-1 text-lg font-semibold text-slate-900">Floor plan &amp; tables</h2>
-      <p className="mb-4 text-sm text-slate-500">
-        {advancedTableManagement
-          ? 'Layout changes are saved automatically as you make them.'
-          : 'Optional: define tables for staff seating notes on the Day Sheet. This does not change how many guests can book online.'}
-      </p>
+      {!hideHeading && (
+        <>
+          <h2 className="mb-1 text-lg font-semibold text-slate-900">Floor plan &amp; tables</h2>
+          <p className="mb-4 text-sm text-slate-500">
+            {advancedTableManagement
+              ? 'Layout changes are saved automatically as you make them.'
+              : 'Optional: define tables for staff seating notes on the Day Sheet. This does not change how many guests can book online.'}
+          </p>
+        </>
+      )}
 
       <div className="mb-4 overflow-x-auto">
         <div className="flex w-max gap-2">

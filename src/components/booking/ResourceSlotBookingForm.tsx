@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState, useMemo } from 'react';
+import { NumericInput } from '@/components/ui/NumericInput';
 
 interface ResourceInfo {
   id: string;
@@ -321,12 +322,11 @@ export function ResourceSlotBookingForm({
               {/* Party size */}
               <div>
                 <label className="mb-1 block text-xs font-medium text-slate-700">Party size</label>
-                <input
-                  type="number"
+                <NumericInput
                   min={1}
                   max={50}
                   value={partySize}
-                  onChange={(e) => setPartySize(Math.max(1, Number(e.target.value)))}
+                  onChange={setPartySize}
                   className="w-24 rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
                 />
               </div>

@@ -31,22 +31,23 @@ export function DiningDurationTab({ services, showToast, selectedAreaId }: Props
 
   useEffect(() => {
     async function load() {
-      if (!selectedAreaId) {
-        setDurations([]);
-        setLoading(false);
-        return;
-      }
+      setLoading(true);
       try {
-        const res = await fetch(`/api/venue/party-size-durations?area_id=${encodeURIComponent(selectedAreaId)}`);
+        const url = selectedAreaId
+          ? `/api/venue/party-size-durations?area_id=${encodeURIComponent(selectedAreaId)}`
+          : '/api/venue/party-size-durations';
+        const res = await fetch(url);
         if (res.ok) {
           const data = await res.json();
           setDurations(data.durations ?? []);
+        } else {
+          setDurations([]);
         }
       } finally {
         setLoading(false);
       }
     }
-    load();
+    void load();
   }, [selectedAreaId]);
 
   async function handleCreate(serviceId: string, minPs: number, maxPs: number, dur: number) {

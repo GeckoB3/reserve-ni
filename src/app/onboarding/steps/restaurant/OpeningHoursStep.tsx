@@ -1,32 +1,66 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import type { OpeningHoursSettings } from '@/app/dashboard/settings/types';
 import { OpeningHoursControl, defaultOpeningHoursSettings } from '@/components/scheduling/OpeningHoursControl';
+
+function restaurantFallbackHours(): OpeningHoursSettings {
+  const defaults = defaultOpeningHoursSettings();
+  return {
+    '0': { closed: true },
+    '1': { periods: [{ open: '12:00', close: '23:00' }] },
+    '2': { periods: [{ open: '12:00', close: '23:00' }] },
+    '3': { periods: [{ open: '12:00', close: '23:00' }] },
+    '4': { periods: [{ open: '12:00', close: '23:00' }] },
+    '5': { periods: [{ open: '12:00', close: '23:00' }] },
+    '6': { periods: [{ open: '12:00', close: '23:00' }] },
+    ...defaults,
+  };
+}
 
 interface Props {
   onDone: () => Promise<void>;
 }
 
 export function OpeningHoursStep({ onDone }: Props) {
-  const [hours, setHours] = useState<OpeningHoursSettings>(() => {
-    const defaults = defaultOpeningHoursSettings();
-    // Restaurant-friendly defaults: Mon–Sat noon–23:00, Sun closed
-    return {
-      '0': { closed: true },
-      '1': { periods: [{ open: '12:00', close: '23:00' }] },
-      '2': { periods: [{ open: '12:00', close: '23:00' }] },
-      '3': { periods: [{ open: '12:00', close: '23:00' }] },
-      '4': { periods: [{ open: '12:00', close: '23:00' }] },
-      '5': { periods: [{ open: '12:00', close: '23:00' }] },
-      '6': { periods: [{ open: '12:00', close: '23:00' }] },
-      ...defaults,
-    };
-  });
+  const [hours, setHours] = useState<OpeningHoursSettings | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const res = await fetch('/api/venue');
+        if (!res.ok) {
+          if (!cancelled) setLoadError('Could not load existing hours.');
+          return;
+        }
+        const data = (await res.json()) as { opening_hours?: OpeningHoursSettings | null };
+        const raw = data.opening_hours;
+        if (cancelled) return;
+        if (raw && typeof raw === 'object' && Object.keys(raw).length > 0) {
+          setHours(raw as OpeningHoursSettings);
+        } else {
+          setHours(restaurantFallbackHours());
+        }
+      } catch {
+        if (!cancelled) {
+          setLoadError('Could not load existing hours.');
+          setHours(restaurantFallbackHours());
+        }
+      }
+    }
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   async function handleSave() {
+    if (!hours) return;
     setSaving(true);
     setError(null);
     try {
@@ -36,7 +70,7 @@ export function OpeningHoursStep({ onDone }: Props) {
         body: JSON.stringify(hours),
       });
       if (!res.ok) {
-        const j = await res.json().catch(() => ({})) as { error?: string };
+        const j = (await res.json().catch(() => ({}))) as { error?: string };
         throw new Error(j.error ?? 'Failed to save opening hours');
       }
       await onDone();
@@ -46,16 +80,33 @@ export function OpeningHoursStep({ onDone }: Props) {
     }
   }
 
+  if (!hours) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <div className="h-6 w-6 animate-spin rounded-full border-2 border-brand-600 border-t-transparent" />
+      </div>
+    );
+  }
+
   return (
     <div>
       <h2 className="mb-1 text-lg font-bold text-slate-900">Opening hours</h2>
       <p className="mb-4 text-sm text-slate-500">
-        Set the hours your restaurant is open for bookings. You can update these any time from{' '}
-        <span className="font-medium text-slate-700">Settings → Business Hours</span>.
+        This is the same control as{' '}
+        <Link
+          href="/dashboard/settings?tab=business-hours"
+          className="font-medium text-brand-600 underline hover:text-brand-700"
+        >
+          Settings → Business Hours
+        </Link>{' '}
+        (venue-wide outer limits for online booking). Venue closures and amended hours live there too.
       </p>
+      {loadError && (
+        <p className="mb-3 text-xs text-amber-800">{loadError} Showing starter hours; you can edit before saving.</p>
+      )}
+
       <div className="mb-6 rounded-xl border border-slate-200 bg-slate-50/80 p-4 text-sm text-slate-600">
-        These are the outer limits for online reservations. Your dining services (set in the next step) further
-        define when specific sittings are available within these hours.
+        Dining services in the next steps define sitting windows inside these hours.
       </div>
 
       {error && (
@@ -67,7 +118,7 @@ export function OpeningHoursStep({ onDone }: Props) {
       <div className="mt-8 flex items-center justify-between">
         <button
           type="button"
-          onClick={onDone}
+          onClick={() => void onDone()}
           disabled={saving}
           className="text-sm text-slate-500 hover:text-slate-700"
         >
@@ -75,7 +126,7 @@ export function OpeningHoursStep({ onDone }: Props) {
         </button>
         <button
           type="button"
-          onClick={handleSave}
+          onClick={() => void handleSave()}
           disabled={saving}
           className="rounded-lg bg-brand-600 px-6 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
         >

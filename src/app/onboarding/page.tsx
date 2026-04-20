@@ -18,6 +18,7 @@ import type { WorkingHours } from '@/types/booking-models';
 import type { OpeningHours } from '@/types/availability';
 import type { OpeningHoursSettings } from '@/app/dashboard/settings/types';
 import { OpeningHoursControl, defaultOpeningHoursSettings } from '@/components/scheduling/OpeningHoursControl';
+import { NumericInput } from '@/components/ui/NumericInput';
 import { WorkingHoursControl } from '@/components/scheduling/WorkingHoursControl';
 import { OnboardingStaffInviteStep, type StaffInviteDraft } from '@/components/onboarding/OnboardingStaffInviteStep';
 import {
@@ -28,6 +29,7 @@ import {
   serviceDraftToApiPayload,
   type AppointmentServiceFormDraft,
 } from '@/components/onboarding/OnboardingAppointmentServiceList';
+import { isServiceCustomScheduleEmpty } from '@/lib/service-custom-availability';
 import { normalizeTimeToHhMm, validateStartEndTimes } from '@/lib/experience-events/experience-event-validation';
 import { formatZodFlattenedError } from '@/lib/experience-events/experience-event-zod';
 import { StripeConnectSection } from '@/app/dashboard/settings/sections/StripeConnectSection';
@@ -324,7 +326,7 @@ type ResourcePaymentRequirement = 'none' | 'deposit' | 'full_payment';
 interface ResourceDraft {
   name: string;
   resource_type: string;
-  /** Host team calendar (non-resource) — required by POST /api/venue/resources */
+  /** Host team calendar (non-resource): required by POST /api/venue/resources */
   display_on_calendar_id: string;
   slot_interval_minutes: number;
   min_booking_minutes: number;
@@ -395,7 +397,7 @@ type OnboardingStepDef = { key: string; label: string };
 /**
  * Every Appointments-plan booking model uses team calendar columns (`unified_calendars`) for at least one flow
  * (appointments, classes, events, resources), so per-calendar working hours belong in onboarding whenever any
- * model is enabled — not only when `unified_scheduling` is selected.
+ * model is enabled, not only when `unified_scheduling` is selected.
  */
 function appointmentsPlanNeedsCalendarAvailabilityStep(activeModels: AppointmentPlanModel[]): boolean {
   return activeModels.length > 0;
@@ -539,6 +541,28 @@ export default function OnboardingPage() {
 
   /** Restaurant plan: tracks simple vs advanced table management (drives dynamic step list). */
   const [tableManagementEnabled, setTableManagementEnabled] = useState(false);
+
+  useEffect(() => {
+    if (!venue || venue.booking_model !== 'table_reservation') return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch('/api/venue/tables/settings');
+        if (!res.ok || cancelled) return;
+        const data = (await res.json()) as { settings?: { table_management_enabled?: boolean } };
+        if (!cancelled) {
+          setTableManagementEnabled(Boolean(data.settings?.table_management_enabled));
+        }
+      } catch {
+        /* ignore */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // Only re-sync when venue identity / model changes, not whole venue object (frequent PATCHes).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [venue?.id, venue?.booking_model]);
 
   // Model C: First event
   const [eventDraft, setEventDraft] = useState<EventDraft>({
@@ -1105,7 +1129,7 @@ export default function OnboardingPage() {
 
   /**
    * Keep `venues.onboarding_step` aligned with the visible step so users resume here after closing the tab,
-   * navigating away, or logging in again — not only after clicking Continue.
+   * navigating away, or logging in again, not only after clicking Continue.
    */
   useEffect(() => {
     if (!venue || venue.onboarding_completed) return;
@@ -1490,6 +1514,12 @@ export default function OnboardingPage() {
             setError('Set a price for each service that charges the full amount online.');
             return;
           }
+          if (s.custom_availability_enabled && isServiceCustomScheduleEmpty(s.custom_working_hours)) {
+            setError(
+              `Add at least one custom schedule rule for “${s.name.trim() || 'this service'}”, or turn off custom availability.`,
+            );
+            return;
+          }
         }
         setSaving(true);
         try {
@@ -1872,7 +1902,7 @@ export default function OnboardingPage() {
     }
 
     // Restaurant-specific steps delegate saving to the child component via advanceRestaurantStep.
-    // handleNext is not used for these steps — the standard Continue button is hidden.
+    // handleNext is not used for these steps; the standard Continue button is hidden.
     if (
       currentStepKey === 'r_opening_hours' ||
       currentStepKey === 'r_services' ||
@@ -2487,7 +2517,7 @@ export default function OnboardingPage() {
           </div>
         )}
 
-        {/* Model C: First event — aligned with dashboard Event manager → Create event */}
+        {/* Model C: First event: aligned with dashboard Event manager → Create event */}
         {currentStepKey === 'first_event' && (
           <div>
             <h2 className="mb-1 text-lg font-bold text-slate-900">
@@ -2617,13 +2647,10 @@ export default function OnboardingPage() {
                   )}
                   <div>
                     <label className="mb-1 block text-xs font-medium text-slate-600">Capacity *</label>
-                    <input
-                      type="number"
+                    <NumericInput
                       min={1}
                       value={eventDraft.capacity}
-                      onChange={(e) =>
-                        setEventDraft((f) => ({ ...f, capacity: parseInt(e.target.value, 10) || 1 }))
-                      }
+                      onChange={(v) => setEventDraft((f) => ({ ...f, capacity: v }))}
                       className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
                     />
                   </div>
@@ -2650,15 +2677,14 @@ export default function OnboardingPage() {
                     <div className="grid gap-3 sm:grid-cols-2">
                       <div>
                         <label className="mb-1 block text-xs font-medium text-slate-600">Max advance (days)</label>
-                        <input
-                          type="number"
+                        <NumericInput
                           min={1}
                           max={365}
                           value={eventDraft.max_advance_booking_days}
-                          onChange={(e) =>
+                          onChange={(v) =>
                             setEventDraft((f) => ({
                               ...f,
-                              max_advance_booking_days: parseInt(e.target.value, 10) || 1,
+                              max_advance_booking_days: v,
                             }))
                           }
                           className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
@@ -2666,15 +2692,14 @@ export default function OnboardingPage() {
                       </div>
                       <div>
                         <label className="mb-1 block text-xs font-medium text-slate-600">Min notice (hours)</label>
-                        <input
-                          type="number"
+                        <NumericInput
                           min={0}
                           max={168}
                           value={eventDraft.min_booking_notice_hours}
-                          onChange={(e) =>
+                          onChange={(v) =>
                             setEventDraft((f) => ({
                               ...f,
-                              min_booking_notice_hours: parseInt(e.target.value, 10) || 0,
+                              min_booking_notice_hours: v,
                             }))
                           }
                           className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
@@ -2684,15 +2709,14 @@ export default function OnboardingPage() {
                         <label className="mb-1 block text-xs font-medium text-slate-600">
                           Cancellation notice (hours)
                         </label>
-                        <input
-                          type="number"
+                        <NumericInput
                           min={0}
                           max={168}
                           value={eventDraft.cancellation_notice_hours}
-                          onChange={(e) =>
+                          onChange={(v) =>
                             setEventDraft((f) => ({
                               ...f,
-                              cancellation_notice_hours: parseInt(e.target.value, 10) || 0,
+                              cancellation_notice_hours: v,
                             }))
                           }
                           className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
@@ -2836,9 +2860,9 @@ export default function OnboardingPage() {
                         <div className="w-28">
                           <label className="mb-1 block text-xs font-medium text-slate-500">Price ({sym})</label>
                           <input
-                            type="number"
-                            min={0}
-                            step={0.01}
+                            type="text"
+                            inputMode="decimal"
+                            autoComplete="off"
                             value={tt.price_pence}
                             onChange={(e) => updateEventTicketType(i, { price_pence: e.target.value })}
                             placeholder="0.00"
@@ -2850,8 +2874,9 @@ export default function OnboardingPage() {
                             Cap <span className="font-normal text-slate-400">opt.</span>
                           </label>
                           <input
-                            type="number"
-                            min={1}
+                            type="text"
+                            inputMode="numeric"
+                            autoComplete="off"
                             value={tt.capacity}
                             onChange={(e) => updateEventTicketType(i, { capacity: e.target.value })}
                             placeholder="-"
@@ -2921,9 +2946,9 @@ export default function OnboardingPage() {
                     <div className="mt-3 max-w-xs">
                       <label className="mb-1 block text-xs font-medium text-slate-600">Deposit amount ({sym}) *</label>
                       <input
-                        type="number"
-                        min={0}
-                        step={0.01}
+                        type="text"
+                        inputMode="decimal"
+                        autoComplete="off"
                         value={eventDraft.deposit_pounds}
                         onChange={(e) => setEventDraft((f) => ({ ...f, deposit_pounds: e.target.value }))}
                         placeholder="e.g. 5.00"
@@ -2948,7 +2973,7 @@ export default function OnboardingPage() {
           </div>
         )}
 
-        {/* Model D: Classes — class types only (timetable & sessions: dashboard → Class timetable) */}
+        {/* Model D: Classes: class types only (timetable & sessions: dashboard → Class timetable) */}
         {currentStepKey === 'classes' && (
           <div>
             <h2 className="mb-1 text-lg font-bold text-slate-900">Class types</h2>
@@ -3013,16 +3038,15 @@ export default function OnboardingPage() {
                     </div>
                     <div>
                       <label className="mb-1 block text-xs font-medium text-slate-600">Duration (minutes)</label>
-                      <input
-                        type="number"
+                      <NumericInput
                         min={5}
                         max={480}
                         value={c.duration_minutes}
-                        onChange={(e) => {
+                        onChange={(v) => {
                           const updated = [...classes];
                           updated[i] = {
                             ...c,
-                            duration_minutes: parseInt(e.target.value, 10) || 60,
+                            duration_minutes: v,
                           };
                           setClasses(updated);
                         }}
@@ -3031,13 +3055,12 @@ export default function OnboardingPage() {
                     </div>
                     <div>
                       <label className="mb-1 block text-xs font-medium text-slate-600">Capacity (spots)</label>
-                      <input
-                        type="number"
+                      <NumericInput
                         min={1}
                         value={c.capacity}
-                        onChange={(e) => {
+                        onChange={(v) => {
                           const updated = [...classes];
-                          updated[i] = { ...c, capacity: parseInt(e.target.value, 10) || 1 };
+                          updated[i] = { ...c, capacity: v };
                           setClasses(updated);
                         }}
                         className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
@@ -3048,9 +3071,9 @@ export default function OnboardingPage() {
                         Price ({sym}) <span className="font-normal text-slate-400">optional</span>
                       </label>
                       <input
-                        type="number"
-                        min={0}
-                        step={0.01}
+                        type="text"
+                        inputMode="decimal"
+                        autoComplete="off"
                         value={c.price}
                         onChange={(e) => {
                           const updated = [...classes];
@@ -3113,9 +3136,9 @@ export default function OnboardingPage() {
                             Deposit amount ({sym}) *
                           </label>
                           <input
-                            type="number"
-                            min={0}
-                            step={0.01}
+                            type="text"
+                            inputMode="decimal"
+                            autoComplete="off"
                             value={c.deposit_pounds}
                             onChange={(e) => {
                               const updated = [...classes];
@@ -3142,16 +3165,15 @@ export default function OnboardingPage() {
                       <div className="grid gap-3 sm:grid-cols-2">
                         <div>
                           <label className="mb-1 block text-xs font-medium text-slate-600">Max advance (days)</label>
-                          <input
-                            type="number"
+                          <NumericInput
                             min={1}
                             max={365}
                             value={c.max_advance_booking_days}
-                            onChange={(e) => {
+                            onChange={(v) => {
                               const updated = [...classes];
                               updated[i] = {
                                 ...c,
-                                max_advance_booking_days: parseInt(e.target.value, 10) || 1,
+                                max_advance_booking_days: v,
                               };
                               setClasses(updated);
                             }}
@@ -3160,16 +3182,15 @@ export default function OnboardingPage() {
                         </div>
                         <div>
                           <label className="mb-1 block text-xs font-medium text-slate-600">Min notice (hours)</label>
-                          <input
-                            type="number"
+                          <NumericInput
                             min={0}
                             max={168}
                             value={c.min_booking_notice_hours}
-                            onChange={(e) => {
+                            onChange={(v) => {
                               const updated = [...classes];
                               updated[i] = {
                                 ...c,
-                                min_booking_notice_hours: parseInt(e.target.value, 10) || 0,
+                                min_booking_notice_hours: v,
                               };
                               setClasses(updated);
                             }}
@@ -3180,16 +3201,15 @@ export default function OnboardingPage() {
                           <label className="mb-1 block text-xs font-medium text-slate-600">
                             Cancellation notice (hours)
                           </label>
-                          <input
-                            type="number"
+                          <NumericInput
                             min={0}
                             max={168}
                             value={c.cancellation_notice_hours}
-                            onChange={(e) => {
+                            onChange={(v) => {
                               const updated = [...classes];
                               updated[i] = {
                                 ...c,
-                                cancellation_notice_hours: parseInt(e.target.value, 10) || 0,
+                                cancellation_notice_hours: v,
                               };
                               setClasses(updated);
                             }}
@@ -3345,7 +3365,7 @@ export default function OnboardingPage() {
           </div>
         )}
 
-        {/* Model E: Resources — aligned with dashboard Resource timeline (no date-exception calendar) */}
+        {/* Model E: Resources: aligned with dashboard Resource timeline (no date-exception calendar) */}
         {currentStepKey === 'resources' && (
           <div>
             <h2 className="mb-1 text-lg font-bold text-slate-900">
@@ -3486,14 +3506,13 @@ export default function OnboardingPage() {
                   <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                     <div>
                       <label className="mb-1 block text-[10px] font-medium text-slate-500">Slot interval (min)</label>
-                      <input
-                        type="number"
+                      <NumericInput
                         value={r.slot_interval_minutes}
-                        onChange={(e) => {
+                        onChange={(v) => {
                           const updated = [...resources];
                           updated[i] = {
                             ...r,
-                            slot_interval_minutes: parseInt(e.target.value, 10) || RES_SLOT_MIN,
+                            slot_interval_minutes: v,
                           };
                           setResources(updated);
                         }}
@@ -3504,14 +3523,13 @@ export default function OnboardingPage() {
                     </div>
                     <div>
                       <label className="mb-1 block text-[10px] font-medium text-slate-500">Min booking (min)</label>
-                      <input
-                        type="number"
+                      <NumericInput
                         value={r.min_booking_minutes}
-                        onChange={(e) => {
+                        onChange={(v) => {
                           const updated = [...resources];
                           updated[i] = {
                             ...r,
-                            min_booking_minutes: parseInt(e.target.value, 10) || RES_MIN_BOOK_MIN,
+                            min_booking_minutes: v,
                           };
                           setResources(updated);
                         }}
@@ -3522,14 +3540,13 @@ export default function OnboardingPage() {
                     </div>
                     <div>
                       <label className="mb-1 block text-[10px] font-medium text-slate-500">Max booking (min)</label>
-                      <input
-                        type="number"
+                      <NumericInput
                         value={r.max_booking_minutes}
-                        onChange={(e) => {
+                        onChange={(v) => {
                           const updated = [...resources];
                           updated[i] = {
                             ...r,
-                            max_booking_minutes: parseInt(e.target.value, 10) || RES_MAX_BOOK_MIN,
+                            max_booking_minutes: v,
                           };
                           setResources(updated);
                         }}
@@ -3549,15 +3566,15 @@ export default function OnboardingPage() {
                           {currencySymbol(currency)}
                         </span>
                         <input
-                          type="number"
+                          type="text"
+                          inputMode="decimal"
+                          autoComplete="off"
                           value={r.pricePerSlot}
                           onChange={(e) => {
                             const updated = [...resources];
                             updated[i] = { ...r, pricePerSlot: e.target.value };
                             setResources(updated);
                           }}
-                          min={0}
-                          step={0.01}
                           placeholder="0.00"
                           className="w-full rounded-lg border border-slate-200 py-2 pl-7 pr-3 text-sm"
                         />
@@ -3593,15 +3610,15 @@ export default function OnboardingPage() {
                           {currencySymbol(currency)}
                         </span>
                         <input
-                          type="number"
+                          type="text"
+                          inputMode="decimal"
+                          autoComplete="off"
                           value={r.depositPounds}
                           onChange={(e) => {
                             const updated = [...resources];
                             updated[i] = { ...r, depositPounds: e.target.value };
                             setResources(updated);
                           }}
-                          min={0}
-                          step={0.01}
                           className="w-full rounded-lg border border-slate-200 py-2 pl-7 pr-3 text-sm"
                         />
                       </div>
@@ -3790,7 +3807,7 @@ export default function OnboardingPage() {
           </div>
         )}
 
-        {/* Navigation — hidden for restaurant self-managed steps (they render their own CTAs) */}
+        {/* Navigation: hidden for restaurant self-managed steps (they render their own CTAs) */}
         {!RESTAURANT_SELF_MANAGED_STEPS.has(currentStepKey) && (
           <div className="mt-8 flex justify-between">
             {step > 0 && !saving ? (

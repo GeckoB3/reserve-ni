@@ -9,6 +9,7 @@ import { formatZodFlattenedError } from '@/lib/experience-events/experience-even
 import { downloadCsvFile, escapeCsvCell } from './event-manager-utils';
 import { canAddCalendarColumn, useCalendarEntitlement } from '@/hooks/use-calendar-entitlement';
 import { isLightPlanTier } from '@/lib/tier-enforcement';
+import { NumericInput } from '@/components/ui/NumericInput';
 
 interface TicketType {
   id: string;
@@ -865,11 +866,10 @@ export function EventManagerView({
               )}
               <div>
                 <label className="mb-1 block text-xs font-medium text-slate-600">Capacity *</label>
-                <input
-                  type="number"
+                <NumericInput
                   min={1}
                   value={eventForm.capacity}
-                  onChange={(e) => setEventForm((f) => ({ ...f, capacity: parseInt(e.target.value) || 1 }))}
+                  onChange={(v) => setEventForm((f) => ({ ...f, capacity: v }))}
                   className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
                 />
               </div>
@@ -896,15 +896,14 @@ export function EventManagerView({
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div>
                     <label className="mb-1 block text-xs font-medium text-slate-600">Max advance (days)</label>
-                    <input
-                      type="number"
+                    <NumericInput
                       min={1}
                       max={365}
                       value={eventForm.max_advance_booking_days}
-                      onChange={(e) =>
+                      onChange={(v) =>
                         setEventForm((f) => ({
                           ...f,
-                          max_advance_booking_days: parseInt(e.target.value, 10) || 1,
+                          max_advance_booking_days: v,
                         }))
                       }
                       className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
@@ -912,15 +911,14 @@ export function EventManagerView({
                   </div>
                   <div>
                     <label className="mb-1 block text-xs font-medium text-slate-600">Min notice (hours)</label>
-                    <input
-                      type="number"
+                    <NumericInput
                       min={0}
                       max={168}
                       value={eventForm.min_booking_notice_hours}
-                      onChange={(e) =>
+                      onChange={(v) =>
                         setEventForm((f) => ({
                           ...f,
-                          min_booking_notice_hours: parseInt(e.target.value, 10) || 0,
+                          min_booking_notice_hours: v,
                         }))
                       }
                       className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
@@ -928,15 +926,14 @@ export function EventManagerView({
                   </div>
                   <div>
                     <label className="mb-1 block text-xs font-medium text-slate-600">Cancellation notice (hours)</label>
-                    <input
-                      type="number"
+                    <NumericInput
                       min={0}
                       max={168}
                       value={eventForm.cancellation_notice_hours}
-                      onChange={(e) =>
+                      onChange={(v) =>
                         setEventForm((f) => ({
                           ...f,
-                          cancellation_notice_hours: parseInt(e.target.value, 10) || 0,
+                          cancellation_notice_hours: v,
                         }))
                       }
                       className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
@@ -1090,9 +1087,9 @@ export function EventManagerView({
                     <div className="w-28">
                       <label className="mb-1 block text-xs font-medium text-slate-500">Price ({sym})</label>
                       <input
-                        type="number"
-                        min={0}
-                        step={0.01}
+                        type="text"
+                        inputMode="decimal"
+                        autoComplete="off"
                         value={tt.price_pence}
                         onChange={(e) => updateTicketType(i, { price_pence: e.target.value })}
                         placeholder="0.00"
@@ -1104,8 +1101,9 @@ export function EventManagerView({
                         Cap <span className="font-normal text-slate-400">opt.</span>
                       </label>
                       <input
-                        type="number"
-                        min={1}
+                        type="text"
+                        inputMode="numeric"
+                        autoComplete="off"
                         value={tt.capacity}
                         onChange={(e) => updateTicketType(i, { capacity: e.target.value })}
                         placeholder="-"
@@ -1176,9 +1174,9 @@ export function EventManagerView({
                 <div className="mt-3 max-w-xs">
                   <label className="mb-1 block text-xs font-medium text-slate-600">Deposit amount ({sym}) *</label>
                   <input
-                    type="number"
-                    min={0}
-                    step={0.01}
+                    type="text"
+                    inputMode="decimal"
+                    autoComplete="off"
                     value={eventForm.deposit_pounds}
                     onChange={(e) => setEventForm((f) => ({ ...f, deposit_pounds: e.target.value }))}
                     placeholder="e.g. 5.00"

@@ -48,22 +48,23 @@ export function CapacityRulesTab({ services, showToast, selectedAreaId }: Props)
 
   useEffect(() => {
     async function load() {
-      if (!selectedAreaId) {
-        setRules([]);
-        setLoading(false);
-        return;
-      }
+      setLoading(true);
       try {
-        const res = await fetch(`/api/venue/capacity-rules?area_id=${encodeURIComponent(selectedAreaId)}`);
+        const url = selectedAreaId
+          ? `/api/venue/capacity-rules?area_id=${encodeURIComponent(selectedAreaId)}`
+          : '/api/venue/capacity-rules';
+        const res = await fetch(url);
         if (res.ok) {
           const data = await res.json();
           setRules(data.rules ?? []);
+        } else {
+          setRules([]);
         }
       } finally {
         setLoading(false);
       }
     }
-    load();
+    void load();
   }, [selectedAreaId]);
 
   async function handleCreate() {
