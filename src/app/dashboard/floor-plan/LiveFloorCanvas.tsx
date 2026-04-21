@@ -4,8 +4,15 @@ import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import { Stage, Layer, Line, Rect, Text, Circle } from 'react-konva';
 import type { KonvaEventObject } from 'konva/lib/Node';
 import type Konva from 'konva';
-import { computeTableAdjacency, getTableDimensions } from '@/types/table-management';
-import { computeStageFitToView } from '@/lib/floor-plan/fit-view';
+import {
+  computeTableAdjacency,
+  getTableDimensions,
+  tableDimensionsPercentToPixels,
+} from '@/types/table-management';
+import {
+  FLOOR_PLAN_DEFAULT_LAYOUT_HEIGHT,
+  FLOOR_PLAN_DEFAULT_LAYOUT_WIDTH,
+} from '@/lib/floor-plan/fit-view';
 import type { BlockedSides } from '@/types/table-management';
 import TableShape from '@/components/floor-plan/TableShape';
 import { computeGlobalUnifiedLabelFonts } from '@/lib/floor-plan/table-label-fonts';
@@ -60,6 +67,7 @@ interface TableWithState {
   width: number | null;
   height: number | null;
   rotation: number | null;
+  polygon_points?: { x: number; y: number }[] | null;
   service_status: string;
   booking: {
     id: string;
@@ -77,6 +85,9 @@ export interface FloorDragEvent {
 
 interface Props {
   tables: TableWithState[];
+  /** Logical floor size in px (same as floor plan editor); table % positions map to this rectangle. */
+  layoutWidth?: number;
+  layoutHeight?: number;
   selectedId: string | null;
   onSelect: (id: string | null) => void;
   combinedTableGroups?: Map<string, string[]>;
@@ -90,6 +101,8 @@ interface Props {
 
 export default function LiveFloorCanvas({
   tables,
+  layoutWidth = FLOOR_PLAN_DEFAULT_LAYOUT_WIDTH,
+  layoutHeight = FLOOR_PLAN_DEFAULT_LAYOUT_HEIGHT,
   selectedId,
   onSelect,
   combinedTableGroups,
@@ -100,9 +113,12 @@ export default function LiveFloorCanvas({
   onDragEnd,
   onDragCancel,
 }: Props) {
-  const containerRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<Konva.Stage | null>(null);
-  const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const layoutPixelW = Math.max(1, Math.round(layoutWidth));
+  const layoutPixelH = Math.max(1, Math.round(layoutHeight));
+  /** Visible container size (px). Stage is rendered at this size so all tables fit after fit-to-view. */
+  const [viewport, setViewport] = useState({ w: 0, h: 0 });
   const [scale, setScale] = useState(1);
   const [stagePos, setStagePos] = useState({ x: 0, y: 0 });
   const baseScaleRef = useRef(1);
@@ -110,27 +126,11 @@ export default function LiveFloorCanvas({
   const [dragPointer, setDragPointer] = useState<{ x: number; y: number } | null>(null);
   const dragStartPosRef = useRef<{ x: number; y: number } | null>(null);
   const isDraggingRef = useRef(false);
-
-  useEffect(() => {
-    const updateSize = () => {
-      if (containerRef.current) {
-        const w = containerRef.current.offsetWidth;
-        const h = containerRef.current.offsetHeight || Math.min(Math.round(w * 0.75), window.innerHeight - 200);
-        setDimensions({ width: Math.max(1, w), height: Math.max(1, h) });
-      }
-    };
-    updateSize();
-    window.addEventListener('resize', updateSize);
-    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(updateSize) : null;
-    if (ro && containerRef.current) ro.observe(containerRef.current);
-    return () => {
-      window.removeEventListener('resize', updateSize);
-      ro?.disconnect();
-    };
-  }, []);
+  /** Tracks whether the Konva Stage is mid-pan (click vs. drag distinction for deselect). */
+  const panningRef = useRef(false);
 
   const handleStageClick = useCallback((e: KonvaEventObject<MouseEvent | TouchEvent>) => {
-    if (isDraggingRef.current) return;
+    if (isDraggingRef.current || panningRef.current) return;
     if (e.target === e.target.getStage()) {
       if (draggingBookingId) {
         setDraggingBookingId(null);
@@ -143,41 +143,26 @@ export default function LiveFloorCanvas({
     }
   }, [onSelect, draggingBookingId, onDragCancel]);
 
-  const handleWheel = useCallback((e: KonvaEventObject<WheelEvent>) => {
-    e.evt.preventDefault();
-    const stage = stageRef.current;
-    if (!stage) return;
-    const pointer = stage.getPointerPosition();
-    if (!pointer) return;
-
-    const mousePointTo = {
-      x: (pointer.x - stagePos.x) / scale,
-      y: (pointer.y - stagePos.y) / scale,
-    };
-
-    const direction = e.evt.deltaY > 0 ? -1 : 1;
-    const newScale = Math.max(0.3, Math.min(3, scale + direction * 0.1));
-
-    setScale(newScale);
-    setStagePos({
-      x: pointer.x - mousePointTo.x * newScale,
-      y: pointer.y - mousePointTo.y * newScale,
-    });
-  }, [scale, stagePos]);
-
   const adjacency = useMemo(() => {
     const bounds = tables.map((t) => {
       const fallback = getTableDimensions(t.max_covers, t.shape);
+      const { w, h } = tableDimensionsPercentToPixels(
+        t.width ?? fallback.width,
+        t.height ?? fallback.height,
+        layoutPixelW,
+        layoutPixelH,
+        t.shape,
+      );
       return {
         id: t.id,
-        x: t.position_x != null ? (t.position_x / 100) * dimensions.width : dimensions.width / 2,
-        y: t.position_y != null ? (t.position_y / 100) * dimensions.height : dimensions.height / 2,
-        w: ((t.width ?? fallback.width) / 100) * dimensions.width,
-        h: ((t.height ?? fallback.height) / 100) * dimensions.height,
+        x: t.position_x != null ? (t.position_x / 100) * layoutPixelW : layoutPixelW / 2,
+        y: t.position_y != null ? (t.position_y / 100) * layoutPixelH : layoutPixelH / 2,
+        w,
+        h,
       };
     });
     return computeTableAdjacency(bounds);
-  }, [tables, dimensions]);
+  }, [tables, layoutPixelW, layoutPixelH]);
 
   const combinationLines = useCallback(() => {
     if (!combinedTableGroups) return [];
@@ -189,16 +174,16 @@ export default function LiveFloorCanvas({
         const t1 = tables.find((t) => t.id === tableIds[i]);
         const t2 = tables.find((t) => t.id === tableIds[i + 1]);
         if (!t1 || !t2) continue;
-        const x1 = t1.position_x != null ? (t1.position_x / 100) * dimensions.width : dimensions.width / 2;
-        const y1 = t1.position_y != null ? (t1.position_y / 100) * dimensions.height : dimensions.height / 2;
-        const x2 = t2.position_x != null ? (t2.position_x / 100) * dimensions.width : dimensions.width / 2;
-        const y2 = t2.position_y != null ? (t2.position_y / 100) * dimensions.height : dimensions.height / 2;
+        const x1 = t1.position_x != null ? (t1.position_x / 100) * layoutPixelW : layoutPixelW / 2;
+        const y1 = t1.position_y != null ? (t1.position_y / 100) * layoutPixelH : layoutPixelH / 2;
+        const x2 = t2.position_x != null ? (t2.position_x / 100) * layoutPixelW : layoutPixelW / 2;
+        const y2 = t2.position_y != null ? (t2.position_y / 100) * layoutPixelH : layoutPixelH / 2;
         lines.push({ key: `${bookingId}-${i}`, points: [x1, y1, x2, y2] });
       }
     });
 
     return lines;
-  }, [combinedTableGroups, tables, dimensions]);
+  }, [combinedTableGroups, tables, layoutPixelW, layoutPixelH]);
 
   const handleTableMouseDown = useCallback((tableId: string, _e: KonvaEventObject<MouseEvent | TouchEvent>) => {
     const table = tables.find((t) => t.id === tableId);
@@ -288,36 +273,86 @@ export default function LiveFloorCanvas({
     });
   }, [scale, stagePos]);
 
+  /**
+   * Fits the bounding box of all tables (in logical layout coords) into the visible viewport
+   * so the page loads at a sensible zoom. Stage is rendered at viewport size, while tables are
+   * positioned in `layoutPixelW`×`layoutPixelH` space — we find their AABB and scale+pan the Stage.
+   */
   const fitViewToStage = useCallback(() => {
-    const fit = computeStageFitToView(tables, dimensions.width, dimensions.height);
-    baseScaleRef.current = fit.scale;
-    setScale(fit.scale);
-    setStagePos({ x: fit.x, y: fit.y });
-  }, [tables, dimensions.width, dimensions.height]);
+    const vw = viewport.w;
+    const vh = viewport.h;
+    if (vw < 1 || vh < 1 || tables.length === 0) return;
+
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const t of tables) {
+      const fb = getTableDimensions(t.max_covers, t.shape);
+      const { w, h } = tableDimensionsPercentToPixels(
+        t.width ?? fb.width,
+        t.height ?? fb.height,
+        layoutPixelW,
+        layoutPixelH,
+        t.shape,
+      );
+      const cx = t.position_x != null ? (t.position_x / 100) * layoutPixelW : layoutPixelW / 2;
+      const cy = t.position_y != null ? (t.position_y / 100) * layoutPixelH : layoutPixelH / 2;
+      minX = Math.min(minX, cx - w / 2);
+      maxX = Math.max(maxX, cx + w / 2);
+      minY = Math.min(minY, cy - h / 2);
+      maxY = Math.max(maxY, cy + h / 2);
+    }
+    if (!Number.isFinite(minX) || !Number.isFinite(maxX)) return;
+
+    const pad = 48;
+    const bw = maxX - minX + pad * 2;
+    const bh = maxY - minY + pad * 2;
+    const nextScale = Math.max(0.1, Math.min(3, Math.min(vw / bw, vh / bh)));
+    const midX = (minX + maxX) / 2;
+    const midY = (minY + maxY) / 2;
+    baseScaleRef.current = nextScale;
+    setScale(nextScale);
+    setStagePos({
+      x: vw / 2 - midX * nextScale,
+      y: vh / 2 - midY * nextScale,
+    });
+  }, [tables, layoutPixelW, layoutPixelH, viewport.w, viewport.h]);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const update = () => {
+      const rect = el.getBoundingClientRect();
+      setViewport((prev) =>
+        prev.w === Math.round(rect.width) && prev.h === Math.round(rect.height)
+          ? prev
+          : { w: Math.round(rect.width), h: Math.round(rect.height) },
+      );
+    };
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   const initialFitDone = useRef(false);
-  const prevDimensions = useRef({ width: 0, height: 0 });
   useEffect(() => {
-    if (tables.length === 0 || dimensions.width <= 1) return;
+    initialFitDone.current = false;
+  }, [layoutWidth, layoutHeight]);
+  useEffect(() => {
+    if (tables.length === 0 || viewport.w < 1 || viewport.h < 1) return;
     if (!initialFitDone.current) {
       fitViewToStage();
       initialFitDone.current = true;
-      prevDimensions.current = { width: dimensions.width, height: dimensions.height };
-      return;
     }
-    const dw = Math.abs(dimensions.width - prevDimensions.current.width);
-    const dh = Math.abs(dimensions.height - prevDimensions.current.height);
-    if (dw > 50 || dh > 50) {
-      fitViewToStage();
-      prevDimensions.current = { width: dimensions.width, height: dimensions.height };
-    }
-  }, [tables, dimensions.width, dimensions.height, fitViewToStage]);
+  }, [tables, viewport.w, viewport.h, fitViewToStage]);
 
   const zoomBy = useCallback(
     (delta: number) => {
       const newScale = Math.max(0.3, Math.min(3, scale + delta));
-      const cx = dimensions.width / 2;
-      const cy = dimensions.height / 2;
+      const cx = viewport.w / 2;
+      const cy = viewport.h / 2;
       const pointTo = {
         x: (cx - stagePos.x) / scale,
         y: (cy - stagePos.y) / scale,
@@ -328,7 +363,7 @@ export default function LiveFloorCanvas({
         y: cy - pointTo.y * newScale,
       });
     },
-    [scale, stagePos, dimensions.width, dimensions.height],
+    [scale, stagePos, viewport.w, viewport.h],
   );
 
   const isDragging = draggingBookingId != null || reassignMode != null;
@@ -337,8 +372,13 @@ export default function LiveFloorCanvas({
   const unifiedLabelFonts = useMemo(() => {
     const inputs = tables.map((table) => {
       const fb = getTableDimensions(table.max_covers, table.shape);
-      const tw = ((table.width ?? fb.width) / 100) * dimensions.width;
-      const th = ((table.height ?? fb.height) / 100) * dimensions.height;
+      const { w: tw, h: th } = tableDimensionsPercentToPixels(
+        table.width ?? fb.width,
+        table.height ?? fb.height,
+        layoutPixelW,
+        layoutPixelH,
+        table.shape,
+      );
       const capacityText =
         table.min_covers === table.max_covers
           ? `${table.max_covers}`
@@ -360,13 +400,14 @@ export default function LiveFloorCanvas({
         bottomLabel,
         compactLabels: false,
         layoutScale: scale,
+        polygon_points: table.polygon_points ?? null,
       };
     });
     return computeGlobalUnifiedLabelFonts(inputs);
   }, [
     tables,
-    dimensions.width,
-    dimensions.height,
+    layoutPixelW,
+    layoutPixelH,
     scale,
     draggingBookingId,
     reassignMode,
@@ -375,7 +416,11 @@ export default function LiveFloorCanvas({
   ]);
 
   return (
-    <div ref={containerRef} className="h-full w-full" style={{ position: 'relative', touchAction: 'none' }}>
+    <div
+      ref={containerRef}
+      className="relative h-full w-full overflow-hidden bg-slate-50"
+      style={{ touchAction: 'none' }}
+    >
       <div className="absolute right-2 top-2 z-10 flex gap-1">
         <button
           type="button"
@@ -407,24 +452,34 @@ export default function LiveFloorCanvas({
 
       <Stage
         ref={(node) => { stageRef.current = node; }}
-        width={dimensions.width}
-        height={dimensions.height}
+        width={viewport.w}
+        height={viewport.h}
         scaleX={scale}
         scaleY={scale}
         x={stagePos.x}
         y={stagePos.y}
         onClick={handleStageClick}
         onTap={handleStageClick}
-        onWheel={handleWheel}
         onMouseUp={handleStageMouseUp}
         onMouseMove={handleStageMouseMove}
-        draggable={!isDraggingRef.current}
-        onDragEnd={(e) => {
+        draggable={!isDragging}
+        onDragStart={(e) => {
+          if (e.target === e.target.getStage()) panningRef.current = true;
+        }}
+        onDragMove={(e) => {
           if (e.target === e.target.getStage()) {
             setStagePos({ x: e.target.x(), y: e.target.y() });
           }
         }}
-        style={{ background: '#f8fafc', cursor: isDragging ? 'grabbing' : undefined }}
+        onDragEnd={(e) => {
+          if (e.target === e.target.getStage()) {
+            setStagePos({ x: e.target.x(), y: e.target.y() });
+            setTimeout(() => {
+              panningRef.current = false;
+            }, 0);
+          }
+        }}
+        style={{ background: '#f8fafc', cursor: isDragging ? 'grabbing' : 'grab' }}
       >
         <Layer>
           {/* Combination lines only when a booking spans multiple tables (see combinationLines) */}
@@ -464,8 +519,13 @@ export default function LiveFloorCanvas({
             const hidden = blockedToHiddenSet(blocked);
 
             const fb = getTableDimensions(table.max_covers, table.shape);
-            const w = ((table.width ?? fb.width) / 100) * dimensions.width;
-            const h = ((table.height ?? fb.height) / 100) * dimensions.height;
+            const { w, h } = tableDimensionsPercentToPixels(
+              table.width ?? fb.width,
+              table.height ?? fb.height,
+              layoutPixelW,
+              layoutPixelH,
+              table.shape,
+            );
 
             return (
               <TableShape
@@ -477,8 +537,8 @@ export default function LiveFloorCanvas({
                 statusColour={statusColor}
                 groupOpacity={opacity}
                 booking={isDragging && isSource ? null : table.booking}
-                canvasWidth={dimensions.width}
-                canvasHeight={dimensions.height}
+                canvasWidth={layoutPixelW}
+                canvasHeight={layoutPixelH}
                 layoutScale={scale}
                 unifiedLabelFonts={unifiedLabelFonts}
                 onClick={() => {

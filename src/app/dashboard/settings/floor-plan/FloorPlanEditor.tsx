@@ -3,12 +3,33 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import type { VenueTable, TableShape, TableType, FloorPlan } from '@/types/table-management';
-import { getTableDimensions, computeGridPositions, TABLE_TYPES } from '@/types/table-management';
+import {
+  getTableDimensions,
+  computeGridPositions,
+  TABLE_TYPES,
+  tableDimensionsPercentToPixels,
+  tablePixelDimensionsToPercent,
+} from '@/types/table-management';
+import { reshapePolygonVertexAtLocalPosition } from '@/lib/floor-plan/polygon-vertex-reshape';
 import type { LayoutResizeAnchor } from '@/app/dashboard/settings/floor-plan/KonvaCanvas';
 import Link from 'next/link';
 import { NumericInput } from '@/components/ui/NumericInput';
 
 const KonvaCanvas = dynamic(() => import('./KonvaCanvas'), { ssr: false });
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+/** Keyboard nudge step in layout % (~1 px on a 2600px wide canvas). Shift = 10×. */
+const NUDGE_STEP_PCT = 0.2;
+const NUDGE_BIG_STEP_PCT = 2;
+/** Max undo history entries. */
+const HISTORY_LIMIT = 80;
+/** Dedup adjacent snapshots within this window (ms) to compress slider drags. */
+const HISTORY_DEDUP_MS = 350;
+/** Grid step (in % of layout) for snap-to-grid and optional move snapping. */
+const GRID_STEP_PCT = 2;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -74,8 +95,9 @@ export function FloorPlanEditor({ className, embedded = false, onLayoutSaved, di
   const [tables, setTables] = useState<VenueTable[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
-  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [combinations, setCombinations] = useState<CombinationLink[]>([]);
+  const [showShortcuts, setShowShortcuts] = useState(false);
 
   // Background
   const [backgroundUrl, setBackgroundUrl] = useState<string | null>(null);
@@ -85,6 +107,10 @@ export function FloorPlanEditor({ className, embedded = false, onLayoutSaved, di
   // Placement aids
   const [comboSaving, setComboSaving] = useState(false);
   const [alignmentGuidesEnabled, setAlignmentGuidesEnabled] = useState(false);
+  /** Snap table positions to the grid while moving (applied on commit of move). */
+  const [gridSnapEnabled, setGridSnapEnabled] = useState(false);
+  /** Show a grid overlay on the canvas. */
+  const [showGrid, setShowGrid] = useState(false);
 
   // Canvas layout size (from active floor plan)
   const [layoutWidth, setLayoutWidth] = useState<number | null>(null);
@@ -102,9 +128,35 @@ export function FloorPlanEditor({ className, embedded = false, onLayoutSaved, di
 
   // Refs
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const layoutSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const initialArrangeDone = useRef(false);
   const canvasWrapperRef = useRef<HTMLDivElement>(null);
+
+  // --- Live mirror of tables for handlers that need the latest snapshot ---
+  const tablesRef = useRef<VenueTable[]>(tables);
+  useEffect(() => { tablesRef.current = tables; }, [tables]);
+
+  // --- Undo / redo (geometry only: move / resize / rotate / seat / polygon /
+  //     auto-arrange / snap / plan rotate / layout resize). Deletes and creates
+  //     are intentionally not undoable because they round-trip the server. ---
+  const historyRef = useRef<{
+    undo: VenueTable[][];
+    redo: VenueTable[][];
+    lastPushTs: number;
+  }>({ undo: [], redo: [], lastPushTs: 0 });
+  const [, forceHistoryTick] = useState(0);
+  const bumpHistoryTick = useCallback(() => forceHistoryTick((v) => v + 1), []);
+
+  /** Snapshot current `tables` onto the undo stack, clearing redo. */
+  const pushHistory = useCallback(() => {
+    const h = historyRef.current;
+    const now = Date.now();
+    if (now - h.lastPushTs < HISTORY_DEDUP_MS) return;
+    h.undo.push(tablesRef.current);
+    if (h.undo.length > HISTORY_LIMIT) h.undo.shift();
+    h.redo = [];
+    h.lastPushTs = now;
+    bumpHistoryTick();
+  }, [bumpHistoryTick]);
 
   // ---------------------------------------------------------------------------
   // Data loading
@@ -251,7 +303,6 @@ export function FloorPlanEditor({ className, embedded = false, onLayoutSaved, di
   useEffect(() => {
     return () => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-      if (layoutSaveTimerRef.current) clearTimeout(layoutSaveTimerRef.current);
     };
   }, []);
 
@@ -286,71 +337,98 @@ export function FloorPlanEditor({ className, embedded = false, onLayoutSaved, di
   }, [selectedIds, tables]);
 
   // ---------------------------------------------------------------------------
-  // Position save (debounced)
+  // Position save (debounced, with real error surfacing)
   // ---------------------------------------------------------------------------
 
-  const savePositions = useCallback(async (updatedTables: VenueTable[]) => {
-    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    saveTimerRef.current = setTimeout(async () => {
-      setSaveStatus('saving');
+  /** Execute the network write. Returns whether it succeeded. */
+  const runPositionSave = useCallback(async (updatedTables: VenueTable[]): Promise<boolean> => {
+    // The legacy venue_tables position columns are the single source of truth for
+    // every downstream consumer (AdjacencyPreview, recalculate API, live floor canvas).
+    // We always write there so those systems stay current.
+    const legacyUpdates = updatedTables.map((t) => ({
+      id: t.id,
+      position_x: t.position_x,
+      position_y: t.position_y,
+      width: t.width,
+      height: t.height,
+      rotation: t.rotation,
+      seat_angles: t.seat_angles ?? null,
+      polygon_points: t.polygon_points ?? null,
+    }));
 
-      // The legacy venue_tables position columns are the single source of truth for
-      // every downstream consumer (AdjacencyPreview, recalculate API, live floor canvas).
-      // We always write there so those systems stay current.
-      const legacyUpdates = updatedTables.map((t) => ({
-        id: t.id,
-        position_x: t.position_x,
-        position_y: t.position_y,
-        width: t.width,
-        height: t.height,
-        rotation: t.rotation,
-        seat_angles: t.seat_angles ?? null,
-        polygon_points: t.polygon_points ?? null,
-      }));
-
-      try {
-        if (activeFloorPlanId) {
-          // Primary: save to per-floor-plan positions table
-          const fpUpdates = updatedTables.map((t) => ({
-            table_id: t.id,
-            position_x: t.position_x,
-            position_y: t.position_y,
-            width: t.width,
-            height: t.height,
-            rotation: t.rotation ?? 0,
-            seat_angles: t.seat_angles ?? null,
-            polygon_points: t.polygon_points ?? null,
-          }));
-          // Dual-write: both new per-plan table and legacy venue_tables columns
-          await Promise.all([
-            fetch(`/api/venue/floor-plans/${activeFloorPlanId}/positions`, {
-              method: 'PUT',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(fpUpdates),
-            }),
-            fetch('/api/venue/tables', {
-              method: 'PUT',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(legacyUpdates),
-            }),
-          ]);
-        } else {
-          // No active floor plan — write directly to venue_tables only
-          await fetch('/api/venue/tables', {
+    try {
+      if (activeFloorPlanId) {
+        const fpUpdates = updatedTables.map((t) => ({
+          table_id: t.id,
+          position_x: t.position_x,
+          position_y: t.position_y,
+          width: t.width,
+          height: t.height,
+          rotation: t.rotation ?? 0,
+          seat_angles: t.seat_angles ?? null,
+          polygon_points: t.polygon_points ?? null,
+        }));
+        const [fpRes, legacyRes] = await Promise.all([
+          fetch(`/api/venue/floor-plans/${activeFloorPlanId}/positions`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(fpUpdates),
+          }),
+          fetch('/api/venue/tables', {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(legacyUpdates),
-          });
+          }),
+        ]);
+        if (!fpRes.ok || !legacyRes.ok) {
+          console.error('Save positions failed:', fpRes.status, legacyRes.status);
+          return false;
         }
+      } else {
+        const res = await fetch('/api/venue/tables', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(legacyUpdates),
+        });
+        if (!res.ok) {
+          console.error('Save positions failed:', res.status);
+          return false;
+        }
+      }
+      return true;
+    } catch (err) {
+      console.error('Save positions failed:', err);
+      return false;
+    }
+  }, [activeFloorPlanId]);
+
+  const savePositions = useCallback((updatedTables: VenueTable[]) => {
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(async () => {
+      setSaveStatus('saving');
+      const ok = await runPositionSave(updatedTables);
+      if (ok) {
         setSaveStatus('saved');
-        setTimeout(() => setSaveStatus('idle'), 2000);
+        setTimeout(() => setSaveStatus((s) => (s === 'saved' ? 'idle' : s)), 2000);
         onLayoutSaved?.();
-      } catch (err) {
-        console.error('Save positions failed:', err);
-        setSaveStatus('idle');
+      } else {
+        setSaveStatus('error');
       }
     }, 1000);
-  }, [activeFloorPlanId, onLayoutSaved]);
+  }, [runPositionSave, onLayoutSaved]);
+
+  /** Retry the last pending save immediately. Useful for the error state button. */
+  const retrySaveNow = useCallback(async () => {
+    setSaveStatus('saving');
+    const ok = await runPositionSave(tablesRef.current);
+    if (ok) {
+      setSaveStatus('saved');
+      setTimeout(() => setSaveStatus((s) => (s === 'saved' ? 'idle' : s)), 2000);
+      onLayoutSaved?.();
+    } else {
+      setSaveStatus('error');
+    }
+  }, [runPositionSave, onLayoutSaved]);
 
   // ---------------------------------------------------------------------------
   // Canvas / move handlers
@@ -358,26 +436,63 @@ export function FloorPlanEditor({ className, embedded = false, onLayoutSaved, di
 
   const handleTableMove = useCallback(
     (tableId: string, x: number, y: number) => {
+      pushHistory();
       setTables((prev) => {
-        const updated = prev.map((t) =>
-          t.id === tableId ? { ...t, position_x: x, position_y: y } : t,
-        );
+        const source = prev.find((t) => t.id === tableId);
+        if (!source) return prev;
+
+        // If the moved table is part of a multi-selection, move the whole group
+        // by the same delta. Otherwise just move the one.
+        const isGroup = selectedIds.length > 1 && selectedIds.includes(tableId);
+        const dx = x - (source.position_x ?? 50);
+        const dy = y - (source.position_y ?? 50);
+
+        // Grid snap: applied to the *dragged* table's final position; group members
+        // move by the same delta so spacing is preserved.
+        const snap = (v: number) =>
+          gridSnapEnabled ? Math.round(v / GRID_STEP_PCT) * GRID_STEP_PCT : v;
+
+        const updated = prev.map((t) => {
+          if (!isGroup && t.id !== tableId) return t;
+          if (!isGroup) {
+            return { ...t, position_x: snap(x), position_y: snap(y) };
+          }
+          if (!selectedIds.includes(t.id)) return t;
+          if (t.position_x == null || t.position_y == null) return t;
+          if (t.id === tableId) {
+            return { ...t, position_x: snap(x), position_y: snap(y) };
+          }
+          return {
+            ...t,
+            position_x: Math.max(0, Math.min(100, t.position_x + dx)),
+            position_y: Math.max(0, Math.min(100, t.position_y + dy)),
+          };
+        });
         savePositions(updated);
         return updated;
       });
     },
-    [savePositions],
+    [savePositions, pushHistory, selectedIds, gridSnapEnabled],
   );
 
   const handleTableResize = useCallback(
     (tableId: string, width: number, height: number) => {
+      pushHistory();
       setTables((prev) => {
-        const updated = prev.map((t) => (t.id === tableId ? { ...t, width, height } : t));
+        const updated = prev.map((t) => {
+          if (t.id !== tableId) return t;
+          // Square tables must stay square — always force width == height.
+          if (t.shape === 'square') {
+            const side = Math.max(width, height);
+            return { ...t, width: side, height: side };
+          }
+          return { ...t, width, height };
+        });
         savePositions(updated);
         return updated;
       });
     },
-    [savePositions],
+    [savePositions, pushHistory],
   );
 
   const handleSeatDrag = useCallback(
@@ -399,6 +514,7 @@ export function FloorPlanEditor({ className, embedded = false, onLayoutSaved, di
 
   const handleSeatDragEnd = useCallback(
     (tableId: string, seatIndex: number, newAngle: number) => {
+      pushHistory();
       setTables((prev) => {
         const updated = prev.map((t) => {
           if (t.id !== tableId) return t;
@@ -414,8 +530,65 @@ export function FloorPlanEditor({ className, embedded = false, onLayoutSaved, di
         return updated;
       });
     },
-    [savePositions],
+    [savePositions, pushHistory],
   );
+
+  /** Clear per-seat angle overrides so chairs use the default even distribution for the shape. */
+  const resetSeatAnglesToEven = useCallback(
+    (tableId: string) => {
+      pushHistory();
+      setTables((prev) => {
+        const updated = prev.map((t) =>
+          t.id === tableId ? { ...t, seat_angles: null } : t,
+        );
+        savePositions(updated);
+        return updated;
+      });
+    },
+    [savePositions, pushHistory],
+  );
+
+  const handlePolygonVertexDrag = useCallback(
+    (tableId: string, vertexIndex: number, localX: number, localY: number) => {
+      setTables((prev) =>
+        prev.map((t) => {
+          if (t.id !== tableId || t.shape !== 'polygon' || !t.polygon_points || t.polygon_points.length < 3) {
+            return t;
+          }
+          const fb = getTableDimensions(t.max_covers, t.shape);
+          const wPct = t.width ?? fb.width;
+          const hPct = t.height ?? fb.height;
+          try {
+            const next = reshapePolygonVertexAtLocalPosition({
+              polygon_points: t.polygon_points,
+              widthPct: wPct,
+              heightPct: hPct,
+              canvasWidth: canvasDims.width,
+              canvasHeight: canvasDims.height,
+              positionXPct: t.position_x,
+              positionYPct: t.position_y,
+              rotationDeg: t.rotation ?? 0,
+              vertexIndex,
+              newLocalX: localX,
+              newLocalY: localY,
+            });
+            return { ...t, ...next };
+          } catch {
+            return t;
+          }
+        }),
+      );
+    },
+    [canvasDims.width, canvasDims.height],
+  );
+
+  const handlePolygonVertexDragEnd = useCallback(() => {
+    pushHistory();
+    setTables((prev) => {
+      savePositions(prev);
+      return prev;
+    });
+  }, [savePositions, pushHistory]);
 
   // Snapshot of table pixel positions before resize started — used to keep
   // tables visually fixed during the drag.  Captured on first call to
@@ -432,18 +605,27 @@ export function FloorPlanEditor({ className, embedded = false, onLayoutSaved, di
       const nextH = Math.max(1200, Math.min(9000, h));
       const anchor = opts?.anchor ?? 'se';
 
-      // On the first frame of a resize gesture, snapshot current pixel positions.
+      // On the first frame of a resize gesture, snapshot current pixel positions
+      // *and* push the pre-gesture geometry onto the undo stack.
       if (!layoutResizeSnapshotRef.current) {
+        pushHistory();
         const prevW = canvasDims.width;
         const prevH = canvasDims.height;
         const tablePx = new Map<string, { x: number; y: number; w: number; h: number }>();
         for (const t of tables) {
           const fb = getTableDimensions(t.max_covers, t.shape);
+          const { w, h } = tableDimensionsPercentToPixels(
+            t.width ?? fb.width,
+            t.height ?? fb.height,
+            prevW,
+            prevH,
+            t.shape,
+          );
           tablePx.set(t.id, {
             x: ((t.position_x ?? 50) / 100) * prevW,
             y: ((t.position_y ?? 50) / 100) * prevH,
-            w: ((t.width ?? fb.width) / 100) * prevW,
-            h: ((t.height ?? fb.height) / 100) * prevH,
+            w,
+            h,
           });
         }
         layoutResizeSnapshotRef.current = { prevW, prevH, tablePx };
@@ -468,17 +650,18 @@ export function FloorPlanEditor({ className, embedded = false, onLayoutSaved, di
           if (anchor === 'w' || anchor === 'nw' || anchor === 'sw') shiftX = deltaW;
           if (anchor === 'n' || anchor === 'nw' || anchor === 'ne') shiftY = deltaH;
 
+          const pct = tablePixelDimensionsToPercent(px.w, px.h, nextW, nextH, t.shape);
           return {
             ...t,
             position_x: Math.max(0, Math.min(100, ((px.x + shiftX) / nextW) * 100)),
             position_y: Math.max(0, Math.min(100, ((px.y + shiftY) / nextH) * 100)),
-            width: Math.max(1, (px.w / nextW) * 100),
-            height: Math.max(1, (px.h / nextH) * 100),
+            width: Math.max(1, pct.widthPct),
+            height: Math.max(1, pct.heightPct),
           };
         }),
       );
     },
-    [canvasDims.width, canvasDims.height, tables],
+    [canvasDims.width, canvasDims.height, tables, pushHistory],
   );
 
   /** Called once when the user releases the resize handle — persists to DB. */
@@ -516,13 +699,14 @@ export function FloorPlanEditor({ className, embedded = false, onLayoutSaved, di
 
   const handleTableRotate = useCallback(
     (tableId: string, rotation: number) => {
+      pushHistory();
       setTables((prev) => {
         const updated = prev.map((t) => (t.id === tableId ? { ...t, rotation } : t));
         savePositions(updated);
         return updated;
       });
     },
-    [savePositions],
+    [savePositions, pushHistory],
   );
 
   const handleSelect = useCallback((id: string | null, additive?: boolean) => {
@@ -548,38 +732,45 @@ export function FloorPlanEditor({ className, embedded = false, onLayoutSaved, di
   // ---------------------------------------------------------------------------
 
   const snapToGrid = useCallback(() => {
-    const GRID_PCT = 2;
+    pushHistory();
     setTables((prev) => {
       const updated = prev.map((t) => ({
         ...t,
-        position_x: t.position_x != null ? Math.round(t.position_x / GRID_PCT) * GRID_PCT : t.position_x,
-        position_y: t.position_y != null ? Math.round(t.position_y / GRID_PCT) * GRID_PCT : t.position_y,
+        position_x: t.position_x != null
+          ? Math.round(t.position_x / GRID_STEP_PCT) * GRID_STEP_PCT
+          : t.position_x,
+        position_y: t.position_y != null
+          ? Math.round(t.position_y / GRID_STEP_PCT) * GRID_STEP_PCT
+          : t.position_y,
       }));
       savePositions(updated);
       return updated;
     });
-  }, [savePositions]);
+  }, [savePositions, pushHistory]);
 
   const autoArrange = useCallback(() => {
+    pushHistory();
     setTables((prev) => {
       const positions = computeGridPositions(prev);
       const updated = prev.map((t, i) => {
-        const dims = getTableDimensions(t.max_covers, t.shape);
+        const fb = getTableDimensions(t.max_covers, t.shape);
         return {
           ...t,
           position_x: positions[i]!.position_x,
           position_y: positions[i]!.position_y,
-          width: dims.width,
-          height: dims.height,
+          // Preserve the user's chosen size; only fall back to default if unset.
+          width: t.width ?? fb.width,
+          height: t.height ?? fb.height,
         };
       });
       savePositions(updated);
       return updated;
     });
-  }, [savePositions]);
+  }, [savePositions, pushHistory]);
 
   const rotatePlanCW = useCallback(() => {
-    // Rotate 90° CW about (50,50): (x,y) → (100-y, x); swap w/h
+    pushHistory();
+    // Rotate 90° CW about (50,50): (x,y) → (100-y, x); swap w/h; add 90° to per-table rotation.
     setTables((prev) => {
       const updated = prev.map((t) => {
         if (t.position_x == null || t.position_y == null) return t;
@@ -589,15 +780,17 @@ export function FloorPlanEditor({ className, embedded = false, onLayoutSaved, di
           position_y: t.position_x,
           width: t.height,
           height: t.width,
+          rotation: ((t.rotation ?? 0) + 90) % 360,
         };
       });
       savePositions(updated);
       return updated;
     });
-  }, [savePositions]);
+  }, [savePositions, pushHistory]);
 
   const rotatePlanCCW = useCallback(() => {
-    // Rotate 90° CCW about (50,50): (x,y) → (y, 100-x); swap w/h
+    pushHistory();
+    // Rotate 90° CCW about (50,50): (x,y) → (y, 100-x); swap w/h; subtract 90° from per-table rotation.
     setTables((prev) => {
       const updated = prev.map((t) => {
         if (t.position_x == null || t.position_y == null) return t;
@@ -607,12 +800,188 @@ export function FloorPlanEditor({ className, embedded = false, onLayoutSaved, di
           position_y: 100 - t.position_x,
           width: t.height,
           height: t.width,
+          rotation: (((t.rotation ?? 0) - 90) % 360 + 360) % 360,
         };
       });
       savePositions(updated);
       return updated;
     });
-  }, [savePositions]);
+  }, [savePositions, pushHistory]);
+
+  // ---------------------------------------------------------------------------
+  // Undo / redo
+  // ---------------------------------------------------------------------------
+
+  const performUndo = useCallback(() => {
+    const h = historyRef.current;
+    const prev = h.undo.pop();
+    if (!prev) return;
+    h.redo.push(tablesRef.current);
+    h.lastPushTs = 0;
+    setTables(prev);
+    savePositions(prev);
+    bumpHistoryTick();
+  }, [savePositions, bumpHistoryTick]);
+
+  const performRedo = useCallback(() => {
+    const h = historyRef.current;
+    const next = h.redo.pop();
+    if (!next) return;
+    h.undo.push(tablesRef.current);
+    h.lastPushTs = 0;
+    setTables(next);
+    savePositions(next);
+    bumpHistoryTick();
+  }, [savePositions, bumpHistoryTick]);
+
+  const canUndo = historyRef.current.undo.length > 0;
+  const canRedo = historyRef.current.redo.length > 0;
+
+  // ---------------------------------------------------------------------------
+  // Nudge / multi-delete
+  // ---------------------------------------------------------------------------
+
+  /** Move every selected table by (dxPct, dyPct). Clamped to 0..100. */
+  const nudgeSelected = useCallback(
+    (dxPct: number, dyPct: number) => {
+      if (selectedIds.length === 0) return;
+      pushHistory();
+      setTables((prev) => {
+        const updated = prev.map((t) => {
+          if (!selectedIds.includes(t.id)) return t;
+          if (t.position_x == null || t.position_y == null) return t;
+          return {
+            ...t,
+            position_x: Math.max(0, Math.min(100, t.position_x + dxPct)),
+            position_y: Math.max(0, Math.min(100, t.position_y + dyPct)),
+          };
+        });
+        savePositions(updated);
+        return updated;
+      });
+    },
+    [selectedIds, savePositions, pushHistory],
+  );
+
+  const deleteSelected = useCallback(async () => {
+    if (selectedIds.length === 0) return;
+    const n = selectedIds.length;
+    const msg =
+      n === 1
+        ? 'Delete this table? This cannot be undone.'
+        : `Delete ${n} tables? This cannot be undone.`;
+    if (!confirm(msg)) return;
+
+    const ids = [...selectedIds];
+    const results = await Promise.all(
+      ids.map((id) =>
+        fetch(`/api/venue/tables?id=${id}`, { method: 'DELETE' })
+          .then((r) => ({ id, ok: r.ok }))
+          .catch(() => ({ id, ok: false })),
+      ),
+    );
+    const okIds = new Set(results.filter((r) => r.ok).map((r) => r.id));
+    setTables((prev) => prev.filter((t) => !okIds.has(t.id)));
+    setSelectedIds((prev) => prev.filter((x) => !okIds.has(x)));
+    const failed = results.filter((r) => !r.ok);
+    if (failed.length > 0) {
+      alert(`Failed to delete ${failed.length} of ${n} tables.`);
+    }
+  }, [selectedIds]);
+
+  // ---------------------------------------------------------------------------
+  // Align & distribute (multi-select)
+  // ---------------------------------------------------------------------------
+
+  type AlignEdge = 'left' | 'right' | 'top' | 'bottom' | 'hcenter' | 'vcenter';
+
+  const alignSelected = useCallback(
+    (edge: AlignEdge) => {
+      if (selectedIds.length < 2) return;
+      pushHistory();
+      setTables((prev) => {
+        const selected = prev.filter((t) => selectedIds.includes(t.id));
+        if (selected.length < 2) return prev;
+
+        // Each table's % size; half-size used for edge calculation.
+        const sizeOf = (t: VenueTable) => {
+          const fb = getTableDimensions(t.max_covers, t.shape);
+          return { w: t.width ?? fb.width, h: t.height ?? fb.height };
+        };
+
+        let target = 0;
+        if (edge === 'left') {
+          target = Math.min(...selected.map((t) => (t.position_x ?? 50) - sizeOf(t).w / 2));
+        } else if (edge === 'right') {
+          target = Math.max(...selected.map((t) => (t.position_x ?? 50) + sizeOf(t).w / 2));
+        } else if (edge === 'top') {
+          target = Math.min(...selected.map((t) => (t.position_y ?? 50) - sizeOf(t).h / 2));
+        } else if (edge === 'bottom') {
+          target = Math.max(...selected.map((t) => (t.position_y ?? 50) + sizeOf(t).h / 2));
+        } else if (edge === 'hcenter') {
+          target =
+            selected.reduce((s, t) => s + (t.position_x ?? 50), 0) / selected.length;
+        } else if (edge === 'vcenter') {
+          target =
+            selected.reduce((s, t) => s + (t.position_y ?? 50), 0) / selected.length;
+        }
+
+        const updated = prev.map((t) => {
+          if (!selectedIds.includes(t.id)) return t;
+          const { w, h } = sizeOf(t);
+          switch (edge) {
+            case 'left':
+              return { ...t, position_x: target + w / 2 };
+            case 'right':
+              return { ...t, position_x: target - w / 2 };
+            case 'top':
+              return { ...t, position_y: target + h / 2 };
+            case 'bottom':
+              return { ...t, position_y: target - h / 2 };
+            case 'hcenter':
+              return { ...t, position_x: target };
+            case 'vcenter':
+              return { ...t, position_y: target };
+            default:
+              return t;
+          }
+        });
+        savePositions(updated);
+        return updated;
+      });
+    },
+    [selectedIds, savePositions, pushHistory],
+  );
+
+  /** Distribute spacing: divides the gap between the first and last edges evenly. */
+  const distributeSelected = useCallback(
+    (axis: 'horizontal' | 'vertical') => {
+      if (selectedIds.length < 3) return;
+      pushHistory();
+      setTables((prev) => {
+        const selected = prev.filter((t) => selectedIds.includes(t.id));
+        if (selected.length < 3) return prev;
+        const keyPos = axis === 'horizontal' ? 'position_x' : 'position_y';
+        // Sort by current centre along axis.
+        const sorted = [...selected].sort(
+          (a, b) => (a[keyPos] ?? 50) - (b[keyPos] ?? 50),
+        );
+        const first = sorted[0]![keyPos] ?? 50;
+        const last = sorted[sorted.length - 1]![keyPos] ?? 50;
+        const step = (last - first) / (sorted.length - 1);
+        const targetById = new Map<string, number>();
+        sorted.forEach((t, i) => targetById.set(t.id, first + step * i));
+        const updated = prev.map((t) => {
+          const target = targetById.get(t.id);
+          if (target == null) return t;
+          return { ...t, [keyPos]: target } as VenueTable;
+        });
+        savePositions(updated);
+        return updated;
+      });
+    },
+    [selectedIds, savePositions, pushHistory],
+  );
 
   // ---------------------------------------------------------------------------
   // Table CRUD
@@ -678,9 +1047,12 @@ export function FloorPlanEditor({ className, embedded = false, onLayoutSaved, di
   }, []);
 
   const handleDuplicateTable = useCallback(
-    async (id: string) => {
+    async (
+      id: string,
+      opts?: { offsetX?: number; offsetY?: number; select?: boolean },
+    ) => {
       const source = tables.find((t) => t.id === id);
-      if (!source) return;
+      if (!source) return null;
       const dims = getTableDimensions(source.max_covers, source.shape);
       const existingNames = new Set(tables.map((t) => t.name));
       let copyName = `${source.name} (copy)`;
@@ -688,8 +1060,10 @@ export function FloorPlanEditor({ className, embedded = false, onLayoutSaved, di
       while (existingNames.has(copyName)) {
         copyName = `${source.name} (copy ${i++})`;
       }
-      const offsetX = Math.min((source.position_x ?? 50) + 5, 90);
-      const offsetY = Math.min((source.position_y ?? 50) + 5, 90);
+      const offX = opts?.offsetX ?? 5;
+      const offY = opts?.offsetY ?? 5;
+      const offsetX = Math.max(2, Math.min(98, (source.position_x ?? 50) + offX));
+      const offsetY = Math.max(2, Math.min(98, (source.position_y ?? 50) + offY));
       try {
         const res = await fetch('/api/venue/tables', {
           method: 'POST',
@@ -705,6 +1079,9 @@ export function FloorPlanEditor({ className, embedded = false, onLayoutSaved, di
             position_y: offsetY,
             width: source.width ?? dims.width,
             height: source.height ?? dims.height,
+            rotation: source.rotation ?? 0,
+            polygon_points: source.polygon_points ?? null,
+            seat_angles: source.seat_angles ?? null,
             sort_order: tables.length,
             ...(diningAreaId ? { area_id: diningAreaId } : {}),
           }),
@@ -712,14 +1089,27 @@ export function FloorPlanEditor({ className, embedded = false, onLayoutSaved, di
         if (res.ok) {
           const { table } = await res.json();
           setTables((prev) => [...prev, table]);
-          setSelectedIds([table.id]);
+          if (opts?.select ?? true) setSelectedIds([table.id]);
+          return table as VenueTable;
         }
       } catch (err) {
         console.error('Failed to duplicate table:', err);
       }
+      return null;
     },
     [tables, diningAreaId],
   );
+
+  /** Duplicate every currently selected table (used by Ctrl/Cmd+D and Alt-drag). */
+  const duplicateSelected = useCallback(async () => {
+    if (selectedIds.length === 0) return;
+    const created: string[] = [];
+    for (const id of selectedIds) {
+      const t = await handleDuplicateTable(id, { offsetX: 3, offsetY: 3, select: false });
+      if (t) created.push(t.id);
+    }
+    if (created.length > 0) setSelectedIds(created);
+  }, [selectedIds, handleDuplicateTable]);
 
   // ---------------------------------------------------------------------------
   // Inline property editing
@@ -994,29 +1384,113 @@ export function FloorPlanEditor({ className, embedded = false, onLayoutSaved, di
   );
 
   // ---------------------------------------------------------------------------
-  // Keyboard delete
+  // Keyboard shortcuts
   // ---------------------------------------------------------------------------
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key !== 'Delete' && e.key !== 'Backspace') return;
-      const target = e.target as HTMLElement;
+      const target = e.target as HTMLElement | null;
+      // Ignore when typing in form controls.
       if (
-        target.tagName === 'INPUT' ||
-        target.tagName === 'TEXTAREA' ||
-        target.isContentEditable
-      ) return;
-      if (selectedIds.length === 1) {
-        handleDeleteTable(selectedIds[0]!);
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+
+      const mod = e.ctrlKey || e.metaKey;
+
+      // Undo / redo
+      if (mod && !e.shiftKey && e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        performUndo();
+        return;
+      }
+      if (
+        (mod && e.shiftKey && e.key.toLowerCase() === 'z') ||
+        (mod && e.key.toLowerCase() === 'y')
+      ) {
+        e.preventDefault();
+        performRedo();
+        return;
+      }
+
+      // Duplicate selected (Ctrl/Cmd+D)
+      if (mod && e.key.toLowerCase() === 'd' && selectedIds.length > 0) {
+        e.preventDefault();
+        duplicateSelected();
+        return;
+      }
+
+      // Select all (Ctrl/Cmd+A)
+      if (mod && e.key.toLowerCase() === 'a') {
+        e.preventDefault();
+        setSelectedIds(tables.map((t) => t.id));
+        return;
+      }
+
+      // Delete selected
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        if (selectedIds.length > 0) {
+          e.preventDefault();
+          deleteSelected();
+        }
+        return;
+      }
+
+      // Arrow-key nudge
+      if (
+        selectedIds.length > 0 &&
+        (e.key === 'ArrowUp' ||
+          e.key === 'ArrowDown' ||
+          e.key === 'ArrowLeft' ||
+          e.key === 'ArrowRight')
+      ) {
+        e.preventDefault();
+        const step = e.shiftKey ? NUDGE_BIG_STEP_PCT : NUDGE_STEP_PCT;
+        const dx =
+          e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0;
+        const dy =
+          e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0;
+        nudgeSelected(dx, dy);
+        return;
+      }
+
+      // Escape to deselect (but not while polygon drawing — KonvaCanvas handles that)
+      if (e.key === 'Escape' && !polygonDrawPending && selectedIds.length > 0) {
+        setSelectedIds([]);
+        return;
+      }
+
+      // Show shortcuts
+      if (e.key === '?' && e.shiftKey) {
+        e.preventDefault();
+        setShowShortcuts((v) => !v);
+        return;
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedIds, handleDeleteTable]);
+  }, [
+    selectedIds,
+    tables,
+    deleteSelected,
+    duplicateSelected,
+    nudgeSelected,
+    performUndo,
+    performRedo,
+    polygonDrawPending,
+  ]);
 
   // ---------------------------------------------------------------------------
   // Canvas drag-and-drop (from elements panel)
   // ---------------------------------------------------------------------------
+
+  /** Populated by KonvaCanvas so drop coordinates stay accurate under pan/zoom. */
+  const stageViewRef = useRef<{ scale: number; x: number; y: number }>({ scale: 1, x: 0, y: 0 });
 
   const handleCanvasDrop = useCallback(
     (e: React.DragEvent<HTMLDivElement>) => {
@@ -1032,11 +1506,17 @@ export function FloorPlanEditor({ className, embedded = false, onLayoutSaved, di
       const wrapper = canvasWrapperRef.current;
       if (!wrapper) return;
       const rect = wrapper.getBoundingClientRect();
-      const pctX = Math.max(5, Math.min(95, ((e.clientX - rect.left) / rect.width) * 100));
-      const pctY = Math.max(5, Math.min(95, ((e.clientY - rect.top) / rect.height) * 100));
+      const viewX = e.clientX - rect.left;
+      const viewY = e.clientY - rect.top;
+      // Convert viewport point → layout point (accounts for pan & zoom).
+      const view = stageViewRef.current;
+      const layoutX = (viewX - view.x) / view.scale;
+      const layoutY = (viewY - view.y) / view.scale;
+      const pctX = Math.max(5, Math.min(95, (layoutX / canvasDims.width) * 100));
+      const pctY = Math.max(5, Math.min(95, (layoutY / canvasDims.height) * 100));
       handleCreateTable(shape, pctX, pctY);
     },
-    [handleCreateTable],
+    [handleCreateTable, canvasDims.width, canvasDims.height],
   );
 
   const handlePolygonCreate = useCallback(
@@ -1280,47 +1760,76 @@ export function FloorPlanEditor({ className, embedded = false, onLayoutSaved, di
 
         <div className="mx-1 h-4 w-px bg-slate-200" />
 
-        <span className={`text-xs font-medium ${
-          saveStatus === 'saving' ? 'text-amber-600' : saveStatus === 'saved' ? 'text-green-600' : 'text-slate-400'
-        }`}>
-          {saveStatus === 'saving' ? 'Saving…' : saveStatus === 'saved' ? 'Saved' : ''}
-        </span>
+        {/* Undo / redo */}
+        <button
+          type="button"
+          onClick={performUndo}
+          disabled={!canUndo}
+          className="rounded border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40"
+          title="Undo (Ctrl+Z)"
+          aria-label="Undo"
+        >
+          ↶
+        </button>
+        <button
+          type="button"
+          onClick={performRedo}
+          disabled={!canRedo}
+          className="rounded border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40"
+          title="Redo (Ctrl+Shift+Z)"
+          aria-label="Redo"
+        >
+          ↷
+        </button>
+
+        <div className="mx-1 h-4 w-px bg-slate-200" />
+
+        <SaveStatusPill status={saveStatus} onRetry={retrySaveNow} />
 
         <div className="flex-1" />
 
-        {/* Layout size controls */}
+        {/* Layout size controls (commit on blur / Enter, not every keystroke) */}
         <div className="hidden lg:flex items-center gap-1.5 rounded border border-slate-200 bg-white px-2 py-1">
           <span className="text-[10px] font-medium text-slate-500">Layout</span>
-          <NumericInput
+          <LayoutSizeInput
+            value={Math.round(layoutWidth ?? canvasDims.width)}
             min={1600}
             max={12000}
-            value={Math.round(layoutWidth ?? canvasDims.width)}
-            onChange={(v) => {
+            onCommit={(v) => {
               handleLayoutResize(v, Math.round(layoutHeight ?? canvasDims.height));
-              setTimeout(handleLayoutResizeEnd, 0);
+              handleLayoutResizeEnd();
             }}
-            className="w-20 rounded border border-slate-200 px-1.5 py-0.5 text-[10px] text-slate-600 focus:border-brand-400 focus:outline-none"
-            title="Canvas width in pixels"
+            title="Canvas width in pixels — press Enter to apply"
           />
           <span className="text-[10px] text-slate-400">×</span>
-          <NumericInput
+          <LayoutSizeInput
+            value={Math.round(layoutHeight ?? canvasDims.height)}
             min={1200}
             max={9000}
-            value={Math.round(layoutHeight ?? canvasDims.height)}
-            onChange={(v) => {
+            onCommit={(v) => {
               handleLayoutResize(Math.round(layoutWidth ?? canvasDims.width), v);
-              setTimeout(handleLayoutResizeEnd, 0);
+              handleLayoutResizeEnd();
             }}
-            className="w-20 rounded border border-slate-200 px-1.5 py-0.5 text-[10px] text-slate-600 focus:border-brand-400 focus:outline-none"
-            title="Canvas height in pixels"
+            title="Canvas height in pixels — press Enter to apply"
           />
         </div>
 
         {/* Placement aid toggles */}
         <ToggleSwitch
-          label="Guides"
+          label="Snap to guides"
           checked={alignmentGuidesEnabled}
           onChange={() => setAlignmentGuidesEnabled((v) => !v)}
+          title="Alignment guides always appear while dragging; toggle this to snap to them"
+        />
+        <ToggleSwitch
+          label="Grid"
+          checked={showGrid}
+          onChange={() => setShowGrid((v) => !v)}
+        />
+        <ToggleSwitch
+          label="Snap"
+          checked={gridSnapEnabled}
+          onChange={() => setGridSnapEnabled((v) => !v)}
         />
         <div className="mx-1 h-4 w-px bg-slate-200" />
 
@@ -1334,7 +1843,7 @@ export function FloorPlanEditor({ className, embedded = false, onLayoutSaved, di
         <button
           onClick={snapToGrid}
           className="rounded border border-slate-200 px-2.5 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50"
-          title="Snap all tables to a uniform grid"
+          title="Snap all tables to the 2% grid"
         >
           Snap Grid
         </button>
@@ -1384,7 +1893,20 @@ export function FloorPlanEditor({ className, embedded = false, onLayoutSaved, di
             × Background
           </button>
         )}
+
+        <div className="mx-1 h-4 w-px bg-slate-200" />
+        <button
+          type="button"
+          onClick={() => setShowShortcuts(true)}
+          className="rounded border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-500 hover:bg-slate-50"
+          title="Keyboard shortcuts (?)"
+          aria-label="Keyboard shortcuts"
+        >
+          ?
+        </button>
       </div>
+
+      {showShortcuts && <ShortcutsModal onClose={() => setShowShortcuts(false)} />}
 
       {/* ── Three-column body ── */}
       <div className="flex min-h-0 flex-1 overflow-hidden">
@@ -1392,19 +1914,47 @@ export function FloorPlanEditor({ className, embedded = false, onLayoutSaved, di
         {/* Left: Elements Panel */}
         <div className="w-36 shrink-0 border-r border-slate-200 bg-slate-50 overflow-y-auto p-3">
           <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Elements</p>
-          <p className="mb-3 text-[9px] text-slate-400 leading-relaxed">Drag a shape onto the canvas to create a table</p>
+          <p className="mb-3 text-[9px] text-slate-400 leading-relaxed">
+            Drag a shape onto the canvas. Click <span className="font-medium text-slate-500">Custom</span> to draw
+            vertices on the canvas.
+          </p>
           <div className="space-y-1.5">
-            {SHAPE_OPTIONS.map(({ shape, label }) => (
-              <div
-                key={shape}
-                draggable
-                onDragStart={(e) => e.dataTransfer.setData('shape', shape)}
-                className="flex cursor-grab items-center gap-2 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs text-slate-700 shadow-sm hover:border-brand-300 hover:bg-brand-50 active:cursor-grabbing select-none"
-              >
-                <ShapeIcon shape={shape} size={26} />
-                <span className="font-medium">{label}</span>
-              </div>
-            ))}
+            {SHAPE_OPTIONS.map(({ shape, label }) => {
+              const isPolygon = shape === 'polygon';
+              const startPolygonDraw = () => {
+                setPolygonEditTableId(null);
+                setPolygonDrawPending(true);
+              };
+              return (
+                <div
+                  key={shape}
+                  draggable={!isPolygon}
+                  onDragStart={
+                    isPolygon ? undefined : (e) => e.dataTransfer.setData('shape', shape)
+                  }
+                  onClick={isPolygon ? startPolygonDraw : undefined}
+                  role={isPolygon ? 'button' : undefined}
+                  tabIndex={isPolygon ? 0 : undefined}
+                  onKeyDown={
+                    isPolygon
+                      ? (e) => {
+                          if (e.key !== 'Enter' && e.key !== ' ') return;
+                          e.preventDefault();
+                          startPolygonDraw();
+                        }
+                      : undefined
+                  }
+                  className={`flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs text-slate-700 shadow-sm hover:border-brand-300 hover:bg-brand-50 select-none ${
+                    isPolygon
+                      ? 'cursor-pointer active:opacity-90'
+                      : 'cursor-grab active:cursor-grabbing'
+                  }`}
+                >
+                  <ShapeIcon shape={shape} size={26} />
+                  <span className="min-w-0 flex-1 font-medium leading-snug">{label}</span>
+                </div>
+              );
+            })}
           </div>
         </div>
 
@@ -1428,12 +1978,16 @@ export function FloorPlanEditor({ className, embedded = false, onLayoutSaved, di
             combinationLinks={combinations}
             showCombinationLinkLines={!embedded}
             alignmentGuidesEnabled={alignmentGuidesEnabled}
+            showGrid={showGrid}
+            gridStepPct={GRID_STEP_PCT}
             layoutWidth={layoutWidth}
             layoutHeight={layoutHeight}
             onLayoutResize={handleLayoutResize}
             onLayoutResizeEnd={handleLayoutResizeEnd}
             onSeatDrag={handleSeatDrag}
             onSeatDragEnd={handleSeatDragEnd}
+            onPolygonVertexDrag={handlePolygonVertexDrag}
+            onPolygonVertexDragEnd={handlePolygonVertexDragEnd}
             polygonDrawPending={polygonDrawPending}
             onPolygonCreate={handlePolygonCreate}
             onPolygonDrawCancel={() => {
@@ -1441,6 +1995,10 @@ export function FloorPlanEditor({ className, embedded = false, onLayoutSaved, di
               setPolygonEditTableId(null);
             }}
             onDimensionsChange={setCanvasDims}
+            onStageView={(v) => { stageViewRef.current = v; }}
+            onAltDragDuplicate={(id) =>
+              handleDuplicateTable(id, { offsetX: 0, offsetY: 0, select: true })
+            }
           />
         </div>
 
@@ -1449,17 +2007,103 @@ export function FloorPlanEditor({ className, embedded = false, onLayoutSaved, di
           {selectedIds.length >= 2 ? (
             /* Multi-selection */
             <div className="p-4 space-y-4">
-              <div className="rounded-xl border border-purple-200 bg-purple-50 p-4">
-                <h3 className="mb-2 text-sm font-semibold text-purple-900">
-                  {selectedIds.length} Tables Selected
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-semibold text-slate-900">
+                  {selectedIds.length} Tables
                 </h3>
-                <p className="mb-3 text-xs text-purple-600">
-                  {tables.filter((t) => selectedIds.includes(t.id)).map((t) => t.name).join(', ')}
+                <button
+                  onClick={() => setSelectedIds([])}
+                  className="rounded p-0.5 text-slate-400 hover:text-slate-600"
+                  title="Deselect"
+                >
+                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+              <p className="text-xs text-slate-500 line-clamp-2">
+                {tables.filter((t) => selectedIds.includes(t.id)).map((t) => t.name).join(', ')}
+              </p>
+
+              {/* Align */}
+              <div>
+                <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                  Align
+                </p>
+                <div className="grid grid-cols-6 gap-1">
+                  <AlignButton title="Align left edges" onClick={() => alignSelected('left')}>
+                    <AlignIcon dir="left" />
+                  </AlignButton>
+                  <AlignButton title="Align horizontal centres" onClick={() => alignSelected('hcenter')}>
+                    <AlignIcon dir="hcenter" />
+                  </AlignButton>
+                  <AlignButton title="Align right edges" onClick={() => alignSelected('right')}>
+                    <AlignIcon dir="right" />
+                  </AlignButton>
+                  <AlignButton title="Align top edges" onClick={() => alignSelected('top')}>
+                    <AlignIcon dir="top" />
+                  </AlignButton>
+                  <AlignButton title="Align vertical centres" onClick={() => alignSelected('vcenter')}>
+                    <AlignIcon dir="vcenter" />
+                  </AlignButton>
+                  <AlignButton title="Align bottom edges" onClick={() => alignSelected('bottom')}>
+                    <AlignIcon dir="bottom" />
+                  </AlignButton>
+                </div>
+              </div>
+
+              {/* Distribute (needs 3+) */}
+              {selectedIds.length >= 3 && (
+                <div>
+                  <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                    Distribute
+                  </p>
+                  <div className="grid grid-cols-2 gap-1">
+                    <button
+                      onClick={() => distributeSelected('horizontal')}
+                      className="rounded border border-slate-200 bg-white px-2 py-1.5 text-[11px] font-medium text-slate-600 hover:bg-slate-50"
+                      title="Distribute horizontal spacing"
+                    >
+                      ↔ Horizontal
+                    </button>
+                    <button
+                      onClick={() => distributeSelected('vertical')}
+                      className="rounded border border-slate-200 bg-white px-2 py-1.5 text-[11px] font-medium text-slate-600 hover:bg-slate-50"
+                      title="Distribute vertical spacing"
+                    >
+                      ↕ Vertical
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Actions */}
+              <div className="flex gap-2">
+                <button
+                  onClick={duplicateSelected}
+                  className="flex-1 rounded-lg border border-slate-300 px-2 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                  title="Duplicate selection (Ctrl+D)"
+                >
+                  Duplicate
+                </button>
+                <button
+                  onClick={deleteSelected}
+                  className="flex-1 rounded-lg border border-red-200 px-2 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50"
+                  title="Delete selection (Del)"
+                >
+                  Delete
+                </button>
+              </div>
+
+              {/* Combine */}
+              <div className="rounded-xl border border-purple-200 bg-purple-50 p-3">
+                <p className="mb-2 text-[11px] font-medium text-purple-700">
+                  Link these tables so they can be booked together:
                 </p>
                 <button
                   onClick={createCombination}
                   disabled={comboSaving}
-                  className="w-full rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-brand-700 disabled:opacity-50"
+                  className="w-full rounded-lg bg-brand-600 px-3 py-2 text-xs font-medium text-white shadow-sm hover:bg-brand-700 disabled:opacity-50"
                 >
                   {comboSaving ? 'Linking…' : 'Link as Combination'}
                 </button>
@@ -1578,11 +2222,20 @@ export function FloorPlanEditor({ className, embedded = false, onLayoutSaved, di
                     value={selected.rotation ?? 0}
                     onChange={(e) => handleTableRotate(selected.id, parseInt(e.target.value))}
                     className="flex-1"
+                    title="Drag to rotate · hold Shift on the stage rotation handle for 1° steps"
                   />
-                  <span className="w-10 text-right text-xs text-slate-600">{selected.rotation ?? 0}°</span>
+                  <NumericInput
+                    min={0}
+                    max={359}
+                    value={Math.round(selected.rotation ?? 0)}
+                    onChange={(v) => handleTableRotate(selected.id, ((v % 360) + 360) % 360)}
+                    className="w-12 rounded border border-slate-300 px-1 py-0.5 text-xs text-right text-slate-600 focus:border-brand-400 focus:outline-none"
+                    title="Precise rotation in degrees"
+                  />
+                  <span className="text-xs text-slate-500">°</span>
                 </div>
                 <div className="mt-1.5 flex flex-wrap gap-1">
-                  {[0, 45, 90, 135, 180, 270].map((deg) => (
+                  {[0, 45, 90, 135, 180, 225, 270, 315].map((deg) => (
                     <button
                       key={deg}
                       onClick={() => handleTableRotate(selected.id, deg)}
@@ -1598,20 +2251,43 @@ export function FloorPlanEditor({ className, embedded = false, onLayoutSaved, di
                 </div>
               </div>
 
+              {selected.max_covers > 0 && (
+                <div>
+                  <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
+                    Chairs
+                  </label>
+                  <ToggleSwitch
+                    label="Even spacing around table"
+                    checked={!tableHasCustomSeatAngles(selected)}
+                    onChange={() => {
+                      if (tableHasCustomSeatAngles(selected)) {
+                        resetSeatAnglesToEven(selected.id);
+                      }
+                    }}
+                  />
+                  <p className="mt-1.5 text-[10px] text-slate-400 leading-relaxed">
+                    Drag a chair on the canvas to fine-tune. Turn this on to reset to the automatic layout.
+                  </p>
+                </div>
+              )}
+
               {/* Size */}
               <div>
                 <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
                   Size
                 </label>
                 <div className="space-y-1.5">
-                  {selected.shape === 'circle' ? (
-                    /* Circle: single Diameter slider — keeps W = H */
+                  {selected.shape === 'circle' || selected.shape === 'square' ? (
+                    /* Single size slider — W always equals H */
                     (() => {
                       const fallback = getTableDimensions(selected.max_covers, selected.shape);
                       const val = selected.width ?? fallback.width;
+                      const isCircle = selected.shape === 'circle';
                       return (
                         <div className="flex items-center gap-2">
-                          <span className="w-5 text-[10px] text-slate-500 uppercase">⌀</span>
+                          <span className="w-5 text-[10px] text-slate-500 uppercase">
+                            {isCircle ? '⌀' : '□'}
+                          </span>
                           <input
                             type="range"
                             min={4}
@@ -1623,13 +2299,14 @@ export function FloorPlanEditor({ className, embedded = false, onLayoutSaved, di
                               handleTableResize(selected.id, v, v);
                             }}
                             className="flex-1"
+                            title={isCircle ? 'Diameter' : 'Side length'}
                           />
                           <span className="w-8 text-right text-[10px] text-slate-600">{val.toFixed(1)}</span>
                         </div>
                       );
                     })()
                   ) : (
-                    /* Oval, rectangle, square, polygon fallback: separate W / H sliders */
+                    /* Oval, rectangle, polygon fallback: separate W / H sliders */
                     (['width', 'height'] as const).map((dim) => {
                       const fallback = getTableDimensions(selected.max_covers, selected.shape);
                       const val = selected[dim] ?? fallback[dim];
@@ -1667,7 +2344,8 @@ export function FloorPlanEditor({ className, embedded = false, onLayoutSaved, di
                     Custom shape · {selected.polygon_points?.length ?? 0} vertices
                   </p>
                   <p className="text-[10px] text-slate-500">
-                    Drag the table to move it. Use reset to redraw the polygon while keeping the same table.
+                    With the table selected on the layout, drag any blue vertex on the outline to reshape it. Drag
+                    the table to move it. Use reset to redraw the polygon while keeping the same table.
                   </p>
                   <button
                     type="button"
@@ -1779,12 +2457,13 @@ export function FloorPlanEditor({ className, embedded = false, onLayoutSaved, di
               <div className="px-3 py-3">
                 <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Tips</p>
                 <ul className="space-y-0.5 text-[10px] text-slate-400 leading-relaxed">
-                  <li>• Drag shapes from the Elements panel to add tables</li>
-                  <li>• Shift+click to select multiple tables</li>
-                  <li>• Delete key removes the selected table</li>
-                  <li>• Scroll to zoom, drag empty area to pan</li>
+                  <li>• Drag shapes from Elements to add tables</li>
+                  <li>• Shift+click or shift-drag a box to multi-select</li>
+                  <li>• Arrow keys nudge · Shift+Arrow for 10×</li>
+                  <li>• Ctrl+Z undo · Ctrl+Shift+Z redo · Ctrl+D duplicate</li>
+                  <li>• Scroll to zoom · Space or middle-click to pan</li>
                   {!embedded && <li>• Purple lines show linked combinations</li>}
-                  <li>• Use toolbar buttons to rotate the whole layout</li>
+                  <li>• Press ? to see all shortcuts</li>
                 </ul>
               </div>
             </div>
@@ -1799,9 +2478,225 @@ export function FloorPlanEditor({ className, embedded = false, onLayoutSaved, di
 // Small sub-components
 // ---------------------------------------------------------------------------
 
-function ToggleSwitch({ label, checked, onChange }: { label: string; checked: boolean; onChange: () => void }) {
+/** Numeric layout-size input that only commits on Enter / blur — avoids resize
+ * thrash while typing multi-digit values like 2400. */
+function LayoutSizeInput({
+  value,
+  min,
+  max,
+  onCommit,
+  title,
+}: {
+  value: number;
+  min: number;
+  max: number;
+  onCommit: (v: number) => void;
+  title?: string;
+}) {
+  const [text, setText] = useState(String(value));
+  useEffect(() => {
+    setText(String(value));
+  }, [value]);
+  const commit = () => {
+    const n = Number(text);
+    if (!Number.isFinite(n)) {
+      setText(String(value));
+      return;
+    }
+    const clamped = Math.max(min, Math.min(max, Math.round(n)));
+    setText(String(clamped));
+    if (clamped !== value) onCommit(clamped);
+  };
   return (
-    <label className="flex cursor-pointer items-center gap-1.5 text-xs text-slate-600">
+    <input
+      type="number"
+      inputMode="numeric"
+      value={text}
+      min={min}
+      max={max}
+      onChange={(e) => setText(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          commit();
+          (e.target as HTMLInputElement).blur();
+        }
+        if (e.key === 'Escape') {
+          setText(String(value));
+          (e.target as HTMLInputElement).blur();
+        }
+      }}
+      className="w-20 rounded border border-slate-200 px-1.5 py-0.5 text-[10px] text-slate-600 focus:border-brand-400 focus:outline-none"
+      title={title}
+    />
+  );
+}
+
+function SaveStatusPill({
+  status,
+  onRetry,
+}: {
+  status: 'idle' | 'saving' | 'saved' | 'error';
+  onRetry: () => void;
+}) {
+  if (status === 'error') {
+    return (
+      <button
+        type="button"
+        onClick={onRetry}
+        className="rounded border border-red-300 bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700 hover:bg-red-100"
+        title="Changes failed to save — click to retry"
+      >
+        Retry save
+      </button>
+    );
+  }
+  return (
+    <span
+      className={`text-xs font-medium ${
+        status === 'saving'
+          ? 'text-amber-600'
+          : status === 'saved'
+            ? 'text-green-600'
+            : 'text-slate-400'
+      }`}
+    >
+      {status === 'saving' ? 'Saving…' : status === 'saved' ? 'Saved' : ''}
+    </span>
+  );
+}
+
+function AlignButton({
+  title,
+  onClick,
+  children,
+}: {
+  title: string;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      aria-label={title}
+      className="flex h-7 items-center justify-center rounded border border-slate-200 bg-white text-slate-500 hover:border-brand-300 hover:bg-brand-50 hover:text-brand-700"
+    >
+      {children}
+    </button>
+  );
+}
+
+function AlignIcon({ dir }: { dir: 'left' | 'right' | 'top' | 'bottom' | 'hcenter' | 'vcenter' }) {
+  // Simple inline SVGs for align icons — edges are the heavy line; shapes hint at grouping.
+  const stroke = 'currentColor';
+  return (
+    <svg width={16} height={16} viewBox="0 0 16 16" fill="none" stroke={stroke} strokeWidth={1.4} strokeLinecap="round">
+      {dir === 'left' && (<>
+        <line x1="2" y1="2" x2="2" y2="14" strokeWidth={2} />
+        <rect x="2" y="4" width="8" height="3" rx="0.5" />
+        <rect x="2" y="9" width="11" height="3" rx="0.5" />
+      </>)}
+      {dir === 'right' && (<>
+        <line x1="14" y1="2" x2="14" y2="14" strokeWidth={2} />
+        <rect x="6" y="4" width="8" height="3" rx="0.5" />
+        <rect x="3" y="9" width="11" height="3" rx="0.5" />
+      </>)}
+      {dir === 'hcenter' && (<>
+        <line x1="8" y1="2" x2="8" y2="14" strokeWidth={2} strokeDasharray="2 2" />
+        <rect x="4" y="4" width="8" height="3" rx="0.5" />
+        <rect x="2.5" y="9" width="11" height="3" rx="0.5" />
+      </>)}
+      {dir === 'top' && (<>
+        <line x1="2" y1="2" x2="14" y2="2" strokeWidth={2} />
+        <rect x="4" y="2" width="3" height="8" rx="0.5" />
+        <rect x="9" y="2" width="3" height="11" rx="0.5" />
+      </>)}
+      {dir === 'bottom' && (<>
+        <line x1="2" y1="14" x2="14" y2="14" strokeWidth={2} />
+        <rect x="4" y="6" width="3" height="8" rx="0.5" />
+        <rect x="9" y="3" width="3" height="11" rx="0.5" />
+      </>)}
+      {dir === 'vcenter' && (<>
+        <line x1="2" y1="8" x2="14" y2="8" strokeWidth={2} strokeDasharray="2 2" />
+        <rect x="4" y="4" width="3" height="8" rx="0.5" />
+        <rect x="9" y="2.5" width="3" height="11" rx="0.5" />
+      </>)}
+    </svg>
+  );
+}
+
+function ShortcutsModal({ onClose }: { onClose: () => void }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  const rows: [string, string][] = [
+    ['Undo / Redo', 'Ctrl+Z  ·  Ctrl+Shift+Z (or Ctrl+Y)'],
+    ['Duplicate selection', 'Ctrl+D  ·  Alt-drag a table'],
+    ['Select all tables', 'Ctrl+A'],
+    ['Delete selection', 'Del or Backspace'],
+    ['Nudge selection', 'Arrow keys  ·  Shift+Arrow = 10×'],
+    ['Multi-select', 'Shift-click  ·  Shift-drag a box'],
+    ['Pan the canvas', 'Space-drag  ·  Middle-mouse drag  ·  Drag empty area'],
+    ['Zoom', 'Scroll wheel  ·  + / − buttons'],
+    ['Rotate selected table', 'Drag the rotation handle on the stage'],
+    ['Draw a custom polygon', 'Click Custom, then tap to add points, double-tap to close'],
+    ['Cancel / deselect', 'Escape'],
+    ['Show this help', 'Shift + ?'],
+  ];
+
+  return (
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/40 backdrop-blur-sm"
+      role="dialog"
+      aria-modal="true"
+      onClick={onClose}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="w-[min(480px,92vw)] max-h-[80vh] overflow-y-auto rounded-2xl border border-slate-200 bg-white shadow-2xl"
+      >
+        <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3">
+          <h2 className="text-sm font-semibold text-slate-900">Keyboard Shortcuts</h2>
+          <button
+            onClick={onClose}
+            className="rounded p-1 text-slate-400 hover:text-slate-700"
+            aria-label="Close"
+          >
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+        <dl className="divide-y divide-slate-100">
+          {rows.map(([label, keys]) => (
+            <div key={label} className="flex items-center justify-between gap-4 px-5 py-2.5 text-xs">
+              <dt className="text-slate-600">{label}</dt>
+              <dd className="font-mono text-[11px] text-slate-500">{keys}</dd>
+            </div>
+          ))}
+        </dl>
+      </div>
+    </div>
+  );
+}
+
+function tableHasCustomSeatAngles(table: VenueTable): boolean {
+  const sa = table.seat_angles;
+  if (!sa?.length) return false;
+  return sa.some((a) => a != null);
+}
+
+function ToggleSwitch({ label, checked, onChange, title }: { label: string; checked: boolean; onChange: () => void; title?: string }) {
+  return (
+    <label className="flex cursor-pointer items-center gap-1.5 text-xs text-slate-600" title={title}>
       <button
         type="button"
         role="switch"

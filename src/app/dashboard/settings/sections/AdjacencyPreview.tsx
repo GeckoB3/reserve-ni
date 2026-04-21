@@ -33,6 +33,63 @@ function toCombinationTable(t: VenueTable): CombinationTable {
   };
 }
 
+/**
+ * Real floor-plan geometry for a table: centre (position_x/y), size (width/height
+ * as layout-percentage units), rotation, and shape. This matches how the Layout
+ * tab renders tables, so the preview looks like the floor plan rather than the
+ * combination engine's internal axis-aligned box convention.
+ */
+interface TableGeom {
+  id: string;
+  name: string;
+  shape: string;
+  cx: number;
+  cy: number;
+  w: number;
+  h: number;
+  rotation: number;
+  /** AABB of the rotated shape centered on (cx, cy). Used only for layout/viewBox. */
+  aabb: { left: number; right: number; top: number; bottom: number };
+  /** Optional polygon points (percentage 0–100 within the table's local box). */
+  polygonPoints: { x: number; y: number }[] | null;
+}
+
+function computeAabb(cx: number, cy: number, w: number, h: number, rotation: number) {
+  const rad = (rotation * Math.PI) / 180;
+  const cos = Math.abs(Math.cos(rad));
+  const sin = Math.abs(Math.sin(rad));
+  const halfW = (w * cos + h * sin) / 2;
+  const halfH = (w * sin + h * cos) / 2;
+  return {
+    left: cx - halfW,
+    right: cx + halfW,
+    top: cy - halfH,
+    bottom: cy + halfH,
+  };
+}
+
+function toTableGeom(t: VenueTable): TableGeom {
+  const dims = getTableDimensions(t.max_covers, t.shape);
+  const w = t.width ?? dims.width;
+  const h = t.height ?? dims.height;
+  const cx = t.position_x ?? 50;
+  const cy = t.position_y ?? 50;
+  const rotation = t.rotation ?? 0;
+  const polygonPoints = Array.isArray(t.polygon_points) ? t.polygon_points : null;
+  return {
+    id: t.id,
+    name: t.name,
+    shape: t.shape,
+    cx,
+    cy,
+    w,
+    h,
+    rotation,
+    aabb: computeAabb(cx, cy, w, h, rotation),
+    polygonPoints,
+  };
+}
+
 export function AdjacencyPreview({ threshold, refreshKey = 0, diningAreaId }: Props) {
   const [tables, setTables] = useState<VenueTable[]>([]);
   const [loading, setLoading] = useState(true);
@@ -84,6 +141,13 @@ export function AdjacencyPreview({ threshold, refreshKey = 0, diningAreaId }: Pr
     [tables],
   );
 
+  const geomTables = useMemo(() => tables.map(toTableGeom), [tables]);
+  const geomById = useMemo(() => {
+    const m = new Map<string, TableGeom>();
+    for (const g of geomTables) m.set(g.id, g);
+    return m;
+  }, [geomTables]);
+
   /** Same pairwise rule as {@link detectAdjacentTables}: gap ≤ threshold and same row or column (not diagonal-only). */
   const adjacentIds = useMemo(() => {
     if (!selectedId) return new Set<string>();
@@ -101,35 +165,27 @@ export function AdjacencyPreview({ threshold, refreshKey = 0, diningAreaId }: Pr
     return result;
   }, [selectedId, comboTables, threshold]);
 
-  const selectedTable = useMemo(
-    () => comboTables.find((t) => t.id === selectedId) ?? null,
-    [selectedId, comboTables],
+  const selectedGeom = useMemo(
+    () => (selectedId ? geomById.get(selectedId) ?? null : null),
+    [selectedId, geomById],
   );
 
-  const selectedCenter = useMemo(() => {
-    if (!selectedTable) return null;
-    const box = getRotatedBoundingBox(selectedTable);
-    return {
-      cx: (box.left + box.right) / 2,
-      cy: (box.top + box.bottom) / 2,
-    };
-  }, [selectedTable]);
-
-  // Compute a tight viewBox around all table bounding boxes so the diagram is
-  // centred in the SVG regardless of where tables are positioned on the canvas.
+  // Compute a tight viewBox around all rendered shapes (centered at position_x/y)
+  // so the diagram is centred in the SVG regardless of where tables sit on the canvas.
   const viewBox = useMemo(() => {
-    if (comboTables.length === 0) return '0 0 100 100';
+    if (geomTables.length === 0) return '0 0 100 100';
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    for (const t of comboTables) {
-      const b = getRotatedBoundingBox(t);
-      if (b.left < minX) minX = b.left;
-      if (b.top < minY) minY = b.top;
-      if (b.right > maxX) maxX = b.right;
-      if (b.bottom > maxY) maxY = b.bottom;
+    for (const g of geomTables) {
+      if (g.aabb.left < minX) minX = g.aabb.left;
+      if (g.aabb.top < minY) minY = g.aabb.top;
+      if (g.aabb.right > maxX) maxX = g.aabb.right;
+      if (g.aabb.bottom > maxY) maxY = g.aabb.bottom;
     }
-    const pad = Math.max((maxX - minX), (maxY - minY)) * 0.12 + 10;
-    return `${minX - pad} ${minY - pad} ${maxX - minX + pad * 2} ${maxY - minY + pad * 2}`;
-  }, [comboTables]);
+    const spanX = maxX - minX;
+    const spanY = maxY - minY;
+    const pad = Math.max(spanX, spanY) * 0.14 + 6;
+    return `${minX - pad} ${minY - pad} ${spanX + pad * 2} ${spanY + pad * 2}`;
+  }, [geomTables]);
 
   const viewBoxRect = useMemo(() => {
     const parts = viewBox.split(/\s+/).map(Number);
@@ -138,6 +194,12 @@ export function AdjacencyPreview({ threshold, refreshKey = 0, diningAreaId }: Pr
     }
     return { x: parts[0]!, y: parts[1]!, w: parts[2]!, h: parts[3]! };
   }, [viewBox]);
+
+  /** SVG stroke width scaled to the viewBox so lines look consistent across zoom levels. */
+  const baseStroke = useMemo(
+    () => Math.max(0.25, Math.min(viewBoxRect.w, viewBoxRect.h) * 0.004),
+    [viewBoxRect.w, viewBoxRect.h],
+  );
 
   if (loading) {
     return (
@@ -177,39 +239,48 @@ export function AdjacencyPreview({ threshold, refreshKey = 0, diningAreaId }: Pr
       <svg
         viewBox={viewBox}
         className="w-full rounded-lg border border-slate-200 bg-white"
-        style={{ maxHeight: 300 }}
+        style={{ maxHeight: 320 }}
         onClick={() => setSelectedId(null)}
       >
-        {selectedCenter && (
+        <defs>
+          <filter id="adj-preview-shadow" x="-20%" y="-20%" width="140%" height="140%">
+            <feDropShadow
+              dx="0"
+              dy={baseStroke * 0.8}
+              stdDeviation={baseStroke * 0.6}
+              floodColor="#0f172a"
+              floodOpacity="0.12"
+            />
+          </filter>
+        </defs>
+
+        {selectedGeom && (
           <g pointerEvents="none">
             <line
               x1={viewBoxRect.x}
-              y1={selectedCenter.cy}
+              y1={selectedGeom.cy}
               x2={viewBoxRect.x + viewBoxRect.w}
-              y2={selectedCenter.cy}
+              y2={selectedGeom.cy}
               stroke="rgba(16, 185, 129, 0.45)"
-              strokeWidth={Math.max(0.15, viewBoxRect.w * 0.001)}
-              strokeDasharray="4 3"
+              strokeWidth={baseStroke}
+              strokeDasharray={`${baseStroke * 6} ${baseStroke * 4}`}
             />
             <line
-              x1={selectedCenter.cx}
+              x1={selectedGeom.cx}
               y1={viewBoxRect.y}
-              x2={selectedCenter.cx}
+              x2={selectedGeom.cx}
               y2={viewBoxRect.y + viewBoxRect.h}
               stroke="rgba(16, 185, 129, 0.45)"
-              strokeWidth={Math.max(0.15, viewBoxRect.w * 0.001)}
-              strokeDasharray="4 3"
+              strokeWidth={baseStroke}
+              strokeDasharray={`${baseStroke * 6} ${baseStroke * 4}`}
             />
           </g>
         )}
 
-        {comboTables.map((t) => {
-          const box = getRotatedBoundingBox(t);
-          const w = box.right - box.left;
-          const h = box.bottom - box.top;
-          const isSelected = t.id === selectedId;
-          const isAdjacent = adjacentIds.has(t.id);
-          const isHovered = t.id === hoveredId;
+        {geomTables.map((g) => {
+          const isSelected = g.id === selectedId;
+          const isAdjacent = adjacentIds.has(g.id);
+          const isHovered = g.id === hoveredId;
           const hasSelection = selectedId !== null;
 
           let fill = '#e2e8f0';
@@ -218,10 +289,10 @@ export function AdjacencyPreview({ threshold, refreshKey = 0, diningAreaId }: Pr
 
           if (hasSelection) {
             if (isSelected) {
-              fill = '#6366f1';
+              fill = '#c7d2fe';
               stroke = '#4338ca';
             } else if (isAdjacent) {
-              fill = '#34d399';
+              fill = '#bbf7d0';
               stroke = '#059669';
             } else {
               fill = '#f1f5f9';
@@ -229,59 +300,124 @@ export function AdjacencyPreview({ threshold, refreshKey = 0, diningAreaId }: Pr
               opacity = 0.5;
             }
           } else if (isHovered) {
-            fill = '#c7d2fe';
-            stroke = '#6366f1';
+            fill = '#dbeafe';
+            stroke = '#2563eb';
           }
 
-          const isCircular = tables.find((vt) => vt.id === t.id)?.shape === 'circle';
+          const strokeWidth = isSelected ? baseStroke * 2.2 : isHovered ? baseStroke * 1.6 : baseStroke * 1.1;
+          const textFill = hasSelection && !isSelected && !isAdjacent ? '#94a3b8' : '#1e293b';
+          const textWeight = isSelected || isAdjacent || isHovered ? 600 : 500;
+
+          const isCircle = g.shape === 'circle';
+          const isOval = g.shape === 'oval';
+          const isPolygon = g.shape === 'polygon' && g.polygonPoints && g.polygonPoints.length >= 3;
+          const isSquare = g.shape === 'square';
+
+          // Rotation around the table's actual centre.
+          const transform = g.rotation ? `rotate(${g.rotation} ${g.cx} ${g.cy})` : undefined;
+
+          // Fit label to the smaller of width/height so text stays inside the shape.
+          const labelSize = Math.min(g.w, g.h) * 0.32;
+          const labelStroke = Math.max(baseStroke * 0.6, labelSize * 0.04);
+
+          let shapeNode: React.ReactNode;
+          if (isCircle) {
+            const r = Math.min(g.w, g.h) / 2;
+            shapeNode = (
+              <circle
+                cx={g.cx}
+                cy={g.cy}
+                r={r}
+                fill={fill}
+                stroke={stroke}
+                strokeWidth={strokeWidth}
+                filter="url(#adj-preview-shadow)"
+              />
+            );
+          } else if (isOval) {
+            shapeNode = (
+              <ellipse
+                cx={g.cx}
+                cy={g.cy}
+                rx={g.w / 2}
+                ry={g.h / 2}
+                fill={fill}
+                stroke={stroke}
+                strokeWidth={strokeWidth}
+                filter="url(#adj-preview-shadow)"
+              />
+            );
+          } else if (isPolygon && g.polygonPoints) {
+            const pts = g.polygonPoints
+              .map((pt) => {
+                const px = g.cx + (pt.x / 100 - 0.5) * g.w;
+                const py = g.cy + (pt.y / 100 - 0.5) * g.h;
+                return `${px},${py}`;
+              })
+              .join(' ');
+            shapeNode = (
+              <polygon
+                points={pts}
+                fill={fill}
+                stroke={stroke}
+                strokeWidth={strokeWidth}
+                strokeLinejoin="round"
+                filter="url(#adj-preview-shadow)"
+              />
+            );
+          } else {
+            // rectangle / square / l-shape fallback
+            const radius = isSquare ? g.w * 0.08 : Math.min(g.w, g.h) * 0.08;
+            shapeNode = (
+              <rect
+                x={g.cx - g.w / 2}
+                y={g.cy - g.h / 2}
+                width={g.w}
+                height={g.h}
+                rx={radius}
+                ry={radius}
+                fill={fill}
+                stroke={stroke}
+                strokeWidth={strokeWidth}
+                filter="url(#adj-preview-shadow)"
+              />
+            );
+          }
 
           return (
             <g
-              key={t.id}
+              key={g.id}
               onClick={(e) => {
                 e.stopPropagation();
-                setSelectedId(isSelected ? null : t.id);
+                setSelectedId(isSelected ? null : g.id);
               }}
-              onMouseEnter={() => setHoveredId(t.id)}
+              onMouseEnter={() => setHoveredId(g.id)}
               onMouseLeave={() => setHoveredId(null)}
               style={{ cursor: 'pointer' }}
               opacity={opacity}
+              transform={transform}
             >
-              {isCircular ? (
-                <ellipse
-                  cx={box.left + w / 2}
-                  cy={box.top + h / 2}
-                  rx={w / 2}
-                  ry={h / 2}
-                  fill={fill}
-                  stroke={stroke}
-                  strokeWidth={isSelected || isHovered ? 0.5 : 0.3}
-                />
-              ) : (
-                <rect
-                  x={box.left}
-                  y={box.top}
-                  width={w}
-                  height={h}
-                  rx={0.6}
-                  ry={0.6}
-                  fill={fill}
-                  stroke={stroke}
-                  strokeWidth={isSelected || isHovered ? 0.5 : 0.3}
-                />
-              )}
-              <text
-                x={box.left + w / 2}
-                y={box.top + h / 2}
-                textAnchor="middle"
-                dominantBaseline="central"
-                fontSize={Math.min(w, h) * 0.45}
-                fill={isSelected ? '#fff' : '#334155'}
-                fontWeight={isSelected || isAdjacent ? 600 : 400}
-                pointerEvents="none"
-              >
-                {t.name}
-              </text>
+              {shapeNode}
+              {/* Label is counter-rotated so it stays horizontal even when the table is rotated. */}
+              <g transform={g.rotation ? `rotate(${-g.rotation} ${g.cx} ${g.cy})` : undefined}>
+                <text
+                  x={g.cx}
+                  y={g.cy}
+                  textAnchor="middle"
+                  dominantBaseline="central"
+                  fontSize={labelSize}
+                  fill={textFill}
+                  fontWeight={textWeight}
+                  stroke="#ffffff"
+                  strokeWidth={labelStroke}
+                  strokeLinejoin="round"
+                  paintOrder="stroke"
+                  pointerEvents="none"
+                  style={{ fontFamily: 'Inter, system-ui, sans-serif' }}
+                >
+                  {g.name}
+                </text>
+              </g>
             </g>
           );
         })}

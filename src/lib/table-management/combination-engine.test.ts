@@ -227,6 +227,7 @@ function makeAutoOverride(
     id: `ov-${key}`,
     table_group_key: key,
     disabled: false,
+    locked: false,
     display_name: null,
     combined_min_covers: null,
     combined_max_covers: null,
@@ -486,5 +487,31 @@ describe('findValidCombinations', () => {
       autoOverrides: overrides,
     });
     expect(allowed.some((r) => r.source === 'auto' && r.table_ids.join('|') === key)).toBe(true);
+  });
+
+  it('includes a locked auto override when the group is no longer adjacent', () => {
+    const tables = [
+      makeTable('a', 0, 0, 100, 60, 4),
+      makeTable('b', 500, 0, 100, 60, 4),
+    ];
+    const adjacency = detectAdjacentTables(tables, 80);
+    expect(adjacency.get('a')?.has('b')).toBe(false);
+    const key = tableGroupKeyFromIds(['a', 'b']);
+    const overrides = new Map<string, AutoCombinationOverrideInput>([
+      [key, makeAutoOverride(['a', 'b'], { locked: true })],
+    ]);
+    const results = findValidCombinations({
+      partySize: 6,
+      datetime: '2026-03-11T18:00:00.000Z',
+      durationMinutes: 90,
+      tables,
+      bookings: [],
+      blocks: [],
+      adjacencyMap: adjacency,
+      manualCombinations: [],
+      autoOverrides: overrides,
+    });
+    const auto = results.find((r) => r.source === 'auto' && r.table_ids.join('|') === key);
+    expect(auto).toBeTruthy();
   });
 });

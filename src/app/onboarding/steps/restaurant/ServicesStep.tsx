@@ -28,17 +28,30 @@ export function ServicesStep({ onDone }: Props) {
 
   return (
     <div>
-      <h2 className="mb-1 text-lg font-bold text-slate-900">Dining services</h2>
-      <p className="mb-4 text-sm text-slate-500">
-        Use the same service editor as{' '}
-        <Link
-          href="/dashboard/availability?tab=services"
-          className="font-medium text-brand-600 underline hover:text-brand-700"
-        >
-          Availability → Services
-        </Link>
-        . Edits save immediately.
+      <h2 className="mb-1 text-lg font-bold text-slate-900">Your dining services</h2>
+      <p className="mb-3 text-sm text-slate-500">
+        A <strong className="font-medium text-slate-700">service</strong> is a named sitting inside your
+        opening hours (for example <em>Lunch</em>, <em>Dinner</em>, or <em>Sunday Brunch</em>). Guests book
+        into a service. Each service has its own capacity, duration, and rules.
       </p>
+
+      <div className="mb-6 rounded-xl border border-slate-200 bg-slate-50/80 p-4 text-sm text-slate-600">
+        <p className="mb-2 font-medium text-slate-800">Quick tips</p>
+        <ul className="list-inside list-disc space-y-1">
+          <li>Most restaurants start with just <strong className="font-medium">Lunch</strong> and <strong className="font-medium">Dinner</strong>. Add more any time.</li>
+          <li>Set which days of the week each service runs (e.g. no lunch on Monday).</li>
+          <li>Set the last bookable time before the service ends, so the kitchen isn&apos;t seated at close.</li>
+          <li>Edits save immediately. You can refine any of this later from{' '}
+            <Link
+              href="/dashboard/availability?tab=services"
+              className="font-medium text-brand-600 underline hover:text-brand-700"
+            >
+              Availability → Services
+            </Link>
+            .
+          </li>
+        </ul>
+      </div>
 
       <ServicesTab services={services} setServices={setServices} showToast={showToast} areaId={selectedAreaId} />
 

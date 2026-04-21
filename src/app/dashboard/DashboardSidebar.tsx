@@ -62,7 +62,7 @@ const MODEL_NAV_ITEMS: Partial<Record<BookingModel, NavItem[]>> = {
 
 const TABLE_RESERVATION_ONLY = new Set(['/dashboard/waitlist']);
 
-interface Props {
+export interface DashboardSidebarProps {
   email: string;
   staffName?: string;
   venueName?: string;
@@ -91,7 +91,7 @@ export function DashboardSidebar({
   enabledModels = [],
   isAdmin = false,
   venueTerminology: _venueTerminology = null,
-}: Props) {
+}: DashboardSidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
   const [mobileOpen, setMobileOpen] = useState(false);

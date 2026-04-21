@@ -34,9 +34,9 @@ describe('renderCommunicationEmail booking_confirmation', () => {
     });
     expect(out?.html).toContain('£45.00');
     expect(out?.html).not.toContain('(pay at venue)');
-    expect(out?.html).toContain('Payment is due at the venue');
+    expect(out?.html).toMatch(/Total price £45\.00\. Pay at the venue/i);
     expect(out?.text).toContain('Price: £45.00');
-    expect(out?.text).toContain('Payment is due at the venue');
+    expect(out?.text).toMatch(/Total price £45\.00\. Pay at the venue/i);
   });
 
   it('shows paid in full when deposit_status is Paid and amount meets total', () => {
@@ -72,6 +72,24 @@ describe('renderCommunicationEmail booking_confirmation', () => {
       venue,
     });
     expect(out?.html).toContain('Deposit paid online');
-    expect(out?.html).toContain('pay at the venue');
+    expect(out?.html).toMatch(/Balance due at the venue: £30\.00/i);
+  });
+
+  it('shows Free when there is no charge and no deposit paid', () => {
+    const out = renderCommunicationEmail({
+      lane: 'appointments_other',
+      messageKey: 'booking_confirmation',
+      booking: baseBooking({
+        email_variant: 'appointment',
+        appointment_service_name: 'Intro class',
+        booking_total_price_pence: 0,
+        deposit_status: 'Not Required',
+      }),
+      venue,
+    });
+    expect(out?.html).toContain('>Free</span>');
+    expect(out?.html).toContain('There is no charge for this booking');
+    expect(out?.text).toContain('Price: Free');
+    expect(out?.text).toContain('There is no charge for this booking');
   });
 });

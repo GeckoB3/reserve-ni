@@ -37,7 +37,7 @@ export async function sendEmail(opts: SendEmailOptions): Promise<string | null> 
   if (!opts.to?.trim()) return null;
 
   if (!apiKey) {
-    console.log('[sendEmail] SENDGRID_API_KEY not set; would send:', { to: opts.to, subject: opts.subject });
+    console.warn('[sendEmail] SENDGRID_API_KEY not set; skipping email:', { to: opts.to, subject: opts.subject });
     return null;
   }
 

@@ -2,7 +2,7 @@ import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { isPlatformSuperuser } from '@/lib/platform-auth';
-import { DashboardSidebar } from './DashboardSidebar';
+import { DashboardShell } from './DashboardShell';
 import { SessionTimeoutGuard } from '@/components/SessionTimeoutGuard';
 import { DashboardSWRProvider } from '@/components/providers/DashboardSWRProvider';
 import {
@@ -93,18 +93,20 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   return (
     <div className="flex h-[100dvh] max-h-[100dvh] overflow-hidden bg-slate-50">
-      <DashboardSidebar
-        email={email}
-        staffName={staffName}
-        venueName={venueName}
-        venueSlug={venueSlug}
-        tableManagementEnabled={tableManagementEnabled}
-        pricingTier={pricingTier}
-        bookingModel={bookingModel}
-        enabledModels={enabledModels}
-        isAdmin={isAdmin}
-        venueTerminology={venueTerminology}
-      />
+      <DashboardShell
+        initialTableManagementEnabled={tableManagementEnabled}
+        sidebarRest={{
+          email,
+          staffName,
+          venueName,
+          venueSlug,
+          pricingTier,
+          bookingModel,
+          enabledModels,
+          isAdmin,
+          venueTerminology,
+        }}
+      >
       <main className="min-h-0 flex-1 overflow-y-auto pt-[calc(3.5rem+env(safe-area-inset-top,0px))] lg:pt-0">
         {planStatus === 'cancelling' && (
           <div className="border-b border-amber-200 bg-amber-50 px-6 py-3">
@@ -156,6 +158,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
         {venueId && <SessionTimeoutGuard venueId={venueId} />}
         <DashboardSWRProvider>{children}</DashboardSWRProvider>
       </main>
+      </DashboardShell>
     </div>
   );
 }

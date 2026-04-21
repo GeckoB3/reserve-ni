@@ -220,7 +220,7 @@ export function ExpandedBookingContent({
      
     <div id={`booking-expand-${booking.id}`} className="mt-3 space-y-3 px-1" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
       {/* Row 1: Guest card + Booking summary */}
-      <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
         {/* Guest info */}
         <div className="rounded-xl border border-slate-200 bg-white p-3.5">
           <div className="flex items-center gap-3">
@@ -250,6 +250,15 @@ export function ExpandedBookingContent({
             {!guestPhone && !guestEmail && (
               <p className="text-xs italic text-slate-400">No contact details</p>
             )}
+            {detail?.guest?.id ? (
+              <CustomerProfileNotesCard
+                embedded
+                guestId={detail.guest.id}
+                value={detail.guest.customer_profile_notes}
+                disabled={detailLoading}
+                onSaved={onDetailUpdated}
+              />
+            ) : null}
           </div>
         </div>
 
@@ -287,23 +296,16 @@ export function ExpandedBookingContent({
           )}
         </div>
 
-        {detail?.guest?.id ? (
-          <CustomerProfileNotesCard
-            guestId={detail.guest.id}
-            value={detail.guest.customer_profile_notes}
-            disabled={detailLoading}
+        <div className="lg:col-span-2">
+          <BookingNotesEditablePanel
+            bookingId={booking.id}
+            dietaryNotes={booking.dietary_notes}
+            guestRequests={detail?.special_requests}
+            staffNotes={detail?.internal_notes}
             onSaved={onDetailUpdated}
+            notesVariant={notesVariant}
           />
-        ) : null}
-
-        <BookingNotesEditablePanel
-          bookingId={booking.id}
-          dietaryNotes={booking.dietary_notes}
-          guestRequests={detail?.special_requests}
-          staffNotes={detail?.internal_notes}
-          onSaved={onDetailUpdated}
-          notesVariant={notesVariant}
-        />
+        </div>
       </div>
 
       {detail?.cde_context && (

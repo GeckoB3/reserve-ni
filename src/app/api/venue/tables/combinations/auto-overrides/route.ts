@@ -8,6 +8,7 @@ const bodySchema = z.object({
   /** Dining area for this override; if omitted, resolved from the first table id in `table_group_key`. */
   area_id: z.string().uuid().optional(),
   disabled: z.boolean().optional(),
+  locked: z.boolean().optional(),
   display_name: z.string().max(200).nullable().optional(),
   combined_min_covers: z.number().int().min(1).nullable().optional(),
   combined_max_covers: z.number().int().min(1).nullable().optional(),

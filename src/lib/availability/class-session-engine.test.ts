@@ -5,6 +5,7 @@ import {
   resolveClassPaymentRequirement,
 } from './class-session-engine';
 import type { ClassInstance, ClassType } from '@/types/booking-models';
+import type { AvailabilityBlock, OpeningHours } from '@/types/availability';
 
 const SAMPLE_INSTRUCTOR_ID = '11111111-1111-4111-8111-111111111111';
 
@@ -147,5 +148,181 @@ describe('computeClassAvailability', () => {
       instructorDisplayNamesById: { [SAMPLE_INSTRUCTOR_ID]: 'Studio calendar' },
     });
     expect(slots[0]?.instructor_name).toBe('Studio calendar');
+  });
+});
+
+describe('computeClassAvailability — venue opening hours vs explicit blocks', () => {
+  // 2026-04-10 is a Friday.
+  const FRIDAY = '2026-04-10';
+  const SUNDAY = '2026-04-12';
+
+  /** Weekly hours Mon–Fri 09:00–17:00, closed weekends. Keys are "0"–"6" (Sun=0). */
+  const weekdayOpeningHours: OpeningHours = {
+    '1': { periods: [{ open: '09:00', close: '17:00' }] },
+    '2': { periods: [{ open: '09:00', close: '17:00' }] },
+    '3': { periods: [{ open: '09:00', close: '17:00' }] },
+    '4': { periods: [{ open: '09:00', close: '17:00' }] },
+    '5': { periods: [{ open: '09:00', close: '17:00' }] },
+    '0': { closed: true },
+    '6': { closed: true },
+  };
+
+  it('shows an evening class on a weekday that falls outside weekly opening hours (no blocks)', () => {
+    const slots = computeClassAvailability({
+      date: FRIDAY,
+      classTypes: [baseType()],
+      instances: [baseInstance({ instance_date: FRIDAY, start_time: '19:00:00' })],
+      bookedByInstance: {},
+      venueWideBlocks: [],
+      venueOpeningHours: weekdayOpeningHours,
+    });
+    expect(slots).toHaveLength(1);
+    expect(slots[0]?.start_time).toBe('19:00:00');
+  });
+
+  it('shows a class scheduled on a weekly-closed day (no blocks)', () => {
+    const slots = computeClassAvailability({
+      date: SUNDAY,
+      classTypes: [baseType()],
+      instances: [baseInstance({ instance_date: SUNDAY, start_time: '10:00:00' })],
+      bookedByInstance: {},
+      venueWideBlocks: [],
+      venueOpeningHours: weekdayOpeningHours,
+    });
+    expect(slots).toHaveLength(1);
+  });
+
+  it('hides a class on a full-day venue-wide closure block', () => {
+    const block: AvailabilityBlock = {
+      id: 'blk-1',
+      venue_id: 'v-1',
+      service_id: null,
+      block_type: 'closed',
+      date_start: FRIDAY,
+      date_end: FRIDAY,
+      time_start: null,
+      time_end: null,
+      override_max_covers: null,
+      reason: 'Public holiday',
+    };
+    const slots = computeClassAvailability({
+      date: FRIDAY,
+      classTypes: [baseType()],
+      instances: [baseInstance({ instance_date: FRIDAY, start_time: '10:00:00' })],
+      bookedByInstance: {},
+      venueWideBlocks: [block],
+      venueOpeningHours: weekdayOpeningHours,
+    });
+    expect(slots).toHaveLength(0);
+  });
+
+  it('hides a class that overlaps a partial closure window', () => {
+    const block: AvailabilityBlock = {
+      id: 'blk-2',
+      venue_id: 'v-1',
+      service_id: null,
+      block_type: 'closed',
+      date_start: FRIDAY,
+      date_end: FRIDAY,
+      time_start: '09:30:00',
+      time_end: '11:30:00',
+      override_max_covers: null,
+      reason: 'Maintenance',
+    };
+    const slots = computeClassAvailability({
+      date: FRIDAY,
+      classTypes: [baseType()],
+      instances: [baseInstance({ instance_date: FRIDAY, start_time: '10:00:00' })],
+      bookedByInstance: {},
+      venueWideBlocks: [block],
+      venueOpeningHours: weekdayOpeningHours,
+    });
+    expect(slots).toHaveLength(0);
+  });
+
+  it('shows a class that does not overlap a partial closure window', () => {
+    const block: AvailabilityBlock = {
+      id: 'blk-3',
+      venue_id: 'v-1',
+      service_id: null,
+      block_type: 'closed',
+      date_start: FRIDAY,
+      date_end: FRIDAY,
+      time_start: '13:00:00',
+      time_end: '15:00:00',
+      override_max_covers: null,
+      reason: 'Maintenance',
+    };
+    const slots = computeClassAvailability({
+      date: FRIDAY,
+      classTypes: [baseType()],
+      instances: [baseInstance({ instance_date: FRIDAY, start_time: '10:00:00' })],
+      bookedByInstance: {},
+      venueWideBlocks: [block],
+      venueOpeningHours: weekdayOpeningHours,
+    });
+    expect(slots).toHaveLength(1);
+  });
+
+  it('shows a class that fits inside amended hours for the date', () => {
+    const block: AvailabilityBlock = {
+      id: 'blk-4',
+      venue_id: 'v-1',
+      service_id: null,
+      block_type: 'amended_hours',
+      date_start: FRIDAY,
+      date_end: FRIDAY,
+      time_start: null,
+      time_end: null,
+      override_max_covers: null,
+      reason: 'Reduced hours',
+      override_periods: [{ open: '10:00', close: '14:00' }],
+    };
+    const slots = computeClassAvailability({
+      date: FRIDAY,
+      classTypes: [baseType()],
+      instances: [baseInstance({ instance_date: FRIDAY, start_time: '11:00:00' })],
+      bookedByInstance: {},
+      venueWideBlocks: [block],
+      venueOpeningHours: weekdayOpeningHours,
+    });
+    expect(slots).toHaveLength(1);
+  });
+
+  it('hides a class that does not fit inside amended hours', () => {
+    const block: AvailabilityBlock = {
+      id: 'blk-5',
+      venue_id: 'v-1',
+      service_id: null,
+      block_type: 'amended_hours',
+      date_start: FRIDAY,
+      date_end: FRIDAY,
+      time_start: null,
+      time_end: null,
+      override_max_covers: null,
+      reason: 'Reduced hours',
+      override_periods: [{ open: '10:00', close: '14:00' }],
+    };
+    const slots = computeClassAvailability({
+      date: FRIDAY,
+      classTypes: [baseType()],
+      instances: [baseInstance({ instance_date: FRIDAY, start_time: '15:00:00' })],
+      bookedByInstance: {},
+      venueWideBlocks: [block],
+      venueOpeningHours: weekdayOpeningHours,
+    });
+    expect(slots).toHaveLength(0);
+  });
+
+  it('shows classes when venue has no opening hours and no blocks', () => {
+    const slots = computeClassAvailability({
+      date: FRIDAY,
+      classTypes: [baseType()],
+      instances: [baseInstance({ instance_date: FRIDAY, start_time: '06:00:00' })],
+      bookedByInstance: {},
+      venueWideBlocks: [],
+      venueOpeningHours: null,
+    });
+    expect(slots).toHaveLength(1);
   });
 });

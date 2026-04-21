@@ -34,6 +34,9 @@ import { normalizeTimeToHhMm, validateStartEndTimes } from '@/lib/experience-eve
 import { formatZodFlattenedError } from '@/lib/experience-events/experience-event-zod';
 import { StripeConnectSection } from '@/app/dashboard/settings/sections/StripeConnectSection';
 import { StripePaymentWarning } from '@/components/dashboard/StripePaymentWarning';
+import { AppointmentsWelcomeStep } from '@/components/onboarding/AppointmentsWelcomeStep';
+import { AppointmentsDashboardStep } from '@/components/onboarding/AppointmentsDashboardStep';
+import { WelcomeStep as RestaurantWelcomeStep } from './steps/restaurant/WelcomeStep';
 import { OpeningHoursStep } from './steps/restaurant/OpeningHoursStep';
 import { ServicesStep } from './steps/restaurant/ServicesStep';
 import { CapacityStep } from './steps/restaurant/CapacityStep';
@@ -418,7 +421,7 @@ function buildAppointmentsPlanModelSteps(
     steps.push({ key: 'hours', label: 'Calendar Availability' });
   }
   if (!options?.omitOtherUsersStep) {
-    steps.push({ key: 'users', label: 'Other Users' });
+    steps.push({ key: 'users', label: 'Invite Your Team' });
   }
   for (const model of APPOINTMENTS_ACTIVE_MODEL_ORDER.filter(isAppointmentPlanModel)) {
     if (!activeModels.includes(model)) continue;
@@ -435,6 +438,7 @@ function buildAppointmentsPlanModelSteps(
       steps.push({ key: 'resources', label: 'Resources Setup' });
     }
   }
+  steps.push({ key: 'dashboard', label: 'Your Dashboard' });
   steps.push({ key: 'stripe_onboarding', label: 'Payments (Stripe)' });
   steps.push({ key: 'preview', label: 'Review & Go Live' });
   return steps;
@@ -489,6 +493,7 @@ function migrateOnboardingStepToCurrentLayout(
       'classes',
       'first_event',
       'resources',
+      'dashboard',
       'stripe_onboarding',
       'preview',
     ];
@@ -900,12 +905,13 @@ export default function OnboardingPage() {
     if (venue.booking_model === 'table_reservation') {
       const steps: Array<{ key: string; label: string }> = [
         { key: 'profile', label: 'Business Profile' },
+        { key: 'r_welcome', label: 'Welcome' },
         { key: 'r_opening_hours', label: 'Opening Hours' },
+        { key: 'r_table_mode', label: 'Table Management' },
         { key: 'r_services', label: 'Dining Services' },
         { key: 'r_capacity', label: 'Capacity' },
         { key: 'r_dining_duration', label: 'Dining Duration' },
         { key: 'r_booking_rules', label: 'Booking Rules' },
-        { key: 'r_table_mode', label: 'Table Management' },
       ];
       if (tableManagementEnabled) {
         steps.push({ key: 'r_table_setup', label: 'Table Setup' });
@@ -1188,6 +1194,23 @@ export default function OnboardingPage() {
     setError(null);
 
     if (currentStepKey === 'welcome') {
+      if (step < maxCompletedStep && step !== revisitedStepIndex) {
+        setStep((s) => s + 1);
+        return;
+      }
+      setSaving(true);
+      try {
+        await saveProgress(step + 1);
+        setMaxCompletedStep((prev) => Math.max(prev, step + 1));
+      } catch {
+        setError('Failed to save your progress. Please try again.');
+        setSaving(false);
+        return;
+      }
+      setSaving(false);
+    }
+
+    if (currentStepKey === 'dashboard') {
       if (step < maxCompletedStep && step !== revisitedStepIndex) {
         setStep((s) => s + 1);
         return;
@@ -1904,6 +1927,7 @@ export default function OnboardingPage() {
     // Restaurant-specific steps delegate saving to the child component via advanceRestaurantStep.
     // handleNext is not used for these steps; the standard Continue button is hidden.
     if (
+      currentStepKey === 'r_welcome' ||
       currentStepKey === 'r_opening_hours' ||
       currentStepKey === 'r_services' ||
       currentStepKey === 'r_capacity' ||
@@ -1982,13 +2006,16 @@ export default function OnboardingPage() {
   const stripeConnected = Boolean(venue.stripe_connected_account_id);
 
   const RESTAURANT_SELF_MANAGED_STEPS = new Set([
-    'r_opening_hours', 'r_services', 'r_capacity', 'r_dining_duration',
+    'r_welcome', 'r_opening_hours', 'r_services', 'r_capacity', 'r_dining_duration',
     'r_booking_rules', 'r_table_mode', 'r_table_setup', 'r_dashboard',
   ]);
 
   const wideOnboardingStep =
+    currentStepKey === 'welcome' ||
+    currentStepKey === 'dashboard' ||
     currentStepKey === 'first_event' ||
     currentStepKey === 'stripe_onboarding' ||
+    currentStepKey === 'r_welcome' ||
     currentStepKey === 'r_services' ||
     currentStepKey === 'r_capacity' ||
     currentStepKey === 'r_booking_rules' ||
@@ -2032,36 +2059,22 @@ export default function OnboardingPage() {
         )}
 
         {currentStepKey === 'welcome' && (
-          <div>
-            <h2 className="mb-1 text-lg font-bold text-slate-900">
-              {isLightPlanVenue ? 'Welcome to Appointments Light' : 'Welcome to your Appointments plan'}
-            </h2>
-            <p className="mb-6 text-sm text-slate-500">
-              {isLightPlanVenue
-                ? 'Reserve NI runs appointments, classes, events, and resources from one venue with a single calendar. This guide covers your business profile, opening hours, that calendar, the booking models you chose, optional Stripe, then review.'
-                : 'Reserve NI supports appointments, classes, events, and bookable resources from one venue. This setup covers your business profile, opening hours, calendars, calendar availability, inviting other users, the booking models you enabled, Stripe, then review.'}
-            </p>
-            <div className="mb-6 rounded-xl border border-brand-200 bg-brand-50/60 p-4">
-              <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-brand-800">
-                Booking models enabled
-              </p>
-              <div className="flex flex-wrap gap-2">
-                {activeAppointmentsModels.map((model) => (
-                  <span
-                    key={model}
-                    className="rounded-full border border-brand-200 bg-white px-3 py-1 text-sm font-medium text-slate-700"
-                  >
-                    {APPOINTMENTS_MODEL_LABEL[model as AppointmentPlanModel]}
-                  </span>
-                ))}
-              </div>
-            </div>
-            <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-4 text-sm text-slate-600">
-              {isLightPlanVenue
-                ? 'You can change booking models later in Settings. The following steps set up the ones you enabled.'
-                : 'You can enable or disable booking models later from Settings, but this onboarding flow will make sure the ones above are ready to use straight away.'}
-            </div>
-          </div>
+          <AppointmentsWelcomeStep
+            venueName={venue?.name ?? ''}
+            isLightPlan={isLightPlanVenue}
+            activeModels={activeAppointmentsModels as AppointmentPlanModel[]}
+            modelLabel={APPOINTMENTS_MODEL_LABEL}
+            staffTerm={terms.staff}
+          />
+        )}
+
+        {currentStepKey === 'dashboard' && (
+          <AppointmentsDashboardStep
+            activeModels={activeAppointmentsModels as AppointmentPlanModel[]}
+            isLightPlan={isLightPlanVenue}
+            staffTerm={terms.staff}
+            hasTeamCalendars={rosterList.length > 0}
+          />
         )}
 
         {currentStepKey === 'stripe_onboarding' && (
@@ -2205,26 +2218,47 @@ export default function OnboardingPage() {
         {currentStepKey === 'opening_hours' && (
           <div>
             <h2 className="mb-1 text-lg font-bold text-slate-900">Set your opening hours</h2>
-            <p className="mb-6 text-sm text-slate-500">
-              These are the broad hours when your business accepts bookings at all.
+            <p className="mb-4 text-sm text-slate-500">
+              These are the broad weekly hours when your business accepts online bookings. Set them generously, and
+              you can always narrow per-calendar hours in the next step.
             </p>
             <div className="mb-6 rounded-xl border border-slate-200 bg-slate-50/80 p-4">
               <p className="text-sm font-medium text-slate-800">How booking availability works</p>
               <ul className="mt-3 list-inside list-disc space-y-1.5 text-sm text-slate-600">
-                <li>Business opening hours are the outer limit for online booking.</li>
-                <li>Calendar availability narrows that down for each person, room, or resource.</li>
-                <li>A time is bookable only when both the business and the relevant calendar are available.</li>
+                <li>
+                  <strong className="text-slate-800">Business opening hours</strong> (this step) are the outer
+                  limit for all online bookings.
+                </li>
+                <li>
+                  <strong className="text-slate-800">Calendar availability</strong> (next step) narrows that down
+                  per person, room, or resource.
+                </li>
+                <li>A time is bookable only when <strong>both</strong> are open.</li>
               </ul>
               <div className="mt-4 space-y-2 rounded-lg border border-slate-200 bg-white p-3 text-xs text-slate-500">
-                <p>Example: if the business is open `09:00-18:00` but a therapist works `10:00-16:00`, the earliest bookable slot is `10:00`.</p>
-                <p>Example: if the business is open all day but a room is blocked at `14:00`, that room is not bookable then.</p>
+                <p>
+                  Example: business 09:00–18:00, therapist 10:00–16:00 → bookable times for that therapist are
+                  10:00–16:00.
+                </p>
+                <p>
+                  Example: business open all day, but Room A blocked 14:00–15:00 → Room A is not bookable in that
+                  hour.
+                </p>
               </div>
+              <p className="mt-3 text-xs text-slate-500">
+                Tip: closing for a holiday or a day off? Toggle the day to <strong>Closed</strong>. You can also
+                add date-specific closures from Calendar availability later.
+              </p>
             </div>
             <OpeningHoursControl value={openingHoursDraft} onChange={setOpeningHoursDraft} />
           </div>
         )}
 
         {/* Restaurant plan steps */}
+        {currentStepKey === 'r_welcome' && (
+          <RestaurantWelcomeStep venueName={venue?.name ?? ''} onContinue={() => void advanceRestaurantStep()} />
+        )}
+
         {currentStepKey === 'r_opening_hours' && (
           <OpeningHoursStep onDone={advanceRestaurantStep} />
         )}
@@ -2283,56 +2317,53 @@ export default function OnboardingPage() {
             </h2>
             {isLightPlanVenue ? (
               <p className="mb-4 text-sm text-slate-500">
-                Name your single calendar (often your name or your business). Working hours come in the next steps. To
-                add staff or more calendars, upgrade to full Appointments under{' '}
+                Your plan includes one bookable calendar. Give it a name (usually your name or business name), and
+                you’ll set its working hours next. Need more calendars or to invite staff? Upgrade to full
+                Appointments under{' '}
                 <Link href="/dashboard/settings?tab=plan" className="font-medium text-brand-600 underline hover:text-brand-700">
                   Settings → Plan
                 </Link>
                 .
               </p>
-            ) : venue.pricing_tier === 'founding' ? (
-              <p className="mb-4 text-sm text-slate-500">
-                Your Founding Partner plan includes <strong>unlimited bookable calendars</strong> and{' '}
-                <strong>unlimited team members</strong>. Each name you add below is a <strong>calendar column</strong>: a
-                lane on your schedule. A column might match a specific staff member or a resource, or just be a label you
-                work with. You can point bookable resources at whichever column fits, and you can change that later. Use{' '}
-                <strong>Add</strong> for another column and <strong>Remove</strong> to drop one. You need at least one.
-                After onboarding, add or remove columns any time under{' '}
-                <Link
-                  href="/dashboard/calendar-availability"
-                  className="font-medium text-brand-600 underline hover:text-brand-700"
-                >
-                  Calendar availability
-                </Link>
-                . Set working hours, breaks, and days off there too. Under{' '}
-                <Link
-                  href="/dashboard/settings?tab=staff"
-                  className="font-medium text-brand-600 underline hover:text-brand-700"
-                >
-                  Settings → Staff
-                </Link>
-                , choose which staff can manage which columns.
-              </p>
             ) : (
               <p className="mb-4 text-sm text-slate-500">
-                Your plan includes <strong>unlimited bookable calendars</strong>. Each row is a calendar column
-                representing a staff member, resource, or category. Add or remove columns as needed (minimum one required).
-                Later, manage working hours, breaks, and days off under{' '}
+                Add a <strong>calendar column</strong> for each lane on your schedule. You can add or remove
+                columns any time from{' '}
                 <Link
                   href="/dashboard/calendar-availability"
                   className="font-medium text-brand-600 underline hover:text-brand-700"
                 >
                   Calendar availability
-                </Link>
-                . Give team members column access via{' '}
-                <Link
-                  href="/dashboard/settings?tab=staff"
-                  className="font-medium text-brand-600 underline hover:text-brand-700"
-                >
-                  Settings → Staff
                 </Link>
                 .
               </p>
+            )}
+
+            {!isLightPlanVenue && (
+              <div className="mb-6 rounded-xl border border-slate-200 bg-slate-50/80 p-4 text-sm text-slate-700">
+                <p className="mb-2 font-medium text-slate-800">What’s a calendar column?</p>
+                <p className="mb-3 text-slate-600">
+                  Think of it as a lane on your daily schedule. Each column has its own working hours and its own
+                  bookings. Columns usually represent one of:
+                </p>
+                <ul className="list-inside list-disc space-y-1 text-slate-600">
+                  <li>
+                    <strong className="text-slate-800">A person</strong>, e.g. a therapist, stylist, tutor, or
+                    practitioner.
+                  </li>
+                  <li>
+                    <strong className="text-slate-800">A room or chair</strong>, e.g. Treatment room 1, Chair A.
+                  </li>
+                  <li>
+                    <strong className="text-slate-800">A resource or category</strong>, e.g. Court 1, Studio, or
+                    “Walk-ins”.
+                  </li>
+                </ul>
+                <p className="mt-3 text-xs text-slate-500">
+                  Tip: many businesses mirror their physical space (one column per chair, one per room). You can
+                  change the setup later without losing history.
+                </p>
+              </div>
             )}
             <div className="mb-6 space-y-3">
               {practitioners.map((p, i) => (
@@ -2431,35 +2462,45 @@ export default function OnboardingPage() {
               <h2 className="mb-1 text-lg font-bold text-slate-900">
                 {isAppointmentsPlanVenue ? 'Set up appointments' : 'Your services'}
               </h2>
-              <p className="mb-6 text-sm text-slate-500">
-                {isLightPlanVenue ? (
-                  <>
-                    Adding services is optional; add as many as you need using &quot;+ Add service&quot;. Use the same
-                    fields as in the dashboard: duration, buffer, price, online payment, and guest booking rules. You
-                    can refine services later under{' '}
-                    <Link
-                      href="/dashboard/appointment-services"
-                      className="font-medium text-brand-600 underline hover:text-brand-700"
-                    >
-                      Services
-                    </Link>
-                    .
-                  </>
-                ) : (
-                  <>
-                    Adding services is optional; add as many as you need using &quot;+ Add service&quot;. Use the same
-                    fields as in the dashboard: duration, buffer, price, online payment, guest booking rules, which{' '}
-                    {terms.staff.toLowerCase()} offers each service, and optional per-calendar customisation. You can
-                    refine services later under{' '}
-                    <Link
-                      href="/dashboard/appointment-services"
-                      className="font-medium text-brand-600 underline hover:text-brand-700"
-                    >
-                      Services
-                    </Link>
-                    .
-                  </>
-                )}
+              <p className="mb-4 text-sm text-slate-500">
+                A <strong>service</strong> is anything guests book one-to-one with you: a consultation, a
+                treatment, a lesson, a grooming session. Each service has its own duration, price, and rules.
+              </p>
+              <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50/80 p-4 text-sm text-slate-700">
+                <p className="mb-2 font-medium text-slate-800">For each service you can set…</p>
+                <ul className="list-inside list-disc space-y-1 text-slate-600">
+                  <li>
+                    <strong className="text-slate-800">Duration</strong> and an optional{' '}
+                    <strong>buffer</strong> (gap between bookings for cleaning, notes, or travel).
+                  </li>
+                  <li>
+                    <strong className="text-slate-800">Price</strong> and whether guests pay online, pay in
+                    person, or leave a deposit.
+                  </li>
+                  <li>
+                    <strong className="text-slate-800">Guest booking rules</strong>: min/max notice and how far
+                    ahead guests can book.
+                  </li>
+                  {!isLightPlanVenue && (
+                    <li>
+                      <strong className="text-slate-800">Which calendars</strong> offer the service, with
+                      optional per-calendar overrides.
+                    </li>
+                  )}
+                </ul>
+                <p className="mt-2 text-xs italic text-slate-500">
+                  e.g. “60 min massage, £55, deposit £10 on booking, bookable 2 hours to 30 days ahead”.
+                </p>
+              </div>
+              <p className="mb-6 text-xs text-slate-500">
+                Adding services now is optional. You can leave this blank and add or refine services later under{' '}
+                <Link
+                  href="/dashboard/appointment-services"
+                  className="font-medium text-brand-600 underline hover:text-brand-700"
+                >
+                  Services
+                </Link>
+                . Pro tip: add your 1–3 most popular services now so your booking page looks finished on day one.
               </p>
               <OnboardingAppointmentServiceList
                 currencySymbol={currencySymbol(currency)}
@@ -2481,12 +2522,41 @@ export default function OnboardingPage() {
             <h2 className="mb-1 text-lg font-bold text-slate-900">
               {isAppointmentsPlanVenue ? 'Set calendar availability' : 'Opening hours & schedules'}
             </h2>
-            <p className="mb-6 text-sm text-slate-500">
+            <p className="mb-4 text-sm text-slate-500">
               {isAppointmentsPlanVenue
-                ? `Set when each ${terms.staff.toLowerCase()} or calendar can take bookings. A booking is available only where these hours overlap with your business opening hours.`
-                : `Set when the business accepts appointments and when each ${terms.staff.toLowerCase()} is available to take bookings. You can adjust breaks, calendar closures, and schedules later under Calendar availability.`
+                ? `Set when each calendar can take bookings. Guests see a time slot only when business opening hours and the calendar’s working hours both allow it.`
+                : `Set when the business accepts appointments and when each ${terms.staff.toLowerCase()} is available. You can adjust breaks, day-off, and custom schedules any time from Calendar availability.`
               }
             </p>
+
+            <div className="mb-6 rounded-xl border border-slate-200 bg-slate-50/80 p-4 text-sm text-slate-700">
+              <p className="mb-2 font-medium text-slate-800">How the hours fit together</p>
+              <ul className="list-inside list-disc space-y-1.5 text-slate-600">
+                <li>
+                  <strong className="text-slate-800">Business opening hours</strong> are the outer window for all
+                  bookings.
+                </li>
+                <li>
+                  <strong className="text-slate-800">Calendar working hours</strong> narrow that down per column
+                  (for example, one therapist works mornings, another evenings).
+                </li>
+                <li>A time is bookable only where <strong>both</strong> are open.</li>
+              </ul>
+              <div className="mt-3 space-y-1 rounded-lg border border-slate-200 bg-white p-3 text-xs text-slate-500">
+                <p>Example: business 09:00–18:00, therapist 10:00–16:00 → guests can book 10:00–16:00.</p>
+                <p>Example: business 09:00–18:00, Room A blocked 14:00–15:00 → no bookings in Room A in that hour.</p>
+              </div>
+              <p className="mt-3 text-xs text-slate-500">
+                Breaks, day-off, and date-specific closures can be added from{' '}
+                <Link
+                  href="/dashboard/calendar-availability"
+                  className="font-medium text-brand-600 underline hover:text-brand-700"
+                >
+                  Calendar availability
+                </Link>{' '}
+                any time.
+              </p>
+            </div>
             {!isAppointmentsPlanVenue && (
               <div className="mb-8">
                 <h3 className="mb-3 text-sm font-semibold text-slate-800">Business opening hours</h3>
@@ -2521,30 +2591,45 @@ export default function OnboardingPage() {
         {currentStepKey === 'first_event' && (
           <div>
             <h2 className="mb-1 text-lg font-bold text-slate-900">
-              {isAppointmentsPlanVenue ? 'Events (optional)' : 'Set up your first event'}
+              {isAppointmentsPlanVenue ? 'Set up your first event (optional)' : 'Set up your first event'}
             </h2>
             <p className="mb-4 text-sm text-slate-500">
-              {isAppointmentsPlanVenue ? (
-                <>
-                  You can skip this step and add events later. Use the same form as{' '}
+              An <strong>event</strong> is a one-off or recurring ticketed occasion with a fixed start time and
+              limited capacity, such as a wine tasting, masterclass, guided tour, or supper club. Guests book a
+              ticket from your public Events tab.
+            </p>
+            <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50/80 p-4 text-sm text-slate-700">
+              <p className="mb-2 font-medium text-slate-800">In this step you can…</p>
+              <ul className="list-inside list-disc space-y-1 text-slate-600">
+                <li>
+                  Pick a <strong className="text-slate-800">schedule</strong>: one-off date, weekly recurrence,
+                  or custom dates (one event row is created per date).
+                </li>
+                <li>
+                  Set <strong className="text-slate-800">capacity</strong>, <strong>price</strong>, and one or
+                  more <strong>ticket types</strong> (e.g. Adult / Child).
+                </li>
+                <li>
+                  Choose which <strong className="text-slate-800">calendar column</strong> the event appears on
+                  so it doesn’t clash with other bookings.
+                </li>
+                <li>
+                  Add an image, description, and guest rules, all editable later from Event manager.
+                </li>
+              </ul>
+            </div>
+            {isAppointmentsPlanVenue && (
+              <div className="mb-6 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                <p className="font-medium text-slate-800">Optional: skip if you’d rather</p>
+                <p className="mt-1">
+                  Leave the form empty and click Continue to skip. You can create events any time from{' '}
                   <Link
                     href="/dashboard/event-manager"
                     className="font-medium text-brand-600 underline hover:text-brand-700"
                   >
                     Event manager
-                  </Link>{' '}
-                  → Create event: schedule, ticket types, guest rules, calendar column, and optional image. Guests book
-                  from your public Events tab when you publish an event.
-                </>
-              ) : (
-                <>Create one event now so guests can start booking from your Events tab straight away.</>
-              )}
-            </p>
-            {isAppointmentsPlanVenue && (
-              <div className="mb-6 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
-                <p className="font-medium text-slate-800">Optional step</p>
-                <p className="mt-1">
-                  Leave the form empty and click Continue to skip, or complete it to create a first event now.
+                  </Link>
+                  .
                 </p>
               </div>
             )}
@@ -2976,19 +3061,41 @@ export default function OnboardingPage() {
         {/* Model D: Classes: class types only (timetable & sessions: dashboard → Class timetable) */}
         {currentStepKey === 'classes' && (
           <div>
-            <h2 className="mb-1 text-lg font-bold text-slate-900">Class types</h2>
-            <p className="mb-2 text-sm text-slate-500">
-              You are adding <strong>class types</strong> using the same fields as <strong>Add class type</strong> on{' '}
+            <h2 className="mb-1 text-lg font-bold text-slate-900">Set up your classes</h2>
+            <p className="mb-4 text-sm text-slate-500">
+              A <strong>class type</strong> is the template for a recurring group session: a yoga class, a
+              pottery workshop, a weekly swim lesson. Here you define what each session looks like; you’ll
+              schedule the weekly rota from the dashboard in the next step.
+            </p>
+            <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50/80 p-4 text-sm text-slate-700">
+              <p className="mb-2 font-medium text-slate-800">For each class type you can set…</p>
+              <ul className="list-inside list-disc space-y-1 text-slate-600">
+                <li>
+                  <strong className="text-slate-800">Name &amp; description</strong> shown on your booking page.
+                </li>
+                <li>
+                  <strong className="text-slate-800">Duration</strong> and{' '}
+                  <strong>capacity</strong> (maximum guests per session).
+                </li>
+                <li>
+                  <strong className="text-slate-800">Price</strong> and optional online payment or deposit.
+                </li>
+                <li>
+                  Which <strong className="text-slate-800">calendar column</strong> the sessions appear on, plus
+                  an optional instructor label and colour.
+                </li>
+              </ul>
+              <p className="mt-2 text-xs italic text-slate-500">
+                e.g. “Beginner yoga, 60 min, 12 spots, £10”.
+              </p>
+            </div>
+            <p className="mb-6 text-xs text-slate-500">
+              Once saved, head to{' '}
               <Link href="/dashboard/class-timetable" className="font-medium text-brand-600 underline hover:text-brand-700">
                 Class timetable
               </Link>{' '}
-              (name, description, duration, capacity, price, online payment, guest booking rules, calendar, optional
-              instructor label, colour, and visibility).
-            </p>
-            <p className="mb-6 text-sm text-slate-500">
-              <strong>Scheduling:</strong> day, time, and recurring sessions are set in the dashboard under the{' '}
-              <strong>Classes</strong> tab (class timetable). There you can add timetable rules and generate bookable
-              sessions for guests.
+              to set the weekly rota (day, time, repeat) and generate bookable sessions for guests. You can skip
+              this step and add class types later if you prefer.
             </p>
             <div className="space-y-4">
               {classes.map((c, i) => (
@@ -3369,27 +3476,51 @@ export default function OnboardingPage() {
         {currentStepKey === 'resources' && (
           <div>
             <h2 className="mb-1 text-lg font-bold text-slate-900">
-              {isAppointmentsPlanVenue ? 'Bookable resources (optional)' : 'Set up your resources'}
+              {isAppointmentsPlanVenue ? 'Set up bookable resources (optional)' : 'Set up your resources'}
             </h2>
-            <p className="mb-3 text-sm text-slate-600">
-              A <strong>resource</strong> is something guests book by the slot: a court, room, lane, desk, or piece of
-              equipment, for example. Each resource has its own weekly availability, slot length, and pricing. Resources
-              appear on a <strong>team calendar column</strong> you choose so staff see them alongside appointments; guests
-              book from your public <strong>Resources</strong> tab.
+            <p className="mb-4 text-sm text-slate-600">
+              A <strong>resource</strong> is anything guests rent by the slot: a tennis court, a meeting room, a
+              lane, a desk, a piece of kit. Each resource has its own weekly availability, slot length, and
+              pricing.
             </p>
+            <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50/80 p-4 text-sm text-slate-700">
+              <p className="mb-2 font-medium text-slate-800">For each resource you can set…</p>
+              <ul className="list-inside list-disc space-y-1 text-slate-600">
+                <li>
+                  <strong className="text-slate-800">Type</strong>: court, room, desk, equipment, or your own
+                  label.
+                </li>
+                <li>
+                  <strong className="text-slate-800">Slot length</strong> and booking rules (min/max duration,
+                  advance notice).
+                </li>
+                <li>
+                  <strong className="text-slate-800">Pricing</strong> per slot, with optional online payment or
+                  deposit.
+                </li>
+                <li>
+                  Which <strong className="text-slate-800">calendar column</strong> it appears on so staff see
+                  it alongside other bookings.
+                </li>
+              </ul>
+              <p className="mt-2 text-xs italic text-slate-500">
+                e.g. “Court 1, 60-min slots, £12, Mon–Sun 09:00–21:00”.
+              </p>
+            </div>
             <p className="mb-4 text-sm text-slate-500">
-              This step matches the fields in{' '}
+              Date-specific closures or custom hours (e.g. public holidays, maintenance days) can be added later
+              from{' '}
               <Link href="/dashboard/resource-timeline" className="font-medium text-brand-600 underline hover:text-brand-700">
-                Dashboard → Resource timeline
-              </Link>{' '}
-              → Add resource. Date-specific exceptions (closures or custom hours) can be added there later; they are not
-              required here.
+                Resource timeline
+              </Link>
+              .
             </p>
             {isAppointmentsPlanVenue && (
               <div className="mb-6 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
-                <p className="font-medium text-slate-800">Optional step</p>
+                <p className="font-medium text-slate-800">Optional: skip if you’d rather</p>
                 <p className="mt-1">
-                  Leave the form below empty and click Continue to skip, or add one or more resources now.
+                  Leave the form empty and click Continue to skip, or add one or more resources now. You can add
+                  more any time from the dashboard.
                 </p>
               </div>
             )}

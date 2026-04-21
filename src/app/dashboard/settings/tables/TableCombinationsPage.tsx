@@ -29,6 +29,8 @@ interface CatalogAutoGroup {
   effective_min_covers: number;
   effective_max_covers: number;
   override: Record<string, unknown> | null;
+  /** Kept in the list when adjacency changes (e.g. after updating detection distance). */
+  is_locked: boolean;
   status: 'active' | 'disabled' | 'modified';
 }
 
@@ -73,6 +75,8 @@ export function TableCombinationsPage({
   const [howItWorksOpen, setHowItWorksOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [combinationsSubTab, setCombinationsSubTab] = useState<'auto' | 'custom'>('auto');
+  /** When set, only combinations that include this table are listed (both tabs). */
+  const [filterTableId, setFilterTableId] = useState<string>('');
 
   const [modal, setModal] = useState<
     | { mode: 'auto'; group: CatalogAutoGroup }
@@ -192,7 +196,36 @@ export function TableCombinationsPage({
     return () => clearTimeout(t);
   }, [toast]);
 
+  useEffect(() => {
+    if (!filterTableId) return;
+    if (!tables.some((t) => t.is_active && t.id === filterTableId)) {
+      setFilterTableId('');
+    }
+  }, [filterTableId, tables]);
+
   const allAutoDisabled = autoGroups.length > 0 && autoGroups.every((g) => g.status === 'disabled');
+
+  const tableFilterOptions = useMemo(() => {
+    return [...tables]
+      .filter((t) => t.is_active)
+      .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
+      .map((t) => ({ id: t.id, label: t.name }));
+  }, [tables]);
+
+  const filteredAutoGroups = useMemo(() => {
+    if (!filterTableId) return autoGroups;
+    return autoGroups.filter((g) => g.table_ids.includes(filterTableId));
+  }, [autoGroups, filterTableId]);
+
+  const filteredCombinations = useMemo(() => {
+    if (!filterTableId) return combinations;
+    return combinations.filter((c) => (c.members ?? []).some((m) => m.table_id === filterTableId));
+  }, [combinations, filterTableId]);
+
+  const filterTableLabel = useMemo(() => {
+    if (!filterTableId) return '';
+    return tableFilterOptions.find((o) => o.id === filterTableId)?.label ?? 'this table';
+  }, [filterTableId, tableFilterOptions]);
 
   const miniTables = useMemo(
     () =>
@@ -328,9 +361,44 @@ export function TableCombinationsPage({
               }`}
             >
               Custom combinations
+              <span className="ml-1 font-normal opacity-90">({combinations.length})</span>
             </button>
           </div>
         </div>
+
+        {tableFilterOptions.length > 0 && (
+          <div className="flex flex-wrap items-end gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2.5">
+            <div className="min-w-[200px] flex-1">
+              <label htmlFor="combinations-table-filter" className="block text-xs font-semibold text-slate-600">
+                Filter by table
+              </label>
+              <select
+                id="combinations-table-filter"
+                value={filterTableId}
+                onChange={(e) => setFilterTableId(e.target.value)}
+                className="mt-1 w-full max-w-md rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-800"
+              >
+                <option value="">All tables</option>
+                {tableFilterOptions.map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-1 text-[11px] text-slate-500">
+                Show only combinations that include the selected table.
+              </p>
+            </div>
+            {filterTableId && (
+              <p className="text-xs text-slate-600">
+                <span className="font-medium text-slate-800">{filterTableLabel}</span>:{' '}
+                {combinationsSubTab === 'auto'
+                  ? `${filteredAutoGroups.length} of ${autoGroups.length} auto-detected`
+                  : `${filteredCombinations.length} of ${combinations.length} custom`}
+              </p>
+            )}
+          </div>
+        )}
 
         {combinationsSubTab === 'auto' && allAutoDisabled && (
           <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
@@ -346,11 +414,19 @@ export function TableCombinationsPage({
               <h3 className="text-sm font-semibold text-slate-900">
                 Auto-detected combinations
                 {!catalogLoading && (
-                  <span className="ml-2 font-normal text-slate-500">({autoGroups.length})</span>
+                  <span className="ml-2 font-normal text-slate-500">
+                    ({filteredAutoGroups.length}
+                    {filterTableId && autoGroups.length !== filteredAutoGroups.length
+                      ? ` of ${autoGroups.length}`
+                      : ''}
+                    )
+                  </span>
                 )}
               </h3>
               <p className="mt-1 text-xs text-slate-500">
                 From adjacency on the floor plan (read-only). Disable or adjust rules without changing table positions.
+                Lock a combination in Edit to keep it listed and bookable even if it is no longer auto-detected after you
+                change the combination distance or layout.
               </p>
               {catalogLoading ? (
                 <p className="mt-4 text-sm text-slate-500">Loading…</p>
@@ -358,9 +434,15 @@ export function TableCombinationsPage({
                 <p className="mt-4 text-sm text-slate-500">
                   No adjacent table pairs or groups found. Adjust the layout or combination threshold.
                 </p>
+              ) : filteredAutoGroups.length === 0 ? (
+                <p className="mt-4 text-sm text-slate-500">
+                  No auto-detected combinations include{' '}
+                  <span className="font-medium text-slate-700">{filterTableLabel}</span>. Choose another table or clear the
+                  filter.
+                </p>
               ) : (
                 <ul className="mt-3 divide-y divide-slate-200 rounded-xl border border-slate-200 bg-white">
-                  {autoGroups.map((g) => (
+                  {filteredAutoGroups.map((g) => (
                     <li
                       key={g.table_group_key}
                       className={`flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 text-sm ${
@@ -379,6 +461,11 @@ export function TableCombinationsPage({
                           {g.status === 'modified' && (
                             <span className="rounded bg-violet-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-violet-800">
                               Modified
+                            </span>
+                          )}
+                          {g.is_locked && (
+                            <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-amber-900">
+                              Locked
                             </span>
                           )}
                           {g.status === 'disabled' && (
@@ -453,7 +540,23 @@ export function TableCombinationsPage({
           {combinationsSubTab === 'custom' && (
             <section>
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <h3 className="text-sm font-semibold text-slate-900">Custom combinations</h3>
+                <h3 className="text-sm font-semibold text-slate-900">
+                  Custom combinations
+                  {combinations.length > 0 && (
+                    <span className="ml-2 font-normal text-slate-500">
+                      (
+                      {filterTableId ? (
+                        <>
+                          {filteredCombinations.length}
+                          {combinations.length !== filteredCombinations.length ? ` of ${combinations.length}` : ''}
+                        </>
+                      ) : (
+                        combinations.length
+                      )}
+                      )
+                    </span>
+                  )}
+                </h3>
                 {isAdmin && (
                   <button
                     type="button"
@@ -472,9 +575,15 @@ export function TableCombinationsPage({
                   No custom combinations yet. Add one to define table joins that the auto-detector can&apos;t see (e.g.
                   tables across the room for special events).
                 </div>
+              ) : filteredCombinations.length === 0 ? (
+                <p className="mt-4 text-sm text-slate-500">
+                  No custom combinations include{' '}
+                  <span className="font-medium text-slate-700">{filterTableLabel}</span>. Choose another table or clear the
+                  filter.
+                </p>
               ) : (
                 <ul className="mt-3 divide-y divide-slate-200 rounded-xl border border-slate-200 bg-white">
-                  {combinations.map((combo) => (
+                  {filteredCombinations.map((combo) => (
                     <li
                       key={combo.id}
                       className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 text-sm"
@@ -541,6 +650,7 @@ export function TableCombinationsPage({
                 onChange={() => {}}
                 partySize={2}
                 className="min-h-[300px]"
+                previewMode
               />
             </div>
           </div>
@@ -583,6 +693,9 @@ function AutoOverrideModal({
   const [disabled, setDisabled] = useState(
     group.status === 'disabled' || Boolean((ov as { disabled?: boolean }).disabled),
   );
+  const [locked, setLocked] = useState(
+    group.is_locked || Boolean((ov as { locked?: boolean }).locked),
+  );
   const [name, setName] = useState((ov.display_name as string) ?? '');
   const [minC, setMinC] = useState<number | ''>((ov.combined_min_covers as number | null) ?? '');
   const [maxC, setMaxC] = useState<number | ''>((ov.combined_max_covers as number | null) ?? '');
@@ -618,6 +731,7 @@ function AutoOverrideModal({
       await onSave({
         table_group_key: group.table_group_key,
         disabled,
+        locked,
         display_name: name.trim() || null,
         combined_min_covers: minC === '' ? null : Number(minC),
         combined_max_covers: maxC === '' ? null : Number(maxC),
@@ -645,6 +759,19 @@ function AutoOverrideModal({
         <label className="mt-3 flex items-center gap-2 text-sm">
           <input type="checkbox" checked={disabled} onChange={(e) => setDisabled(e.target.checked)} />
           Disabled (excluded from booking suggestions)
+        </label>
+        <label className="mt-2 flex items-start gap-2 text-sm">
+          <input
+            type="checkbox"
+            className="mt-0.5"
+            checked={locked}
+            disabled={disabled}
+            onChange={(e) => setLocked(e.target.checked)}
+          />
+          <span>
+            Lock this combination — keep it when you click &quot;Update Automatic Table Combinations&quot; even if tables
+            are no longer detected as adjacent.
+          </span>
         </label>
         <div className="mt-3">
           <label className="text-xs font-medium text-slate-600">Name (optional)</label>

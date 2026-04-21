@@ -13,10 +13,37 @@ interface Props {
 export function OnboardingStaffInviteStep({ invites, setInvites }: Props) {
   return (
     <div>
-      <h2 className="mb-1 text-lg font-bold text-slate-900">Set up other users</h2>
-      <p className="mb-6 text-sm text-slate-500">
-        Add any teammates who should be able to sign in after onboarding. They receive an email with a link to create a
-        password and open the dashboard. You can add or remove users later under Settings → Staff.
+      <h2 className="mb-1 text-lg font-bold text-slate-900">Invite your team</h2>
+      <p className="mb-4 text-sm text-slate-500">
+        Add any teammates who should be able to sign in alongside you. Each invite gets an email with a link to
+        set their password and open the dashboard. You can add or remove users any time from{' '}
+        <a href="/dashboard/settings?tab=staff" className="font-medium text-brand-600 underline hover:text-brand-700">
+          Settings → Staff
+        </a>
+        .
+      </p>
+
+      <div className="mb-6 rounded-xl border border-slate-200 bg-slate-50/80 p-4 text-sm text-slate-700">
+        <p className="mb-2 font-medium text-slate-800">Two roles to choose from</p>
+        <ul className="space-y-1.5 text-slate-600">
+          <li>
+            <strong className="text-slate-800">Staff</strong>: day-to-day diary work (view, create, edit, and
+            cancel bookings; check guests in; take payments where applicable).
+          </li>
+          <li>
+            <strong className="text-slate-800">Admin</strong>: everything staff can do, plus manage settings,
+            services, calendars, billing, and invite other users.
+          </li>
+        </ul>
+        <p className="mt-2 text-xs text-slate-500">
+          You’re the admin by default. Tip: invite a second admin as a backup so your account isn’t a single
+          point of failure.
+        </p>
+      </div>
+
+      <p className="mb-3 text-xs text-slate-500">
+        Don’t have anyone to invite yet? Leave this blank and click <strong>Continue</strong>; you can invite
+        people later.
       </p>
 
       <div className="space-y-3">
@@ -84,9 +111,6 @@ export function OnboardingStaffInviteStep({ invites, setInvites }: Props) {
         + Add another user
       </button>
 
-      <div className="mt-6 rounded-xl border border-slate-200 bg-slate-50/80 p-4 text-sm text-slate-600">
-        Staff users can work day-to-day in the dashboard. Admin users can also manage settings, staff, and billing.
-      </div>
     </div>
   );
 }

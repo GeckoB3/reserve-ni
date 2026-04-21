@@ -12,7 +12,8 @@ import { communicationService } from './service';
 import type { CommunicationRequest, MessageType } from './types';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 
-const MARKETING_MESSAGE_TYPES = new Set<MessageType>(['post_visit_thankyou', 'dietary_digest', 'custom_message']);
+/** Transactional / operational messages must not be blocked by marketing opt-out. */
+const MARKETING_MESSAGE_TYPES = new Set<MessageType>(['post_visit_thankyou', 'dietary_digest']);
 
 async function shouldSkipMarketingComms(request: CommunicationRequest): Promise<boolean> {
   if (!MARKETING_MESSAGE_TYPES.has(request.type)) return false;

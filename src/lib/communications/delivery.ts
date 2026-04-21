@@ -92,6 +92,23 @@ export async function deliverEmailMessage(
   rendered: RenderedEmail,
   mode: LogMode,
 ): Promise<CommunicationSendResult> {
+  if (!process.env.SENDGRID_API_KEY) {
+    const detail = 'Email did not send: SENDGRID_API_KEY is not configured on the server.';
+    console.warn('[deliverEmailMessage]', detail);
+    try {
+      if (mode === 'dedupe') {
+        const inserted = await insertPending(ctx, 'email');
+        if (!inserted) return { sent: false, reason: 'duplicate' };
+      } else {
+        await upsertPending(ctx, 'email');
+      }
+      await updateStatus(ctx, 'failed', null, detail);
+    } catch (logErr) {
+      console.error('[deliverEmailMessage] failed to log comm_log:', logErr);
+    }
+    return { sent: false, reason: 'not_configured' };
+  }
+
   try {
     if (mode === 'dedupe') {
       const inserted = await insertPending(ctx, 'email');
@@ -123,6 +140,27 @@ export async function deliverSmsMessage(
   rendered: RenderedSms,
   mode: LogMode,
 ): Promise<CommunicationSendResult> {
+  if (
+    !process.env.TWILIO_PHONE_NUMBER ||
+    !process.env.TWILIO_ACCOUNT_SID ||
+    !process.env.TWILIO_AUTH_TOKEN
+  ) {
+    const detail = 'SMS did not send: Twilio is not configured on the server (TWILIO_* env vars missing).';
+    console.warn('[deliverSmsMessage]', detail);
+    try {
+      if (mode === 'dedupe') {
+        const inserted = await insertPending(ctx, 'sms');
+        if (!inserted) return { sent: false, reason: 'duplicate' };
+      } else {
+        await upsertPending(ctx, 'sms');
+      }
+      await updateStatus(ctx, 'failed', null, detail);
+    } catch (logErr) {
+      console.error('[deliverSmsMessage] failed to log comm_log:', logErr);
+    }
+    return { sent: false, reason: 'not_configured' };
+  }
+
   try {
     if (mode === 'dedupe') {
       const inserted = await insertPending(ctx, 'sms');

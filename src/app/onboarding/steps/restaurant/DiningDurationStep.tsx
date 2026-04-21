@@ -29,21 +29,25 @@ export function DiningDurationStep({ onDone }: Props) {
   if (services.length === 0) {
     return (
       <div>
-        <h2 className="mb-1 text-lg font-bold text-slate-900">Dining duration</h2>
+        <h2 className="mb-1 text-lg font-bold text-slate-900">How long does each party stay?</h2>
         <p className="mb-6 text-sm text-slate-500">
-          How long each party holds a table by party size.
+          Dining duration decides how long a table is held for each booking, and therefore how soon you can
+          seat the next guest.
         </p>
         <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-6 text-center text-sm text-slate-600">
           <p className="font-medium text-slate-700">No services yet</p>
           <p className="mt-1">
-            Add dining services first, then set durations under{' '}
+            Go back and add at least one dining service first. You can also configure this later from{' '}
             <Link href="/dashboard/availability?tab=duration" className="font-medium text-brand-600 underline">
               Availability → Dining Duration
             </Link>
             .
           </p>
         </div>
-        <div className="mt-8 flex justify-end">
+        <div className="mt-8 flex items-center justify-between">
+          <button type="button" onClick={() => void onDone()} className="text-sm text-slate-500 hover:text-slate-700">
+            Skip for now
+          </button>
           <button
             type="button"
             onClick={() => void onDone()}
@@ -58,17 +62,27 @@ export function DiningDurationStep({ onDone }: Props) {
 
   return (
     <div>
-      <h2 className="mb-1 text-lg font-bold text-slate-900">Dining duration</h2>
-      <p className="mb-4 text-sm text-slate-500">
-        Same table as{' '}
-        <Link
-          href="/dashboard/availability?tab=duration"
-          className="font-medium text-brand-600 underline hover:text-brand-700"
-        >
-          Availability → Dining Duration
-        </Link>
-        : party size bands, optional day overrides, add defaults per service.
+      <h2 className="mb-1 text-lg font-bold text-slate-900">How long does each party stay?</h2>
+      <p className="mb-3 text-sm text-slate-500">
+        Duration is set per party size, per service. Larger parties usually stay longer, and dinner typically
+        runs longer than lunch. These numbers affect when the next guest can be offered the same table.
       </p>
+
+      <div className="mb-6 rounded-xl border border-slate-200 bg-slate-50/80 p-4 text-sm text-slate-600">
+        <p className="mb-2 font-medium text-slate-800">A good starting point</p>
+        <ul className="list-inside list-disc space-y-1">
+          <li>Lunch: 1–2 guests 75 min · 3–4 guests 90 min · 5+ guests 120 min.</li>
+          <li>Dinner: 1–2 guests 90 min · 3–4 guests 120 min · 5+ guests 150 min.</li>
+          <li>Fine dining: add 15–30 minutes to each band.</li>
+        </ul>
+        <p className="mt-2 text-xs text-slate-500">
+          Tip: you can add day-of-week overrides (e.g. give Sunday 30 extra minutes) later from{' '}
+          <Link href="/dashboard/availability?tab=duration" className="font-medium text-brand-600 underline">
+            Availability → Dining Duration
+          </Link>
+          .
+        </p>
+      </div>
 
       <DiningDurationTab services={services} showToast={showToast} selectedAreaId={selectedAreaId} />
 

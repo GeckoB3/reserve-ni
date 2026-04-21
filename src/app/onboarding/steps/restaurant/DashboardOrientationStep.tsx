@@ -58,10 +58,11 @@ export function DashboardOrientationStep({ onDone, tableManagementEnabled }: Pro
 
   return (
     <div>
-      <h2 className="mb-1 text-lg font-bold text-slate-900">Your dashboard</h2>
+      <h2 className="mb-1 text-lg font-bold text-slate-900">Where you&apos;ll work every day</h2>
       <p className="mb-2 text-sm text-slate-500">
-        Here&apos;s what each view does, and when to use it based on your{' '}
-        <strong>{tableManagementEnabled ? 'Advanced table management' : 'Simple covers'}</strong> mode.
+        A quick tour of the four views you&apos;ll use most. Based on your{' '}
+        <strong>{tableManagementEnabled ? 'Advanced table management' : 'Simple covers'}</strong> mode, some
+        views are your main service screen and others are secondary.
       </p>
 
       {tableManagementEnabled && (

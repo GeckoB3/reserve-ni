@@ -353,11 +353,6 @@ function clusterMultiServiceBookings(bookings: Booking[]): BookingCluster[] {
   return out;
 }
 
-function todayLocalISO(): string {
-  const n = new Date();
-  return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-${String(n.getDate()).padStart(2, '0')}`;
-}
-
 function bookingToPrefetch(b: Booking): AppointmentDetailPrefetch {
   return {
     id: b.id,
@@ -904,12 +899,6 @@ export function PractitionerCalendarView({
   const touchX = useRef<number | null>(null);
   /** Snapshot when a touch starts; if scrollLeft/scrollTop move during the gesture, it was scrolling, not a day swipe. */
   const scrollSnapshotAtTouch = useRef<{ left: number; mainScrollTop: number } | null>(null);
-  /**
-   * After the user changes day or time range via the calendar date/time picker, skip scrolling the timeline
-   * to "now" and instead scroll the dashboard `main` to the top so the toolbar + date picker bar stay visible.
-   * Initial navigation still scrolls the timeline to the current time for today.
-   */
-  const skipAutoScrollToTimelineNowRef = useRef(false);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 10 } }));
 
@@ -1073,44 +1062,12 @@ export function PractitionerCalendarView({
   useEffect(() => {
     if (loading || viewMode !== 'day') return;
     const el = scrollRef.current;
-    const main = el?.closest('main');
-    if (!el || !main) return;
-
-    /** After picker changes: scroll the dashboard main to the top so the toolbar + date picker stay in view. */
-    if (skipAutoScrollToTimelineNowRef.current) {
-      const applyPicker = () => {
-        const m = scrollRef.current?.closest('main');
-        if (!m) return;
-        m.scrollTo({ top: 0, behavior: 'auto' });
-      };
-      const id = requestAnimationFrame(() => requestAnimationFrame(applyPicker));
-      return () => cancelAnimationFrame(id);
-    }
-
-    const gridStartM = startHour * 60;
-    const gridEndM = endHour * 60;
-    let yOffset: number;
-    if (date === todayLocalISO()) {
-      const now = new Date();
-      const nowM = now.getHours() * 60 + now.getMinutes();
-      const clampedM = Math.min(Math.max(nowM, gridStartM), Math.max(gridEndM - SLOT_MINUTES, gridStartM));
-      const slotFromStart = (clampedM - gridStartM) / SLOT_MINUTES;
-      const targetY = slotFromStart * SLOT_HEIGHT;
-      const viewH = main.clientHeight;
-      yOffset = Math.max(0, targetY - viewH * 0.28);
-    } else {
-      const eightAm = ((8 - startHour) * 60) / SLOT_MINUTES;
-      yOffset = Math.max(0, eightAm * SLOT_HEIGHT);
-    }
+    if (!el?.closest('main')) return;
 
     const apply = () => {
       const m = scrollRef.current?.closest('main');
-      const node = scrollRef.current;
-      if (!m || !node) return;
-      const mainRect = m.getBoundingClientRect();
-      const elRect = node.getBoundingClientRect();
-      const elDocTop = m.scrollTop + (elRect.top - mainRect.top);
-      m.scrollTo({ top: Math.max(0, elDocTop + yOffset) });
+      if (!m) return;
+      m.scrollTo({ top: 0, behavior: 'auto' });
     };
     const id = requestAnimationFrame(() => requestAnimationFrame(apply));
     return () => cancelAnimationFrame(id);
@@ -1329,7 +1286,6 @@ export function PractitionerCalendarView({
   }
 
   function navigateDayDirect(iso: string) {
-    skipAutoScrollToTimelineNowRef.current = true;
     clearTimeRangeOverridesForDayChange();
     setDate(iso);
     setWeekStart(iso);
@@ -1337,7 +1293,6 @@ export function PractitionerCalendarView({
   }
 
   function handleTimeRangeChange(start: number, end: number) {
-    skipAutoScrollToTimelineNowRef.current = true;
     setStartHourOverride(start);
     setEndHourOverride(end);
   }

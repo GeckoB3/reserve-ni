@@ -230,6 +230,53 @@ export function getTableDimensions(maxCovers: number, shape: string): { width: n
   return { width: 19, height: 11.5 };
 }
 
+/**
+ * Converts stored width/height percentages to pixel sizes on the layout.
+ * Square tables use `min(layoutWidth, layoutHeight)` as the unit so equal %
+ * values are geometrically square; other shapes keep width % × layout width and
+ * height % × layout height.
+ */
+export function tableDimensionsPercentToPixels(
+  widthPct: number,
+  heightPct: number,
+  layoutWidth: number,
+  layoutHeight: number,
+  shape: string,
+): { w: number; h: number } {
+  if (shape === 'square') {
+    const u = Math.min(layoutWidth, layoutHeight);
+    return { w: (widthPct / 100) * u, h: (widthPct / 100) * u };
+  }
+  return {
+    w: (widthPct / 100) * layoutWidth,
+    h: (heightPct / 100) * layoutHeight,
+  };
+}
+
+/**
+ * Inverse of {@link tableDimensionsPercentToPixels} for layout/table resize.
+ */
+export function tablePixelDimensionsToPercent(
+  wPx: number,
+  hPx: number,
+  layoutWidth: number,
+  layoutHeight: number,
+  shape: string,
+): { widthPct: number; heightPct: number } {
+  if (shape === 'square') {
+    const u = Math.min(layoutWidth, layoutHeight);
+    if (u <= 0) return { widthPct: 0, heightPct: 0 };
+    const sidePx = (wPx + hPx) / 2;
+    const p = (sidePx / u) * 100;
+    return { widthPct: p, heightPct: p };
+  }
+  if (layoutWidth <= 0 || layoutHeight <= 0) return { widthPct: 0, heightPct: 0 };
+  return {
+    widthPct: (wPx / layoutWidth) * 100,
+    heightPct: (hPx / layoutHeight) * 100,
+  };
+}
+
 export type BlockedSides = { top: boolean; right: boolean; bottom: boolean; left: boolean };
 
 /**

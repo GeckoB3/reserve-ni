@@ -37,6 +37,10 @@ import { normalizeToE164 } from '@/lib/phone/e164';
 import { HorizontalScrollHint } from '@/components/ui/HorizontalScrollHint';
 import { GuestMessageChannelSelect } from '@/components/booking/GuestMessageChannelSelect';
 import type { GuestMessageChannel } from '@/lib/booking/guest-message-channel';
+import { CalendarDateTimePicker } from '@/components/calendar/CalendarDateTimePicker';
+import { getCalendarGridBounds } from '@/lib/venue-calendar-bounds';
+import { isBookingTimeInHourRange } from '@/lib/booking-time-window';
+import type { OpeningHours } from '@/types/availability';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -175,19 +179,9 @@ const DEFAULT_STATUSES = new Set(['Pending', 'Confirmed', 'Seated']);
 function todayISO(): string {
   return new Date().toISOString().slice(0, 10);
 }
-function addDays(date: string, days: number): string {
-  const d = new Date(date + 'T12:00:00');
-  d.setDate(d.getDate() + days);
-  return d.toISOString().slice(0, 10);
-}
 function formatDateFull(date: string): string {
   const d = new Date(date + 'T12:00:00');
   return `${WEEKDAYS[d.getDay()]} ${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
-}
-/** Long heading - matches table grid / live floor date strip. */
-function formatDateHeading(date: string): string {
-  const d = new Date(`${date}T12:00:00`);
-  return d.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 }
 /** Relative day label - matches dashboard/bookings concertina. */
 function formatDateNice(dateStr: string): string {
@@ -742,8 +736,12 @@ export function DaySheetView({
   const [showNewBooking, setShowNewBooking] = useState(false);
   const [editBooking, setEditBooking] = useState<DaySheetBooking | null>(null);
   const [sendMessageId, setSendMessageId] = useState<string | null>(null);
-  const [showDatePicker, setShowDatePicker] = useState(false);
   const [dietaryOpen, setDietaryOpen] = useState(false);
+  const [openingHours, setOpeningHours] = useState<OpeningHours | null>(null);
+  const [venueTimezone, setVenueTimezone] = useState<string>('Europe/London');
+  const [startHourOverride, setStartHourOverride] = useState<number | null>(null);
+  const [endHourOverride, setEndHourOverride] = useState<number | null>(null);
+  const [timeRangeFilterActive, setTimeRangeFilterActive] = useState(false);
   const [undoAction, setUndoAction] = useState<UndoAction | null>(null);
   const [tableManagementEnabled, setTableManagementEnabled] = useState(false);
   const [seatWithTableBookingId, setSeatWithTableBookingId] = useState<string | null>(null);
@@ -764,6 +762,41 @@ export function DaySheetView({
     })();
   }, []);
 
+  // Fetch venue opening hours + timezone for the calendar/time picker bounds.
+  useEffect(() => {
+    let cancelled = false;
+    void fetch('/api/venue')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((v) => {
+        if (cancelled || !v) return;
+        if (v.opening_hours) setOpeningHours(v.opening_hours as OpeningHours);
+        const tz = v.timezone;
+        if (typeof tz === 'string' && tz.trim() !== '') setVenueTimezone(tz.trim());
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Derive default display window from opening hours, allow user overrides.
+  const { startHour: derivedStartHour, endHour: derivedEndHour } = useMemo(
+    () =>
+      getCalendarGridBounds(date, openingHours ?? undefined, 7, 21, {
+        timeZone: venueTimezone,
+      }),
+    [date, openingHours, venueTimezone],
+  );
+  const pickerStartHour = startHourOverride ?? derivedStartHour;
+  const pickerEndHour = endHourOverride ?? derivedEndHour;
+
+  // Reset the hour filter whenever the user changes the date.
+  useEffect(() => {
+    setStartHourOverride(null);
+    setEndHourOverride(null);
+    setTimeRangeFilterActive(false);
+  }, [date]);
+
   // Filters
   const [filters, setFilters] = useState<Filters>({
     periodKey: 'all',
@@ -778,8 +811,6 @@ export function DaySheetView({
       [...filters.statuses].every((s) => defaultStatuses.has(s));
     return filters.periodKey !== 'all' || !sameStatuses || filters.search !== '' || filters.showCancelled || filters.showNoShow;
   }, [filters]);
-
-  const isToday = useMemo(() => date === todayISO(), [date]);
 
   const activeTables = useMemo(() => data?.active_tables ?? [], [data]);
 
@@ -1062,10 +1093,13 @@ export function DaySheetView({
             const sizeMatch = String(b.party_size) === q;
             if (!nameMatch && !sizeMatch) return false;
           }
+          if (timeRangeFilterActive && !isBookingTimeInHourRange(b.booking_time, pickerStartHour, pickerEndHour)) {
+            return false;
+          }
           return true;
         }),
       }));
-  }, [data, filters]);
+  }, [data, filters, timeRangeFilterActive, pickerStartHour, pickerEndHour]);
 
   // Loading skeleton
   if (loading && !data) {
@@ -1170,51 +1204,45 @@ export function DaySheetView({
         </div>
       </div>
 
-      {/* Row 2 - date navigator (same card treatment as table grid / floor) */}
-      <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-3 shadow-sm print:hidden sm:px-4">
-        <button
-          type="button"
-          onClick={() => setDate(addDays(date, -1))}
-          className="rounded-lg p-2 text-slate-400 hover:bg-slate-50 hover:text-slate-600"
-          aria-label="Previous day"
-        >
-          <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" />
-          </svg>
-        </button>
-        <div className="relative min-w-0 flex-1 px-2 text-center">
-          <button
-            type="button"
-            onClick={() => setShowDatePicker((o) => !o)}
-            className="w-full rounded-lg py-1 hover:bg-slate-50/80"
-          >
-            <h2 className="truncate text-sm font-semibold text-slate-900 sm:text-base">{formatDateHeading(date)}</h2>
-            {isToday && <span className="text-xs font-medium text-brand-600">Today</span>}
-          </button>
-          {showDatePicker && (
-            <input
-              type="date"
-              value={date}
-              onChange={(e) => {
-                setDate(e.target.value || todayISO());
-                setShowDatePicker(false);
+      {/* Row 2 - date + time-range picker (same bar used on the bookings dashboard) */}
+      <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm print:hidden">
+        <CalendarDateTimePicker
+          date={date}
+          onDateChange={setDate}
+          startHour={pickerStartHour}
+          endHour={pickerEndHour}
+          onTimeRangeChange={(start, end) => {
+            setStartHourOverride(start);
+            setEndHourOverride(end);
+            setTimeRangeFilterActive(true);
+          }}
+        />
+        {timeRangeFilterActive && (
+          <div className="mt-2 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-2">
+            <p className="text-xs text-slate-600">
+              Showing bookings with start times from{' '}
+              <span className="font-medium text-slate-800">
+                {String(pickerStartHour).padStart(2, '0')}:00
+              </span>{' '}
+              up to{' '}
+              <span className="font-medium text-slate-800">
+                {String(pickerEndHour).padStart(2, '0')}:00
+              </span>{' '}
+              (not including the end hour).
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                setStartHourOverride(null);
+                setEndHourOverride(null);
+                setTimeRangeFilterActive(false);
               }}
-              onBlur={() => setShowDatePicker(false)}
-              className="absolute left-1/2 top-full z-20 mt-1 -translate-x-1/2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm shadow-lg"
-              autoFocus
-            />
-          )}
-        </div>
-        <button
-          type="button"
-          onClick={() => setDate(addDays(date, 1))}
-          className="rounded-lg p-2 text-slate-400 hover:bg-slate-50 hover:text-slate-600"
-          aria-label="Next day"
-        >
-          <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
-          </svg>
-        </button>
+              className="shrink-0 text-xs font-medium text-brand-600 hover:text-brand-700 hover:underline"
+            >
+              Clear time filter
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Connection warning */}

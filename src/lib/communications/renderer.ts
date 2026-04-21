@@ -7,11 +7,17 @@ import type {
 import {
   escapeHtml,
   formatDate,
-  formatDepositAmount,
   formatTime,
   renderBaseTemplate,
 } from '@/lib/emails/templates/base-template';
 import { buildGoogleCalendarAddUrlForBooking } from '@/lib/emails/calendar-links';
+import {
+  bookingConfirmationPaymentParagraphs,
+  bookingConfirmationPaymentTextLines,
+  bookingConfirmationSmsPriceSuffix,
+  formatMoneyOrNull,
+  priceDisplayForConfirmationCard,
+} from './booking-confirmation-pricing';
 import type {
   CommunicationLane,
   CommunicationMessageKey,
@@ -48,108 +54,6 @@ function htmlParagraph(text: string): string {
 
 function htmlRaw(text: string): string {
   return `<p style="margin:0 0 14px 0">${text}</p>`;
-}
-
-function formatMoneyOrNull(pence: number | null | undefined): string | null {
-  if (typeof pence !== 'number') return null;
-  return `£${formatDepositAmount(pence)}`;
-}
-
-/** Strip trailing venue-payment hint so the detail card shows a clean amount. */
-export function normalizePriceDisplayForCard(raw: string | null | undefined): string | null {
-  if (!raw?.trim()) return null;
-  const s = raw.replace(/\s*\(pay at venue\)\s*$/i, '').trim();
-  return s || null;
-}
-
-/** First £ amount in a display string, as pence (for fallbacks when total pence is unset). */
-export function parseFirstGbpPence(display: string | null | undefined): number | null {
-  if (!display?.trim()) return null;
-  const m = display.match(/£\s*([\d.]+)/i);
-  if (!m) return null;
-  const val = parseFloat(m[1]!);
-  if (!Number.isFinite(val)) return null;
-  return Math.round(val * 100);
-}
-
-function bookingConfirmationPaymentParagraphs(booking: BookingEmailData): string[] {
-  const ds = (booking.deposit_status ?? '').toLowerCase();
-  const paidPence = booking.deposit_amount_pence;
-  const totalPence = booking.booking_total_price_pence ?? null;
-  const inferredTotalPence =
-    totalPence != null && totalPence > 0
-      ? totalPence
-      : parseFirstGbpPence(booking.appointment_price_display);
-
-  const hasPositivePrice = inferredTotalPence != null && inferredTotalPence > 0;
-
-  const paidOnline = ds === 'paid' && typeof paidPence === 'number' && paidPence > 0;
-
-  if (paidOnline) {
-    const amt = formatMoneyOrNull(paidPence);
-    if (!amt) return [];
-    if (totalPence != null && totalPence > 0 && paidPence >= totalPence) {
-      return [htmlParagraph(`Paid in full online (${amt}).`)];
-    }
-    if (totalPence != null && totalPence > 0 && paidPence < totalPence) {
-      const bal = formatMoneyOrNull(totalPence - paidPence);
-      return [
-        htmlParagraph(
-          `Deposit paid online (${amt}). Remaining balance${bal ? ` (${bal})` : ''}: pay at the venue.`,
-        ),
-      ];
-    }
-    return [htmlParagraph(`Payment received online (${amt}).`)];
-  }
-
-  if (ds === 'pending') {
-    return [];
-  }
-
-  if (hasPositivePrice && !paidOnline) {
-    return [htmlParagraph('Payment is due at the venue.')];
-  }
-
-  return [];
-}
-
-function bookingConfirmationPaymentTextLines(booking: BookingEmailData): string[] {
-  const ds = (booking.deposit_status ?? '').toLowerCase();
-  const paidPence = booking.deposit_amount_pence;
-  const totalPence = booking.booking_total_price_pence ?? null;
-  const inferredTotalPence =
-    totalPence != null && totalPence > 0
-      ? totalPence
-      : parseFirstGbpPence(booking.appointment_price_display);
-
-  const hasPositivePrice = inferredTotalPence != null && inferredTotalPence > 0;
-
-  const paidOnline = ds === 'paid' && typeof paidPence === 'number' && paidPence > 0;
-
-  if (paidOnline) {
-    const amt = formatMoneyOrNull(paidPence);
-    if (!amt) return [];
-    if (totalPence != null && totalPence > 0 && paidPence >= totalPence) {
-      return [`Paid in full online (${amt}).`];
-    }
-    if (totalPence != null && totalPence > 0 && paidPence < totalPence) {
-      const bal = formatMoneyOrNull(totalPence - paidPence);
-      return [
-        `Deposit paid online (${amt}). Remaining balance${bal ? ` (${bal})` : ''}: pay at the venue.`,
-      ];
-    }
-    return [`Payment received online (${amt}).`];
-  }
-
-  if (ds === 'pending') {
-    return [];
-  }
-
-  if (hasPositivePrice && !paidOnline) {
-    return ['Payment is due at the venue.'];
-  }
-
-  return [];
 }
 
 function withStaff(
@@ -200,24 +104,9 @@ export function renderCommunicationSms(
   const body = (() => {
     switch (opts.messageKey) {
       case 'booking_confirmation': {
-        const priceShow = normalizePriceDisplayForCard(opts.booking.appointment_price_display);
-        const ds = (opts.booking.deposit_status ?? '').toLowerCase();
-        const paidOnline =
-          ds === 'paid' &&
-          typeof opts.booking.deposit_amount_pence === 'number' &&
-          opts.booking.deposit_amount_pence > 0;
-        const payHint = (() => {
-          if (!isAppointmentLane(opts.lane)) return '';
-          if (paidOnline) {
-            const amt = formatMoneyOrNull(opts.booking.deposit_amount_pence);
-            return amt ? ` Paid ${amt} online.` : '';
-          }
-          if (ds === 'pending') return '';
-          if (priceShow && parseFirstGbpPence(opts.booking.appointment_price_display)) {
-            return ` ${priceShow}. Pay at venue.`;
-          }
-          return priceShow ? ` ${priceShow}.` : '';
-        })();
+        const payHint = isAppointmentLane(opts.lane)
+          ? bookingConfirmationSmsPriceSuffix(opts.booking)
+          : '';
         return isAppointmentLane(opts.lane)
           ? `${leadPart}${venueName}: Your ${withStaff(label, opts.booking)} is booked for ${date} at ${time}.${payHint}${manage}`.trim()
           : `${leadPart}${venueName}: Your table is booked for ${date} at ${time} (${partySize} guests).${manage} See you there!`.trim();
@@ -281,10 +170,12 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
 
   switch (opts.messageKey) {
     case 'booking_confirmation': {
-      const priceLineText =
-        appointment && opts.booking.appointment_price_display
-          ? `Price: ${normalizePriceDisplayForCard(opts.booking.appointment_price_display) ?? opts.booking.appointment_price_display}`
-          : null;
+      const priceLineText = appointment
+        ? (() => {
+            const line = priceDisplayForConfirmationCard(opts.booking);
+            return line ? `Price: ${line}` : null;
+          })()
+        : null;
       const paymentHtml = appointment ? bookingConfirmationPaymentParagraphs(opts.booking) : [];
       const paymentText = appointment ? bookingConfirmationPaymentTextLines(opts.booking) : [];
       return {
@@ -658,7 +549,7 @@ export function renderCommunicationEmail(
 
   const priceForCard =
     opts.messageKey === 'booking_confirmation' && isAppointmentLane(opts.lane)
-      ? normalizePriceDisplayForCard(opts.booking.appointment_price_display)
+      ? priceDisplayForConfirmationCard(opts.booking)
       : null;
 
   const html = renderBaseTemplate({

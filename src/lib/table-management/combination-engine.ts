@@ -47,6 +47,8 @@ export interface AutoCombinationOverrideInput {
   id: string;
   table_group_key: string;
   disabled: boolean;
+  /** When true, combination is still offered if it drops out of adjacency detection. */
+  locked: boolean;
   display_name: string | null;
   combined_min_covers: number | null;
   combined_max_covers: number | null;
@@ -657,6 +659,57 @@ export function findValidCombinations(args: {
   const singleSuggestions: CombinationSuggestion[] = [];
   const comboByKey = new Map<string, CombinationSuggestion>();
 
+  const pushAutoFromOverride = (sortedGroup: string[], ov: AutoCombinationOverrideInput | undefined) => {
+    if (sortedGroup.length < 2) return;
+    if (ov?.disabled) return;
+    const key = sortedGroup.join('|');
+    if (comboByKey.has(key)) return;
+    if (sortedGroup.some((id) => !availableSet.has(id))) return;
+
+    const tablesInGroup = sortedGroup.map((tableId) => tableMap.get(tableId)).filter(Boolean) as CombinationTable[];
+    if (tablesInGroup.length !== sortedGroup.length) return;
+    const sumCap = tablesInGroup.reduce((sum, table) => sum + table.max_covers, 0);
+    const effectiveMaxParty = ov?.combined_max_covers ?? sumCap;
+    const effectiveMinParty = ov?.combined_min_covers ?? 1;
+    if (partySize < effectiveMinParty || partySize > effectiveMaxParty) return;
+    const effectiveCapacity = Math.min(sumCap, effectiveMaxParty);
+    if (effectiveCapacity < partySize) return;
+
+    if (ov && bookingContext) {
+      const ok = isCombinationAllowedForBookingContext(
+        {
+          days_of_week: ov.days_of_week,
+          time_start: ov.time_start,
+          time_end: ov.time_end,
+          booking_type_filters: ov.booking_type_filters,
+          requires_manager_approval: ov.requires_manager_approval,
+        },
+        {
+          bookingDate: bookingContext.bookingDate,
+          bookingTime: bookingContext.bookingTime,
+          bookingModel: bookingContext.bookingModel,
+        },
+      );
+      if (!ok) return;
+    }
+
+    const metrics = scoreCombination(sortedGroup, partySize, tableMap, false);
+    comboByKey.set(key, {
+      source: 'auto',
+      table_ids: sortedGroup,
+      table_names: tablesInGroup.map((table) => table.name),
+      combined_capacity: effectiveCapacity,
+      spare_covers: Math.max(0, effectiveCapacity - partySize),
+      score: metrics.score,
+      waste: metrics.waste,
+      table_count: sortedGroup.length,
+      compactness_area: metrics.compactnessArea,
+      auto_override_id: ov?.id,
+      requires_manager_approval: ov?.requires_manager_approval,
+      internal_notes: ov?.internal_notes ?? undefined,
+    });
+  };
+
   for (const table of availableTables) {
     if (table.max_covers < partySize) continue;
     const metrics = scoreCombination([table.id], partySize, tableMap, false);
@@ -687,51 +740,19 @@ export function findValidCombinations(args: {
     for (const group of groups) {
       if (group.length < 2) continue;
       const sortedGroup = [...group].sort();
-      const key = sortedGroup.join('|');
-      const ov = autoOverrides?.get(key);
-      if (ov?.disabled) continue;
+      const ov = autoOverrides?.get(sortedGroup.join('|'));
+      pushAutoFromOverride(sortedGroup, ov);
+    }
+  }
 
-      const tablesInGroup = sortedGroup.map((tableId) => tableMap.get(tableId)).filter(Boolean) as CombinationTable[];
-      const sumCap = tablesInGroup.reduce((sum, table) => sum + table.max_covers, 0);
-      const effectiveMaxParty = ov?.combined_max_covers ?? sumCap;
-      const effectiveMinParty = ov?.combined_min_covers ?? 1;
-      if (partySize < effectiveMinParty || partySize > effectiveMaxParty) continue;
-      const effectiveCapacity = Math.min(sumCap, effectiveMaxParty);
-      if (effectiveCapacity < partySize) continue;
-
-      if (ov && bookingContext) {
-        const ok = isCombinationAllowedForBookingContext(
-          {
-            days_of_week: ov.days_of_week,
-            time_start: ov.time_start,
-            time_end: ov.time_end,
-            booking_type_filters: ov.booking_type_filters,
-            requires_manager_approval: ov.requires_manager_approval,
-          },
-          {
-            bookingDate: bookingContext.bookingDate,
-            bookingTime: bookingContext.bookingTime,
-            bookingModel: bookingContext.bookingModel,
-          },
-        );
-        if (!ok) continue;
-      }
-
-      const metrics = scoreCombination(sortedGroup, partySize, tableMap, false);
-      comboByKey.set(key, {
-        source: 'auto',
-        table_ids: sortedGroup,
-        table_names: tablesInGroup.map((table) => table.name),
-        combined_capacity: effectiveCapacity,
-        spare_covers: Math.max(0, effectiveCapacity - partySize),
-        score: metrics.score,
-        waste: metrics.waste,
-        table_count: sortedGroup.length,
-        compactness_area: metrics.compactnessArea,
-        auto_override_id: ov?.id,
-        requires_manager_approval: ov?.requires_manager_approval,
-        internal_notes: ov?.internal_notes ?? undefined,
-      });
+  if (autoOverrides) {
+    for (const ov of autoOverrides.values()) {
+      if (!ov.locked || ov.disabled) continue;
+      const ids = ov.table_group_key.split('|').filter(Boolean);
+      if (ids.length < 2) continue;
+      const sortedGroup = [...ids].sort((a, b) => a.localeCompare(b));
+      if (sortedGroup.join('|') !== ov.table_group_key) continue;
+      pushAutoFromOverride(sortedGroup, ov);
     }
   }
 

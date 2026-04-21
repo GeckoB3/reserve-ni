@@ -3,16 +3,25 @@
 import React, { useMemo } from 'react';
 import { Group, Rect, Circle, Ellipse, Text, Line } from 'react-konva';
 import type { KonvaEventObject } from 'konva/lib/Node';
-import { getTableDimensions } from '@/types/table-management';
+import {
+  getTableDimensions,
+  tableDimensionsPercentToPixels,
+  tablePixelDimensionsToPercent,
+} from '@/types/table-management';
 import { calculateSeatPositions } from '@/lib/floor-plan/seat-positions';
 import {
+  computeBestPolygonLabelBand,
   computeInnerLabelWidthRounded,
   computeFittedTableLabelFonts,
   type TableLabelFitResult,
 } from '@/lib/floor-plan/table-label-fonts';
 
-const SEAT_DOT_RADIUS = 9;
-const SEAT_DOT_OFFSET = 14;
+/** ~30% larger chair markers (seat rects) around the table vs prior defaults. */
+const SEAT_MARKER_SCALE = 1.3;
+/** Extra scale on chair-marker rect width and length only (after radius-derived base). */
+const SEAT_RECT_WL_SCALE = 1.4;
+const SEAT_DOT_RADIUS = 9 * SEAT_MARKER_SCALE;
+const SEAT_DOT_OFFSET = 14 * SEAT_MARKER_SCALE;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -63,18 +72,27 @@ export interface TableShapeProps {
   /** Override the computed pixel position during drag. */
   overrideX?: number;
   overrideY?: number;
+  onDragStart?: (e: KonvaEventObject<DragEvent>) => void;
   onDragEnd?: (e: KonvaEventObject<DragEvent>) => void;
   onDragMove?: (e: KonvaEventObject<DragEvent>) => void;
   onClick?: (e: KonvaEventObject<MouseEvent>) => void;
   onTap?: () => void;
   /**
-   * Called while dragging a resize handle on oval/circle/rectangle tables.
+   * Called while dragging a resize handle on oval/circle tables.
    * axis: 'x' for horizontal (width), 'y' for vertical (height).
    * halfPixels: distance from table centre to handle in pixels.
    */
   onResizeHandleDrag?: (axis: 'x' | 'y', halfPixels: number) => void;
   /** Called when a resize handle drag ends (for final save). */
   onResizeHandleEnd?: () => void;
+  /**
+   * Called while dragging a corner of a rectangle / square / polygon table.
+   * Emits full width & height simultaneously (as a percentage of the canvas)
+   * so W and H don't fight over state.
+   */
+  onRectResize?: (widthPct: number, heightPct: number) => void;
+  /** Called when rectangle corner resize ends (for final save). */
+  onRectResizeEnd?: () => void;
   /**
    * Custom seat angle overrides per seat index (radians). null = use computed.
    */
@@ -88,6 +106,9 @@ export interface TableShapeProps {
    * font sizes so labels match the tightest table on the plan.
    */
   unifiedLabelFonts?: TableLabelFitResult | null;
+  /** Editor: drag a polygon vertex (table-local unrotated pixels) to reshape the custom table. */
+  onPolygonVertexDrag?: (vertexIndex: number, localX: number, localY: number) => void;
+  onPolygonVertexDragEnd?: () => void;
   children?: React.ReactNode;
 }
 
@@ -210,16 +231,21 @@ export default function TableShape({
   layoutScale,
   overrideX,
   overrideY,
+  onDragStart,
   onDragEnd,
   onDragMove,
   onClick,
   onTap,
   onResizeHandleDrag,
   onResizeHandleEnd,
+  onRectResize,
+  onRectResizeEnd,
   seatAngles,
   onSeatDrag,
   onSeatDragEnd,
   unifiedLabelFonts,
+  onPolygonVertexDrag,
+  onPolygonVertexDragEnd,
   children,
 }: TableShapeProps) {
   // --- Geometry ---
@@ -234,8 +260,13 @@ export default function TableShape({
     (table.position_y != null
       ? (table.position_y / 100) * canvasHeight
       : canvasHeight / 2);
-  const w = ((table.width ?? fallback.width) / 100) * canvasWidth;
-  const h = ((table.height ?? fallback.height) / 100) * canvasHeight;
+  const { w, h } = tableDimensionsPercentToPixels(
+    table.width ?? fallback.width,
+    table.height ?? fallback.height,
+    canvasWidth,
+    canvasHeight,
+    table.shape,
+  );
 
   const isOccupied = !isEditorMode && booking != null;
 
@@ -295,10 +326,25 @@ export default function TableShape({
     : capacityText;
 
   const HANDLE = 6;
+  /** Screen-space targets: grow when zoomed out so corners stay easy to grab (desktop + touch). */
+  const layoutScaleSafe = layoutScale != null && layoutScale > 0 ? layoutScale : 1;
+  /** ~40% smaller than the prior default while preserving zoom-aware scaling. */
+  const POLY_VERTEX_SCALE = 0.6;
+  const polyVertexRadius =
+    POLY_VERTEX_SCALE * Math.max(10, 16 / Math.max(layoutScaleSafe, 0.14));
+  const polyVertexHitStroke =
+    POLY_VERTEX_SCALE * Math.max(28, 44 / Math.max(layoutScaleSafe, 0.14));
 
   const minDim = Math.min(w, h);
-  const topEdge = isCircular ? -Math.min(w, h) / 2 : -h / 2;
-  const bottomEdge = isCircular ? Math.min(w, h) / 2 : h / 2;
+  const polyVert =
+    isPolygon && polygonPixelPts && polygonPixelPts.length >= 3
+      ? {
+          top: Math.min(...polygonPixelPts.map((p) => p.y)),
+          bottom: Math.max(...polygonPixelPts.map((p) => p.y)),
+        }
+      : null;
+  const topEdge = isCircular ? -Math.min(w, h) / 2 : polyVert ? polyVert.top : -h / 2;
+  const bottomEdge = isCircular ? Math.min(w, h) / 2 : polyVert ? polyVert.bottom : h / 2;
 
   /** Single-line box height for Konva Text (bold needs extra headroom vs raw fontSize). */
   const compactLineBox = (fs: number, bold: boolean) =>
@@ -313,6 +359,7 @@ export default function TableShape({
   let nameLineH: number;
   let innerW: number;
   let textX: number;
+  let labelBlockCenterY: number;
   let nameFill: string;
   let capFill: string;
   let compactTextStroke: string | undefined;
@@ -332,6 +379,7 @@ export default function TableShape({
         bottomLabel,
         compactLabels: true,
         layoutScale,
+        polygon_points: table.polygon_points ?? null,
       });
     const fn = fit.fontName;
     const fc = fit.fontCap;
@@ -344,6 +392,15 @@ export default function TableShape({
     };
 
     const { blockH, nameBox, capBox } = measureBlock(fn, fc, gap);
+    const polygonBand =
+      isPolygon && polygonPixelPts && polygonPixelPts.length >= 3
+        ? computeBestPolygonLabelBand({
+            polygonPixelPts,
+            labelHalfHeight: blockH / 2,
+            insetXLocal,
+            curveInsetFactor: 0.97,
+          })
+        : null;
     const computedInnerW = computeInnerLabelWidthRounded({
       w,
       h,
@@ -352,6 +409,7 @@ export default function TableShape({
       isOval,
       labelHalfHeight: blockH / 2,
       curveInsetFactor: 0.97,
+      polygonPixelPts: isPolygon ? polygonPixelPts : null,
     });
 
     fontName = fn;
@@ -367,9 +425,11 @@ export default function TableShape({
     displayName = truncateForWidth(topLabel, nm);
     displayCap = truncateForWidth(bottomLabel, cm);
 
-    /* Centre the two-line block on the table origin (0,0) - same for rect, circle, oval. */
-    nameY = -blockH / 2;
+    /* Keep polygon labels centered in the largest contiguous interior band. */
+    const startY = polygonBand ? polygonBand.centerY - blockH / 2 : -blockH / 2;
+    nameY = startY;
     capY = nameY + nameLineH + gap;
+    labelBlockCenterY = nameY + blockH / 2;
 
     nameFill = '#000000';
     capFill = '#000000';
@@ -393,6 +453,7 @@ export default function TableShape({
         bottomLabel,
         compactLabels: false,
         layoutScale,
+        polygon_points: table.polygon_points ?? null,
       });
     const fn = fit.fontName;
     const fc = fit.fontCap;
@@ -405,6 +466,15 @@ export default function TableShape({
     };
 
     const { blockH, nameBox, capBox } = measureBlock(fn, fc, gap);
+    const polygonBand =
+      isPolygon && polygonPixelPts && polygonPixelPts.length >= 3
+        ? computeBestPolygonLabelBand({
+            polygonPixelPts,
+            labelHalfHeight: blockH / 2,
+            insetXLocal,
+            curveInsetFactor: 0.97,
+          })
+        : null;
     const computedInnerW = computeInnerLabelWidthRounded({
       w,
       h,
@@ -413,6 +483,7 @@ export default function TableShape({
       isOval,
       labelHalfHeight: blockH / 2,
       curveInsetFactor: 0.97,
+      polygonPixelPts: isPolygon ? polygonPixelPts : null,
     });
 
     fontName = fn;
@@ -428,18 +499,30 @@ export default function TableShape({
     displayName = truncateForWidth(topLabel, nm);
     displayCap = truncateForWidth(bottomLabel, cm);
 
-    const opticalUp = Math.min(2, Math.max(0, minDim * 0.01));
-    const centred = innerTop + Math.max(0, (innerH - blockH) / 2);
-    const rawStart = centred - opticalUp;
-    const blockStart = clamp(rawStart, innerTop, Math.max(innerTop, innerBottom - blockH));
+    const blockStart = polygonBand
+      ? clamp(
+          polygonBand.centerY - blockH / 2,
+          innerTop,
+          Math.max(innerTop, innerBottom - blockH),
+        )
+      : (() => {
+          const opticalUp = Math.min(2, Math.max(0, minDim * 0.01));
+          const centred = innerTop + Math.max(0, (innerH - blockH) / 2);
+          const rawStart = centred - opticalUp;
+          return clamp(rawStart, innerTop, Math.max(innerTop, innerBottom - blockH));
+        })();
     nameY = blockStart;
     capY = blockStart + nameLineH + gap;
+    labelBlockCenterY = blockStart + blockH / 2;
 
     nameFill = isOccupied ? '#1e293b' : '#334155';
     capFill = isOccupied ? '#64748b' : '#94a3b8';
     compactTextStroke = undefined;
     compactTextStrokeW = 0;
   }
+
+  /** Keeps name/capacity horizontal on screen while the table Group still rotates the shape. */
+  const labelScreenRotationDeg = -(table.rotation ?? 0);
 
   return (
     <Group
@@ -448,6 +531,7 @@ export default function TableShape({
       opacity={groupOpacity}
       rotation={table.rotation ?? 0}
       draggable={isEditorMode}
+      onDragStart={onDragStart}
       onDragEnd={onDragEnd}
       onDragMove={onDragMove}
       onClick={onClick}
@@ -558,9 +642,9 @@ export default function TableShape({
 
           const isFilled = isOccupied && i < booking!.party_size;
           const seatRadius = compactLabels
-            ? 4
+            ? 4 * SEAT_MARKER_SCALE
             : Math.min(
-                13,
+                13 * SEAT_MARKER_SCALE,
                 (SEAT_DOT_RADIUS + 2) *
                   (layoutScale != null && layoutScale > 0
                     ? clamp(0.38 / layoutScale, 1, 1.8)
@@ -570,8 +654,8 @@ export default function TableShape({
           const canDragSeat = isEditorMode && !compactLabels && !!onSeatDrag;
 
           // Chair-back proportions (width = short axis, length = along table edge).
-          const seatThickness = Math.max(4, seatRadius * 1.1); // ~2× prior width
-          const seatLength = Math.max(10, seatRadius * 4.1875); // ~1.25× prior length (3.35 × 1.25)
+          const seatThickness = Math.max(4, seatRadius * 1.1) * SEAT_RECT_WL_SCALE;
+          const seatLength = Math.max(10, seatRadius * 4.1875) * SEAT_RECT_WL_SCALE;
           const seatRotation = konvaSeatBackRotationDeg(edgeTangentRad);
 
           return (
@@ -626,7 +710,7 @@ export default function TableShape({
         })}
       </Group>
 
-      {/* ---- Labels: shape-aware clip ---- */}
+      {/* ---- Labels: keep the whole two-line block upright without letting the lines drift independently ---- */}
       <Group
         {...(isCircular || isOval
           ? {
@@ -662,65 +746,107 @@ export default function TableShape({
                 },
               })}
       >
-        <Text
-          text={displayName}
-          fontSize={fontName}
-          fontFamily="Inter, system-ui, sans-serif"
-          fontStyle="bold"
-          fill={nameFill}
-          stroke={compactTextStroke}
-          strokeWidth={compactTextStrokeW}
-          align="center"
-          verticalAlign="middle"
-          wrap="none"
-          ellipsis={true}
-          width={innerW}
-          height={nameLineH}
-          x={textX}
-          y={nameY}
-          listening={false}
-        />
-        <Text
-          text={displayCap}
-          fontSize={fontCap}
-          fontFamily="Inter, system-ui, sans-serif"
-          fontStyle="normal"
-          fill={capFill}
-          stroke={compactTextStroke}
-          strokeWidth={compactTextStrokeW}
-          align="center"
-          verticalAlign="middle"
-          wrap="none"
-          ellipsis={true}
-          width={innerW}
-          height={capLineH}
-          x={textX}
-          y={capY}
-          listening={false}
-        />
+        <Group x={0} y={labelBlockCenterY} rotation={labelScreenRotationDeg}>
+          <Text
+            text={displayName}
+            fontSize={fontName}
+            fontFamily="Inter, system-ui, sans-serif"
+            fontStyle="bold"
+            fill={nameFill}
+            stroke={compactTextStroke}
+            strokeWidth={compactTextStrokeW}
+            align="center"
+            verticalAlign="middle"
+            wrap="none"
+            ellipsis={true}
+            width={innerW}
+            height={nameLineH}
+            x={textX}
+            y={nameY - labelBlockCenterY}
+            listening={false}
+          />
+          <Text
+            text={displayCap}
+            fontSize={fontCap}
+            fontFamily="Inter, system-ui, sans-serif"
+            fontStyle="normal"
+            fill={capFill}
+            stroke={compactTextStroke}
+            strokeWidth={compactTextStrokeW}
+            align="center"
+            verticalAlign="middle"
+            wrap="none"
+            ellipsis={true}
+            width={innerW}
+            height={capLineH}
+            x={textX}
+            y={capY - labelBlockCenterY}
+            listening={false}
+          />
+        </Group>
       </Group>
 
-      {/* ---- Resize handles (editor + selected) ---- */}
+      {/* ---- Corner resize handles for rectangle / square / polygon ---- */}
       {isSelected && isEditorMode && !isCircular && !isOval &&
         (
           [
-            [-w / 2, -h / 2],
-            [w / 2, -h / 2],
-            [w / 2, h / 2],
-            [-w / 2, h / 2],
-          ] as [number, number][]
-        ).map(([cx, cy], i) => (
-          <Rect
-            key={`handle-${i}`}
-            x={cx - HANDLE / 2}
-            y={cy - HANDLE / 2}
-            width={HANDLE}
-            height={HANDLE}
-            fill="#ffffff"
-            stroke="#2563eb"
-            strokeWidth={1.5}
-          />
-        ))}
+            ['nw', -1, -1],
+            ['ne',  1, -1],
+            ['se',  1,  1],
+            ['sw', -1,  1],
+          ] as [string, -1 | 1, -1 | 1][]
+        ).map(([name, sx, sy], i) => {
+          const hx = (sx * w) / 2;
+          const hy = (sy * h) / 2;
+          return (
+            <Rect
+              key={`rect-handle-${i}`}
+              x={hx - HANDLE / 2}
+              y={hy - HANDLE / 2}
+              width={HANDLE}
+              height={HANDLE}
+              fill="#ffffff"
+              stroke="#2563eb"
+              strokeWidth={1.5}
+              draggable={!!onRectResize}
+              onDragMove={onRectResize ? (e) => {
+                e.cancelBubble = true;
+                const node = e.target;
+                // Handle centre in local coords = node.x + HANDLE/2
+                const hxNow = node.x() + HANDLE / 2;
+                const hyNow = node.y() + HANDLE / 2;
+                const halfWpx = Math.abs(hxNow);
+                const halfHpx = Math.abs(hyNow);
+                const { widthPct: wp, heightPct: hp } = tablePixelDimensionsToPercent(
+                  halfWpx * 2,
+                  halfHpx * 2,
+                  canvasWidth,
+                  canvasHeight,
+                  table.shape,
+                );
+                const widthPct = Math.max(3, Math.min(25, wp));
+                const heightPct = Math.max(3, Math.min(25, hp));
+                onRectResize(widthPct, table.shape === 'square' ? widthPct : heightPct);
+                // Snap handle back to its corner (React re-render will place it correctly
+                // once state flows; this just prevents it flying off during rapid moves).
+                node.x(hx - HANDLE / 2);
+                node.y(hy - HANDLE / 2);
+              } : undefined}
+              onDragEnd={onRectResizeEnd ? (e) => {
+                e.cancelBubble = true;
+                onRectResizeEnd();
+              } : undefined}
+              onMouseDown={(e) => { e.cancelBubble = true; }}
+              onTouchStart={(e) => { e.cancelBubble = true; }}
+              hitStrokeWidth={12}
+              style={
+                onRectResize
+                  ? ({ cursor: name === 'nw' || name === 'se' ? 'nwse-resize' : 'nesw-resize' } as React.CSSProperties)
+                  : undefined
+              }
+            />
+          );
+        })}
 
       {/* Circle handles — dragging any changes diameter (w = h) */}
       {isSelected && isEditorMode && isCircular &&
@@ -802,28 +928,46 @@ export default function TableShape({
           />
         ))}
 
-      {/* Polygon: show bbox corner handles for scaling */}
-      {isSelected && isEditorMode && isPolygon && polygonPixelPts && (
-        (
-          [
-            [-w / 2, -h / 2],
-            [w / 2, -h / 2],
-            [w / 2, h / 2],
-            [-w / 2, h / 2],
-          ] as [number, number][]
-        ).map(([cx, cy], i) => (
-          <Rect
-            key={`poly-handle-${i}`}
-            x={cx - HANDLE / 2}
-            y={cy - HANDLE / 2}
-            width={HANDLE}
-            height={HANDLE}
+      {/* Polygon: draggable vertices to reshape (table-local space). */}
+      {isSelected &&
+        isEditorMode &&
+        isPolygon &&
+        polygonPixelPts &&
+        polygonPixelPts.length >= 3 &&
+        onPolygonVertexDrag &&
+        polygonPixelPts.map((pt, vi) => (
+          <Circle
+            key={`poly-vertex-${vi}`}
+            x={pt.x}
+            y={pt.y}
+            radius={polyVertexRadius}
             fill="#ffffff"
             stroke="#2563eb"
-            strokeWidth={1.5}
+            strokeWidth={POLY_VERTEX_SCALE * Math.max(1.75, 2 / Math.max(layoutScaleSafe, 0.2))}
+            hitStrokeWidth={polyVertexHitStroke}
+            draggable
+            dragDistance={2}
+            onMouseDown={(e) => {
+              e.cancelBubble = true;
+            }}
+            onTouchStart={(e) => {
+              e.cancelBubble = true;
+            }}
+            onDragStart={(e) => {
+              e.cancelBubble = true;
+            }}
+            onDragMove={(e) => {
+              e.cancelBubble = true;
+              const node = e.target;
+              onPolygonVertexDrag(vi, node.x(), node.y());
+            }}
+            onDragEnd={(e) => {
+              e.cancelBubble = true;
+              onPolygonVertexDragEnd?.();
+            }}
+            style={{ cursor: 'move' } as React.CSSProperties}
           />
-        ))
-      )}
+        ))}
 
       {children}
     </Group>

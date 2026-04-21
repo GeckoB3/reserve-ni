@@ -21,6 +21,10 @@ import { bookingStatusDisplayLabel } from '@/lib/booking/infer-booking-row-model
 import { CalendarDateTimePicker } from '@/components/calendar/CalendarDateTimePicker';
 import { getCalendarGridBounds } from '@/lib/venue-calendar-bounds';
 import type { OpeningHours } from '@/types/availability';
+import {
+  FLOOR_PLAN_DEFAULT_LAYOUT_HEIGHT,
+  FLOOR_PLAN_DEFAULT_LAYOUT_WIDTH,
+} from '@/lib/floor-plan/fit-view';
 
 const LiveFloorCanvas = dynamic(() => import('./LiveFloorCanvas'), { ssr: false });
 
@@ -121,6 +125,10 @@ export function FloorPlanLiveView({
   const [validDropTargets, setValidDropTargets] = useState<Set<string> | null>(null);
   const [validDropComboLabels, setValidDropComboLabels] = useState<Map<string, string> | null>(null);
   const [dragSourceTableIds, setDragSourceTableIds] = useState<string[]>([]);
+  const [floorPlanLayout, setFloorPlanLayout] = useState({
+    width: FLOOR_PLAN_DEFAULT_LAYOUT_WIDTH,
+    height: FLOOR_PLAN_DEFAULT_LAYOUT_HEIGHT,
+  });
 
   useEffect(() => {
     const timeout = setTimeout(() => setDebouncedTime(selectedTime), 300);
@@ -193,6 +201,16 @@ export function FloorPlanLiveView({
         setTables((data.tables ?? []).filter((t: VenueTable) => t.is_active));
         setNoShowGraceMinutes(data.settings?.no_show_grace_minutes ?? 15);
         setCombinationThreshold(data.settings?.combination_threshold ?? 80);
+        const layout = data.floor_plan_layout as { width?: number; height?: number } | undefined;
+        if (
+          layout &&
+          typeof layout.width === 'number' &&
+          typeof layout.height === 'number' &&
+          layout.width > 0 &&
+          layout.height > 0
+        ) {
+          setFloorPlanLayout({ width: Math.round(layout.width), height: Math.round(layout.height) });
+        }
       }
 
       if (gridRes.ok) {
@@ -826,7 +844,7 @@ export function FloorPlanLiveView({
       </ViewToolbar>
 
       {/* Canvas area */}
-      <div className="relative min-h-0 flex-1 overflow-hidden rounded-xl border border-slate-200 bg-slate-50 shadow-sm">
+      <div className="relative min-h-0 min-w-0 flex-1 overflow-hidden rounded-xl border border-slate-200 bg-slate-50 shadow-sm">
         {reassignMode && (
           <div className="absolute left-2 right-2 top-2 z-30 flex items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-2 py-1.5 text-[11px] text-amber-900 shadow-sm sm:left-4 sm:right-4 sm:top-4 sm:px-4 sm:py-2 sm:text-xs">
             <span>Tap a highlighted table to move <strong>{reassignMode.guestName}</strong></span>
@@ -835,6 +853,8 @@ export function FloorPlanLiveView({
         )}
         <LiveFloorCanvas
           tables={tablesWithState}
+          layoutWidth={floorPlanLayout.width}
+          layoutHeight={floorPlanLayout.height}
           selectedId={selectedTableId}
           combinedTableGroups={combinedTableGroups}
           validDropTargets={validDropTargets}

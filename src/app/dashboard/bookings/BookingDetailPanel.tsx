@@ -735,6 +735,20 @@ export function BookingDetailPanel({
                     />
                   </div>
                 ) : null}
+                {d.guest?.id ? (
+                  <CustomerProfileNotesCard
+                    embedded
+                    guestId={d.guest.id}
+                    value={d.guest.customer_profile_notes}
+                    disabled={!isHydrated}
+                    onSaved={() => {
+                      void (async () => {
+                        await load();
+                        onUpdated();
+                      })();
+                    }}
+                  />
+                ) : null}
               </div>
             </div>
 
@@ -998,20 +1012,6 @@ export function BookingDetailPanel({
               </div>
             </div>
           )}
-
-          {d.guest?.id ? (
-            <CustomerProfileNotesCard
-              guestId={d.guest.id}
-              value={d.guest.customer_profile_notes}
-              disabled={!isHydrated}
-              onSaved={() => {
-                void (async () => {
-                  await load();
-                  onUpdated();
-                })();
-              }}
-            />
-          ) : null}
 
           <BookingNotesEditablePanel
             bookingId={bookingId}
@@ -1285,10 +1285,23 @@ export function BookingDetailPanel({
                       headers: { 'Content-Type': 'application/json' },
                       body: JSON.stringify({ message: customMessage, channel: guestMessageChannel }),
                     });
-                    if (!res.ok) {
-                      const payload = await res.json().catch(() => ({}));
-                      setError(payload.error ?? 'Failed to send message');
+                    const payload = (await res.json().catch(() => ({}))) as {
+                      success?: boolean;
+                      error?: string;
+                      errors?: string[];
+                    };
+                    if (!res.ok || !payload.success) {
+                      const detail =
+                        (payload.errors && payload.errors.length > 0
+                          ? payload.errors.join('; ')
+                          : payload.error) ?? 'Failed to send message';
+                      setError(detail);
                       return;
+                    }
+                    if (payload.errors && payload.errors.length > 0) {
+                      setError(`Partially sent — ${payload.errors.join('; ')}`);
+                    } else {
+                      setError(null);
                     }
                     setCustomMessage('');
                     await load();

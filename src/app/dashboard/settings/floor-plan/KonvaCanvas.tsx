@@ -1,12 +1,12 @@
 'use client';
 
 import React, { useRef, useState, useCallback, useEffect, useMemo } from 'react';
-import { Stage, Layer, Line, Rect, Text, Group, Circle } from 'react-konva';
+import { Stage, Layer, Line, Rect, Group, Circle } from 'react-konva';
 import type { KonvaEventObject } from 'konva/lib/Node';
 import type Konva from 'konva';
 
 import type { VenueTable } from '@/types/table-management';
-import { getTableDimensions, computeTableAdjacency } from '@/types/table-management';
+import { getTableDimensions, computeTableAdjacency, tableDimensionsPercentToPixels } from '@/types/table-management';
 import type { BlockedSides } from '@/types/table-management';
 import TableShape from '@/components/floor-plan/TableShape';
 import { computeFitFullLayoutToViewport } from '@/lib/floor-plan/fit-view';
@@ -18,6 +18,9 @@ import { computeGlobalUnifiedLabelFonts } from '@/lib/floor-plan/table-label-fon
 
 /** Logical floor size is at least this wide (px) so 50+ tables can be placed comfortably. */
 const MIN_LAYOUT_WIDTH = 2600;
+
+/** Snap “close polygon” to first vertex: tolerance in stage pixels (fat-finger friendly on touch). */
+const POLYGON_CLOSE_HIT_STAGE_PX = 28;
 const MIN_LAYOUT_HEIGHT = 1950;
 const MIN_RESIZE_WIDTH = 1600;
 const MIN_RESIZE_HEIGHT = 1200;
@@ -75,11 +78,18 @@ function blockedToHiddenSet(blocked?: BlockedSides): Set<string> {
 
 function tableBounds(t: VenueTable, dims: { width: number; height: number }): { x: number; y: number; w: number; h: number } {
   const fb = getTableDimensions(t.max_covers, t.shape);
+  const { w, h } = tableDimensionsPercentToPixels(
+    t.width ?? fb.width,
+    t.height ?? fb.height,
+    dims.width,
+    dims.height,
+    t.shape,
+  );
   return {
     x: pctToPixel(t.position_x, dims.width),
     y: pctToPixel(t.position_y, dims.height),
-    w: ((t.width ?? fb.width) / 100) * dims.width,
-    h: ((t.height ?? fb.height) / 100) * dims.height,
+    w,
+    h,
   };
 }
 
@@ -155,6 +165,10 @@ interface Props {
   showCombinationLinkLines?: boolean;
   backgroundUrl?: string | null;
   alignmentGuidesEnabled?: boolean;
+  /** Render a faint grid overlay over the canvas area. */
+  showGrid?: boolean;
+  /** Grid step in layout %. Used for the overlay. */
+  gridStepPct?: number;
   /** Override the computed logical canvas dimensions (from saved floor plan). */
   layoutWidth?: number | null;
   layoutHeight?: number | null;
@@ -174,6 +188,20 @@ interface Props {
   polygonDrawPending?: boolean;
   onPolygonDrawCancel?: () => void;
   onDimensionsChange?: (dims: { width: number; height: number }) => void;
+  /** Reshape a custom polygon table by dragging a vertex (table-local coordinates). */
+  onPolygonVertexDrag?: (tableId: string, vertexIndex: number, localX: number, localY: number) => void;
+  onPolygonVertexDragEnd?: () => void;
+  /**
+   * Report current stage view (zoom + pan) so callers can convert viewport
+   * coords to layout coords (e.g. the HTML5 drag-and-drop drop handler).
+   */
+  onStageView?: (view: { scale: number; x: number; y: number }) => void;
+  /**
+   * Called when the user begins a drag with Alt held down on a table.
+   * Parent should create a duplicate table at the SAME position as the original;
+   * the original keeps being dragged and will land offset.
+   */
+  onAltDragDuplicate?: (tableId: string) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -186,12 +214,18 @@ export default function KonvaCanvas({
   showCombinationLinkLines = true,
   backgroundUrl,
   alignmentGuidesEnabled = false,
+  showGrid = false,
+  gridStepPct = 2,
   layoutWidth, layoutHeight, onLayoutResize, onLayoutResizeEnd,
   onSeatDrag, onSeatDragEnd,
   onPolygonCreate,
   polygonDrawPending,
   onPolygonDrawCancel,
   onDimensionsChange,
+  onPolygonVertexDrag,
+  onPolygonVertexDragEnd,
+  onStageView,
+  onAltDragDuplicate,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<Konva.Stage | null>(null);
@@ -226,13 +260,6 @@ export default function KonvaCanvas({
     centerY: number;
   } | null>(null);
 
-  // Resize handle live state (for oval/circle — updates table while dragging)
-  const resizingRef = useRef<{
-    tableId: string;
-    axis: 'x' | 'y';
-    currentHalfPx: number;
-  } | null>(null);
-
   // Polygon drawing state
   const [polygonDrawing, setPolygonDrawing] = useState<{
     active: boolean;
@@ -253,7 +280,6 @@ export default function KonvaCanvas({
     startPointerStage: { x: number; y: number };
     /** Stage pan at pointer-down — used to keep content visually fixed when expanding west/north. */
     startStagePos: { x: number; y: number };
-    startScale: number;
   } | null>(null);
 
   /** Coalesce layout resize to one React update per animation frame for smooth borders. */
@@ -301,6 +327,12 @@ export default function KonvaCanvas({
   useEffect(() => {
     onDimensionsChange?.(dimensions);
   }, [dimensions, onDimensionsChange]);
+
+  // Report current stage view (scale + pan) to parent so HTML5 drop handlers
+  // can convert viewport coords → layout coords.
+  useEffect(() => {
+    onStageView?.({ scale, x: stagePos.x, y: stagePos.y });
+  }, [scale, stagePos.x, stagePos.y, onStageView]);
 
   // --- Enter polygon drawing mode when parent signals pending drop ---
   useEffect(() => {
@@ -399,8 +431,13 @@ export default function KonvaCanvas({
       if (!draggedTable) return;
 
       const fb = getTableDimensions(draggedTable.max_covers, draggedTable.shape);
-      const dw = ((draggedTable.width ?? fb.width) / 100) * dimensions.width;
-      const dh = ((draggedTable.height ?? fb.height) / 100) * dimensions.height;
+      const { w: dw, h: dh } = tableDimensionsPercentToPixels(
+        draggedTable.width ?? fb.width,
+        draggedTable.height ?? fb.height,
+        dimensions.width,
+        dimensions.height,
+        draggedTable.shape,
+      );
 
       // -- Alignment guides --
       const guides: Array<{ points: number[] }> = [];
@@ -509,9 +546,14 @@ export default function KonvaCanvas({
         const ly = (pos.y - stagePos.y) / scale;
 
         const pts = polygonDrawing.points;
-        const CLOSE_THRESHOLD = 14 / scale;
+        const CLOSE_THRESHOLD = POLYGON_CLOSE_HIT_STAGE_PX / scale;
         const firstPt = pts[0];
-        const isDoubleClick = 'evt' in e && (e.evt as MouseEvent).detail >= 2;
+        const evt = e.evt;
+        const isDoubleClick =
+          typeof MouseEvent !== 'undefined' &&
+          evt instanceof MouseEvent &&
+          typeof evt.detail === 'number' &&
+          evt.detail >= 2;
 
         if (isDoubleClick && pts.length >= 3) {
           closePolygon(pts);
@@ -597,8 +639,8 @@ export default function KonvaCanvas({
   }, [flushLayoutResizeToParent]);
 
   const endLayoutResizeGesture = useCallback(() => {
+    const container = stageRef.current?.container();
     try {
-      const container = stageRef.current?.container();
       const pid = layoutResizePointerIdRef.current;
       if (container != null && pid !== undefined) {
         container.releasePointerCapture(pid);
@@ -621,12 +663,11 @@ export default function KonvaCanvas({
     if (hadResize) {
       onLayoutResizeEnd?.();
     }
-    const container = stageRef.current?.container();
     if (container) container.style.cursor = 'default';
   }, [flushLayoutResizeToParent, onLayoutResizeEnd]);
 
   const beginLayoutResize = useCallback(
-    (anchor: LayoutResizeAnchor, e: KonvaEventObject<MouseEvent>) => {
+    (anchor: LayoutResizeAnchor, e: KonvaEventObject<MouseEvent | TouchEvent | PointerEvent>) => {
       e.cancelBubble = true;
       const stage = stageRef.current;
       const posStage = stage?.getPointerPosition();
@@ -640,7 +681,6 @@ export default function KonvaCanvas({
         startH: H,
         startPointerStage: { x: posStage.x, y: posStage.y },
         startStagePos: { x: stagePos.x, y: stagePos.y },
-        startScale: scale,
       };
       layoutResizePendingRef.current = { newW: W, newH: H };
 
@@ -690,11 +730,11 @@ export default function KonvaCanvas({
 
       scheduleLayoutResizeFlush();
     },
-    [dimensions.width, dimensions.height, stagePos.x, stagePos.y, scale, scheduleLayoutResizeFlush, endLayoutResizeGesture],
+    [dimensions.width, dimensions.height, stagePos.x, stagePos.y, scheduleLayoutResizeFlush, endLayoutResizeGesture],
   );
 
-  const handleStageMouseMove = useCallback(
-    (e: KonvaEventObject<MouseEvent>) => {
+  const handleStagePointerMove = useCallback(
+    (e: KonvaEventObject<MouseEvent | TouchEvent>) => {
       const stage = stageRef.current;
       if (!stage) return;
 
@@ -718,7 +758,13 @@ export default function KonvaCanvas({
         if (!local) return;
         const { tableId, centerX, centerY } = rotatingRef.current;
         const angle = (Math.atan2(local.x - centerX, -(local.y - centerY)) * 180) / Math.PI;
-        const snapped = Math.round(angle / 5) * 5;
+        // Hold Shift for 1° fine rotation, otherwise snap to 15° like the slider.
+        const shiftHeld =
+          'shiftKey' in (e.evt as MouseEvent | TouchEvent) &&
+          (e.evt as MouseEvent).shiftKey;
+        const step = shiftHeld ? 1 : 15;
+        let snapped = Math.round(angle / step) * step;
+        snapped = ((snapped % 360) + 360) % 360;
         onRotate?.(tableId, snapped);
         e.evt.preventDefault();
       }
@@ -771,7 +817,7 @@ export default function KonvaCanvas({
 
   const zoomBy = useCallback(
     (delta: number) => {
-      const newScale = Math.max(0.3, Math.min(3, scale + delta));
+      const newScale = Math.max(0.3, Math.min(5, scale + delta));
       const cx = viewport.width / 2;
       const cy = viewport.height / 2;
       const pointTo = {
@@ -787,6 +833,45 @@ export default function KonvaCanvas({
     [scale, stagePos, viewport.width, viewport.height],
   );
 
+  /** Zoom & pan so the current selection (or all tables) fits the viewport. */
+  const zoomToSelection = useCallback(() => {
+    const ids = selectedIds?.length ? selectedIds : (selectedId ? [selectedId] : []);
+    const target = ids.length > 0
+      ? tables.filter((t) => ids.includes(t.id))
+      : tables;
+    if (target.length === 0) return;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const t of target) {
+      const fb = getTableDimensions(t.max_covers, t.shape);
+      const cx = pctToPixel(t.position_x, dimensions.width);
+      const cy = pctToPixel(t.position_y, dimensions.height);
+      const { w, h } = tableDimensionsPercentToPixels(
+        t.width ?? fb.width,
+        t.height ?? fb.height,
+        dimensions.width,
+        dimensions.height,
+        t.shape,
+      );
+      minX = Math.min(minX, cx - w / 2);
+      minY = Math.min(minY, cy - h / 2);
+      maxX = Math.max(maxX, cx + w / 2);
+      maxY = Math.max(maxY, cy + h / 2);
+    }
+    const pad = 60;
+    const bw = Math.max(1, maxX - minX);
+    const bh = Math.max(1, maxY - minY);
+    const sx = (viewport.width - pad * 2) / bw;
+    const sy = (viewport.height - pad * 2) / bh;
+    const newScale = Math.max(0.3, Math.min(5, Math.min(sx, sy)));
+    const cx = (minX + maxX) / 2;
+    const cy = (minY + maxY) / 2;
+    setScale(newScale);
+    setStagePos({
+      x: viewport.width / 2 - cx * newScale,
+      y: viewport.height / 2 - cy * newScale,
+    });
+  }, [tables, selectedIds, selectedId, dimensions.width, dimensions.height, viewport.width, viewport.height]);
+
   // ============================================================
   // Computed values
   // ============================================================
@@ -797,12 +882,19 @@ export default function KonvaCanvas({
     const bounds = tables.map((t) => {
       const fb = getTableDimensions(t.max_covers, t.shape);
       const isDrag = dp?.id === t.id;
+      const { w, h } = tableDimensionsPercentToPixels(
+        t.width ?? fb.width,
+        t.height ?? fb.height,
+        dimensions.width,
+        dimensions.height,
+        t.shape,
+      );
       return {
         id: t.id,
         x: isDrag ? dp!.x : pctToPixel(t.position_x, dimensions.width),
         y: isDrag ? dp!.y : pctToPixel(t.position_y, dimensions.height),
-        w: ((t.width ?? fb.width) / 100) * dimensions.width,
-        h: ((t.height ?? fb.height) / 100) * dimensions.height,
+        w,
+        h,
       };
     });
     return computeTableAdjacency(bounds);
@@ -827,8 +919,13 @@ export default function KonvaCanvas({
   const unifiedLabelFonts = useMemo(() => {
     const inputs = tables.map((table) => {
       const fb = getTableDimensions(table.max_covers, table.shape);
-      const tw = ((table.width ?? fb.width) / 100) * dimensions.width;
-      const th = ((table.height ?? fb.height) / 100) * dimensions.height;
+      const { w: tw, h: th } = tableDimensionsPercentToPixels(
+        table.width ?? fb.width,
+        table.height ?? fb.height,
+        dimensions.width,
+        dimensions.height,
+        table.shape,
+      );
       const capacityText =
         table.min_covers === table.max_covers
           ? `${table.max_covers}`
@@ -841,6 +938,7 @@ export default function KonvaCanvas({
         bottomLabel: capacityText,
         compactLabels: false,
         layoutScale: scale,
+        polygon_points: table.polygon_points ?? null,
       };
     });
     return computeGlobalUnifiedLabelFonts(inputs);
@@ -869,19 +967,33 @@ export default function KonvaCanvas({
           onClick={() => zoomBy(0.2)}
           className="flex h-7 w-7 items-center justify-center rounded border border-slate-300 bg-white text-sm text-slate-600 hover:bg-slate-50"
           title="Zoom in"
+          aria-label="Zoom in"
         >+</button>
         <button
           type="button"
           onClick={() => zoomBy(-0.2)}
           className="flex h-7 w-7 items-center justify-center rounded border border-slate-300 bg-white text-sm text-slate-600 hover:bg-slate-50"
           title="Zoom out"
+          aria-label="Zoom out"
         >−</button>
         <button
           type="button"
           onClick={resetView}
           className="flex h-7 min-w-[2.75rem] items-center justify-center rounded border border-slate-300 bg-white px-2 text-xs text-slate-600 hover:bg-slate-50"
-          title="Fit entire layout in view (reset to 100%)"
+          title="Fit entire layout in view"
+          aria-label="Fit layout"
         >{zoomPercent}%</button>
+        {((selectedIds?.length ?? 0) > 0 || !!selectedId) && (
+          <button
+            type="button"
+            onClick={zoomToSelection}
+            className="flex h-7 items-center justify-center rounded border border-brand-300 bg-brand-50 px-2 text-xs text-brand-700 hover:bg-brand-100"
+            title="Zoom to selection"
+            aria-label="Zoom to selection"
+          >
+            ⊡ Selection
+          </button>
+        )}
       </div>
 
       <Stage
@@ -894,6 +1006,13 @@ export default function KonvaCanvas({
         y={0}
         onClick={handleStageClick}
         onTap={handleStageClick}
+        onDblTap={(e) => {
+          if (!polygonDrawing.active) return;
+          const pts = polygonDrawing.points;
+          if (pts.length < 3) return;
+          e.cancelBubble = true;
+          closePolygon(pts);
+        }}
         onMouseDown={(e: KonvaEventObject<MouseEvent>) => {
           // Middle-mouse activates temporary pan
           if (e.evt.button === 1) {
@@ -912,9 +1031,26 @@ export default function KonvaCanvas({
           }
           handleStageMouseUp();
         }}
-        onMouseMove={handleStageMouseMove}
+        onMouseMove={handleStagePointerMove}
+        onTouchMove={(e) => {
+          if (
+            polygonDrawing.active ||
+            marqueeRef.current?.active ||
+            rotatingRef.current
+          ) {
+            if (e.evt.cancelable) e.evt.preventDefault();
+          }
+          handleStagePointerMove(e);
+        }}
+        onTouchEnd={() => {
+          handleStageMouseUp();
+        }}
+        onTouchCancel={() => {
+          handleStageMouseUp();
+        }}
         onWheel={handleWheel}
         style={{
+          touchAction: 'none',
           background: backgroundUrl ? 'rgba(248,250,252,0.55)' : '#f8fafc',
           cursor: marqueeRef.current?.active
             ? 'crosshair'
@@ -960,6 +1096,42 @@ export default function KonvaCanvas({
             dash={[12, 8]}
             listening={false}
           />
+          {/* ---- Grid overlay ---- */}
+          {showGrid && (() => {
+            const step = Math.max(0.5, gridStepPct) / 100;
+            const stepX = step * dimensions.width;
+            const stepY = step * dimensions.height;
+            const lines: React.ReactNode[] = [];
+            const strokeFine = 'rgba(100,116,139,0.12)';
+            const strokeMajor = 'rgba(100,116,139,0.28)';
+            // Skip rendering when lines would be sub-pixel after zoom-out.
+            if (stepX * scale < 3 || stepY * scale < 3) return null;
+            for (let i = 1, x = stepX; x < dimensions.width; i++, x += stepX) {
+              const major = i % 5 === 0;
+              lines.push(
+                <Line
+                  key={`gx-${i}`}
+                  points={[x, 0, x, dimensions.height]}
+                  stroke={major ? strokeMajor : strokeFine}
+                  strokeWidth={(major ? 1 : 0.75) / Math.max(scale, 0.3)}
+                  listening={false}
+                />,
+              );
+            }
+            for (let i = 1, y = stepY; y < dimensions.height; i++, y += stepY) {
+              const major = i % 5 === 0;
+              lines.push(
+                <Line
+                  key={`gy-${i}`}
+                  points={[0, y, dimensions.width, y]}
+                  stroke={major ? strokeMajor : strokeFine}
+                  strokeWidth={(major ? 1 : 0.75) / Math.max(scale, 0.3)}
+                  listening={false}
+                />,
+              );
+            }
+            return <Group listening={false}>{lines}</Group>;
+          })()}
           {/* ---- Tables ---- */}
           {tables.map((table) => {
             const isDragging = dragPosRef.current?.id === table.id;
@@ -981,6 +1153,12 @@ export default function KonvaCanvas({
                 canvasHeight={dimensions.height}
                 overrideX={isDragging ? dragPosRef.current!.x : undefined}
                 overrideY={isDragging ? dragPosRef.current!.y : undefined}
+                onDragStart={(e) => {
+                  const native = e.evt as DragEvent & { altKey?: boolean };
+                  if (native?.altKey && onAltDragDuplicate) {
+                    onAltDragDuplicate(table.id);
+                  }
+                }}
                 onDragMove={(e) => handleDragMove(e, table.id)}
                 onDragEnd={(e) => handleDragEnd(e, table.id)}
                 onClick={(e) => onSelect(table.id, e.evt.shiftKey)}
@@ -995,7 +1173,6 @@ export default function KonvaCanvas({
                   onSeatDragEnd(table.id, seatIndex, newAngle);
                 } : undefined}
                 onResizeHandleDrag={(axis, halfPx) => {
-                  resizingRef.current = { tableId: table.id, axis, currentHalfPx: halfPx };
                   const t = tables.find((tb) => tb.id === table.id);
                   if (!t) return;
                   const fallback = getTableDimensions(t.max_covers, t.shape);
@@ -1009,9 +1186,18 @@ export default function KonvaCanvas({
                     axis === 'y' ? clamped : (t.shape === 'circle' ? clamped : curH),
                   );
                 }}
-                onResizeHandleEnd={() => {
-                  resizingRef.current = null;
+                onResizeHandleEnd={() => { /* finalisation handled on next state write */ }}
+                onRectResize={(widthPct, heightPct) => {
+                  onResize(table.id, widthPct, heightPct);
                 }}
+                onRectResizeEnd={() => { /* parent savePositions already debounced */ }}
+                onPolygonVertexDrag={
+                  onPolygonVertexDrag
+                    ? (vertexIndex, localX, localY) =>
+                        onPolygonVertexDrag(table.id, vertexIndex, localX, localY)
+                    : undefined
+                }
+                onPolygonVertexDragEnd={onPolygonVertexDragEnd}
               />
             );
           })}
@@ -1082,9 +1268,11 @@ export default function KonvaCanvas({
                     rotatingRef.current = { tableId: t.id, centerX: b.x, centerY: b.y };
                     e.evt.preventDefault();
                   }}
-                  onTouchStart={() => {
+                  onTouchStart={(e) => {
+                    e.cancelBubble = true;
                     rotatingRef.current = { tableId: t.id, centerX: b.x, centerY: b.y };
                   }}
+                  hitStrokeWidth={22}
                   style={{ cursor: 'grab' } as React.CSSProperties}
                 />
               </Group>
@@ -1123,7 +1311,7 @@ export default function KonvaCanvas({
             const polyPts = pts.flatMap((p) => [p.x, p.y]);
             if (cursor) polyPts.push(cursor.x, cursor.y);
 
-            const CLOSE_THRESHOLD = 14 / scale;
+            const CLOSE_THRESHOLD = POLYGON_CLOSE_HIT_STAGE_PX / scale;
             const isNearFirst = cursor && pts.length >= 3 &&
               Math.abs(cursor.x - pts[0]!.x) < CLOSE_THRESHOLD &&
               Math.abs(cursor.y - pts[0]!.y) < CLOSE_THRESHOLD;
@@ -1157,7 +1345,7 @@ export default function KonvaCanvas({
                     key={`poly-pt-${i}`}
                     x={p.x}
                     y={p.y}
-                    radius={(i === 0 && pts.length >= 3 ? 7 : 5) / scale}
+                    radius={(i === 0 && pts.length >= 3 ? 11 : 8) / scale}
                     fill={i === 0 && pts.length >= 3 ? '#2563eb' : '#ffffff'}
                     stroke="#2563eb"
                     strokeWidth={1.5 / scale}
@@ -1170,7 +1358,7 @@ export default function KonvaCanvas({
                   <Circle
                     x={pts[0]!.x}
                     y={pts[0]!.y}
-                    radius={12 / scale}
+                    radius={18 / scale}
                     stroke="#2563eb"
                     strokeWidth={1.5 / scale}
                     fill="rgba(37,99,235,0.1)"
@@ -1227,9 +1415,11 @@ export default function KonvaCanvas({
                     width={ed.w}
                     height={ed.h}
                     fill="transparent"
+                    hitStrokeWidth={edgeHit}
                     onMouseEnter={() => setCur(ed.cursor)}
                     onMouseLeave={() => setCur('default')}
                     onMouseDown={(e) => beginLayoutResize(ed.anchor, e)}
+                    onTouchStart={(e) => beginLayoutResize(ed.anchor, e)}
                   />
                 ))}
                 {corners.map((cr) => (
@@ -1242,9 +1432,11 @@ export default function KonvaCanvas({
                     fill="#3b82f6"
                     cornerRadius={2}
                     opacity={0.85}
+                    hitStrokeWidth={12}
                     onMouseEnter={() => setCur(cr.cursor)}
                     onMouseLeave={() => setCur('default')}
                     onMouseDown={(e) => beginLayoutResize(cr.anchor, e)}
+                    onTouchStart={(e) => beginLayoutResize(cr.anchor, e)}
                   />
                 ))}
                 <Line
@@ -1263,17 +1455,26 @@ export default function KonvaCanvas({
 
       {/* ---- Polygon drawing hint bar ---- */}
       {polygonDrawing.active && (
-        <div className="pointer-events-none absolute bottom-2 left-1/2 -translate-x-1/2 z-20">
-          <div className="rounded-lg bg-slate-900/90 px-3 py-1.5 text-xs text-white shadow-lg flex items-center gap-2">
-            <span className="opacity-70">Click to add points</span>
-            <span className="opacity-30">·</span>
-            <span className="opacity-70">Double-click or click first point to close</span>
-            <span className="opacity-30">·</span>
+        <div className="pointer-events-none absolute bottom-2 left-1/2 z-20 max-w-[min(100vw-1rem,28rem)] -translate-x-1/2 px-2">
+          <div className="rounded-lg bg-slate-900/90 px-3 py-1.5 text-xs text-white shadow-lg flex flex-wrap items-center justify-center gap-x-2 gap-y-1">
+            <span className="opacity-70 text-center">
+              Tap to add points · double-tap or tap first point to close
+            </span>
+            <span className="opacity-30 hidden sm:inline">·</span>
             <button
+              type="button"
+              className="pointer-events-auto rounded bg-blue-500 px-2 py-0.5 font-medium text-white opacity-95 hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-40"
+              disabled={polygonDrawing.points.length < 3}
+              onClick={() => closePolygon(polygonDrawing.points)}
+            >
+              Done
+            </button>
+            <button
+              type="button"
               className="pointer-events-auto underline opacity-90 hover:opacity-100"
               onClick={() => setPolygonDrawing({ active: false, points: [], cursorPos: null })}
             >
-              Esc to cancel
+              Cancel
             </button>
           </div>
         </div>

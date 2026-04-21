@@ -156,16 +156,20 @@ async function buildGuestBookingContext(
 
   const venueRow = await admin
     .from('venues')
-    .select('name, address, phone, booking_page_url, booking_model, email, reply_to_email')
+    .select('name, address, phone, booking_model, email, reply_to_email')
     .eq('id', ctx.venue_id)
     .maybeSingle();
+
+  if (venueRow.error) {
+    console.error('[buildGuestBookingContext] venue lookup failed:', venueRow.error);
+    return null;
+  }
 
   const venue = venueRow.data as
     | {
         name?: string | null;
         address?: string | null;
         phone?: string | null;
-        booking_page_url?: string | null;
         booking_model?: string | null;
         email?: string | null;
         reply_to_email?: string | null;
@@ -242,7 +246,6 @@ async function buildGuestBookingContext(
       name: venue.name,
       address: venue.address ?? null,
       phone: venue.phone ?? null,
-      booking_page_url: venue.booking_page_url ?? null,
       email: venue.email ?? null,
       reply_to_email: venue.reply_to_email ?? null,
     }),

@@ -12,6 +12,7 @@ import {
 import type { BookingModel } from '@/types/booking-models';
 import { isAppointmentPlanTier } from '@/lib/tier-enforcement';
 import { backfillVenueEmailIfEmptyFromStaff } from '@/lib/venue-contact-email';
+import { assertCanDisableBookingModels } from '@/lib/booking/venue-booking-model-disable-guard';
 
 const venueProfileSchema = z.object({
   name: z.string().min(1).max(200).optional(),
@@ -168,7 +169,7 @@ export async function PATCH(request: NextRequest) {
     if (data.active_booking_models !== undefined || data.enabled_models !== undefined) {
       const { data: venueRow, error: primaryErr } = await staff.db
         .from('venues')
-        .select('booking_model, enabled_models, active_booking_models, pricing_tier')
+        .select('booking_model, enabled_models, active_booking_models, pricing_tier, timezone')
         .eq('id', staff.venue_id)
         .single();
       if (primaryErr || !venueRow) {
@@ -180,6 +181,7 @@ export async function PATCH(request: NextRequest) {
         enabled_models?: unknown;
         active_booking_models?: unknown;
         pricing_tier?: string | null;
+        timezone?: string | null;
       };
       const existingActive = resolveActiveBookingModels({
         pricingTier: row.pricing_tier,
@@ -203,11 +205,12 @@ export async function PATCH(request: NextRequest) {
             activeBookingModels: data.enabled_models,
           });
         } else {
+          // Do not pass stored `active_booking_models` here: when it is non-empty,
+          // `resolveActiveBookingModels` would ignore the new `enabled_models` entirely.
           nextActiveModels = resolveActiveBookingModels({
             pricingTier: row.pricing_tier,
-            bookingModel: row.booking_model,
+            bookingModel: basePrimary,
             enabledModels: data.enabled_models,
-            activeBookingModels: row.active_booking_models,
           });
         }
       }
@@ -215,6 +218,17 @@ export async function PATCH(request: NextRequest) {
       if (nextActiveModels !== null) {
         if (isAppointmentPlanTier(row.pricing_tier) && nextActiveModels.length === 0) {
           nextActiveModels = appointmentPlanDefaultModels();
+        }
+        const removed = existingActive.filter((m) => !nextActiveModels!.includes(m));
+        try {
+          await assertCanDisableBookingModels(staff.db, staff.venue_id, row.timezone, removed);
+        } catch (guardErr) {
+          const code = (guardErr as { code?: string }).code;
+          if (code === 'BOOKING_MODEL_HAS_FUTURE_BOOKINGS') {
+            return NextResponse.json({ error: (guardErr as Error).message }, { status: 409 });
+          }
+          console.error('PATCH /api/venue: booking model disable guard', guardErr);
+          return NextResponse.json({ error: 'Failed to validate booking types' }, { status: 500 });
         }
         const nextPrimary = nextActiveModels[0] ?? basePrimary;
         update.booking_model = nextPrimary;

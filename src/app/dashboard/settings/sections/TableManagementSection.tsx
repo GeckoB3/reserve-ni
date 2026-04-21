@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import type { VenueSettings } from '../types';
+import { useDashboardTableManagementNavSync } from '@/app/dashboard/DashboardShell';
 
 interface Props {
   venue: VenueSettings;
@@ -18,6 +19,7 @@ interface ToggleFlags {
 
 export function TableManagementSection({ venue, onUpdate, isAdmin }: Props) {
   const router = useRouter();
+  const navSync = useDashboardTableManagementNavSync();
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [flags, setFlags] = useState<ToggleFlags>({ hasConfiguredFloorPlan: false, hasActiveAssignments: false });
@@ -74,6 +76,7 @@ export function TableManagementSection({ venue, onUpdate, isAdmin }: Props) {
           ? { combination_threshold: payload.settings.combination_threshold }
           : {}),
       } as Partial<VenueSettings>);
+      navSync?.setTableManagementEnabled(nextValue);
       setNotice(`Advanced table management ${nextValue ? 'enabled' : 'disabled'}.`);
       router.refresh();
       return {

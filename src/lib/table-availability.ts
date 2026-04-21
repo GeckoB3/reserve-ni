@@ -226,6 +226,7 @@ export async function getAvailableTablesForBooking(
       id: r.id as string,
       table_group_key: r.table_group_key as string,
       disabled: r.disabled as boolean,
+      locked: (r.locked as boolean) ?? false,
       display_name: (r.display_name as string | null) ?? null,
       combined_min_covers: (r.combined_min_covers as number | null) ?? null,
       combined_max_covers: (r.combined_max_covers as number | null) ?? null,

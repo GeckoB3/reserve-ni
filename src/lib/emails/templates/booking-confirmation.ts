@@ -11,6 +11,11 @@ import {
   formatTime,
   formatDepositAmount,
 } from "./base-template";
+import {
+  bookingConfirmationPaymentParagraphs,
+  bookingConfirmationPaymentTextLines,
+  priceDisplayForConfirmationCard,
+} from "@/lib/communications/booking-confirmation-pricing";
 import { buildGoogleCalendarAddUrlForBooking } from "@/lib/emails/calendar-links";
 
 /** Non-table detail block: appointments (B/USE) or C/D/E with labels. */
@@ -100,7 +105,9 @@ export function renderBookingConfirmation(
 
   let mainContent: string;
   mainContent = confirmationIntroLine(booking);
-  if (depositPending) {
+  if (appt) {
+    mainContent += bookingConfirmationPaymentParagraphs(booking).join("");
+  } else if (depositPending) {
     mainContent += `<p style="margin:0 0 12px 0">A deposit of £${formatDepositAmount(booking.deposit_amount_pence!)} is required. You\'ll receive a separate message with payment details shortly.</p>`;
   }
 
@@ -134,7 +141,7 @@ export function renderBookingConfirmation(
     emailVariant: appt ? "appointment" : "table",
     practitionerName: booking.practitioner_name ?? null,
     serviceName: booking.appointment_service_name ?? null,
-    priceDisplay: booking.appointment_price_display ?? null,
+    priceDisplay: priceDisplayForConfirmationCard(booking),
     groupAppointments: booking.group_appointments,
     ctaLabel,
     ctaUrl: ctaUrl ?? null,
@@ -159,6 +166,7 @@ export function renderBookingConfirmation(
           `* ${g.person_label}: ${formatDate(g.booking_date)} at ${formatTime(g.booking_time)}. ${g.service_name} with ${g.practitioner_name}${g.price_display ? ` (${g.price_display})` : ""}`,
         );
       }
+      textParts.push(...bookingConfirmationPaymentTextLines(booking));
       textParts.push("");
     } else {
       textParts.push(`Date: ${date}`, `Time: ${time}`);
@@ -175,8 +183,9 @@ export function renderBookingConfirmation(
         if (booking.practitioner_name)
           textParts.push(`With: ${booking.practitioner_name}`);
       }
-      if (booking.appointment_price_display)
-        textParts.push(`Price: ${booking.appointment_price_display}`);
+      const priceLine = priceDisplayForConfirmationCard(booking);
+      if (priceLine) textParts.push(`Price: ${priceLine}`);
+      textParts.push(...bookingConfirmationPaymentTextLines(booking));
       textParts.push("");
     }
   } else {

@@ -1,5 +1,9 @@
-import { getTableDimensions } from '@/types/table-management';
+import { getTableDimensions, tableDimensionsPercentToPixels } from '@/types/table-management';
 import type { TableShape } from '@/types/table-management';
+
+/** Default logical canvas size when `floor_plans.canvas_*` is unset (matches floor plan editor). */
+export const FLOOR_PLAN_DEFAULT_LAYOUT_WIDTH = 2600;
+export const FLOOR_PLAN_DEFAULT_LAYOUT_HEIGHT = 1950;
 
 /** Minimal table fields needed to compute bounding box in stage coordinates. */
 export interface FitViewTableLike {
@@ -44,8 +48,13 @@ export function computeStageFitToView(
     const fb = getTableDimensions(t.max_covers, t.shape as TableShape);
     const cx = t.position_x != null ? (t.position_x / 100) * canvasW : canvasW / 2;
     const cy = t.position_y != null ? (t.position_y / 100) * canvasH : canvasH / 2;
-    const w = ((t.width ?? fb.width) / 100) * canvasW;
-    const h = ((t.height ?? fb.height) / 100) * canvasH;
+    const { w, h } = tableDimensionsPercentToPixels(
+      t.width ?? fb.width,
+      t.height ?? fb.height,
+      canvasW,
+      canvasH,
+      t.shape,
+    );
     minX = Math.min(minX, cx - w / 2);
     maxX = Math.max(maxX, cx + w / 2);
     minY = Math.min(minY, cy - h / 2);

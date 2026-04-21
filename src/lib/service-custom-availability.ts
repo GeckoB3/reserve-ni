@@ -185,6 +185,52 @@ export function formatWorkingHoursSummary(wh: WorkingHours | null | undefined): 
   return parts.length > 0 ? parts.join(' · ') : 'Closed every day.';
 }
 
+function friendlyIsoDate(ymd: string): string {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd)) return ymd;
+  const d = new Date(`${ymd}T12:00:00`);
+  if (Number.isNaN(d.getTime())) return ymd;
+  return d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+/** Short human-readable description of a single rule (single line). */
+export function formatServiceCustomRuleSummary(rule: ServiceCustomRule): string {
+  switch (rule.kind) {
+    case 'weekly': {
+      const days = DAY_ORDER.filter(({ key }) => (rule.windows[key]?.length ?? 0) > 0);
+      if (days.length === 0) return 'Weekly: no days selected yet.';
+      return days
+        .map(({ key, label }) => {
+          const ranges = rule.windows[key] ?? [];
+          const seg = ranges.map((r) => `${r.start}–${r.end}`).join(', ');
+          return `${label.slice(0, 3)} ${seg}`;
+        })
+        .join(' · ');
+    }
+    case 'specific_dates': {
+      if (rule.entries.length === 0) return 'No dates added yet.';
+      const shown = rule.entries
+        .slice(0, 3)
+        .map((e) => `${friendlyIsoDate(e.date)} ${e.ranges.map((r) => `${r.start}–${r.end}`).join(', ')}`);
+      const extra = rule.entries.length > 3 ? ` + ${rule.entries.length - 3} more` : '';
+      return `${shown.join(' · ')}${extra}`;
+    }
+    case 'date_range_pattern': {
+      const days = [...rule.days_of_week].sort((a, b) => a - b);
+      const dayLabels = days
+        .map((d) => {
+          const idx = DAY_ORDER.findIndex(({ key }) => Number(key) === d);
+          return idx >= 0 ? DAY_ORDER[idx]!.label.slice(0, 3) : '';
+        })
+        .filter(Boolean)
+        .join(', ');
+      const times = rule.ranges.map((r) => `${r.start}–${r.end}`).join(', ');
+      return `${friendlyIsoDate(rule.start_date)} → ${friendlyIsoDate(rule.end_date)} · ${dayLabels} · ${times}`;
+    }
+    default:
+      return '';
+  }
+}
+
 function sanitizeTimeRange(item: unknown): TimeRange | null {
   if (!item || typeof item !== 'object') return null;
   const start = typeof (item as { start?: unknown }).start === 'string' ? (item as { start: string }).start : '';
@@ -274,32 +320,14 @@ export function formatServiceCustomScheduleSummary(schedule: ServiceCustomSchedu
     return formatWorkingHoursSummary(schedule as WorkingHours);
   }
   if (schedule.rules.length === 0) return 'No rules — service not bookable online with custom hours enabled.';
-  const parts: string[] = [];
-  for (const rule of schedule.rules) {
-    switch (rule.kind) {
-      case 'weekly':
-        parts.push(`Weekly: ${formatWorkingHoursSummary(rule.windows).replace(/^No custom hours set\.$/, '—')}`);
-        break;
-      case 'specific_dates':
-        parts.push(
-          rule.entries.length === 0
-            ? 'Chosen dates: (no dates added yet)'
-            : `Specific dates (${rule.entries.length}): ${rule.entries
-                .map((e) => `${e.date} ${e.ranges.map((r) => `${r.start}–${r.end}`).join(', ')}`)
-                .join('; ')}`,
-        );
-        break;
-      case 'date_range_pattern': {
-        const days = [...rule.days_of_week].sort((a, b) => a - b).join(', ');
-        const times = rule.ranges.map((r) => `${r.start}–${r.end}`).join(', ');
-        parts.push(`Range ${rule.start_date} → ${rule.end_date}, days [${days}], ${times}`);
-        break;
-      }
-      default:
-        break;
-    }
-  }
-  return parts.join('\n');
+  const ruleTypeLabel: Record<ServiceCustomRule['kind'], string> = {
+    weekly: 'Weekly',
+    specific_dates: 'Specific dates',
+    date_range_pattern: 'Date range',
+  };
+  return schedule.rules
+    .map((rule) => `${ruleTypeLabel[rule.kind]}: ${formatServiceCustomRuleSummary(rule)}`)
+    .join('\n');
 }
 
 function isVenueOpeningHoursConfigured(openingHours: OpeningHours | null | undefined): boolean {
@@ -524,6 +552,92 @@ export function getOnlineBookableWeeklySummaryParts(params: {
     weekLines: lines.join('\n'),
     previewDatesNote,
   };
+}
+
+export interface ServiceAvailabilityForDate {
+  /** Merged bookable minute ranges for the date (empty = closed for online booking). */
+  ranges: Array<{ start: number; end: number }>;
+  /** True when there are no linked calendars at all (calendar view cannot render). */
+  noCalendars: boolean;
+  /** True when venue is closed on this date (via weekly hours or exception). */
+  venueClosed: boolean;
+  /** True when every linked calendar has no hours configured for this weekday. */
+  calendarsClosed: boolean;
+  /** True when the service's custom schedule excludes this date (only if custom enabled). */
+  serviceCustomExcludes: boolean;
+}
+
+/**
+ * Final online-bookable ranges for one concrete calendar date:
+ * venue hours (+ exceptions) ∩ union(linked calendars' weekly hours) ∩ service custom schedule.
+ * Staff blocks and one-off calendar changes are not modelled here.
+ */
+export function computeServiceAvailabilityForDate(
+  params: {
+    venueOpeningHours: OpeningHours | null | undefined;
+    venueOpeningExceptions?: VenueOpeningException[] | null;
+    linkedCalendars: Array<{ id: string; working_hours: WorkingHours | null | undefined }>;
+    customAvailabilityEnabled: boolean;
+    customWorkingHours: ServiceCustomScheduleStored | null | undefined;
+  },
+  dateStr: string,
+): ServiceAvailabilityForDate {
+  const {
+    venueOpeningHours,
+    venueOpeningExceptions,
+    linkedCalendars,
+    customAvailabilityEnabled,
+    customWorkingHours,
+  } = params;
+
+  if (linkedCalendars.length === 0) {
+    return {
+      ranges: [],
+      noCalendars: true,
+      venueClosed: false,
+      calendarsClosed: true,
+      serviceCustomExcludes: false,
+    };
+  }
+
+  const dow = getDayOfWeek(dateStr);
+  const venueRanges = venueMinuteRangesForSummaryDate(venueOpeningHours, dateStr, venueOpeningExceptions);
+  const venueClosed = venueRanges !== null && venueRanges.length === 0;
+
+  const calendarEffective: Array<{ start: number; end: number }> = [];
+  let anyCalendarHasHours = false;
+  for (const cal of linkedCalendars) {
+    const calRanges = minuteRangesForWorkingHoursDay(cal.working_hours, dow);
+    if (calRanges.length === 0) continue;
+    anyCalendarHasHours = true;
+    const eff = venueRanges === null ? calRanges : intersectMinuteRanges(calRanges, venueRanges);
+    calendarEffective.push(...eff);
+  }
+  let union = mergeUnionRanges(calendarEffective);
+
+  let serviceCustomExcludes = false;
+  if (customAvailabilityEnabled && customWorkingHours) {
+    const custom = getServiceCustomMinuteRangesForDate(customWorkingHours, dateStr);
+    if (custom.length === 0) {
+      serviceCustomExcludes = true;
+      union = [];
+    } else {
+      union = mergeUnionRanges(intersectMinuteRanges(union, custom));
+    }
+  }
+
+  return {
+    ranges: union,
+    noCalendars: false,
+    venueClosed,
+    calendarsClosed: !anyCalendarHasHours,
+    serviceCustomExcludes,
+  };
+}
+
+/** Format minute range as "9:00–17:00" (omits trailing ":00" for round hours). */
+export function formatMinuteRangeShort(range: { start: number; end: number }): string {
+  return `${minutesToTime(range.start)}–${minutesToTime(range.end)}`;
 }
 
 /** Single string for simple callers; dashboard uses {@link getOnlineBookableWeeklySummaryParts}. */

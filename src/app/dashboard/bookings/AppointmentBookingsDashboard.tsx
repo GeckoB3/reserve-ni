@@ -897,19 +897,43 @@ export function AppointmentBookingsDashboard({
         const ids = [...selectedBookingIds];
         const outcomes = await Promise.all(
           ids.map(async (bookingId) => {
-            const res = await fetch(`/api/venue/bookings/${bookingId}/message`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ message, channel }),
-            });
-            return res.ok;
+            try {
+              const res = await fetch(`/api/venue/bookings/${bookingId}/message`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ message, channel }),
+              });
+              const payload = (await res.json().catch(() => ({}))) as {
+                success?: boolean;
+                error?: string;
+                errors?: string[];
+              };
+              const sent = Boolean(res.ok && payload.success);
+              const issues =
+                payload.errors && payload.errors.length > 0
+                  ? payload.errors.join('; ')
+                  : payload.error ?? null;
+              return { sent, issues };
+            } catch {
+              return { sent: false, issues: 'Request failed' };
+            }
           }),
         );
-        const okCount = outcomes.filter(Boolean).length;
-        if (okCount !== ids.length) {
-          setError(`Sent to ${okCount}/${ids.length} guests. Some may lack the chosen contact method.`);
-        } else {
+        const okCount = outcomes.filter((o) => o.sent).length;
+        const failureSummaries = outcomes
+          .map((o, idx) => (!o.sent && o.issues ? `Guest ${idx + 1}: ${o.issues}` : null))
+          .filter((entry): entry is string => entry !== null);
+        if (okCount === ids.length) {
           addToast(`Message sent to ${okCount} guest(s)`, 'success');
+        } else if (okCount > 0) {
+          setError(
+            `Sent to ${okCount}/${ids.length}. ${failureSummaries.slice(0, 3).join(' · ')}`,
+          );
+          addToast(`Sent to ${okCount}/${ids.length}`, 'error');
+        } else {
+          const first = failureSummaries[0] ?? 'No messages were sent.';
+          setError(first);
+          addToast(first, 'error');
         }
         setSelectedBookingIds([]);
         setBulkGuestMessageOpen(false);

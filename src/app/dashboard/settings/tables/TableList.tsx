@@ -147,6 +147,7 @@ export function TableList({ tables, setTables, isAdmin, onRefresh, variant = 'fu
   const [batchCount, setBatchCount] = useState(10);
   const [batchPrefix, setBatchPrefix] = useState('Table');
   const [batchMaxCovers, setBatchMaxCovers] = useState(4);
+  const [batchShape, setBatchShape] = useState<TableShape>('rectangle');
 
   const zones = [...new Set(tables.map((t) => t.zone).filter(Boolean))] as string[];
   const showZoneColumn = !isCovers && zones.length > 0;
@@ -312,7 +313,7 @@ export function TableList({ tables, setTables, isAdmin, onRefresh, variant = 'fu
     setError(null);
 
     const newTables = Array.from({ length: batchCount }, (_, i) => {
-      const shape = batchMaxCovers <= 2 ? 'circle' as const : 'rectangle' as const;
+      const shape = batchShape;
       const dims = getTableDimensions(batchMaxCovers, shape);
       return {
         name: `${batchPrefix} ${tables.length + i + 1}`,
@@ -399,7 +400,7 @@ export function TableList({ tables, setTables, isAdmin, onRefresh, variant = 'fu
       {showBatch && (
         <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
           <h3 className="mb-4 text-base font-medium text-slate-900">Add Multiple Tables</h3>
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
             <div>
               <label className="block text-xs font-medium text-slate-600">Count</label>
               <div className="mt-1 flex gap-1">
@@ -437,6 +438,18 @@ export function TableList({ tables, setTables, isAdmin, onRefresh, variant = 'fu
                 className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
               />
             </div>
+            <div className="sm:col-span-1">
+              <label className="block text-xs font-medium text-slate-600">Shape</label>
+              <select
+                value={batchShape}
+                onChange={(e) => setBatchShape(e.target.value as TableShape)}
+                className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
+              >
+                {SHAPES.map((s) => (
+                  <option key={s.value} value={s.value}>{s.label}</option>
+                ))}
+              </select>
+            </div>
           </div>
           <div className="mt-4 flex gap-2">
             <button
@@ -464,7 +477,7 @@ export function TableList({ tables, setTables, isAdmin, onRefresh, variant = 'fu
           {error && (
             <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>
           )}
-          <div className={`grid gap-4 ${isCovers ? 'grid-cols-2' : 'grid-cols-2 sm:grid-cols-3'}`}>
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
             <div>
               <label className="block text-xs font-medium text-slate-600">Name</label>
               <input
@@ -497,20 +510,20 @@ export function TableList({ tables, setTables, isAdmin, onRefresh, variant = 'fu
                 className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
               />
             </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-600">Shape</label>
+              <select
+                value={editing.shape}
+                onChange={(e) => setEditing({ ...editing, shape: e.target.value as TableShape })}
+                className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
+              >
+                {SHAPES.map((s) => (
+                  <option key={s.value} value={s.value}>{s.label}</option>
+                ))}
+              </select>
+            </div>
             {!isCovers && (
               <>
-                <div>
-                  <label className="block text-xs font-medium text-slate-600">Shape</label>
-                  <select
-                    value={editing.shape}
-                    onChange={(e) => setEditing({ ...editing, shape: e.target.value as TableShape })}
-                    className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
-                  >
-                    {SHAPES.map((s) => (
-                      <option key={s.value} value={s.value}>{s.label}</option>
-                    ))}
-                  </select>
-                </div>
                 <div>
                   <label className="block text-xs font-medium text-slate-600">Table Type</label>
                   <select
@@ -602,7 +615,7 @@ export function TableList({ tables, setTables, isAdmin, onRefresh, variant = 'fu
                       {showZoneColumn && (
                         <th className="px-4 py-2.5 text-left text-xs font-medium text-slate-500">Zone</th>
                       )}
-                      {!isCovers && <th className="px-4 py-2.5 text-left text-xs font-medium text-slate-500">Shape</th>}
+                      <th className="px-4 py-2.5 text-left text-xs font-medium text-slate-500">Shape</th>
                       <th className="px-4 py-2.5 text-center text-xs font-medium text-slate-500">{isCovers ? 'Seats' : 'Covers'}</th>
                       {!isCovers && <th className="px-4 py-2.5 text-left text-xs font-medium text-slate-500">Type</th>}
                       <th className="px-4 py-2.5 text-center text-xs font-medium text-slate-500">Active</th>
@@ -629,7 +642,7 @@ export function TableList({ tables, setTables, isAdmin, onRefresh, variant = 'fu
                               {showZoneColumn && (
                                 <td className="px-4 py-2.5 text-slate-600">{t.zone ?? '—'}</td>
                               )}
-                              {!isCovers && <td className="px-4 py-2.5 capitalize text-slate-600">{t.shape}</td>}
+                              <td className="px-4 py-2.5 capitalize text-slate-600">{t.shape}</td>
                               <td className="px-4 py-2.5 text-center text-slate-600">
                                 {isCovers ? t.max_covers : `${t.min_covers}–${t.max_covers}`}
                               </td>
@@ -701,7 +714,7 @@ export function TableList({ tables, setTables, isAdmin, onRefresh, variant = 'fu
                     {showZoneColumn && (
                       <th className="px-4 py-2.5 text-left text-xs font-medium text-slate-500">Zone</th>
                     )}
-                    {!isCovers && <th className="px-4 py-2.5 text-left text-xs font-medium text-slate-500">Shape</th>}
+                    <th className="px-4 py-2.5 text-left text-xs font-medium text-slate-500">Shape</th>
                     <th className="px-4 py-2.5 text-center text-xs font-medium text-slate-500">{isCovers ? 'Seats' : 'Covers'}</th>
                     {!isCovers && <th className="px-4 py-2.5 text-left text-xs font-medium text-slate-500">Type</th>}
                     <th className="px-4 py-2.5 text-center text-xs font-medium text-slate-500">Active</th>
@@ -717,7 +730,7 @@ export function TableList({ tables, setTables, isAdmin, onRefresh, variant = 'fu
                       {showZoneColumn && (
                         <td className="px-4 py-2.5 text-slate-600">{t.zone ?? '—'}</td>
                       )}
-                      {!isCovers && <td className="px-4 py-2.5 capitalize text-slate-600">{t.shape}</td>}
+                      <td className="px-4 py-2.5 capitalize text-slate-600">{t.shape}</td>
                       <td className="px-4 py-2.5 text-center text-slate-600">
                         {isCovers ? t.max_covers : `${t.min_covers}–${t.max_covers}`}
                       </td>

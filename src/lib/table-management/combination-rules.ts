@@ -16,6 +16,15 @@ export function tableGroupKeyFromIds(tableIds: string[]): string {
   return [...tableIds].sort().join('|');
 }
 
+/** Parse a stored `table_group_key` back into sorted table ids. */
+export function tableGroupIdsFromKey(tableGroupKey: string): string[] {
+  return tableGroupKey
+    .split('|')
+    .map((id) => id.trim())
+    .filter(Boolean)
+    .sort((a, b) => a.localeCompare(b));
+}
+
 /** ISO weekday 1=Mon … 7=Sun from a YYYY-MM-DD date string (local). */
 export function isoWeekdayFromDateString(dateStr: string): number {
   const d = new Date(`${dateStr}T12:00:00`);

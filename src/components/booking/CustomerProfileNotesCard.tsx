@@ -10,11 +10,14 @@ export function CustomerProfileNotesCard({
   value,
   disabled,
   onSaved,
+  /** When true, nest inside the guest contact card (top border, no separate panel frame). */
+  embedded = false,
 }: {
   guestId: string | null | undefined;
   value: string | null | undefined;
   disabled?: boolean;
   onSaved: () => void;
+  embedded?: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value ?? '');
@@ -64,9 +67,13 @@ export function CustomerProfileNotesCard({
     return null;
   }
 
+  const rootClass = embedded
+    ? 'mt-3 border-t border-slate-100 pt-3'
+    : 'rounded-xl border border-sky-200 bg-sky-50/80 p-3';
+
   return (
-    <div className="rounded-xl border border-sky-200 bg-sky-50/80 p-3">
-      <div className="mb-1.5 flex items-start justify-between gap-2">
+    <div className={rootClass}>
+      <div className={`mb-1.5 flex items-start justify-between gap-2 ${embedded ? 'px-0.5' : ''}`}>
         <div>
           <p className="text-[10px] font-semibold uppercase tracking-wider text-sky-800">Customer info</p>
           <p className="mt-0.5 text-[11px] leading-snug text-sky-900/80">
@@ -87,7 +94,7 @@ export function CustomerProfileNotesCard({
       {saveError && <p className="mb-2 text-[11px] text-red-700">{saveError}</p>}
 
       {editing && canEdit ? (
-        <div className="space-y-2">
+        <div className={`space-y-2 ${embedded ? 'px-0.5' : ''}`}>
           <textarea
             value={draft}
             onChange={(e) => {
@@ -130,7 +137,9 @@ export function CustomerProfileNotesCard({
           </div>
         </div>
       ) : (
-        <p className="whitespace-pre-wrap text-sm text-slate-800">{normalized.trim() ? normalized : '—'}</p>
+        <p className={`whitespace-pre-wrap text-sm text-slate-800 ${embedded ? 'px-0.5' : ''}`}>
+          {normalized.trim() ? normalized : '—'}
+        </p>
       )}
     </div>
   );

@@ -85,7 +85,8 @@ export function allocateSeatsToEdges(
 }
 
 /**
- * Distributes `count` seats evenly along a single rectangular edge.
+ * Distributes `count` seats along a single rectangular edge using interior spacing:
+ * 1 seat → middle (1/2), 2 → 1/3 & 2/3, 3 → 1/4, 1/2, 3/4, i.e. t = (i+1)/(count+1).
  */
 function positionsOnEdge(
   edge: EdgeSide,
@@ -97,7 +98,7 @@ function positionsOnEdge(
   const seats: SeatPosition[] = [];
 
   for (let i = 0; i < count; i++) {
-    const t = (i + 0.5) / count; // 0→1, centred within each slot
+    const t = (i + 1) / (count + 1);
     let x: number, y: number, angle: number;
 
     let edgeTangentRad: number;
@@ -139,8 +140,8 @@ function positionsOnEdge(
 // ---------------------------------------------------------------------------
 
 /**
- * Distributes `count` seats evenly along a polygon perimeter.
- * Points are pixel coords relative to the polygon's centroid (table centre).
+ * Allocate seats to each polygon edge by length, then place along each edge at
+ * (i+1)/(k+1) — same interior spacing as rectangular `positionsOnEdge`.
  */
 function polygonPerimeterSeats(
   pixelPts: { x: number; y: number }[],
@@ -148,55 +149,58 @@ function polygonPerimeterSeats(
 ): SeatPosition[] {
   if (pixelPts.length < 3 || count <= 0) return [];
 
-  // Build cumulative arc-length for each edge
   const n = pixelPts.length;
   const edgeLengths: number[] = [];
-  let totalLen = 0;
   for (let i = 0; i < n; i++) {
     const a = pixelPts[i]!;
     const b = pixelPts[(i + 1) % n]!;
-    const len = Math.hypot(b.x - a.x, b.y - a.y);
-    edgeLengths.push(len);
-    totalLen += len;
+    edgeLengths.push(Math.hypot(b.x - a.x, b.y - a.y));
+  }
+  const totalLen = edgeLengths.reduce((s, len) => s + len, 0);
+  if (totalLen <= 0) return [];
+
+  const allocation = new Array<number>(n).fill(0);
+  let placed = 0;
+  for (let i = 0; i < n; i++) {
+    const seats = Math.floor(count * (edgeLengths[i]! / totalLen));
+    allocation[i] = seats;
+    placed += seats;
+  }
+  let remaining = count - placed;
+  const order = [...edgeLengths.map((len, i) => ({ len, i }))].sort((x, y) => y.len - x.len);
+  for (const { i } of order) {
+    if (remaining <= 0) break;
+    allocation[i]!++;
+    remaining--;
   }
 
-  const spacing = totalLen / count;
   const seats: SeatPosition[] = [];
-
-  let edgeIdx = 0;
-  let distAlongEdge = spacing / 2;
-
-  for (let s = 0; s < count; s++) {
-    // Advance along edges until we've walked distAlongEdge
-    while (edgeIdx < n && distAlongEdge > edgeLengths[edgeIdx]!) {
-      distAlongEdge -= edgeLengths[edgeIdx]!;
-      edgeIdx = (edgeIdx + 1) % n;
-    }
-    const a = pixelPts[edgeIdx]!;
-    const b = pixelPts[(edgeIdx + 1) % n]!;
-    const len = edgeLengths[edgeIdx] ?? 1;
-    const t = len > 0 ? distAlongEdge / len : 0;
-    const px = a.x + (b.x - a.x) * t;
-    const py = a.y + (b.y - a.y) * t;
-
-    // Outward normal angle: perpendicular to edge, pointing away from centroid
+  for (let ei = 0; ei < n; ei++) {
+    const k = allocation[ei]!;
+    if (k <= 0) continue;
+    const a = pixelPts[ei]!;
+    const b = pixelPts[(ei + 1) % n]!;
     const edgeTangentRad = Math.atan2(b.y - a.y, b.x - a.x);
-    const normalAngle = edgeTangentRad - Math.PI / 2;
-    // Choose outward direction (centroid is at 0,0)
-    const outX = Math.cos(normalAngle);
-    const outY = Math.sin(normalAngle);
-    const angle = (outX * px + outY * py) > 0 ? normalAngle : normalAngle + Math.PI;
 
-    // Map angle to closest cardinal edgeSide
-    const deg = (((angle + Math.PI / 2) * 180) / Math.PI + 360) % 360;
-    let edgeSide: EdgeSide;
-    if (deg < 45 || deg >= 315) edgeSide = 'top';
-    else if (deg < 135) edgeSide = 'right';
-    else if (deg < 225) edgeSide = 'bottom';
-    else edgeSide = 'left';
+    for (let i = 0; i < k; i++) {
+      const t = (i + 1) / (k + 1);
+      const px = a.x + (b.x - a.x) * t;
+      const py = a.y + (b.y - a.y) * t;
 
-    seats.push({ x: px, y: py, angle, edgeSide, edgeTangentRad });
-    distAlongEdge += spacing;
+      const normalAngle = edgeTangentRad - Math.PI / 2;
+      const outX = Math.cos(normalAngle);
+      const outY = Math.sin(normalAngle);
+      const angle = (outX * px + outY * py) > 0 ? normalAngle : normalAngle + Math.PI;
+
+      const deg = (((angle + Math.PI / 2) * 180) / Math.PI + 360) % 360;
+      let edgeSide: EdgeSide;
+      if (deg < 45 || deg >= 315) edgeSide = 'top';
+      else if (deg < 135) edgeSide = 'right';
+      else if (deg < 225) edgeSide = 'bottom';
+      else edgeSide = 'left';
+
+      seats.push({ x: px, y: py, angle, edgeSide, edgeTangentRad });
+    }
   }
 
   return seats;

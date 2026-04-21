@@ -689,10 +689,24 @@ export function BookingsDashboard({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: trimmedMessage, channel }),
       });
-      if (!res.ok) {
-        const payload = await res.json().catch(() => ({}));
-        setError(payload.error ?? 'Failed to send message.');
+      const payload = (await res.json().catch(() => ({}))) as {
+        success?: boolean;
+        error?: string;
+        errors?: string[];
+      };
+      if (!res.ok || !payload.success) {
+        const detail =
+          (payload.errors && payload.errors.length > 0
+            ? payload.errors.join('; ')
+            : payload.error) ?? 'Failed to send message.';
+        setError(detail);
+        addToast(detail, 'error');
       } else {
+        if (payload.errors && payload.errors.length > 0) {
+          addToast(`Sent with issues — ${payload.errors.join('; ')}`, 'error');
+        } else {
+          addToast('Message sent', 'success');
+        }
         setMessageDraftById((prev) => ({ ...prev, [bookingId]: '' }));
         setDetailById((prev) => {
           const next = { ...prev };
@@ -703,10 +717,11 @@ export function BookingsDashboard({
       }
     } catch {
       setError('Failed to send message.');
+      addToast('Failed to send message.', 'error');
     } finally {
       setSendingMessageIds((prev) => prev.filter((id) => id !== bookingId));
     }
-  }, [loadBookingDetail]);
+  }, [addToast, loadBookingDetail]);
 
   const executeBulkNoShow = useCallback(async () => {
     const previousMap = new Map(bookings.map((b) => [b.id, b.status]));
@@ -817,23 +832,49 @@ export function BookingsDashboard({
     setError(null);
     try {
       const outcomes = await Promise.all(selectedIds.map(async (bookingId) => {
-        const res = await fetch(`/api/venue/bookings/${bookingId}/message`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message, channel }),
-        });
-        return res.ok;
+        try {
+          const res = await fetch(`/api/venue/bookings/${bookingId}/message`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message, channel }),
+          });
+          const payload = (await res.json().catch(() => ({}))) as {
+            success?: boolean;
+            error?: string;
+            errors?: string[];
+          };
+          const sent = Boolean(res.ok && payload.success);
+          const issues =
+            payload.errors && payload.errors.length > 0
+              ? payload.errors.join('; ')
+              : payload.error ?? null;
+          return { sent, issues };
+        } catch {
+          return { sent: false, issues: 'Request failed' };
+        }
       }));
-      const okCount = outcomes.filter(Boolean).length;
-      if (okCount !== selectedIds.length) {
-        setError(`Sent messages to ${okCount}/${selectedIds.length} bookings. Some guests may be missing the chosen contact method.`);
+      const okCount = outcomes.filter((o) => o.sent).length;
+      const failureSummaries = outcomes
+        .map((o, idx) => (!o.sent && o.issues ? `Booking ${idx + 1}: ${o.issues}` : null))
+        .filter((entry): entry is string => entry !== null);
+      if (okCount === selectedIds.length) {
+        addToast(`Message sent to ${okCount} booking(s)`, 'success');
+      } else if (okCount > 0) {
+        setError(
+          `Sent to ${okCount}/${selectedIds.length}. ${failureSummaries.slice(0, 3).join(' · ')}`,
+        );
+        addToast(`Sent to ${okCount}/${selectedIds.length}`, 'error');
+      } else {
+        const first = failureSummaries[0] ?? 'No messages were sent.';
+        setError(first);
+        addToast(first, 'error');
       }
       setSelectedIds([]);
       setBulkGuestMessageOpen(false);
     } finally {
       setBulkLoading(false);
     }
-  }, [selectedIds]);
+  }, [addToast, selectedIds]);
 
   /** Selected rows that can still transition to Cancelled (for bulk cancel). */
   const bulkCancelEligibleIds = useMemo(() => {

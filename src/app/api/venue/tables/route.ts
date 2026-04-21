@@ -6,6 +6,10 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { ensureDefaultDiningAreaForVenue } from '@/lib/areas/resolve-default-area';
 import { getSupabaseAdminClient } from '@/lib/supabase';
+import {
+  FLOOR_PLAN_DEFAULT_LAYOUT_HEIGHT,
+  FLOOR_PLAN_DEFAULT_LAYOUT_WIDTH,
+} from '@/lib/floor-plan/fit-view';
 
 const TABLE_TYPE_VALUES = ['Regular', 'High-Top', 'Counter', 'Bar', 'Outdoor'] as const;
 
@@ -96,14 +100,48 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Failed to load tables' }, { status: 500 });
   }
 
-  const { data: venue } = await staff.db
-    .from('venues')
-    .select('table_management_enabled, floor_plan_background_url, auto_bussing_minutes, active_table_statuses, no_show_grace_minutes, combination_threshold')
-    .eq('id', staff.venue_id)
-    .single();
+  const [venueResult, floorPlanResult] = await Promise.all([
+    staff.db
+      .from('venues')
+      .select(
+        'table_management_enabled, floor_plan_background_url, auto_bussing_minutes, active_table_statuses, no_show_grace_minutes, combination_threshold',
+      )
+      .eq('id', staff.venue_id)
+      .single(),
+    (() => {
+      let fpQuery = staff.db
+        .from('floor_plans')
+        .select('canvas_width, canvas_height')
+        .eq('venue_id', staff.venue_id)
+        .order('sort_order', { ascending: true })
+        .order('created_at', { ascending: true })
+        .limit(1);
+      if (areaId) {
+        fpQuery = fpQuery.eq('area_id', areaId);
+      }
+      return fpQuery;
+    })(),
+  ]);
+
+  const venue = venueResult.data;
+  const fpRow = floorPlanResult.data?.[0] as
+    | { canvas_width: number | null; canvas_height: number | null }
+    | undefined;
+  let layoutW = FLOOR_PLAN_DEFAULT_LAYOUT_WIDTH;
+  let layoutH = FLOOR_PLAN_DEFAULT_LAYOUT_HEIGHT;
+  if (
+    typeof fpRow?.canvas_width === 'number' &&
+    typeof fpRow?.canvas_height === 'number' &&
+    fpRow.canvas_width > 0 &&
+    fpRow.canvas_height > 0
+  ) {
+    layoutW = Math.round(fpRow.canvas_width);
+    layoutH = Math.round(fpRow.canvas_height);
+  }
 
   return NextResponse.json({
     tables: tables ?? [],
+    floor_plan_layout: { width: layoutW, height: layoutH },
     settings: {
       table_management_enabled: venue?.table_management_enabled ?? false,
       floor_plan_background_url: venue?.floor_plan_background_url ?? null,

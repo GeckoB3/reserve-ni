@@ -90,23 +90,30 @@ export function OpeningHoursStep({ onDone }: Props) {
 
   return (
     <div>
-      <h2 className="mb-1 text-lg font-bold text-slate-900">Opening hours</h2>
+      <h2 className="mb-1 text-lg font-bold text-slate-900">When are you open?</h2>
       <p className="mb-4 text-sm text-slate-500">
-        This is the same control as{' '}
-        <Link
-          href="/dashboard/settings?tab=business-hours"
-          className="font-medium text-brand-600 underline hover:text-brand-700"
-        >
-          Settings → Business Hours
-        </Link>{' '}
-        (venue-wide outer limits for online booking). Venue closures and amended hours live there too.
+        Set the outer window for online bookings: the broadest hours guests could ever book. In the next
+        steps you&apos;ll define named sittings (e.g. Lunch, Dinner) inside this window.
       </p>
       {loadError && (
         <p className="mb-3 text-xs text-amber-800">{loadError} Showing starter hours; you can edit before saving.</p>
       )}
 
       <div className="mb-6 rounded-xl border border-slate-200 bg-slate-50/80 p-4 text-sm text-slate-600">
-        Dining services in the next steps define sitting windows inside these hours.
+        <p className="mb-2 font-medium text-slate-800">How this fits together</p>
+        <ul className="list-inside list-disc space-y-1">
+          <li>Opening hours are the maximum window: guests can never book outside them.</li>
+          <li>Dining services (next step) narrow it to named sittings like Lunch and Dinner.</li>
+          <li>You can set one-off closures and amended hours any time from{' '}
+            <Link
+              href="/dashboard/settings?tab=business-hours"
+              className="font-medium text-brand-600 underline hover:text-brand-700"
+            >
+              Settings → Business Hours
+            </Link>
+            .
+          </li>
+        </ul>
       </div>
 
       {error && (

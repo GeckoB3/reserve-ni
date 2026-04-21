@@ -167,6 +167,7 @@ async function buildTableFilterByTime(
         id: row.id as string,
         table_group_key: row.table_group_key as string,
         disabled: row.disabled as boolean,
+        locked: (row.locked as boolean) ?? false,
         display_name: (row.display_name as string | null) ?? null,
         combined_min_covers: (row.combined_min_covers as number | null) ?? null,
         combined_max_covers: (row.combined_max_covers as number | null) ?? null,

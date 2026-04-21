@@ -52,20 +52,31 @@ export function TableSetupStep({ onDone }: Props) {
 
   return (
     <div>
-      <h2 className="mb-1 text-lg font-bold text-slate-900">Set up your tables</h2>
-      <p className="mb-2 text-sm text-slate-500">
-        You chose Advanced table management. Use the same floor plan tools as{' '}
-        <Link
-          href="/dashboard/availability?tab=table&fp=layout"
-          className="font-medium text-brand-600 underline hover:text-brand-700"
-        >
-          Availability → Table Management
-        </Link>
-        . Layout saves as you work. You can also open the floor plan in a new tab anytime from the dashboard.
+      <h2 className="mb-1 text-lg font-bold text-slate-900">Lay out your tables</h2>
+      <p className="mb-3 text-sm text-slate-500">
+        Because you chose <strong className="font-medium text-slate-700">Advanced table management</strong>,
+        online booking will check a specific table is free for each party. Add the tables you actually have,
+        set their covers, and (optionally) arrange them on the floor plan.
       </p>
-      <p className="mb-4 text-xs text-slate-500">
-        If you are short on time, continue now and finish layout later from Availability.
-      </p>
+
+      <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50/80 p-4 text-sm text-slate-600">
+        <p className="mb-2 font-medium text-slate-800">Three ways to get set up</p>
+        <ul className="list-inside list-disc space-y-1">
+          <li><strong className="font-medium">Quickest:</strong> use the <em>Tables</em> tab to add a list of tables and covers. You can skip the visual layout for now.</li>
+          <li><strong className="font-medium">Typical:</strong> use the <em>Layout</em> tab to drag tables onto the floor plan, then fine-tune shapes and chairs.</li>
+          <li><strong className="font-medium">Advanced:</strong> use <em>Areas</em> and <em>Combinations</em> to model multiple rooms and allow tables to be joined for large parties.</li>
+        </ul>
+        <p className="mt-2 text-xs text-slate-500">
+          Everything saves as you work. You can come back any time from{' '}
+          <Link
+            href="/dashboard/availability?tab=table&fp=layout"
+            className="font-medium text-brand-600 underline hover:text-brand-700"
+          >
+            Availability → Table Management
+          </Link>
+          , or open the floor plan in a new tab from the link below.
+        </p>
+      </div>
 
       <FloorPlanEditorTabs
         isAdmin

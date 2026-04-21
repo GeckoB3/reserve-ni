@@ -44,20 +44,11 @@ import { createShortManageLink } from '@/lib/short-manage-link';
 import type { BookingEmailData } from '@/lib/emails/types';
 import { venueRowToEmailData } from '@/lib/emails/venue-email-data';
 import { logBookingOp } from '@/lib/observability/booking-ops-log';
-import { timeToMinutes } from '@/lib/availability';
 import { venueWideBlocksRejectBookingWindow } from '@/lib/availability/venue-wide-business-hours';
 import { fetchVenueOpeningHoursAndWideBlocksForDate } from '@/lib/availability/venue-wide-blocks-fetch';
 import { getResourceBookingEmailLabels } from '@/lib/booking/resource-booking-email-labels';
 import { listActiveAreasForVenue } from '@/lib/areas/resolve-default-area';
 import { isOnlineBookingBlockedForLightPastDue } from '@/lib/booking/light-plan-public-block';
-
-function hhMmAfterAddingMinutes(startHhMm: string, durationMinutes: number): string {
-  const base = timeToMinutes(startHhMm.slice(0, 5));
-  const end = Math.min(base + durationMinutes, 24 * 60 - 1);
-  const h = Math.floor(end / 60);
-  const m = end % 60;
-  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
-}
 
 const createBookingSchema = z.object({
   venue_id: z.string().uuid(),
@@ -758,17 +749,9 @@ async function handleNonTableBooking(
     if (!cls || cls.remaining < party_size) {
       return NextResponse.json({ error: 'This class is full or unavailable' }, { status: 409 });
     }
-    const classEndHhMm = hhMmAfterAddingMinutes(cls.start_time, cls.duration_minutes);
-    const venueWideErrClass = venueWideBlocksRejectBookingWindow(
-      venueWideHours.openingHours,
-      booking_date,
-      cls.start_time.slice(0, 5),
-      classEndHhMm,
-      venueWideHours.blocks,
-    );
-    if (venueWideErrClass) {
-      return NextResponse.json({ error: venueWideErrClass }, { status: 400 });
-    }
+    // computeClassAvailability already applies venue-wide closures / amended hours for the date.
+    // Scheduled class sessions intentionally bypass the venue's weekly opening hours (an evening
+    // class on a venue that closes at 5pm is still bookable if staff scheduled it).
     const classPayReq = cls.payment_requirement;
     const priceP = cls.price_pence ?? 0;
     const depPer = cls.deposit_amount_pence ?? 0;

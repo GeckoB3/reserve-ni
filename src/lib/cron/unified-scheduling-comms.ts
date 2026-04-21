@@ -298,7 +298,7 @@ export async function runUnifiedSchedulingComms(
 ): Promise<void> {
   const { data: venues } = await supabase
     .from('venues')
-    .select('id, name, address, phone, timezone, booking_model, email, reply_to_email, booking_page_url')
+    .select('id, name, address, phone, timezone, booking_model, email, reply_to_email')
     .in('booking_model', ['unified_scheduling', 'practitioner_appointment']);
 
   for (const venue of venues ?? []) {
@@ -334,7 +334,7 @@ export async function runSecondaryModelScheduledComms(
 ): Promise<void> {
   const { data: venues } = await supabase
     .from('venues')
-    .select('id, name, address, phone, timezone, booking_model, email, reply_to_email, booking_page_url');
+    .select('id, name, address, phone, timezone, booking_model, email, reply_to_email');
 
   for (const venue of venues ?? []) {
     await runLaneReminder({

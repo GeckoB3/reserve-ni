@@ -8,6 +8,7 @@ import { TableList } from './TableList';
 import { TableCombinationsPage } from './TableCombinationsPage';
 import { StatusSettings } from './StatusSettings';
 import { SetupWizard } from './SetupWizard';
+import { useDashboardTableManagementNavSync } from '@/app/dashboard/DashboardShell';
 
 interface TableSettings {
   table_management_enabled: boolean;
@@ -24,6 +25,7 @@ interface Props {
 
 export function TableSettingsView({ isAdmin }: Props) {
   const router = useRouter();
+  const navSync = useDashboardTableManagementNavSync();
   const [tables, setTables] = useState<VenueTable[]>([]);
   const [combinations, setCombinations] = useState<TableCombination[]>([]);
   const [settings, setSettings] = useState<TableSettings>({
@@ -84,6 +86,7 @@ export function TableSettingsView({ isAdmin }: Props) {
       if (res.ok) {
         const data = await res.json();
         setSettings(data.settings);
+        navSync?.setTableManagementEnabled(newValue);
         router.refresh();
       }
     } catch (err) {
@@ -106,6 +109,7 @@ export function TableSettingsView({ isAdmin }: Props) {
       if (res.ok) {
         const data = await res.json();
         setSettings(data.settings);
+        navSync?.setTableManagementEnabled(true);
         router.refresh();
       }
     } catch (err) {
@@ -124,6 +128,9 @@ export function TableSettingsView({ isAdmin }: Props) {
       if (res.ok) {
         const data = await res.json();
         setSettings(data.settings);
+        if (typeof updates.table_management_enabled === 'boolean') {
+          navSync?.setTableManagementEnabled(updates.table_management_enabled);
+        }
       }
     } catch (err) {
       console.error('Failed to update settings:', err);

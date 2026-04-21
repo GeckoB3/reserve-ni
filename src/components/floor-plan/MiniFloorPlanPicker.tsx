@@ -5,12 +5,16 @@ import { Stage, Layer, Group, Rect } from 'react-konva';
 import type { KonvaEventObject } from 'konva/lib/Node';
 import type Konva from 'konva';
 import TableShape from '@/components/floor-plan/TableShape';
-import { getTableDimensions } from '@/types/table-management';
+import { getTableDimensions, tableDimensionsPercentToPixels } from '@/types/table-management';
 import { computeGlobalUnifiedLabelFonts } from '@/lib/floor-plan/table-label-fonts';
 
 const COLOR_FREE = '#047857';
 const COLOR_SELECTED = '#2563eb';
 const COLOR_BUSY = '#94a3b8';
+/** Neutral fill for non-highlighted tables when used as a read-only combination preview. */
+const COLOR_PREVIEW_IDLE = '#94a3b8';
+/** Amber highlight for combination members in the read-only preview. */
+const COLOR_PREVIEW_HIGHLIGHT = '#d97706';
 
 const EMPTY_HIDDEN = new Set<string>();
 
@@ -26,6 +30,7 @@ export interface MiniFloorTableRow {
   height: number | null;
   rotation: number | null;
   is_active: boolean;
+  polygon_points?: { x: number; y: number }[] | null;
   /** Dining area; used when filtering tables for multi-area venues. */
   area_id?: string | null;
 }
@@ -38,6 +43,13 @@ export interface MiniFloorPlanPickerProps {
   partySize: number;
   className?: string;
   minHeight?: number;
+  /**
+   * Read-only preview mode. Hides the Free/Selected/Busy legend, the selection
+   * summary chips, and the "Tap tables above…" helper text — useful when the
+   * picker is used to preview a combination rather than to pick tables.
+   * `selectedIds` still drives which tables are highlighted (shown in amber).
+   */
+  previewMode?: boolean;
 }
 
 function computeFit(
@@ -58,8 +70,13 @@ function computeFit(
     const fb = getTableDimensions(t.max_covers, t.shape);
     const cx = t.position_x != null ? (t.position_x / 100) * canvasW : canvasW / 2;
     const cy = t.position_y != null ? (t.position_y / 100) * canvasH : canvasH / 2;
-    const w = ((t.width ?? fb.width) / 100) * canvasW;
-    const h = ((t.height ?? fb.height) / 100) * canvasH;
+    const { w, h } = tableDimensionsPercentToPixels(
+      t.width ?? fb.width,
+      t.height ?? fb.height,
+      canvasW,
+      canvasH,
+      t.shape,
+    );
     minX = Math.min(minX, cx - w / 2);
     maxX = Math.max(maxX, cx + w / 2);
     minY = Math.min(minY, cy - h / 2);
@@ -67,9 +84,10 @@ function computeFit(
   }
 
   const pad = 28;
-  const bw = maxX - minX + pad * 2;
-  const bh = maxY - minY + pad * 2;
-  const scale = Math.min(canvasW / bw, canvasH / bh, 2.5);
+  const bw = Math.max(1e-6, maxX - minX + pad * 2);
+  const bh = Math.max(1e-6, maxY - minY + pad * 2);
+  const rawScale = Math.min(canvasW / bw, canvasH / bh, 2.5);
+  const scale = Number.isFinite(rawScale) && rawScale > 0 ? rawScale : 1;
   const midX = (minX + maxX) / 2;
   const midY = (minY + maxY) / 2;
   return {
@@ -87,10 +105,14 @@ export default function MiniFloorPlanPicker({
   partySize,
   className = '',
   minHeight = 220,
+  previewMode = false,
 }: MiniFloorPlanPickerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<Konva.Stage | null>(null);
   const [dimensions, setDimensions] = useState({ width: 400, height: minHeight });
+  /** Konva must never receive 0×0 — it triggers drawImage on invalid layer canvases. */
+  const canvasW = Math.max(1, dimensions.width);
+  const canvasH = Math.max(1, dimensions.height);
   const [fetchedTables, setFetchedTables] = useState<MiniFloorTableRow[] | null>(
     tablesProp != null ? tablesProp : null,
   );
@@ -160,8 +182,8 @@ export default function MiniFloorPlanPicker({
   }, [minHeight]);
 
   const fit = useMemo(
-    () => computeFit(tables, dimensions.width, dimensions.height),
-    [tables, dimensions.width, dimensions.height],
+    () => computeFit(tables, canvasW, canvasH),
+    [tables, canvasW, canvasH],
   );
 
   useEffect(() => {
@@ -191,8 +213,13 @@ export default function MiniFloorPlanPicker({
     if (tables.length === 0) return null;
     const inputs = tables.map((table) => {
       const fb = getTableDimensions(table.max_covers, table.shape);
-      const tw = ((table.width ?? fb.width) / 100) * dimensions.width;
-      const th = ((table.height ?? fb.height) / 100) * dimensions.height;
+      const { w: tw, h: th } = tableDimensionsPercentToPixels(
+        table.width ?? fb.width,
+        table.height ?? fb.height,
+        canvasW,
+        canvasH,
+        table.shape,
+      );
       const capacityText =
         table.min_covers === table.max_covers
           ? `${table.max_covers}`
@@ -205,19 +232,21 @@ export default function MiniFloorPlanPicker({
         bottomLabel: capacityText,
         compactLabels: true,
         layoutScale: undefined,
+        polygon_points: table.polygon_points ?? null,
       };
     });
     return computeGlobalUnifiedLabelFonts(inputs);
-  }, [tables, dimensions.width, dimensions.height]);
+  }, [tables, canvasW, canvasH]);
 
   const zoomBy = useCallback(
     (delta: number) => {
       const newScale = Math.max(0.35, Math.min(2.8, scale + delta));
-      const cx = dimensions.width / 2;
-      const cy = dimensions.height / 2;
+      const cx = canvasW / 2;
+      const cy = canvasH / 2;
+      const safePrevScale = scale > 0 ? scale : 1;
       const pointTo = {
-        x: (cx - stagePos.x) / scale,
-        y: (cy - stagePos.y) / scale,
+        x: (cx - stagePos.x) / safePrevScale,
+        y: (cy - stagePos.y) / safePrevScale,
       };
       setScale(newScale);
       setStagePos({
@@ -225,7 +254,7 @@ export default function MiniFloorPlanPicker({
         y: cy - pointTo.y * newScale,
       });
     },
-    [scale, stagePos, dimensions.width, dimensions.height],
+    [scale, stagePos, canvasW, canvasH],
   );
 
   const toggleTable = useCallback(
@@ -291,24 +320,38 @@ export default function MiniFloorPlanPicker({
   }
 
   const capacityOk = selectedIds.length === 0 || combinedCapacity >= partySize;
+  /** Avoid Konva layer draw with scale 0 (InvalidStateError on drawImage). */
+  const stageScale = Math.max(0.001, scale);
 
   return (
     <div className={className}>
       {/* Header: legend + zoom controls */}
       <div className="mb-2 flex flex-wrap items-center justify-between gap-x-2 gap-y-1.5">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-500">
-          <span className="flex items-center gap-1">
-            <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: COLOR_FREE }} />
-            Free
-          </span>
-          <span className="flex items-center gap-1">
-            <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: COLOR_SELECTED }} />
-            Selected
-          </span>
-          <span className="flex items-center gap-1">
-            <span className="inline-block h-2.5 w-2.5 rounded-sm opacity-50" style={{ background: COLOR_BUSY }} />
-            Busy
-          </span>
+          {previewMode ? (
+            <span className="flex items-center gap-1">
+              <span
+                className="inline-block h-2.5 w-2.5 rounded-sm"
+                style={{ background: COLOR_PREVIEW_HIGHLIGHT }}
+              />
+              {selectedIds.length > 0 ? 'In this combination' : 'Hover a combination to preview'}
+            </span>
+          ) : (
+            <>
+              <span className="flex items-center gap-1">
+                <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: COLOR_FREE }} />
+                Free
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: COLOR_SELECTED }} />
+                Selected
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="inline-block h-2.5 w-2.5 rounded-sm opacity-50" style={{ background: COLOR_BUSY }} />
+                Busy
+              </span>
+            </>
+          )}
         </div>
         <div className="flex gap-1">
           <button
@@ -344,17 +387,17 @@ export default function MiniFloorPlanPicker({
       <div
         ref={containerRef}
         className="overflow-hidden rounded-xl border border-slate-200 bg-slate-100"
-        style={{ height: dimensions.height, touchAction: 'none' }}
+        style={{ height: Math.max(minHeight, canvasH), touchAction: 'none' }}
         aria-label={`Floor plan picker. ${selectedIds.length} table${selectedIds.length !== 1 ? 's' : ''} selected.`}
       >
         <Stage
           ref={(node) => {
             stageRef.current = node;
           }}
-          width={dimensions.width}
-          height={dimensions.height}
-          scaleX={scale}
-          scaleY={scale}
+          width={canvasW}
+          height={canvasH}
+          scaleX={stageScale}
+          scaleY={stageScale}
           x={stagePos.x}
           y={stagePos.y}
           onClick={handleStageClick}
@@ -371,42 +414,59 @@ export default function MiniFloorPlanPicker({
             {tables.map((table) => {
               const busy = occupiedSet.has(table.id);
               const isSelected = selectedIds.includes(table.id);
-              let statusColour = COLOR_FREE;
-              if (busy) statusColour = COLOR_BUSY;
-              else if (isSelected) statusColour = COLOR_SELECTED;
+              let statusColour: string;
+              if (previewMode) {
+                statusColour = isSelected ? COLOR_PREVIEW_HIGHLIGHT : COLOR_PREVIEW_IDLE;
+              } else if (busy) {
+                statusColour = COLOR_BUSY;
+              } else if (isSelected) {
+                statusColour = COLOR_SELECTED;
+              } else {
+                statusColour = COLOR_FREE;
+              }
 
               const fb = getTableDimensions(table.max_covers, table.shape);
-              const w = ((table.width ?? fb.width) / 100) * dimensions.width;
-              const h = ((table.height ?? fb.height) / 100) * dimensions.height;
+              const { w, h } = tableDimensionsPercentToPixels(
+                table.width ?? fb.width,
+                table.height ?? fb.height,
+                canvasW,
+                canvasH,
+                table.shape,
+              );
+
+              /* Preview mode: dim non-highlighted tables when anything is selected,
+                 so the combination stands out. In picker mode, only busy tables dim. */
+              const previewDim = previewMode && selectedIds.length > 0 && !isSelected;
+              const groupOpacity = previewDim ? 0.35 : busy ? 0.45 : 1;
 
               return (
-                <Group key={table.id} opacity={busy ? 0.45 : 1}>
+                <Group key={table.id} opacity={groupOpacity}>
                   <TableShape
                     table={table}
                     hiddenSides={EMPTY_HIDDEN}
-                    isSelected={isSelected && !busy}
+                    isSelected={!previewMode && isSelected && !busy}
                     isEditorMode={false}
                     statusColour={statusColour}
                     booking={null}
-                    canvasWidth={dimensions.width}
-                    canvasHeight={dimensions.height}
+                    canvasWidth={canvasW}
+                    canvasHeight={canvasH}
                     compactLabels
                     unifiedLabelFonts={unifiedLabelFonts}
-                    onClick={() => toggleTable(table.id)}
-                    onTap={() => toggleTable(table.id)}
+                    onClick={previewMode ? undefined : () => toggleTable(table.id)}
+                    onTap={previewMode ? undefined : () => toggleTable(table.id)}
                   />
-                  {/* Pointer-cursor hit area over each free table */}
-                  {!busy && (
+                  {/* Pointer-cursor hit area over each free table (picker mode only). */}
+                  {!busy && !previewMode && (
                     <Rect
                       x={
                         (table.position_x != null
-                          ? (table.position_x / 100) * dimensions.width
-                          : dimensions.width / 2) - w / 2
+                          ? (table.position_x / 100) * canvasW
+                          : canvasW / 2) - w / 2
                       }
                       y={
                         (table.position_y != null
-                          ? (table.position_y / 100) * dimensions.height
-                          : dimensions.height / 2) - h / 2
+                          ? (table.position_y / 100) * canvasH
+                          : canvasH / 2) - h / 2
                       }
                       width={w}
                       height={h}
@@ -430,7 +490,8 @@ export default function MiniFloorPlanPicker({
         </Stage>
       </div>
 
-      {/* Selection summary */}
+      {/* Selection summary (hidden in read-only preview mode) */}
+      {previewMode ? null : (
       <div className="mt-2 flex flex-wrap items-center gap-1.5">
         {selectedIds.length > 0 ? (
           <>
@@ -469,8 +530,9 @@ export default function MiniFloorPlanPicker({
           <p className="text-[11px] text-slate-400">Tap tables above to select for this booking</p>
         )}
       </div>
+      )}
 
-      {selectedIds.length > 0 && !capacityOk && (
+      {!previewMode && selectedIds.length > 0 && !capacityOk && (
         <p className="mt-1.5 text-[11px] text-amber-600">
           Selected capacity is tight for this party. You can still assign; staff can adjust on the floor.
         </p>

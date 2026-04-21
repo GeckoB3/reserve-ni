@@ -13,6 +13,7 @@ import { entityBookingWindowFromRow, isGuestBookingDateAllowed } from '@/lib/boo
 import {
   resolveVenueWideAllowedMinuteRanges,
   isMinuteSubintervalCoveredByRanges,
+  blocksForDate,
 } from '@/lib/availability/venue-wide-business-hours';
 import {
   rowsToVenueWideBlocks,
@@ -133,6 +134,14 @@ export function isClassInstanceBookableForGuest(
 // Core engine
 // ---------------------------------------------------------------------------
 
+/**
+ * Class sessions are *explicitly scheduled* by staff, so the venue's weekly `opening_hours`
+ * do not hide them (a 7pm yoga class is bookable even if the venue's weekly hours are 9am–5pm).
+ * Only date-specific venue-wide blocks constrain them:
+ *   - `closed` / `special_event` → hides overlapping class times
+ *   - `amended_hours` → class must fit inside the amended periods
+ * When there are no date-specific blocks, the scheduled session is always allowed.
+ */
 function classInstanceAllowedByVenueWideBlocks(
   instanceDate: string,
   startTimeHhMm: string,
@@ -141,6 +150,9 @@ function classInstanceAllowedByVenueWideBlocks(
   venueOpeningHours: OpeningHours | null | undefined,
 ): boolean {
   if (venueWideBlocks == null) return true;
+  const dayBlocks = blocksForDate(venueWideBlocks, instanceDate);
+  if (dayBlocks.length === 0) return true;
+
   const res = resolveVenueWideAllowedMinuteRanges(venueOpeningHours ?? null, instanceDate, venueWideBlocks);
   if (res.kind === 'unrestricted') return true;
   if (res.kind === 'closed') return false;

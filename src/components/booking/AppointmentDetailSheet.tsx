@@ -372,10 +372,21 @@ export function AppointmentDetailSheet({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: guestMessageDraft.trim(), channel: guestMessageChannel }),
       });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        setActionError((data as { error?: string }).error ?? 'Could not send message');
+      const data = (await res.json().catch(() => ({}))) as {
+        success?: boolean;
+        error?: string;
+        errors?: string[];
+      };
+      if (!res.ok || !data.success) {
+        const detail =
+          (data.errors && data.errors.length > 0
+            ? data.errors.join('; ')
+            : data.error) ?? 'Could not send message';
+        setActionError(detail);
         return;
+      }
+      if (data.errors && data.errors.length > 0) {
+        setActionError(`Partially sent — ${data.errors.join('; ')}`);
       }
       setGuestMessageDraft('');
       await loadDetail();
@@ -617,6 +628,20 @@ export function AppointmentDetailSheet({
                     )}
                   </dd>
                 </div>
+                {detail.guest?.id && detail.guest.id !== '__prefetch__' ? (
+                  <div className="sm:col-span-2">
+                    <CustomerProfileNotesCard
+                      embedded
+                      guestId={detail.guest.id}
+                      value={detail.guest.customer_profile_notes}
+                      disabled={busy}
+                      onSaved={() => {
+                        void loadDetail();
+                        onUpdated();
+                      }}
+                    />
+                  </div>
+                ) : null}
                 <div>
                   <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">Service</dt>
                   <dd className="mt-0.5 text-slate-900">
@@ -722,6 +747,20 @@ export function AppointmentDetailSheet({
                   <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">Party size</dt>
                   <dd className="mt-0.5 text-slate-900">{detail.party_size}</dd>
                 </div>
+                {detail.guest?.id && detail.guest.id !== '__prefetch__' ? (
+                  <div className="sm:col-span-2">
+                    <CustomerProfileNotesCard
+                      embedded
+                      guestId={detail.guest.id}
+                      value={detail.guest.customer_profile_notes}
+                      disabled={busy}
+                      onSaved={() => {
+                        void loadDetail();
+                        onUpdated();
+                      }}
+                    />
+                  </div>
+                ) : null}
                 {inferredModel === 'resource_booking' ? (
                   <>
                     <div>
@@ -770,18 +809,6 @@ export function AppointmentDetailSheet({
                 </div>
               </dl>
               )}
-
-              {detail.guest?.id && detail.guest.id !== '__prefetch__' ? (
-                <CustomerProfileNotesCard
-                  guestId={detail.guest.id}
-                  value={detail.guest.customer_profile_notes}
-                  disabled={busy}
-                  onSaved={() => {
-                    void loadDetail();
-                    onUpdated();
-                  }}
-                />
-              ) : null}
 
               <div>
                 <label htmlFor="internal-notes-detail" className="text-xs font-medium uppercase tracking-wide text-slate-500">

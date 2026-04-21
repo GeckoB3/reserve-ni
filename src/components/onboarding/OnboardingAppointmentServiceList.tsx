@@ -1,13 +1,13 @@
 'use client';
 
-import { useState } from 'react';
 import { DEFAULT_ENTITY_BOOKING_WINDOW, entityBookingWindowFromRow } from '@/lib/booking/entity-booking-window';
 import { defaultNewUnifiedCalendarWorkingHours } from '@/lib/availability/practitioner-defaults';
-import { getOnlineBookableWeeklySummaryParts, toServiceCustomScheduleV2 } from '@/lib/service-custom-availability';
+import { toServiceCustomScheduleV2 } from '@/lib/service-custom-availability';
 import type { ClassPaymentRequirement, ServiceCustomScheduleStored, ServiceCustomScheduleV2, WorkingHours } from '@/types/booking-models';
 import type { OpeningHours } from '@/types/availability';
 import type { VenueOpeningException } from '@/types/venue-opening-exceptions';
 import { ServiceCustomAvailabilityEditor } from '@/components/scheduling/ServiceCustomAvailabilityEditor';
+import { ServiceAvailabilityCalendar } from '@/components/scheduling/ServiceAvailabilityCalendar';
 import { NumericInput } from '@/components/ui/NumericInput';
 
 export type StaffMayFlags = {
@@ -257,9 +257,6 @@ export function OnboardingAppointmentServiceList({
   calendarWorkingHoursById = {},
 }: OnboardingAppointmentServiceListProps) {
   const sym = currencySymbol;
-  const [customModalKey, setCustomModalKey] = useState<string | null>(null);
-  const [customDraftEnabled, setCustomDraftEnabled] = useState(false);
-  const [customDraft, setCustomDraft] = useState<ServiceCustomScheduleV2>(() => toServiceCustomScheduleV2({}));
 
   function togglePractitioner(clientKey: string, pid: string) {
     setServices((prev) =>
@@ -279,36 +276,21 @@ export function OnboardingAppointmentServiceList({
     );
   }
 
-  function openCustomModal(s: AppointmentServiceFormDraft) {
-    setCustomModalKey(s.clientKey);
-    setCustomDraftEnabled(s.custom_availability_enabled);
-    setCustomDraft(toServiceCustomScheduleV2(s.custom_availability_enabled ? s.custom_working_hours : {}));
-  }
-
-  function applyCustomModal() {
-    if (!customModalKey) return;
-    updateRow(customModalKey, {
-      custom_availability_enabled: customDraftEnabled,
-      custom_working_hours: customDraftEnabled
-        ? (JSON.parse(JSON.stringify(customDraft)) as ServiceCustomScheduleStored)
-        : {},
-    });
-    setCustomModalKey(null);
+  function getServiceV2(s: AppointmentServiceFormDraft): ServiceCustomScheduleV2 {
+    const raw =
+      s.custom_working_hours && typeof s.custom_working_hours === 'object'
+        ? s.custom_working_hours
+        : {};
+    return toServiceCustomScheduleV2(raw);
   }
 
   return (
     <div className="space-y-4">
       {services.map((s) => {
-        const bookSummary = getOnlineBookableWeeklySummaryParts({
-          venueOpeningHours,
-          venueOpeningExceptions: venueOpeningExceptions ?? undefined,
-          linkedCalendars: s.practitioner_ids.map((id) => ({
-            id,
-            working_hours: calendarWorkingHoursById[id] ?? defaultNewUnifiedCalendarWorkingHours(),
-          })),
-          customAvailabilityEnabled: s.custom_availability_enabled,
-          customWorkingHours: s.custom_working_hours,
-        });
+        const linkedCalendarsForPreview = s.practitioner_ids.map((id) => ({
+          id,
+          working_hours: calendarWorkingHoursById[id] ?? defaultNewUnifiedCalendarWorkingHours(),
+        }));
         return (
         <div key={s.clientKey} className="rounded-xl border border-slate-200 p-4 space-y-4">
           <div className="flex items-start justify-between gap-2">
@@ -607,41 +589,45 @@ export function OnboardingAppointmentServiceList({
             </div>
           )}
 
-          <div className="rounded-lg border border-slate-200 p-4 space-y-3">
-            <p className="text-sm font-medium text-slate-800">When guests can book this service online</p>
-            <p className="text-xs text-slate-600">A slot appears only when:</p>
-            <ul className="list-disc space-y-0.5 pl-4 text-xs text-slate-600">
-              <li>The venue is open</li>
-              <li>At least one linked calendar is available then</li>
-              <li>This service allows that time (including any custom schedule)</li>
-            </ul>
-            <p className="text-xs text-slate-500">Blocks and breaks on calendars still remove time inside those windows.</p>
-            {bookSummary.noCalendarsMessage ? (
-              <p className="text-sm text-slate-600">{bookSummary.noCalendarsMessage}</p>
-            ) : (
-              <div className="rounded-lg border border-slate-100 bg-slate-50/80 p-3 space-y-2">
-                {bookSummary.contextualNote ? (
-                  <p className="text-xs leading-relaxed text-slate-700">{bookSummary.contextualNote}</p>
-                ) : null}
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Sample week</p>
-                <p className="text-xs text-slate-500">
-                  Sample week: example Mon–Sun times only. Venue hours follow the date on each row (including closed or
-                  amended days). Linked calendars show their usual weekly pattern; one-off calendar blocks are not
-                  shown. This is not a live booking view.
+          <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-4">
+            <div>
+              <p className="text-sm font-medium text-slate-800">When guests can book this service online</p>
+              <p className="mt-0.5 text-xs text-slate-500">
+                Final availability is the overlap of venue opening hours, each linked calendar&apos;s
+                hours, and this service&apos;s schedule (below). Staff blocks and one-off calendar
+                changes also apply live.
+              </p>
+            </div>
+            <ServiceAvailabilityCalendar
+              venueOpeningHours={venueOpeningHours}
+              venueOpeningExceptions={venueOpeningExceptions ?? undefined}
+              linkedCalendars={linkedCalendarsForPreview}
+              customAvailabilityEnabled={s.custom_availability_enabled}
+              customWorkingHours={s.custom_working_hours}
+              footnote="Based on venue hours (with exceptions), each linked calendar's recurring weekly hours, and this service's schedule. Staff blocks and one-off calendar changes are not previewed here."
+            />
+
+            <div className="space-y-3 pt-1">
+              <div>
+                <p className="text-sm font-medium text-slate-800">This service&apos;s schedule</p>
+                <p className="mt-0.5 text-xs text-slate-500">
+                  Optional — only turn on if this service should be bookable for less time than its
+                  calendars are open.
                 </p>
-                <p className="text-sm text-slate-800 whitespace-pre-line tabular-nums">{bookSummary.weekLines}</p>
-                {bookSummary.previewDatesNote ? (
-                  <p className="text-xs leading-relaxed text-slate-600">{bookSummary.previewDatesNote}</p>
-                ) : null}
               </div>
-            )}
-            <button
-              type="button"
-              onClick={() => openCustomModal(s)}
-              className="inline-flex w-full items-center justify-center rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 sm:w-auto"
-            >
-              Custom schedule for this service
-            </button>
+              <ServiceCustomAvailabilityEditor
+                value={getServiceV2(s)}
+                onChange={(next) =>
+                  updateRow(s.clientKey, {
+                    custom_working_hours: next as ServiceCustomScheduleStored,
+                  })
+                }
+                enabled={s.custom_availability_enabled}
+                onEnabledChange={(next) =>
+                  updateRow(s.clientKey, { custom_availability_enabled: next })
+                }
+              />
+            </div>
           </div>
         </div>
         );
@@ -663,64 +649,7 @@ export function OnboardingAppointmentServiceList({
         + Add service
       </button>
 
-      {customModalKey && (
-        <div
-          className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-4"
-          onClick={() => setCustomModalKey(null)}
-        >
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="onboarding-service-custom-availability-title"
-            className="w-full max-w-6xl max-h-[90vh] overflow-y-auto rounded-2xl bg-white p-6 shadow-xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h2 id="onboarding-service-custom-availability-title" className="mb-1 text-lg font-semibold text-slate-900">
-              When can this service be booked?
-            </h2>
-            <p className="mb-4 text-xs text-slate-500">
-              Narrow online booking with weekly hours, hand-picked dates, or a date range with weekdays. Rules combine:
-              if any rule allows a time, it may appear (venue and calendars must still allow it). Apply saves this draft;
-              continue onboarding to store services.
-            </p>
-            <label className="mb-4 flex cursor-pointer items-start gap-2 text-sm text-slate-800">
-              <input
-                type="checkbox"
-                className="mt-0.5 rounded border-slate-300"
-                checked={customDraftEnabled}
-                onChange={(e) => {
-                  setCustomDraftEnabled(e.target.checked);
-                }}
-              />
-              <span>Use a custom schedule for online booking</span>
-            </label>
-            <ServiceCustomAvailabilityEditor
-              value={customDraft}
-              onChange={setCustomDraft}
-              disabled={!customDraftEnabled}
-            />
-            <p className="mt-4 text-center text-[11px] text-slate-500">
-              Apply updates this service row only — save onboarding to persist services.
-            </p>
-            <div className="mt-2 flex justify-end gap-3">
-              <button
-                type="button"
-                onClick={() => setCustomModalKey(null)}
-                className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={applyCustomModal}
-                className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700"
-              >
-                Apply to service
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
+

@@ -160,7 +160,7 @@ async function sendConfirmOrCancelPrompts(results: {
   const now = new Date();
   const { data: venues } = await supabase
     .from('venues')
-    .select('id, name, address, phone, timezone, booking_model, email, reply_to_email, booking_page_url');
+    .select('id, name, address, phone, timezone, booking_model, email, reply_to_email');
 
   if (!venues?.length) return;
 
@@ -262,7 +262,7 @@ async function sendPreVisitReminders(results: {
   const now = new Date();
   const { data: venues } = await supabase
     .from('venues')
-    .select('id, name, address, phone, timezone, booking_model, email, reply_to_email, booking_page_url');
+    .select('id, name, address, phone, timezone, booking_model, email, reply_to_email');
 
   if (!venues?.length) return;
 
@@ -360,7 +360,7 @@ async function sendPostVisitThankYous(results: {
   const now = new Date();
   const { data: venues } = await supabase
     .from('venues')
-    .select('id, name, address, phone, timezone, booking_model, email, reply_to_email, booking_page_url');
+    .select('id, name, address, phone, timezone, booking_model, email, reply_to_email');
 
   if (!venues?.length) return;
 
