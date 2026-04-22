@@ -325,7 +325,7 @@ export function DetailsStep({
           )}
         </FormField>
 
-        <FormField label="Phone" required={audience !== 'staff_walk_in'} error={errors.phone?.message}>
+        <FormField label="Phone" required={audience !== 'staff_walk_in'}>
           <Controller
             name="phone"
             control={control}
@@ -336,6 +336,7 @@ export function DetailsStep({
                 value={field.value}
                 onChange={field.onChange}
                 defaultCountry={phoneDefaultCountry}
+                error={errors.phone?.message}
                 inputClassName="min-h-[44px] w-full min-w-0 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base placeholder:text-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
               />
             )}

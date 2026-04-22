@@ -24,6 +24,7 @@ import { parseVenueOpeningExceptions } from '@/types/venue-opening-exceptions';
 import type { AvailabilityBlock } from '@/types/availability';
 import { blocksToVenueOpeningExceptions } from '@/lib/availability/venue-exceptions-adapter';
 import { intersectEffectiveRangesWithServiceCustom, parseCustomWorkingHoursFromDb } from '@/lib/service-custom-availability';
+import { fetchScheduledSessionBlocksForCalendar } from '@/lib/availability/calendar-session-blocks';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -794,6 +795,29 @@ export async function fetchAppointmentInput(params: {
     ...leavePartialBlocks,
   ];
 
+  /**
+   * For each practitioner whose id also exists as a `unified_calendars` column, fold
+   * scheduled classes and events on that column into the block list so appointments
+   * cannot overlap them (mirror of the calendar-path behaviour above).
+   */
+  const sessionRangesByPractitioner = await Promise.all(
+    practitioners.map((p) =>
+      fetchScheduledSessionBlocksForCalendar(supabase, venueId, p.id, date).then((ranges) => ({
+        practitioner_id: p.id,
+        ranges,
+      })),
+    ),
+  );
+  for (const entry of sessionRangesByPractitioner) {
+    for (const r of entry.ranges) {
+      practitionerBlockedRanges.push({
+        practitioner_id: entry.practitioner_id,
+        start: r.start,
+        end: r.end,
+      });
+    }
+  }
+
   if (blocksRes.error) {
     console.warn('[fetchAppointmentInput] practitioner_calendar_blocks:', blocksRes.error.message);
   }
@@ -1060,10 +1084,23 @@ export async function fetchCalendarAppointmentInput(params: {
     }));
   }
 
+  /**
+   * Scheduled classes and events render on this calendar column via the schedule feed,
+   * not via `calendar_blocks`. Treat them as blocks so appointments cannot overlap a
+   * class/event even before any tickets have been booked.
+   */
+  const sessionRanges = await fetchScheduledSessionBlocksForCalendar(supabase, venueId, calendarId, date);
+  const scheduledSessionBlockRanges: PractitionerCalendarBlockedRange[] = sessionRanges.map((r) => ({
+    practitioner_id: calendarId,
+    start: r.start,
+    end: r.end,
+  }));
+
   const practitionerBlockedRanges: PractitionerCalendarBlockedRange[] = [
     ...legacyBlockRanges,
     ...unifiedCalBlockRanges,
     ...resourceHostBlockRanges,
+    ...scheduledSessionBlockRanges,
     ...leavePartialForCalendar,
   ];
 

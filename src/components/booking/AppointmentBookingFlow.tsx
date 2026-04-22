@@ -21,6 +21,8 @@ import type { ClassPaymentRequirement } from '@/types/booking-models';
 import {
   type BookingFlowAudience,
   appointmentCatalogUrl,
+  appointmentCalendarUrl,
+  appointmentCalendarCacheKey,
   bookingAvailabilityUrl,
   validateAppointmentSlotUrl,
   bookingCreateUrl,
@@ -29,6 +31,7 @@ import {
   bookingConfirmPaymentUrl,
   venueBookingsCreateUrl,
 } from '@/lib/booking/booking-flow-api';
+import { ResourceCalendarMonth, todayYmdLocal } from './ResourceCalendarMonth';
 
 /** Services + staff from catalog (no date / slots). */
 interface CatalogPractitioner {
@@ -221,6 +224,19 @@ export function AppointmentBookingFlow({
     cancellation_notice_hours: number;
   } | null>(null);
 
+  /**
+   * Visual calendar state: currently-displayed month + dates-with-availability for the
+   * `(practitioner, service)` pair. Cached by key so month-paging / back-and-forward is cheap.
+   */
+  const [calendarMonth, setCalendarMonth] = useState<{ year: number; month: number }>(() => {
+    const base = initialDate ?? todayStr();
+    const [y, m] = base.split('-').map(Number);
+    return { year: y ?? new Date().getFullYear(), month: m ?? new Date().getMonth() + 1 };
+  });
+  const [availableDates, setAvailableDates] = useState<Set<string>>(new Set());
+  const [loadingCalendar, setLoadingCalendar] = useState(false);
+  const [calendarCache, setCalendarCache] = useState<Map<string, Set<string>>>(() => new Map());
+
   const containerRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!onHeightChange || !containerRef.current) return;
@@ -342,6 +358,98 @@ export function AppointmentBookingFlow({
     phantomBookings,
     fetchAvailability,
   ]);
+
+  /**
+   * Drive the visual date picker: whenever the user lands on a slot step with a
+   * resolved (practitioner, service), fetch dates-with-availability for the
+   * displayed month. Results are memoised in `calendarCache`.
+   */
+  useEffect(() => {
+    if (step !== 'slot' && step !== 'group_slot') return;
+    const isGroup = step === 'group_slot';
+    const svc = isGroup ? groupServiceId : selectedServiceId;
+    const prac = isGroup ? groupPractitionerId : selectedPractitionerId;
+    if (!svc || !prac) return;
+
+    const key = appointmentCalendarCacheKey(prac, svc, calendarMonth.year, calendarMonth.month);
+    const cached = calendarCache.get(key);
+    if (cached) {
+      setAvailableDates(cached);
+      setLoadingCalendar(false);
+      return;
+    }
+
+    const ac = new AbortController();
+    let cancelled = false;
+    (async () => {
+      setLoadingCalendar(true);
+      try {
+        const url = appointmentCalendarUrl(
+          bookingAudience,
+          venue.id,
+          prac,
+          svc,
+          calendarMonth.year,
+          calendarMonth.month,
+        );
+        const res = await fetch(url, { signal: ac.signal });
+        const data = await res.json();
+        if (cancelled) return;
+        if (!res.ok) throw new Error(data.error ?? 'Failed to load calendar');
+        const list = (data.available_dates ?? []) as string[];
+        const nextSet = new Set(list);
+        setAvailableDates(nextSet);
+        setCalendarCache((prev) => {
+          const next = new Map(prev);
+          next.set(key, nextSet);
+          return next;
+        });
+      } catch (e) {
+        if (cancelled || (e instanceof Error && e.name === 'AbortError')) return;
+        setAvailableDates(new Set());
+      } finally {
+        if (!cancelled) setLoadingCalendar(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      ac.abort();
+    };
+  }, [
+    step,
+    venue.id,
+    bookingAudience,
+    selectedServiceId,
+    selectedPractitionerId,
+    groupServiceId,
+    groupPractitionerId,
+    calendarMonth.year,
+    calendarMonth.month,
+    calendarCache,
+  ]);
+
+  /** Reset the displayed month whenever the user changes service or practitioner. */
+  useEffect(() => {
+    const base = date || todayStr();
+    const [y, m] = base.split('-').map(Number);
+    if (!y || !m) return;
+    setCalendarMonth((prev) => (prev.year === y && prev.month === m ? prev : { year: y, month: m }));
+  }, [selectedServiceId, selectedPractitionerId, groupServiceId, groupPractitionerId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const goPrevMonth = useCallback(() => {
+    setCalendarMonth((prev) => {
+      const m = prev.month - 1;
+      if (m < 1) return { year: prev.year - 1, month: 12 };
+      return { year: prev.year, month: m };
+    });
+  }, []);
+  const goNextMonth = useCallback(() => {
+    setCalendarMonth((prev) => {
+      const m = prev.month + 1;
+      if (m > 12) return { year: prev.year + 1, month: 1 };
+      return { year: prev.year, month: m };
+    });
+  }, []);
 
   const allServices = catalogStaff.flatMap((p) => p.services);
   const uniqueServices = Array.from(new Map(allServices.map((s) => [s.id, s])).values());
@@ -1100,10 +1208,19 @@ export function AppointmentBookingFlow({
             </div>
           </div>
           <h2 className="mb-1 text-lg font-semibold text-slate-900">Date and time</h2>
-          <p className="mb-4 text-sm text-slate-500">Select a date first. Available times for that day will appear below.</p>
+          <p className="mb-4 text-sm text-slate-500">Green days have at least one bookable time. Select a day to see times.</p>
           <div className="mb-4">
-            <label className="mb-1 block text-xs font-medium text-slate-500 uppercase tracking-wider">Date</label>
-            <input type="date" value={date} min={todayStr()} onChange={(e) => { setDate(e.target.value); setSelectedTime(null); }} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm shadow-sm focus:border-brand-400 focus:ring-2 focus:ring-brand-100 focus:outline-none" />
+            <ResourceCalendarMonth
+              year={calendarMonth.year}
+              month={calendarMonth.month}
+              availableDates={availableDates}
+              selectedDate={date || null}
+              onSelectDate={(ymd) => { setDate(ymd); setSelectedTime(null); }}
+              onPrevMonth={goPrevMonth}
+              onNextMonth={goNextMonth}
+              minSelectableDate={todayYmdLocal()}
+              loading={loadingCalendar}
+            />
           </div>
           {isStaffWalkInAppointment && (
             <div className="mb-4">
@@ -1671,10 +1788,19 @@ export function AppointmentBookingFlow({
             <span className="text-purple-500"> &middot; {groupSelectedService?.name} &middot; {groupSelectedPrac?.name}</span>
           </div>
           <h2 className="mb-1 text-lg font-semibold text-slate-900">Pick a time for {currentPersonLabel}</h2>
-          <p className="mb-4 text-sm text-slate-500">Select a date, then choose an available time.</p>
+          <p className="mb-4 text-sm text-slate-500">Green days have at least one bookable time. Select a day, then choose an available time.</p>
           <div className="mb-4">
-            <label className="mb-1 block text-xs font-medium text-slate-500 uppercase tracking-wider">Date</label>
-            <input type="date" value={date} min={todayStr()} onChange={(e) => setDate(e.target.value)} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm shadow-sm focus:border-brand-400 focus:ring-2 focus:ring-brand-100 focus:outline-none" />
+            <ResourceCalendarMonth
+              year={calendarMonth.year}
+              month={calendarMonth.month}
+              availableDates={availableDates}
+              selectedDate={date || null}
+              onSelectDate={(ymd) => setDate(ymd)}
+              onPrevMonth={goPrevMonth}
+              onNextMonth={goNextMonth}
+              minSelectableDate={todayYmdLocal()}
+              loading={loadingCalendar}
+            />
           </div>
           {loading ? (
             <div className="h-32 animate-pulse rounded-xl bg-slate-100" />

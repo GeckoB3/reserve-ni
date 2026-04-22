@@ -95,6 +95,9 @@ export function PhoneWithCountryField({
 
   const [countryCode, setCountryCode] = useState<CountryCode>(baseDefault);
   const [national, setNational] = useState('');
+  /** After an invalid blur we clear the parent `value` but keep showing the typed national until the user edits. */
+  const retainInvalidNationalRef = useRef(false);
+  const [formatError, setFormatError] = useState<string | null>(null);
   const prevExternalValueRef = useRef<string | undefined>(undefined);
   const isFirstSyncRef = useRef(true);
 
@@ -129,6 +132,9 @@ export function PhoneWithCountryField({
       }
       if (prevExternalValueRef.current === value) return;
       prevExternalValueRef.current = value;
+      if (retainInvalidNationalRef.current && !value) {
+        return;
+      }
       const parts = parseStoredPhoneForUi(value || null, baseDefault);
       setCountryCode(parts.countryCode);
       setNational(parts.nationalNumber);
@@ -136,6 +142,12 @@ export function PhoneWithCountryField({
     const id = requestAnimationFrame(apply);
     return () => cancelAnimationFrame(id);
   }, [value, baseDefault]);
+
+  useEffect(() => {
+    if (!error) return;
+    const t = window.setTimeout(() => setFormatError(null), 0);
+    return () => clearTimeout(t);
+  }, [error]);
 
   /* emit to parent */
   const emit = (nextCountry: CountryCode, nextNational: string) => {
@@ -152,37 +164,48 @@ export function PhoneWithCountryField({
   };
 
   const handleNationalChange = (raw: string) => {
+    retainInvalidNationalRef.current = false;
+    setFormatError(null);
     setNational(raw);
     emit(countryCode, raw);
   };
 
   const handleCountryChange = useCallback(
     (cc: CountryCode) => {
+      setFormatError(null);
       setCountryCode(cc);
       const e164 = nationalToE164Client(national, cc);
       if (e164) {
+        retainInvalidNationalRef.current = false;
         onChange(e164);
         prevExternalValueRef.current = e164;
       } else if (!national.trim()) {
+        retainInvalidNationalRef.current = false;
         onChange('');
         prevExternalValueRef.current = '';
       }
     },
-     
+
     [national, onChange],
   );
 
   const handleBlur = () => {
     if (!national.trim()) {
+      retainInvalidNationalRef.current = false;
+      setFormatError(null);
       onChange('');
       prevExternalValueRef.current = '';
       return;
     }
     if (!nationalToE164Client(national, countryCode)) {
+      setFormatError('That number is not valid for the selected country.');
+      retainInvalidNationalRef.current = true;
       onChange('');
       prevExternalValueRef.current = '';
-      setNational('');
+      return;
     }
+    setFormatError(null);
+    retainInvalidNationalRef.current = false;
   };
 
   /* ── dropdown logic ── */
@@ -317,10 +340,16 @@ export function PhoneWithCountryField({
     inputClassName || 'px-4 py-2.5 text-sm placeholder:text-slate-300',
   );
 
+  const combinedError = error ?? formatError;
+
   return (
     <div className={className}>
       <div
-        className={`flex items-stretch overflow-hidden border border-slate-200 bg-white transition-colors focus-within:border-brand-500 focus-within:ring-2 focus-within:ring-brand-500/20 ${radius} ${disabled ? 'opacity-50' : ''}`}
+        className={`flex items-stretch overflow-hidden border bg-white transition-colors focus-within:ring-2 ${radius} ${disabled ? 'opacity-50' : ''} ${
+          combinedError
+            ? 'border-red-400 focus-within:border-red-500 focus-within:ring-red-500/25'
+            : 'border-slate-200 focus-within:border-brand-500 focus-within:ring-brand-500/20'
+        }`}
       >
         <label htmlFor={id} className="sr-only">
           Mobile number
@@ -469,7 +498,7 @@ export function PhoneWithCountryField({
           document.body,
         )}
 
-      {error ? <p className="mt-1 text-xs text-red-600">{error}</p> : null}
+      {combinedError ? <p className="mt-1 text-xs text-red-600">{combinedError}</p> : null}
     </div>
   );
 }

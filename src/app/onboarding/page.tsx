@@ -9,6 +9,7 @@ import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 import { normalizeEnabledModels } from '@/lib/booking/enabled-models';
 import { APPOINTMENTS_ACTIVE_MODEL_ORDER } from '@/lib/booking/active-models';
 import { buildAddress, parseAddress } from '@/lib/venue/address-format';
+import { defaultCalendarWorkingHoursFromOpeningHours } from '@/lib/availability/opening-hours-to-working-hours';
 import {
   defaultNewUnifiedCalendarWorkingHours,
   defaultPractitionerWorkingHours,
@@ -1089,22 +1090,25 @@ export default function OnboardingPage() {
           practitioners?: Array<{ id: string; working_hours?: WorkingHours }>;
         };
         const pracs = prBody.practitioners ?? [];
+        let mergedOpening: OpeningHoursSettings;
         if (venueRow.opening_hours && typeof venueRow.opening_hours === 'object') {
-          const merged = {
+          mergedOpening = {
             ...defaultOpeningHoursSettings(),
             ...venueRow.opening_hours,
           } as OpeningHoursSettings;
-          if (!cancelled) setOpeningHoursDraft(merged);
-        } else if (!cancelled) {
-          setOpeningHoursDraft(defaultOpeningHoursSettings());
+          if (!cancelled) setOpeningHoursDraft(mergedOpening);
+        } else {
+          mergedOpening = defaultOpeningHoursSettings();
+          if (!cancelled) setOpeningHoursDraft(mergedOpening);
         }
+        const fromOpening = defaultCalendarWorkingHoursFromOpeningHours(mergedOpening);
         const byId: Record<string, WorkingHours> = {};
         for (const p of pracs) {
           const wh = p.working_hours;
           if (wh && typeof wh === 'object' && Object.keys(wh).length > 0) {
             byId[p.id] = wh;
           } else {
-            byId[p.id] = defaultPractitionerWorkingHours();
+            byId[p.id] = fromOpening;
           }
         }
         if (!cancelled) setCalendarWorkingDraft(byId);
@@ -1617,7 +1621,9 @@ export default function OnboardingPage() {
           if (!ohRes.ok) throw new Error('Failed to save opening hours');
         }
         for (const cal of rosterList) {
-          const wh = calendarWorkingDraft[cal.id] ?? defaultPractitionerWorkingHours();
+          const wh =
+            calendarWorkingDraft[cal.id] ??
+            defaultCalendarWorkingHoursFromOpeningHours(openingHoursDraft);
           const hasDay = Object.values(wh).some((ranges) => Array.isArray(ranges) && ranges.length > 0);
           if (!hasDay) {
             throw new Error(
@@ -2573,7 +2579,10 @@ export default function OnboardingPage() {
                     {cal.name}: working hours
                   </h3>
                   <WorkingHoursControl
-                    value={calendarWorkingDraft[cal.id] ?? defaultPractitionerWorkingHours()}
+                    value={
+                      calendarWorkingDraft[cal.id] ??
+                      defaultCalendarWorkingHoursFromOpeningHours(openingHoursDraft)
+                    }
                     onChange={(wh) =>
                       setCalendarWorkingDraft((prev) => ({
                         ...prev,

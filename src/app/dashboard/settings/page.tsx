@@ -14,6 +14,7 @@ import { computeSmsMonthlyAllowance, updateVenueSmsMonthlyAllowance } from '@/li
 import { parseVenueOpeningExceptions } from '@/types/venue-opening-exceptions';
 import type { VenueSettings } from './types';
 import { backfillVenueEmailIfEmptyFromStaff } from '@/lib/venue-contact-email';
+import { venueHasStripePaymentMethodForSms } from '@/lib/stripe/venue-customer-payment';
 
 export default async function SettingsPage({
   searchParams,
@@ -208,6 +209,11 @@ export default async function SettingsPage({
     planCheckoutReturn = 'light_sms_setup';
   }
 
+  let initialLightHasPaymentMethod: boolean | undefined;
+  if (venueId && venue && String((venue as { pricing_tier?: string | null }).pricing_tier ?? '').toLowerCase() === 'light') {
+    initialLightHasPaymentMethod = await venueHasStripePaymentMethodForSms(venueId);
+  }
+
   return (
     <div className="p-4 md:p-6 lg:p-8">
       <div className="mx-auto max-w-3xl">
@@ -224,6 +230,7 @@ export default async function SettingsPage({
           hasServiceConfig={hasServiceConfig}
           bookingModel={bookingModel}
           smsCountUsesStripePeriod={smsCountUsesStripePeriod}
+          initialLightHasPaymentMethod={initialLightHasPaymentMethod}
         />
       </div>
     </div>

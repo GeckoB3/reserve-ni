@@ -90,7 +90,7 @@ function buildDefaultLanePolicies(): LaneCommunicationPolicies {
     },
     pre_visit_reminder: {
       enabled: true,
-      channels: ['email', 'sms'],
+      channels: ['email'],
       emailCustomMessage: null,
       smsCustomMessage: null,
       hoursBefore: 2,

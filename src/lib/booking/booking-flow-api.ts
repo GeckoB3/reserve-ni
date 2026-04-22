@@ -24,6 +24,40 @@ export function bookingAvailabilityUrl(params: URLSearchParams): string {
   return `/api/booking/availability?${params}`;
 }
 
+/**
+ * Month view of appointment availability (dates with at least one bookable slot
+ * for a given practitioner + service). Powers the visual date picker.
+ */
+export function appointmentCalendarUrl(
+  audience: BookingFlowAudience,
+  venueId: string,
+  practitionerId: string,
+  serviceId: string,
+  year: number,
+  month: number,
+): string {
+  const params = new URLSearchParams({
+    practitioner_id: practitionerId,
+    service_id: serviceId,
+    year: String(year),
+    month: String(month),
+  });
+  if (audience === 'public') {
+    params.set('venue_id', venueId);
+    return `/api/booking/appointment-calendar?${params}`;
+  }
+  return `/api/venue/appointment-calendar?${params}`;
+}
+
+export function appointmentCalendarCacheKey(
+  practitionerId: string,
+  serviceId: string,
+  year: number,
+  month: number,
+): string {
+  return `${practitionerId}:${serviceId}:${year}:${month}`;
+}
+
 export function validateAppointmentSlotUrl(): string {
   return '/api/booking/validate-appointment-slot';
 }

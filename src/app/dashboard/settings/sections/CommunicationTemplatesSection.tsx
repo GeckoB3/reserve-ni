@@ -180,8 +180,20 @@ export function CommunicationTemplatesSection({
     "idle" | "saving" | "saved" | "error"
   >("idle");
   const [previewState, setPreviewState] = useState<PreviewState | null>(null);
-  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  /**
+   * Save queue:
+   * - `pendingRef` holds the latest intended state the user wants persisted (or null if up-to-date).
+   * - `inFlightRef` prevents overlapping requests.
+   * - `debounceRef` collects rapid successive edits into a single PUT.
+   * When a save completes, the UI state is NOT overwritten with the server echo unless that
+   * response corresponds to the latest pending payload (prevents mid-edit flicker where a stale
+   * response reverts a newer toggle).
+   */
+  const pendingRef = useRef<VenueCommunicationPolicies | null>(null);
+  const inFlightRef = useRef(false);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const savedFlashRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     setActiveLane(showTableLane ? "table" : "appointments_other");
@@ -211,35 +223,75 @@ export function CommunicationTemplatesSection({
     };
   }, [venue.id]);
 
-  const persistPolicies = useCallback(
+  const flushNow = useCallback(async () => {
+    if (debounceRef.current) {
+      clearTimeout(debounceRef.current);
+      debounceRef.current = null;
+    }
+    if (inFlightRef.current) return;
+    const payload = pendingRef.current;
+    if (!payload) return;
+
+    inFlightRef.current = true;
+    if (savedFlashRef.current) {
+      clearTimeout(savedFlashRef.current);
+      savedFlashRef.current = null;
+    }
+    setSaveStatus("saving");
+
+    try {
+      const response = await fetch("/api/venue/communication-policies", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!response.ok) throw new Error(String(response.status));
+      const data = (await response.json()) as VenueCommunicationPolicies;
+
+      if (pendingRef.current === payload) {
+        pendingRef.current = null;
+        setPolicies(data);
+        setSaveStatus("saved");
+        savedFlashRef.current = setTimeout(
+          () => setSaveStatus("idle"),
+          1500,
+        );
+      }
+    } catch (error) {
+      console.error("Failed to save communication policies:", error);
+      setSaveStatus("error");
+    } finally {
+      inFlightRef.current = false;
+      if (pendingRef.current) {
+        void flushNow();
+      }
+    }
+  }, []);
+
+  const schedulePersist = useCallback(
     (next: VenueCommunicationPolicies) => {
       if (!isAdmin) return;
+      pendingRef.current = next;
+      if (savedFlashRef.current) {
+        clearTimeout(savedFlashRef.current);
+        savedFlashRef.current = null;
+      }
       setSaveStatus("saving");
-      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-      if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
-      saveTimerRef.current = setTimeout(async () => {
-        try {
-          const response = await fetch("/api/venue/communication-policies", {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(next),
-          });
-          if (!response.ok) throw new Error(String(response.status));
-          const data = (await response.json()) as VenueCommunicationPolicies;
-          setPolicies(data);
-          setSaveStatus("saved");
-          savedTimerRef.current = setTimeout(
-            () => setSaveStatus("idle"),
-            2000,
-          );
-        } catch (error) {
-          console.error("Failed to save communication policies:", error);
-          setSaveStatus("error");
-        }
-      }, 400);
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      debounceRef.current = setTimeout(() => {
+        debounceRef.current = null;
+        void flushNow();
+      }, 350);
     },
-    [isAdmin],
+    [isAdmin, flushNow],
   );
+
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      if (savedFlashRef.current) clearTimeout(savedFlashRef.current);
+    };
+  }, []);
 
   const updateMessagePolicy = useCallback(
     (
@@ -259,13 +311,11 @@ export function CommunicationTemplatesSection({
             },
           },
         };
-        queueMicrotask(() => {
-          persistPolicies(next);
-        });
+        queueMicrotask(() => schedulePersist(next));
         return next;
       });
     },
-    [persistPolicies],
+    [schedulePersist],
   );
 
   const openPreview = useCallback(
@@ -447,14 +497,56 @@ function SaveIndicator({
 }: {
   status: "idle" | "saving" | "saved" | "error";
 }) {
-  if (status === "idle") return null;
-  const map = {
-    saving: { text: "Saving...", className: "text-slate-500" },
-    saved: { text: "Saved", className: "text-emerald-600" },
-    error: { text: "Save failed", className: "text-red-600" },
-  };
-  const current = map[status];
-  return <span className={`text-xs font-medium ${current.className}`}>{current.text}</span>;
+  return (
+    <div
+      aria-live="polite"
+      aria-atomic="true"
+      className="flex h-6 min-w-[6rem] items-center justify-end"
+    >
+      {status === "saving" && (
+        <span className="flex items-center gap-1.5 text-xs font-medium text-slate-500">
+          <span className="h-3 w-3 animate-spin rounded-full border-2 border-slate-300 border-t-slate-500" />
+          Saving…
+        </span>
+      )}
+      {status === "saved" && (
+        <span className="flex items-center gap-1.5 text-xs font-medium text-emerald-600">
+          <svg
+            className="h-3.5 w-3.5"
+            viewBox="0 0 20 20"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={2.5}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M5 10.5l3.5 3.5L15 7" />
+          </svg>
+          Saved
+        </span>
+      )}
+      {status === "error" && (
+        <span className="flex items-center gap-1.5 text-xs font-medium text-red-600">
+          <svg
+            className="h-3.5 w-3.5"
+            viewBox="0 0 20 20"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={2.5}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M10 6v4.5" />
+            <path d="M10 13.75v.01" />
+            <circle cx="10" cy="10" r="7.5" />
+          </svg>
+          Save failed — retrying next change
+        </span>
+      )}
+    </div>
+  );
 }
 
 function MessagePolicyCard({
@@ -494,14 +586,15 @@ function MessagePolicyCard({
           type="button"
           role="switch"
           aria-checked={policy.enabled}
+          aria-label={`${policy.enabled ? "Disable" : "Enable"} ${card.label}`}
           disabled={!isAdmin}
           onClick={() => onUpdate(lane, card.key, { enabled: !policy.enabled })}
-          className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full transition-colors ${
+          className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full transition-colors duration-150 ease-out focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 ${
             policy.enabled ? "bg-brand-600" : "bg-slate-200"
           } ${!isAdmin ? "cursor-not-allowed opacity-50" : "cursor-pointer"}`}
         >
           <span
-            className={`mt-0.5 inline-block h-5 w-5 transform rounded-full bg-white shadow-sm transition-transform ${
+            className={`mt-0.5 inline-block h-5 w-5 transform rounded-full bg-white shadow-sm transition-transform duration-150 ease-out ${
               policy.enabled ? "translate-x-5" : "translate-x-0.5"
             }`}
           />
