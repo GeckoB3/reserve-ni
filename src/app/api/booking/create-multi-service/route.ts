@@ -278,6 +278,8 @@ export async function POST(request: NextRequest) {
         booking_date: seg.booking_date,
         booking_time: timeForDb,
         party_size: 1,
+        /** Must be set explicitly — defaults to `table_reservation`, which fails the area_required CHECK for non-table venues. */
+        booking_model: useUnifiedBookingRows ? 'unified_scheduling' : 'practitioner_appointment',
         status: requiresDeposit ? 'Pending' : 'Confirmed',
         source,
         guest_email: guest.email,

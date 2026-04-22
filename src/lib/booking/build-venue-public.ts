@@ -1,6 +1,10 @@
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { resolveVenueMode } from '@/lib/venue-mode';
 import type { VenuePublic } from '@/components/booking/types';
+import {
+  maxAdvanceDaysFromVenueBookingRulesJson,
+  mergePublicTableBookingRulesFromRestrictions,
+} from '@/lib/booking/public-table-venue-booking-rules';
 
 /**
  * Builds the same public booking profile shape as GET /api/booking/venue?slug=…, but by venue id.
@@ -26,19 +30,19 @@ export async function buildVenuePublicForBookingById(venueId: string): Promise<V
   if (venueMode.bookingModel === 'table_reservation') {
     const usesNewEngine = venueMode.availabilityEngine === 'service';
     if (usesNewEngine) {
-      const { data: restriction } = await supabase
-        .from('booking_restrictions')
-        .select('min_party_size_online, max_party_size_online')
-        .eq('venue_id', venue.id)
-        .limit(1)
-        .maybeSingle();
-
-      if (restriction) {
-        booking_rules = {
-          min_party_size: restriction.min_party_size_online,
-          max_party_size: restriction.max_party_size_online,
-        };
+      booking_rules = await mergePublicTableBookingRulesFromRestrictions(
+        supabase,
+        venue.id,
+        venue.booking_rules,
+      );
+    } else {
+      const raw = (venue.booking_rules && typeof venue.booking_rules === 'object'
+        ? { ...(venue.booking_rules as Record<string, unknown>) }
+        : {}) as Record<string, unknown>;
+      if (raw.max_advance_booking_days == null || typeof raw.max_advance_booking_days !== 'number') {
+        raw.max_advance_booking_days = maxAdvanceDaysFromVenueBookingRulesJson(venue.booking_rules);
       }
+      booking_rules = raw as unknown as VenuePublic['booking_rules'];
     }
   }
 

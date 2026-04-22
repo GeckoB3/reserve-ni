@@ -3,6 +3,7 @@ import { getSupabaseAdminClient } from '@/lib/supabase';
 import { resolveVenueMode } from '@/lib/venue-mode';
 import { listActiveAreasForVenue } from '@/lib/areas/resolve-default-area';
 import { isOnlineBookingBlockedForLightPastDue } from '@/lib/booking/light-plan-public-block';
+import { mergePublicTableBookingRulesFromRestrictions } from '@/lib/booking/public-table-venue-booking-rules';
 
 /**
  * GET /api/booking/venue?slug=venue-slug
@@ -38,19 +39,11 @@ export async function GET(request: NextRequest) {
     if (venueMode.bookingModel === 'table_reservation') {
       const usesNewEngine = venueMode.availabilityEngine === 'service';
       if (usesNewEngine) {
-        const { data: restriction } = await supabase
-          .from('booking_restrictions')
-          .select('min_party_size_online, max_party_size_online')
-          .eq('venue_id', venue.id)
-          .limit(1)
-          .maybeSingle();
-
-        if (restriction) {
-          venue.booking_rules = {
-            min_party_size: restriction.min_party_size_online,
-            max_party_size: restriction.max_party_size_online,
-          };
-        }
+        venue.booking_rules = await mergePublicTableBookingRulesFromRestrictions(
+          supabase,
+          venue.id,
+          venue.booking_rules,
+        );
       }
     }
 

@@ -3,6 +3,7 @@ import { resolveVenueMode } from '@/lib/venue-mode';
 import type { VenuePublic } from '@/components/booking/types';
 import { listActiveAreasForVenue } from '@/lib/areas/resolve-default-area';
 import { isOnlineBookingBlockedForLightPastDue } from '@/lib/booking/light-plan-public-block';
+import { mergePublicTableBookingRulesFromRestrictions } from '@/lib/booking/public-table-venue-booking-rules';
 
 /** Loads a venue for the public /book/[slug] pages (admin client; slug is public). */
 export async function getPublicVenueForBookBySlug(slug: string): Promise<VenuePublic | null> {
@@ -31,19 +32,11 @@ export async function getPublicVenueForBookBySlug(slug: string): Promise<VenuePu
   if (venueMode.bookingModel === 'table_reservation') {
     (data as VenuePublic).areas = await listActiveAreasForVenue(supabase, data.id);
     if (venueMode.availabilityEngine === 'service') {
-      const { data: restriction } = await supabase
-        .from('booking_restrictions')
-        .select('min_party_size_online, max_party_size_online')
-        .eq('venue_id', data.id)
-        .limit(1)
-        .maybeSingle();
-
-      if (restriction) {
-        data.booking_rules = {
-          min_party_size: restriction.min_party_size_online,
-          max_party_size: restriction.max_party_size_online,
-        };
-      }
+      data.booking_rules = await mergePublicTableBookingRulesFromRestrictions(
+        supabase,
+        data.id,
+        data.booking_rules,
+      );
     }
   }
 

@@ -596,7 +596,7 @@ async function handleNonTableBooking(
     if (sess.service_item_id) {
       const { data: si } = await supabase
         .from('service_items')
-        .select('name, price_pence, deposit_pence')
+        .select('name, price_pence, deposit_pence, payment_requirement')
         .eq('id', sess.service_item_id)
         .eq('venue_id', venue_id)
         .maybeSingle();
@@ -604,6 +604,17 @@ async function handleNonTableBooking(
       const pp = (si as { price_pence?: number | null } | null)?.price_pence;
       priceDisplay = pp != null ? `£${(pp / 100).toFixed(2)}` : null;
       depositPence = (si as { deposit_pence?: number | null } | null)?.deposit_pence ?? null;
+      const payReq = (si as { payment_requirement?: ClassPaymentRequirement | null } | null)
+        ?.payment_requirement;
+      const online = resolveAppointmentServiceOnlineCharge({
+        payment_requirement: payReq ?? undefined,
+        price_pence: pp ?? 0,
+        deposit_pence: depositPence ?? 0,
+      });
+      if (online != null && online.amountPence > 0) {
+        requiresDeposit = true;
+        depositAmountPence = online.amountPence * needSeats;
+      }
     }
 
     appointmentEmailExtras = {
@@ -612,11 +623,6 @@ async function handleNonTableBooking(
       appointment_service_name: svcName,
       appointment_price_display: priceDisplay,
     };
-
-    if (depositPence != null && depositPence > 0) {
-      requiresDeposit = true;
-      depositAmountPence = depositPence * needSeats;
-    }
 
     unifiedSessionAnchor = { calendar_id: sess.calendar_id, service_item_id: sess.service_item_id };
 

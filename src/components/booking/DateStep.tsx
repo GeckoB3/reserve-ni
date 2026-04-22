@@ -6,6 +6,8 @@ interface DateStepProps {
   minParty: number;
   maxParty: number;
   partySize: number;
+  /** Inclusive window from today: day 0 = today (aligned with booking engine advance rules). */
+  maxAdvanceBookingDays: number;
   onPartySizeChange: (n: number) => void;
   onDateSelect: (date: string) => void;
 }
@@ -30,7 +32,14 @@ interface CalendarDay {
   disabled: boolean;
 }
 
-export function DateStep({ minParty, maxParty, partySize, onPartySizeChange, onDateSelect }: DateStepProps) {
+export function DateStep({
+  minParty,
+  maxParty,
+  partySize,
+  maxAdvanceBookingDays,
+  onPartySizeChange,
+  onDateSelect,
+}: DateStepProps) {
   const today = useMemo(() => {
     const d = new Date();
     d.setHours(0, 0, 0, 0);
@@ -39,11 +48,13 @@ export function DateStep({ minParty, maxParty, partySize, onPartySizeChange, onD
 
   const todayStr = useMemo(() => toDateStr(today), [today]);
 
+  const cappedAdvanceDays = Math.max(1, Math.min(365, Math.floor(maxAdvanceBookingDays)));
+
   const maxDate = useMemo(() => {
     const d = new Date(today);
-    d.setMonth(d.getMonth() + 6);
+    d.setDate(d.getDate() + cappedAdvanceDays);
     return d;
-  }, [today]);
+  }, [today, cappedAdvanceDays]);
 
   const [viewYear, setViewYear] = useState(today.getFullYear());
   const [viewMonth, setViewMonth] = useState(today.getMonth());
@@ -210,11 +221,6 @@ export function DateStep({ minParty, maxParty, partySize, onPartySizeChange, onD
           </div>
 
         </div>
-
-        {/* Helper legend */}
-        <p className="mt-2 text-center text-xs text-slate-400">
-          You can book up to 6 months in advance
-        </p>
       </div>
     </div>
   );

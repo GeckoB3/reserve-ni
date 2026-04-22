@@ -45,6 +45,8 @@ export interface DepositConfigPublic {
 export interface BookingRulesPublic {
   min_party_size: number;
   max_party_size: number;
+  /** Table booking: last bookable day is today + this many days (venue settings + / or booking_restrictions). */
+  max_advance_booking_days?: number;
   /** Model B: hours before appointment start to cancel for deposit refund */
   cancellation_notice_hours?: number;
   allow_same_day_booking?: boolean;

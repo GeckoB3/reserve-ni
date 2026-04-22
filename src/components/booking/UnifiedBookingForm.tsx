@@ -88,6 +88,12 @@ export function UnifiedBookingForm({
   const [staffAreaId, setStaffAreaId] = useState<string | null>(null);
   /** Avoid fetching `/api/booking/availability` with the wrong `area_id` before venue + areas are loaded. */
   const [tableBookingPrefsReady, setTableBookingPrefsReady] = useState(false);
+  /**
+   * Bumps when the form is reset (e.g. "Create Another Booking") so we refetch slots even when
+   * `date` / `party_size` / area prefs are unchanged — otherwise the availability effect skips and
+   * times stay empty until the user tweaks a selector.
+   */
+  const [slotFetchNonce, setSlotFetchNonce] = useState(0);
 
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
@@ -228,8 +234,16 @@ export function UnifiedBookingForm({
       return;
     }
     setLoadingSlots(true);
-    setSelectedTime(initialTime ?? '');
-    setGridCenter('20:00');
+
+    /** Prefer keeping the guest's chosen clock time when date / party / area changes. */
+    const clockFrom = (t: string | undefined | null): string | null => {
+      const s = String(t ?? '').trim();
+      return s.length >= 5 ? s.slice(0, 5) : null;
+    };
+    const preferredClock = clockFrom(selectedTime) ?? clockFrom(initialTime);
+    const disambiguateKey = selectedSlotKey;
+    if (preferredClock) setGridCenter(preferredClock);
+    else setGridCenter('20:00');
 
     if (debounceRef.current) clearTimeout(debounceRef.current);
     if (abortRef.current) abortRef.current.abort();
@@ -260,20 +274,36 @@ export function UnifiedBookingForm({
             .filter((s: Slot) => s.start_time);
           if (!controller.signal.aborted) {
             setSlots(rawSlots);
-            if (!initialTime && rawSlots.length > 0) {
-              const defaultCenter = 20 * 60;
-              let best = rawSlots[0];
-              let bestDist = Infinity;
-              for (const s of rawSlots) {
-                const p = s.start_time.slice(0, 5).split(':');
-                const dist = Math.abs(parseInt(p[0], 10) * 60 + parseInt(p[1], 10) - defaultCenter);
-                if (dist < bestDist) { best = s; bestDist = dist; }
+            if (rawSlots.length === 0) {
+              setSelectedTime('');
+              setSelectedSlotKey(null);
+            } else {
+              let picked: Slot | null = null;
+              if (preferredClock) {
+                const matches = rawSlots.filter((s) => s.start_time.slice(0, 5) === preferredClock);
+                if (matches.length === 1) picked = matches[0]!;
+                else if (matches.length > 1) {
+                  picked =
+                    (disambiguateKey ? matches.find((s) => s.key === disambiguateKey) : undefined) ??
+                    matches[0]!;
+                }
               }
-              setSelectedTime(best.start_time);
-              setSelectedSlotKey(best.key);
-            } else if (initialTime && rawSlots.length > 0) {
-              const m = rawSlots.find((s) => s.start_time.slice(0, 5) === initialTime.slice(0, 5));
-              if (m) setSelectedSlotKey(m.key);
+              if (!picked) {
+                const defaultCenter = 20 * 60;
+                picked = rawSlots[0]!;
+                let bestDist = Infinity;
+                for (const s of rawSlots) {
+                  const p = s.start_time.slice(0, 5).split(':');
+                  const dist = Math.abs(parseInt(p[0], 10) * 60 + parseInt(p[1], 10) - defaultCenter);
+                  if (dist < bestDist) {
+                    picked = s;
+                    bestDist = dist;
+                  }
+                }
+              }
+              setSelectedTime(picked.start_time);
+              setSelectedSlotKey(picked.key);
+              setGridCenter(picked.start_time.slice(0, 5));
             }
           }
         } catch (err) {
@@ -293,7 +323,17 @@ export function UnifiedBookingForm({
       if (abortRef.current) abortRef.current.abort();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [addToast, date, partySize, venueId, publicBookingAreaMode, staffAreaId, tableBookingPrefsReady, diningAreas.length]);
+  }, [
+    addToast,
+    date,
+    partySize,
+    venueId,
+    publicBookingAreaMode,
+    staffAreaId,
+    tableBookingPrefsReady,
+    diningAreas.length,
+    slotFetchNonce,
+  ]);
 
   // Pre-fetch all tables when advanced mode is on so floor plan can switch areas without extra round-trips
   useEffect(() => {
@@ -438,6 +478,7 @@ export function UnifiedBookingForm({
     setGridCenter('20:00');
     setCalendarMonth(new Date(new Date().getFullYear(), new Date().getMonth(), 1));
     setSlots([]);
+    setSlotFetchNonce((n) => n + 1);
     setSelectedTime(initialTime ?? '');
     setSelectedSlotKey(null);
     setName('');
@@ -910,7 +951,11 @@ export function UnifiedBookingForm({
       <div className="space-y-3 sm:space-y-3.5">
         <div>
           <label htmlFor="ubf-name" className="mb-1 block text-xs font-medium text-slate-700 sm:text-sm">
-            Guest name
+            Guest name{' '}
+            <span className="text-red-600" aria-hidden="true">
+              *
+            </span>
+            <span className="sr-only">(required)</span>
           </label>
           <input
             ref={nameRef}
@@ -926,7 +971,11 @@ export function UnifiedBookingForm({
 
         <div>
           <label htmlFor="ubf-phone" className="mb-1 block text-xs font-medium text-slate-700 sm:text-sm">
-            Phone number
+            Phone number{' '}
+            <span className="text-red-600" aria-hidden="true">
+              *
+            </span>
+            <span className="sr-only">(required)</span>
           </label>
           <PhoneWithCountryField
             id="ubf-phone"

@@ -193,6 +193,8 @@ export async function POST(request: NextRequest) {
           booking_time: walkInTime,
           booking_end_time: bookingEndTime,
           party_size: 1,
+          /** Must be set explicitly — column defaults to `table_reservation`, which fails the area_required CHECK for non-table venues. */
+          booking_model: venueMode.bookingModel,
           status: 'Seated',
           source: 'walk-in',
           deposit_status: 'Not Required',

@@ -53,10 +53,18 @@ describe('resolveClassPaymentRequirement', () => {
     ).toBe('none');
   });
 
-  it('maps legacy missing flag with price to full_payment', () => {
+  it('treats legacy missing payment mode with price as pay-at-venue (no inferred full_payment)', () => {
     expect(
       resolveClassPaymentRequirement(
         baseType({ payment_requirement: undefined, requires_online_payment: undefined, price_pence: 500 }),
+      ),
+    ).toBe('none');
+  });
+
+  it('maps legacy requires_online_payment true with price to full_payment', () => {
+    expect(
+      resolveClassPaymentRequirement(
+        baseType({ payment_requirement: undefined, requires_online_payment: true, price_pence: 500 }),
       ),
     ).toBe('full_payment');
   });

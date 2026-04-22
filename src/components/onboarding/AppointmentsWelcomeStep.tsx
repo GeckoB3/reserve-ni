@@ -3,7 +3,6 @@
 type AppointmentPlanModel = 'unified_scheduling' | 'event_ticket' | 'class_session' | 'resource_booking';
 
 interface Props {
-  venueName?: string;
   isLightPlan: boolean;
   activeModels: AppointmentPlanModel[];
   modelLabel: Record<AppointmentPlanModel, string>;
@@ -50,13 +49,11 @@ function buildModelDescription(
 }
 
 export function AppointmentsWelcomeStep({
-  venueName,
   isLightPlan,
   activeModels,
   modelLabel,
   staffTerm,
 }: Props) {
-  const trimmedName = venueName?.trim();
   const modelCards = activeModels.map((m) => buildModelDescription(m, modelLabel[m], staffTerm));
 
   const stepPreviews: { title: string; summary: string; example: string; show: boolean }[] = [
@@ -163,13 +160,7 @@ export function AppointmentsWelcomeStep({
           </svg>
         </div>
         <div className="min-w-0">
-          <h2 className="text-lg font-bold text-slate-900">
-            {trimmedName
-              ? `Welcome, ${trimmedName}`
-              : isLightPlan
-                ? 'Welcome to Appointments Light'
-                : 'Welcome to your Appointments plan'}
-          </h2>
+          <h2 className="text-lg font-bold text-slate-900">Welcome to Reserve NI</h2>
           <p className="mt-1 text-sm text-slate-500">
             {isLightPlan
               ? 'Let’s get your diary ready in about 10 minutes. Every step is skippable, so you can always finish later from your dashboard.'

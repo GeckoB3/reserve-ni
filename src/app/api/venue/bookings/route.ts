@@ -294,6 +294,8 @@ export async function POST(request: NextRequest) {
         booking_date,
         booking_time: timeForDb,
         party_size,
+        /** Must be set explicitly — column defaults to `table_reservation`, which fails the area_required CHECK for non-table venues. */
+        booking_model: 'event_ticket' as const,
         status: requiresDeposit ? ('Pending' as const) : ('Confirmed' as const),
         source: eventSource,
         guest_email: guest.email || null,
@@ -408,9 +410,15 @@ export async function POST(request: NextRequest) {
 
       let depositAmountPence = 0;
       let requiresDeposit = false;
-      if (cls.price_pence != null && cls.price_pence > 0) {
+      const classPayReq = cls.payment_requirement;
+      const classPriceP = cls.price_pence ?? 0;
+      const classDepPerPerson = cls.deposit_amount_pence ?? 0;
+      if (classPayReq === 'full_payment' && classPriceP > 0) {
         requiresDeposit = true;
-        depositAmountPence = cls.price_pence * party_size;
+        depositAmountPence = classPriceP * party_size;
+      } else if (classPayReq === 'deposit' && classDepPerPerson > 0) {
+        requiresDeposit = true;
+        depositAmountPence = classDepPerPerson * party_size;
       }
       const classPriceDisplay =
         cls.price_pence != null ? `£${((cls.price_pence * party_size) / 100).toFixed(2)}` : null;
@@ -459,6 +467,8 @@ export async function POST(request: NextRequest) {
         booking_date,
         booking_time: timeForDb,
         party_size,
+        /** Must be set explicitly — column defaults to `table_reservation`, which fails the area_required CHECK for non-table venues. */
+        booking_model: 'class_session' as const,
         status: requiresDeposit ? ('Pending' as const) : ('Confirmed' as const),
         source: classSource,
         guest_email: guest.email || null,
@@ -657,6 +667,8 @@ export async function POST(request: NextRequest) {
         booking_time: timeForDb,
         booking_end_time: bookingEndForDb,
         party_size,
+        /** Must be set explicitly — column defaults to `table_reservation`, which fails the area_required CHECK for non-table venues. */
+        booking_model: 'resource_booking' as const,
         status: requiresDepositRes ? ('Pending' as const) : ('Confirmed' as const),
         source: resourceSource,
         guest_email: guest.email || null,

@@ -10,6 +10,7 @@ import { PaymentStep } from './PaymentStep';
 import { ConfirmationStep } from './ConfirmationStep';
 import { BookingSubmittingPanel } from './BookingSubmittingPanel';
 import { formatOnlinePaidRefundPolicyLine } from '@/lib/booking/public-deposit-refund-policy';
+import { DEFAULT_ENTITY_BOOKING_WINDOW } from '@/lib/booking/entity-booking-window';
 
 export interface BookingFlowProps {
   venue: VenuePublic;
@@ -49,7 +50,13 @@ export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, 
   const [submitting, setSubmitting] = useState(false);
 
   const step = steps[stepIndex];
-  const rules: BookingRulesPublic = venue.booking_rules ?? { min_party_size: 1, max_party_size: 20 };
+  const rules: BookingRulesPublic = venue.booking_rules ?? {
+    min_party_size: 1,
+    max_party_size: 20,
+    max_advance_booking_days: DEFAULT_ENTITY_BOOKING_WINDOW.max_advance_booking_days,
+  };
+  const maxAdvanceBookingDays =
+    rules.max_advance_booking_days ?? DEFAULT_ENTITY_BOOKING_WINDOW.max_advance_booking_days;
   const phoneDefaultCountry = defaultPhoneCountryForVenueCurrency(venue.currency);
 
   const requiresDeposit = useMemo(() => {
@@ -267,7 +274,14 @@ export function BookingFlow({ venue, embed, onHeightChange, cancellationPolicy, 
       )}
 
       {step === 'date' && (
-        <DateStep minParty={rules.min_party_size} maxParty={rules.max_party_size} partySize={partySize} onPartySizeChange={setPartySize} onDateSelect={handleDateSelect} />
+        <DateStep
+          minParty={rules.min_party_size}
+          maxParty={rules.max_party_size}
+          partySize={partySize}
+          maxAdvanceBookingDays={maxAdvanceBookingDays}
+          onPartySizeChange={setPartySize}
+          onDateSelect={handleDateSelect}
+        />
       )}
       {step === 'slot' && (
         <SlotStep

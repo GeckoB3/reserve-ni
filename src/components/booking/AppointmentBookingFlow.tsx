@@ -236,6 +236,8 @@ export function AppointmentBookingFlow({
   const [availableDates, setAvailableDates] = useState<Set<string>>(new Set());
   const [loadingCalendar, setLoadingCalendar] = useState(false);
   const [calendarCache, setCalendarCache] = useState<Map<string, Set<string>>>(() => new Map());
+  const calendarCacheRef = useRef(calendarCache);
+  calendarCacheRef.current = calendarCache;
 
   const containerRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -341,6 +343,31 @@ export function AppointmentBookingFlow({
     [venue.id, date, phantomBookings],
   );
 
+  /** Month grid for the date picker (public or staff calendar API). */
+  const fetchAppointmentCalendarMonth = useCallback(
+    async (opts: {
+      practitionerId: string;
+      serviceId: string;
+      year: number;
+      month: number;
+      signal?: AbortSignal;
+    }): Promise<Set<string>> => {
+      const url = appointmentCalendarUrl(
+        bookingAudience,
+        venue.id,
+        opts.practitionerId,
+        opts.serviceId,
+        opts.year,
+        opts.month,
+      );
+      const res = await fetch(url, { signal: opts.signal });
+      const data = (await res.json()) as { available_dates?: string[]; error?: string };
+      if (!res.ok) throw new Error(data.error ?? 'Failed to load calendar');
+      return new Set(data.available_dates ?? []);
+    },
+    [bookingAudience, venue.id],
+  );
+
   useEffect(() => {
     if (step !== 'slot' && step !== 'group_slot') return;
     const isGroup = step === 'group_slot';
@@ -357,6 +384,74 @@ export function AppointmentBookingFlow({
     groupPractitionerId,
     phantomBookings,
     fetchAvailability,
+  ]);
+
+  /**
+   * Preload month availability while the user is still picking a practitioner (or a service in the
+   * locked-practitioner flow) so the date picker often hits the cache on the next step.
+   */
+  useEffect(() => {
+    const { year, month } = calendarMonth;
+    const tasks: Array<{ practitionerId: string; serviceId: string }> = [];
+
+    if (step === 'practitioner' && selectedServiceId) {
+      for (const p of catalogStaff) {
+        if (p.services.some((s) => s.id === selectedServiceId)) {
+          tasks.push({ practitionerId: p.id, serviceId: selectedServiceId });
+        }
+      }
+    } else if (isLockedPractitionerFlow && step === 'service' && lockedPractitioner?.id) {
+      const p = catalogStaff.find((c) => c.id === lockedPractitioner.id);
+      if (p) {
+        for (const s of p.services) {
+          tasks.push({ practitionerId: p.id, serviceId: s.id });
+        }
+      }
+    } else if (step === 'group_practitioner' && groupServiceId) {
+      for (const p of catalogStaff) {
+        if (p.services.some((s) => s.id === groupServiceId)) {
+          tasks.push({ practitionerId: p.id, serviceId: groupServiceId });
+        }
+      }
+    }
+
+    if (tasks.length === 0) return;
+
+    const ac = new AbortController();
+    for (const t of tasks) {
+      const key = appointmentCalendarCacheKey(t.practitionerId, t.serviceId, year, month);
+      if (calendarCacheRef.current.has(key)) continue;
+      void (async () => {
+        try {
+          const nextSet = await fetchAppointmentCalendarMonth({
+            practitionerId: t.practitionerId,
+            serviceId: t.serviceId,
+            year,
+            month,
+            signal: ac.signal,
+          });
+          setCalendarCache((prev) => {
+            if (prev.has(key)) return prev;
+            const next = new Map(prev);
+            next.set(key, nextSet);
+            return next;
+          });
+        } catch {
+          /* best-effort prefetch */
+        }
+      })();
+    }
+    return () => ac.abort();
+  }, [
+    step,
+    selectedServiceId,
+    groupServiceId,
+    isLockedPractitionerFlow,
+    lockedPractitioner?.id,
+    catalogStaff,
+    calendarMonth.year,
+    calendarMonth.month,
+    fetchAppointmentCalendarMonth,
   ]);
 
   /**
@@ -384,26 +479,20 @@ export function AppointmentBookingFlow({
     (async () => {
       setLoadingCalendar(true);
       try {
-        const url = appointmentCalendarUrl(
-          bookingAudience,
-          venue.id,
-          prac,
-          svc,
-          calendarMonth.year,
-          calendarMonth.month,
-        );
-        const res = await fetch(url, { signal: ac.signal });
-        const data = await res.json();
+        const nextSet = await fetchAppointmentCalendarMonth({
+          practitionerId: prac,
+          serviceId: svc,
+          year: calendarMonth.year,
+          month: calendarMonth.month,
+          signal: ac.signal,
+        });
         if (cancelled) return;
-        if (!res.ok) throw new Error(data.error ?? 'Failed to load calendar');
-        const list = (data.available_dates ?? []) as string[];
-        const nextSet = new Set(list);
-        setAvailableDates(nextSet);
         setCalendarCache((prev) => {
           const next = new Map(prev);
           next.set(key, nextSet);
           return next;
         });
+        setAvailableDates(nextSet);
       } catch (e) {
         if (cancelled || (e instanceof Error && e.name === 'AbortError')) return;
         setAvailableDates(new Set());
@@ -417,8 +506,6 @@ export function AppointmentBookingFlow({
     };
   }, [
     step,
-    venue.id,
-    bookingAudience,
     selectedServiceId,
     selectedPractitionerId,
     groupServiceId,
@@ -426,6 +513,7 @@ export function AppointmentBookingFlow({
     calendarMonth.year,
     calendarMonth.month,
     calendarCache,
+    fetchAppointmentCalendarMonth,
   ]);
 
   /** Reset the displayed month whenever the user changes service or practitioner. */

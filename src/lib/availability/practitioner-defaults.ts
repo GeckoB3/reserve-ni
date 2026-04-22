@@ -24,3 +24,23 @@ export function defaultNewUnifiedCalendarWorkingHours(): WorkingHours {
   }
   return hours;
 }
+
+/**
+ * True when `wh` matches the placeholder `defaultNewUnifiedCalendarWorkingHours()` exactly
+ * (7 days, a single 09:00–22:00 range each). Used by onboarding to treat API-persisted
+ * placeholder rows as uncustomized and seed them from business opening hours instead.
+ */
+export function isDefaultNewUnifiedCalendarWorkingHours(
+  wh: WorkingHours | null | undefined,
+): boolean {
+  if (!wh || typeof wh !== 'object') return false;
+  const keys = Object.keys(wh);
+  if (keys.length !== 7) return false;
+  for (const key of ['0', '1', '2', '3', '4', '5', '6']) {
+    const ranges = wh[key];
+    if (!Array.isArray(ranges) || ranges.length !== 1) return false;
+    const r = ranges[0];
+    if (!r || r.start !== '09:00' || r.end !== '22:00') return false;
+  }
+  return true;
+}

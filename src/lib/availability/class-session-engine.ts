@@ -85,9 +85,14 @@ const CAPACITY_CONSUMING_STATUSES = ['Confirmed', 'Pending', 'Seated'];
 
 /** Resolves DB row to enum; supports legacy requires_online_payment. */
 export function resolveClassPaymentRequirement(ct: ClassType): ClassPaymentRequirement {
-  if (ct.payment_requirement) return ct.payment_requirement;
+  const raw = ct.payment_requirement;
+  if (raw === 'deposit' || raw === 'full_payment' || raw === 'none') return raw;
   if (ct.requires_online_payment === false) return 'none';
-  if (ct.price_pence != null && ct.price_pence > 0) return 'full_payment';
+  if (ct.requires_online_payment === true) {
+    if (ct.price_pence != null && ct.price_pence > 0) return 'full_payment';
+    return 'none';
+  }
+  // Ambiguous legacy rows: a list price without explicit online payment mode is pay-at-venue.
   return 'none';
 }
 

@@ -11,8 +11,8 @@ import { APPOINTMENTS_ACTIVE_MODEL_ORDER } from '@/lib/booking/active-models';
 import { buildAddress, parseAddress } from '@/lib/venue/address-format';
 import { defaultCalendarWorkingHoursFromOpeningHours } from '@/lib/availability/opening-hours-to-working-hours';
 import {
-  defaultNewUnifiedCalendarWorkingHours,
   defaultPractitionerWorkingHours,
+  isDefaultNewUnifiedCalendarWorkingHours,
 } from '@/lib/availability/practitioner-defaults';
 import { DEFAULT_ENTITY_BOOKING_WINDOW } from '@/lib/booking/entity-booking-window';
 import type { WorkingHours } from '@/types/booking-models';
@@ -661,13 +661,14 @@ export default function OnboardingPage() {
     setAddCalendarSubmitting(true);
     setAddCalendarModalError(null);
     try {
+      const seededWorkingHours = defaultCalendarWorkingHoursFromOpeningHours(openingHoursDraft);
       const res = await fetch('/api/venue/practitioners', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name,
           is_active: true,
-          working_hours: defaultNewUnifiedCalendarWorkingHours(),
+          working_hours: seededWorkingHours,
           break_times: [],
           days_off: [],
         }),
@@ -699,7 +700,7 @@ export default function OnboardingPage() {
       });
       setCalendarWorkingDraft((prev) => ({
         ...prev,
-        [newId]: defaultNewUnifiedCalendarWorkingHours(),
+        [newId]: seededWorkingHours,
       }));
       if (target.kind === 'event') {
         setEventDraft((f) => ({ ...f, calendar_id: newId }));
@@ -1105,11 +1106,12 @@ export default function OnboardingPage() {
         const byId: Record<string, WorkingHours> = {};
         for (const p of pracs) {
           const wh = p.working_hours;
-          if (wh && typeof wh === 'object' && Object.keys(wh).length > 0) {
-            byId[p.id] = wh;
-          } else {
-            byId[p.id] = fromOpening;
-          }
+          const hasCustom =
+            wh &&
+            typeof wh === 'object' &&
+            Object.keys(wh).length > 0 &&
+            !isDefaultNewUnifiedCalendarWorkingHours(wh);
+          byId[p.id] = hasCustom ? (wh as WorkingHours) : fromOpening;
         }
         if (!cancelled) setCalendarWorkingDraft(byId);
       } catch {
@@ -2066,7 +2068,6 @@ export default function OnboardingPage() {
 
         {currentStepKey === 'welcome' && (
           <AppointmentsWelcomeStep
-            venueName={venue?.name ?? ''}
             isLightPlan={isLightPlanVenue}
             activeModels={activeAppointmentsModels as AppointmentPlanModel[]}
             modelLabel={APPOINTMENTS_MODEL_LABEL}
@@ -2262,7 +2263,7 @@ export default function OnboardingPage() {
 
         {/* Restaurant plan steps */}
         {currentStepKey === 'r_welcome' && (
-          <RestaurantWelcomeStep venueName={venue?.name ?? ''} onContinue={() => void advanceRestaurantStep()} />
+          <RestaurantWelcomeStep onContinue={() => void advanceRestaurantStep()} />
         )}
 
         {currentStepKey === 'r_opening_hours' && (

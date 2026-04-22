@@ -1,7 +1,6 @@
 'use client';
 
 interface Props {
-  venueName?: string;
   onContinue: () => void;
 }
 
@@ -54,8 +53,7 @@ const PREVIEW_CARDS: PreviewCard[] = [
   },
 ];
 
-export function WelcomeStep({ venueName, onContinue }: Props) {
-  const trimmedName = venueName?.trim();
+export function WelcomeStep({ onContinue }: Props) {
   return (
     <div>
       <div className="mb-6 flex items-start gap-4">
@@ -65,9 +63,7 @@ export function WelcomeStep({ venueName, onContinue }: Props) {
           </svg>
         </div>
         <div className="min-w-0">
-          <h2 className="text-lg font-bold text-slate-900">
-            {trimmedName ? `Welcome, ${trimmedName}` : 'Welcome to Reserve NI'}
-          </h2>
+          <h2 className="text-lg font-bold text-slate-900">Welcome to Reserve NI</h2>
           <p className="mt-1 text-sm text-slate-500">
             Let&apos;s get your restaurant ready to take online bookings. This takes about 10 minutes and
             every step is skippable, and you can always finish later from your dashboard.
