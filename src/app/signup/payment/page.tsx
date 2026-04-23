@@ -7,18 +7,19 @@ import { createClient } from '@/lib/supabase/browser';
 import { formatSignupBusinessTypeLabel, isDirectModelBusinessType } from '@/lib/business-config';
 import {
   APPOINTMENTS_LIGHT_PRICE,
-  APPOINTMENTS_PRICE,
+  APPOINTMENTS_PLUS_PRICE,
+  APPOINTMENTS_PRO_PRICE,
   RESTAURANT_PRICE,
   SMS_LIGHT_GBP_PER_MESSAGE,
   SMS_OVERAGE_GBP_PER_MESSAGE,
 } from '@/lib/pricing-constants';
-import { SMS_INCLUDED_APPOINTMENTS, SMS_INCLUDED_RESTAURANT } from '@/lib/billing/sms-allowance';
+import { SMS_INCLUDED_APPOINTMENTS, SMS_INCLUDED_PLUS, SMS_INCLUDED_RESTAURANT } from '@/lib/billing/sms-allowance';
 import { signupPlanToFamily, SIGNUP_PLAN_CONFLICT_MESSAGE } from '@/lib/signup-plan-family';
 import { fetchPendingSignupSelection, syncPendingToSessionStorage } from '@/lib/signup-pending-client';
 import { isSignupPaymentReady } from '@/lib/signup-pending-selection';
 import { ensureDefaultRestaurantFamilyBusinessType } from '@/lib/signup-resume';
 
-type PlanType = 'appointments' | 'light' | 'restaurant' | 'founding';
+type PlanType = 'appointments' | 'plus' | 'light' | 'restaurant' | 'founding';
 
 /** Hospitality keys from signup; redundant next to "Plan: Restaurant" / Founding on order summary. */
 const HOSPITALITY_BUSINESS_TYPE_KEYS = new Set(['restaurant', 'cafe', 'pub', 'hotel_restaurant']);
@@ -48,7 +49,7 @@ export default function PaymentPage() {
         data: { session },
       } = await supabase.auth.getSession();
 
-      if ((!p || (p !== 'appointments' && !bt)) && session) {
+      if ((!p || (p !== 'appointments' && p !== 'plus' && p !== 'light' && !bt)) && session) {
         const pending = await fetchPendingSignupSelection();
         if (cancelled) return;
         if (pending?.plan && isSignupPaymentReady(pending.plan, pending.business_type)) {
@@ -63,7 +64,7 @@ export default function PaymentPage() {
       p = sessionStorage.getItem('signup_plan') as PlanType | null;
 
       if (cancelled) return;
-      if (!p || (p !== 'appointments' && p !== 'light' && !bt)) {
+      if (!p || (p !== 'appointments' && p !== 'plus' && p !== 'light' && !bt)) {
         router.push('/signup/business-type');
         return;
       }
@@ -104,7 +105,8 @@ export default function PaymentPage() {
 
   const totalPrice = useMemo(() => {
     if (plan === 'light') return APPOINTMENTS_LIGHT_PRICE;
-    if (plan === 'appointments') return APPOINTMENTS_PRICE;
+    if (plan === 'plus') return APPOINTMENTS_PLUS_PRICE;
+    if (plan === 'appointments') return APPOINTMENTS_PRO_PRICE;
     if (plan === 'restaurant') return RESTAURANT_PRICE;
     return 0; // founding is free
   }, [plan]);
@@ -119,9 +121,7 @@ export default function PaymentPage() {
     } = await supabase.auth.getSession();
     if (!session) {
       setError(
-        plan === 'light'
-          ? 'You must be signed in to continue. If you just registered, open the confirmation link in your email first, or sign in below.'
-          : 'You must be signed in to pay. If you just registered, open the confirmation link in your email first, or sign in below.',
+        'You must be signed in to continue. If you just registered, open the confirmation link in your email first, or sign in below.',
       );
       setLoading(false);
       return;
@@ -177,14 +177,22 @@ export default function PaymentPage() {
   const isRestaurant = plan === 'restaurant';
   const isFounding = plan === 'founding';
   const isLight = plan === 'light';
-  const smsIncluded = isRestaurant || isFounding ? SMS_INCLUDED_RESTAURANT : SMS_INCLUDED_APPOINTMENTS;
+  const isPlus = plan === 'plus';
+  const smsIncluded =
+    isRestaurant || isFounding
+      ? SMS_INCLUDED_RESTAURANT
+      : isPlus
+        ? SMS_INCLUDED_PLUS
+        : SMS_INCLUDED_APPOINTMENTS;
   const planLabel = isFounding
     ? 'Founding Partner'
     : isRestaurant
       ? 'Restaurant'
       : isLight
         ? 'Appointments Light'
-        : 'Appointments';
+        : isPlus
+          ? 'Appointments Plus'
+          : 'Appointments Pro';
   const omitBusinessTypeRow =
     (isRestaurant || isFounding) &&
     !!businessType &&
@@ -197,9 +205,7 @@ export default function PaymentPage() {
         <p className="mt-2 text-sm text-slate-500">
           {isFounding
             ? 'Review your selection before completing setup.'
-            : isLight
-              ? 'No credit card is required to sign up for Appointments Light or to start using Reserve NI. Confirm below to create your venue and continue to onboarding.'
-              : 'Review your selection before proceeding to payment.'}
+            : 'Review your selection before proceeding to secure checkout with Stripe.'}
         </p>
       </div>
 
@@ -222,9 +228,9 @@ export default function PaymentPage() {
                 </p>
               )}
             </>
-          ) : !businessType && !isLight ? (
+          ) : !businessType && (plan === 'appointments' || plan === 'plus') ? (
             <div className="rounded-lg border border-brand-100 bg-brand-50/60 px-3 py-2 text-xs text-brand-900">
-              Appointments includes appointments, classes, events, and resources. After payment, you&apos;ll choose
+              Appointments plans include appointments, classes, events, and resources. After payment, you&apos;ll choose
               which booking models to enable first and can change them later in Settings.
             </div>
           ) : null}
@@ -245,17 +251,14 @@ export default function PaymentPage() {
             </div>
           ) : isLight ? (
             <div className="rounded-lg border border-brand-100 bg-brand-50/60 px-3 py-2 text-xs text-brand-900">
-              <p className="font-medium">
-                Appointments Light: free for 3 months, then &pound;{APPOINTMENTS_LIGHT_PRICE}/month.
-              </p>
+              <p className="font-medium">Appointments Light: &pound;{APPOINTMENTS_LIGHT_PRICE}/month from signup.</p>
               <p className="mt-1.5 leading-relaxed">
                 One bookable calendar and one venue login. Appointments, classes, events, and bookable resources.
                 You choose which models to start with in onboarding; edit anytime in Settings. Email reminders are
                 included.
               </p>
               <p className="mt-1.5 leading-relaxed">
-                SMS is optional. Add payment details in the dashboard whenever you want to send SMS: pay as you go at{' '}
-                {lightSmsPence}p per message.
+                0 SMS included; metered SMS at {lightSmsPence}p per message (billed through Stripe with your subscription).
               </p>
             </div>
           ) : (
@@ -265,10 +268,10 @@ export default function PaymentPage() {
               </p>
               <p className="mt-1 leading-relaxed">
                 {isRestaurant
-                  ? `Table management, floor plan, all booking types. ${smsIncluded} SMS per month included. Priority support.`
-                  : `All booking types: appointments, classes, events, resources. Unlimited calendars and team members. You'll choose which models to enable first after payment. ${smsIncluded} SMS per month included.`
-                }
-                {' '}Additional SMS at {overagePence}p each.
+                  ? `Table management, floor plan, all booking types. ${smsIncluded} SMS per month included. Priority support. Additional SMS at ${overagePence}p each.`
+                  : isPlus
+                    ? `Up to 5 calendars and 5 team members. ${smsIncluded} SMS per month included, then ${overagePence}p each. Phone and email support.`
+                    : `All booking types: appointments, classes, events, resources. Unlimited calendars and team members. You'll choose which models to enable first after payment. ${smsIncluded} SMS per month included. Additional SMS at ${overagePence}p each after your included allowance.`}
               </p>
             </div>
           )}
@@ -281,8 +284,6 @@ export default function PaymentPage() {
               <span className="text-base font-bold text-slate-900">
                 {isFounding ? (
                   <span className="text-emerald-600">Free for 6 months</span>
-                ) : isLight ? (
-                  <span className="text-brand-700">Free for 3 months</span>
                 ) : (
                   <>&pound;{totalPrice}/mo</>
                 )}
@@ -299,11 +300,7 @@ export default function PaymentPage() {
           <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-900">
             <p className="font-medium">Sign in required</p>
             <p className="mt-1 text-amber-800/90">
-              {isFounding
-                ? 'Complete setup needs an active session.'
-                : isLight
-                  ? 'You need an active session so we can create your venue and continue signup.'
-                  : 'Payment needs an active session.'}{' '}
+              {isFounding ? 'Complete setup needs an active session.' : 'Checkout needs an active session.'}{' '}
               If you haven&apos;t confirmed your email yet, use the link we sent you, then return here. Already
               confirmed?{' '}
               <Link href="/login?redirectTo=/signup/payment" className="font-medium text-brand-700 underline">
@@ -322,22 +319,11 @@ export default function PaymentPage() {
         >
           {loading
             ? 'Processing...'
-            : isFounding
-              ? 'Complete setup'
-              : isLight
-                ? 'Start free'
-                : 'Proceed to payment'}
+            : isFounding ? 'Complete setup' : 'Proceed to payment'}
         </button>
 
-        {isLight ? (
-          <p className="mt-3 text-center text-xs text-slate-500">
-            When the free period ends, Appointments Light is &pound;{APPOINTMENTS_LIGHT_PRICE}/month. Cancel anytime
-            with 30 days notice.
-          </p>
-        ) : (
-          <p className="mt-3 text-center text-xs text-slate-500">Cancel anytime with 30 days notice.</p>
-        )}
-        {!isFounding && !isLight && (
+        <p className="mt-3 text-center text-xs text-slate-500">Cancel anytime with 30 days notice.</p>
+        {!isFounding && (
           <p className="mt-1 text-center text-xs text-slate-400">
             You&apos;ll be redirected to Stripe for secure payment.
           </p>

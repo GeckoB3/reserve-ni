@@ -47,6 +47,7 @@ next-env.d.ts
 supabase/.temp/
 
 # tooling / local
+scripts/output/
 # local agent / IDE
 .claude/
 

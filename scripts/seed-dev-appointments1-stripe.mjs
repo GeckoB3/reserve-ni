@@ -3,7 +3,7 @@
  *
  * Requires .env.local:
  *   NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
- *   STRIPE_SECRET_KEY, STRIPE_APPOINTMENTS_PRICE_ID
+ *   STRIPE_SECRET_KEY, STRIPE_APPOINTMENTS_PRO_PRICE_ID
  * Optional: STRIPE_SMS_OVERAGE_PRICE_ID (metered line, matches Checkout)
  *
  * Usage:
@@ -90,8 +90,8 @@ function subscriptionItemIds(sub, mainPriceId, smsPriceId) {
 }
 
 async function ensureStripeCustomerAndSubscription(stripe, { email, userId, existingVenue }) {
-  const mainPriceId = process.env.STRIPE_APPOINTMENTS_PRICE_ID?.trim();
-  if (!mainPriceId) throw new Error('STRIPE_APPOINTMENTS_PRICE_ID is not set');
+  const mainPriceId = process.env.STRIPE_APPOINTMENTS_PRO_PRICE_ID?.trim();
+  if (!mainPriceId) throw new Error('STRIPE_APPOINTMENTS_PRO_PRICE_ID is not set');
 
   const smsPriceId = process.env.STRIPE_SMS_OVERAGE_PRICE_ID?.trim() || '';
 

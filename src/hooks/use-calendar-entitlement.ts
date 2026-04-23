@@ -1,7 +1,6 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { isLightPlanTier } from '@/lib/tier-enforcement';
 
 export interface CalendarEntitlement {
   pricing_tier: string;
@@ -11,11 +10,15 @@ export interface CalendarEntitlement {
   unlimited: boolean;
   at_calendar_limit: boolean;
   can_add_practitioner: boolean;
+  staff_limit?: number | null;
+  active_staff?: number;
+  can_invite_staff?: boolean;
+  unified_calendar_count?: number;
 }
 
 /**
- * After `entitlementLoaded` is true: Light tier uses `can_add_practitioner`; other tiers may add freely.
- * Before load: returns false so Appointments Light does not briefly show "Add calendar".
+ * After `entitlementLoaded` is true: finite tiers use `can_add_practitioner`; unlimited tiers may add freely.
+ * Before load: returns false so finite tiers do not briefly show "Add calendar".
  */
 export function canAddCalendarColumn(
   entitlement: CalendarEntitlement | null,
@@ -23,7 +26,8 @@ export function canAddCalendarColumn(
 ): boolean {
   if (!entitlementLoaded) return false;
   if (!entitlement) return true;
-  return !isLightPlanTier(entitlement.pricing_tier) || entitlement.can_add_practitioner;
+  if (entitlement.unlimited) return true;
+  return entitlement.can_add_practitioner;
 }
 
 export function useCalendarEntitlement(enabled: boolean) {

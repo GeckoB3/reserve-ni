@@ -27,10 +27,6 @@
     {
       "path": "/api/cron/sms-overage-billing",
       "schedule": "0 2 1 * *"
-    },
-    {
-      "path": "/api/cron/light-plan-expiry",
-      "schedule": "0 9 * * *"
     }
   ]
 }

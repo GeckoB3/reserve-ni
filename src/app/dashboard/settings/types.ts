@@ -49,8 +49,6 @@ export interface VenueSettings {
   stripe_subscription_id?: string | null;
   /** Venue row created_at (ISO) for promotional banners. */
   created_at?: string;
-  /** Appointments Light: free period end (ISO). */
-  light_plan_free_period_ends_at?: string | null;
   /**
    * Multi-area table venues: `auto` = combined slot list on public + staff booking; `manual` = area tabs to view times per area.
    */

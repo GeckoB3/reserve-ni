@@ -25,7 +25,7 @@ export default function AppointmentsLightIntroPage() {
       <div className="mb-8 text-center">
         <h1 className="text-2xl font-bold text-slate-900">Appointments Light</h1>
         <p className="mt-2 text-sm text-slate-500">
-          Free for three months, then &pound;{APPOINTMENTS_LIGHT_PRICE}/month. Built for sole traders who need one
+          &pound;{APPOINTMENTS_LIGHT_PRICE}/month from day one, with card at checkout. Built for sole traders who need one
           bookable calendar and a clear client booking page.
         </p>
       </div>
@@ -37,7 +37,7 @@ export default function AppointmentsLightIntroPage() {
           <SummaryItem text="An online booking page your clients can use at any time" />
           <SummaryItem text="Appointments, classes, events, and resource booking in one place" />
           <SummaryItem text="Automated email reminders included" />
-          <SummaryItem text={`SMS at ${smsPence}p each. You only pay for what you send`} />
+          <SummaryItem text={`0 SMS included; pay-as-you-go at ${smsPence}p per SMS via Stripe`} />
           <SummaryItem text="Client records with visit history" />
           <SummaryItem text="Email support" />
         </ul>

@@ -25,20 +25,35 @@ const stripe = new Stripe(secretKey, { typescript: true });
 async function main() {
   console.log('Creating Stripe Products and Prices for ReserveNI...\n');
 
-  const appointmentsProduct = await stripe.products.create({
-    name: 'Reserve NI Appointments',
-    description: 'Appointments plan - unlimited calendars, 300 SMS/month included. £35/month.',
+  const appointmentsProProduct = await stripe.products.create({
+    name: 'Reserve NI Appointments Pro',
+    description: 'Appointments Pro — unlimited calendars and users, 800 SMS/month included, £79/month.',
   });
 
-  const appointmentsPrice = await stripe.prices.create({
-    product: appointmentsProduct.id,
+  const appointmentsProPrice = await stripe.prices.create({
+    product: appointmentsProProduct.id,
+    unit_amount: 7900,
+    currency: 'gbp',
+    recurring: { interval: 'month' },
+  });
+
+  console.log(`Appointments Pro Product: ${appointmentsProProduct.id}`);
+  console.log(`Appointments Pro Price:   ${appointmentsProPrice.id}`);
+
+  const appointmentsPlusProduct = await stripe.products.create({
+    name: 'Reserve NI Appointments Plus',
+    description: 'Appointments Plus — up to 5 calendars and 5 users, 300 SMS/month included, £35/month.',
+  });
+
+  const appointmentsPlusPrice = await stripe.prices.create({
+    product: appointmentsPlusProduct.id,
     unit_amount: 3500,
     currency: 'gbp',
     recurring: { interval: 'month' },
   });
 
-  console.log(`Appointments Product: ${appointmentsProduct.id}`);
-  console.log(`Appointments Price:   ${appointmentsPrice.id}`);
+  console.log(`Appointments Plus Product: ${appointmentsPlusProduct.id}`);
+  console.log(`Appointments Plus Price:   ${appointmentsPlusPrice.id}`);
 
   const restaurantProduct = await stripe.products.create({
     name: 'Reserve NI Restaurant',
@@ -57,7 +72,7 @@ async function main() {
 
   const lightProduct = await stripe.products.create({
     name: 'Reserve NI Appointments Light',
-    description: 'Appointments Light — £6/month after free period, one calendar, PAYG SMS.',
+    description: 'Appointments Light — £6/month, one calendar, one login, PAYG SMS at 8p.',
   });
 
   const lightPrice = await stripe.prices.create({
@@ -72,7 +87,7 @@ async function main() {
 
   const smsProduct = await stripe.products.create({
     name: 'Reserve NI SMS (metered)',
-    description: 'Metered SMS overage for Appointments / Restaurant (6p) or Light (8p) — attach separate prices.',
+    description: 'Metered SMS overage for Plus/Pro/Restaurant (6p) or Light (8p) — attach separate prices.',
   });
 
   const smsOverage6 = await stripe.prices.create({
@@ -96,7 +111,8 @@ async function main() {
   console.log(`SMS Light 8p Price:    ${smsLight8.id}`);
 
   console.log('\n--- Add these to your .env.local ---\n');
-  console.log(`STRIPE_APPOINTMENTS_PRICE_ID=${appointmentsPrice.id}`);
+  console.log(`STRIPE_APPOINTMENTS_PRO_PRICE_ID=${appointmentsProPrice.id}`);
+  console.log(`STRIPE_APPOINTMENTS_PLUS_PRICE_ID=${appointmentsPlusPrice.id}`);
   console.log(`STRIPE_RESTAURANT_PRICE_ID=${restaurantPrice.id}`);
   console.log(`STRIPE_LIGHT_PRICE_ID=${lightPrice.id}`);
   console.log(`STRIPE_SMS_OVERAGE_PRICE_ID=${smsOverage6.id}`);

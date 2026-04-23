@@ -5,7 +5,8 @@ import { getSupabaseAdminClient } from '@/lib/supabase';
 import { setStaffPractitionerLink, setStaffUnifiedCalendarAssignments } from '@/lib/staff-practitioner-link';
 import { deliverStaffAccessLinkEmail } from '@/lib/staff-invite-email';
 import { getStaffAuthBaseUrl } from '@/lib/staff-invite-redirect';
-import { assertLightPlanSingleStaffOnly } from '@/lib/light-plan';
+import { assertStaffSlotAvailable } from '@/lib/light-plan';
+import { planDisplayName } from '@/lib/pricing-constants';
 import { z } from 'zod';
 
 const inviteSchema = z.object({
@@ -113,13 +114,18 @@ export async function POST(request: NextRequest) {
       .eq('email', normalisedEmail)
       .maybeSingle();
 
-    const staffLimit = await assertLightPlanSingleStaffOnly(staff.venue_id);
+    const staffLimit = await assertStaffSlotAvailable(staff.venue_id);
     if (!staffLimit.allowed) {
+      const { data: vrow } = await admin
+        .from('venues')
+        .select('pricing_tier')
+        .eq('id', staff.venue_id)
+        .maybeSingle();
+      const tierLabel = planDisplayName((vrow as { pricing_tier?: string } | null)?.pricing_tier);
       return NextResponse.json(
         {
-          error:
-            'Your Appointments Light plan includes one login. Upgrade to the Appointments plan to invite team members.',
-          code: 'LIGHT_PLAN_STAFF_LIMIT',
+          error: `Your ${tierLabel} plan allows up to ${staffLimit.limit} team login(s). Upgrade to add more team members.`,
+          code: 'PLAN_STAFF_LIMIT',
         },
         { status: 403 },
       );

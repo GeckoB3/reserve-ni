@@ -142,7 +142,8 @@ export async function POST(request: Request) {
         }
 
         const priceIdMap: Record<string, string | undefined> = {
-          appointments: process.env.STRIPE_APPOINTMENTS_PRICE_ID,
+          appointments: process.env.STRIPE_APPOINTMENTS_PRO_PRICE_ID,
+          plus: process.env.STRIPE_APPOINTMENTS_PLUS_PRICE_ID,
           restaurant: process.env.STRIPE_RESTAURANT_PRICE_ID,
           founding: process.env.STRIPE_RESTAURANT_PRICE_ID,
         };

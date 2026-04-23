@@ -7,10 +7,16 @@ import { fetchPendingSignupSelection, syncPendingToSessionStorage } from '@/lib/
 import { isSignupPaymentReady } from '@/lib/signup-pending-selection';
 import { formatSignupBusinessTypeLabel } from '@/lib/business-config';
 import { DEFAULT_RESTAURANT_FAMILY_BUSINESS_TYPE } from '@/lib/signup-resume';
-import { APPOINTMENTS_PRICE, RESTAURANT_PRICE, FOUNDING_PARTNER_CAP, SMS_OVERAGE_GBP_PER_MESSAGE } from '@/lib/pricing-constants';
-import { SMS_INCLUDED_APPOINTMENTS, SMS_INCLUDED_RESTAURANT } from '@/lib/billing/sms-allowance';
+import {
+  APPOINTMENTS_PLUS_PRICE,
+  APPOINTMENTS_PRO_PRICE,
+  RESTAURANT_PRICE,
+  FOUNDING_PARTNER_CAP,
+  SMS_OVERAGE_GBP_PER_MESSAGE,
+} from '@/lib/pricing-constants';
+import { SMS_INCLUDED_APPOINTMENTS, SMS_INCLUDED_PLUS, SMS_INCLUDED_RESTAURANT } from '@/lib/billing/sms-allowance';
 
-type PlanType = 'appointments' | 'light' | 'restaurant' | 'founding';
+type PlanType = 'appointments' | 'plus' | 'light' | 'restaurant' | 'founding';
 
 export default function PlanPage() {
   const router = useRouter();
@@ -35,7 +41,11 @@ export default function PlanPage() {
       let resolvedBt = bt;
 
       if (
-        (!resolvedPlan || (resolvedPlan !== 'appointments' && resolvedPlan !== 'light' && !resolvedBt)) &&
+        (!resolvedPlan ||
+          (resolvedPlan !== 'appointments' &&
+            resolvedPlan !== 'plus' &&
+            resolvedPlan !== 'light' &&
+            !resolvedBt)) &&
         session
       ) {
         const pending = await fetchPendingSignupSelection();
@@ -45,7 +55,10 @@ export default function PlanPage() {
           router.replace('/signup/payment');
           return;
         }
-        if (pending?.plan && (pending.plan === 'appointments' || pending.plan === 'light' || pending.business_type)) {
+        if (
+          pending?.plan &&
+          (pending.plan === 'appointments' || pending.plan === 'plus' || pending.plan === 'light' || pending.business_type)
+        ) {
           syncPendingToSessionStorage(pending.plan, pending.business_type);
           storedPlan = pending.plan;
           bt = pending.business_type;
@@ -213,6 +226,51 @@ export default function PlanPage() {
     );
   }
 
+  if (plan === 'plus') {
+    const smsIncluded = SMS_INCLUDED_PLUS;
+    return (
+      <div className="w-full max-w-xl">
+        <div className="mb-8 text-center">
+          <h1 className="text-2xl font-bold text-slate-900">Your plan</h1>
+          {businessType ? (
+            <p className="mt-2 text-sm text-slate-500">
+              Your business: {formatSignupBusinessTypeLabel(businessType)}
+            </p>
+          ) : (
+            <p className="mt-2 text-sm text-slate-500">Appointments Plus: up to 5 calendars and 5 team members.</p>
+          )}
+        </div>
+        <div className="rounded-2xl border border-brand-200 bg-brand-50/30 p-6 shadow-sm">
+          <h2 className="text-lg font-bold text-slate-900">Appointments Plus</h2>
+          <div className="mt-2 flex items-baseline gap-1">
+            <span className="text-2xl font-extrabold text-slate-900">&pound;{APPOINTMENTS_PLUS_PRICE}</span>
+            <span className="text-sm text-slate-500">/month</span>
+          </div>
+          <p className="mt-2 text-xs text-slate-500">Single venue only.</p>
+          <ul className="mt-4 space-y-2 text-sm text-slate-600">
+            <FeatureItem text="Up to 5 bookable calendars and 5 team members" />
+            <FeatureItem text="Appointments, classes, events, and resource booking" />
+            <FeatureItem text={`${smsIncluded} SMS per month included, then ${overagePence}p each`} />
+            <FeatureItem text="Personal booking links per staff member" />
+            <FeatureItem text="Phone and email support" />
+          </ul>
+        </div>
+        <p className="mt-6 text-center text-xs text-slate-500">
+          No per-booking fees. No commission. Cancel anytime.
+        </p>
+        <div className="mt-6 flex justify-center">
+          <button
+            type="button"
+            onClick={handleContinue}
+            className="rounded-xl bg-brand-600 px-8 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700"
+          >
+            Get Started
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   if (plan === 'appointments') {
     const smsIncluded = SMS_INCLUDED_APPOINTMENTS;
     return (
@@ -224,13 +282,13 @@ export default function PlanPage() {
               Your business: {formatSignupBusinessTypeLabel(businessType)}
             </p>
           ) : (
-            <p className="mt-2 text-sm text-slate-500">Full Appointments: unlimited calendars and team members.</p>
+            <p className="mt-2 text-sm text-slate-500">Appointments Pro: unlimited calendars and team members.</p>
           )}
         </div>
         <div className="rounded-2xl border border-brand-200 bg-brand-50/30 p-6 shadow-sm">
-          <h2 className="text-lg font-bold text-slate-900">Appointments</h2>
+          <h2 className="text-lg font-bold text-slate-900">Appointments Pro</h2>
           <div className="mt-2 flex items-baseline gap-1">
-            <span className="text-2xl font-extrabold text-slate-900">&pound;{APPOINTMENTS_PRICE}</span>
+            <span className="text-2xl font-extrabold text-slate-900">&pound;{APPOINTMENTS_PRO_PRICE}</span>
             <span className="text-sm text-slate-500">/month</span>
           </div>
           <p className="mt-2 text-xs text-slate-500">Single venue only. For teams of any size.</p>

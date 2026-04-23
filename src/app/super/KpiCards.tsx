@@ -28,7 +28,7 @@ async function fetchKpis(): Promise<KpiData> {
     const status = ((v.plan_status as string) ?? '').toLowerCase().trim();
 
     if (status === 'active' || status === 'trialing') activeVenues++;
-    if (tier === 'appointments') appointments++;
+    if (tier === 'appointments' || tier === 'plus' || tier === 'light') appointments++;
     else if (tier === 'restaurant') restaurant++;
     else if (tier === 'founding') founding++;
   }
@@ -47,7 +47,7 @@ export async function KpiCards() {
   const cards = [
     { label: 'Total Venues', value: data.totalVenues, color: 'bg-blue-50 text-blue-700' },
     { label: 'Active Subscriptions', value: data.activeVenues, color: 'bg-emerald-50 text-emerald-700' },
-    { label: 'Appointments Plan', value: data.byTier.appointments, color: 'bg-violet-50 text-violet-700' },
+      { label: 'Appointments (Light / Plus / Pro)', value: data.byTier.appointments, color: 'bg-violet-50 text-violet-700' },
     { label: 'Restaurant / Founding', value: data.byTier.restaurant + data.byTier.founding, color: 'bg-amber-50 text-amber-700' },
     { label: 'Total Staff Logins', value: data.totalStaff, color: 'bg-slate-100 text-slate-700' },
   ];

@@ -4,9 +4,9 @@ import { isAppointmentPlanTier, isRestaurantTableProductTier } from '@/lib/tier-
 export type SignupPlanFamily = 'appointments' | 'restaurant';
 
 export function signupPlanToFamily(
-  plan: 'appointments' | 'light' | 'restaurant' | 'founding',
+  plan: 'appointments' | 'plus' | 'light' | 'restaurant' | 'founding',
 ): SignupPlanFamily {
-  return plan === 'appointments' || plan === 'light' ? 'appointments' : 'restaurant';
+  return plan === 'appointments' || plan === 'plus' || plan === 'light' ? 'appointments' : 'restaurant';
 }
 
 export function pricingTierToSignupFamily(tier: string | null | undefined): SignupPlanFamily {

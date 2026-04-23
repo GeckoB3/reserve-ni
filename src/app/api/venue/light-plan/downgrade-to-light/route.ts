@@ -43,9 +43,9 @@ export async function POST() {
     }
 
     const tier = String((venue as { pricing_tier?: string }).pricing_tier ?? '').toLowerCase();
-    if (tier !== 'appointments') {
+    if (tier !== 'appointments' && tier !== 'plus') {
       return NextResponse.json(
-        { error: 'Downgrade to Light is only available on the Appointments plan.' },
+        { error: 'Downgrade to Light is only available on Appointments Pro or Appointments Plus.' },
         { status: 400 },
       );
     }
@@ -134,9 +134,7 @@ export async function POST() {
         stripe_sms_subscription_item_id: ids.smsSubscriptionItemId,
         subscription_current_period_start: periodStartIso,
         subscription_current_period_end: periodEndIso,
-        calendar_count: null,
-        light_plan_free_period_ends_at: null,
-        light_plan_converted_at: new Date().toISOString(),
+        calendar_count: 1,
         plan_status: cancelAtPeriodEnd ? 'cancelling' : sub.status === 'trialing' ? 'trialing' : 'active',
       })
       .eq('id', staffVenueId);

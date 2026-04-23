@@ -1,15 +1,7 @@
 import Link from "next/link";
 import ContactForm from "@/components/ContactForm";
 import HomeFaq from "@/components/home/HomeFaq";
-import {
-  APPOINTMENTS_LIGHT_PRICE,
-  APPOINTMENTS_PRICE,
-  RESTAURANT_PRICE,
-  FOUNDING_PARTNER_CAP,
-  SMS_LIGHT_GBP_PER_MESSAGE,
-  SMS_OVERAGE_GBP_PER_MESSAGE,
-} from "@/lib/pricing-constants";
-import { SMS_INCLUDED_APPOINTMENTS, SMS_INCLUDED_RESTAURANT } from "@/lib/billing/sms-allowance";
+import { PricingSection } from "@/components/home/PricingSection";
 
 /** Feature blurbs aligned with ReserveNI Unified Scheduling Engine Plan (v1.1): deposits, comms lifecycle, dashboard. */
 const features = [
@@ -59,7 +51,7 @@ const steps = [
     number: "1",
     title: "Pick your plan",
     description:
-      "Choose Appointments Light (free to start), full Appointments, or Restaurant, then create your account. Founding Partner spots are available for restaurants.",
+      "Choose Appointments Light, Plus, or Pro, or the Restaurant plan, then create your account. Founding Partner spots are available for qualifying businesses.",
   },
   { number: "2", title: "Choose your booking models", description: "Appointments includes appointments, classes, events, and resources. Enable the ones you want to start with." },
   { number: "3", title: "Start taking bookings", description: "Share your booking page link, embed the widget, or print a QR code so your clients can book instantly." },
@@ -155,116 +147,7 @@ export default function Home() {
         </div>
       </section>
 
-      {/* Pricing */}
-      <section id="pricing" className="scroll-mt-16 bg-white py-20 sm:py-28">
-        <div className="mx-auto max-w-5xl px-6">
-          <h2 className="text-center text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">Simple, transparent pricing</h2>
-          <p className="mx-auto mt-4 max-w-xl text-center text-slate-500">No commission, no hidden fees. Pick the plan that fits your business.</p>
-
-          <div className="mx-auto mt-14 grid max-w-6xl items-stretch gap-8 lg:grid-cols-3">
-            {/* Appointments Light */}
-            <div className="flex flex-col rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
-              <h3 className="text-lg font-bold text-slate-900">Appointments Light</h3>
-              <div className="mt-3 flex flex-col gap-0.5">
-                <span className="text-2xl font-extrabold text-slate-900">Free for 3 months</span>
-                <span className="text-sm text-slate-600">&pound;{APPOINTMENTS_LIGHT_PRICE}/month after</span>
-              </div>
-              <p className="mt-2 text-sm font-medium leading-snug text-slate-700">For sole traders getting started.</p>
-              <ul className="mt-6 flex-1 space-y-3 text-sm text-slate-600">
-                <PricingFeature text="One calendar for you and your business" />
-                <PricingFeature text="Online booking page your clients can use 24/7" />
-                <PricingFeature text="Appointments, classes, events, and resource booking" />
-                <PricingFeature text="Automated email reminders included" />
-                <PricingFeature text={`SMS messages at ${Math.round(SMS_LIGHT_GBP_PER_MESSAGE * 100)}p each. Pay only for what you send`} />
-                <PricingFeature text="Client records with visit history" />
-                <PricingFeature text="Email support" />
-              </ul>
-              <Link href="/signup/appointments-light" className="mt-8 inline-flex h-11 w-full items-center justify-center rounded-xl bg-brand-600 text-sm font-semibold text-white shadow-lg shadow-brand-600/20 transition-colors hover:bg-brand-700">
-                Start Free
-              </Link>
-            </div>
-
-            {/* Appointments */}
-            <div className="flex flex-col rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
-              <h3 className="text-lg font-bold text-slate-900">Appointments</h3>
-              <div className="mt-3 flex items-baseline gap-1">
-                <span className="text-4xl font-extrabold text-slate-900">&pound;{APPOINTMENTS_PRICE}</span>
-                <span className="text-sm text-slate-500">/month</span>
-              </div>
-              <p className="mt-2 text-sm font-medium leading-snug text-slate-700">
-                For teams of any size.
-              </p>
-              <p className="mt-1 text-xs text-slate-500">Single venue only.</p>
-              <ul className="mt-6 flex-1 space-y-3 text-sm text-slate-600">
-                <PricingFeature text="Unlimited calendars and team members" />
-                <PricingFeature text="Everything in Light, plus:" />
-                <PricingFeature text={`${SMS_INCLUDED_APPOINTMENTS} SMS per month included, then ${Math.round(SMS_OVERAGE_GBP_PER_MESSAGE * 100)}p each`} />
-                <PricingFeature text="Personal booking links per staff member" />
-                <PricingFeature text="Phone and email support" />
-              </ul>
-              <Link href="/signup/plan?plan=appointments" className="mt-8 inline-flex h-11 w-full items-center justify-center rounded-xl bg-brand-600 text-sm font-semibold text-white shadow-lg shadow-brand-600/20 transition-colors hover:bg-brand-700">
-                Get Started
-              </Link>
-            </div>
-
-            {/* Restaurant */}
-            <div className="flex flex-col rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
-              <h3 className="text-lg font-bold text-slate-900">Restaurant</h3>
-              <div className="mt-3 flex items-baseline gap-1">
-                <span className="text-4xl font-extrabold text-slate-900">&pound;{RESTAURANT_PRICE}</span>
-                <span className="text-sm text-slate-500">/month</span>
-              </div>
-              <p className="mt-2 text-sm font-medium leading-snug text-slate-700">
-                For restaurants, cafes, pubs, and hotel dining.
-              </p>
-              <p className="mt-1 text-xs text-slate-500">Single venue only.</p>
-              <ul className="mt-6 flex-1 space-y-3 text-sm text-slate-600">
-                <PricingFeature text="Table management with timeline grid and floor plan" />
-                <PricingFeature text="Plus all appointment booking types if needed" />
-                <PricingFeature text={`${SMS_INCLUDED_RESTAURANT} SMS messages included per month`} />
-                <PricingFeature text={`Additional SMS at ${Math.round(SMS_OVERAGE_GBP_PER_MESSAGE * 100)}p each`} />
-                <PricingFeature text="Bookings, deposits, reminders, guest records, reporting" />
-                <PricingFeature text="Email and SMS communications" />
-                <PricingFeature text="Priority support" />
-              </ul>
-              <Link href="/signup/plan?plan=restaurant" className="mt-8 inline-flex h-11 w-full items-center justify-center rounded-xl bg-brand-600 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700">
-                Get Started
-              </Link>
-            </div>
-          </div>
-
-          <p className="mx-auto mt-10 max-w-2xl text-center text-sm text-slate-500">
-            No per-booking fees. No commission. Cancel anytime.
-          </p>
-
-          {/* Founding Partner - Appointments and Restaurant */}
-          <div className="mx-auto mt-10 max-w-4xl overflow-hidden rounded-2xl border border-emerald-200 bg-gradient-to-br from-emerald-50 to-white shadow-sm">
-            <div className="flex flex-col gap-4 p-6 sm:flex-row sm:items-center sm:justify-between sm:gap-8">
-              <div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <h3 className="text-lg font-bold text-slate-900">Founding Partner</h3>
-                  <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-700">
-                    Limited
-                  </span>
-                  <span className="rounded-full bg-white/80 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-800 ring-1 ring-emerald-200">
-                    Appointments & Restaurant
-                  </span>
-                </div>
-                <p className="mt-2 text-sm font-medium text-emerald-900">
-                  Free for six months - full Appointments or Restaurant plan (whichever fits your business). We onboard you personally.
-                </p>
-                <p className="mt-1 text-xs text-emerald-700">Only {FOUNDING_PARTNER_CAP} spots available.</p>
-              </div>
-              <a
-                href="#contact"
-                className="inline-flex h-11 flex-shrink-0 items-center justify-center rounded-xl bg-emerald-600 px-6 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-emerald-700 sm:min-w-[10rem]"
-              >
-                Apply now
-              </a>
-            </div>
-          </div>
-        </div>
-      </section>
+      <PricingSection />
 
       <HomeFaq />
 
@@ -307,17 +190,6 @@ export default function Home() {
         </div>
       </footer>
     </div>
-  );
-}
-
-function PricingFeature({ text }: { text: string }) {
-  return (
-    <li className="flex items-start gap-2.5">
-      <svg className="mt-0.5 h-5 w-5 flex-shrink-0 text-brand-600" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-        <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
-      </svg>
-      {text}
-    </li>
   );
 }
 

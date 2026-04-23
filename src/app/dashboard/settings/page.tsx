@@ -27,7 +27,7 @@ export default async function SettingsPage({
     upgraded?: string;
     downgraded?: string;
     resubscribed?: string;
-    light_sms_setup?: string;
+    card_updated?: string;
   }>;
 }) {
   const supabase = await createClient();
@@ -73,7 +73,7 @@ export default async function SettingsPage({
   let hasServiceConfig = false;
   const { data: fullVenue, error: fullErr } = await staff.db
     .from('venues')
-    .select('id, name, slug, address, phone, email, website_url, cover_photo_url, cuisine_type, price_band, no_show_grace_minutes, kitchen_email, communication_templates, opening_hours, venue_opening_exceptions, booking_rules, deposit_config, availability_config, stripe_connected_account_id, timezone, table_management_enabled, combination_threshold, pricing_tier, plan_status, subscription_current_period_start, subscription_current_period_end, calendar_count, booking_model, enabled_models, active_booking_models, sms_monthly_allowance, stripe_subscription_id, created_at, light_plan_free_period_ends_at')
+    .select('id, name, slug, address, phone, email, website_url, cover_photo_url, cuisine_type, price_band, no_show_grace_minutes, kitchen_email, communication_templates, opening_hours, venue_opening_exceptions, booking_rules, deposit_config, availability_config, stripe_connected_account_id, timezone, table_management_enabled, combination_threshold, pricing_tier, plan_status, subscription_current_period_start, subscription_current_period_end, calendar_count, booking_model, enabled_models, active_booking_models, sms_monthly_allowance, stripe_subscription_id, created_at')
     .eq('id', venueId)
     .single();
 
@@ -205,12 +205,12 @@ export default async function SettingsPage({
   }
   const sp = await searchParams;
   const { tab } = sp;
-  let planCheckoutReturn: 'upgraded' | 'downgraded' | 'resubscribed' | 'light_sms_setup' | undefined;
+  let planCheckoutReturn: 'upgraded' | 'downgraded' | 'resubscribed' | 'card_updated' | undefined;
   if (sp.upgraded === 'true') planCheckoutReturn = 'upgraded';
   else if (sp.downgraded === 'true') planCheckoutReturn = 'downgraded';
   else if (sp.resubscribed === 'true') planCheckoutReturn = 'resubscribed';
-  else if (sp.light_sms_setup === '1' || sp.light_sms_setup === 'true') {
-    planCheckoutReturn = 'light_sms_setup';
+  else if (sp.card_updated === '1' || sp.card_updated === 'true') {
+    planCheckoutReturn = 'card_updated';
   }
 
   let initialLightHasPaymentMethod: boolean | undefined;

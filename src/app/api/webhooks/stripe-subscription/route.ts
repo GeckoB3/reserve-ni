@@ -14,7 +14,8 @@ import {
 } from '@/lib/stripe/subscription-line-items';
 import { updateVenueSmsMonthlyAllowance } from '@/lib/billing/sms-allowance';
 import { handleLightPaymentMethodUpdateFromSetup } from '@/lib/stripe/light-past-due-payment-webhook';
-import { handleLightSmsSetupCheckoutCompleted } from '@/lib/stripe/light-sms-setup-webhook';
+import { communicationPoliciesEmailOnlyAppointmentsLane } from '@/lib/communications/policies';
+import { defaultNotificationSettingsForLightPlan } from '@/lib/notifications/notification-settings';
 
 /**
  * Configure in Stripe Dashboard: endpoint URL /api/webhooks/stripe-subscription,
@@ -133,12 +134,6 @@ async function handleCheckoutCompleted(
     return;
   }
 
-  /** Appointments Light: collect default payment method, then create £6 + metered SMS subscription (webhook). */
-  if (session.mode === 'setup' && metadata.action === 'light_sms_setup' && metadata.venue_id) {
-    await handleLightSmsSetupCheckoutCompleted(supabase, session);
-    return;
-  }
-
   const businessType = metadata.business_type;
   const plan = metadata.plan;
   const supabaseUserId = metadata.supabase_user_id;
@@ -191,10 +186,6 @@ async function handleCheckoutCompleted(
       changePlanUpdates.pricing_tier = newPlan;
     }
     changePlanUpdates.calendar_count = null;
-    if (newPlan === 'appointments') {
-      changePlanUpdates.light_plan_free_period_ends_at = null;
-      changePlanUpdates.light_plan_converted_at = null;
-    }
 
     await supabase
       .from('venues')
@@ -270,6 +261,10 @@ async function handleCheckoutCompleted(
 
   const slug = `venue-${Date.now()}`;
 
+  const isLight = String(plan).toLowerCase() === 'light';
+  const commPolicies = communicationPoliciesEmailOnlyAppointmentsLane();
+  const notifDefaults = defaultNotificationSettingsForLightPlan();
+
   const { data: venue, error: venueError } = await supabase
     .from('venues')
     .insert({
@@ -287,9 +282,15 @@ async function handleCheckoutCompleted(
       stripe_sms_subscription_item_id: smsSubscriptionItemId,
       subscription_current_period_start: periodStartIso,
       subscription_current_period_end: periodEndIso,
-      calendar_count: null,
+      calendar_count: isLight ? 1 : null,
       onboarding_step: 0,
       onboarding_completed: false,
+      ...(isLight
+        ? {
+            communication_policies: commPolicies as unknown as Record<string, never>,
+            notification_settings: notifDefaults as unknown as Record<string, never>,
+          }
+        : {}),
     })
     .select('id')
     .single();
@@ -348,7 +349,8 @@ async function handleSubscriptionUpdated(
     const id = process.env[envKey]?.trim();
     if (id) priceToTier[id] = tier;
   };
-  addMapping('STRIPE_APPOINTMENTS_PRICE_ID', 'appointments');
+  addMapping('STRIPE_APPOINTMENTS_PRO_PRICE_ID', 'appointments');
+  addMapping('STRIPE_APPOINTMENTS_PLUS_PRICE_ID', 'plus');
   addMapping('STRIPE_RESTAURANT_PRICE_ID', 'restaurant');
   addMapping('STRIPE_LIGHT_PRICE_ID', 'light');
   if (priceId && priceToTier[priceId]) {

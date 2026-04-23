@@ -1,16 +1,17 @@
 import { NextResponse } from 'next/server';
+import type Stripe from 'stripe';
 import { createClient } from '@/lib/supabase/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { stripe } from '@/lib/stripe';
-import { buildCheckoutLineItems } from '@/lib/stripe/subscription-line-items';
+import {
+  buildCheckoutLineItems,
+  buildLightPlanCheckoutLineItems,
+} from '@/lib/stripe/subscription-line-items';
 import { getBusinessConfig } from '@/lib/business-config';
-import { updateVenueSmsMonthlyAllowance } from '@/lib/billing/sms-allowance';
 import { FOUNDING_PARTNER_CAP } from '@/lib/pricing-constants';
 import { getExistingVenueForUserEmail } from '@/lib/signup-existing-venue';
 import { pricingTierToSignupFamily, signupPlanToFamily, SIGNUP_PLAN_CONFLICT_MESSAGE } from '@/lib/signup-plan-family';
 import { clearSignupPendingUserMetadata } from '@/lib/signup-pending-metadata';
-import { communicationPoliciesEmailOnlyAppointmentsLane } from '@/lib/communications/policies';
-import { defaultNotificationSettingsForLightPlan } from '@/lib/notifications/notification-settings';
 
 export async function POST(request: Request) {
   try {
@@ -26,11 +27,12 @@ export async function POST(request: Request) {
     const body = await request.json();
     const { business_type: rawBusinessType, plan } = body as {
       business_type?: string | null;
-      plan: 'appointments' | 'light' | 'restaurant' | 'founding';
+      plan: 'appointments' | 'plus' | 'light' | 'restaurant' | 'founding';
     };
-    const business_type = rawBusinessType?.trim() || (plan === 'appointments' || plan === 'light' ? 'other' : '');
+    const business_type =
+      rawBusinessType?.trim() || (plan === 'appointments' || plan === 'plus' || plan === 'light' ? 'other' : '');
 
-    if (!plan || (plan !== 'appointments' && plan !== 'light' && !business_type)) {
+    if (!plan || (plan !== 'appointments' && plan !== 'plus' && plan !== 'light' && !business_type)) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
     }
 
@@ -48,7 +50,9 @@ export async function POST(request: Request) {
         );
       }
       if (
-        (existingVenue.pricing_tier === 'appointments' || existingVenue.pricing_tier === 'light') &&
+        (existingVenue.pricing_tier === 'appointments' ||
+          existingVenue.pricing_tier === 'plus' ||
+          existingVenue.pricing_tier === 'light') &&
         Array.isArray((existingVenue as { active_booking_models?: unknown }).active_booking_models) &&
         ((existingVenue as { active_booking_models?: unknown[] }).active_booking_models?.length ?? 0) === 0
       ) {
@@ -62,7 +66,7 @@ export async function POST(request: Request) {
       if (config.model !== 'table_reservation') {
         return NextResponse.json(
           { error: 'Founding Partner plan is only available for hospitality businesses' },
-          { status: 400 }
+          { status: 400 },
         );
       }
       const { count: foundingCount, error: foundingCountErr } = await admin
@@ -107,7 +111,7 @@ export async function POST(request: Request) {
       if (venueError || !venue) {
         return NextResponse.json(
           { error: 'Failed to create venue: ' + (venueError?.message ?? 'unknown') },
-          { status: 500 }
+          { status: 500 },
         );
       }
 
@@ -121,7 +125,7 @@ export async function POST(request: Request) {
       if (staffError) {
         return NextResponse.json(
           { error: 'Failed to create staff record: ' + staffError.message },
-          { status: 500 }
+          { status: 500 },
         );
       }
 
@@ -130,7 +134,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ redirect_url: '/onboarding' });
     }
 
-    // Appointments Light: no payment at signup; Stripe Customer only for later SMS / paid period.
+    // Appointments Light: card-required subscription checkout (£6 + 8p SMS metered)
     if (plan === 'light') {
       if (config.model === 'table_reservation') {
         return NextResponse.json(
@@ -138,111 +142,49 @@ export async function POST(request: Request) {
           { status: 400 },
         );
       }
-
-      const existingCustomers = await stripe.customers.list({
-        email: user.email ?? undefined,
-        limit: 1,
-      });
-      const customer =
-        existingCustomers.data[0] ??
-        (await stripe.customers.create({
-          email: user.email ?? undefined,
-          metadata: {
-            supabase_user_id: user.id,
-            business_type,
-            plan: 'light',
-          },
-        }));
-
-      const freeEnd = new Date();
-      freeEnd.setMonth(freeEnd.getMonth() + 3);
-      const slug = `venue-${Date.now()}`;
-
-      const commPolicies = communicationPoliciesEmailOnlyAppointmentsLane();
-      const notifDefaults = defaultNotificationSettingsForLightPlan();
-
-      const ownerEmail = (user.email ?? '').trim().toLowerCase() || null;
-
-      const { data: venue, error: venueError } = await admin
-        .from('venues')
-        .insert({
-          name: 'My Business',
-          slug,
-          booking_model: config.model,
-          business_type,
-          business_category: config.category,
-          terminology: config.terms,
-          pricing_tier: 'light',
-          plan_status: 'active',
-          calendar_count: 1,
-          sms_monthly_allowance: 0,
-          light_plan_free_period_ends_at: freeEnd.toISOString(),
-          stripe_customer_id: customer.id,
-          stripe_subscription_id: null,
-          stripe_subscription_item_id: null,
-          stripe_sms_subscription_item_id: null,
-          onboarding_step: 0,
-          onboarding_completed: false,
-          communication_policies: commPolicies as unknown as Record<string, never>,
-          notification_settings: notifDefaults as unknown as Record<string, never>,
-          email: ownerEmail,
-        })
-        .select('id')
-        .single();
-
-      if (venueError || !venue) {
-        return NextResponse.json(
-          { error: 'Failed to create venue: ' + (venueError?.message ?? 'unknown') },
-          { status: 500 },
-        );
-      }
-
-      const { error: staffError } = await admin.from('staff').insert({
-        venue_id: venue.id,
-        email: user.email,
-        name: user.email?.split('@')[0] ?? 'Admin',
-        role: 'admin',
-      });
-
-      if (staffError) {
-        return NextResponse.json(
-          { error: 'Failed to create staff record: ' + staffError.message },
-          { status: 500 },
-        );
-      }
-
-      await updateVenueSmsMonthlyAllowance(venue.id);
-      await clearSignupPendingUserMetadata(admin, user.id);
-
-      return NextResponse.json({ redirect_url: '/signup/booking-models' });
     }
 
-    // Create Stripe Checkout Session for paid plans
     const priceIdMap: Record<string, string | undefined> = {
-      appointments: process.env.STRIPE_APPOINTMENTS_PRICE_ID,
+      appointments: process.env.STRIPE_APPOINTMENTS_PRO_PRICE_ID,
+      plus: process.env.STRIPE_APPOINTMENTS_PLUS_PRICE_ID,
       restaurant: process.env.STRIPE_RESTAURANT_PRICE_ID,
     };
-    const priceId = priceIdMap[plan];
 
-    if (!priceId) {
-      return NextResponse.json(
-        { error: 'Stripe price not configured. Run scripts/create-stripe-products.ts first.' },
-        { status: 500 }
-      );
+    let lineItems: Stripe.Checkout.SessionCreateParams.LineItem[];
+
+    if (plan === 'light') {
+      try {
+        lineItems = buildLightPlanCheckoutLineItems(1);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'Light plan prices not configured';
+        console.error('[create-checkout] Light:', msg);
+        return NextResponse.json({ error: msg }, { status: 500 });
+      }
+    } else {
+      const priceId = priceIdMap[plan];
+      if (!priceId) {
+        return NextResponse.json(
+          { error: 'Stripe price not configured. Run scripts/create-stripe-products.ts first.' },
+          { status: 500 },
+        );
+      }
+      lineItems = buildCheckoutLineItems(priceId, 1);
     }
 
     const existingCustomers = await stripe.customers.list({
       email: user.email ?? undefined,
       limit: 1,
     });
-    const customer = existingCustomers.data[0] ?? await stripe.customers.create({
-      email: user.email,
-      metadata: {
-        supabase_user_id: user.id,
-        business_type,
-        plan,
-      },
-    });
+    const customer =
+      existingCustomers.data[0] ??
+      (await stripe.customers.create({
+        email: user.email,
+        metadata: {
+          supabase_user_id: user.id,
+          business_type,
+          plan,
+        },
+      }));
 
     const quantity = 1;
 
@@ -255,7 +197,7 @@ export async function POST(request: Request) {
       customer: customer.id,
       mode: 'subscription',
       allow_promotion_codes: true,
-      line_items: buildCheckoutLineItems(priceId, quantity),
+      line_items: lineItems,
       metadata: {
         supabase_user_id: user.id,
         user_id: user.id,

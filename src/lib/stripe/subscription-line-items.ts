@@ -19,6 +19,17 @@ export function getStripeLightPlanPriceId(): string | undefined {
   return id || undefined;
 }
 
+export function getStripeAppointmentsPlusPriceId(): string | undefined {
+  const id = process.env.STRIPE_APPOINTMENTS_PLUS_PRICE_ID?.trim();
+  return id || undefined;
+}
+
+/** Appointments Pro (internal `pricing_tier` = `appointments`), £79/mo recurring. */
+export function getStripeAppointmentsProPriceId(): string | undefined {
+  const id = process.env.STRIPE_APPOINTMENTS_PRO_PRICE_ID?.trim();
+  return id || undefined;
+}
+
 function priceIdOf(item: Stripe.SubscriptionItem): string | undefined {
   const p = item.price;
   if (!p) return undefined;
@@ -28,9 +39,10 @@ function priceIdOf(item: Stripe.SubscriptionItem): string | undefined {
 /** Subscription line item for the main plan recurring price (quantity updates). */
 export function findMainPlanSubscriptionItem(sub: Stripe.Subscription): Stripe.SubscriptionItem | undefined {
   const knownPriceIds = [
-    process.env.STRIPE_APPOINTMENTS_PRICE_ID?.trim(),
+    getStripeAppointmentsProPriceId(),
+    getStripeAppointmentsPlusPriceId(),
     process.env.STRIPE_RESTAURANT_PRICE_ID?.trim(),
-    process.env.STRIPE_LIGHT_PRICE_ID?.trim(),
+    getStripeLightPlanPriceId(),
   ].filter(Boolean) as string[];
   for (const item of sub.items.data) {
     const pid = priceIdOf(item);
@@ -90,7 +102,18 @@ export function buildCheckoutLineItems(mainPriceId: string, mainQuantity: number
 }
 
 /**
- * Appointments Light Checkout: flat £6/mo (deferred via subscription trial in API/webhook) + metered SMS at 8p.
+ * Appointments Plus Checkout: £35/mo + optional metered SMS overage (6p).
+ */
+export function buildAppointmentsPlusCheckoutLineItems(mainQuantity: number): Stripe.Checkout.SessionCreateParams.LineItem[] {
+  const main = getStripeAppointmentsPlusPriceId();
+  if (!main?.trim()) {
+    throw new Error('STRIPE_APPOINTMENTS_PLUS_PRICE_ID is not configured');
+  }
+  return buildCheckoutLineItems(main.trim(), mainQuantity);
+}
+
+/**
+ * Appointments Light Checkout: £6/mo + metered SMS at 8p.
  * Quantity only applies to the main recurring price.
  */
 export function buildLightPlanCheckoutLineItems(mainQuantity: number): Stripe.Checkout.SessionCreateParams.LineItem[] {

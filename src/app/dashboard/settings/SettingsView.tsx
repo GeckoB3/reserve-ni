@@ -11,7 +11,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import type { VenueSettings } from './types';
 import { ProfileSection } from './sections/ProfileSection';
 import { VenueProfileSection } from './sections/VenueProfileSection';
@@ -26,7 +26,8 @@ import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 import { computeSmsMonthlyAllowance } from '@/lib/billing/sms-allowance';
 import {
   APPOINTMENTS_LIGHT_PRICE,
-  APPOINTMENTS_PRICE,
+  APPOINTMENTS_PRO_PRICE,
+  planDisplayName,
   RESTAURANT_PRICE,
   SMS_LIGHT_GBP_PER_MESSAGE,
   SMS_OVERAGE_GBP_PER_MESSAGE,
@@ -44,7 +45,7 @@ interface SettingsViewProps {
   isAdmin: boolean;
   initialTab?: string;
   /** Set after Stripe checkout for plan changes (webhook may lag behind redirect). */
-  planCheckoutReturn?: 'upgraded' | 'downgraded' | 'resubscribed' | 'light_sms_setup';
+  planCheckoutReturn?: 'upgraded' | 'downgraded' | 'resubscribed' | 'card_updated';
   hasServiceConfig?: boolean;
   bookingModel?: string;
   /** Light plan: SMS count matches Stripe subscription period (sms_log). */
@@ -89,17 +90,14 @@ function PlanSection({
   bookingModel,
   smsCountUsesStripePeriod = false,
   onVenueUpdate,
-  planCheckoutReturn,
   initialLightHasPaymentMethod,
 }: {
   venue: VenueSettings;
   bookingModel?: string;
   smsCountUsesStripePeriod?: boolean;
   onVenueUpdate: (patch: Partial<VenueSettings>) => void;
-  planCheckoutReturn?: SettingsViewProps['planCheckoutReturn'];
   initialLightHasPaymentMethod?: boolean;
 }) {
-  const searchParams = useSearchParams();
   const [loading, setLoading] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [planSuccess, setPlanSuccess] = useState<string | null>(null);
@@ -116,23 +114,9 @@ function PlanSection({
       : null,
   );
   const unified = isUnifiedSchedulingVenue(bookingModel);
-  const tierLabel =
-    tier === 'founding'
-      ? 'Founding Partner'
-      : tier === 'restaurant'
-        ? 'Restaurant'
-        : tier === 'light'
-          ? 'Appointments Light'
-          : 'Appointments';
+  const tierLabel = planDisplayName(tier);
   const periodEndLabel = venue.subscription_current_period_end
     ? new Date(venue.subscription_current_period_end).toLocaleDateString('en-GB', {
-        day: 'numeric',
-        month: 'long',
-        year: 'numeric',
-      })
-    : null;
-  const freePeriodEndLabel = venue.light_plan_free_period_ends_at
-    ? new Date(venue.light_plan_free_period_ends_at).toLocaleDateString('en-GB', {
         day: 'numeric',
         month: 'long',
         year: 'numeric',
@@ -170,52 +154,6 @@ function PlanSection({
     return () => clearTimeout(t);
   }, [isLight, fetchLightPlanStatus]);
 
-  const shouldPollLightSetup =
-    isLight &&
-    (planCheckoutReturn === 'light_sms_setup' ||
-      searchParams.get('light_sms_setup') === '1' ||
-      searchParams.get('light_sms_setup') === 'true');
-
-  useEffect(() => {
-    if (!shouldPollLightSetup) return;
-    let n = 0;
-    const id = window.setInterval(() => {
-      n += 1;
-      void fetchLightPlanStatus();
-      if (n >= 24) window.clearInterval(id);
-    }, 2000);
-    return () => window.clearInterval(id);
-  }, [shouldPollLightSetup, fetchLightPlanStatus]);
-
-  const freeEndMs = venue.light_plan_free_period_ends_at
-    ? new Date(venue.light_plan_free_period_ends_at).getTime()
-    : NaN;
-  /** Clock for “still in free window” — updated on an interval so render stays pure (no Date.now() in render). */
-  const [planClockMs, setPlanClockMs] = useState(() => Date.now());
-  useEffect(() => {
-    const id = setInterval(() => setPlanClockMs(Date.now()), 60_000);
-    return () => clearInterval(id);
-  }, []);
-  const inFreeWindow = !Number.isNaN(freeEndMs) && freeEndMs > planClockMs;
-
-  const lightSubscriptionPending =
-    isLight &&
-    hasCardOnFile &&
-    !hasStripeSub &&
-    inFreeWindow &&
-    billingActive &&
-    !isCancelling;
-
-  const lightTrialNoCard =
-    isLight &&
-    !hasStripeSub &&
-    !hasCardOnFile &&
-    !lightCardCheckPending &&
-    inFreeWindow &&
-    billingActive &&
-    !isCancelling;
-  const lightTrialWithCard =
-    isLight && hasStripeSub && planStatus === 'trialing' && billingActive && !isCancelling;
   const lightPaying = isLight && hasStripeSub && planStatus === 'active' && !isCancelling;
   const lightCancelling = isLight && isCancelling;
   const lightCancelled = isLight && planStatus === 'cancelled';
@@ -301,7 +239,7 @@ function PlanSection({
 
   async function confirmDowngradeToLight() {
     const ok = window.confirm(
-      `Downgrade to Appointments Light? You must have only one bookable calendar and one team login. Your Appointments subscription will be replaced by Light billing (£${APPOINTMENTS_LIGHT_PRICE}/month + pay-as-you-go SMS). This cannot be undone without upgrading again.`,
+      `Downgrade to Appointments Light? You must have only one bookable calendar and one team login. Your current subscription will be replaced by Light billing (£${APPOINTMENTS_LIGHT_PRICE}/month + pay-as-you-go SMS). This cannot be undone without upgrading again.`,
     );
     if (!ok) return;
     await postLightPlan('/api/venue/light-plan/downgrade-to-light');
@@ -372,23 +310,6 @@ function PlanSection({
           <>Your last payment failed. Update your card below to restore billing and access.</>
         ) : lightCardCheckPending ? (
           <>Checking your Stripe billing details…</>
-        ) : lightSubscriptionPending ? (
-          <>
-            Your card is saved. We are finishing your Light subscription in Stripe; this page updates automatically. A valid
-            card is required for the monthly plan fee and for pay-as-you-go SMS.
-          </>
-        ) : lightTrialNoCard ? (
-          <>
-            First three months are free for bookings and email (no card needed). The &pound;{APPOINTMENTS_LIGHT_PRICE}/month
-            plan fee starts when your free period ends, not when you add a card. Add a card anytime to send SMS at &pound;
-            {SMS_LIGHT_GBP_PER_MESSAGE.toFixed(2)} each. Add a card before your free period ends to stay on Light after that.
-          </>
-        ) : lightTrialWithCard ? (
-          <>
-            The &pound;{APPOINTMENTS_LIGHT_PRICE}/month subscription charge starts when your free period ends, not when you
-            added your card. SMS is &pound;{SMS_LIGHT_GBP_PER_MESSAGE.toFixed(2)} each (metered) when enabled. If you cancel,
-            you keep access until the billing period below ends.
-          </>
         ) : lightPaying ? (
           <>
             You are on Appointments Light at &pound;{APPOINTMENTS_LIGHT_PRICE}/month. SMS is &pound;
@@ -397,8 +318,8 @@ function PlanSection({
           </>
         ) : (
           <>
-            Appointments Light: &pound;{APPOINTMENTS_LIGHT_PRICE}/month after your free period; SMS &pound;
-            {SMS_LIGHT_GBP_PER_MESSAGE.toFixed(2)} each (metered).
+            Appointments Light: &pound;{APPOINTMENTS_LIGHT_PRICE}/month; SMS &pound;{SMS_LIGHT_GBP_PER_MESSAGE.toFixed(2)}{' '}
+            each (metered). A card on file is required for your subscription and SMS billing.
           </>
         )}
       </p>
@@ -419,18 +340,15 @@ function PlanSection({
       {periodEndLabel && billingActive && !isCancelling && hasStripeSub && (
         <p className="text-xs text-slate-500">Current billing period ends on {periodEndLabel}.</p>
       )}
-      {lightTrialNoCard && freePeriodEndLabel && (
-        <p className="text-xs text-slate-600">
-          Included free period ends on <span className="font-medium text-slate-800">{freePeriodEndLabel}</span>.
-        </p>
-      )}
       {!isLight && (
         <p className="text-sm text-slate-600">
           {isRestaurantTier
             ? 'Table management, floor plan tools, and team access included for your venue (see Dining Availability and Staff).'
             : tier === 'founding'
               ? 'Full platform features for your venue during the founding period (see note below).'
-              : 'Unlimited calendars and team members.'}
+              : tier === 'plus'
+                ? 'Up to 5 bookable calendars and 5 team logins.'
+                : 'Unlimited calendars and team members.'}
         </p>
       )}
       {isLight && (
@@ -516,7 +434,7 @@ function PlanSection({
                 ? 'Checking…'
                 : hasStripeSub
                   ? String(planStatus)
-                  : 'Not linked yet — add a card to create your Light subscription and enable metered SMS.'}
+                  : 'Not linked yet — complete checkout or resubscribe if your subscription was removed.'}
             </li>
             <li>
               <span className="font-medium text-sky-950">Card on file: </span>
@@ -533,30 +451,23 @@ function PlanSection({
               page.
             </p>
           ) : null}
-          {planStatus !== 'cancelled' &&
-            (!hasCardOnFile || planStatus === 'past_due') &&
-            !lightSubscriptionPending && (
-              <button
-                type="button"
-                disabled={loading}
-                onClick={() => void postLightPlan('/api/venue/light-plan/start-sms-setup')}
-                className="rounded-lg bg-sky-700 px-4 py-2 text-xs font-semibold text-white hover:bg-sky-800 disabled:opacity-50"
-              >
-                {planStatus === 'past_due' && hasStripeSub
-                  ? 'Update card in Stripe Checkout'
-                  : 'Add card for SMS and billing'}
-              </button>
-            )}
-          {lightSubscriptionPending ? (
-            <p className="text-xs font-medium text-sky-900">Hang tight — confirming subscription with Stripe…</p>
+          {planStatus !== 'cancelled' && hasStripeSub && (!hasCardOnFile || planStatus === 'past_due') ? (
+            <button
+              type="button"
+              disabled={loading}
+              onClick={() => void postLightPlan('/api/venue/light-plan/update-payment-method')}
+              className="rounded-lg bg-sky-700 px-4 py-2 text-xs font-semibold text-white hover:bg-sky-800 disabled:opacity-50"
+            >
+              {planStatus === 'past_due' ? 'Update card in Stripe Checkout' : 'Add or update card'}
+            </button>
           ) : null}
         </div>
       )}
       {isLight && (
         <div className="rounded-lg border border-brand-200 bg-brand-50/80 px-3 py-3 text-sm text-brand-950">
-          <p className="font-medium">Upgrade to full Appointments</p>
+          <p className="font-medium">Upgrade to Appointments Pro</p>
           <p className="mt-1 text-brand-900">
-            &pound;{APPOINTMENTS_PRICE}/month: unlimited calendars and team members, higher SMS bundle. Checkout replaces your
+            &pound;{APPOINTMENTS_PRO_PRICE}/month: unlimited calendars and team members, higher SMS bundle. Checkout replaces your
             Light plan.
           </p>
           <button
@@ -565,11 +476,11 @@ function PlanSection({
             onClick={() => void postLightPlan('/api/venue/light-plan/upgrade-to-appointments')}
             className="mt-2 rounded-lg bg-brand-600 px-4 py-2 text-xs font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
           >
-            Upgrade to Appointments
+            Upgrade to Appointments Pro
           </button>
         </div>
       )}
-      {tier === 'appointments' && unified && (
+      {(tier === 'appointments' || tier === 'plus') && unified && (
         <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-800">
           <p className="font-medium text-slate-900">Downgrade to Appointments Light</p>
           <p className="mt-1 text-slate-600">
@@ -724,8 +635,8 @@ export function SettingsView({
       ? 'Payment received. We are confirming your upgrade. The Plan tab will update in a few seconds. You can also refresh the page if it still shows your old plan.'
       : planCheckoutReturn === 'downgraded'
         ? 'We are confirming your plan change. Details on the Plan tab will update shortly.'
-        : planCheckoutReturn === 'light_sms_setup'
-          ? 'Card saved. We are creating your Light subscription in Stripe; the Plan tab may take a short moment to update.'
+        : planCheckoutReturn === 'card_updated'
+          ? 'Payment method updated. Stripe will retry any open invoices shortly.'
           : 'We are confirming your subscription. The Plan tab will update shortly.';
 
   if (!venue) {
@@ -842,7 +753,6 @@ export function SettingsView({
             bookingModel={bookingModel}
             smsCountUsesStripePeriod={smsCountUsesStripePeriod}
             onVenueUpdate={onUpdate}
-            planCheckoutReturn={planCheckoutReturn}
             initialLightHasPaymentMethod={initialLightHasPaymentMethod}
           />
         )}

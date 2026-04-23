@@ -1,13 +1,16 @@
 import { getSupabaseAdminClient } from '@/lib/supabase';
 
-/** Included SMS per month on the Appointments plan. */
-export const SMS_INCLUDED_APPOINTMENTS = 300;
+/** Included SMS per month on Appointments Pro (`pricing_tier` = appointments). */
+export const SMS_INCLUDED_APPOINTMENTS = 800;
+
+/** Included SMS per month on Appointments Plus. */
+export const SMS_INCLUDED_PLUS = 300;
 
 /** Included SMS per month on the Restaurant plan (and Founding). */
 export const SMS_INCLUDED_RESTAURANT = 800;
 
 /**
- * Appointments: 300 SMS flat; Restaurant / Founding: 800 flat.
+ * Light: 0; Plus: 300; Pro (appointments): 800; Restaurant / Founding: 800.
  * Must match `venues.sms_monthly_allowance` persisted by `updateVenueSmsMonthlyAllowance`.
  * Call after subscription tier changes.
  */
@@ -15,6 +18,9 @@ export function computeSmsMonthlyAllowance(pricingTier: string, _calendarCount: 
   const tier = (pricingTier ?? 'appointments').toLowerCase();
   if (tier === 'light') {
     return 0;
+  }
+  if (tier === 'plus') {
+    return SMS_INCLUDED_PLUS;
   }
   if (tier === 'restaurant' || tier === 'founding') {
     return SMS_INCLUDED_RESTAURANT;

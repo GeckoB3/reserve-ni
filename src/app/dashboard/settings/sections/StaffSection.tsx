@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { BookingModel } from '@/types/booking-models';
 import type { StaffMember } from '../types';
-import { isLightPlanTier } from '@/lib/tier-enforcement';
+import { planStaffLimit } from '@/lib/plan-limits';
+import { planDisplayName } from '@/lib/pricing-constants';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { Pill } from '@/components/ui/dashboard/Pill';
 
@@ -89,13 +90,14 @@ export function StaffSection({
     setStaff(list ?? []);
   }, []);
 
-  const lightPlanStaffLimitReached = isLightPlanTier(pricingTier) && staff.length >= 1;
+  const staffCap = planStaffLimit(pricingTier);
+  const staffPlanLimitReached = staffCap !== Infinity && staff.length >= staffCap;
 
   useEffect(() => {
-    if (lightPlanStaffLimitReached) {
+    if (staffPlanLimitReached) {
       setShowCreateForm(false);
     }
-  }, [lightPlanStaffLimitReached]);
+  }, [staffPlanLimitReached]);
 
   const loadSessionSettings = useCallback(async () => {
     try {
@@ -522,7 +524,7 @@ export function StaffSection({
           title="Staff members"
           description={isAdmin ? 'Manage team members, roles, and access.' : 'View your team members.'}
           right={
-            isAdmin && !lightPlanStaffLimitReached ? (
+            isAdmin && !staffPlanLimitReached ? (
               <button
                 type="button"
                 onClick={() => {
@@ -540,10 +542,10 @@ export function StaffSection({
         />
 
         <SectionCard.Body className="space-y-4">
-          {isAdmin && lightPlanStaffLimitReached && (
+          {isAdmin && staffPlanLimitReached && (
             <div className="rounded-lg border border-amber-200 bg-amber-50/90 px-4 py-3 text-sm text-amber-950">
-              Appointments Light includes <strong>one team login</strong>. To invite more people, upgrade to the full
-              Appointments plan under{' '}
+              {planDisplayName(pricingTier)} allows <strong>up to {staffCap} team login(s)</strong>. To invite more people,
+              upgrade to Appointments Pro under{' '}
               <a href="/dashboard/settings?tab=plan" className="font-medium text-brand-700 underline hover:text-brand-800">
                 Settings → Plan
               </a>

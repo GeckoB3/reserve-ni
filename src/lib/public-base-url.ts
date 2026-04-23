@@ -15,7 +15,7 @@ export function normalizePublicBaseUrl(raw: string | undefined): string {
     if (u.protocol !== 'http:' && u.protocol !== 'https:') return DEFAULT_PUBLIC_ORIGIN;
     return `${u.protocol}//${u.host}`;
   } catch {
-    // e.g. "http://localhost:3000STRIPE_APPOINTMENTS_PRICE_ID=price_xxx" (missing newline between env vars)
+    // e.g. "http://localhost:3000STRIPE_APPOINTMENTS_PRO_PRICE_ID=price_xxx" (missing newline between env vars)
     const m = firstLine.match(/^(https?:\/\/[a-zA-Z0-9.-]+(?::\d+)?)/);
     if (m) {
       try {

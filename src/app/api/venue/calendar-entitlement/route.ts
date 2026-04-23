@@ -2,8 +2,9 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
-import { assertLightPlanCalendarSlotAvailable } from '@/lib/light-plan';
-import { isLightPlanTier } from '@/lib/tier-enforcement';
+import { assertCalendarSlotAvailable, assertStaffSlotAvailable } from '@/lib/light-plan';
+import { planCalendarLimit, planStaffLimit } from '@/lib/plan-limits';
+import { isLightPlanTier, isPlusPlanTier } from '@/lib/tier-enforcement';
 
 /**
  * GET /api/venue/calendar-entitlement
@@ -38,18 +39,28 @@ export async function GET() {
 
     const activePractitioners = count ?? 0;
 
-    const lightRes = await assertLightPlanCalendarSlotAvailable(staff.venue_id);
-    if (isLightPlanTier(tier)) {
+    const calRes = await assertCalendarSlotAvailable(staff.venue_id);
+    const staffRes = await assertStaffSlotAvailable(staff.venue_id);
+
+    const calLimit = planCalendarLimit(tier);
+    const staffLimit = planStaffLimit(tier);
+    const finiteCal = calLimit !== Infinity;
+    const finiteStaff = staffLimit !== Infinity;
+
+    if (isLightPlanTier(tier) || isPlusPlanTier(tier)) {
       return NextResponse.json({
         pricing_tier: tier,
-        calendar_count: 1,
+        calendar_count: isLightPlanTier(tier) ? 1 : null,
         active_practitioners: activePractitioners,
-        calendar_limit: lightRes.limit,
-        unlimited: false,
-        at_calendar_limit: !lightRes.allowed,
-        can_add_practitioner: lightRes.allowed,
+        calendar_limit: calRes.limit,
+        unlimited: !finiteCal,
+        at_calendar_limit: !calRes.allowed,
+        can_add_practitioner: calRes.allowed,
+        unified_calendar_count: calRes.current,
+        staff_limit: finiteStaff ? staffRes.limit : null,
+        active_staff: staffRes.staffCount,
+        can_invite_staff: staffRes.allowed,
         booking_model: venue.booking_model,
-        unified_calendar_count: lightRes.current,
       });
     }
 
@@ -61,6 +72,10 @@ export async function GET() {
       unlimited: true,
       at_calendar_limit: false,
       can_add_practitioner: true,
+      unified_calendar_count: calRes.current,
+      staff_limit: null,
+      active_staff: staffRes.staffCount,
+      can_invite_staff: true,
       booking_model: venue.booking_model,
     });
   } catch (err) {

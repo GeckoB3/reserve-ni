@@ -1,11 +1,16 @@
 import { getSupabaseAdminClient } from '@/lib/supabase';
-import { assertLightPlanCalendarSlotAvailable } from '@/lib/light-plan';
+import { assertCalendarSlotAvailable } from '@/lib/light-plan';
 
-export type PricingTier = 'appointments' | 'light' | 'restaurant' | 'founding';
+export type PricingTier = 'appointments' | 'plus' | 'light' | 'restaurant' | 'founding';
 
 /** Appointments Light — sole trader tier: one calendar column, one staff login, PAYG SMS. */
 export function isLightPlanTier(pricingTier: string | null | undefined): boolean {
   return (pricingTier ?? '').toLowerCase().trim() === 'light';
+}
+
+/** Appointments Plus — up to 5 calendars and 5 staff. */
+export function isPlusPlanTier(pricingTier: string | null | undefined): boolean {
+  return (pricingTier ?? '').toLowerCase().trim() === 'plus';
 }
 
 /**
@@ -26,21 +31,21 @@ export function isRestaurantCommsTier(pricingTier: string | null | undefined): b
 }
 
 /**
- * Unified scheduling product (Appointments full plan or Appointments Light), not restaurant table SKU.
+ * Unified scheduling product (Pro, Plus, Light), not restaurant table SKU.
  */
 export function isAppointmentPlanTier(pricingTier: string | null | undefined): boolean {
   const t = (pricingTier ?? '').toLowerCase().trim();
-  return t === 'appointments' || t === 'light';
+  return t === 'appointments' || t === 'light' || t === 'plus';
 }
 
 /**
- * Appointments Light: at most one active `unified_calendars` row. Other tiers: unlimited.
+ * Light and Plus: finite active `unified_calendars` rows. Other tiers: unlimited.
  */
 export async function checkCalendarLimit(
   venueId: string,
   _countTable: 'practitioners' | 'venue_resources' | 'experience_events'
 ): Promise<{ allowed: boolean; current?: number; limit?: number }> {
-  const r = await assertLightPlanCalendarSlotAvailable(venueId);
+  const r = await assertCalendarSlotAvailable(venueId);
   if (r.limit === Infinity) {
     return { allowed: true };
   }

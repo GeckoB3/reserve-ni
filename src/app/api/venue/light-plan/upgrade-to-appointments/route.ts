@@ -38,9 +38,9 @@ export async function POST() {
       return NextResponse.json({ error: 'No Stripe customer on file.' }, { status: 400 });
     }
 
-    const appointmentsPrice = process.env.STRIPE_APPOINTMENTS_PRICE_ID?.trim();
+    const appointmentsPrice = process.env.STRIPE_APPOINTMENTS_PRO_PRICE_ID?.trim();
     if (!appointmentsPrice) {
-      console.error('[upgrade-to-appointments] STRIPE_APPOINTMENTS_PRICE_ID missing');
+      console.error('[upgrade-to-appointments] STRIPE_APPOINTMENTS_PRO_PRICE_ID missing');
       return NextResponse.json({ error: 'Billing is not configured' }, { status: 500 });
     }
 

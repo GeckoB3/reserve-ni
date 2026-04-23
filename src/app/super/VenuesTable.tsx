@@ -36,12 +36,14 @@ interface ApiResponse {
   totalPages: number;
 }
 
-const TIER_OPTIONS = ['', 'appointments', 'restaurant', 'founding'] as const;
+const TIER_OPTIONS = ['', 'appointments', 'plus', 'light', 'restaurant', 'founding'] as const;
 const STATUS_OPTIONS = ['', 'active', 'trialing', 'past_due', 'cancelled', 'cancelling'] as const;
 
 function tierBadge(tier: string) {
   const t = tier.toLowerCase().trim();
   if (t === 'appointments') return 'bg-violet-100 text-violet-700';
+  if (t === 'plus') return 'bg-indigo-100 text-indigo-800';
+  if (t === 'light') return 'bg-sky-100 text-sky-800';
   if (t === 'restaurant') return 'bg-blue-100 text-blue-700';
   if (t === 'founding') return 'bg-amber-100 text-amber-800';
   return 'bg-slate-100 text-slate-600';

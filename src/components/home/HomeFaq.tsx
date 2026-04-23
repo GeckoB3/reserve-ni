@@ -3,11 +3,13 @@
 import { useCallback, useId, useState } from 'react';
 import {
   APPOINTMENTS_LIGHT_PRICE,
-  APPOINTMENTS_PRICE,
+  APPOINTMENTS_PLUS_PRICE,
+  APPOINTMENTS_PRO_PRICE,
   RESTAURANT_PRICE,
   SMS_LIGHT_GBP_PER_MESSAGE,
   SMS_OVERAGE_GBP_PER_MESSAGE,
 } from '@/lib/pricing-constants';
+import { SMS_INCLUDED_APPOINTMENTS, SMS_INCLUDED_PLUS, SMS_INCLUDED_RESTAURANT } from '@/lib/billing/sms-allowance';
 
 type FaqItem = { question: string; answer: string };
 
@@ -38,15 +40,15 @@ function buildFaqSections(): { heading: string; items: FaqItem[] }[] {
       items: [
         {
           question: 'What does ReserveNI cost?',
-          answer: `Appointments Light is built for sole traders: your first three months are free, then £${APPOINTMENTS_LIGHT_PRICE} per month for one bookable calendar and one venue login, with appointments, classes, events, and resource booking plus email reminders. SMS is pay-as-you-go at ${Math.round(SMS_LIGHT_GBP_PER_MESSAGE * 100)}p per message. The full Appointments plan is £${APPOINTMENTS_PRICE} per month for unlimited team members, calendars, and booking types, with a monthly SMS allowance then ${Math.round(SMS_OVERAGE_GBP_PER_MESSAGE * 100)}p per message over that. The Restaurant plan is £${RESTAURANT_PRICE} per month with table management, floor plan tools, and priority support. There are no setup fees, no contracts, and no per-booking commissions. Cancel anytime with 30 days notice.`,
+          answer: `Appointments Light is £${APPOINTMENTS_LIGHT_PRICE} per month (card at signup) for one bookable calendar and one venue login, with appointments, classes, events, and resource booking plus email reminders. SMS is pay-as-you-go at ${Math.round(SMS_LIGHT_GBP_PER_MESSAGE * 100)}p per message with none included. Appointments Plus is £${APPOINTMENTS_PLUS_PRICE} per month for up to 5 calendars and 5 users, with ${SMS_INCLUDED_PLUS} SMS included then ${Math.round(SMS_OVERAGE_GBP_PER_MESSAGE * 100)}p each. Appointments Pro is £${APPOINTMENTS_PRO_PRICE} per month for unlimited calendars and team members, with ${SMS_INCLUDED_APPOINTMENTS} SMS included then ${Math.round(SMS_OVERAGE_GBP_PER_MESSAGE * 100)}p each. The Restaurant plan is £${RESTAURANT_PRICE} per month with table management, floor plan tools, and ${SMS_INCLUDED_RESTAURANT} SMS per month included. There are no setup fees, no contracts, and no per-booking commissions. Cancel anytime with 30 days notice.`,
         },
         {
           question: 'Are there any hidden fees or commissions?',
-          answer: `No. Your monthly subscription covers the platform. We never take a commission on your bookings, and we never charge your customers a booking fee. On Appointments Light there is no SMS bundle: each message is billed at ${Math.round(SMS_LIGHT_GBP_PER_MESSAGE * 100)}p. On full Appointments and Restaurant you get a generous monthly SMS allowance; additional messages are ${Math.round(SMS_OVERAGE_GBP_PER_MESSAGE * 100)}p each, clearly shown in your dashboard.`,
+          answer: `No. Your monthly subscription covers the platform. We never take a commission on your bookings, and we never charge your customers a booking fee. On Appointments Light there is no SMS bundle: each message is billed at ${Math.round(SMS_LIGHT_GBP_PER_MESSAGE * 100)}p. On Appointments Plus, Pro, and Restaurant you get a monthly SMS allowance; additional messages are ${Math.round(SMS_OVERAGE_GBP_PER_MESSAGE * 100)}p each, clearly shown in your dashboard.`,
         },
         {
           question: 'How does ReserveNI compare to Fresha, Booksy, or ResDiary on price?',
-          answer: `Fresha charges a 20% commission every time a new client books through their marketplace. Booksy charges per team member, so a salon with 4 staff pays over £90 per month. ResDiary starts at £89 per month for restaurants. ReserveNI offers Appointments Light: three months free, then £${APPOINTMENTS_LIGHT_PRICE} per month for a single calendar with no per-staff fees, plus full Appointments at £${APPOINTMENTS_PRICE} per month with unlimited team members and no commission, or Restaurant at £${RESTAURANT_PRICE} per month for dining-focused tools. You keep more of what you earn.`,
+          answer: `Fresha charges a 20% commission every time a new client books through their marketplace. Booksy charges per team member, so a salon with 4 staff pays over £90 per month. ResDiary starts at £89 per month for restaurants. ReserveNI offers Appointments Light at £${APPOINTMENTS_LIGHT_PRICE} per month for a single calendar, Appointments Plus at £${APPOINTMENTS_PLUS_PRICE} for up to 5 calendars and users, Appointments Pro at £${APPOINTMENTS_PRO_PRICE} with unlimited team members and no commission, or Restaurant at £${RESTAURANT_PRICE} per month for dining-focused tools. You keep more of what you earn.`,
         },
       ],
     },
@@ -66,7 +68,7 @@ function buildFaqSections(): { heading: string; items: FaqItem[] }[] {
         {
           question: 'Does ReserveNI send booking reminders to my clients?',
           answer:
-            'Yes. Automated email reminders are included on every plan. On full Appointments and Restaurant you also get SMS reminders within your monthly allowance (overage priced per message). Appointments Light includes email reminders; you can enable SMS reminders pay-as-you-go when you need them. Reminders include a one-tap confirm or cancel link, which typically reduces no-shows by 30-40%.',
+            'Yes. Automated email reminders are included on every plan. On Appointments Plus, Pro, and Restaurant you also get SMS reminders within your monthly allowance (overage priced per message). Appointments Light includes email reminders; SMS is pay-as-you-go when you send messages. Reminders include a one-tap confirm or cancel link, which typically reduces no-shows by 30-40%.',
         },
         {
           question: 'Can I collect deposits to protect against no-shows?',
@@ -76,7 +78,7 @@ function buildFaqSections(): { heading: string; items: FaqItem[] }[] {
         {
           question: 'Can my staff each have their own calendar and booking link?',
           answer:
-            'On the full Appointments plan, yes. Each team member gets their own calendar with individual working hours, breaks, and services, plus a personal booking link (like reserveni.com/book/your-salon/sarah) to share with clients. There is no extra charge for adding team members. Appointments Light is built for sole traders: one bookable calendar and one venue login—upgrade when you need multiple staff with separate calendars.',
+            'On Appointments Plus and Pro, yes (within your plan limits). Each team member can have their own calendar with individual working hours, breaks, and services, plus a personal booking link to share with clients. Appointments Light is built for sole traders: one bookable calendar and one venue login—upgrade to Plus or Pro when you need multiple staff with separate calendars.',
         },
         {
           question: 'I run a restaurant. How does ReserveNI compare to ResDiary?',
@@ -100,12 +102,12 @@ function buildFaqSections(): { heading: string; items: FaqItem[] }[] {
         {
           question: 'What support do you offer if I get stuck?',
           answer:
-            'Appointments Light includes email support. The full Appointments and Restaurant plans include email and phone support, and Restaurant customers get priority response times. We are a Northern Ireland-based team who understand local businesses, so when you contact us you will reach someone who knows the product inside out, not a chatbot or an overseas call centre.',
+            'Appointments Light includes email support. Appointments Plus, Pro, and Restaurant include email and phone support, and Restaurant customers get priority response times. We are a Northern Ireland-based team who understand local businesses, so when you contact us you will reach someone who knows the product inside out, not a chatbot or an overseas call centre.',
         },
         {
           question: 'Can I try ReserveNI before committing?',
           answer:
-            'Yes. Appointments Light starts with three months free with no card required to begin. You can also contact us for a free demo tailored to your business type—we will walk you through how ReserveNI fits your setup and answer questions before you sign up.',
+            'You can contact us for a free demo tailored to your business type—we will walk you through how ReserveNI fits your setup and answer questions before you sign up.',
         },
       ],
     },

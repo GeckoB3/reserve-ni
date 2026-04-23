@@ -1,7 +1,13 @@
-/** Appointments plan: flat monthly price (GBP). */
-export const APPOINTMENTS_PRICE = 35;
+/** Appointments Pro plan: flat monthly price (GBP). */
+export const APPOINTMENTS_PRO_PRICE = 79;
 
-/** Appointments Light plan: after free period (GBP). */
+/** @deprecated Use APPOINTMENTS_PRO_PRICE — same value (Pro tier in Stripe). */
+export const APPOINTMENTS_PRICE = APPOINTMENTS_PRO_PRICE;
+
+/** Appointments Plus plan: flat monthly price (GBP). */
+export const APPOINTMENTS_PLUS_PRICE = 35;
+
+/** Appointments Light plan (GBP). */
 export const APPOINTMENTS_LIGHT_PRICE = 6;
 
 /** Restaurant plan: flat monthly price (GBP). */
@@ -15,3 +21,22 @@ export const SMS_LIGHT_GBP_PER_MESSAGE = 0.08;
 
 /** Founding Partner programme cap (restaurants). */
 export const FOUNDING_PARTNER_CAP = 20;
+
+/** User-visible plan name from `venues.pricing_tier` (lowercase). */
+export function planDisplayName(pricingTier: string | null | undefined): string {
+  const t = (pricingTier ?? '').toLowerCase().trim();
+  switch (t) {
+    case 'light':
+      return 'Appointments Light';
+    case 'plus':
+      return 'Appointments Plus';
+    case 'appointments':
+      return 'Appointments Pro';
+    case 'restaurant':
+      return 'Restaurant';
+    case 'founding':
+      return 'Founding Partner';
+    default:
+      return 'Appointments Pro';
+  }
+}
