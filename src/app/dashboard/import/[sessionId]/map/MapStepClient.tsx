@@ -235,7 +235,7 @@ export function MapStepClient({ sessionId }: { sessionId: string }) {
             key={f.id}
             type="button"
             onClick={() => setActiveFileId(f.id)}
-            className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${
+            className={`min-h-10 rounded-lg px-3 py-2 text-sm font-semibold ${
               activeFile?.id === f.id ? 'bg-brand-600 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
             }`}
           >
@@ -252,7 +252,7 @@ export function MapStepClient({ sessionId }: { sessionId: string }) {
               type="button"
               disabled={aiBusy}
               onClick={() => void runAiForFile(activeFile.id)}
-              className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-800 hover:bg-slate-50 disabled:opacity-50"
+              className="min-h-10 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 hover:bg-slate-50 disabled:opacity-50"
             >
               {aiBusy ? 'Running AI…' : 'Run AI mapping'}
             </button>
@@ -275,7 +275,7 @@ export function MapStepClient({ sessionId }: { sessionId: string }) {
       <div className="flex justify-between gap-2">
         <Link
           href={`/dashboard/import/${sessionId}/upload`}
-          className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+          className="inline-flex min-h-10 items-center justify-center rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
         >
           Back
         </Link>
@@ -283,7 +283,7 @@ export function MapStepClient({ sessionId }: { sessionId: string }) {
           type="button"
           disabled={saving || !canContinue}
           onClick={() => void saveAndContinue()}
-          className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
+          className="min-h-10 rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
         >
           {saving ? 'Saving…' : 'Continue'}
         </button>

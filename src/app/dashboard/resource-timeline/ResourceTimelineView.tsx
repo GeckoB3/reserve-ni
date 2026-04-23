@@ -711,7 +711,7 @@ export function ResourceTimelineView({
                 <button
                   type="button"
                   onClick={openCreate}
-                  className="rounded-xl bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-brand-700"
+                  className="min-h-10 rounded-xl bg-brand-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-700"
                 >
                   + Add
                 </button>
@@ -782,14 +782,14 @@ export function ResourceTimelineView({
             <div className="mt-3 flex flex-wrap items-center gap-3">
               <Link
                 href="/dashboard/calendar-availability?tab=availability"
-                className="inline-flex items-center rounded-lg bg-amber-800 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-900"
+                className="inline-flex min-h-10 items-center rounded-lg bg-amber-800 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-900"
               >
                 Open Calendar availability
               </Link>
               <button
                 type="button"
                 onClick={() => setAvailabilityWarning(null)}
-                className="text-xs font-medium text-amber-800 underline underline-offset-2 hover:text-amber-950"
+                className="min-h-10 rounded-lg px-2 text-sm font-medium text-amber-800 underline underline-offset-2 hover:bg-amber-100/60 hover:text-amber-950"
               >
                 Dismiss
               </button>
@@ -1160,14 +1160,14 @@ export function ResourceTimelineView({
                   <button
                     type="button"
                     onClick={saveExceptionEdit}
-                    className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-700"
+                    className="min-h-10 rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white hover:bg-brand-700"
                   >
                     Save changes
                   </button>
                   <button
                     type="button"
                     onClick={() => removeException(exceptionEditingDay)}
-                    className="rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50"
+                    className="min-h-10 rounded-lg border border-red-200 bg-white px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50"
                   >
                     Remove this day
                   </button>
@@ -1216,14 +1216,14 @@ export function ResourceTimelineView({
                     type="button"
                     onClick={applyExceptionRange}
                     disabled={!exceptionRangeStart}
-                    className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-brand-700 disabled:opacity-50"
+                    className="min-h-10 rounded-lg bg-brand-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 disabled:opacity-50"
                   >
                     Apply to calendar selection
                   </button>
                   <button
                     type="button"
                     onClick={clearExceptionRangeSelection}
-                    className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                    className="min-h-10 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
                   >
                     Clear selection
                   </button>
@@ -1288,14 +1288,14 @@ export function ResourceTimelineView({
                         <button
                           type="button"
                           onClick={() => openEdit(selected)}
-                          className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
+                          className="min-h-10 rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
                         >
                           Edit
                         </button>
                         <button
                           type="button"
                           onClick={() => void handleDelete(selected.id)}
-                          className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700 shadow-sm hover:bg-red-100"
+                          className="min-h-10 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700 shadow-sm hover:bg-red-100"
                         >
                           Delete
                         </button>

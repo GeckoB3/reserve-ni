@@ -46,19 +46,19 @@ export function StatTile({
         </div>
       </div>
       {subValue ? (
-        <p className="mt-1 text-[10px] font-medium tabular-nums opacity-85 sm:text-xs">{subValue}</p>
+        <p className="mt-1 text-xs font-medium tabular-nums opacity-85">{subValue}</p>
       ) : null}
       {subValue2 ? (
-        <p className="mt-0.5 text-[10px] font-medium tabular-nums opacity-85 sm:text-xs">{subValue2}</p>
+        <p className="mt-0.5 text-xs font-medium tabular-nums opacity-85">{subValue2}</p>
       ) : null}
       <div className="mt-2 flex flex-wrap items-center justify-between gap-1">
         {label ? (
-          <p className="text-[10px] font-semibold uppercase tracking-wide opacity-80 sm:text-xs">{label}</p>
+          <p className="text-xs font-semibold uppercase tracking-wide opacity-80">{label}</p>
         ) : (
           <span />
         )}
         {trend ? (
-          <span className="rounded-full bg-white/70 px-1.5 py-0.5 text-[10px] font-bold tabular-nums text-emerald-700 ring-1 ring-emerald-100/80">
+          <span className="rounded-full bg-white/70 px-1.5 py-0.5 text-xs font-bold tabular-nums text-emerald-700 ring-1 ring-emerald-100/80">
             {trend}
           </span>
         ) : null}

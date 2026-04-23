@@ -313,7 +313,7 @@ export function ValidateStepClient({ sessionId }: { sessionId: string }) {
           <button
             type="button"
             onClick={() => void runValidation()}
-            className="rounded-lg bg-red-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-950"
+            className="min-h-10 rounded-lg bg-red-900 px-3 py-2 text-sm font-semibold text-white hover:bg-red-950"
           >
             Retry validation
           </button>
@@ -390,7 +390,7 @@ export function ValidateStepClient({ sessionId }: { sessionId: string }) {
             <select
               value={dateChoice}
               onChange={(e) => setDateChoice(e.target.value as 'dd/MM/yyyy' | 'MM/dd/yyyy' | '')}
-              className="rounded-lg border border-amber-300 bg-white px-2 py-1.5 text-xs"
+              className="min-h-10 rounded-lg border border-amber-300 bg-white px-2 py-2 text-sm"
             >
               <option value="">Select format…</option>
               <option value="dd/MM/yyyy">DD/MM/YYYY (UK)</option>
@@ -399,7 +399,7 @@ export function ValidateStepClient({ sessionId }: { sessionId: string }) {
             <button
               type="button"
               onClick={() => void applyDateFormat()}
-              className="rounded-lg bg-amber-800 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-900"
+              className="min-h-10 rounded-lg bg-amber-800 px-3 py-2 text-sm font-semibold text-white hover:bg-amber-900"
             >
               Apply and re-validate
             </button>
@@ -412,14 +412,14 @@ export function ValidateStepClient({ sessionId }: { sessionId: string }) {
           <button
             type="button"
             onClick={() => void bulkDecision('existing_client', 'update_existing')}
-            className="rounded-lg bg-slate-800 px-3 py-1.5 text-xs font-semibold text-white hover:bg-slate-900"
+            className="min-h-10 rounded-lg bg-slate-800 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-900"
           >
             Update all existing {clientPlural.toLowerCase()}
           </button>
           <button
             type="button"
             onClick={() => void bulkDecision('existing_client', 'skip')}
-            className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-800 hover:bg-slate-50"
+            className="min-h-10 rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-800 hover:bg-slate-50"
           >
             Skip all duplicates
           </button>
@@ -432,14 +432,14 @@ export function ValidateStepClient({ sessionId }: { sessionId: string }) {
           <button
             type="button"
             onClick={() => void bulkDecision('email_invalid', 'import_anyway')}
-            className="rounded-lg bg-slate-800 px-3 py-1.5 text-xs font-semibold text-white hover:bg-slate-900"
+            className="min-h-10 rounded-lg bg-slate-800 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-900"
           >
             Import all without email where invalid
           </button>
           <button
             type="button"
             onClick={() => void bulkDecision('email_invalid', 'skip')}
-            className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-800 hover:bg-slate-50"
+            className="min-h-10 rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-800 hover:bg-slate-50"
           >
             Skip all these rows
           </button>

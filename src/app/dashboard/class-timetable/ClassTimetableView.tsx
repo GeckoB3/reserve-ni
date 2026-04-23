@@ -1437,7 +1437,7 @@ export function ClassTimetableView({
             role="dialog"
             aria-modal="true"
             aria-labelledby="add-calendar-modal-title"
-            className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-6 shadow-xl"
+            className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-6 pb-[max(1.5rem,env(safe-area-inset-bottom,0px))] shadow-xl sm:pb-6"
             onClick={(e) => e.stopPropagation()}
           >
             <h2 id="add-calendar-modal-title" className="mb-1 text-lg font-semibold text-slate-900">
@@ -1498,7 +1498,7 @@ export function ClassTimetableView({
 
       {editingTimetable && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-6 shadow-xl">
+          <div className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-6 pb-[max(1.5rem,env(safe-area-inset-bottom,0px))] shadow-xl sm:pb-6">
             <h3 className="mb-4 text-lg font-semibold text-slate-900">Edit weekly rule</h3>
             <div className="space-y-3">
               <div>
@@ -1623,7 +1623,7 @@ export function ClassTimetableView({
 
       {editingInstance && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-6 shadow-xl">
+          <div className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-6 pb-[max(1.5rem,env(safe-area-inset-bottom,0px))] shadow-xl sm:pb-6">
             <h3 className="text-lg font-semibold text-slate-900">Edit session</h3>
             {typeMap.get(editingInstance.class_type_id)?.name ? (
               <p className="mt-1 text-base font-medium text-slate-800">

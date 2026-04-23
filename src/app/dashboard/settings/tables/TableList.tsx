@@ -14,6 +14,7 @@ import { CSS } from '@dnd-kit/utilities';
 import type { VenueTable, TableShape, TableType } from '@/types/table-management';
 import { getTableDimensions, TABLE_TYPES } from '@/types/table-management';
 import { NumericInput } from '@/components/ui/NumericInput';
+import { HorizontalScrollHint } from '@/components/ui/HorizontalScrollHint';
 
 interface Props {
   tables: VenueTable[];
@@ -602,7 +603,8 @@ export function TableList({ tables, setTables, isAdmin, onRefresh, variant = 'fu
         </div>
       ) : (
         <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
-          <div className="overflow-x-auto">
+          <HorizontalScrollHint />
+          <div className="touch-pan-x overflow-x-auto [-webkit-overflow-scrolling:touch]">
             {canReorderTables ? (
               <DndContext sensors={reorderSensors} collisionDetection={closestCenter} onDragEnd={onReorderDragEnd}>
                 <table className="w-full text-sm">
@@ -668,7 +670,7 @@ export function TableList({ tables, setTables, isAdmin, onRefresh, variant = 'fu
                                           is_active: t.is_active,
                                         })
                                       }
-                                      className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                                      className="flex h-10 w-10 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-600"
                                       title="Edit"
                                     >
                                       <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -678,7 +680,7 @@ export function TableList({ tables, setTables, isAdmin, onRefresh, variant = 'fu
                                     <button
                                       type="button"
                                       onClick={() => duplicateTable(t)}
-                                      className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                                      className="flex h-10 w-10 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-600"
                                       title="Duplicate"
                                     >
                                       <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -688,7 +690,7 @@ export function TableList({ tables, setTables, isAdmin, onRefresh, variant = 'fu
                                     <button
                                       type="button"
                                       onClick={() => deleteTable(t.id)}
-                                      className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600"
+                                      className="flex h-10 w-10 items-center justify-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600"
                                       title="Delete"
                                     >
                                       <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -756,7 +758,7 @@ export function TableList({ tables, setTables, isAdmin, onRefresh, variant = 'fu
                                   is_active: t.is_active,
                                 })
                               }
-                              className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                              className="flex h-10 w-10 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-600"
                               title="Edit"
                             >
                               <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -766,7 +768,7 @@ export function TableList({ tables, setTables, isAdmin, onRefresh, variant = 'fu
                             <button
                               type="button"
                               onClick={() => duplicateTable(t)}
-                              className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                              className="flex h-10 w-10 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-600"
                               title="Duplicate"
                             >
                               <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -776,7 +778,7 @@ export function TableList({ tables, setTables, isAdmin, onRefresh, variant = 'fu
                             <button
                               type="button"
                               onClick={() => deleteTable(t.id)}
-                              className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600"
+                              className="flex h-10 w-10 items-center justify-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600"
                               title="Delete"
                             >
                               <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>

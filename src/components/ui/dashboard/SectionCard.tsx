@@ -32,9 +32,9 @@ function SectionCardHeader({
   description?: ReactNode;
   right?: ReactNode;
 }) {
-  if (!eyebrow && !title && !right) return null;
+  if (!eyebrow && !title && !description && !right) return null;
   return (
-    <div className="flex flex-col gap-3 border-b border-slate-100 bg-slate-50/60 px-5 py-4 sm:flex-row sm:items-start sm:justify-between sm:px-6">
+    <div className="flex flex-col gap-3 border-b border-slate-100 bg-slate-50/60 px-4 py-4 sm:flex-row sm:items-start sm:justify-between sm:px-6">
       <div className="min-w-0">
         {eyebrow ? (
           <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-500">{eyebrow}</p>
@@ -48,7 +48,7 @@ function SectionCardHeader({
 }
 
 function SectionCardBody({ children, className = '' }: { children: ReactNode; className?: string }) {
-  return <div className={`px-5 py-4 sm:px-6 sm:py-5 ${className}`}>{children}</div>;
+  return <div className={`px-4 py-4 sm:px-6 sm:py-5 ${className}`}>{children}</div>;
 }
 
 function SectionCardDivider() {
@@ -57,7 +57,7 @@ function SectionCardDivider() {
 
 function SectionCardFooter({ children, className = '' }: { children: ReactNode; className?: string }) {
   return (
-    <div className={`border-t border-slate-100 bg-slate-50/40 px-5 py-3 sm:px-6 ${className}`}>{children}</div>
+    <div className={`border-t border-slate-100 bg-slate-50/40 px-4 py-3 sm:px-6 ${className}`}>{children}</div>
   );
 }
 

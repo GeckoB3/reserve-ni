@@ -30,7 +30,7 @@ export default async function FloorPlanPage() {
   );
 
   return (
-    <PageFrame maxWidthClass="max-w-[1600px]" className="px-2 py-4 sm:px-4 sm:py-5 lg:px-6">
+    <PageFrame maxWidthClass="max-w-[1600px]" className="px-2 py-4 pb-24 sm:px-4 sm:py-5 sm:pb-5 lg:px-6 lg:pb-8">
       <UnifiedFloorPlanView
         isAdmin={staff.role === 'admin'}
         venueId={staff.venue_id}

@@ -157,7 +157,7 @@ export function ImportHub() {
                   {['uploading', 'mapping', 'validating', 'ready'].includes(s.status) && (
                     <Link
                       href={`/dashboard/import/${s.id}/upload`}
-                      className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                      className="inline-flex min-h-10 items-center justify-center rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
                     >
                       Continue
                     </Link>
@@ -165,7 +165,7 @@ export function ImportHub() {
                   {s.status === 'complete' && (
                     <a
                       href={`/api/import/sessions/${s.id}/report`}
-                      className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-900 hover:bg-emerald-100"
+                      className="inline-flex min-h-10 items-center justify-center rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-900 hover:bg-emerald-100"
                     >
                       Report CSV
                     </a>
@@ -173,7 +173,7 @@ export function ImportHub() {
                   {s.status === 'complete' && (
                     <button
                       type="button"
-                      className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                      className="min-h-10 rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
                       onClick={() => {
                         if (!window.confirm('Undo this import? This will revert created records.')) return;
                         void (async () => {
@@ -193,7 +193,7 @@ export function ImportHub() {
                   <button
                     type="button"
                     disabled={deletingId === s.id}
-                    className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-semibold text-red-800 hover:bg-red-50 disabled:opacity-50"
+                    className="min-h-10 rounded-lg border border-red-200 px-3 py-2 text-sm font-semibold text-red-800 hover:bg-red-50 disabled:opacity-50"
                     onClick={() => {
                       if (
                         !window.confirm(

@@ -70,6 +70,7 @@ import { CalendarColumnsFilter } from './CalendarColumnsFilter';
 import { MonthScheduleGrid } from './MonthScheduleGrid';
 import { PractitionerCalendarToolbar } from './PractitionerCalendarToolbar';
 import { EmptyState } from '@/components/ui/dashboard/EmptyState';
+import { HorizontalScrollHint } from '@/components/ui/HorizontalScrollHint';
 
 interface Practitioner {
   id: string;
@@ -1799,7 +1800,9 @@ export function PractitionerCalendarView({
         />
       ) : viewMode === 'week' ? (
         <div className="w-full rounded-2xl border border-slate-200 bg-white shadow-sm shadow-slate-900/5">
-          <div className="min-w-[720px]">
+          <HorizontalScrollHint />
+          <div className="overflow-x-auto touch-pan-x [-webkit-overflow-scrolling:touch]">
+            <div className="min-w-[720px]">
             <table className="w-full border-collapse text-sm">
               <thead>
                 <tr className="sticky top-0 z-20 border-b border-slate-200 bg-slate-50/90 shadow-sm">
@@ -1954,6 +1957,7 @@ export function PractitionerCalendarView({
                 ) : null}
               </tbody>
             </table>
+            </div>
           </div>
         </div>
       ) : (
@@ -1961,7 +1965,7 @@ export function PractitionerCalendarView({
           <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
             <div
               ref={scrollRef}
-              className="min-w-0 w-full touch-manipulation rounded-2xl border border-slate-200 bg-white shadow-sm shadow-slate-900/5 motion-safe:scroll-smooth"
+              className="min-w-0 w-full touch-manipulation overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm shadow-slate-900/5 motion-safe:scroll-smooth [-webkit-overflow-scrolling:touch]"
             onTouchStart={(e) => {
               touchX.current = e.touches[0].clientX;
               const main = scrollRef.current?.closest('main');
@@ -2634,7 +2638,7 @@ export function PractitionerCalendarView({
             );
             setStaffBookingModal('new');
           }}
-          className="fixed bottom-6 right-6 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-brand-600 text-white shadow-lg hover:bg-brand-700 md:hidden"
+          className="fixed right-[max(1rem,env(safe-area-inset-right,0px))] z-40 flex h-14 w-14 items-center justify-center rounded-full bg-brand-600 text-white shadow-lg hover:bg-brand-700 bottom-[max(1.5rem,env(safe-area-inset-bottom,0px))] md:hidden"
           aria-label={newBookingToolbarLabel}
         >
           <svg className="h-7 w-7" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">

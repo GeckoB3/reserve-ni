@@ -612,7 +612,7 @@ export default function AvailabilitySettingsClient({
       )}
 
       {toast && (
-        <div className="fixed bottom-6 right-6 z-50 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-medium text-white shadow-lg">
+        <div className="fixed z-50 max-w-[calc(100vw-2rem)] rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-medium text-white shadow-lg right-[max(1rem,env(safe-area-inset-right,0px))] bottom-[max(1rem,env(safe-area-inset-bottom,0px))]">
           {toast}
         </div>
       )}

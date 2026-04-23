@@ -96,6 +96,18 @@ body {
   padding-right: env(safe-area-inset-right, 0px);
 }
 
+/*
+ * Dashboard: prevent iOS Safari from zooming on focus when inputs use <16px text.
+ * Scoped via `.dashboard-coarse-inputs` on the dashboard `<main>` (see dashboard layout).
+ */
+@media (pointer: coarse) {
+  .dashboard-coarse-inputs input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]),
+  .dashboard-coarse-inputs select,
+  .dashboard-coarse-inputs textarea {
+    font-size: 16px;
+  }
+}
+
 /* Smooth transitions on all interactive elements */
 button, a, input, select, textarea {
   transition: all 0.15s ease;
@@ -121,4 +133,49 @@ button, a, input, select, textarea {
 }
 ::-webkit-scrollbar-thumb:hover {
   background: #94a3b8;
+}
+
+/* Motion primitives (replaces missing tailwindcss-animate plugin).
+   Use sparingly; honour prefers-reduced-motion. */
+@keyframes ds-slide-in-right {
+  from { transform: translateX(12px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+@keyframes ds-slide-in-bottom {
+  from { transform: translateY(12px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+@keyframes ds-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes ds-skeleton-shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+@utility animate-slide-in-right {
+  animation: ds-slide-in-right 180ms ease-out both;
+}
+@utility animate-slide-in-bottom {
+  animation: ds-slide-in-bottom 180ms ease-out both;
+}
+@utility animate-fade-in {
+  animation: ds-fade-in 180ms ease-out both;
+}
+@utility skeleton {
+  background: linear-gradient(90deg, #e2e8f0 0%, #f1f5f9 40%, #e2e8f0 80%);
+  background-size: 200% 100%;
+  animation: ds-skeleton-shimmer 1.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-slide-in-right,
+  .animate-slide-in-bottom,
+  .animate-fade-in {
+    animation: none;
+  }
+  .skeleton {
+    animation: none;
+  }
 }

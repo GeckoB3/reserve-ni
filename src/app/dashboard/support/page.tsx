@@ -50,7 +50,7 @@ export default function SupportPage() {
 
   if (sent) {
     return (
-      <div className="p-4 md:p-6 lg:p-8">
+      <div className="p-4 pb-[max(2rem,env(safe-area-inset-bottom,0px))] md:p-6 md:pb-6 lg:p-8 lg:pb-8">
         <div className="mx-auto max-w-lg">
           <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm text-center">
             <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-emerald-100">
@@ -82,7 +82,7 @@ export default function SupportPage() {
   }
 
   return (
-    <div className="p-4 md:p-6 lg:p-8">
+    <div className="p-4 pb-[max(2rem,env(safe-area-inset-bottom,0px))] md:p-6 md:pb-6 lg:p-8 lg:pb-8">
       <div className="mx-auto max-w-lg">
         <h1 className="mb-2 text-2xl font-semibold text-slate-900">Support</h1>
         <p className="mb-6 text-sm text-slate-500">
@@ -174,7 +174,7 @@ export default function SupportPage() {
             <button
               type="submit"
               disabled={submitting || !subject.trim() || !message.trim()}
-              className="w-full rounded-xl bg-brand-600 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 disabled:opacity-50"
+              className="min-h-12 w-full rounded-xl bg-brand-600 px-4 py-3 text-base font-semibold text-white shadow-sm hover:bg-brand-700 disabled:opacity-50"
             >
               {submitting ? 'Sending...' : 'Send Message'}
             </button>

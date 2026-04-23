@@ -424,7 +424,7 @@ export function ClientsSection({
                 key={t}
                 type="button"
                 onClick={() => toggleTagFilter(t)}
-                className={`rounded-full px-2.5 py-1 text-xs font-medium transition-colors ${
+                className={`min-h-10 rounded-full px-3 py-2 text-sm font-medium transition-colors ${
                   tagFilter.includes(t)
                     ? 'bg-brand-600 text-white'
                     : 'bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50'
@@ -566,7 +566,7 @@ export function ClientsSection({
                                   />
                                 </div>
                                 <div className="space-y-3">
-                                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
                                     <StatMini label={totalBookingsLabel} value={String(detail.stats.total_bookings)} />
                                     <StatMini label="Cancellations" value={String(detail.stats.cancellations)} />
                                     <StatMini label="No-shows" value={String(detail.stats.no_shows)} />
@@ -582,7 +582,7 @@ export function ClientsSection({
                                       type="button"
                                       onClick={exportGuestHistory}
                                       disabled={detail.booking_history.length === 0}
-                                      className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                                      className="min-h-10 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
                                     >
                                       Export history (CSV)
                                     </button>
@@ -633,7 +633,7 @@ export function ClientsSection({
                 type="button"
                 disabled={page <= 0}
                 onClick={() => setPage((p) => Math.max(0, p - 1))}
-                className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium shadow-sm disabled:opacity-50"
+                className="min-h-10 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium shadow-sm disabled:opacity-50"
               >
                 Previous
               </button>
@@ -641,7 +641,7 @@ export function ClientsSection({
                 type="button"
                 disabled={page >= totalPages - 1}
                 onClick={() => setPage((p) => p + 1)}
-                className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium shadow-sm disabled:opacity-50"
+                className="min-h-10 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium shadow-sm disabled:opacity-50"
               >
                 Next
               </button>

@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/browser';
 import { AdjacencyPreview } from '@/app/dashboard/settings/sections/AdjacencyPreview';
 import { NumericInput } from '@/components/ui/NumericInput';
+import { HorizontalScrollHint } from '@/components/ui/HorizontalScrollHint';
 import type { VenueTable, TableCombination } from '@/types/table-management';
 import type { BookingModel } from '@/types/booking-models';
 const MiniFloorPlanPicker = dynamic(() => import('@/components/floor-plan/MiniFloorPlanPicker'), {
@@ -335,12 +336,13 @@ export function TableCombinationsPage({
       </div>
 
       <div className="mt-4 space-y-4">
-        <div className="overflow-x-auto">
+        <HorizontalScrollHint />
+        <div className="touch-pan-x overflow-x-auto [-webkit-overflow-scrolling:touch]">
           <div className="flex w-max gap-2">
             <button
               type="button"
               onClick={() => setCombinationsSubTab('auto')}
-              className={`rounded-lg px-3 py-1.5 text-sm font-medium ${
+              className={`min-h-10 rounded-lg px-3 py-2 text-sm font-medium ${
                 combinationsSubTab === 'auto'
                   ? 'bg-brand-600 text-white'
                   : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
@@ -354,7 +356,7 @@ export function TableCombinationsPage({
             <button
               type="button"
               onClick={() => setCombinationsSubTab('custom')}
-              className={`rounded-lg px-3 py-1.5 text-sm font-medium ${
+              className={`min-h-10 rounded-lg px-3 py-2 text-sm font-medium ${
                 combinationsSubTab === 'custom'
                   ? 'bg-brand-600 text-white'
                   : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50'

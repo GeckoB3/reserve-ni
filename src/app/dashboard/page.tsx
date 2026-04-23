@@ -12,6 +12,8 @@ import { Pill } from '@/components/ui/dashboard/Pill';
 import { ScheduleRow } from '@/components/ui/dashboard/ScheduleRow';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { StackedList } from '@/components/ui/dashboard/StackedList';
+import { Skeleton } from '@/components/ui/Skeleton';
+import { HorizontalScrollHint } from '@/components/ui/HorizontalScrollHint';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 import {
   activeModelsToLegacyEnabledModels,
@@ -139,12 +141,36 @@ export default function DashboardHomePage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center p-16">
-        <div className="flex flex-col items-center gap-3">
-          <div className="h-8 w-8 animate-spin rounded-full border-2 border-brand-600 border-t-transparent" />
-          <p className="text-sm text-slate-400">Loading dashboard…</p>
+      <PageFrame>
+        <div className="space-y-8" role="status" aria-label="Loading dashboard">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+            <div className="space-y-2">
+              <Skeleton.Line className="w-20" />
+              <Skeleton.Line className="h-8 w-48" />
+              <Skeleton.Line className="h-3 w-64" />
+            </div>
+            <div className="flex gap-2">
+              <Skeleton.Block className="h-10 w-28" />
+              <Skeleton.Block className="h-10 w-32" />
+            </div>
+          </div>
+          <div className="grid gap-8 lg:grid-cols-3">
+            <div className="space-y-8 lg:col-span-2">
+              <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-4">
+                {Array.from({ length: 4 }).map((_, i) => (
+                  <Skeleton.Block key={i} className="h-24" />
+                ))}
+              </div>
+              <Skeleton.Block className="h-32" />
+              <Skeleton.Block className="h-60" />
+            </div>
+            <aside className="space-y-4 lg:col-span-1">
+              <Skeleton.Block className="h-56" />
+            </aside>
+          </div>
+          <Skeleton.Block className="h-72" />
         </div>
-      </div>
+      </PageFrame>
     );
   }
 
@@ -392,7 +418,9 @@ export default function DashboardHomePage() {
           <p className="mb-4 mt-1 text-xs text-slate-400">
             How full each day gets at its busiest time.
           </p>
-          <div className="flex gap-2">
+          <HorizontalScrollHint />
+          <div className="-mx-1 overflow-x-auto pb-1 [-webkit-overflow-scrolling:touch] sm:mx-0 sm:overflow-visible">
+            <div className="flex min-w-min gap-2 sm:min-w-0 sm:w-full">
             {data.heatmap.map((h, idx) => {
               const hPeak = n(h.peak_in_house_covers);
               const hTotal = n(h.daily_total_covers);
@@ -400,7 +428,10 @@ export default function DashboardHomePage() {
               const isToday = idx === 0;
               const hHasCap = h.concurrent_cap != null;
               return (
-                <div key={h.date} className="flex flex-1 flex-col items-center gap-1.5">
+                <div
+                  key={h.date}
+                  className="flex w-[4.5rem] shrink-0 flex-col items-center gap-1.5 sm:w-0 sm:min-w-0 sm:flex-1 sm:shrink"
+                >
                   <span className={`text-xs font-medium ${isToday ? 'text-brand-600' : 'text-slate-500'}`}>
                     {isToday ? 'Today' : h.day}
                   </span>
@@ -426,6 +457,7 @@ export default function DashboardHomePage() {
                 </div>
               );
             })}
+            </div>
           </div>
           <div className="mt-4 flex flex-wrap items-center justify-center gap-3 text-[10px] text-slate-400">
             <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-slate-200" /> Quiet</span>

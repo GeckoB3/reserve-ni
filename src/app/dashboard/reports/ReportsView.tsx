@@ -975,7 +975,7 @@ function ReportSection({
             onClick={handleExportClick}
             title={blocked ? blockedHint : 'Download this report as a CSV file'}
             aria-label={blocked ? `Export CSV: ${blockedHint}` : 'Export CSV'}
-            className={`flex shrink-0 items-center gap-1.5 rounded-xl px-3 py-2 text-sm font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 ${
+            className={`flex min-h-10 shrink-0 items-center gap-1.5 rounded-xl px-3 py-2 text-sm font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 ${
               blocked
                 ? 'text-slate-400 hover:bg-slate-50 hover:text-slate-600'
                 : 'text-brand-600 hover:bg-brand-50 hover:text-brand-700'

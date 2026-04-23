@@ -1552,15 +1552,17 @@ export function BookingsDashboard({
 
       {/* Floating bulk-actions tray — appears when rows are selected */}
       {selectedIds.length > 0 && (
-        <div className="fixed bottom-6 left-1/2 z-40 -translate-x-1/2 transform">
-          <div className="flex items-center gap-1.5 rounded-2xl border border-slate-200/80 bg-white px-4 py-2.5 shadow-xl shadow-slate-900/15 ring-1 ring-slate-100">
-            <span className="mr-1 text-sm font-semibold text-slate-800">{selectedIds.length} selected</span>
-            <div className="mx-2 h-4 w-px bg-slate-200" />
+        <div className="fixed left-1/2 z-40 max-w-[calc(100vw-1rem)] -translate-x-1/2 px-2 bottom-[max(1rem,env(safe-area-inset-bottom,0px))]">
+          <div className="flex max-w-full flex-wrap items-center justify-center gap-1.5 rounded-2xl border border-slate-200/80 bg-white px-3 py-2 shadow-xl shadow-slate-900/15 ring-1 ring-slate-100 sm:flex-nowrap sm:px-4 sm:py-2.5">
+            <span className="mr-1 w-full shrink-0 text-center text-sm font-semibold text-slate-800 sm:w-auto sm:text-left">
+              {selectedIds.length} selected
+            </span>
+            <div className="hidden h-4 w-px shrink-0 bg-slate-200 sm:block" />
             <button
               type="button"
               disabled={bulkLoading}
               onClick={() => void runBulkNoShow()}
-              className="rounded-lg px-3 py-1.5 text-xs font-semibold text-slate-700 transition-colors hover:bg-rose-50 hover:text-rose-700 disabled:opacity-50"
+              className="min-h-10 rounded-lg px-3 py-2 text-sm font-semibold text-slate-700 transition-colors hover:bg-rose-50 hover:text-rose-700 disabled:opacity-50"
             >
               No-show
             </button>
@@ -1568,7 +1570,7 @@ export function BookingsDashboard({
               type="button"
               disabled={bulkLoading || bulkCancelEligibleIds.length === 0}
               onClick={() => void runBulkCancel()}
-              className="rounded-lg px-3 py-1.5 text-xs font-semibold text-slate-700 transition-colors hover:bg-amber-50 hover:text-amber-800 disabled:opacity-40"
+              className="min-h-10 rounded-lg px-3 py-2 text-sm font-semibold text-slate-700 transition-colors hover:bg-amber-50 hover:text-amber-800 disabled:opacity-40"
             >
               Cancel {bulkCancelEligibleIds.length > 0 && bulkCancelEligibleIds.length < selectedIds.length ? `(${bulkCancelEligibleIds.length})` : ''}
             </button>
@@ -1576,27 +1578,27 @@ export function BookingsDashboard({
               type="button"
               disabled={bulkLoading || bulkDeleteEligibleIds.length === 0}
               onClick={() => void runBulkDelete()}
-              className="rounded-lg px-3 py-1.5 text-xs font-semibold text-slate-700 transition-colors hover:bg-red-50 hover:text-red-700 disabled:opacity-40"
+              className="min-h-10 rounded-lg px-3 py-2 text-sm font-semibold text-slate-700 transition-colors hover:bg-red-50 hover:text-red-700 disabled:opacity-40"
             >
               Delete
             </button>
-            <div className="mx-1 h-4 w-px bg-slate-200" />
+            <div className="hidden h-4 w-px shrink-0 bg-slate-200 sm:block" />
             <button
               type="button"
               disabled={bulkLoading}
               onClick={() => setBulkGuestMessageOpen(true)}
-              className="rounded-lg px-3 py-1.5 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-100 disabled:opacity-50"
+              className="min-h-10 rounded-lg px-3 py-2 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-100 disabled:opacity-50"
             >
               Message
             </button>
-            <div className="mx-1 h-4 w-px bg-slate-200" />
+            <div className="hidden h-4 w-px shrink-0 bg-slate-200 sm:block" />
             <button
               type="button"
               onClick={() => setSelectedIds([])}
-              className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
+              className="flex min-h-10 min-w-10 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
               aria-label="Clear selection"
             >
-              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor">
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
               </svg>
             </button>

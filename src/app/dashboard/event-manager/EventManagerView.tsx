@@ -1092,18 +1092,18 @@ export function EventManagerView({
               <div className="space-y-2">
                 {eventForm.ticket_types.map((tt, i) => (
                   <div key={i} className="flex flex-wrap items-end gap-2 rounded-lg border border-slate-100 bg-slate-50/60 px-3 py-2">
-                    <div className="flex-1 min-w-[140px]">
-                      <label className="mb-1 block text-xs font-medium text-slate-500">Ticket name</label>
+                    <div className="min-w-0 flex-1 sm:min-w-[140px]">
+                      <label className="mb-1 block text-xs font-medium text-slate-500 sm:text-sm">Ticket name</label>
                       <input
                         type="text"
                         value={tt.name}
                         onChange={(e) => updateTicketType(i, { name: e.target.value })}
                         placeholder="e.g. General Admission"
-                        className="w-full rounded border border-slate-200 bg-white px-2 py-1.5 text-xs focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
+                        className="w-full rounded border border-slate-200 bg-white px-2 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
                       />
                     </div>
-                    <div className="w-28">
-                      <label className="mb-1 block text-xs font-medium text-slate-500">Price ({sym})</label>
+                    <div className="w-full min-w-0 sm:w-28">
+                      <label className="mb-1 block text-xs font-medium text-slate-500 sm:text-sm">Price ({sym})</label>
                       <input
                         type="text"
                         inputMode="decimal"
@@ -1111,11 +1111,11 @@ export function EventManagerView({
                         value={tt.price_pence}
                         onChange={(e) => updateTicketType(i, { price_pence: e.target.value })}
                         placeholder="0.00"
-                        className="w-full rounded border border-slate-200 bg-white px-2 py-1.5 text-xs focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
+                        className="w-full rounded border border-slate-200 bg-white px-2 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
                       />
                     </div>
-                    <div className="w-24">
-                      <label className="mb-1 block text-xs font-medium text-slate-500">
+                    <div className="w-full min-w-0 sm:w-24">
+                      <label className="mb-1 block text-xs font-medium text-slate-500 sm:text-sm">
                         Cap <span className="font-normal text-slate-400">opt.</span>
                       </label>
                       <input
@@ -1125,14 +1125,14 @@ export function EventManagerView({
                         value={tt.capacity}
                         onChange={(e) => updateTicketType(i, { capacity: e.target.value })}
                         placeholder="-"
-                        className="w-full rounded border border-slate-200 bg-white px-2 py-1.5 text-xs focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
+                        className="w-full rounded border border-slate-200 bg-white px-2 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
                       />
                     </div>
                     {eventForm.ticket_types.length > 1 && (
                       <button
                         type="button"
                         onClick={() => removeTicketType(i)}
-                        className="self-end pb-1.5 text-xs text-red-400 hover:text-red-600"
+                        className="min-h-10 self-end rounded-lg px-2 text-sm font-medium text-red-500 hover:bg-red-50 hover:text-red-700"
                       >
                         Remove
                       </button>

@@ -925,7 +925,7 @@ export function AppointmentServicesView({
               </div>
 
               {/* Duration + Buffer */}
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div>
                   <label className="mb-1 block text-sm font-medium text-slate-700">Duration (mins) *</label>
                   <NumericInput
@@ -1036,7 +1036,7 @@ export function AppointmentServicesView({
                 <p className="text-xs text-slate-500">
                   Applies to online bookings for this service (advance window, notice, and deposit refund notice).
                 </p>
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   <div>
                     <label className="mb-1 block text-sm text-slate-700">Max advance (days)</label>
                     <NumericInput

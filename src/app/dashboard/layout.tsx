@@ -108,22 +108,22 @@ export default async function DashboardLayout({ children }: { children: React.Re
           venueTerminology,
         }}
       >
-      <main className="min-h-0 flex-1 overflow-y-auto bg-slate-100/80 pt-[calc(3.5rem+env(safe-area-inset-top,0px))] lg:pt-0">
+      <main className="dashboard-coarse-inputs min-h-0 flex-1 overflow-y-auto bg-slate-100/80 pt-[calc(3.5rem+env(safe-area-inset-top,0px))] lg:pt-0">
         {planStatus === 'cancelling' && (
           <div className="border-b border-amber-200/80 bg-gradient-to-r from-amber-50 via-white to-amber-50/30 px-4 py-3 sm:px-6">
-            <div className="mx-auto flex max-w-[1400px] flex-wrap items-center justify-between gap-3">
-              <div className="flex min-w-0 flex-1 items-start gap-2">
-                <Pill variant="warning" size="sm">
+            <div className="mx-auto flex max-w-[1400px] flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+              <div className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-start">
+                <Pill variant="warning" size="sm" className="w-fit shrink-0">
                   Cancelling
                 </Pill>
-                <p className="text-sm text-amber-950">
+                <p className="min-w-0 text-sm text-amber-950">
                   Your subscription is set to end at the close of this billing period. You can keep full access until
                   then, or resume billing below.
                 </p>
               </div>
               <a
                 href="/dashboard/settings?tab=plan"
-                className="shrink-0 rounded-xl bg-amber-800 px-4 py-2 text-xs font-semibold text-white shadow-sm hover:bg-amber-900"
+                className="inline-flex min-h-10 shrink-0 items-center justify-center rounded-xl bg-amber-800 px-4 py-2.5 text-center text-sm font-semibold text-white shadow-sm hover:bg-amber-900 sm:w-auto sm:py-2 sm:text-xs"
               >
                 Manage plan
               </a>
@@ -132,18 +132,18 @@ export default async function DashboardLayout({ children }: { children: React.Re
         )}
         {planStatus === 'cancelled' && (
           <div className="border-b border-amber-200/80 bg-gradient-to-r from-amber-50 via-white to-amber-50/30 px-4 py-3 sm:px-6">
-            <div className="mx-auto flex max-w-[1400px] flex-wrap items-center justify-between gap-3">
-              <div className="flex min-w-0 flex-1 items-start gap-2">
-                <Pill variant="warning" size="sm">
+            <div className="mx-auto flex max-w-[1400px] flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+              <div className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-start">
+                <Pill variant="warning" size="sm" className="w-fit shrink-0">
                   Cancelled
                 </Pill>
-                <p className="text-sm text-amber-950">
+                <p className="min-w-0 text-sm text-amber-950">
                   Your subscription has been cancelled. Resubscribe to continue using all features.
                 </p>
               </div>
               <a
                 href="/dashboard/settings?tab=plan"
-                className="shrink-0 rounded-xl bg-amber-700 px-4 py-2 text-xs font-semibold text-white shadow-sm hover:bg-amber-800"
+                className="inline-flex min-h-10 shrink-0 items-center justify-center rounded-xl bg-amber-700 px-4 py-2.5 text-center text-sm font-semibold text-white shadow-sm hover:bg-amber-800 sm:w-auto sm:py-2 sm:text-xs"
               >
                 Resubscribe
               </a>
@@ -152,12 +152,12 @@ export default async function DashboardLayout({ children }: { children: React.Re
         )}
         {planStatus === 'past_due' && (
           <div className="border-b border-rose-200/80 bg-gradient-to-r from-rose-50 via-white to-rose-50/30 px-4 py-3 sm:px-6">
-            <div className="mx-auto flex max-w-[1400px] flex-wrap items-center justify-between gap-3">
-              <div className="flex min-w-0 flex-1 items-start gap-2">
-                <Pill variant="danger" size="sm">
+            <div className="mx-auto flex max-w-[1400px] flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+              <div className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-start">
+                <Pill variant="danger" size="sm" className="w-fit shrink-0">
                   Billing
                 </Pill>
-                <p className="text-sm text-rose-950">
+                <p className="min-w-0 text-sm text-rose-950">
                   {pricingTier === 'light'
                     ? `Your free period has ended. Add a payment method to continue using Reserve NI at £${APPOINTMENTS_LIGHT_PRICE}/month. Your public booking page is paused until billing is active.`
                     : 'Your last payment failed. Please update your payment method to avoid service interruption.'}
@@ -165,7 +165,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
               </div>
               <a
                 href="/dashboard/settings?tab=plan"
-                className="shrink-0 rounded-xl bg-rose-700 px-4 py-2 text-xs font-semibold text-white shadow-sm hover:bg-rose-800"
+                className="inline-flex min-h-10 shrink-0 items-center justify-center rounded-xl bg-rose-700 px-4 py-2.5 text-center text-sm font-semibold text-white shadow-sm hover:bg-rose-800 sm:w-auto sm:py-2 sm:text-xs"
               >
                 {pricingTier === 'light' ? 'Add payment method' : 'Update billing'}
               </a>

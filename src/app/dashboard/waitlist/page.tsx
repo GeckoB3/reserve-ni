@@ -264,7 +264,7 @@ export default function WaitlistPage() {
                           <button
                             type="button"
                             onClick={() => handleOffer(entry)}
-                            className="rounded-lg bg-brand-600 px-2.5 py-1 text-xs font-semibold text-white shadow-sm hover:bg-brand-700"
+                            className="min-h-10 rounded-lg bg-brand-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-700"
                           >
                             Offer spot
                           </button>
@@ -273,7 +273,7 @@ export default function WaitlistPage() {
                           <button
                             type="button"
                             onClick={() => handleConfirm(entry)}
-                            className="rounded-lg bg-emerald-600 px-2.5 py-1 text-xs font-semibold text-white shadow-sm hover:bg-emerald-700"
+                            className="min-h-10 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700"
                           >
                             Confirm
                           </button>
@@ -282,7 +282,7 @@ export default function WaitlistPage() {
                           <button
                             type="button"
                             onClick={() => handleCancel(entry)}
-                            className="rounded-lg border border-slate-200 px-2.5 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50"
+                            className="min-h-10 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
                           >
                             Cancel
                           </button>
@@ -291,7 +291,7 @@ export default function WaitlistPage() {
                           <button
                             type="button"
                             onClick={() => handleDelete(entry.id)}
-                            className="rounded-lg p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600"
+                            className="flex min-h-10 min-w-10 items-center justify-center rounded-lg text-slate-400 hover:bg-rose-50 hover:text-rose-600"
                             aria-label="Remove entry"
                           >
                             <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
@@ -327,7 +327,7 @@ export default function WaitlistPage() {
                             <button
                               type="button"
                               onClick={() => handleOffer(entry)}
-                              className="rounded-lg bg-brand-600 px-2.5 py-1 text-xs font-semibold text-white shadow-sm hover:bg-brand-700"
+                              className="min-h-10 rounded-lg bg-brand-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-700"
                             >
                               Offer
                             </button>
@@ -336,7 +336,7 @@ export default function WaitlistPage() {
                             <button
                               type="button"
                               onClick={() => handleConfirm(entry)}
-                              className="rounded-lg bg-emerald-600 px-2.5 py-1 text-xs font-semibold text-white shadow-sm hover:bg-emerald-700"
+                              className="min-h-10 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700"
                             >
                               Confirm
                             </button>
@@ -345,7 +345,7 @@ export default function WaitlistPage() {
                             <button
                               type="button"
                               onClick={() => handleCancel(entry)}
-                              className="rounded-lg border border-slate-200 px-2.5 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50"
+                              className="min-h-10 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
                             >
                               Cancel
                             </button>
@@ -354,7 +354,7 @@ export default function WaitlistPage() {
                             <button
                               type="button"
                               onClick={() => handleDelete(entry.id)}
-                              className="rounded-lg p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600"
+                              className="flex min-h-10 min-w-10 items-center justify-center rounded-lg text-slate-400 hover:bg-rose-50 hover:text-rose-600"
                               aria-label="Remove entry"
                             >
                               <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">

@@ -1,6 +1,14 @@
 'use client';
 
-import { useState, useEffect, useCallback, createContext, useContext, type ReactNode } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 
 type ToastType = 'success' | 'error' | 'info';
 
@@ -35,7 +43,11 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastContext.Provider value={{ addToast }}>
       {children}
-      <div className="fixed bottom-4 left-4 right-4 z-[100] flex flex-col gap-2 sm:left-auto sm:right-4 sm:max-w-sm">
+      <div
+        className="pointer-events-none fixed inset-x-4 bottom-[max(1rem,env(safe-area-inset-bottom,0px))] z-[100] flex flex-col gap-2 sm:left-auto sm:right-4 sm:max-w-sm"
+        aria-live="polite"
+        aria-atomic="false"
+      >
         {toasts.map((t) => (
           <ToastItem key={t.id} toast={t} onDismiss={dismiss} />
         ))}
@@ -45,33 +57,76 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 }
 
 function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: (id: string) => void }) {
+  const [paused, setPaused] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   useEffect(() => {
-    const timer = setTimeout(() => onDismiss(toast.id), 4000);
-    return () => clearTimeout(timer);
-  }, [toast.id, onDismiss]);
+    if (paused) return;
+    timerRef.current = setTimeout(() => onDismiss(toast.id), toast.type === 'error' ? 6000 : 4000);
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, [toast.id, toast.type, paused, onDismiss]);
 
   const bg =
-    toast.type === 'success' ? 'bg-green-600' :
-    toast.type === 'error' ? 'bg-red-600' :
-    'bg-slate-800';
+    toast.type === 'success'
+      ? 'bg-emerald-600'
+      : toast.type === 'error'
+        ? 'bg-rose-600'
+        : 'bg-slate-800';
 
   return (
     <div
-      className={`${bg} animate-in slide-in-from-right flex items-start gap-2 rounded-lg px-4 py-2.5 text-sm font-medium text-white shadow-lg`}
+      role={toast.type === 'error' ? 'alert' : 'status'}
+      onMouseEnter={() => setPaused(true)}
+      onMouseLeave={() => setPaused(false)}
+      onFocus={() => setPaused(true)}
+      onBlur={() => setPaused(false)}
+      className={`${bg} animate-slide-in-right pointer-events-auto flex items-start gap-2 rounded-xl px-4 py-2.5 text-sm font-medium text-white shadow-lg ring-1 ring-black/5`}
     >
       {toast.type === 'success' && (
-        <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <svg
+          className="mt-px h-4 w-4 shrink-0"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          strokeWidth={2}
+          aria-hidden
+        >
           <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
         </svg>
       )}
       {toast.type === 'error' && (
-        <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
+        <svg
+          className="mt-px h-4 w-4 shrink-0"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          strokeWidth={2}
+          aria-hidden
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z"
+          />
         </svg>
       )}
       <span className="min-w-0 flex-1 break-words">{toast.message}</span>
-      <button aria-label="Dismiss notification" onClick={() => onDismiss(toast.id)} className="ml-1 shrink-0 rounded p-0.5 hover:bg-white/20">
-        <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <button
+        type="button"
+        aria-label="Dismiss notification"
+        onClick={() => onDismiss(toast.id)}
+        className="ml-1 flex h-10 min-h-10 w-10 min-w-10 shrink-0 items-center justify-center rounded-lg hover:bg-white/20"
+      >
+        <svg
+          className="h-4 w-4"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          strokeWidth={2}
+          aria-hidden
+        >
           <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
         </svg>
       </button>

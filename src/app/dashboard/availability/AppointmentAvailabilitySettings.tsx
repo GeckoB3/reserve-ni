@@ -813,7 +813,7 @@ export function AppointmentAvailabilitySettings({
                     role="dialog"
                     aria-modal="true"
                     aria-labelledby="team-modal-title"
-                    className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-6 shadow-xl"
+                    className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-6 pb-[max(1.5rem,env(safe-area-inset-bottom,0px))] shadow-xl sm:pb-6"
                   >
                     <h2 id="team-modal-title" className="mb-4 text-lg font-semibold text-slate-900">
                       {editingId ? 'Edit calendar' : 'Add calendar'}

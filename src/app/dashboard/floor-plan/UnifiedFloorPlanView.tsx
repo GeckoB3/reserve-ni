@@ -112,7 +112,7 @@ export function UnifiedFloorPlanView({
           {isAdmin && (
             <Link
               href={editLayoutHref}
-              className="inline-flex items-center gap-2 rounded-lg bg-amber-500 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-amber-600 sm:px-3 sm:py-2 sm:text-sm"
+              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-amber-500 px-4 py-2.5 text-sm font-medium text-white hover:bg-amber-600 sm:min-h-0 sm:px-3 sm:py-2"
             >
               Edit Layout
             </Link>
