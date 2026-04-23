@@ -186,16 +186,9 @@ function columnIdForBlock(bl: CalendarBlock): string | null {
   return bl.calendar_id ?? bl.practitioner_id ?? null;
 }
 
-/** Aligns with dashboard/bookings filters: Confirmed = guest or staff attendance confirmation; Started = status Seated. */
+/** Aligns with dashboard/bookings filters: Confirmed = `bookings.status = 'Confirmed'` (set via guest/staff attendance confirm); Started = status Seated. */
 function bookingMatchesCalendarStatusFilter(b: Booking, filterKey: string): boolean {
   if (filterKey === 'all') return true;
-  if (filterKey === 'attendance_confirmed') {
-    const g = b.guest_attendance_confirmed_at;
-    const s = b.staff_attendance_confirmed_at;
-    const guestOn = typeof g === 'string' && g.trim().length > 0;
-    const staffOn = typeof s === 'string' && s.trim().length > 0;
-    return guestOn || staffOn;
-  }
   if (filterKey === 'Seated') return b.status === 'Seated';
   return b.status === filterKey;
 }
@@ -277,7 +270,7 @@ function bookingBlockCardStyle(p: BookingBlockPalette): CSSProperties {
 
 function isArrivedWaitingDisplay(b: Pick<Booking, 'client_arrived_at' | 'status'>): boolean {
   if (!b.client_arrived_at) return false;
-  return b.status === 'Pending' || b.status === 'Confirmed';
+  return b.status === 'Pending' || b.status === 'Booked' || b.status === 'Confirmed';
 }
 
 function bookingCalendarBlockStyle(b: Booking): BookingBlockPalette {
@@ -287,7 +280,8 @@ function bookingCalendarBlockStyle(b: Booking): BookingBlockPalette {
   if (status === 'Completed') return BOOKING_PALETTE_COMPLETED;
   if (status === 'Seated') return BOOKING_PALETTE_STARTED;
   if (isArrivedWaitingDisplay(b)) return BOOKING_PALETTE_ARRIVED_WAITING;
-  if (status === 'Pending' || status === 'Confirmed') {
+  if (status === 'Confirmed') return BOOKING_PALETTE_CONFIRMED;
+  if (status === 'Pending' || status === 'Booked') {
     if (showAttendanceConfirmedPill(b)) return BOOKING_PALETTE_CONFIRMED;
     return BOOKING_PALETTE_BOOKED;
   }
@@ -382,14 +376,14 @@ function bookingToPrefetch(b: Booking): AppointmentDetailPrefetch {
 function BookingBlockPills({ b }: { b: Booking }) {
   return (
     <>
-      {showDepositPendingPill(b) && ['Pending', 'Confirmed'].includes(b.status) && (
+      {showDepositPendingPill(b) && ['Pending', 'Booked', 'Confirmed'].includes(b.status) && (
         <span
           className="inline-flex h-1.5 w-1.5 shrink-0 rounded-full bg-orange-600 ring-2 ring-white/80"
           aria-hidden
           title="Deposit pending"
         />
       )}
-      {showAttendanceConfirmedPill(b) && ['Pending', 'Confirmed', 'Seated'].includes(b.status) && (
+      {showAttendanceConfirmedPill(b) && ['Pending', 'Booked', 'Confirmed', 'Seated'].includes(b.status) && (
         <span
           className="inline-block max-w-[min(100%,6.5rem)] rounded-lg bg-white/95 px-1.5 py-0.5 text-center text-[8px] font-semibold leading-snug text-[#134E4A] shadow-sm ring-1 ring-[#0D9488] [overflow-wrap:anywhere] sm:max-w-[7.5rem] sm:text-[9px]"
           title="Confirmed"
@@ -416,11 +410,12 @@ function countBookingRightColumnActions(b: Booking, graceMinutes: number): numbe
   if (b.status === 'Completed') return n + 1;
 
   const canNoShow =
-    b.status === 'Confirmed' && canMarkNoShowForSlot(b.booking_date, b.booking_time, graceMinutes);
+    (b.status === 'Confirmed' || b.status === 'Booked') &&
+    canMarkNoShowForSlot(b.booking_date, b.booking_time, graceMinutes);
 
-  if (b.status === 'Pending' || b.status === 'Confirmed') n++;
+  if (b.status === 'Pending' || b.status === 'Booked' || b.status === 'Confirmed') n++;
   if (b.status === 'Pending') n++;
-  if (b.status === 'Confirmed') {
+  if (b.status === 'Booked' || b.status === 'Confirmed') {
     n++;
     if (canNoShow) n++;
   }
@@ -489,7 +484,8 @@ function CalendarBookingRightColumnActions({
 
   const arrived = Boolean(b.client_arrived_at);
   const canNoShow =
-    b.status === 'Confirmed' && canMarkNoShowForSlot(b.booking_date, b.booking_time, graceMinutes);
+    (b.status === 'Confirmed' || b.status === 'Booked') &&
+    canMarkNoShowForSlot(b.booking_date, b.booking_time, graceMinutes);
 
   const showAttendanceConfirm = canShowConfirmBookingAttendanceAction(b);
   const showAttendanceCancel = canShowCancelStaffAttendanceConfirmationAction(b);
@@ -537,7 +533,7 @@ function CalendarBookingRightColumnActions({
       )}
       {b.status !== 'Completed' && (
         <>
-          {(b.status === 'Pending' || b.status === 'Confirmed') && (
+          {(b.status === 'Pending' || b.status === 'Booked' || b.status === 'Confirmed') && (
             <>
               {!arrived ? (
                 <button
@@ -567,13 +563,13 @@ function CalendarBookingRightColumnActions({
               type="button"
               disabled={busy}
               style={textStyle}
-              onClick={() => onStatus(b.id, 'Confirmed')}
+              onClick={() => onStatus(b.id, 'Booked')}
               className={`${baseClass} rounded bg-brand-600 font-medium text-white hover:bg-brand-700 disabled:opacity-50`}
             >
               Confirm
             </button>
           )}
-          {b.status === 'Confirmed' && (
+          {(b.status === 'Booked' || b.status === 'Confirmed') && (
             <button
               type="button"
               disabled={busy}
@@ -590,9 +586,9 @@ function CalendarBookingRightColumnActions({
                 type="button"
                 disabled={busy}
                 style={textStyle}
-                onClick={() => onStatus(b.id, 'Confirmed')}
+                onClick={() => onStatus(b.id, 'Booked')}
                 className={`${baseClass} rounded border border-slate-300 bg-white font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50`}
-                title="If you started by mistake, go back to confirmed (and waiting if they were marked arrived)"
+                title="If you started by mistake, go back to booked (and waiting if they were marked arrived)"
               >
                 Undo start
               </button>
@@ -607,7 +603,7 @@ function CalendarBookingRightColumnActions({
               </button>
             </>
           )}
-          {b.status === 'Confirmed' && canNoShow && (
+          {(b.status === 'Booked' || b.status === 'Confirmed') && canNoShow && (
             <button
               type="button"
               disabled={busy}
@@ -1516,7 +1512,7 @@ export function PractitionerCalendarView({
     ) {
       return;
     }
-    if (!['Pending', 'Confirmed', 'Seated'].includes(b.status)) return;
+    if (!['Pending', 'Booked', 'Confirmed', 'Seated'].includes(b.status)) return;
     if (b.resource_id) return;
     void patchBookingMove(b, dateStr, newTime, pracId);
   }
@@ -1573,11 +1569,8 @@ export function PractitionerCalendarView({
   const activeToolbarBookings = bookingsForToolbarStats.filter(
     (b) => !['Cancelled', 'No-Show'].includes(b.status),
   );
-  const confirmedCount = bookingsForToolbarStats.filter((b) => {
-    const g = b.guest_attendance_confirmed_at;
-    const s = b.staff_attendance_confirmed_at;
-    return (typeof g === 'string' && g.trim().length > 0) || (typeof s === 'string' && s.trim().length > 0);
-  }).length;
+  const confirmedCount = bookingsForToolbarStats.filter((b) => b.status === 'Confirmed').length;
+  const bookedCount = bookingsForToolbarStats.filter((b) => b.status === 'Booked').length;
   const completedCount = bookingsForToolbarStats.filter((b) => b.status === 'Completed').length;
 
   const weekDays = useMemo(() => weekDatesFrom(weekStart), [weekStart]);
@@ -1700,7 +1693,8 @@ export function PractitionerCalendarView({
               >
                 <option value="all">All statuses</option>
                 <option value="Pending">Pending</option>
-                <option value="attendance_confirmed">Confirmed</option>
+                <option value="Booked">Booked</option>
+                <option value="Confirmed">Confirmed</option>
                 <option value="Seated">Started</option>
                 <option value="Completed">Completed</option>
                 <option value="No-Show">No Show</option>
@@ -1743,10 +1737,13 @@ export function PractitionerCalendarView({
                     <span className="font-semibold text-slate-900">{activeToolbarBookings.length}</span> on grid
                   </span>
                   <span className="hidden sm:inline text-slate-500">
-                    <span className="font-semibold text-brand-600">{confirmedCount}</span> confirmed
+                    <span className="font-semibold text-sky-600">{bookedCount}</span> booked
                   </span>
                   <span className="hidden sm:inline text-slate-500">
-                    <span className="font-semibold text-emerald-600">{completedCount}</span> completed
+                    <span className="font-semibold text-emerald-600">{confirmedCount}</span> confirmed
+                  </span>
+                  <span className="hidden sm:inline text-slate-500">
+                    <span className="font-semibold text-violet-600">{completedCount}</span> completed
                   </span>
                 </div>
                 {viewMode !== 'day' && (
@@ -2293,7 +2290,7 @@ export function PractitionerCalendarView({
                           const top = slotTop(b.booking_time);
                           const height = slotHeightFromDuration(duration);
                           const canDrag =
-                            !b.resource_id && ['Pending', 'Confirmed', 'Seated'].includes(b.status);
+                            !b.resource_id && ['Pending', 'Booked', 'Confirmed', 'Seated'].includes(b.status);
                           const flash = flashIds.has(b.id);
                           const qBusy = quickActionId === b.id;
                           const arrived = Boolean(b.client_arrived_at);
@@ -2329,7 +2326,7 @@ export function PractitionerCalendarView({
                                           <span className="truncate text-xs font-semibold">{b.guest_name}</span>
                                           {arrived &&
                                             b.status !== 'Seated' &&
-                                            ['Pending', 'Confirmed'].includes(b.status) && (
+                                            ['Pending', 'Booked', 'Confirmed'].includes(b.status) && (
                                               <span
                                                 className="inline-flex h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-[#F59E0B] ring-1 ring-white/70"
                                                 aria-hidden
@@ -2426,7 +2423,7 @@ export function PractitionerCalendarView({
                                               {segIdx === 0 &&
                                                 arrived &&
                                                 first.status !== 'Seated' &&
-                                                ['Pending', 'Confirmed'].includes(first.status) && (
+                                                ['Pending', 'Booked', 'Confirmed'].includes(first.status) && (
                                                   <span
                                                     className="inline-flex h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-[#F59E0B] ring-1 ring-white/70"
                                                     aria-hidden

@@ -103,7 +103,7 @@ export async function DELETE(
       .eq('venue_id', staff.venue_id)
       .eq('area_id', id)
       .gte('booking_date', today)
-      .in('status', ['Pending', 'Confirmed', 'Seated']);
+      .in('status', ['Pending', 'Booked', 'Confirmed', 'Seated']);
 
     if ((futureBookings ?? 0) > 0) {
       return NextResponse.json(

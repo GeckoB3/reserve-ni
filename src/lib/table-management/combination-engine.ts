@@ -84,7 +84,7 @@ export interface CombinationSuggestion {
   internal_notes?: string | null;
 }
 
-const ACTIVE_BOOKING_STATUSES = new Set(['Pending', 'Confirmed', 'Seated']);
+const ACTIVE_BOOKING_STATUSES = new Set(['Pending', 'Booked', 'Confirmed', 'Seated']);
 
 function timeToMinutes(value: string): number {
   const [hours, minutes] = value.slice(0, 5).split(':').map(Number);

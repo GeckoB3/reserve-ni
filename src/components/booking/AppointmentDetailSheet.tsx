@@ -144,6 +144,8 @@ function appointmentDetailStatusVariant(status: string): PillVariant {
   switch (status) {
     case 'Pending':
       return 'warning';
+    case 'Booked':
+      return 'info';
     case 'Confirmed':
       return 'success';
     case 'Seated':
@@ -464,11 +466,13 @@ export function AppointmentDetailSheet({
     detail && isBookingStatus(detail.status) ? BOOKING_REVERT_ACTIONS[detail.status as BookingStatus] : undefined;
 
   const arrived = Boolean(detail?.client_arrived_at);
+  const isHeldStatus =
+    detail?.status === 'Confirmed' || detail?.status === 'Booked';
   const canNoShow =
-    detail?.status === 'Confirmed' &&
+    isHeldStatus &&
     canMarkNoShowForSlot(detail.booking_date, detail.booking_time, graceMinutes);
   const noShowGraceResult =
-    detail?.status === 'Confirmed' &&
+    isHeldStatus &&
     !canMarkNoShowForSlot(detail.booking_date, detail.booking_time, graceMinutes)
       ? validateNoShowGracePeriod(detail.booking_date, detail.booking_time, graceMinutes)
       : null;
@@ -555,7 +559,7 @@ export function AppointmentDetailSheet({
                   {isApptStyle &&
                     arrived &&
                     detail.status !== 'Seated' &&
-                    ['Pending', 'Confirmed'].includes(detail.status) && (
+                    ['Pending', 'Booked', 'Confirmed'].includes(detail.status) && (
                     <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-950 ring-1 ring-amber-300/70">
                       <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-500" aria-hidden />
                       Waiting
@@ -563,7 +567,7 @@ export function AppointmentDetailSheet({
                   )}
                   {isApptStyle &&
                     showDepositPendingPill(detail) &&
-                    ['Pending', 'Confirmed'].includes(detail.status) && (
+                    ['Pending', 'Booked', 'Confirmed'].includes(detail.status) && (
                     <span
                       className="inline-flex items-center gap-1 rounded-full bg-orange-100 px-2 py-0.5 text-xs font-semibold text-orange-950 ring-1 ring-orange-200/80"
                       title="Deposit not yet paid"
@@ -573,7 +577,7 @@ export function AppointmentDetailSheet({
                   )}
                   {isApptStyle &&
                     showAttendanceConfirmedPill(detail) &&
-                    ['Pending', 'Confirmed'].includes(detail.status) && (
+                    ['Pending', 'Booked', 'Confirmed'].includes(detail.status) && (
                     <span
                       className="inline-flex items-center gap-1 rounded-full bg-teal-100 px-2 py-0.5 text-xs font-semibold text-teal-900 ring-1 ring-teal-200/80"
                       title={(() => {
@@ -897,7 +901,7 @@ export function AppointmentDetailSheet({
               <div className="border-t border-slate-100 pt-4">
                 <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Actions</p>
                 <div className="mt-2 flex flex-wrap gap-2">
-                  {isApptStyle && ['Pending', 'Confirmed'].includes(detail.status) && (
+                  {isApptStyle && ['Pending', 'Booked', 'Confirmed'].includes(detail.status) && (
                     <button
                       type="button"
                       disabled={busy}
@@ -907,7 +911,7 @@ export function AppointmentDetailSheet({
                       {arrived ? 'Clear waiting' : 'Arrived'}
                     </button>
                   )}
-                  {isApptStyle && ['Pending', 'Confirmed'].includes(detail.status) && (
+                  {isApptStyle && ['Pending', 'Booked', 'Confirmed'].includes(detail.status) && (
                     <button
                       type="button"
                       disabled={busy}
@@ -939,18 +943,18 @@ export function AppointmentDetailSheet({
                       className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
                       title={
                         detail.status === 'Seated' && !isTableReservationBooking(detail)
-                          ? 'Return to confirmed; if they were marked arrived, waiting is restored'
+                          ? 'Return to booked; if they were marked arrived, waiting is restored'
                           : undefined
                       }
                     >
                       {detail.status === 'Seated' &&
-                      revert.target === 'Confirmed' &&
+                      revert.target === 'Booked' &&
                       !isTableReservationBooking(detail)
                         ? 'Undo Start'
                         : revert.label}
                     </button>
                   )}
-                  {detail.status === 'Confirmed' && (
+                  {(detail.status === 'Confirmed' || detail.status === 'Booked') && (
                     <button
                       type="button"
                       disabled={busy || !canNoShow}
@@ -972,7 +976,7 @@ export function AppointmentDetailSheet({
                         Cancel
                       </button>
                     )}
-                  {detail.practitioner_id && ['Pending', 'Confirmed', 'Seated'].includes(detail.status) && (
+                  {detail.practitioner_id && ['Pending', 'Booked', 'Confirmed', 'Seated'].includes(detail.status) && (
                     <button
                       type="button"
                       disabled={busy}

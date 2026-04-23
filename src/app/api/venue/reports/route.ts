@@ -295,7 +295,7 @@ export async function GET(request: NextRequest) {
           .eq('booking.venue_id', staff.venue_id)
           .gte('booking.booking_date', from)
           .lte('booking.booking_date', to)
-          .in('booking.status', ['Confirmed', 'Seated', 'Completed']),
+          .in('booking.status', ['Booked', 'Confirmed', 'Seated', 'Completed']),
       ]);
 
       const days = Math.max(1, Math.ceil((new Date(`${to}T00:00:00Z`).getTime() - new Date(`${from}T00:00:00Z`).getTime()) / 86400000) + 1);

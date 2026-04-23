@@ -191,7 +191,7 @@ async function sendConfirmOrCancelPrompts(results: {
         .select(BOOKING_SELECT)
         .eq('venue_id', venue.id)
         .in('booking_date', dates)
-        .in('status', ['Pending', 'Confirmed']);
+        .in('status', ['Pending', 'Booked', 'Confirmed']);
 
       if (!bookings?.length) continue;
 
@@ -293,7 +293,7 @@ async function sendPreVisitReminders(results: {
         .select(BOOKING_SELECT)
         .eq('venue_id', venue.id)
         .in('booking_date', dates)
-        .in('status', ['Pending', 'Confirmed']);
+        .in('status', ['Pending', 'Booked', 'Confirmed']);
 
       if (!bookings?.length) continue;
 

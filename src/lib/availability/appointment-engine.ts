@@ -351,7 +351,7 @@ function effectiveWorkingRangesForAppointments(
   return intersectMinuteRanges(workingRanges, venueRanges);
 }
 
-const CAPACITY_CONSUMING_STATUSES = ['Confirmed', 'Pending', 'Seated'];
+const CAPACITY_CONSUMING_STATUSES = ['Booked', 'Confirmed', 'Pending', 'Seated'];
 
 /**
  * Services a practitioner/calendar offers for appointment booking (only rows explicitly linked in

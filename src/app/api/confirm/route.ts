@@ -255,10 +255,15 @@ export async function GET(request: NextRequest) {
 }
 
 /**
- * POST /api/confirm \u2014 action: confirm | cancel
+ * POST /api/confirm — action: confirm | cancel | modify
  * Body: { booking_id, token, action }.
- * Confirm: set status Confirmed, set confirm_token_used_at.
- * Cancel: set status Cancelled; if before cancellation_deadline trigger refund and set deposit_status Refunded; set confirm_token_used_at; send cancellation_confirmation.
+ * Confirm: only valid when the booking is `Booked` (or already `Confirmed` —
+ *   idempotent). Pending bookings (awaiting deposit) are blocked. Sets status
+ *   to Confirmed, records guest_attendance_confirmed_at, marks token used.
+ * Cancel: set status Cancelled; if before cancellation_deadline trigger refund
+ *   and set deposit_status Refunded; set confirm_token_used_at; send
+ *   cancellation_confirmation.
+ * Modify: change date/time/party for a Booked or Confirmed booking.
  */
 export async function POST(request: NextRequest) {
   try {
@@ -334,8 +339,21 @@ export async function POST(request: NextRequest) {
         booking as { guest_attendance_confirmed_at?: string | null }
       ).guest_attendance_confirmed_at;
 
-      // Pre-visit reminder: booking is often already Confirmed - record guest attendance instead of
-      // attempting Confirmed → Confirmed (invalid transition).
+      // Guests cannot confirm attendance on a booking still awaiting deposit
+      // payment (`Pending`). They must complete the deposit first; once paid
+      // the booking moves to `Booked` and becomes confirmable.
+      if (currentStatus === "Pending") {
+        return NextResponse.json(
+          {
+            error:
+              "This booking is awaiting deposit payment. Please complete the deposit before confirming your attendance.",
+          },
+          { status: 400 },
+        );
+      }
+
+      // Idempotent: if the booking is already in `Confirmed`, just record the
+      // guest timestamp if missing — never attempt Confirmed → Confirmed.
       if (currentStatus === "Confirmed") {
         if (attendanceAlready) {
           return NextResponse.json({
@@ -361,6 +379,7 @@ export async function POST(request: NextRequest) {
         });
       }
 
+      // Standard path: Booked → Confirmed (guest tapped the confirm link).
       const confirmCheck = validateBookingStatusTransition(
         currentStatus,
         "Confirmed",
@@ -393,7 +412,7 @@ export async function POST(request: NextRequest) {
 
       return NextResponse.json({
         success: true,
-        message: "Your booking is confirmed. We look forward to seeing you.",
+        message: "Thanks. We've noted that you're coming. We look forward to seeing you.",
       });
     }
 
@@ -576,7 +595,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (action === "modify") {
-      const modifiableStatuses = ["Confirmed", "Pending"];
+      const modifiableStatuses = ["Booked", "Confirmed", "Pending"];
       if (!modifiableStatuses.includes(booking.status as string)) {
         return NextResponse.json(
           { error: "This booking cannot be modified." },

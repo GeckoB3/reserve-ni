@@ -81,7 +81,7 @@ export interface ClassAvailabilitySlot {
   colour: string;
 }
 
-const CAPACITY_CONSUMING_STATUSES = ['Confirmed', 'Pending', 'Seated'];
+const CAPACITY_CONSUMING_STATUSES = ['Booked', 'Confirmed', 'Pending', 'Seated'];
 
 /** Resolves DB row to enum; supports legacy requires_online_payment. */
 export function resolveClassPaymentRequirement(ct: ClassType): ClassPaymentRequirement {

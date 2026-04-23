@@ -284,7 +284,7 @@ export async function POST(request: NextRequest) {
       }) => {
         const details = Array.isArray(assignment.bookings) ? assignment.bookings[0] : assignment.bookings;
         if (!details || !details.booking_time || !details.status) return false;
-        if (!['Pending', 'Confirmed', 'Seated'].includes(details.status)) return false;
+        if (!['Pending', 'Booked', 'Confirmed', 'Seated'].includes(details.status)) return false;
         const existingStart = timeToMinutes(extractTime(details.booking_time));
         const existingEnd = details.estimated_end_time
           ? timeToMinutes(extractTime(details.estimated_end_time))

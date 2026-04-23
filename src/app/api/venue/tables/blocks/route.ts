@@ -4,7 +4,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff } from '@/lib/venue-auth';
 
-const BOOKING_STATUSES_BLOCK_CONFLICTS = ['Pending', 'Confirmed', 'Seated'] as const;
+const BOOKING_STATUSES_BLOCK_CONFLICTS = ['Pending', 'Booked', 'Confirmed', 'Seated'] as const;
 
 function bookingWindowMs(
   bookingDate: string,

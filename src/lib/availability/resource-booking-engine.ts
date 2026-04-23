@@ -79,7 +79,7 @@ export interface ResourceAvailabilityResult {
 const DAY_NAMES = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const;
 
 /** Statuses that consume resource capacity (must match bookings query in fetchResourceInput). */
-export const RESOURCE_BOOKING_CAPACITY_STATUSES = ['Confirmed', 'Pending', 'Seated'] as const;
+export const RESOURCE_BOOKING_CAPACITY_STATUSES = ['Booked', 'Confirmed', 'Pending', 'Seated'] as const;
 const CAPACITY_CONSUMING_STATUSES = RESOURCE_BOOKING_CAPACITY_STATUSES as unknown as string[];
 
 function dayKeyForDate(dateStr: string): string {
@@ -107,7 +107,6 @@ function getHostCalendarRanges(
   host: { working_hours: WorkingHours; days_off: string[] },
   dateStr: string,
 ): Array<{ start: number; end: number }> {
-  const dayKey = dayKeyForDate(dateStr);
   const dayName = dayNameForDate(dateStr);
   if (Array.isArray(host.days_off)) {
     for (const d of host.days_off) {

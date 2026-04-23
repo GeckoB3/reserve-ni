@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 
-export type PillVariant = 'success' | 'neutral' | 'warning' | 'danger' | 'brand';
+export type PillVariant = 'success' | 'neutral' | 'warning' | 'danger' | 'brand' | 'info';
 
 const variantClasses: Record<PillVariant, string> = {
   success: 'border-emerald-200 bg-emerald-50 text-emerald-800',
@@ -8,6 +8,7 @@ const variantClasses: Record<PillVariant, string> = {
   warning: 'border-amber-200 bg-amber-50 text-amber-800',
   danger: 'border-rose-200 bg-rose-50 text-rose-800',
   brand: 'border-brand-200 bg-brand-50 text-brand-800',
+  info: 'border-sky-200 bg-sky-50 text-sky-800',
 };
 
 export function Pill({
@@ -39,7 +40,9 @@ export function Pill({
                   ? 'bg-rose-500'
                   : variant === 'brand'
                     ? 'bg-brand-600'
-                    : 'bg-slate-400'
+                    : variant === 'info'
+                      ? 'bg-sky-500'
+                      : 'bg-slate-400'
           }`}
         />
       ) : null}

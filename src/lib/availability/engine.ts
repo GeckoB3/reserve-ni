@@ -20,7 +20,7 @@ import type {
   VenueService,
 } from '@/types/availability';
 
-const CAPACITY_CONSUMING_STATUSES = ['Confirmed', 'Pending'];
+const CAPACITY_CONSUMING_STATUSES = ['Booked', 'Confirmed', 'Pending'];
 
 const DEFAULT_DURATION_MINUTES = 90;
 

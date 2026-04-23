@@ -24,7 +24,7 @@ export {
 export { fetchEngineInput, hasServiceConfig } from './fetch';
 
 const DEFAULT_SITTING_DURATION_MINUTES = 90;
-const CAPACITY_CONSUMING_STATUSES = ['Confirmed', 'Pending'];
+const CAPACITY_CONSUMING_STATUSES = ['Booked', 'Confirmed', 'Pending'];
 
 /** Parse "HH:mm" or "HH:mm:ss" to minutes since midnight. */
 export function timeToMinutes(t: string): number {

@@ -302,7 +302,10 @@ export async function applyBookingLifecycleStatusEffects(
     await clearTableStatusesForBooking(db, bookingId, actorId);
     // Remove assignment rows so dashboards and exports do not show stale table links.
     await replaceBookingAssignments(db, bookingId, [], actorId);
-  } else if (nextStatus === 'Seated' || nextStatus === 'Confirmed' || nextStatus === 'Pending') {
+  } else if (nextStatus === 'Seated' || nextStatus === 'Booked' || nextStatus === 'Pending') {
+    // Table assignment is locked at booking time, not at attendance time —
+    // sync on Booked but skip on Booked → Confirmed (the table is already
+    // marked `reserved`; nothing changes when the guest just confirms).
     await syncTableStatusesForBooking(db, bookingId, assignedTableIds, nextStatus, actorId);
   }
 }

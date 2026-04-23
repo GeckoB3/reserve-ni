@@ -130,7 +130,7 @@ export async function GET() {
         .select(bookingListCols)
         .eq('venue_id', staff.venue_id)
         .eq('booking_date', todayStrVenue)
-        .in('status', ['Confirmed', 'Pending', 'Seated']),
+        .in('status', ['Booked', 'Confirmed', 'Pending', 'Seated']),
       admin
         .from('bookings')
         .select(
@@ -139,7 +139,7 @@ export async function GET() {
         .eq('venue_id', staff.venue_id)
         .gte('booking_date', todayStrVenue)
         .lte('booking_date', weekEndStr)
-        .in('status', ['Confirmed', 'Pending', 'Seated']),
+        .in('status', ['Booked', 'Confirmed', 'Pending', 'Seated']),
     ]);
 
     const todayBookings = todayBookingsRes.data ?? [];

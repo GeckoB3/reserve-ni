@@ -302,7 +302,7 @@ export async function POST(request: NextRequest) {
       booking_date,
       booking_time: timeForDb,
       party_size,
-      status: requiresDeposit ? 'Pending' : 'Confirmed',
+      status: requiresDeposit ? 'Pending' : 'Booked',
       source,
       dietary_notes: dietary_notes || null,
       occasion: occasion || null,
@@ -513,7 +513,7 @@ async function handleNonTableBooking(
   let appointmentEmailExtras: Partial<BookingEmailData> = {};
   let unifiedSessionAnchor: { calendar_id: string; service_item_id: string | null } | null = null;
 
-  const SESSION_CAPACITY_STATUSES = ['Pending', 'Confirmed', 'Seated'];
+  const SESSION_CAPACITY_STATUSES = ['Pending', 'Booked', 'Confirmed', 'Seated'];
 
   if (event_session_id && effectiveModel !== 'unified_scheduling') {
     return NextResponse.json(
@@ -885,7 +885,7 @@ async function handleNonTableBooking(
     party_size,
     /** Align with effectiveModel; default `table_reservation` would violate bookings_area_required_for_table_reservation when area_id is unset. */
     booking_model: effectiveModel,
-    status: requiresDeposit ? 'Pending' : 'Confirmed',
+    status: requiresDeposit ? 'Pending' : 'Booked',
     source,
     dietary_notes: dietary_notes || null,
     occasion: occasion || null,

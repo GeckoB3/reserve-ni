@@ -160,7 +160,8 @@ const AREA_UUID_RE =
 
 const STATUS_STYLE: Record<string, { dot: string; bg: string; text: string; ring: string }> = {
   Pending:   { dot: 'bg-amber-500',   bg: 'bg-amber-50',   text: 'text-amber-700',   ring: 'ring-amber-200' },
-  Confirmed: { dot: 'bg-teal-500',    bg: 'bg-teal-50',    text: 'text-teal-700',    ring: 'ring-teal-200' },
+  Booked:    { dot: 'bg-sky-500',     bg: 'bg-sky-50',     text: 'text-sky-700',     ring: 'ring-sky-200' },
+  Confirmed: { dot: 'bg-emerald-500', bg: 'bg-emerald-50', text: 'text-emerald-700', ring: 'ring-emerald-200' },
   Seated:    { dot: 'bg-brand-600',    bg: 'bg-brand-50',    text: 'text-brand-800',    ring: 'ring-brand-200' },
   Completed: { dot: 'bg-slate-400',   bg: 'bg-slate-50',   text: 'text-slate-500',   ring: 'ring-slate-200' },
   'No-Show': { dot: 'bg-red-500',     bg: 'bg-red-50',     text: 'text-red-700',     ring: 'ring-red-200' },
@@ -169,11 +170,12 @@ const STATUS_STYLE: Record<string, { dot: string; bg: string; text: string; ring
 
 const PRIMARY_ACTIONS: Record<string, { label: string; target: BookingStatus }> = {
   Pending:   BOOKING_PRIMARY_ACTIONS.Pending!,
+  Booked:    BOOKING_PRIMARY_ACTIONS.Booked!,
   Confirmed: BOOKING_PRIMARY_ACTIONS.Confirmed!,
   Seated:    BOOKING_PRIMARY_ACTIONS.Seated!,
 };
 
-const DEFAULT_STATUSES = new Set(['Pending', 'Confirmed', 'Seated']);
+const DEFAULT_STATUSES = new Set(['Pending', 'Booked', 'Confirmed', 'Seated']);
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -1008,7 +1010,7 @@ export function DaySheetView({
     const snapshot = data;
     setData((prev) => {
       if (!prev) return prev;
-      const activeStatuses = ['Pending', 'Confirmed', 'Seated'];
+      const activeStatuses = ['Pending', 'Booked', 'Confirmed', 'Seated'];
       const updatedPeriods = prev.periods.map((p) => {
         const updatedBookings = p.bookings.map((b) => b.id === bookingId ? { ...b, status: newStatus } : b);
         const bookedCovers = updatedBookings
@@ -1057,6 +1059,7 @@ export function DaySheetView({
         return;
       }
       const label = newStatus === 'Confirmed' ? 'Booking confirmed' :
+                     newStatus === 'Booked' ? 'Booking saved' :
                      newStatus === 'Seated' ? 'Guest checked in' :
                      newStatus === 'Completed' ? 'Booking completed' :
                      newStatus === 'No-Show' ? 'Marked as no-show' :
@@ -1647,7 +1650,8 @@ export function DaySheetView({
                                 void changeStatus(b.id, primaryAction.target);
                               }}
                               className={`rounded-lg px-3 py-1.5 text-xs font-semibold text-white shadow-sm disabled:opacity-50 print:hidden ${
-                                primaryAction.target === 'Confirmed' ? 'bg-teal-600 hover:bg-teal-700' :
+                                primaryAction.target === 'Booked' ? 'bg-sky-600 hover:bg-sky-700' :
+                                primaryAction.target === 'Confirmed' ? 'bg-emerald-600 hover:bg-emerald-700' :
                                 primaryAction.target === 'Seated' ? 'bg-brand-600 hover:bg-brand-700' :
                                 'bg-slate-600 hover:bg-slate-700'
                               }`}
@@ -1952,7 +1956,7 @@ export function DaySheetView({
                                       {BOOKING_REVERT_ACTIONS[b.status as BookingStatus]!.label}
                                     </button>
                                   )}
-                                  {b.status === 'Confirmed' && (
+                                  {(b.status === 'Confirmed' || b.status === 'Booked') && (
                                     <button
                                       type="button"
                                       disabled={actionLoading === b.id || !canMarkNoShowForSlot(date, b.booking_time, data.no_show_grace_minutes)}
@@ -1968,7 +1972,7 @@ export function DaySheetView({
                                       No-Show
                                     </button>
                                   )}
-                                  {(b.status === 'Pending' || b.status === 'Confirmed') && (
+                                  {(b.status === 'Pending' || b.status === 'Booked' || b.status === 'Confirmed') && (
                                     <button
                                       type="button"
                                       disabled={actionLoading === b.id}

@@ -124,13 +124,13 @@ export function splitFullName(full: string): { first: string; last: string } {
 
 export function mapBookingStatus(raw: string | null | undefined): string {
   const t = raw?.trim().toLowerCase() ?? '';
-  if (!t) return 'Confirmed';
+  if (!t) return 'Booked';
   if (t.includes('cancel')) return 'Cancelled';
   if (t.includes('no-show') || t.includes('no show')) return 'No-Show';
   if (t.includes('complete') || t.includes('completed')) return 'Completed';
   if (t.includes('seat')) return 'Seated';
   if (t.includes('pending') || t.includes('unconfirmed')) return 'Pending';
-  return 'Confirmed';
+  return 'Booked';
 }
 
 const DEPOSIT_STATUS_ENUMS = [

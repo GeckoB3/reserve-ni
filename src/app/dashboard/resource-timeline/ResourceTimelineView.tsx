@@ -85,6 +85,7 @@ const MAX_BOOKING_MAX = 1440;
 function resourceBookingStatusVariant(status: string): PillVariant {
   const s = status.toLowerCase();
   if (s.includes('cancel')) return 'danger';
+  if (s === 'booked') return 'info';
   if (s.includes('confirm') || s.includes('complete')) return 'success';
   if (s.includes('pending')) return 'warning';
   return 'neutral';
@@ -94,6 +95,7 @@ function bookingScheduleStripClass(status: string): string {
   const s = status.toLowerCase();
   if (s.includes('cancel')) return 'bg-slate-300';
   if (s.includes('pending')) return 'bg-amber-500';
+  if (s === 'booked') return 'bg-sky-500';
   if (s.includes('confirm')) return 'bg-brand-600';
   return 'bg-slate-400';
 }

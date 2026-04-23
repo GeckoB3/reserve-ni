@@ -1,5 +1,23 @@
+/**
+ * Booking lifecycle.
+ *
+ * - `Pending`   — Awaiting deposit payment or manual approval.
+ * - `Booked`    — Booking exists, slot is held. Default state when no deposit
+ *                 is required, or once the deposit is paid. (Was historically
+ *                 called "Confirmed" — see migration 20260424…booked_status.)
+ * - `Confirmed` — Guest has explicitly confirmed attendance via the public
+ *                 reminder/confirm link, OR a staff member has manually
+ *                 marked the booking confirmed. Optional milestone — bookings
+ *                 may go `Booked` → `Seated` directly without ever reaching
+ *                 `Confirmed`.
+ * - `Seated`    — Guest has arrived / appointment has started.
+ * - `Completed` — Visit finished.
+ * - `No-Show`   — Guest did not arrive.
+ * - `Cancelled` — Booking cancelled by guest or staff.
+ */
 export const BOOKING_STATUSES = [
   'Pending',
+  'Booked',
   'Confirmed',
   'Seated',
   'Completed',
@@ -10,24 +28,28 @@ export const BOOKING_STATUSES = [
 export type BookingStatus = (typeof BOOKING_STATUSES)[number];
 
 export const BOOKING_STATUS_TRANSITIONS: Record<BookingStatus, BookingStatus[]> = {
-  Pending: ['Confirmed', 'Cancelled'],
-  Confirmed: ['Seated', 'No-Show', 'Cancelled'],
-  Seated: ['Completed', 'Cancelled', 'Confirmed'],
+  Pending: ['Booked', 'Cancelled'],
+  Booked: ['Confirmed', 'Seated', 'No-Show', 'Cancelled'],
+  Confirmed: ['Booked', 'Seated', 'No-Show', 'Cancelled'],
+  Seated: ['Completed', 'Cancelled', 'Booked', 'Confirmed'],
   Completed: ['Seated'],
-  'No-Show': ['Confirmed'],
+  'No-Show': ['Booked', 'Confirmed'],
   Cancelled: [],
 };
 
 export const BOOKING_PRIMARY_ACTIONS: Partial<Record<BookingStatus, { label: string; target: BookingStatus }>> = {
-  Pending: { label: 'Confirm', target: 'Confirmed' },
+  Pending: { label: 'Confirm', target: 'Booked' },
+  Booked: { label: 'Seat', target: 'Seated' },
   Confirmed: { label: 'Seat', target: 'Seated' },
   Seated: { label: 'Complete', target: 'Completed' },
 };
 
 export const BOOKING_REVERT_ACTIONS: Partial<Record<BookingStatus, { label: string; target: BookingStatus }>> = {
-  Seated: { label: 'Unseat', target: 'Confirmed' },
+  Booked: { label: 'Mark pending', target: 'Pending' },
+  Confirmed: { label: 'Undo confirm', target: 'Booked' },
+  Seated: { label: 'Unseat', target: 'Booked' },
   Completed: { label: 'Reopen', target: 'Seated' },
-  'No-Show': { label: 'Revert No-Show', target: 'Confirmed' },
+  'No-Show': { label: 'Revert No-Show', target: 'Booked' },
 };
 
 export function isRevertTransition(from: BookingStatus | string, to: BookingStatus | string): boolean {

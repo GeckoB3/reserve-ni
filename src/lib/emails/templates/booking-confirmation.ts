@@ -50,7 +50,6 @@ function confirmationHeadline(
       subject: `Your booking at ${venueName} is confirmed`,
     };
   }
-  const appt = isAppointmentStyle(booking);
   return {
     heading: `Your booking at ${venueName} is confirmed`,
     subject: `Your booking at ${venueName} is confirmed`,

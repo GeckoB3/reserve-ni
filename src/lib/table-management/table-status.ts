@@ -71,6 +71,6 @@ export function getTableStatus(
   if (activeBooking.status === 'Seated' || activeBooking.status === 'Arrived') return 'seated';
   if (activeBooking.status === 'Pending') return 'pending';
   if (activeBooking.status === 'No-Show') return 'no_show';
-  if (activeBooking.status === 'Confirmed') return 'booked';
+  if (activeBooking.status === 'Confirmed' || activeBooking.status === 'Booked') return 'booked';
   return 'available';
 }

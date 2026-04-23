@@ -296,7 +296,7 @@ export async function POST(request: NextRequest) {
         party_size,
         /** Must be set explicitly — column defaults to `table_reservation`, which fails the area_required CHECK for non-table venues. */
         booking_model: 'event_ticket' as const,
-        status: requiresDeposit ? ('Pending' as const) : ('Confirmed' as const),
+        status: requiresDeposit ? ('Pending' as const) : ('Booked' as const),
         source: eventSource,
         guest_email: guest.email || null,
         deposit_amount_pence: requiresDeposit ? depositAmountPence : null,
@@ -469,7 +469,7 @@ export async function POST(request: NextRequest) {
         party_size,
         /** Must be set explicitly — column defaults to `table_reservation`, which fails the area_required CHECK for non-table venues. */
         booking_model: 'class_session' as const,
-        status: requiresDeposit ? ('Pending' as const) : ('Confirmed' as const),
+        status: requiresDeposit ? ('Pending' as const) : ('Booked' as const),
         source: classSource,
         guest_email: guest.email || null,
         deposit_amount_pence: requiresDeposit ? depositAmountPence : null,
@@ -669,7 +669,7 @@ export async function POST(request: NextRequest) {
         party_size,
         /** Must be set explicitly — column defaults to `table_reservation`, which fails the area_required CHECK for non-table venues. */
         booking_model: 'resource_booking' as const,
-        status: requiresDepositRes ? ('Pending' as const) : ('Confirmed' as const),
+        status: requiresDepositRes ? ('Pending' as const) : ('Booked' as const),
         source: resourceSource,
         guest_email: guest.email || null,
         deposit_amount_pence: requiresDepositRes ? depositAmountPenceRes : null,
@@ -891,7 +891,7 @@ export async function POST(request: NextRequest) {
         booking_model: useUnifiedAppointmentStorage
           ? 'unified_scheduling'
           : 'practitioner_appointment',
-        status: requiresDeposit ? 'Pending' : 'Confirmed',
+        status: requiresDeposit ? 'Pending' : 'Booked',
         source: (parsed.data.source ?? 'phone') as 'phone' | 'walk-in',
         guest_email: guest.email || null,
         deposit_amount_pence: depositAmountPence,
@@ -1136,7 +1136,7 @@ export async function POST(request: NextRequest) {
       booking_date,
       booking_time: timeForDb,
       party_size,
-      status: requiresDeposit ? 'Pending' : 'Confirmed',
+      status: requiresDeposit ? 'Pending' : 'Booked',
       source: 'phone',
       guest_email: guest.email || null,
       deposit_amount_pence: depositAmountPence,

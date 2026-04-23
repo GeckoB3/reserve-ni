@@ -80,7 +80,7 @@ export async function POST(
       .select('id, group_booking_id, status')
       .eq('venue_id', venueId)
       .eq('class_instance_id', instanceId)
-      .in('status', ['Pending', 'Confirmed', 'Seated']);
+      .in('status', ['Pending', 'Booked', 'Confirmed', 'Seated']);
 
     if (bookErr) {
       console.error('POST class-instances/[id]/cancel: list bookings failed:', bookErr);

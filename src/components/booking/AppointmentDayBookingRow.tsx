@@ -30,37 +30,41 @@ export interface DayBooking {
 
 /**
  * Model B day sheet - one semantic colour per lifecycle stage (badges + rows + buttons).
- * Blue = scheduled (Confirmed), Amber = on-site waiting, Violet = in session, Emerald = done.
- * Orange Pending = payment/action still needed (distinct from amber “waiting”).
+ * Sky = scheduled (Booked), Emerald = attendance Confirmed, Amber = on-site waiting,
+ * Violet = in session, Teal = done. Orange Pending = payment/action still needed.
  */
 const STATUS_STYLES: Record<string, string> = {
   Pending: 'bg-orange-100 text-orange-900 ring-1 ring-orange-200/80',
-  Confirmed: 'bg-blue-100 text-blue-900 ring-1 ring-blue-200/80',
+  Booked: 'bg-sky-100 text-sky-900 ring-1 ring-sky-200/80',
+  Confirmed: 'bg-emerald-100 text-emerald-900 ring-1 ring-emerald-200/80',
   Seated: 'bg-violet-100 text-violet-900 ring-1 ring-violet-200/80',
-  Completed: 'bg-emerald-100 text-emerald-900 ring-1 ring-emerald-200/80',
+  Completed: 'bg-teal-100 text-teal-900 ring-1 ring-teal-200/80',
   'No-Show': 'bg-red-100 text-red-900 ring-1 ring-red-200/70',
   Cancelled: 'bg-slate-100 text-slate-500 ring-1 ring-slate-200/80',
 };
 
-/** Row bar tint - matches STATUS_STYLES; Pending vs Confirmed vs Waiting stay visually distinct. */
+/** Row bar tint - matches STATUS_STYLES; Pending/Booked/Confirmed/Waiting stay visually distinct. */
 function rowSurfaceClass(status: string, arrived: boolean, isCancelled: boolean): string {
   if (isCancelled) {
     return 'bg-slate-100/80 border-slate-200/90';
   }
   if (status === 'Completed') {
-    return 'bg-emerald-50/92 border-emerald-200/90';
+    return 'bg-teal-50/92 border-teal-200/90';
   }
   if (status === 'Seated') {
     return 'bg-violet-50/92 border-violet-200/90';
   }
-  if (arrived && (status === 'Pending' || status === 'Confirmed')) {
+  if (arrived && (status === 'Pending' || status === 'Booked' || status === 'Confirmed')) {
     return 'bg-amber-50/92 border-amber-300/90';
   }
   if (status === 'Pending') {
     return 'bg-orange-50/90 border-orange-200/85';
   }
+  if (status === 'Booked') {
+    return 'bg-sky-50/90 border-sky-200/85';
+  }
   if (status === 'Confirmed') {
-    return 'bg-blue-50/90 border-blue-200/85';
+    return 'bg-emerald-50/90 border-emerald-200/85';
   }
   return 'bg-white border-slate-200/90';
 }
@@ -151,7 +155,7 @@ export function AppointmentDayBookingRow({
                 >
                   {bookingStatusDisplayLabel(b.status, false)}
                 </span>
-                {(b.status === 'Confirmed' || b.status === 'Pending') && showDepositPendingPill(b) && (
+                {(b.status === 'Confirmed' || b.status === 'Booked' || b.status === 'Pending') && showDepositPendingPill(b) && (
                   <span
                     className="inline-flex rounded-full bg-orange-100 px-2 py-0.5 text-xs font-medium text-orange-950 ring-1 ring-orange-200/80"
                     title="Deposit not yet paid"
@@ -159,7 +163,7 @@ export function AppointmentDayBookingRow({
                     Deposit pending
                   </span>
                 )}
-                {(b.status === 'Confirmed' || b.status === 'Pending') && showAttendanceConfirmedPill(b) && (
+                {(b.status === 'Confirmed' || b.status === 'Booked' || b.status === 'Pending') && showAttendanceConfirmedPill(b) && (
                   <span
                     className="inline-flex rounded-full bg-teal-100 px-2 py-0.5 text-xs font-medium text-teal-900 ring-1 ring-teal-200/80"
                     title="Confirmed"
@@ -188,7 +192,7 @@ export function AppointmentDayBookingRow({
 
         {!isCancelled && (
           <div className="flex flex-shrink-0 flex-wrap items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
-            {(b.status === 'Pending' || b.status === 'Confirmed') && (
+            {(b.status === 'Pending' || b.status === 'Booked' || b.status === 'Confirmed') && (
               <>
                 {!arrived ? (
                   <button
@@ -221,7 +225,7 @@ export function AppointmentDayBookingRow({
                 Confirm
               </button>
             )}
-            {b.status === 'Confirmed' && (
+            {(b.status === 'Booked' || b.status === 'Confirmed') && (
               <button
                 type="button"
                 onClick={onStart}
@@ -251,7 +255,7 @@ export function AppointmentDayBookingRow({
                 Reopen
               </button>
             )}
-            {b.status === 'Confirmed' && (
+            {(b.status === 'Booked' || b.status === 'Confirmed') && (
               <button
                 type="button"
                 onClick={onNoShow}

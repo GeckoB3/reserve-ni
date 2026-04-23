@@ -14,6 +14,7 @@ import { enrichBookingEmailForComms } from '@/lib/emails/booking-email-enrichmen
 import { venueRowToEmailData } from '@/lib/emails/venue-email-data';
 import { autoAssignTable } from '@/lib/table-availability';
 import { BOOKING_MUTABLE_STATUSES } from '@/lib/table-management/constants';
+import type { BookingStatus } from '@/lib/table-management/booking-status';
 import {
   applyBookingLifecycleStatusEffects,
   clearTableStatusesForBooking,
@@ -291,7 +292,7 @@ export async function PATCH(
         }
       }
 
-      if (newStatus === 'Cancelled' && (booking.status === 'Confirmed' || booking.status === 'Pending' || booking.status === 'Seated')) {
+      if (newStatus === 'Cancelled' && (booking.status === 'Confirmed' || booking.status === 'Booked' || booking.status === 'Pending' || booking.status === 'Seated')) {
         const groupBookingId = booking.group_booking_id as string | null | undefined;
         let idsToCancel: string[] = [id];
         let paymentIntentForRefund: string | null =
@@ -306,7 +307,7 @@ export async function PATCH(
             .select('id, stripe_payment_intent_id, deposit_status, deposit_amount_pence')
             .eq('venue_id', staff.venue_id)
             .eq('group_booking_id', groupBookingId)
-            .in('status', ['Pending', 'Confirmed', 'Seated']);
+            .in('status', ['Pending', 'Booked', 'Confirmed', 'Seated']);
 
           idsToCancel = (groupRows ?? []).map((r: { id: string }) => r.id);
           if (idsToCancel.length === 0) {
@@ -483,13 +484,27 @@ export async function PATCH(
           updated_at: new Date().toISOString(),
         };
         // Table bookings: clear "arrived" when seated. Appointment (practitioner) bookings keep client_arrived_at
-        // so staff can undo start and return to Confirmed with waiting state restored.
+        // so staff can undo start and return to the held state with waiting state restored.
         if (newStatus === 'Seated' && !booking.practitioner_id && !booking.calendar_id) {
           statusPayload.client_arrived_at = null;
         }
+        // Manual transition to `Confirmed` via the status dropdown is treated
+        // as staff confirming attendance — record the timestamp so attendance
+        // pills and `attendanceConfirmationSources` stay in sync.
+        if (newStatus === 'Confirmed' && booking.status !== 'Confirmed') {
+          statusPayload.staff_attendance_confirmed_at = new Date().toISOString();
+        }
+        // Reverting away from `Confirmed` clears the staff attendance timestamp
+        // (mirror of the staff_attendance_confirmed=false path below).
+        if (booking.status === 'Confirmed' && newStatus === 'Booked') {
+          statusPayload.staff_attendance_confirmed_at = null;
+        }
         await staff.db.from('bookings').update(statusPayload).eq('id', id);
 
-        if (booking.status === 'Pending' && newStatus === 'Confirmed') {
+        // Booking confirmation comms: send when the slot first becomes "active",
+        // i.e. Pending → Booked. (Was previously Pending → Confirmed under the
+        // old overloaded enum.)
+        if (booking.status === 'Pending' && newStatus === 'Booked') {
           const { sendBookingConfirmationNotifications } = await import('@/lib/communications/send-templated');
           const { data: guestRow } = await staff.db.from('guests').select('name, email, phone').eq('id', booking.guest_id).single();
           const { data: venueRow } = await staff.db.from('venues').select('name, address').eq('id', staff.venue_id).single();
@@ -550,9 +565,9 @@ export async function PATCH(
         return NextResponse.json({ error: 'Arrived is only available for appointment bookings' }, { status: 400 });
       }
       const st = booking.status as string;
-      if (!['Pending', 'Confirmed'].includes(st)) {
+      if (!['Pending', 'Booked', 'Confirmed'].includes(st)) {
         return NextResponse.json(
-          { error: 'Arrived can only be set when the booking is pending or confirmed' },
+          { error: 'Arrived can only be set when the booking is pending, booked, or confirmed' },
           { status: 400 },
         );
       }
@@ -572,14 +587,43 @@ export async function PATCH(
 
     if (body.staff_attendance_confirmed !== undefined) {
       const on = Boolean(body.staff_attendance_confirmed);
+      const currentStatus = booking.status as string;
+      const updatePayload: Record<string, unknown> = {
+        staff_attendance_confirmed_at: on ? new Date().toISOString() : null,
+        updated_at: new Date().toISOString(),
+      };
+      // Tie the timestamp to the lifecycle status:
+      //   on=true,  status=Booked    → promote to Confirmed
+      //   on=false, status=Confirmed → revert to Booked (only if the guest
+      //                               hasn't independently confirmed)
+      // Other statuses (Seated, Completed, Cancelled, No-Show) keep the
+      // attendance timestamp as a passive audit field without altering status.
+      if (on && currentStatus === 'Booked') {
+        updatePayload.status = 'Confirmed';
+      } else if (
+        !on &&
+        currentStatus === 'Confirmed' &&
+        !booking.guest_attendance_confirmed_at
+      ) {
+        updatePayload.status = 'Booked';
+      }
+
       await staff.db
         .from('bookings')
-        .update({
-          staff_attendance_confirmed_at: on ? new Date().toISOString() : null,
-          updated_at: new Date().toISOString(),
-        })
+        .update(updatePayload)
         .eq('id', id)
         .eq('venue_id', staff.venue_id);
+
+      // Run lifecycle hooks if status changed (mirrors the status-PATCH path).
+      if (updatePayload.status && updatePayload.status !== currentStatus) {
+        await applyBookingLifecycleStatusEffects(admin, {
+          bookingId: id,
+          guestId: booking.guest_id,
+          previousStatus: currentStatus,
+          nextStatus: updatePayload.status as BookingStatus,
+          actorId: staff.id,
+        });
+      }
 
       const updated = await staff.db.from('bookings').select('*').eq('id', id).single();
       return NextResponse.json(updated.data);

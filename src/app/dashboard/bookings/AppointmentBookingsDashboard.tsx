@@ -20,6 +20,7 @@ import type { BookingModel } from '@/types/booking-models';
 import { BOOKING_MODEL_ORDER, venueExposesBookingModel } from '@/lib/booking/enabled-models';
 import { inferBookingRowModel, bookingModelShortLabel } from '@/lib/booking/infer-booking-row-model';
 import { showAttendanceConfirmedPill, showDepositPendingPill } from '@/lib/booking/booking-staff-indicators';
+import { Pill, type PillVariant } from '@/components/ui/dashboard/Pill';
 import { CalendarDateTimePicker } from '@/components/calendar/CalendarDateTimePicker';
 import { getCalendarGridBounds } from '@/lib/venue-calendar-bounds';
 import { isBookingTimeInHourRange } from '@/lib/booking-time-window';
@@ -50,11 +51,12 @@ interface PractitionerServiceLink {
   custom_duration_minutes: number | null;
 }
 
-const STATUS_FILTERS: Array<{ label: string; apiValue: string | null; attendanceConfirmed?: boolean }> = [
+const STATUS_FILTERS: Array<{ label: string; apiValue: string | null }> = [
   { label: 'All', apiValue: null },
   { label: 'Pending', apiValue: 'Pending' },
-  /** Guest confirmed via reminder link, or staff used Confirm Booking — not `bookings.status`. */
-  { label: 'Confirmed', apiValue: null, attendanceConfirmed: true },
+  { label: 'Booked', apiValue: 'Booked' },
+  /** Guest tapped confirm/cancel link or staff confirmed attendance — `bookings.status = 'Confirmed'`. */
+  { label: 'Confirmed', apiValue: 'Confirmed' },
   { label: 'Started', apiValue: 'Seated' },
   { label: 'Completed', apiValue: 'Completed' },
   { label: 'Cancelled', apiValue: 'Cancelled' },
@@ -154,6 +156,54 @@ function rowForInference(b: RegistryAppointment): Parameters<typeof inferBooking
 
 function inferRegistryModel(b: RegistryAppointment): BookingModel {
   return inferBookingRowModel(rowForInference(b));
+}
+
+/** Left-edge status strip color — mirrors the main BookingsDashboard for visual parity. */
+function statusBorderClass(status: string): string {
+  switch (status) {
+    case 'Pending': return 'border-l-amber-400';
+    case 'Booked': return 'border-l-sky-400';
+    case 'Confirmed': return 'border-l-emerald-500';
+    case 'Seated': return 'border-l-brand-500';
+    case 'Completed': return 'border-l-slate-300';
+    case 'Cancelled': return 'border-l-red-300';
+    case 'No-Show': return 'border-l-rose-500';
+    default: return 'border-l-transparent';
+  }
+}
+
+function statusPillVariant(status: string): PillVariant {
+  switch (status) {
+    case 'Pending': return 'warning';
+    case 'Booked': return 'info';
+    case 'Confirmed': return 'success';
+    case 'Seated': return 'brand';
+    case 'Completed': return 'neutral';
+    case 'Cancelled': return 'neutral';
+    case 'No-Show': return 'danger';
+    default: return 'neutral';
+  }
+}
+
+function sourcePillVariant(source: string): PillVariant {
+  if (source === 'online' || source === 'booking_page') return 'brand';
+  if (source === 'walk-in') return 'warning';
+  return 'neutral';
+}
+
+function sourceLabelShort(source: string): string {
+  if (source === 'booking_page' || source === 'online') return 'Online';
+  if (source === 'walk-in') return 'Walk-in';
+  if (source === 'phone') return 'Phone';
+  return source.replace(/_/g, ' ');
+}
+
+function depositPillVariant(status: string): PillVariant {
+  const s = status.toLowerCase();
+  if (s === 'paid' || s === 'captured') return 'success';
+  if (s === 'pending' || s === 'requires_action') return 'warning';
+  if (s === 'refunded' || s === 'cancelled' || s === 'failed') return 'danger';
+  return 'neutral';
 }
 
 const CDE_MODELS = new Set<BookingModel>(['event_ticket', 'class_session', 'resource_booking']);
@@ -280,6 +330,8 @@ export function AppointmentBookingsDashboard({
   const [error, setError] = useState<string | null>(null);
   const [realtimeConnected, setRealtimeConnected] = useState<boolean | null>(null);
   const [detailBookingId, setDetailBookingId] = useState<string | null>(null);
+  /** Appointment rows expanded inline in the list. */
+  const [expandedIds, setExpandedIds] = useState<string[]>([]);
   const searchParams = useSearchParams();
   const router = useRouter();
   const [statusUpdatingId, setStatusUpdatingId] = useState<string | null>(null);
@@ -413,9 +465,7 @@ export function AppointmentBookingsDashboard({
         const params = new URLSearchParams(
           viewMode === 'day' ? { date: from } : { from, to },
         );
-        if (selectedStatusFilter?.attendanceConfirmed) {
-          params.set('attendance_confirmed', '1');
-        } else if (selectedStatusFilter?.apiValue) {
+        if (selectedStatusFilter?.apiValue) {
           params.set('status', selectedStatusFilter.apiValue);
         }
         if (filterGuestId) params.set('guest', filterGuestId);
@@ -661,14 +711,6 @@ export function AppointmentBookingsDashboard({
     });
     return list;
   }, [filteredBookings, sortKey, sortDir, serviceMap, practitionerMap]);
-
-  function toggleSort(key: SortKey) {
-    if (sortKey === key) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
-    else {
-      setSortKey(key);
-      setSortDir(key === 'date' || key === 'time' ? 'asc' : 'asc');
-    }
-  }
 
   function canShowConfirmBookingAttendance(b: RegistryAppointment): boolean {
     if (b.source === 'walk-in') return false;
@@ -947,79 +989,426 @@ export function AppointmentBookingsDashboard({
     [addToast, selectedBookingIds],
   );
 
-  function SortTh({ k, label, className = '' }: { k: SortKey; label: string; className?: string }) {
-    const active = sortKey === k;
-    return (
-      <th className={`px-3 py-2 text-left ${className}`}>
-        <button
-          type="button"
-          onClick={() => toggleSort(k)}
-          className={`inline-flex items-center gap-1 text-xs font-semibold uppercase tracking-wide ${
-            active ? 'text-brand-700' : 'text-slate-500 hover:text-slate-800'
-          }`}
-        >
-          {label}
-          {active && <span aria-hidden>{sortDir === 'asc' ? '↑' : '↓'}</span>}
-        </button>
-      </th>
+  function toggleExpanded(id: string) {
+    setExpandedIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
     );
   }
 
-  function renderTableRows(list: RegistryAppointment[]) {
-    return list.map((b) => {
-      const cid = columnIdForRegistry(b);
-      const sid = serviceIdForRegistry(b);
-      const pracName = cid ? practitionerMap.get(cid)?.name ?? '-' : '-';
-      const svcName = sid ? serviceMap.get(sid)?.name ?? '-' : '-';
-      const typeLabel = bookingModelShortLabel(inferRegistryModel(b));
-      const dep =
-        b.deposit_amount_pence != null
-          ? `${formatMoneyPence(b.deposit_amount_pence, sym)} (${b.deposit_status})`
-          : b.deposit_status;
-      return (
-        <tr key={b.id} className="border-b border-slate-100 hover:bg-slate-50/80">
-          <td className="px-2 py-2.5 align-middle">
+  function SortControl() {
+    const options: Array<{ key: SortKey; label: string }> = [
+      { key: 'date', label: 'Date' },
+      { key: 'time', label: 'Time' },
+      { key: 'client', label: 'Client' },
+      { key: 'status', label: 'Status' },
+      { key: 'service', label: 'Service' },
+      { key: 'practitioner', label: 'Staff' },
+      { key: 'deposit', label: 'Deposit' },
+      { key: 'type', label: 'Type' },
+    ];
+    return (
+      <div className="flex items-center gap-1.5 text-xs text-slate-500">
+        <label htmlFor="appt-sort-key" className="font-medium">
+          Sort
+        </label>
+        <select
+          id="appt-sort-key"
+          value={sortKey}
+          onChange={(e) => setSortKey(e.target.value as SortKey)}
+          className="min-h-[32px] rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-700 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+          aria-label="Sort by"
+        >
+          {options.map((o) => (
+            <option key={o.key} value={o.key}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+        <button
+          type="button"
+          onClick={() => setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))}
+          className="inline-flex min-h-[32px] items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
+          aria-label={`Sort direction: ${sortDir === 'asc' ? 'ascending' : 'descending'}`}
+        >
+          <span aria-hidden>{sortDir === 'asc' ? '↑' : '↓'}</span>
+          <span>{sortDir === 'asc' ? 'Asc' : 'Desc'}</span>
+        </button>
+      </div>
+    );
+  }
+
+  function renderAppointmentCards(
+    list: RegistryAppointment[],
+    opts?: { nested?: boolean; showSort?: boolean },
+  ) {
+    const nested = opts?.nested ?? false;
+    const showSort = opts?.showSort ?? !nested;
+    const allSelected =
+      list.length > 0 && list.every((b) => selectedBookingIds.includes(b.id));
+    return (
+      <div
+        className={
+          nested
+            ? 'overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm shadow-slate-900/5'
+            : 'overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm shadow-slate-900/5'
+        }
+      >
+        <div className="flex items-center justify-between gap-2 border-b border-slate-100 bg-slate-50/60 px-3 py-2 sm:px-4">
+          <label className="inline-flex cursor-pointer items-center gap-2 text-xs font-medium text-slate-500 hover:text-slate-700">
+            <input
+              type="checkbox"
+              checked={allSelected}
+              onChange={(e) => toggleAllInList(list, e.target.checked)}
+              aria-label="Select all bookings in this list"
+            />
+            Select all
+          </label>
+          <div className="flex items-center gap-3">
+            {showSort && <SortControl />}
+            <span className="text-[11px] font-medium text-slate-400">
+              {list.length} {list.length === 1 ? 'booking' : 'bookings'}
+            </span>
+          </div>
+        </div>
+        <div className="divide-y divide-slate-100">
+          {list.map((b) => renderAppointmentRow(b))}
+        </div>
+      </div>
+    );
+  }
+
+  function renderAppointmentRow(b: RegistryAppointment) {
+    const cid = columnIdForRegistry(b);
+    const sid = serviceIdForRegistry(b);
+    const pracName = cid ? practitionerMap.get(cid)?.name ?? '-' : '-';
+    const svcName = sid ? serviceMap.get(sid)?.name ?? '-' : '-';
+    const svc = sid ? serviceMap.get(sid) ?? null : null;
+    const typeLabel = bookingModelShortLabel(inferRegistryModel(b));
+    const expanded = expandedIds.includes(b.id);
+    const startTime = b.booking_time.slice(0, 5);
+    const endTime = b.booking_end_time ? b.booking_end_time.slice(0, 5) : null;
+    const showConfirm = canShowConfirmBookingAttendance(b);
+    const showCancelConfirm = canShowCancelStaffAttendanceConfirmation(b);
+    const duration = svc?.duration_minutes ?? null;
+    const priceDisplay =
+      b.deposit_amount_pence != null
+        ? formatMoneyPence(b.deposit_amount_pence, sym)
+        : null;
+
+    return (
+      <div
+        key={b.id}
+        role="button"
+        tabIndex={0}
+        aria-expanded={expanded}
+        aria-controls={`appt-expand-${b.id}`}
+        onClick={() => toggleExpanded(b.id)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            toggleExpanded(b.id);
+          }
+        }}
+        className={`cursor-pointer border-l-[3px] py-3 pl-3 pr-3 transition-colors sm:pl-4 sm:pr-4 ${statusBorderClass(b.status)} ${expanded ? 'bg-brand-50/20' : 'hover:bg-slate-50/50'}`}
+      >
+        <div className="flex items-start gap-3">
+          <div onClick={(e) => e.stopPropagation()} className="pt-1">
             <input
               type="checkbox"
               checked={selectedBookingIds.includes(b.id)}
               onChange={(e) => toggleBookingSelected(b.id, e.target.checked)}
               aria-label={`Select booking for ${b.guest_name}`}
             />
-          </td>
-          <td className="whitespace-nowrap px-3 py-2.5 text-sm text-slate-800">{b.booking_date}</td>
-          <td className="whitespace-nowrap px-3 py-2.5 text-sm text-slate-800">{b.booking_time.slice(0, 5)}</td>
-          <td className="whitespace-nowrap px-2 py-2.5 sm:px-3">
-            <span className="inline-block rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700">
-              {typeLabel}
+          </div>
+          <div className="flex w-20 flex-none flex-col items-start leading-tight sm:w-24">
+            <span className="font-semibold tabular-nums text-slate-900">
+              {startTime}
             </span>
-          </td>
-          <td className="max-w-[min(200px,28vw)] px-3 py-2.5 text-sm text-slate-900">
-            <div className="flex min-w-0 flex-col gap-1">
-              <span className="truncate font-medium">{b.guest_name}</span>
-              <div className="flex flex-wrap items-center gap-1">
-                {showDepositPendingPill(b) && (
-                  <span className="inline-flex rounded-full bg-orange-100 px-2 py-0.5 text-[10px] font-semibold text-orange-950 ring-1 ring-orange-200/80">
-                    Deposit pending
-                  </span>
-                )}
-                {showAttendanceConfirmedPill(b) && (
-                  <span className="inline-flex rounded-full bg-teal-100 px-2 py-0.5 text-[10px] font-semibold text-teal-900 ring-1 ring-teal-200/80">
-                    Confirmed
-                  </span>
-                )}
-              </div>
+            {endTime && (
+              <span className="text-[11px] tabular-nums text-slate-400">
+                → {endTime}
+              </span>
+            )}
+            <span className="mt-0.5 text-[11px] tabular-nums text-slate-400">
+              {formatDayHeader(b.booking_date)}
+            </span>
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="font-semibold text-slate-900">{b.guest_name}</span>
+              <Pill variant={statusPillVariant(b.status)} size="sm">
+                {tableStatusLabel(b.status)}
+              </Pill>
+              {showDepositPendingPill(b) && (
+                <Pill variant="warning" size="sm" dot>
+                  Deposit pending
+                </Pill>
+              )}
+              {showAttendanceConfirmedPill(b) && (
+                <Pill variant="success" size="sm" dot>
+                  Confirmed
+                </Pill>
+              )}
+              <Pill variant="neutral" size="sm">
+                {typeLabel}
+              </Pill>
             </div>
-          </td>
-          <td className="hidden max-w-[120px] truncate px-3 py-2.5 text-sm text-slate-600 lg:table-cell">
-            {svcName}
-          </td>
-          <td className="hidden whitespace-nowrap px-3 py-2.5 text-sm text-slate-600 xl:table-cell">{pracName}</td>
-          <td className="px-3 py-2.5">
+            <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500">
+              <span className="truncate font-medium text-slate-600">{svcName}</span>
+              <span className="text-slate-300">·</span>
+              <span className="truncate">{pracName}</span>
+              {duration != null && (
+                <>
+                  <span className="text-slate-300">·</span>
+                  <span className="tabular-nums">{duration} min</span>
+                </>
+              )}
+              {b.party_size > 1 && (
+                <>
+                  <span className="text-slate-300">·</span>
+                  <span>
+                    {b.party_size} {b.party_size === 1 ? 'person' : 'people'}
+                  </span>
+                </>
+              )}
+              <span className="text-slate-300">·</span>
+              <Pill variant={sourcePillVariant(b.source)} size="sm">
+                {sourceLabelShort(b.source)}
+              </Pill>
+              {priceDisplay && (
+                <Pill variant={depositPillVariant(b.deposit_status)} size="sm" dot>
+                  {priceDisplay} · {b.deposit_status}
+                </Pill>
+              )}
+            </div>
+          </div>
+          <div onClick={(e) => e.stopPropagation()} className="flex flex-shrink-0 items-center gap-1.5">
+            {showConfirm && (
+              <button
+                type="button"
+                disabled={confirmAttendanceLoadingId === b.id}
+                onClick={() => void confirmBookingAttendance(b.id)}
+                className="hidden items-center rounded-lg border border-teal-200 bg-teal-50 px-2.5 py-1 text-xs font-semibold text-teal-900 shadow-sm transition-colors hover:bg-teal-100 focus:outline-none focus:ring-2 focus:ring-teal-400/30 disabled:opacity-50 sm:inline-flex"
+                aria-label={`Confirm attendance for ${b.guest_name}`}
+              >
+                {confirmAttendanceLoadingId === b.id ? '…' : 'Confirm'}
+              </button>
+            )}
+            {showCancelConfirm && (
+              <button
+                type="button"
+                disabled={confirmAttendanceLoadingId === b.id}
+                onClick={() => void cancelStaffAttendanceConfirmation(b.id)}
+                className="hidden items-center rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 shadow-sm transition-colors hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-400/30 disabled:opacity-50 sm:inline-flex"
+                aria-label={`Cancel staff attendance confirmation for ${b.guest_name}`}
+              >
+                {confirmAttendanceLoadingId === b.id ? '…' : 'Unconfirm'}
+              </button>
+            )}
+          </div>
+          <svg
+            className={`mt-1 h-4 w-4 flex-shrink-0 text-slate-400 transition-transform ${expanded ? 'rotate-180' : ''}`}
+            fill="none"
+            viewBox="0 0 24 24"
+            strokeWidth={2}
+            stroke="currentColor"
+            aria-hidden
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
+          </svg>
+        </div>
+        {expanded && (
+          <div
+            id={`appt-expand-${b.id}`}
+            onClick={(e) => e.stopPropagation()}
+            className="mt-3 rounded-xl border border-slate-200 bg-white p-3 sm:p-4"
+          >
+            {renderExpandedAppointment(b, { svcName, pracName, duration })}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  function renderExpandedAppointment(
+    b: RegistryAppointment,
+    ctx: { svcName: string; pracName: string; duration: number | null },
+  ) {
+    const { svcName, pracName, duration } = ctx;
+    const showConfirm = canShowConfirmBookingAttendance(b);
+    const showCancelConfirm = canShowCancelStaffAttendanceConfirmation(b);
+    const priceDisplay =
+      b.deposit_amount_pence != null
+        ? formatMoneyPence(b.deposit_amount_pence, sym)
+        : null;
+    const endTime = b.booking_end_time ? b.booking_end_time.slice(0, 5) : null;
+    const notes = b.special_requests?.trim() || null;
+    const internal = b.internal_notes?.trim() || null;
+    const arrivedAt = b.client_arrived_at
+      ? new Date(b.client_arrived_at).toLocaleString(undefined, {
+          hour: '2-digit',
+          minute: '2-digit',
+          day: '2-digit',
+          month: 'short',
+        })
+      : null;
+    return (
+      <div className="space-y-4">
+        <div className="grid gap-4 sm:grid-cols-2">
+          <section>
+            <h4 className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+              Guest
+            </h4>
+            <p className="mt-1.5 font-semibold text-slate-900">{b.guest_name}</p>
+            {b.guest_visit_count != null && (
+              <p className="mt-0.5 text-xs text-slate-500">
+                {b.guest_visit_count === 0
+                  ? 'First visit'
+                  : `${b.guest_visit_count} previous ${b.guest_visit_count === 1 ? 'visit' : 'visits'}`}
+              </p>
+            )}
+            <div className="mt-2 flex flex-col gap-1 text-sm">
+              {b.guest_email && (
+                <a
+                  href={`mailto:${b.guest_email}`}
+                  className="inline-flex w-fit items-center gap-1.5 text-brand-700 hover:underline"
+                >
+                  <svg
+                    className="h-3.5 w-3.5"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    aria-hidden
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M2.25 6.75A2.25 2.25 0 0 1 4.5 4.5h15a2.25 2.25 0 0 1 2.25 2.25v10.5A2.25 2.25 0 0 1 19.5 19.5h-15a2.25 2.25 0 0 1-2.25-2.25V6.75Z"
+                    />
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="m3 7 9 6 9-6"
+                    />
+                  </svg>
+                  <span className="break-all">{b.guest_email}</span>
+                </a>
+              )}
+              {b.guest_phone && (
+                <a
+                  href={`tel:${b.guest_phone}`}
+                  className="inline-flex w-fit items-center gap-1.5 text-brand-700 hover:underline"
+                >
+                  <svg
+                    className="h-3.5 w-3.5"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    aria-hidden
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M2.25 6.75A4.5 4.5 0 0 1 6.75 2.25h.5c.8 0 1.5.56 1.66 1.35l.83 4.16a1.5 1.5 0 0 1-.74 1.62l-1.65.82a13.5 13.5 0 0 0 6.06 6.06l.82-1.65a1.5 1.5 0 0 1 1.62-.74l4.16.83c.79.16 1.35.86 1.35 1.66v.5a4.5 4.5 0 0 1-4.5 4.5A15 15 0 0 1 2.25 6.75Z"
+                    />
+                  </svg>
+                  <span>{b.guest_phone}</span>
+                </a>
+              )}
+              {!b.guest_email && !b.guest_phone && (
+                <span className="text-xs text-slate-400">No contact details on file</span>
+              )}
+            </div>
+          </section>
+
+          <section>
+            <h4 className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+              Appointment
+            </h4>
+            <dl className="mt-1.5 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
+              <dt className="text-slate-500">Service</dt>
+              <dd className="font-medium text-slate-800">{svcName}</dd>
+              <dt className="text-slate-500">Staff</dt>
+              <dd className="font-medium text-slate-800">{pracName}</dd>
+              <dt className="text-slate-500">Date</dt>
+              <dd className="font-medium tabular-nums text-slate-800">{b.booking_date}</dd>
+              <dt className="text-slate-500">Time</dt>
+              <dd className="font-medium tabular-nums text-slate-800">
+                {b.booking_time.slice(0, 5)}
+                {endTime && <span className="text-slate-400"> → {endTime}</span>}
+                {duration != null && (
+                  <span className="ml-1.5 text-xs text-slate-400">({duration} min)</span>
+                )}
+              </dd>
+              {b.party_size > 1 && (
+                <>
+                  <dt className="text-slate-500">Party</dt>
+                  <dd className="font-medium text-slate-800">
+                    {b.party_size} {b.party_size === 1 ? 'person' : 'people'}
+                  </dd>
+                </>
+              )}
+              <dt className="text-slate-500">Deposit</dt>
+              <dd>
+                {priceDisplay ? (
+                  <Pill variant={depositPillVariant(b.deposit_status)} size="sm" dot>
+                    {priceDisplay} · {b.deposit_status}
+                  </Pill>
+                ) : (
+                  <Pill variant={depositPillVariant(b.deposit_status)} size="sm">
+                    {b.deposit_status}
+                  </Pill>
+                )}
+              </dd>
+              <dt className="text-slate-500">Source</dt>
+              <dd>
+                <Pill variant={sourcePillVariant(b.source)} size="sm">
+                  {sourceLabelShort(b.source)}
+                </Pill>
+              </dd>
+              {arrivedAt && (
+                <>
+                  <dt className="text-slate-500">Arrived</dt>
+                  <dd className="font-medium text-emerald-700">{arrivedAt}</dd>
+                </>
+              )}
+            </dl>
+          </section>
+        </div>
+
+        {(notes || internal) && (
+          <section className="space-y-2 rounded-lg bg-slate-50/70 p-3 ring-1 ring-slate-200/70">
+            {notes && (
+              <div>
+                <h5 className="text-[10px] font-semibold uppercase tracking-wide text-amber-700">
+                  Special requests
+                </h5>
+                <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">{notes}</p>
+              </div>
+            )}
+            {internal && (
+              <div>
+                <h5 className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                  Internal notes
+                </h5>
+                <p className="mt-1 whitespace-pre-wrap text-sm text-slate-600">{internal}</p>
+              </div>
+            )}
+          </section>
+        )}
+
+        <div className="flex flex-wrap items-end gap-2 border-t border-slate-100 pt-3">
+          <label className="flex min-w-0 flex-col gap-1">
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+              Status
+            </span>
             <select
               value={b.status}
               disabled={statusUpdatingId === b.id}
               onChange={(e) => void updateRowStatus(b.id, e.target.value)}
-              className="max-w-[140px] rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs font-medium text-slate-800 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50"
+              className="min-h-[36px] rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-800 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50"
             >
               {BOOKING_MUTABLE_STATUSES.map((st) => (
                 <option key={st} value={st}>
@@ -1027,141 +1416,47 @@ export function AppointmentBookingsDashboard({
                 </option>
               ))}
             </select>
-          </td>
-          <td className="hidden whitespace-nowrap px-3 py-2.5 text-sm text-slate-600 md:table-cell">{dep}</td>
-          <td className="whitespace-nowrap px-3 py-2.5 text-right">
-            <div className="flex flex-col items-end gap-1.5 sm:flex-row sm:justify-end sm:gap-2">
-              {canShowConfirmBookingAttendance(b) && (
-                <button
-                  type="button"
-                  disabled={confirmAttendanceLoadingId === b.id}
-                  onClick={() => void confirmBookingAttendance(b.id)}
-                  className="rounded-lg border border-teal-200 bg-teal-50 px-2.5 py-1 text-xs font-semibold text-teal-900 hover:bg-teal-100 disabled:opacity-50"
-                >
-                  {confirmAttendanceLoadingId === b.id ? '…' : 'Confirm Booking'}
-                </button>
-              )}
-              {canShowCancelStaffAttendanceConfirmation(b) && (
-                <button
-                  type="button"
-                  disabled={confirmAttendanceLoadingId === b.id}
-                  onClick={() => void cancelStaffAttendanceConfirmation(b.id)}
-                  className="rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-                >
-                  {confirmAttendanceLoadingId === b.id ? '…' : 'Cancel confirmation'}
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={() => setDetailBookingId(b.id)}
-                className="text-sm font-medium text-brand-600 hover:text-brand-800"
-              >
-                View
-              </button>
-            </div>
-          </td>
-        </tr>
-      );
-    });
-  }
-
-  function renderMobileCards(list: RegistryAppointment[]) {
-    return (
-      <div className="space-y-3 md:hidden">
-        {list.map((b) => {
-          const cid = columnIdForRegistry(b);
-          const sid = serviceIdForRegistry(b);
-          const pracName = cid ? practitionerMap.get(cid)?.name ?? '-' : '-';
-          const svcName = sid ? serviceMap.get(sid)?.name ?? '-' : '-';
-          const typeLabel = bookingModelShortLabel(inferRegistryModel(b));
-          const dep =
-            b.deposit_amount_pence != null
-              ? `${formatMoneyPence(b.deposit_amount_pence, sym)} (${b.deposit_status})`
-              : b.deposit_status;
-          return (
-            <div
-              key={b.id}
-              className="rounded-xl border border-slate-200 bg-white p-3.5 shadow-sm ring-1 ring-slate-100/80 sm:p-4"
+          </label>
+          {showConfirm && (
+            <button
+              type="button"
+              disabled={confirmAttendanceLoadingId === b.id}
+              onClick={() => void confirmBookingAttendance(b.id)}
+              className="inline-flex min-h-[36px] items-center rounded-lg border border-teal-200 bg-teal-50 px-3 py-1.5 text-sm font-semibold text-teal-900 shadow-sm transition-colors hover:bg-teal-100 focus:outline-none focus:ring-2 focus:ring-teal-400/30 disabled:opacity-50"
             >
-              <div className="flex items-start gap-2">
-                <input
-                  type="checkbox"
-                  className="mt-1"
-                  checked={selectedBookingIds.includes(b.id)}
-                  onChange={(e) => toggleBookingSelected(b.id, e.target.checked)}
-                  aria-label={`Select booking for ${b.guest_name}`}
-                />
-                <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  <p className="break-words font-semibold leading-snug text-slate-900">{b.guest_name}</p>
-                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
-                    {typeLabel}
-                  </span>
-                </div>
-                <div className="mt-1 flex flex-wrap items-center gap-1">
-                  {showDepositPendingPill(b) && (
-                    <span className="inline-flex rounded-full bg-orange-100 px-2 py-0.5 text-[10px] font-semibold text-orange-950 ring-1 ring-orange-200/80">
-                      Deposit pending
-                    </span>
-                  )}
-                  {showAttendanceConfirmedPill(b) && (
-                    <span className="inline-flex rounded-full bg-teal-100 px-2 py-0.5 text-[10px] font-semibold text-teal-900 ring-1 ring-teal-200/80">
-                      Confirmed
-                    </span>
-                  )}
-                </div>
-                <p className="mt-0.5 text-sm tabular-nums text-slate-600">
-                  {b.booking_date} · {b.booking_time.slice(0, 5)}
-                </p>
-                <p className="mt-1.5 break-words text-xs leading-relaxed text-slate-500">
-                  {svcName} · {pracName}
-                </p>
-                <p className="mt-1.5 text-xs font-medium text-slate-600">Deposit: {dep}</p>
-              <label className="mt-3 block text-xs font-medium text-slate-500">Status</label>
-              <select
-                value={b.status}
-                disabled={statusUpdatingId === b.id}
-                onChange={(e) => void updateRowStatus(b.id, e.target.value)}
-                className="mt-1 min-h-[48px] w-full touch-manipulation rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-base text-slate-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30 disabled:opacity-50 sm:min-h-[44px] sm:text-sm"
+              {confirmAttendanceLoadingId === b.id ? 'Confirming…' : 'Confirm booking'}
+            </button>
+          )}
+          {showCancelConfirm && (
+            <button
+              type="button"
+              disabled={confirmAttendanceLoadingId === b.id}
+              onClick={() => void cancelStaffAttendanceConfirmation(b.id)}
+              className="inline-flex min-h-[36px] items-center rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 shadow-sm transition-colors hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-400/30 disabled:opacity-50"
+            >
+              {confirmAttendanceLoadingId === b.id ? '…' : 'Cancel confirmation'}
+            </button>
+          )}
+          <div className="ml-auto flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setDetailBookingId(b.id)}
+              className="inline-flex min-h-[36px] items-center gap-1.5 rounded-lg border border-brand-200 bg-brand-50 px-3 py-1.5 text-sm font-semibold text-brand-700 shadow-sm transition-colors hover:bg-brand-100 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
+            >
+              Open full view
+              <svg
+                className="h-3.5 w-3.5"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                aria-hidden
               >
-                {BOOKING_MUTABLE_STATUSES.map((st) => (
-                  <option key={st} value={st}>
-                    {tableStatusLabel(st)}
-                  </option>
-                ))}
-              </select>
-              {canShowConfirmBookingAttendance(b) && (
-                <button
-                  type="button"
-                  disabled={confirmAttendanceLoadingId === b.id}
-                  onClick={() => void confirmBookingAttendance(b.id)}
-                  className="mt-3 flex min-h-[48px] w-full touch-manipulation items-center justify-center rounded-lg border border-teal-200 bg-teal-50 px-4 text-sm font-semibold text-teal-900 active:bg-teal-100 disabled:opacity-50 sm:min-h-[44px]"
-                >
-                  {confirmAttendanceLoadingId === b.id ? 'Confirming…' : 'Confirm Booking'}
-                </button>
-              )}
-              {canShowCancelStaffAttendanceConfirmation(b) && (
-                <button
-                  type="button"
-                  disabled={confirmAttendanceLoadingId === b.id}
-                  onClick={() => void cancelStaffAttendanceConfirmation(b.id)}
-                  className="mt-3 flex min-h-[48px] w-full touch-manipulation items-center justify-center rounded-lg border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-800 active:bg-slate-50 disabled:opacity-50 sm:min-h-[44px]"
-                >
-                  {confirmAttendanceLoadingId === b.id ? '…' : 'Cancel confirmation'}
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={() => setDetailBookingId(b.id)}
-                className="mt-3 flex min-h-[48px] w-full touch-manipulation items-center justify-center rounded-lg border border-brand-200 bg-brand-50 px-4 text-sm font-semibold text-brand-700 active:bg-brand-100 sm:min-h-[44px]"
-              >
-                View details
-              </button>
-                </div>
-              </div>
-            </div>
-          );
-        })}
+                <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3" />
+              </svg>
+            </button>
+          </div>
+        </div>
       </div>
     );
   }
@@ -1553,40 +1848,7 @@ export function AppointmentBookingsDashboard({
           }
         />
       ) : viewMode === 'day' ? (
-        <>
-          {renderMobileCards(sortedBookings)}
-          <div className="hidden overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm shadow-slate-900/5 md:block">
-            <table className="w-full min-w-[800px] border-collapse text-left">
-              <thead>
-                <tr className="border-b border-slate-200 bg-slate-50">
-                  <th className="w-10 px-2 py-2 text-left align-middle">
-                    <input
-                      type="checkbox"
-                      checked={
-                        sortedBookings.length > 0 &&
-                        sortedBookings.every((b) => selectedBookingIds.includes(b.id))
-                      }
-                      onChange={(e) => toggleAllInList(sortedBookings, e.target.checked)}
-                      aria-label="Select all bookings in this list"
-                    />
-                  </th>
-                  <SortTh k="date" label="Date" />
-                  <SortTh k="time" label="Time" />
-                  <SortTh k="type" label="Type" />
-                  <SortTh k="client" label="Client" />
-                  <SortTh k="service" label="Service" className="hidden lg:table-cell" />
-                  <SortTh k="practitioner" label="Staff" className="hidden xl:table-cell" />
-                  <SortTh k="status" label="Status" />
-                  <SortTh k="deposit" label="Deposit" className="hidden md:table-cell" />
-                  <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    Actions
-                  </th>
-                </tr>
-              </thead>
-              <tbody>{renderTableRows(sortedBookings)}</tbody>
-            </table>
-          </div>
-        </>
+        renderAppointmentCards(sortedBookings)
       ) : (
         <div className="space-y-4">
           {Object.entries(groupedByDate ?? {})
@@ -1594,49 +1856,16 @@ export function AppointmentBookingsDashboard({
             .map(([date, dayBookings]) => (
               <section
                 key={date}
-                className="overflow-hidden rounded-2xl border border-slate-200 bg-slate-50/40 shadow-sm shadow-slate-900/5"
+                className="space-y-2"
                 aria-label={`Bookings on ${date}`}
               >
-                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200/80 bg-white/80 px-3 py-2.5 sm:px-4 sm:py-3">
+                <div className="flex flex-wrap items-center justify-between gap-2 px-1">
                   <h3 className="min-w-0 text-sm font-semibold text-slate-800">{formatDayHeader(date)}</h3>
                   <span className="shrink-0 text-xs tabular-nums text-slate-500">
                     {dayBookings.length} booking{dayBookings.length !== 1 ? 's' : ''}
                   </span>
                 </div>
-                <div className="min-w-0 p-2.5 sm:p-3">
-                  {renderMobileCards(dayBookings)}
-                  <div className="hidden overflow-x-auto md:block">
-                    <table className="w-full min-w-[800px] border-collapse text-left">
-                      <thead>
-                        <tr className="border-b border-slate-200 bg-white">
-                          <th className="w-10 px-2 py-2 text-left align-middle">
-                            <input
-                              type="checkbox"
-                              checked={
-                                dayBookings.length > 0 &&
-                                dayBookings.every((b) => selectedBookingIds.includes(b.id))
-                              }
-                              onChange={(e) => toggleAllInList(dayBookings, e.target.checked)}
-                              aria-label={`Select all bookings on ${date}`}
-                            />
-                          </th>
-                          <SortTh k="date" label="Date" />
-                          <SortTh k="time" label="Time" />
-                          <SortTh k="type" label="Type" />
-                          <SortTh k="client" label="Client" />
-                          <SortTh k="service" label="Service" className="hidden lg:table-cell" />
-                          <SortTh k="practitioner" label="Staff" className="hidden xl:table-cell" />
-                          <SortTh k="status" label="Status" />
-                          <SortTh k="deposit" label="Deposit" className="hidden md:table-cell" />
-                          <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">
-                            Actions
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody>{renderTableRows(dayBookings)}</tbody>
-                    </table>
-                  </div>
-                </div>
+                {renderAppointmentCards(dayBookings, { nested: true, showSort: false })}
               </section>
             ))}
         </div>

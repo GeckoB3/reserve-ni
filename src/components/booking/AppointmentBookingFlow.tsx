@@ -496,8 +496,7 @@ export function AppointmentBookingFlow({
     isLockedPractitionerFlow,
     lockedPractitioner?.id,
     catalogStaff,
-    calendarMonth.year,
-    calendarMonth.month,
+    calendarMonth,
     prefetchCalendarTasks,
   ]);
 
@@ -641,8 +640,7 @@ export function AppointmentBookingFlow({
     isLockedPractitionerFlow,
     onlyListedServiceId,
     catalogStaff,
-    calendarMonth.year,
-    calendarMonth.month,
+    calendarMonth,
     prefetchCalendarTasks,
   ]);
 
@@ -964,6 +962,7 @@ export function AppointmentBookingFlow({
       validateMultiServiceChain,
       isStaff,
       staffRequireDeposit,
+      staffBookingSource,
       selectedServiceForPractitioner,
       onBookingCreated,
     ],
@@ -1128,7 +1127,7 @@ export function AppointmentBookingFlow({
       return cancellationPolicy ?? `Full deposit refund if you cancel ≥${refundNoticeHours}h before start.`;
     }
     return `Refund cut-off has passed - this deposit is not refundable if you cancel.`;
-  }, [date, selectedTime, refundNoticeHours, cancellationPolicy]);
+  }, [date, selectedTime, refundNoticeHours, cancellationPolicy, paymentCancellationBlurb]);
 
   const groupAppointmentPaymentPolicy = useMemo(() => {
     if (groupPeople.length === 0) return paymentCancellationBlurb;
@@ -1141,7 +1140,7 @@ export function AppointmentBookingFlow({
       return `Refund cut-off has passed for at least one appointment - not all of this deposit is refundable if you cancel.`;
     }
     return `Refund is per appointment (≥${refundNoticeHours}h before each start). Some cut-offs have passed - those shares are not refundable.`;
-  }, [groupPeople, refundNoticeHours, cancellationPolicy]);
+  }, [groupPeople, refundNoticeHours, cancellationPolicy, paymentCancellationBlurb]);
 
   const singleConfirmationDepositCopy = useMemo(() => {
     if (!selectedTime) return null;

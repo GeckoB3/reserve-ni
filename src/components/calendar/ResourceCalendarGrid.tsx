@@ -19,7 +19,8 @@ const MAX_TIME_SLOTS = 384;
 
 const STATUS_COLOURS: Record<string, { bg: string; text: string; border: string }> = {
   Pending: { bg: 'bg-orange-50', text: 'text-orange-900', border: 'border-orange-200' },
-  Confirmed: { bg: 'bg-blue-50', text: 'text-blue-800', border: 'border-blue-200' },
+  Booked: { bg: 'bg-sky-50', text: 'text-sky-800', border: 'border-sky-200' },
+  Confirmed: { bg: 'bg-emerald-50', text: 'text-emerald-800', border: 'border-emerald-200' },
   Seated: { bg: 'bg-violet-50', text: 'text-violet-900', border: 'border-violet-200' },
   Completed: { bg: 'bg-emerald-50', text: 'text-emerald-900', border: 'border-emerald-200' },
   'No-Show': { bg: 'bg-red-50', text: 'text-red-800', border: 'border-red-200' },
@@ -427,7 +428,7 @@ export function ResourceCalendarGrid({
                       const dur = bookingDurationMins(b);
                       const top = slotTop(b.booking_time);
                       const height = slotHeightFromDuration(dur);
-                      const st = STATUS_COLOURS[b.status] ?? STATUS_COLOURS.Confirmed;
+                      const st = STATUS_COLOURS[b.status] ?? STATUS_COLOURS.Booked;
                       return (
                         <button
                           key={b.id}
@@ -439,14 +440,14 @@ export function ResourceCalendarGrid({
                           <div className={`px-1.5 py-1 ${st.text}`}>
                             <div className="flex flex-wrap items-center gap-1">
                               <span className="truncate text-xs font-semibold">{b.guest_name}</span>
-                              {['Pending', 'Confirmed'].includes(b.status) && showDepositPendingPill(b) && (
+                              {['Pending', 'Booked', 'Confirmed'].includes(b.status) && showDepositPendingPill(b) && (
                                 <span
                                   className="inline-flex h-1.5 w-1.5 shrink-0 rounded-full bg-orange-500"
                                   aria-hidden
                                   title="Deposit pending"
                                 />
                               )}
-                              {['Pending', 'Confirmed'].includes(b.status) && showAttendanceConfirmedPill(b) && (
+                              {['Pending', 'Booked', 'Confirmed'].includes(b.status) && showAttendanceConfirmedPill(b) && (
                                 <span
                                   className="inline-flex h-1.5 w-1.5 shrink-0 rounded-full bg-teal-500"
                                   aria-hidden

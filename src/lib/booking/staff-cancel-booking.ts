@@ -11,7 +11,7 @@ import { getCancellationNoticeHoursForBooking, parseExtendedBookingRules } from 
 import type { BookingEmailData } from '@/lib/emails/types';
 import { venueRowToEmailData } from '@/lib/emails/venue-email-data';
 
-const CANCELLABLE = ['Pending', 'Confirmed', 'Seated'];
+const CANCELLABLE = ['Pending', 'Booked', 'Confirmed', 'Seated'];
 
 export interface StaffCancelBookingNotifyOptions {
   /** Prepended to refund lines (e.g. event cancelled by venue). */

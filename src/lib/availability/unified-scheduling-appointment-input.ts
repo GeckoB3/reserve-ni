@@ -18,7 +18,7 @@ import type {
 import { unifiedCalendarRowToPractitioner } from '@/lib/availability/unified-calendar-mapper';
 import { parseCustomWorkingHoursFromDb } from '@/lib/service-custom-availability';
 
-const CAPACITY_STATUSES = ['Confirmed', 'Pending', 'Seated'];
+const CAPACITY_STATUSES = ['Booked', 'Confirmed', 'Pending', 'Seated'];
 
 function serviceItemToAppointmentService(row: Record<string, unknown>): AppointmentService {
   return {

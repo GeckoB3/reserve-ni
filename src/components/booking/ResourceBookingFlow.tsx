@@ -317,7 +317,7 @@ export function ResourceBookingFlow({
     const h = basis?.cancellation_notice_hours;
     if (typeof h === 'number' && Number.isFinite(h)) return h;
     return venue.booking_rules?.cancellation_notice_hours ?? 48;
-  }, [selectedResource?.cancellation_notice_hours, selectedMeta?.cancellation_notice_hours, venue.booking_rules?.cancellation_notice_hours]);
+  }, [selectedResource, selectedMeta, venue.booking_rules?.cancellation_notice_hours]);
 
   const resourcePaymentRefundPolicy = useMemo(() => {
     if (cancellationPolicy) return cancellationPolicy;

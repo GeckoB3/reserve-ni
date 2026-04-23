@@ -1,0 +1,624 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>ReserveNI – Appointments Flyer</title>
+  <style>
+    /* ───────────────────────── Page setup (A4) ───────────────────────── */
+    @page { size: A4; margin: 0; }
+
+    :root {
+      --brand-50:  #EFF3F5;
+      --brand-100: #D9E5E9;
+      --brand-200: #BAD0D8;
+      --brand-300: #94B4BF;
+      --brand-500: #5C818E;
+      --brand-600: #4E6B78;
+      --brand-700: #3D5662;
+      --brand-800: #2F424A;
+      --brand-900: #1F2D33;
+      --emerald-500: #10B981;
+      --emerald-600: #059669;
+      --slate-50:  #F8FAFC;
+      --slate-100: #F1F5F9;
+      --slate-200: #E2E8F0;
+      --slate-300: #CBD5E1;
+      --slate-400: #94A3B8;
+      --slate-500: #64748B;
+      --slate-600: #475569;
+      --slate-700: #334155;
+      --slate-800: #1E293B;
+      --slate-900: #0F172A;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      width: 210mm;
+      height: 297mm;
+      font-family: "Inter", "Segoe UI", -apple-system, system-ui, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      color: var(--slate-900);
+      background: #fff;
+    }
+
+    .page {
+      width: 210mm;
+      height: 297mm;
+      position: relative;
+      overflow: hidden;
+    }
+
+    /* All major sections share these defaults so nothing collapses or bleeds */
+    .page > section { width: 100%; overflow: hidden; }
+
+    /* ────────── HERO  (= 78 mm) ────────── */
+    .hero {
+      height: 78mm;
+      padding: 8mm 14mm 7mm;
+      color: #fff;
+      position: relative;
+      overflow: hidden;
+      background:
+        radial-gradient(circle at 18% 22%, rgba(16,185,129,0.32) 0%, transparent 45%),
+        radial-gradient(circle at 88% 78%, rgba(78,107,120,0.55) 0%, transparent 50%),
+        linear-gradient(135deg, var(--brand-900) 0%, var(--brand-800) 50%, var(--brand-700) 100%);
+    }
+    .hero::before {
+      content: "";
+      position: absolute; inset: 0;
+      background-image:
+        linear-gradient(to right, rgba(255,255,255,0.045) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(255,255,255,0.045) 1px, transparent 1px);
+      background-size: 11mm 11mm;
+      pointer-events: none;
+    }
+
+    .hero-top {
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6mm;
+    }
+    .logo-wrap {
+      background: #fff;
+      border-radius: 2.6mm;
+      padding: 2mm 3.4mm;
+      box-shadow: 0 3mm 8mm -3mm rgba(0,0,0,0.4);
+      display: inline-flex; align-items: center;
+    }
+    .logo-wrap img { height: 10mm; width: auto; display: block; }
+    .badge {
+      display: inline-flex; align-items: center; gap: 1.8mm;
+      padding: 1.4mm 3mm;
+      border-radius: 999px;
+      font-size: 6.6pt; font-weight: 700;
+      letter-spacing: 0.12em; text-transform: uppercase;
+      background: rgba(255,255,255,0.10);
+      border: 0.3mm solid rgba(255,255,255,0.22);
+      color: #fff;
+    }
+    .badge .dot {
+      width: 1.6mm; height: 1.6mm; border-radius: 50%;
+      background: var(--emerald-500);
+      box-shadow: 0 0 2mm rgba(16,185,129,0.8);
+    }
+
+    .hero-headline {
+      position: relative;
+      margin-top: 5mm;
+      font-size: 26pt;
+      font-weight: 900;
+      line-height: 1.02;
+      letter-spacing: -0.02em;
+    }
+    .hero-headline .accent {
+      background: linear-gradient(90deg, #BBF7D0 0%, #6EE7B7 50%, #5EEAD4 100%);
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+    }
+    .hero-sub {
+      position: relative;
+      margin-top: 3mm;
+      font-size: 9.8pt;
+      line-height: 1.4;
+      color: rgba(255,255,255,0.86);
+      max-width: 175mm;
+    }
+    .hero-trust {
+      position: relative;
+      margin-top: 3.5mm;
+      display: flex; flex-wrap: wrap; gap: 2mm 5mm;
+      font-size: 7.8pt; color: rgba(255,255,255,0.82);
+    }
+    .hero-trust span { display: inline-flex; align-items: center; gap: 1.4mm; }
+    .hero-trust .tick {
+      width: 3mm; height: 3mm;
+      border-radius: 50%;
+      background: rgba(16,185,129,0.22);
+      color: #6EE7B7;
+      display: inline-flex; align-items: center; justify-content: center;
+      font-size: 5.4pt; font-weight: 900;
+    }
+
+    /* ────────── PROBLEM  (= 44 mm) ────────── */
+    .problem {
+      height: 44mm;
+      padding: 5mm 14mm 4mm;
+      background: #fff;
+    }
+    .section-eyebrow {
+      font-size: 6.8pt;
+      font-weight: 800;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--brand-600);
+    }
+    .section-title {
+      margin-top: 1mm;
+      font-size: 14pt;
+      font-weight: 800;
+      letter-spacing: -0.015em;
+      color: var(--slate-900);
+      line-height: 1.15;
+    }
+    .section-title .muted { color: var(--slate-400); }
+
+    .problems {
+      margin-top: 2.6mm;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 2.5mm;
+    }
+    .problem-card {
+      border: 0.3mm solid var(--slate-200);
+      background: var(--slate-50);
+      border-radius: 2.4mm;
+      padding: 2.4mm 2.8mm 2.6mm;
+    }
+    .problem-card .pill {
+      display: inline-flex; align-items: center;
+      font-size: 6.2pt; font-weight: 800;
+      letter-spacing: 0.08em; text-transform: uppercase;
+      color: #B91C1C; background: #FEE2E2;
+      border-radius: 999px;
+      padding: 0.5mm 1.8mm;
+    }
+    .problem-card h4 {
+      margin-top: 1.4mm;
+      font-size: 9pt;
+      font-weight: 700;
+      color: var(--slate-900);
+      line-height: 1.2;
+    }
+    .problem-card p {
+      margin-top: 0.8mm;
+      font-size: 7.2pt;
+      line-height: 1.35;
+      color: var(--slate-600);
+    }
+
+    /* ────────── SOLUTION / BENEFITS  (= 82 mm) ────────── */
+    .solution {
+      height: 82mm;
+      padding: 5mm 14mm 5mm;
+      background:
+        radial-gradient(circle at 90% 10%, rgba(78,107,120,0.06) 0%, transparent 40%),
+        var(--slate-50);
+      border-top: 0.3mm solid var(--slate-200);
+      border-bottom: 0.3mm solid var(--slate-200);
+    }
+    .solution-head {
+      display: flex; align-items: flex-end; justify-content: space-between;
+      gap: 6mm;
+    }
+    .solution-head .right {
+      font-size: 8pt; color: var(--slate-600); max-width: 86mm;
+      text-align: right; line-height: 1.4;
+    }
+    .solution-head .right strong { color: var(--brand-700); }
+
+    .benefits {
+      margin-top: 4mm;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 2.5mm;
+    }
+    .benefit {
+      background: #fff;
+      border: 0.3mm solid var(--slate-200);
+      border-radius: 2.4mm;
+      padding: 2.6mm 2.8mm 2.8mm;
+    }
+    .benefit .icon {
+      width: 6.4mm; height: 6.4mm;
+      border-radius: 1.6mm;
+      background: var(--brand-50);
+      color: var(--brand-700);
+      display: flex; align-items: center; justify-content: center;
+      border: 0.3mm solid var(--brand-100);
+    }
+    .benefit .icon svg { width: 3.6mm; height: 3.6mm; }
+    .benefit h4 {
+      margin-top: 1.6mm;
+      font-size: 8.8pt;
+      font-weight: 700;
+      color: var(--slate-900);
+      line-height: 1.2;
+    }
+    .benefit p {
+      margin-top: 0.8mm;
+      font-size: 7pt;
+      line-height: 1.35;
+      color: var(--slate-600);
+    }
+
+    /* ────────── STATS  (= 22 mm) ────────── */
+    .stats {
+      height: 22mm;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      padding: 4mm 14mm;
+      background: linear-gradient(135deg, var(--brand-700) 0%, var(--brand-800) 100%);
+      color: #fff;
+    }
+    .stat {
+      text-align: center;
+      padding: 0 3mm;
+      border-right: 0.3mm solid rgba(255,255,255,0.18);
+    }
+    .stat:last-child { border-right: 0; }
+    .stat .v {
+      font-size: 18pt; font-weight: 900; letter-spacing: -0.02em; line-height: 1;
+      background: linear-gradient(90deg, #FFFFFF 0%, #BBF7D0 100%);
+      -webkit-background-clip: text; background-clip: text; color: transparent;
+    }
+    .stat .l {
+      margin-top: 1.2mm;
+      font-size: 7.2pt;
+      color: rgba(255,255,255,0.78);
+      line-height: 1.32;
+    }
+    .stats-note {
+      position: absolute;
+      right: 4mm; bottom: 1.4mm;
+      font-size: 5.6pt;
+      color: rgba(255,255,255,0.55);
+      letter-spacing: 0.04em;
+    }
+    .stats { position: relative; }
+
+    /* ────────── WHO / USE CASES  (= 22 mm) ────────── */
+    .who {
+      height: 22mm;
+      padding: 2.5mm 14mm 2.5mm;
+      background: #fff;
+    }
+    .who-head {
+      display: flex; align-items: baseline; gap: 4mm;
+    }
+    .who-head .section-title { font-size: 11pt; }
+    .who-row {
+      margin-top: 1.8mm;
+      display: grid;
+      grid-template-columns: repeat(8, 1fr);
+      gap: 1.4mm;
+    }
+    .who-chip {
+      border: 0.3mm solid var(--slate-200);
+      background: var(--slate-50);
+      border-radius: 1.6mm;
+      padding: 1.2mm 1mm;
+      text-align: center;
+      font-size: 6.4pt;
+      font-weight: 600;
+      color: var(--slate-700);
+      line-height: 1.15;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 6mm;
+    }
+    .who-chip.brand {
+      background: var(--brand-50);
+      border-color: var(--brand-200);
+      color: var(--brand-700);
+      font-weight: 800;
+    }
+
+    /* ────────── CTA  (= 49 mm) ────────── */
+    .cta {
+      height: 49mm;
+      padding: 5mm 14mm 4.5mm;
+      background: linear-gradient(135deg, var(--brand-900) 0%, var(--brand-800) 60%, var(--brand-700) 100%);
+      color: #fff;
+      position: relative;
+      display: grid;
+      grid-template-columns: 1fr 36mm;
+      gap: 7mm;
+      align-items: center;
+      overflow: hidden;
+    }
+    .cta::before {
+      content: "";
+      position: absolute; inset: 0;
+      background-image:
+        radial-gradient(circle at 10% 100%, rgba(16,185,129,0.18) 0%, transparent 45%);
+      pointer-events: none;
+    }
+
+    .cta .head {
+      position: relative;
+      font-size: 15pt;
+      font-weight: 900;
+      letter-spacing: -0.015em;
+      line-height: 1.05;
+    }
+    .cta .head .accent {
+      background: linear-gradient(90deg, #BBF7D0 0%, #5EEAD4 100%);
+      -webkit-background-clip: text; background-clip: text; color: transparent;
+    }
+    .cta .sub {
+      position: relative;
+      margin-top: 2mm;
+      font-size: 8.6pt;
+      line-height: 1.38;
+      color: rgba(255,255,255,0.82);
+      max-width: 110mm;
+    }
+    .cta-actions {
+      position: relative;
+      margin-top: 3mm;
+      display: flex; align-items: center; gap: 4mm; flex-wrap: wrap;
+    }
+    .url-pill {
+      display: inline-flex; align-items: center; gap: 2.4mm;
+      padding: 2.4mm 3.8mm;
+      background: #fff;
+      color: var(--brand-800);
+      border-radius: 999px;
+      font-weight: 800;
+      font-size: 10pt;
+      letter-spacing: -0.005em;
+      box-shadow: 0 3mm 8mm -3mm rgba(0,0,0,0.45);
+    }
+    .url-pill .arrow {
+      width: 4.6mm; height: 4.6mm;
+      background: var(--brand-700);
+      color: #fff;
+      border-radius: 50%;
+      display: inline-flex; align-items: center; justify-content: center;
+      font-weight: 900; font-size: 8.4pt;
+    }
+    .scan-hint {
+      display: inline-flex; align-items: center; gap: 1.8mm;
+      font-size: 8.2pt; color: rgba(255,255,255,0.78);
+    }
+    .scan-hint .ring {
+      width: 3.6mm; height: 3.6mm;
+      border: 0.5mm solid rgba(187,247,208,0.55);
+      border-radius: 50%;
+    }
+
+    .qr-block {
+      position: relative;
+      background: #fff;
+      border-radius: 3mm;
+      padding: 2.4mm 2.4mm 1.8mm;
+      text-align: center;
+      box-shadow: 0 4mm 10mm -3mm rgba(0,0,0,0.45);
+    }
+    .qr-block img { width: 30mm; height: 30mm; display: block; }
+    .qr-block .label {
+      margin-top: 1.2mm;
+      font-size: 6.4pt;
+      font-weight: 800;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--brand-700);
+    }
+
+    .contact-strip {
+      position: relative;
+      margin-top: 3.5mm;
+      font-size: 7pt;
+      letter-spacing: 0.04em;
+      color: rgba(255,255,255,0.65);
+    }
+    .contact-strip strong { color: rgba(255,255,255,0.92); font-weight: 700; }
+  </style>
+</head>
+<body>
+  <div class="page">
+
+    <!-- ──────── HERO ──────── -->
+    <section class="hero">
+      <div class="hero-top">
+        <div class="logo-wrap">
+          <img src="logo.png" alt="ReserveNI" />
+        </div>
+        <div class="badge">
+          <span class="dot"></span>
+          Built in Northern Ireland · For Northern Ireland
+        </div>
+      </div>
+
+      <h1 class="hero-headline">
+        Stop losing bookings.<br/>
+        <span class="accent">Start growing your business.</span>
+      </h1>
+
+      <p class="hero-sub">
+        The all-in-one online booking platform for barbers, salons, therapists,
+        clinics, studios and every other appointment-led business. Let clients
+        book 24/7, cut no-shows with deposits, and automate every reminder.
+      </p>
+
+      <div class="hero-trust">
+        <span><span class="tick">✓</span> Online booking 24/7</span>
+        <span><span class="tick">✓</span> Stripe deposits, paid direct to you</span>
+        <span><span class="tick">✓</span> Automatic SMS &amp; email reminders</span>
+        <span><span class="tick">✓</span> No commission on bookings</span>
+      </div>
+    </section>
+
+    <!-- ──────── PROBLEM ──────── -->
+    <section class="problem">
+      <div class="section-eyebrow">If this sounds familiar</div>
+      <h2 class="section-title">
+        You&rsquo;re brilliant at what you do.
+        <span class="muted">The admin around it is drowning you.</span>
+      </h2>
+
+      <div class="problems">
+        <div class="problem-card">
+          <span class="pill">The phone never stops</span>
+          <h4>Missed calls = lost bookings</h4>
+          <p>You&rsquo;re mid-appointment. The phone rings. You can&rsquo;t answer &mdash; the booking goes elsewhere.</p>
+        </div>
+        <div class="problem-card">
+          <span class="pill">No-shows kill your day</span>
+          <h4>Empty chairs cost real money</h4>
+          <p>An empty 2pm slot is income gone. Chasing confirmations every evening is exhausting &mdash; and they still skip.</p>
+        </div>
+        <div class="problem-card">
+          <span class="pill">You&rsquo;re closed, they&rsquo;re not</span>
+          <h4>Best clients book at 11pm</h4>
+          <p>If you&rsquo;re not open to take the booking from the sofa &mdash; via DM, web or text &mdash; someone else is.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ──────── SOLUTION ──────── -->
+    <section class="solution">
+      <div class="solution-head">
+        <div>
+          <div class="section-eyebrow">Meet ReserveNI</div>
+          <h2 class="section-title">
+            One platform.
+            <span class="muted">Every booking. Zero chaos.</span>
+          </h2>
+        </div>
+        <div class="right">
+          The booking system you&rsquo;d build yourself, if you had six months and a software team. <strong>Set up in minutes. Live the same day.</strong>
+        </div>
+      </div>
+
+      <div class="benefits">
+        <div class="benefit">
+          <div class="icon">
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/></svg>
+          </div>
+          <h4>Win back 10+ hours a week</h4>
+          <p>Clients book themselves online, 24/7. No phone tag, no late-night DMs.</p>
+        </div>
+        <div class="benefit">
+          <div class="icon">
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12c0 5.25-4 9.75-9 9.75S3 17.25 3 12V6.75l9-3 9 3V12Z"/></svg>
+          </div>
+          <h4>Protect income with deposits</h4>
+          <p>Take a deposit on any booking. Funds settle direct to your bank via Stripe &mdash; we never hold your money.</p>
+        </div>
+        <div class="benefit">
+          <div class="icon">
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M14.857 17.082a23.85 23.85 0 0 0 5.454-1.31A8.97 8.97 0 0 1 18 9.75V9A6 6 0 0 0 6 9v.75a8.97 8.97 0 0 1-2.312 6.022 23.85 23.85 0 0 0 5.455 1.31m5.714 0a24.26 24.26 0 0 1-5.714 0m5.714 0a3 3 0 1 1-5.714 0"/></svg>
+          </div>
+          <h4>Cut no-shows automatically</h4>
+          <p>Email and SMS reminders go out on autopilot. Clients show up &mdash; or cancel in time for you to rebook.</p>
+        </div>
+        <div class="benefit">
+          <div class="icon">
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M15 9h3.75M15 12h3.75M15 15h3.75M4.5 19.5h15a2.25 2.25 0 0 0 2.25-2.25V6.75A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25v10.5A2.25 2.25 0 0 0 4.5 19.5Zm6-10.125a1.875 1.875 0 1 1-3.75 0 1.875 1.875 0 0 1 3.75 0Zm1.294 6.336a6.72 6.72 0 0 1-3.17.789 6.72 6.72 0 0 1-3.168-.789 3.376 3.376 0 0 1 6.338 0Z"/></svg>
+          </div>
+          <h4>Every client, every detail</h4>
+          <p>History, preferences, allergies, notes and spend &mdash; all in one place. Recognise regulars instantly.</p>
+        </div>
+        <div class="benefit">
+          <div class="icon">
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 18 9 11.25l4.31 4.31a11.95 11.95 0 0 1 5.81-5.52l2.74-1.22m0 0-5.94-2.28m5.94 2.28-2.28 5.94"/></svg>
+          </div>
+          <h4>Look bigger, grow faster</h4>
+          <p>A polished booking page, branded confirmations and a QR code on your counter. Confidence books again.</p>
+        </div>
+        <div class="benefit">
+          <div class="icon">
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M9.568 3H5.25A2.25 2.25 0 0 0 3 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.1 18.1 0 0 0 5.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 0 0 9.568 3Z"/></svg>
+          </div>
+          <h4>Fair, honest pricing</h4>
+          <p>One flat subscription. Zero commission on bookings. Free personal onboarding for every NI business.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ──────── STATS ──────── -->
+    <section class="stats">
+      <div class="stat">
+        <div class="v">24/7</div>
+        <div class="l">Online booking your business never has to staff</div>
+      </div>
+      <div class="stat">
+        <div class="v">&minus;80%</div>
+        <div class="l">Fewer no&#8209;shows when you take a deposit*</div>
+      </div>
+      <div class="stat">
+        <div class="v">10+ hrs</div>
+        <div class="l">Per week back in your day on auto&#8209;reminders</div>
+      </div>
+      <div class="stats-note">*Typical reduction reported by businesses that introduce per&#8209;booking deposits.</div>
+    </section>
+
+    <!-- ──────── WHO / USE CASES ──────── -->
+    <section class="who">
+      <div class="who-head">
+        <div class="section-eyebrow">Built for</div>
+        <h2 class="section-title">If it&rsquo;s bookable, we handle it.</h2>
+      </div>
+      <div class="who-row">
+        <div class="who-chip">Barbers &amp; salons</div>
+        <div class="who-chip">Beauty &amp; nails</div>
+        <div class="who-chip">Aesthetics &amp; tattoo</div>
+        <div class="who-chip">Physio &amp; massage</div>
+        <div class="who-chip">PTs &amp; studios</div>
+        <div class="who-chip">Dog groomers</div>
+        <div class="who-chip">Tutors &amp; driving</div>
+        <div class="who-chip brand">+ anything you book</div>
+      </div>
+    </section>
+
+    <!-- ──────── CTA / FOOTER ──────── -->
+    <section class="cta">
+      <div>
+        <div class="head">
+          Ready to take your diary back?<br/>
+          <span class="accent">Start free in 30 minutes.</span>
+        </div>
+        <p class="sub">
+          See pricing, plans and the full feature list &mdash; or talk to a real
+          person in Northern Ireland about how ReserveNI fits your business.
+        </p>
+        <div class="cta-actions">
+          <span class="url-pill">
+            reserveni.com/appointments-plan
+            <span class="arrow">→</span>
+          </span>
+          <span class="scan-hint">
+            <span class="ring"></span>
+            Or scan the QR &rarr;
+          </span>
+        </div>
+        <div class="contact-strip">
+          <strong>hello@reserveni.com</strong> &nbsp;·&nbsp; reserveni.com &nbsp;·&nbsp; Built in Belfast, for Northern Ireland
+        </div>
+      </div>
+
+      <div class="qr-block">
+        <img src="qr.png" alt="QR code: reserveni.com/appointments-plan" />
+        <div class="label">Scan to learn more</div>
+      </div>
+    </section>
+
+  </div>
+</body>
+</html>

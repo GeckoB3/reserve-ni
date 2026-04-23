@@ -69,7 +69,7 @@ export interface EventAvailabilitySlot {
 // Core engine
 // ---------------------------------------------------------------------------
 
-const CAPACITY_CONSUMING_STATUSES = ['Confirmed', 'Pending', 'Seated'];
+const CAPACITY_CONSUMING_STATUSES = ['Booked', 'Confirmed', 'Pending', 'Seated'];
 
 export function computeEventAvailability(
   input: EventEngineInput,

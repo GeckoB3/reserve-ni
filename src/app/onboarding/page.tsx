@@ -732,7 +732,7 @@ export default function OnboardingPage() {
     } finally {
       setAddCalendarSubmitting(false);
     }
-  }, [newCalendarName, inlineCalendarTarget, refreshCalendarEntitlement]);
+  }, [newCalendarName, inlineCalendarTarget, openingHoursDraft, refreshCalendarEntitlement]);
 
   useEffect(() => {
     async function loadVenue() {
@@ -1167,7 +1167,7 @@ export default function OnboardingPage() {
       });
     }, 400);
     return () => clearTimeout(t);
-  }, [step, venue?.id, venue?.onboarding_completed, modelSteps.length]);
+  }, [step, venue, modelSteps.length]);
 
   useEffect(() => {
     if (!venue || venue.onboarding_completed) return;
@@ -1194,7 +1194,7 @@ export default function OnboardingPage() {
       window.removeEventListener('pagehide', persistNow);
       document.removeEventListener('visibilitychange', onVisibility);
     };
-  }, [venue?.id, venue?.onboarding_completed]);
+  }, [venue]);
 
   async function handleNext() {
     setError(null);

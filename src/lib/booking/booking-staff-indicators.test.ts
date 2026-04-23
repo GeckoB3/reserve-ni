@@ -97,12 +97,23 @@ describe('canShowCancelStaffAttendanceConfirmationAction', () => {
     ).toBe(true);
   });
 
-  it('false without staff timestamp', () => {
+  it('false when status is Booked and no staff timestamp', () => {
+    expect(
+      canShowCancelStaffAttendanceConfirmationAction({
+        status: 'Booked',
+        source: 'booking_page',
+        staff_attendance_confirmed_at: null,
+      }),
+    ).toBe(false);
+  });
+
+  it('false when guest confirmed (not staff) — show guest revert UX, not staff', () => {
     expect(
       canShowCancelStaffAttendanceConfirmationAction({
         status: 'Confirmed',
         source: 'booking_page',
         staff_attendance_confirmed_at: null,
+        guest_attendance_confirmed_at: '2026-01-01T12:00:00.000Z',
       }),
     ).toBe(false);
   });

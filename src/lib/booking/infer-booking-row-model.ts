@@ -60,9 +60,5 @@ export function bookingStatusDisplayLabel(status: string, isTableReservation: bo
   if (status === 'Seated') {
     return bookingSeatedStatusDisplayLabel(isTableReservation);
   }
-  /** Non-table: `Confirmed` means booking is held — avoid clashing with "attendance confirmed" pills. */
-  if (status === 'Confirmed' && !isTableReservation) {
-    return 'Booked';
-  }
   return status;
 }

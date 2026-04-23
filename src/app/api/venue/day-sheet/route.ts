@@ -93,7 +93,7 @@ function timeStr(t: string): string {
   return typeof t === 'string' ? t.slice(0, 5) : '12:00';
 }
 
-const ACTIVE_STATUSES = ['Pending', 'Confirmed', 'Seated'];
+const ACTIVE_STATUSES = ['Pending', 'Booked', 'Confirmed', 'Seated'];
 
 /**
  * GET /api/venue/day-sheet?date=YYYY-MM-DD
@@ -519,7 +519,7 @@ export async function GET(request: NextRequest) {
     const arrivingSoon = isToday
       ? allMapped
           .filter((b) => {
-            if (b.status !== 'Confirmed' && b.status !== 'Pending') return false;
+            if (b.status !== 'Confirmed' && b.status !== 'Booked' && b.status !== 'Pending') return false;
             const startMin = timeToMinutes(b.booking_time);
             return startMin > nowMinutes && startMin <= nowMinutes + 30;
           })

@@ -3,6 +3,7 @@
  */
 
 export interface BookingStaffIndicatorInput {
+  status?: string | null;
   deposit_status?: string | null;
   deposit_amount_pence?: number | null;
   guest_attendance_confirmed_at?: string | null;
@@ -15,8 +16,28 @@ export function showDepositPendingPill(row: BookingStaffIndicatorInput): boolean
   return pence > 0;
 }
 
+/**
+ * True when the booking has reached the `Confirmed` lifecycle status (guest
+ * confirmed via reminder link, or staff manually confirmed). For backwards
+ * compatibility with rows from before the dedicated `Confirmed` status existed,
+ * this also returns true if either attendance timestamp is set.
+ */
+export function isAttendanceConfirmed(row: BookingStaffIndicatorInput): boolean {
+  if (row.status === 'Confirmed') return true;
+  return (
+    Boolean(row.guest_attendance_confirmed_at?.trim()) ||
+    Boolean(row.staff_attendance_confirmed_at?.trim())
+  );
+}
+
+/**
+ * @deprecated Prefer reading the booking `status === 'Confirmed'` directly, or
+ * use {@link isAttendanceConfirmed} for legacy support. Kept for callers that
+ * render an "attendance confirmed" pill as an overlay on top of another status
+ * (e.g. cards showing `Booked` with a green confirmation dot).
+ */
 export function showAttendanceConfirmedPill(row: BookingStaffIndicatorInput): boolean {
-  return Boolean(row.guest_attendance_confirmed_at?.trim()) || Boolean(row.staff_attendance_confirmed_at?.trim());
+  return isAttendanceConfirmed(row);
 }
 
 export interface AttendanceConfirmationSources {
@@ -38,7 +59,7 @@ export function canShowConfirmBookingAttendanceAction(
   row: BookingStaffIndicatorInput & { source?: string | null; status: string },
 ): boolean {
   if (row.source === 'walk-in') return false;
-  if (showAttendanceConfirmedPill(row)) return false;
+  if (isAttendanceConfirmed(row)) return false;
   return !['Cancelled', 'No-Show', 'Completed'].includes(row.status);
 }
 
@@ -46,6 +67,11 @@ export function canShowCancelStaffAttendanceConfirmationAction(
   row: BookingStaffIndicatorInput & { source?: string | null; status: string },
 ): boolean {
   if (row.source === 'walk-in') return false;
-  if (!row.staff_attendance_confirmed_at?.trim()) return false;
+  /** Show only when staff manually confirmed (timestamp set or status is Confirmed via staff path). */
+  const staffConfirmed = Boolean(row.staff_attendance_confirmed_at?.trim());
+  const guestConfirmed = Boolean(row.guest_attendance_confirmed_at?.trim());
+  /** If status is Confirmed but no guest timestamp, treat as staff-confirmed for revert UX. */
+  const inferStaff = row.status === 'Confirmed' && !guestConfirmed;
+  if (!staffConfirmed && !inferStaff) return false;
   return !['Cancelled', 'No-Show', 'Completed'].includes(row.status);
 }

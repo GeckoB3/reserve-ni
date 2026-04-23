@@ -24,6 +24,8 @@ import { DashboardStatCard } from '@/components/dashboard/DashboardStatCard';
 import { PageFrame } from '@/components/ui/dashboard/PageFrame';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
 import { EmptyState as DashboardEmptyState } from '@/components/ui/dashboard/EmptyState';
+import { TabBar } from '@/components/ui/dashboard/TabBar';
+import { Pill, type PillVariant } from '@/components/ui/dashboard/Pill';
 import type { BookingModel } from '@/types/booking-models';
 import { BOOKING_MODEL_ORDER } from '@/lib/booking/enabled-models';
 import {
@@ -103,11 +105,16 @@ interface BookingDetailLite {
 
 type ViewMode = 'day' | 'week' | 'month' | 'custom';
 
-/** Filter UI labels; "Confirmed" = attendance confirmed (guest link or staff button), not `bookings.status`. */
-const STATUS_FILTER_OPTIONS: Array<{ label: string; apiStatus: string | null; attendanceConfirmed?: boolean }> = [
+/**
+ * Filter UI labels.
+ *  - `Booked`    — `status === 'Booked'` (booking active, no attendance confirmation yet).
+ *  - `Confirmed` — `status === 'Confirmed'` (guest or staff confirmed attendance).
+ */
+const STATUS_FILTER_OPTIONS: Array<{ label: string; apiStatus: string | null }> = [
   { label: 'All', apiStatus: null },
-  { label: 'Confirmed', apiStatus: null, attendanceConfirmed: true },
   { label: 'Pending', apiStatus: 'Pending' },
+  { label: 'Booked', apiStatus: 'Booked' },
+  { label: 'Confirmed', apiStatus: 'Confirmed' },
   { label: 'Started', apiStatus: 'Seated' },
   { label: 'Completed', apiStatus: 'Completed' },
   { label: 'Cancelled', apiStatus: 'Cancelled' },
@@ -474,8 +481,7 @@ export function BookingsDashboard({
         : (viewMode === 'day' ? new URLSearchParams({ date: from }) : new URLSearchParams({ from, to }));
       if (!ids && statusFilter !== 'All') {
         const opt = STATUS_FILTER_OPTIONS.find((o) => o.label === statusFilter);
-        if (opt?.attendanceConfirmed) params.set('attendance_confirmed', '1');
-        else if (opt?.apiStatus) params.set('status', opt.apiStatus);
+        if (opt?.apiStatus) params.set('status', opt.apiStatus);
       }
       if (!ids && filterGuestId) params.set('guest', filterGuestId);
       if (!ids && filterAreaId) params.set('area', filterAreaId);
@@ -757,7 +763,7 @@ export function BookingsDashboard({
           previous_state: {
             items: selectedIds
               .filter((bookingId, index) => outcomes[index])
-              .map((bookingId) => ({ bookingId, status: previousMap.get(bookingId) ?? 'Confirmed' })),
+              .map((bookingId) => ({ bookingId, status: previousMap.get(bookingId) ?? 'Booked' })),
           },
           current_state: { status: 'No-Show' },
         });
@@ -806,7 +812,7 @@ export function BookingsDashboard({
       const revertAction = BOOKING_REVERT_ACTIONS[booking.status as BookingStatus];
       const tableStyle = isTableReservationBooking(booking);
       const confirmLabel =
-        booking.status === 'Seated' && nextStatus === 'Confirmed' && !tableStyle
+        booking.status === 'Seated' && (nextStatus === 'Booked' || nextStatus === 'Confirmed') && !tableStyle
           ? 'Undo Start'
           : revertAction?.label ?? `Revert to ${nextStatus}`;
       setConfirmDialog({
@@ -1068,9 +1074,13 @@ export function BookingsDashboard({
   const stats = useMemo(() => {
     const total = filteredBookings.length;
     const totalCovers = filteredBookings.reduce((sum, b) => sum + b.party_size, 0);
-    const confirmed = filteredBookings.filter((b) => b.status === 'Confirmed' || b.status === 'Seated').length;
+    /** Active = anything not pending/cancelled/no-show. Includes Booked, Confirmed, Seated, Completed. */
+    const active = filteredBookings.filter(
+      (b) => b.status === 'Booked' || b.status === 'Confirmed' || b.status === 'Seated' || b.status === 'Completed',
+    ).length;
+    const confirmed = filteredBookings.filter((b) => b.status === 'Confirmed').length;
     const pending = filteredBookings.filter((b) => b.status === 'Pending').length;
-    return { total, totalCovers, confirmed, pending };
+    return { total, totalCovers, active, confirmed, pending };
   }, [filteredBookings]);
 
   const exportCsv = useCallback(() => {
@@ -1137,54 +1147,30 @@ export function BookingsDashboard({
       )}
 
       {showModelFilters && (
-        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
-          <span className="text-xs font-medium text-slate-600">Type:</span>
-          <button
-            type="button"
-            onClick={() => setModelFilter('all')}
-            className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
-              modelFilter === 'all'
-                ? 'bg-brand-600 text-white shadow-sm'
-                : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
-            }`}
-          >
-            All
-          </button>
-          {filterModels.map((m) => (
-            <button
-              key={m}
-              type="button"
-              onClick={() => setModelFilter(m)}
-              className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
-                modelFilter === m
-                  ? 'bg-brand-600 text-white shadow-sm'
-                  : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
-              }`}
-            >
-              {bookingModelShortLabel(m)}
-            </button>
-          ))}
+        <div className="overflow-x-auto pb-0.5">
+          <TabBar<'all' | BookingModel>
+            tabs={[
+              { id: 'all', label: 'All types' },
+              ...filterModels.map((m) => ({ id: m as 'all' | BookingModel, label: bookingModelShortLabel(m) })),
+            ]}
+            value={modelFilter}
+            onChange={setModelFilter}
+          />
         </div>
       )}
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="overflow-x-auto">
-          <div className="flex w-max rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
-            {(['day', 'week', 'month', 'custom'] as ViewMode[]).map((mode) => (
-              <button
-                key={mode}
-                type="button"
-                onClick={() => { setViewMode(mode); if (mode !== 'custom') setAnchorDate(todayISO()); }}
-                className={`rounded-lg px-3 py-2 text-sm font-medium capitalize transition-all sm:px-4 ${
-                  viewMode === mode
-                    ? 'bg-brand-600 text-white shadow-sm'
-                    : 'text-slate-600 hover:bg-slate-50'
-                }`}
-              >
-                {mode}
-              </button>
-            ))}
-          </div>
+        <div className="overflow-x-auto pb-0.5">
+          <TabBar<ViewMode>
+            tabs={[
+              { id: 'day', label: 'Day' },
+              { id: 'week', label: 'Week' },
+              { id: 'month', label: 'Month' },
+              { id: 'custom', label: 'Custom' },
+            ]}
+            value={viewMode}
+            onChange={(id) => { setViewMode(id); if (id !== 'custom') setAnchorDate(todayISO()); }}
+          />
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
@@ -1196,14 +1182,14 @@ export function BookingsDashboard({
             onClick={exportCsv}
             className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 shadow-sm"
           >
-            Export CSV
+            Export
           </button>
-          <button type="button" onClick={() => setNewBookingOpen(true)} className="flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-brand-700">
-            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
+          <button type="button" onClick={() => setNewBookingOpen(true)} className="flex items-center gap-1.5 rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-700">
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
             New Booking
           </button>
-          <button type="button" onClick={() => setWalkInOpen(true)} className="flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-emerald-700">
-            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
+          <button type="button" onClick={() => setWalkInOpen(true)} className="flex items-center gap-1.5 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700">
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0ZM12 14a7 7 0 0 0-7 7h14a7 7 0 0 0-7-7Z" /></svg>
             Walk-in
           </button>
         </div>
@@ -1286,90 +1272,62 @@ export function BookingsDashboard({
         <DashboardStatCard label="Confirmed" value={stats.confirmed} color="emerald" />
         <DashboardStatCard label="Pending" value={stats.pending} color="amber" />
       </div>
+      {/* `Confirmed` here means status === 'Confirmed' (guest or staff confirmed attendance). */}
 
-      <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex flex-wrap items-center gap-1.5">
-          {showAreaBookingsChrome && (
-            <select
-              value={filterAreaId ?? ''}
-              onChange={(e) => setAreaFilter(e.target.value)}
-              className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
-              aria-label="Filter by dining area"
-            >
-              <option value="">All areas</option>
-              {diningAreas
-                .filter((a) => a.is_active)
-                .map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.name}
-                  </option>
-                ))}
-            </select>
-          )}
-          {STATUS_FILTER_OPTIONS.map((s) => (
-            <button
-              key={s.label}
-              type="button"
-              onClick={() => setStatusFilter(s.label)}
-              className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
-                statusFilter === s.label
-                  ? 'bg-brand-600 text-white shadow-sm'
-                  : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
-              }`}
-            >
-              {s.label}
-            </button>
-          ))}
-        </div>
-        <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center sm:gap-3">
-          <div className="relative w-full sm:w-72">
+      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm shadow-slate-900/5">
+        <div className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+          <div className="flex flex-wrap items-center gap-1.5">
+            {showAreaBookingsChrome && (
+              <select
+                value={filterAreaId ?? ''}
+                onChange={(e) => setAreaFilter(e.target.value)}
+                className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+                aria-label="Filter by dining area"
+              >
+                <option value="">All areas</option>
+                {diningAreas
+                  .filter((a) => a.is_active)
+                  .map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.name}
+                    </option>
+                  ))}
+              </select>
+            )}
+            {STATUS_FILTER_OPTIONS.map((s) => (
+              <button
+                key={s.label}
+                type="button"
+                onClick={() => setStatusFilter(s.label)}
+                className={`rounded-full px-3 py-1.5 text-xs font-semibold transition-all ${
+                  statusFilter === s.label
+                    ? 'bg-brand-600 text-white shadow-sm ring-1 ring-brand-600/20'
+                    : 'bg-slate-50 text-slate-600 hover:bg-slate-100 hover:text-slate-800'
+                }`}
+              >
+                {s.label}
+              </button>
+            ))}
+          </div>
+          <div className="relative w-full sm:w-64">
+            <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
+              <svg className="h-4 w-4 text-slate-400" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
+              </svg>
+            </div>
             <input
               type="text"
               value={searchQuery}
               onChange={(event) => setSearchQuery(event.target.value)}
-              placeholder="Search guest, phone, email, or booking ref"
-              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+              placeholder="Search guest, phone, email…"
+              className="w-full rounded-xl border border-slate-200 bg-slate-50/60 py-2 pl-9 pr-3 text-sm placeholder:text-slate-400 focus:border-brand-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-100"
             />
           </div>
         </div>
-      </div>
-
-      <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 shadow-sm">
-        <span className="text-xs font-medium text-slate-600">{selectedIds.length} selected</span>
-        <button
-          type="button"
-          disabled={bulkLoading || selectedIds.length === 0}
-          onClick={() => void runBulkNoShow()}
-          className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
-        >
-          Mark No-Show
-        </button>
-        <button
-          type="button"
-          disabled={bulkLoading || bulkCancelEligibleIds.length === 0}
-          onClick={() => void runBulkCancel()}
-          className="rounded-lg border border-amber-200 px-3 py-1.5 text-xs font-medium text-amber-900 hover:bg-amber-50 disabled:opacity-50"
-        >
-          Cancel bookings
-        </button>
-        <button
-          type="button"
-          disabled={bulkLoading || bulkDeleteEligibleIds.length === 0}
-          onClick={() => void runBulkDelete()}
-          className="rounded-lg border border-red-300 px-3 py-1.5 text-xs font-medium text-red-800 hover:bg-red-50 disabled:opacity-50"
-        >
-          Delete permanently
-        </button>
-        <button
-          type="button"
-          disabled={bulkLoading || selectedIds.length === 0}
-          onClick={() => setBulkGuestMessageOpen(true)}
-          className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-        >
-          Send batch message
-        </button>
         {isRefreshing && (
-          <span className="text-xs text-slate-500">Syncing latest updates...</span>
+          <div className="border-t border-slate-100 px-5 py-1.5">
+            <span className="text-[11px] text-slate-400">Syncing…</span>
+          </div>
         )}
       </div>
 
@@ -1567,22 +1525,22 @@ export function BookingsDashboard({
         />
       )}
       {confirmDialog && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onClick={() => setConfirmDialog(null)}>
-          <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl" onClick={(event) => event.stopPropagation()}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/25 p-4 backdrop-blur-[2px]" onClick={() => setConfirmDialog(null)}>
+          <div className="w-full max-w-sm rounded-2xl border border-slate-200/80 bg-white p-6 shadow-2xl shadow-slate-900/15 ring-1 ring-slate-100" onClick={(event) => event.stopPropagation()}>
             <h3 className="text-base font-semibold text-slate-900">{confirmDialog.title}</h3>
             <p className="mt-2 text-sm text-slate-600">{confirmDialog.message}</p>
-            <div className="mt-4 flex gap-2">
+            <div className="mt-5 flex gap-2.5">
               <button
                 type="button"
                 onClick={() => { confirmDialog.onConfirm(); setConfirmDialog(null); }}
-                className="flex-1 rounded-lg bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-700"
+                className="flex-1 rounded-xl bg-red-600 px-3 py-2.5 text-sm font-semibold text-white hover:bg-red-700"
               >
                 {confirmDialog.confirmLabel}
               </button>
               <button
                 type="button"
                 onClick={() => setConfirmDialog(null)}
-                className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                className="flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
               >
                 Cancel
               </button>
@@ -1591,38 +1549,117 @@ export function BookingsDashboard({
         </div>
       )}
       </div>
+
+      {/* Floating bulk-actions tray — appears when rows are selected */}
+      {selectedIds.length > 0 && (
+        <div className="fixed bottom-6 left-1/2 z-40 -translate-x-1/2 transform">
+          <div className="flex items-center gap-1.5 rounded-2xl border border-slate-200/80 bg-white px-4 py-2.5 shadow-xl shadow-slate-900/15 ring-1 ring-slate-100">
+            <span className="mr-1 text-sm font-semibold text-slate-800">{selectedIds.length} selected</span>
+            <div className="mx-2 h-4 w-px bg-slate-200" />
+            <button
+              type="button"
+              disabled={bulkLoading}
+              onClick={() => void runBulkNoShow()}
+              className="rounded-lg px-3 py-1.5 text-xs font-semibold text-slate-700 transition-colors hover:bg-rose-50 hover:text-rose-700 disabled:opacity-50"
+            >
+              No-show
+            </button>
+            <button
+              type="button"
+              disabled={bulkLoading || bulkCancelEligibleIds.length === 0}
+              onClick={() => void runBulkCancel()}
+              className="rounded-lg px-3 py-1.5 text-xs font-semibold text-slate-700 transition-colors hover:bg-amber-50 hover:text-amber-800 disabled:opacity-40"
+            >
+              Cancel {bulkCancelEligibleIds.length > 0 && bulkCancelEligibleIds.length < selectedIds.length ? `(${bulkCancelEligibleIds.length})` : ''}
+            </button>
+            <button
+              type="button"
+              disabled={bulkLoading || bulkDeleteEligibleIds.length === 0}
+              onClick={() => void runBulkDelete()}
+              className="rounded-lg px-3 py-1.5 text-xs font-semibold text-slate-700 transition-colors hover:bg-red-50 hover:text-red-700 disabled:opacity-40"
+            >
+              Delete
+            </button>
+            <div className="mx-1 h-4 w-px bg-slate-200" />
+            <button
+              type="button"
+              disabled={bulkLoading}
+              onClick={() => setBulkGuestMessageOpen(true)}
+              className="rounded-lg px-3 py-1.5 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-100 disabled:opacity-50"
+            >
+              Message
+            </button>
+            <div className="mx-1 h-4 w-px bg-slate-200" />
+            <button
+              type="button"
+              onClick={() => setSelectedIds([])}
+              className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
+              aria-label="Clear selection"
+            >
+              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      )}
     </PageFrame>
   );
 }
 
+function statusBorderClass(status: string): string {
+  switch (status) {
+    case 'Pending': return 'border-l-amber-400';
+    case 'Booked': return 'border-l-sky-400';
+    case 'Confirmed': return 'border-l-emerald-500';
+    case 'Seated': return 'border-l-brand-500';
+    case 'Completed': return 'border-l-slate-300';
+    case 'Cancelled': return 'border-l-red-300';
+    case 'No-Show': return 'border-l-rose-500';
+    default: return 'border-l-transparent';
+  }
+}
+
+function statusPillVariant(status: string): PillVariant {
+  switch (status) {
+    case 'Pending': return 'warning';
+    case 'Booked': return 'info';
+    case 'Confirmed': return 'success';
+    case 'Seated': return 'brand';
+    case 'Completed': return 'neutral';
+    case 'Cancelled': return 'neutral';
+    case 'No-Show': return 'danger';
+    default: return 'neutral';
+  }
+}
+
 function sourceBadge(s: string) {
-  const map: Record<string, string> = {
-    online: 'bg-violet-50 text-violet-700',
-    phone: 'bg-sky-50 text-sky-700',
-    'walk-in': 'bg-amber-50 text-amber-700',
-    booking_page: 'bg-violet-50 text-violet-700',
+  const variantMap: Record<string, PillVariant> = {
+    online: 'brand',
+    phone: 'neutral',
+    'walk-in': 'warning',
+    booking_page: 'brand',
   };
-  return (
-    <span className={`inline-block rounded-full px-2.5 py-1 text-xs font-medium ${map[s] ?? 'bg-slate-50 text-slate-600'}`}>
-      {s === 'booking_page' ? 'online' : s}
-    </span>
-  );
+  const label = s === 'booking_page' ? 'online' : s;
+  return <Pill variant={variantMap[s] ?? 'neutral'} size="sm">{label}</Pill>;
 }
 
 function depositBadge(status: string, amountPence: number | null) {
+  if (status === 'Not Required') return null;
   const amt = amountPence ? `£${(amountPence / 100).toFixed(2)}` : null;
-  const map: Record<string, { bg: string; text: string; label: string }> = {
-    Paid: { bg: 'bg-emerald-50', text: 'text-emerald-700', label: amt ? `${amt} Paid` : 'Paid' },
-    Refunded: { bg: 'bg-blue-50', text: 'text-blue-700', label: amt ? `${amt} Refunded` : 'Refunded' },
-    Pending: { bg: 'bg-amber-50', text: 'text-amber-700', label: 'Pending' },
-    'Not Required': { bg: 'bg-slate-50', text: 'text-slate-500', label: '-' },
+  const variantMap: Record<string, PillVariant> = {
+    Paid: 'success',
+    Refunded: 'brand',
+    Pending: 'warning',
   };
-  const style = map[status] ?? { bg: 'bg-slate-50', text: 'text-slate-500', label: status };
-  return (
-    <span className={`inline-block rounded-full px-2.5 py-1 text-xs font-medium ${style.bg} ${style.text}`}>
-      {style.label}
-    </span>
-  );
+  const labelMap: Record<string, string> = {
+    Paid: amt ? `${amt} paid` : 'Deposit paid',
+    Refunded: amt ? `${amt} refunded` : 'Refunded',
+    Pending: 'Deposit pending',
+  };
+  const variant = variantMap[status] ?? 'neutral';
+  const label = labelMap[status] ?? status;
+  return <Pill variant={variant} size="sm" dot={status === 'Pending'}>{label}</Pill>;
 }
 
 function canShowConfirmBookingAttendanceRow(b: BookingRow): boolean {
@@ -1689,9 +1726,9 @@ function BookingsAccordionList({
   const allSelected = bookings.length > 0 && bookings.every((b) => selectedIds.includes(b.id));
   return (
     <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm shadow-slate-900/5">
-      <div className="border-b border-slate-100 bg-slate-50/60 px-3 py-2.5 sm:px-4">
+      <div className="border-b border-slate-100 bg-slate-50/60 px-3 py-2 sm:px-4">
         <div className="flex items-center justify-between">
-          <label className="inline-flex items-center gap-2 text-xs font-medium text-slate-600">
+          <label className="inline-flex cursor-pointer items-center gap-2 text-xs font-medium text-slate-500 hover:text-slate-700">
             <input
               type="checkbox"
               checked={allSelected}
@@ -1703,7 +1740,7 @@ function BookingsAccordionList({
             />
             Select all
           </label>
-          <span className="text-xs text-slate-500">{bookings.length} bookings</span>
+          <span className="text-[11px] font-medium text-slate-400">{bookings.length} {bookings.length === 1 ? 'booking' : 'bookings'}</span>
         </div>
       </div>
       <div className="divide-y divide-slate-100">
@@ -1722,7 +1759,7 @@ function BookingsAccordionList({
               aria-controls={`booking-expand-${booking.id}`}
               onClick={() => onToggleExpand(booking.id)}
               onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggleExpand(booking.id); } }}
-              className={`cursor-pointer px-3 py-3 transition-colors sm:px-4 ${expanded ? 'bg-slate-50/60' : 'hover:bg-slate-50/40'}`}
+              className={`cursor-pointer border-l-[3px] py-3 pl-3 pr-3 transition-colors sm:pl-4 sm:pr-4 ${statusBorderClass(booking.status)} ${expanded ? 'bg-brand-50/20' : 'hover:bg-slate-50/50'}`}
             >
               <div className="flex items-center gap-2">
                 <div onClick={(e) => e.stopPropagation()} className="pt-0.5">
@@ -1736,37 +1773,24 @@ function BookingsAccordionList({
                   />
                 </div>
                 <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-1.5">
                     <span className="font-semibold text-slate-900">{booking.guest_name}</span>
+                    <Pill variant={statusPillVariant(booking.status)} size="sm">{booking.status}</Pill>
                     {showAreaBadge && booking.area_name && (
-                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600">
-                        {booking.area_name}
-                      </span>
+                      <Pill variant="neutral" size="sm">{booking.area_name}</Pill>
                     )}
                     {showDepositPendingPill(booking) && (
-                      <span
-                        className="rounded-full bg-orange-100 px-2 py-0.5 text-[10px] font-semibold text-orange-950 ring-1 ring-orange-200/80"
-                        title="Deposit not yet paid"
-                      >
-                        Deposit pending
-                      </span>
+                      <Pill variant="warning" size="sm" dot>Deposit pending</Pill>
                     )}
                     {showAttendanceConfirmedPill(booking) && (
-                      <span
-                        className="rounded-full bg-teal-100 px-2 py-0.5 text-[10px] font-semibold text-teal-900 ring-1 ring-teal-200/80"
-                        title="Confirmed"
-                      >
-                        Confirmed
-                      </span>
+                      <Pill variant="success" size="sm" dot>Confirmed</Pill>
                     )}
                     {showModelBadges && (
-                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-600">
-                        {bookingModelShortLabel(inferBookingRowModel(booking))}
-                      </span>
+                      <Pill variant="neutral" size="sm">{bookingModelShortLabel(inferBookingRowModel(booking))}</Pill>
                     )}
                     {booking.dietary_notes && (
-                      <span className="hidden rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700 sm:inline-block" title={booking.dietary_notes}>
-                        Dietary
+                      <span className="hidden sm:inline-flex">
+                        <Pill variant="warning" size="sm" className="hidden sm:inline-flex">{booking.dietary_notes.length > 20 ? 'Dietary' : booking.dietary_notes}</Pill>
                       </span>
                     )}
                     {booking.table_assignments && booking.table_assignments.length > 0 && (
@@ -1777,14 +1801,16 @@ function BookingsAccordionList({
                       </span>
                     )}
                     {booking.group_booking_id && (
-                      <span className="hidden rounded-full bg-purple-50 px-2 py-0.5 text-[10px] font-medium text-purple-700 sm:inline-block" title={booking.person_label ?? 'Group booking'}>
-                        {booking.person_label ? `Group: ${booking.person_label}` : 'Group'}
+                      <span className="hidden sm:inline-flex">
+                        <Pill variant="neutral" size="sm" className="hidden sm:inline-flex">{booking.person_label ? `Group · ${booking.person_label}` : 'Group'}</Pill>
                       </span>
                     )}
                   </div>
-                  <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-600">
-                    <span className="font-medium tabular-nums">{booking.booking_time.slice(0, 5)}</span>
+                  <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500">
+                    <span className="font-semibold tabular-nums text-slate-700">{booking.booking_time.slice(0, 5)}</span>
+                    <span className="text-slate-300">·</span>
                     <span>{booking.party_size} {booking.party_size === 1 ? 'cover' : 'covers'}</span>
+                    <span className="text-slate-300">·</span>
                     {sourceBadge(booking.source)}
                     {depositBadge(booking.deposit_status, booking.deposit_amount_pence)}
                   </div>
@@ -1840,7 +1866,7 @@ function BookingsAccordionList({
                       {showUndoStart && (
                         <button
                           type="button"
-                          onClick={() => onStatusAction(booking, 'Confirmed')}
+                          onClick={() => onStatusAction(booking, 'Booked')}
                           className="inline-flex items-center rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-900 shadow-sm transition-colors hover:bg-amber-100 focus:outline-none focus:ring-2 focus:ring-amber-400/30"
                           aria-label={`Undo start for ${booking.guest_name}`}
                         >

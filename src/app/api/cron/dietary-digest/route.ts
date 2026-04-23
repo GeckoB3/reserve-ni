@@ -35,7 +35,7 @@ export async function POST(request: NextRequest) {
         .select('id, booking_time, party_size, dietary_notes, guest_id')
         .eq('venue_id', venue.id)
         .eq('booking_date', today)
-        .in('status', ['Confirmed', 'Pending', 'Seated'])
+        .in('status', ['Booked', 'Confirmed', 'Pending', 'Seated'])
         .not('dietary_notes', 'is', null)
         .order('booking_time', { ascending: true });
 

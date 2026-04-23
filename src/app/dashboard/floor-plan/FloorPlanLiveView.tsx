@@ -302,7 +302,7 @@ export function FloorPlanLiveView({
     const dateTime = `${selectedDate}T${debouncedTime}:00.000Z`;
     const bookingsForStatus = Array.from(bookingMap.values()).map((booking) => ({
       id: booking.id,
-      status: booking.status as 'Pending' | 'Confirmed' | 'Seated' | 'Completed' | 'No-Show' | 'Cancelled',
+      status: booking.status as 'Pending' | 'Booked' | 'Confirmed' | 'Seated' | 'Completed' | 'No-Show' | 'Cancelled',
       booking_time: booking.start_time,
       estimated_end_time: booking.estimated_end_time,
     }));
@@ -984,7 +984,7 @@ export function FloorPlanLiveView({
                 <button onClick={() => { void requestBookingStatusChange(selectedTable.booking!.id, selectedTable.booking!.status as BookingStatus, 'Completed'); }} className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700">Complete</button>
                 <button onClick={() => startReassignMode(selectedTable.booking!.id)} className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50">Move</button>
                 <button onClick={() => setDetailBookingId(selectedTable.booking!.id)} className="rounded-lg border border-brand-200 px-3 py-1.5 text-xs font-medium text-brand-700 hover:bg-brand-50">Details</button>
-                <button onClick={() => { void requestBookingStatusChange(selectedTable.booking!.id, selectedTable.booking!.status as BookingStatus, 'Confirmed'); }} className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-800 hover:bg-amber-100">Unseat</button>
+                <button onClick={() => { void requestBookingStatusChange(selectedTable.booking!.id, selectedTable.booking!.status as BookingStatus, 'Booked'); }} className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-800 hover:bg-amber-100">Unseat</button>
               </>
             )}
           </div>

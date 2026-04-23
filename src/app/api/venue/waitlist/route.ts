@@ -102,7 +102,7 @@ export async function PATCH(request: NextRequest) {
           booking_date: bookingDate,
           booking_time: timeForDb,
           party_size: partySize,
-          status: 'Confirmed',
+          status: 'Booked',
           source: 'phone',
           deposit_status: 'Not Required',
           service_id: existingEntry.service_id ?? null,

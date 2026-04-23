@@ -1349,6 +1349,7 @@ export function TableGridView({
                 className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 sm:px-3 sm:py-2 sm:text-sm"
               >
                 <option value="">All statuses</option>
+                <option value="Booked">Booked</option>
                 <option value="Confirmed">Confirmed</option>
                 <option value="Pending">Pending</option>
                 <option value="Seated">Seated</option>
@@ -1402,6 +1403,9 @@ export function TableGridView({
         <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm shadow-slate-900/5">
           <Pill variant="warning" size="sm" dot>
             Pending
+          </Pill>
+          <Pill variant="info" size="sm" dot>
+            Booked
           </Pill>
           <Pill variant="success" size="sm" dot>
             Confirmed

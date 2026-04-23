@@ -314,7 +314,9 @@ export function DashboardSidebar({
         </div>
 
         {/* Nav links */}
-        <p className="px-4 pt-4 text-[10px] font-semibold uppercase tracking-widest text-slate-500">Workspace</p>
+        <p className="px-4 pt-4 text-[10px] font-semibold uppercase tracking-widest text-slate-500 break-words" title={venueName?.trim() || undefined}>
+          {venueName?.trim() || 'Workspace'}
+        </p>
         <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-2 pb-4">
           {navItemsWithImport.map((item) => {
             if (item.href === '/dashboard/bookings' && !showTableManagementNav) {

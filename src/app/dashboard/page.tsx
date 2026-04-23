@@ -107,6 +107,8 @@ function stripClassForBookingStatus(status: string): string {
   switch (status) {
     case 'Confirmed':
       return 'bg-emerald-600';
+    case 'Booked':
+      return 'bg-sky-500';
     case 'Pending':
       return 'bg-amber-500';
     case 'Seated':
@@ -537,11 +539,13 @@ export default function DashboardHomePage() {
                           variant={
                             b.status === 'Confirmed'
                               ? 'success'
-                              : b.status === 'Pending'
-                                ? 'warning'
-                                : b.status === 'Seated'
-                                  ? 'brand'
-                                  : 'neutral'
+                              : b.status === 'Booked'
+                                ? 'info'
+                                : b.status === 'Pending'
+                                  ? 'warning'
+                                  : b.status === 'Seated'
+                                    ? 'brand'
+                                    : 'neutral'
                           }
                           size="sm"
                         >
@@ -573,11 +577,13 @@ export default function DashboardHomePage() {
                           variant={
                             b.status === 'Confirmed'
                               ? 'success'
-                              : b.status === 'Pending'
-                                ? 'warning'
-                                : b.status === 'Seated'
-                                  ? 'brand'
-                                  : 'neutral'
+                              : b.status === 'Booked'
+                                ? 'info'
+                                : b.status === 'Pending'
+                                  ? 'warning'
+                                  : b.status === 'Seated'
+                                    ? 'brand'
+                                    : 'neutral'
                           }
                           size="sm"
                         >

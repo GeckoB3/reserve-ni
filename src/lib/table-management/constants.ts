@@ -37,14 +37,23 @@ export const TABLE_STATUS_SEQUENCE: Record<TableServiceStatus, TableServiceStatu
 };
 
 /**
- * Statuses that represent active/live bookings for table availability checks.
+ * Statuses that represent active/live bookings for capacity / table-availability checks.
  * IMPORTANT: These values MUST exist in the booking_status PostgreSQL enum.
- * 'Arrived' is NOT in the database enum - do NOT add it here.
+ * `Booked` and `Confirmed` both consume a slot — `Confirmed` is just a stronger
+ * signal that the guest is actually coming.
  */
-export const BOOKING_ACTIVE_STATUSES = ['Pending', 'Confirmed', 'Seated'] as const;
+export const BOOKING_ACTIVE_STATUSES = ['Pending', 'Booked', 'Confirmed', 'Seated'] as const;
+
+/**
+ * Statuses that count as "the booking is held and the slot is consumed but the
+ * guest has not yet arrived" — i.e. anything between creation and seating.
+ * Used for filters, capacity, and "active" reporting.
+ */
+export const BOOKING_HELD_STATUSES = ['Booked', 'Confirmed'] as const;
 
 export const BOOKING_MUTABLE_STATUSES = [
   'Pending',
+  'Booked',
   'Confirmed',
   'Cancelled',
   'No-Show',

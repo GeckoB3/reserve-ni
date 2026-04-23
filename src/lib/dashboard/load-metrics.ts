@@ -6,7 +6,7 @@ import type { AvailabilityConfig, FixedIntervalsConfig, NamedSittingsConfig, Ope
 import { getDayOfWeek, timeToMinutes } from '@/lib/availability';
 
 /** Bookings that count toward expected in-venue load (matches day-sheet timeline). */
-export const DASHBOARD_LOAD_STATUSES = ['Pending', 'Confirmed', 'Seated'] as const;
+export const DASHBOARD_LOAD_STATUSES = ['Pending', 'Booked', 'Confirmed', 'Seated'] as const;
 
 export interface DashboardLoadBooking {
   booking_time: string;

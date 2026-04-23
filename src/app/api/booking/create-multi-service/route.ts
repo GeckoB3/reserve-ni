@@ -280,7 +280,7 @@ export async function POST(request: NextRequest) {
         party_size: 1,
         /** Must be set explicitly — defaults to `table_reservation`, which fails the area_required CHECK for non-table venues. */
         booking_model: useUnifiedBookingRows ? 'unified_scheduling' : 'practitioner_appointment',
-        status: requiresDeposit ? 'Pending' : 'Confirmed',
+        status: requiresDeposit ? 'Pending' : 'Booked',
         source,
         guest_email: guest.email,
         dietary_notes: dietary_notes?.trim() || null,
@@ -414,7 +414,7 @@ export async function POST(request: NextRequest) {
         total_deposit_pence: totalDepositPence,
         client_secret: client_secret ?? undefined,
         stripe_account_id: requiresDeposit ? venue.stripe_connected_account_id : undefined,
-        status: requiresDeposit ? 'Pending' : 'Confirmed',
+        status: requiresDeposit ? 'Pending' : 'Booked',
         cancellation_notice_hours: refundWindowHours,
       },
       { status: 201 },

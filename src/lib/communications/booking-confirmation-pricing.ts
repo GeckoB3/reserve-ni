@@ -3,14 +3,7 @@ import {
   formatRefundDeadlineIso,
   isDepositRefundAvailableAt,
 } from '@/lib/booking/cancellation-deadline';
-import {
-  escapeHtml,
-  formatDepositAmount,
-} from '@/lib/emails/templates/base-template';
-
-function htmlParagraph(text: string): string {
-  return `<p style="margin:0 0 14px 0">${escapeHtml(text)}</p>`;
-}
+import { formatDepositAmount } from '@/lib/emails/templates/base-template';
 
 export function formatMoneyOrNull(pence: number | null | undefined): string | null {
   if (typeof pence !== 'number') return null;

@@ -60,7 +60,7 @@ export interface CalendarGridData {
   }>;
 }
 
-const ACTIVE_BOOKING_STATUSES = ['Pending', 'Confirmed', 'Seated'];
+const ACTIVE_BOOKING_STATUSES = ['Pending', 'Booked', 'Confirmed', 'Seated'];
 
 async function fetchCalendarBlocksMerged(
   supabase: SupabaseClient,

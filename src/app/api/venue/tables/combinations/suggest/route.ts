@@ -84,7 +84,7 @@ export async function GET(request: NextRequest) {
       .select('id, status, booking_time, estimated_end_time')
       .eq('venue_id', staff.venue_id)
       .eq('booking_date', date)
-      .in('status', ['Pending', 'Confirmed', 'Seated']),
+      .in('status', ['Pending', 'Booked', 'Confirmed', 'Seated']),
     staff.db
       .from('table_blocks')
       .select('table_id, start_at, end_at')

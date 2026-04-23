@@ -78,6 +78,7 @@ export function BookPublicBookingFlow({
     next.set('tab', resolved);
     router.replace(`${pathname}?${next.toString()}`, { scroll: false });
     // Intentionally omit `searchParams` object identity - use tabParam + pathname only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- searchParams string is captured via tabParam + next URL build
   }, [tabs.length, tabParam, activeModels, venue.terminology, pathname, router]);
 
   if (venue.booking_paused) {

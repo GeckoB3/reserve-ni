@@ -154,7 +154,7 @@ async function runLaneReminder(opts: {
     .select(BOOKING_SELECT)
     .eq('venue_id', opts.venue.id)
     .in('booking_date', dates)
-    .in('status', ['Pending', 'Confirmed']);
+    .in('status', ['Pending', 'Booked', 'Confirmed']);
 
   const venueData = venueRowToEmailData(opts.venue);
   for (const row of normalizeBookings(data ?? [])) {

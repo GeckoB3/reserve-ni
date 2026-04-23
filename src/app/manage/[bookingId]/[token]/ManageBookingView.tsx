@@ -183,8 +183,8 @@ export function ManageBookingView({ bookingId, token, hmac }: { bookingId: strin
   if (!details) return null;
 
   const dateStr = new Date(details.booking_date + 'T12:00:00').toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
-  const canModify = details.status === 'Confirmed' || details.status === 'Pending';
-  const canCancel = details.status === 'Confirmed' || details.status === 'Pending';
+  const canModify = details.status === 'Confirmed' || details.status === 'Booked' || details.status === 'Pending';
+  const canCancel = details.status === 'Confirmed' || details.status === 'Booked' || details.status === 'Pending';
   const isAppointment = Boolean(details.is_appointment);
   const bookingModel: BookingModel = details.booking_model ?? 'table_reservation';
   const isCde = isCdeModel(bookingModel);

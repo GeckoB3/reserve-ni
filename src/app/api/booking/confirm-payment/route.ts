@@ -42,8 +42,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Booking not found' }, { status: 404 });
     }
 
-    // Already confirmed (e.g. by webhook) - return success without re-processing.
-    if (booking.status === 'Confirmed' && booking.deposit_status === 'Paid') {
+    // Already moved past Pending (e.g. by webhook) - return success without re-processing.
+    // Both `Booked` and `Confirmed` indicate the deposit has been credited and
+    // the booking is held; only Pending should re-trigger the confirm flow.
+    if (
+      (booking.status === 'Booked' || booking.status === 'Confirmed') &&
+      booking.deposit_status === 'Paid'
+    ) {
       return NextResponse.json({ confirmed: true, already_confirmed: true });
     }
 
@@ -78,17 +83,19 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const transitionCheck = validateBookingStatusTransition(booking.status as string, 'Confirmed');
+    const transitionCheck = validateBookingStatusTransition(booking.status as string, 'Booked');
     if (!transitionCheck.ok) {
       return NextResponse.json({ error: transitionCheck.error }, { status: 400 });
     }
 
-    // Payment verified - confirm every booking row that shares this PaymentIntent
-    // (group / multi-service deposits store the same PI on each segment).
+    // Payment verified - move every booking row that shares this PaymentIntent
+    // from Pending to Booked (group / multi-service deposits store the same PI
+    // on each segment). The dedicated `Confirmed` status is only set when the
+    // guest or staff explicitly confirms attendance.
     const { data: statusRows } = await supabase
       .from('bookings')
       .update({
-        status: 'Confirmed',
+        status: 'Booked',
         deposit_status: 'Paid',
         updated_at: new Date().toISOString(),
       })
@@ -98,7 +105,7 @@ export async function POST(request: NextRequest) {
       .select('id');
 
     if (!statusRows?.length) {
-      console.log('confirm-payment: booking already confirmed by webhook');
+      console.log('confirm-payment: booking already marked Booked by webhook');
       return NextResponse.json({ confirmed: true, already_confirmed: true });
     }
 

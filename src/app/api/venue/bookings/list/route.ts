@@ -165,7 +165,11 @@ export async function GET(request: NextRequest) {
     });
 
     if (attendanceConfirmedFilter) {
+      // `Confirmed` is the canonical signal that attendance is confirmed; we
+      // also include any booking whose attendance timestamps are set, for
+      // back-compat with rows that pre-date the dedicated `Confirmed` status.
       bookings = bookings.filter((b: Record<string, unknown>) => {
+        if (b.status === 'Confirmed') return true;
         const g = b.guest_attendance_confirmed_at;
         const s = b.staff_attendance_confirmed_at;
         const guestOn = typeof g === 'string' && g.trim().length > 0;

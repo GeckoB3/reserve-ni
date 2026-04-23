@@ -40,22 +40,24 @@ export interface RegistryAppointment {
 
 const STATUS_BADGE: Record<string, string> = {
   Pending: 'bg-orange-100 text-orange-900 ring-1 ring-orange-200/80',
-  Confirmed: 'bg-blue-100 text-blue-900 ring-1 ring-blue-200/80',
+  Booked: 'bg-sky-100 text-sky-900 ring-1 ring-sky-200/80',
+  Confirmed: 'bg-emerald-100 text-emerald-900 ring-1 ring-emerald-200/80',
   Seated: 'bg-violet-100 text-violet-900 ring-1 ring-violet-200/80',
-  Completed: 'bg-emerald-100 text-emerald-900 ring-1 ring-emerald-200/80',
+  Completed: 'bg-teal-100 text-teal-900 ring-1 ring-teal-200/80',
   'No-Show': 'bg-red-100 text-red-900 ring-1 ring-red-200/70',
   Cancelled: 'bg-slate-100 text-slate-500 ring-1 ring-slate-200/80',
 };
 
 function rowTint(status: string, arrived: boolean): string {
   if (status === 'Cancelled') return 'bg-slate-50/90 border-slate-200/90';
-  if (status === 'Completed') return 'bg-emerald-50/80 border-emerald-200/85';
+  if (status === 'Completed') return 'bg-teal-50/80 border-teal-200/85';
   if (status === 'Seated') return 'bg-violet-50/80 border-violet-200/85';
-  if (arrived && (status === 'Pending' || status === 'Confirmed')) {
+  if (arrived && (status === 'Pending' || status === 'Booked' || status === 'Confirmed')) {
     return 'bg-amber-50/85 border-amber-200/90';
   }
   if (status === 'Pending') return 'bg-orange-50/80 border-orange-200/85';
-  if (status === 'Confirmed') return 'bg-blue-50/80 border-blue-200/85';
+  if (status === 'Booked') return 'bg-sky-50/80 border-sky-200/85';
+  if (status === 'Confirmed') return 'bg-emerald-50/80 border-emerald-200/85';
   if (status === 'No-Show') return 'bg-red-50/70 border-red-200/80';
   return 'bg-white border-slate-200/90';
 }

@@ -52,16 +52,6 @@ export function venueExposesBookingModel(
   return enabledModels.includes(model);
 }
 
-/**
- * Primary model nav entries first, then each enabled secondary in array order (already sorted).
- * De-duplicates by `href` (first wins).
- */
-const SECONDARY_ONLY: Array<Extract<BookingModel, 'event_ticket' | 'class_session' | 'resource_booking'>> = [
-  'event_ticket',
-  'class_session',
-  'resource_booking',
-];
-
 /** Payload fields that imply a non–table-reservation booking (public create). */
 export function hasNonTableBookingPayload(data: {
   experience_event_id?: string;

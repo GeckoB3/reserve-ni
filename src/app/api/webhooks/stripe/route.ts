@@ -77,11 +77,13 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ received: true });
       }
 
-      // Confirm every segment that shares this PaymentIntent (group / multi-service).
+      // Mark every segment that shares this PaymentIntent as Booked (group / multi-service).
+      // Deposit-paid moves Pending → Booked. The new dedicated `Confirmed` status is
+      // reserved for explicit attendance confirmation by the guest or staff.
       const { data: updatedRows } = await supabase
         .from('bookings')
         .update({
-          status: 'Confirmed',
+          status: 'Booked',
           deposit_status: 'Paid',
           updated_at: new Date().toISOString(),
         })
@@ -91,7 +93,7 @@ export async function POST(request: NextRequest) {
         .select('id');
 
       if (!updatedRows?.length) {
-        console.log(`[Stripe webhook] No pending bookings to confirm for PI ${pi.id} - may already be processed`);
+        console.log(`[Stripe webhook] No pending bookings to mark Booked for PI ${pi.id} - may already be processed`);
         await recordProcessed(supabase, event.id, event.type);
         return NextResponse.json({ received: true });
       }
