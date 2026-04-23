@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pill } from '@/components/ui/dashboard/Pill';
 import { createClient } from '@/lib/supabase/browser';
 
@@ -14,6 +14,7 @@ import {
   shouldShowAppointmentAvailabilitySettings,
 } from '@/lib/booking/schedule-calendar-eligibility';
 import { isRestaurantTableProductTier } from '@/lib/tier-enforcement';
+import { planDisplayName } from '@/lib/pricing-constants';
 
 /**
  * Sidebar visibility matrix (maintainers: keep in sync with route guards and `lib/booking/schedule-calendar-eligibility.ts`).
@@ -91,6 +92,60 @@ function NavLeadingDot({ active }: { active: boolean }) {
   );
 }
 
+function NavLinkItem({
+  href,
+  label,
+  icon: Icon,
+  active,
+  onNavigate,
+  external = false,
+}: {
+  href: string;
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+  active: boolean;
+  onNavigate: () => void;
+  external?: boolean;
+}) {
+  const className = `group flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors ${
+    active
+      ? 'bg-white text-brand-800 shadow-sm ring-1 ring-slate-100'
+      : 'text-slate-600 hover:bg-white/70 hover:text-slate-900'
+  }`;
+  const iconClass = `h-5 w-5 flex-shrink-0 ${active ? 'text-brand-600' : 'text-slate-400'}`;
+  const content = (
+    <>
+      <NavLeadingDot active={active} />
+      <Icon className={iconClass} />
+      <span className="min-w-0 flex-1 truncate">{label}</span>
+    </>
+  );
+  if (external) {
+    return (
+      <a
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer"
+        onClick={onNavigate}
+        className={className}
+      >
+        {content}
+        <span className="sr-only"> (opens in new tab)</span>
+      </a>
+    );
+  }
+  return (
+    <Link
+      href={href}
+      onClick={onNavigate}
+      aria-current={active ? 'page' : undefined}
+      className={className}
+    >
+      {content}
+    </Link>
+  );
+}
+
 export function DashboardSidebar({
   email,
   staffName,
@@ -106,8 +161,12 @@ export function DashboardSidebar({
   const pathname = usePathname();
   const router = useRouter();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
   const asideRef = useRef<HTMLElement>(null);
 
+  const closeMobile = useCallback(() => setMobileOpen(false), []);
+
+  // Escape to close
   useEffect(() => {
     if (!mobileOpen) return;
     const onKey = (e: KeyboardEvent) => {
@@ -117,6 +176,7 @@ export function DashboardSidebar({
     return () => window.removeEventListener('keydown', onKey);
   }, [mobileOpen]);
 
+  // Focus trap + initial focus on drawer open
   useEffect(() => {
     if (!mobileOpen) return;
     const aside = asideRef.current;
@@ -146,6 +206,16 @@ export function DashboardSidebar({
     return () => {
       window.clearTimeout(t);
       aside.removeEventListener('keydown', onTab);
+    };
+  }, [mobileOpen]);
+
+  // Lock body scroll behind the mobile drawer; `lg` hides the drawer so only applies on small viewports.
+  useEffect(() => {
+    if (!mobileOpen) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prev;
     };
   }, [mobileOpen]);
 
@@ -197,7 +267,6 @@ export function DashboardSidebar({
       );
     }
 
-    // Rename nav items for appointment businesses; broader labels when secondaries are enabled.
     const hasSecondaryModels = enabledModels.length > 0;
     if (isAppointment) {
       items = items.map((item) => {
@@ -253,10 +322,16 @@ export function DashboardSidebar({
   }, [isAdmin, navItems]);
 
   async function handleSignOut() {
-    const supabase = createClient();
-    await supabase.auth.signOut();
-    router.push('/login');
-    router.refresh();
+    if (signingOut) return;
+    setSigningOut(true);
+    try {
+      const supabase = createClient();
+      await supabase.auth.signOut();
+      router.push('/login');
+      router.refresh();
+    } finally {
+      // Leave disabled briefly — navigation unmounts this component anyway.
+    }
   }
 
   const isActive = (href: string) => {
@@ -272,27 +347,45 @@ export function DashboardSidebar({
     return pathname.startsWith(href);
   };
 
+  const tierLabel = planDisplayName(pricingTier);
+  const venueInitial = (venueName ?? staffName ?? email).charAt(0).toUpperCase();
+
   return (
     <>
-      {/* Mobile top bar */}
-      <div className="fixed top-0 right-0 left-0 z-40 flex items-center justify-between border-b border-slate-200/80 bg-white/95 px-4 py-3 pt-[calc(0.75rem+env(safe-area-inset-top,0px))] backdrop-blur-md lg:hidden">
-        <div className="flex items-center gap-3">
-          <img src="/Logo.png" alt="Reserve NI" className="h-7 w-auto" />
+      {/* Mobile top bar — fixed 3.5rem content height to match the layout's pt-[calc(3.5rem+…)] offset. */}
+      <div
+        className="fixed top-0 right-0 left-0 z-40 border-b border-slate-200/80 bg-white/95 pt-[env(safe-area-inset-top,0px)] backdrop-blur-md lg:hidden"
+      >
+        <div className="flex h-14 items-center justify-between gap-3 px-3">
+          <div className="flex min-w-0 items-center gap-3">
+            <img src="/Logo.png" alt="Reserve NI" className="h-7 w-auto shrink-0" />
+            {venueName ? (
+              <span
+                className="min-w-0 truncate text-sm font-semibold text-slate-800"
+                title={venueName}
+              >
+                {venueName}
+              </span>
+            ) : null}
+          </div>
+          <button
+            type="button"
+            onClick={() => setMobileOpen(!mobileOpen)}
+            className="inline-flex h-10 w-10 items-center justify-center rounded-lg text-slate-600 hover:bg-slate-100"
+            aria-label={mobileOpen ? 'Close navigation' : 'Open navigation'}
+            aria-expanded={mobileOpen}
+            aria-controls="dashboard-sidebar"
+          >
+            {mobileOpen ? <XIcon /> : <MenuIcon />}
+          </button>
         </div>
-        <button
-          onClick={() => setMobileOpen(!mobileOpen)}
-          className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg p-2 text-slate-500 hover:bg-slate-100"
-          aria-label="Toggle navigation"
-        >
-          {mobileOpen ? <XIcon /> : <MenuIcon />}
-        </button>
       </div>
 
       {/* Mobile overlay: button for a11y + keyboard */}
       {mobileOpen ? (
         <button
           type="button"
-          className="fixed inset-0 z-30 bg-slate-900/25 backdrop-blur-[2px] lg:hidden"
+          className="fixed inset-0 z-30 bg-slate-900/30 backdrop-blur-[2px] lg:hidden"
           aria-label="Close menu"
           onClick={() => setMobileOpen(false)}
         />
@@ -300,7 +393,9 @@ export function DashboardSidebar({
 
       {/* Sidebar */}
       <aside
+        id="dashboard-sidebar"
         ref={asideRef}
+        aria-label="Primary"
         className={`
         fixed top-0 left-0 z-40 flex h-[100dvh] w-64 flex-col border-r border-slate-200/80 bg-slate-50/95 shadow-sm backdrop-blur-md
         transition-transform duration-200 ease-in-out
@@ -313,69 +408,51 @@ export function DashboardSidebar({
           <img src="/Logo.png" alt="Reserve NI" className="h-8 w-auto" />
         </div>
 
-        {/* Nav links */}
-        <p className="px-4 pt-4 text-[10px] font-semibold uppercase tracking-widest text-slate-500 break-words" title={venueName?.trim() || undefined}>
+        {/* Workspace label */}
+        <p
+          className="break-words px-4 pt-4 text-[10px] font-semibold uppercase tracking-widest text-slate-500"
+          title={venueName?.trim() || undefined}
+        >
           {venueName?.trim() || 'Workspace'}
         </p>
-        <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-2 pb-4">
+
+        {/* Nav links */}
+        <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-2 pb-4" aria-label="Dashboard">
           {navItemsWithImport.map((item) => {
             if (item.href === '/dashboard/bookings' && !showTableManagementNav) {
               if (isRestaurantTablePrimary) {
                 /** Day Sheet + Bookings: restaurant table venues (with or without schedule calendar secondaries). */
-                const daySheetActive = pathname.startsWith('/dashboard/day-sheet');
                 return (
                   <div key="reservations-with-day-sheet" className="space-y-1">
-                    <Link
+                    <NavLinkItem
                       href="/dashboard/day-sheet"
-                      onClick={() => setMobileOpen(false)}
-                      className={`group flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors ${
-                        daySheetActive
-                          ? 'bg-white text-brand-800 shadow-sm ring-1 ring-slate-100'
-                          : 'text-slate-600 hover:bg-white/70 hover:text-slate-900'
-                      }`}
-                    >
-                      <NavLeadingDot active={daySheetActive} />
-                      <ClipboardIcon
-                        className={`h-5 w-5 flex-shrink-0 ${daySheetActive ? 'text-brand-600' : 'text-slate-400'}`}
-                      />
-                      Day Sheet
-                    </Link>
-                    <Link
+                      label="Day Sheet"
+                      icon={ClipboardIcon}
+                      active={pathname.startsWith('/dashboard/day-sheet')}
+                      onNavigate={closeMobile}
+                    />
+                    <NavLinkItem
                       href={item.href}
-                      onClick={() => setMobileOpen(false)}
-                      className={`
-                      group flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors
-                      ${isActive(item.href)
-                        ? 'bg-white text-brand-800 shadow-sm ring-1 ring-slate-100'
-                        : 'text-slate-600 hover:bg-white/70 hover:text-slate-900'
-                      }
-                    `}
-                    >
-                      <NavLeadingDot active={isActive(item.href)} />
-                      <item.icon className={`h-5 w-5 flex-shrink-0 ${isActive(item.href) ? 'text-brand-600' : 'text-slate-400'}`} />
-                      {item.label}
-                    </Link>
+                      label={item.label}
+                      icon={item.icon}
+                      active={isActive(item.href)}
+                      onNavigate={closeMobile}
+                    />
                   </div>
                 );
               }
 
-              /** Legacy `table_reservation` on Appointments/Standard SKU: single list link, not restaurant Day Sheet bundle. */
+              /** Legacy `table_reservation` on Appointments/Standard SKU: single list link. */
               if (bookingModel === 'table_reservation' && !isRestaurantPlanTier) {
-                const active = isActive(item.href);
                 return (
-                  <Link
+                  <NavLinkItem
                     key={item.href}
                     href={item.href}
-                    onClick={() => setMobileOpen(false)}
-                    className={`
-                      group flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors
-                      ${active ? 'bg-white text-brand-800 shadow-sm ring-1 ring-slate-100' : 'text-slate-600 hover:bg-white/70 hover:text-slate-900'}
-                    `}
-                  >
-                    <NavLeadingDot active={active} />
-                    <item.icon className={`h-5 w-5 flex-shrink-0 ${active ? 'text-brand-600' : 'text-slate-400'}`} />
-                    {item.label}
-                  </Link>
+                    label={item.label}
+                    icon={item.icon}
+                    active={isActive(item.href)}
+                    onNavigate={closeMobile}
+                  />
                 );
               }
 
@@ -384,151 +461,97 @@ export function DashboardSidebar({
                 : pathname.startsWith('/dashboard/day-sheet');
               return (
                 <div key="reservations-with-day-sheet" className="space-y-1">
-                  <Link
+                  <NavLinkItem
                     href={item.href}
-                    onClick={() => setMobileOpen(false)}
-                    className={`
-                      group flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors
-                      ${isActive(item.href)
-                        ? 'bg-white text-brand-800 shadow-sm ring-1 ring-slate-100'
-                        : 'text-slate-600 hover:bg-white/70 hover:text-slate-900'
-                      }
-                    `}
-                  >
-                    <NavLeadingDot active={isActive(item.href)} />
-                    <item.icon className={`h-5 w-5 flex-shrink-0 ${isActive(item.href) ? 'text-brand-600' : 'text-slate-400'}`} />
-                    {item.label}
-                  </Link>
-                  <Link
+                    label={item.label}
+                    icon={item.icon}
+                    active={isActive(item.href)}
+                    onNavigate={closeMobile}
+                  />
+                  <NavLinkItem
                     href={calendarEligible ? '/dashboard/calendar' : '/dashboard/day-sheet'}
-                    onClick={() => setMobileOpen(false)}
-                    className={`group flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors ${
-                      scheduleActive
-                        ? 'bg-white text-brand-800 shadow-sm ring-1 ring-slate-100'
-                        : 'text-slate-600 hover:bg-white/70 hover:text-slate-900'
-                    }`}
-                  >
-                    <NavLeadingDot active={scheduleActive} />
-                    {calendarEligible ? (
-                      <CalendarIcon className={`h-5 w-5 flex-shrink-0 ${scheduleActive ? 'text-brand-600' : 'text-slate-400'}`} />
-                    ) : (
-                      <ClipboardIcon className={`h-5 w-5 flex-shrink-0 ${scheduleActive ? 'text-brand-600' : 'text-slate-400'}`} />
-                    )}
-                    {calendarEligible ? 'Appointment Calendar' : 'Day Sheet'}
-                  </Link>
+                    label={calendarEligible ? 'Appointment Calendar' : 'Day Sheet'}
+                    icon={calendarEligible ? CalendarIcon : ClipboardIcon}
+                    active={scheduleActive}
+                    onNavigate={closeMobile}
+                  />
                 </div>
               );
             }
 
             if (item.href === '/dashboard/bookings' && showTableManagementNav) {
-              const reservationsActive = isActive(item.href);
               return (
                 <div key="reservations-with-table-views" className="space-y-1">
-                  <Link
+                  <NavLinkItem
                     href={item.href}
-                    onClick={() => setMobileOpen(false)}
-                    className={`
-                      group flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors
-                      ${reservationsActive
-                        ? 'bg-white text-brand-800 shadow-sm ring-1 ring-slate-100'
-                        : 'text-slate-600 hover:bg-white/70 hover:text-slate-900'
-                      }
-                    `}
-                  >
-                    <NavLeadingDot active={reservationsActive} />
-                    <item.icon className={`h-5 w-5 flex-shrink-0 ${reservationsActive ? 'text-brand-600' : 'text-slate-400'}`} />
-                    {item.label}
-                  </Link>
-                  <Link
+                    label={item.label}
+                    icon={item.icon}
+                    active={isActive(item.href)}
+                    onNavigate={closeMobile}
+                  />
+                  <NavLinkItem
                     href="/dashboard/table-grid"
-                    onClick={() => setMobileOpen(false)}
-                    className={`group flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors ${
-                      pathname.startsWith('/dashboard/table-grid')
-                        ? 'bg-white text-brand-800 shadow-sm ring-1 ring-slate-100'
-                        : 'text-slate-600 hover:bg-white/70 hover:text-slate-900'
-                    }`}
-                  >
-                    <NavLeadingDot active={pathname.startsWith('/dashboard/table-grid')} />
-                    <TableGridIcon className={`h-5 w-5 flex-shrink-0 ${pathname.startsWith('/dashboard/table-grid') ? 'text-brand-600' : 'text-slate-400'}`} />
-                    Table Grid
-                  </Link>
-                  <Link
+                    label="Table Grid"
+                    icon={TableGridIcon}
+                    active={pathname.startsWith('/dashboard/table-grid')}
+                    onNavigate={closeMobile}
+                  />
+                  <NavLinkItem
                     href="/dashboard/floor-plan"
-                    onClick={() => setMobileOpen(false)}
-                    className={`group flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors ${
-                      pathname.startsWith('/dashboard/floor-plan')
-                        ? 'bg-white text-brand-800 shadow-sm ring-1 ring-slate-100'
-                        : 'text-slate-600 hover:bg-white/70 hover:text-slate-900'
-                    }`}
-                  >
-                    <NavLeadingDot active={pathname.startsWith('/dashboard/floor-plan')} />
-                    <MapIcon className={`h-5 w-5 flex-shrink-0 ${pathname.startsWith('/dashboard/floor-plan') ? 'text-brand-600' : 'text-slate-400'}`} />
-                    Floor Plan
-                  </Link>
+                    label="Floor Plan"
+                    icon={MapIcon}
+                    active={pathname.startsWith('/dashboard/floor-plan')}
+                    onNavigate={closeMobile}
+                  />
                 </div>
               );
             }
 
-            const active = isActive(item.href);
             return (
-              <Link
+              <NavLinkItem
                 key={item.href}
                 href={item.href}
-                onClick={() => setMobileOpen(false)}
-                className={`
-                  group flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors
-                  ${active
-                    ? 'bg-white text-brand-800 shadow-sm ring-1 ring-slate-100'
-                    : 'text-slate-600 hover:bg-white/70 hover:text-slate-900'
-                  }
-                `}
-              >
-                <NavLeadingDot active={active} />
-                <item.icon className={`h-5 w-5 flex-shrink-0 ${active ? 'text-brand-600' : 'text-slate-400'}`} />
-                {item.label}
-              </Link>
+                label={item.label}
+                icon={item.icon}
+                active={isActive(item.href)}
+                onNavigate={closeMobile}
+              />
             );
           })}
 
           {/* Your Booking Page - external link */}
           {venueSlug && (
-            <a
+            <NavLinkItem
               href={`/book/${venueSlug}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              onClick={() => setMobileOpen(false)}
-              className="group flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-600 transition-colors hover:bg-white/70 hover:text-slate-900"
-            >
-              <NavLeadingDot active={false} />
-              <ExternalLinkIcon className="h-5 w-5 flex-shrink-0 text-slate-400" />
-              Your Booking Page
-            </a>
+              label="Your Booking Page"
+              icon={ExternalLinkIcon}
+              active={false}
+              onNavigate={closeMobile}
+              external
+            />
           )}
         </nav>
 
         {/* Support link */}
         <div className="px-3 pb-1">
-          <Link
+          <NavLinkItem
             href="/dashboard/support"
-            onClick={() => setMobileOpen(false)}
-            className={`group flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors ${
-              pathname.startsWith('/dashboard/support')
-                ? 'bg-white text-brand-800 shadow-sm ring-1 ring-slate-100'
-                : 'text-slate-600 hover:bg-white/70 hover:text-slate-900'
-            }`}
-          >
-            <NavLeadingDot active={pathname.startsWith('/dashboard/support')} />
-            <SupportIcon className={`h-5 w-5 flex-shrink-0 ${pathname.startsWith('/dashboard/support') ? 'text-brand-600' : 'text-slate-400'}`} />
-            Support
-          </Link>
+            label="Support"
+            icon={SupportIcon}
+            active={pathname.startsWith('/dashboard/support')}
+            onNavigate={closeMobile}
+          />
         </div>
 
         {/* Footer */}
         <div className="space-y-3 border-t border-slate-100/80 bg-white/60 px-3 py-4 pb-[max(1rem,env(safe-area-inset-bottom,0px))]">
           <div className="rounded-xl border border-slate-100 bg-white p-3 shadow-sm">
             <div className="flex items-center gap-3">
-              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-brand-100 text-xs font-semibold text-brand-800 ring-2 ring-white">
-                {(staffName ?? email).charAt(0).toUpperCase()}
+              <div
+                aria-hidden
+                className="flex h-9 w-9 items-center justify-center rounded-full bg-brand-100 text-xs font-semibold text-brand-800 ring-2 ring-white"
+              >
+                {venueInitial}
               </div>
               <div className="min-w-0 flex-1">
                 {venueName ? (
@@ -537,21 +560,24 @@ export function DashboardSidebar({
                   </p>
                 ) : null}
                 {staffName ? <p className="truncate text-xs font-medium text-slate-700">{staffName}</p> : null}
-                <p className="truncate text-[11px] text-slate-500">{email}</p>
+                <p className="truncate text-[11px] text-slate-500" title={email}>
+                  {email}
+                </p>
               </div>
             </div>
             <div className="mt-2 flex flex-wrap items-center gap-1.5">
-              <Pill variant="neutral" size="sm">
-                {pricingTier.replace(/_/g, ' ')}
+              <Pill variant="brand" size="sm">
+                {tierLabel}
               </Pill>
             </div>
           </div>
           <button
             type="button"
             onClick={handleSignOut}
-            className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs font-semibold text-slate-600 shadow-sm hover:bg-slate-50 hover:text-slate-900"
+            disabled={signingOut}
+            className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs font-semibold text-slate-600 shadow-sm transition-colors hover:bg-slate-50 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-70"
           >
-            Sign out
+            {signingOut ? 'Signing out…' : 'Sign out'}
           </button>
         </div>
       </aside>

@@ -492,7 +492,7 @@ export function AppointmentDetailSheet({
         role="dialog"
         aria-modal="true"
         aria-labelledby="appointment-detail-title"
-        className="fixed inset-x-0 bottom-0 z-50 max-h-[90dvh] overflow-y-auto rounded-t-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-900/15 ring-1 ring-slate-100 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom motion-safe:duration-200 lg:inset-y-0 lg:right-0 lg:left-auto lg:max-h-none lg:w-full lg:max-w-md lg:rounded-none lg:rounded-l-2xl lg:border-l lg:border-t-0 lg:border-r-0 lg:border-b-0 lg:motion-safe:slide-in-from-right"
+        className="fixed inset-x-0 bottom-0 z-50 max-h-[90dvh] overflow-y-auto rounded-t-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-900/15 ring-1 ring-slate-100 animate-slide-in-bottom lg:inset-y-0 lg:right-0 lg:left-auto lg:max-h-none lg:w-full lg:max-w-md lg:rounded-none lg:rounded-l-2xl lg:border-l lg:border-t-0 lg:border-r-0 lg:border-b-0 lg:animate-slide-in-right"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-100 bg-slate-50/60 px-4 py-3 backdrop-blur lg:px-5">
