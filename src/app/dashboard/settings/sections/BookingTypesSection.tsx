@@ -10,6 +10,7 @@ import {
   resolveActiveBookingModels,
 } from '@/lib/booking/active-models';
 import { isAppointmentPlanTier } from '@/lib/tier-enforcement';
+import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 
 const APPOINTMENTS_PLAN_MODELS: Array<{
   model: Extract<BookingModel, 'unified_scheduling' | 'event_ticket' | 'class_session' | 'resource_booking'>;
@@ -178,29 +179,28 @@ export function BookingTypesSection({ venue, onUpdate, isAdmin }: Props) {
 
   const busy = saving || setupNavigating;
 
+  const bookingTypesDescription = appointmentsPlan ? (
+    <>
+      Your Appointments plan includes appointments, classes, events, and resources. Choose which models are active on
+      your booking page and in the dashboard.
+    </>
+  ) : (
+    <>
+      Your main booking type is set at signup. Enable extra types to show them on your public booking page and in the
+      dashboard. Guests use the <span className="font-medium text-slate-700">?tab=</span> links on your booking URL.
+    </>
+  );
+
   return (
-    <div
-      id="additional-booking-types"
-      className="scroll-mt-24 rounded-xl border border-slate-200 bg-white p-5 shadow-sm"
-    >
-      <h2 className="text-base font-semibold text-slate-900">
-        {appointmentsPlan ? 'Booking models' : 'Additional booking types'}
-      </h2>
-      <p className="mt-1 text-sm text-slate-500">
-        {appointmentsPlan ? (
-          <>
-            Your Appointments plan includes appointments, classes, events, and resources. Choose which models are active
-            on your booking page and in the dashboard.
-          </>
-        ) : (
-          <>
-            Your main booking type is set at signup. Enable extra types to show them on your public booking page and in
-            the dashboard. Guests use the <span className="font-medium text-slate-700">?tab=</span> links on your
-            booking URL.
-          </>
-        )}
-      </p>
-      <ul className="mt-4 space-y-3">
+    <div id="additional-booking-types" className="scroll-mt-24">
+      <SectionCard elevated>
+        <SectionCard.Header
+          eyebrow="Models"
+          title={appointmentsPlan ? 'Booking models' : 'Additional booking types'}
+          description={bookingTypesDescription}
+        />
+        <SectionCard.Body>
+      <ul className="space-y-3">
         {visible.map((opt) => {
           const checked = draft.includes(opt.model);
           return (
@@ -253,6 +253,8 @@ export function BookingTypesSection({ venue, onUpdate, isAdmin }: Props) {
         )}
         {!dirty && !saveSuccess && <span className="text-xs text-slate-400">No unsaved changes</span>}
       </div>
+        </SectionCard.Body>
+      </SectionCard>
     </div>
   );
 }

@@ -421,23 +421,23 @@ export default function LiveFloorCanvas({
       className="relative h-full w-full overflow-hidden bg-slate-50"
       style={{ touchAction: 'none' }}
     >
-      <div className="absolute right-2 top-2 z-10 flex gap-1">
+      <div className="absolute right-2 top-2 z-10 flex gap-1 rounded-2xl border border-slate-200 bg-white p-0.5 shadow-sm shadow-slate-900/5">
         <button
           type="button"
           onClick={() => zoomBy(0.2)}
-          className="flex h-10 w-10 items-center justify-center rounded-lg border border-slate-300 bg-white text-base text-slate-600 shadow-sm hover:bg-slate-50 sm:h-9 sm:w-9 sm:text-sm"
+          className="flex h-10 w-10 items-center justify-center rounded-xl text-base text-slate-600 hover:bg-slate-50 sm:h-9 sm:w-9 sm:text-sm"
           aria-label="Zoom in"
         >+</button>
         <button
           type="button"
           onClick={() => zoomBy(-0.2)}
-          className="flex h-10 w-10 items-center justify-center rounded-lg border border-slate-300 bg-white text-base text-slate-600 shadow-sm hover:bg-slate-50 sm:h-9 sm:w-9 sm:text-sm"
+          className="flex h-10 w-10 items-center justify-center rounded-xl text-base text-slate-600 hover:bg-slate-50 sm:h-9 sm:w-9 sm:text-sm"
           aria-label="Zoom out"
         >−</button>
         <button
           type="button"
           onClick={fitViewToStage}
-          className="flex h-10 min-w-[3rem] items-center justify-center rounded-lg border border-slate-300 bg-white px-2 text-xs font-medium text-slate-600 shadow-sm hover:bg-slate-50 sm:h-9 sm:min-w-[2.75rem]"
+          className="flex h-10 min-w-[3rem] items-center justify-center rounded-xl px-2 text-xs font-semibold text-slate-600 hover:bg-slate-50 sm:h-9 sm:min-w-[2.75rem]"
           title="Fit entire floor plan to view"
         >{Math.round((baseScaleRef.current > 0 ? scale / baseScaleRef.current : scale) * 100)}%</button>
       </div>

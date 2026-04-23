@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation';
 import { HelpTooltip } from '@/components/dashboard/HelpTooltip';
 import { helpContent } from '@/lib/help-content';
 import { NumericInput } from '@/components/ui/NumericInput';
+import { PageFrame } from '@/components/ui/dashboard/PageFrame';
+import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { detectOverlaps, formatOverlapWarning } from '@/lib/service-overlap';
 
 type VenueType = 'casual_dining' | 'fine_dining' | 'cafe' | 'pub' | 'fast_casual';
@@ -190,12 +192,15 @@ export function RestaurantSetupWizard() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-slate-50 p-6">
-      <div className="w-full max-w-xl">
+    <PageFrame maxWidthClass="max-w-xl">
+      <div className="mx-auto space-y-8">
         {/* Progress */}
-        <div className="mb-8">
+        <div>
+          <p className="mb-2 text-center text-[10px] font-semibold uppercase tracking-widest text-slate-500">
+            Step {step + 1} of {totalSteps}
+          </p>
           <div className="mb-2 flex justify-between text-xs font-medium text-slate-400">
-            <span>Step {step + 1} of {totalSteps}</span>
+            <span>Progress</span>
             <span>{Math.round(((step + 1) / totalSteps) * 100)}%</span>
           </div>
           <div className="h-2 rounded-full bg-slate-200">
@@ -203,9 +208,10 @@ export function RestaurantSetupWizard() {
           </div>
         </div>
 
-        <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
+        <SectionCard elevated>
+          <SectionCard.Body className="space-y-6 sm:px-8 sm:py-8">
           {error && (
-            <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
+            <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
           )}
 
           {/* Step 0: Venue Type */}
@@ -422,15 +428,18 @@ export function RestaurantSetupWizard() {
             </div>
           )}
 
+          <SectionCard.Divider />
+
           {/* Navigation */}
-          <div className="mt-8 flex justify-between">
+          <div className="flex justify-between gap-3 pt-2">
             {step > 0 && !saving ? (
-              <button onClick={() => setStep(step - 1)} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">
+              <button type="button" onClick={() => setStep(step - 1)} className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50">
                 Back
               </button>
             ) : <div />}
             {step < 5 ? (
               <button
+                type="button"
                 onClick={() => {
                   if (step === 1) {
                     const unnamed = services.filter(s => !s.name.trim());
@@ -446,18 +455,19 @@ export function RestaurantSetupWizard() {
                   }
                   setStep(step + 1);
                 }}
-                className="rounded-lg bg-brand-600 px-6 py-2 text-sm font-medium text-white hover:bg-brand-700"
+                className="rounded-xl bg-brand-600 px-6 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-700"
               >
                 Continue
               </button>
             ) : (
-              <button onClick={handleFinish} disabled={saving} className="rounded-lg bg-brand-600 px-6 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50">
+              <button type="button" onClick={handleFinish} disabled={saving} className="rounded-xl bg-brand-600 px-6 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 disabled:opacity-50">
                 {saving ? 'Setting up...' : 'Complete Setup'}
               </button>
             )}
           </div>
-        </div>
+          </SectionCard.Body>
+        </SectionCard>
       </div>
-    </div>
+    </PageFrame>
   );
 }

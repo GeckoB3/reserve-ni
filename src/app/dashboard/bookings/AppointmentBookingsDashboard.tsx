@@ -10,6 +10,9 @@ import {
 } from '@/components/booking/AppointmentDetailSheet';
 import type { RegistryAppointment } from '@/components/booking/AppointmentRegistryCard';
 import { DashboardStatCard } from '@/components/dashboard/DashboardStatCard';
+import { PageFrame } from '@/components/ui/dashboard/PageFrame';
+import { PageHeader } from '@/components/ui/dashboard/PageHeader';
+import { EmptyState } from '@/components/ui/dashboard/EmptyState';
 import { useToast } from '@/components/ui/Toast';
 import { buildCsvFromRows, downloadCsvString, formatMoneyPence } from '@/lib/appointments-csv';
 import { BOOKING_MUTABLE_STATUSES } from '@/lib/table-management/constants';
@@ -435,7 +438,7 @@ export function AppointmentBookingsDashboard({
         else setLoading(false);
       }
     },
-    [filterGuestId, from, to, viewMode, statusKey, invalidCustomRange, primaryBookingModel, enabledModels],
+    [filterGuestId, from, to, viewMode, invalidCustomRange, primaryBookingModel, enabledModels, selectedStatusFilter],
   );
 
 
@@ -1164,7 +1167,13 @@ export function AppointmentBookingsDashboard({
   }
 
   return (
-    <div className="min-w-0 space-y-4 sm:space-y-5">
+    <PageFrame>
+      <PageHeader
+        eyebrow="Operations"
+        title={statsPrimaryLabel}
+        subtitle={`Filter, sort, and export your ${statsPrimaryLabel.toLowerCase()}. Expand cards for full client details.`}
+      />
+      <div className="min-w-0 space-y-5">
       {realtimeConnected === false && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-800 sm:px-4">
           Updates may be delayed. Reconnecting…
@@ -1405,7 +1414,7 @@ export function AppointmentBookingsDashboard({
       )}
 
       <div className="grid min-w-0 grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-3">
-        <DashboardStatCard label={statsPrimaryLabel} value={stats.total} color="blue" />
+        <DashboardStatCard label={statsPrimaryLabel} value={stats.total} color="brand" />
         <DashboardStatCard label="Confirmed" value={stats.confirmed} color="emerald" />
         <DashboardStatCard label="Completed" value={stats.completed} color="violet" />
         <DashboardStatCard label="No-shows" value={stats.noShows} color="slate" />
@@ -1530,14 +1539,23 @@ export function AppointmentBookingsDashboard({
           ))}
         </div>
       ) : filteredBookings.length === 0 ? (
-        <div className="rounded-xl border border-slate-200 bg-white px-4 py-14 text-center shadow-sm sm:py-16">
-          <p className="text-sm font-medium text-slate-500">No bookings match this period and filters.</p>
-          <p className="mt-1 text-xs text-slate-400">Try another date range or clear search.</p>
-        </div>
+        <EmptyState
+          title="No bookings match this view"
+          description="Try another date range, clear search, or adjust filters."
+          action={
+            <button
+              type="button"
+              onClick={() => setNewBookingOpen(true)}
+              className="inline-flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-brand-700"
+            >
+              New booking
+            </button>
+          }
+        />
       ) : viewMode === 'day' ? (
         <>
           {renderMobileCards(sortedBookings)}
-          <div className="hidden overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm md:block">
+          <div className="hidden overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm shadow-slate-900/5 md:block">
             <table className="w-full min-w-[800px] border-collapse text-left">
               <thead>
                 <tr className="border-b border-slate-200 bg-slate-50">
@@ -1576,7 +1594,7 @@ export function AppointmentBookingsDashboard({
             .map(([date, dayBookings]) => (
               <section
                 key={date}
-                className="overflow-hidden rounded-xl border border-slate-200 bg-slate-50/40 shadow-sm"
+                className="overflow-hidden rounded-2xl border border-slate-200 bg-slate-50/40 shadow-sm shadow-slate-900/5"
                 aria-label={`Bookings on ${date}`}
               >
                 <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200/80 bg-white/80 px-3 py-2.5 sm:px-4 sm:py-3">
@@ -1750,6 +1768,7 @@ export function AppointmentBookingsDashboard({
           price_pence: s.price_pence ?? null,
         }))}
       />
-    </div>
+      </div>
+    </PageFrame>
   );
 }

@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { useCallback } from 'react';
 import type { VenueSettings, DepositConfigSettings } from '../types';
 import { useNumericField } from '@/hooks/useNumericField';
+import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 
 const depositConfigSchema = z.object({
   enabled: z.boolean(),
@@ -40,18 +41,25 @@ interface DepositConfigSectionProps {
 
 function ServiceEngineTableDepositMessage() {
   return (
-    <section className="rounded-lg border border-neutral-200 bg-white p-6 shadow-sm">
-      <h2 className="mb-2 text-lg font-semibold text-neutral-900">Deposit config</h2>
-      <p className="text-sm text-neutral-600">
-        Table deposits for each dining period are set under{' '}
-        <strong>Dining Availability → Booking Rules</strong> (per service: amount and party-size threshold). The{' '}
-        <strong>Table Management</strong> tab covers floor plan and legacy engine options. Staff phone bookings use the
-        &ldquo;Require deposit&rdquo; toggle on the New Booking form.
-      </p>
-      <p className="mt-3 text-sm text-neutral-600">
-        Use the <strong>Communications</strong> tab for deposit request and confirmation message wording.
-      </p>
-    </section>
+    <SectionCard elevated>
+      <SectionCard.Header
+        eyebrow="Payments"
+        title="Deposit config"
+        description={
+          <>
+            Table deposits for each dining period are set under <strong>Dining Availability → Booking Rules</strong> (per
+            service: amount and party-size threshold). The <strong>Table Management</strong> tab covers floor plan and
+            legacy engine options. Staff phone bookings use the &ldquo;Require deposit&rdquo; toggle on the New Booking
+            form.
+          </>
+        }
+      />
+      <SectionCard.Body>
+        <p className="text-sm text-neutral-600">
+          Use the <strong>Communications</strong> tab for deposit request and confirmation message wording.
+        </p>
+      </SectionCard.Body>
+    </SectionCard>
   );
 }
 
@@ -94,10 +102,10 @@ function LegacyDepositConfigForm({
   }, [onUpdate]);
 
   return (
-    <section className="rounded-lg border border-neutral-200 bg-white p-6 shadow-sm">
-      <h2 className="mb-4 text-lg font-semibold text-neutral-900">Deposit config</h2>
-
-      <div className="mb-4 rounded bg-amber-50 border border-amber-200 p-3 text-sm text-amber-800">
+    <SectionCard elevated>
+      <SectionCard.Header eyebrow="Payments" title="Deposit config" />
+      <SectionCard.Body>
+      <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
         <strong>Cancellation policy (MVP):</strong> Deposits are refundable if the guest cancels at least 48 hours before the booking time. Otherwise the deposit is forfeited. This is fixed for the MVP and not editable here.
       </div>
 
@@ -142,7 +150,8 @@ function LegacyDepositConfigForm({
           </button>
         )}
       </form>
-    </section>
+      </SectionCard.Body>
+    </SectionCard>
   );
 }
 

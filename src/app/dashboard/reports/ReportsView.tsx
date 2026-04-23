@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import useSWR from 'swr';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import {
@@ -12,6 +12,13 @@ import { ClientsSection, type ClientSummary } from './ClientsSection';
 import type { BookingModel, VenueTerminology } from '@/types/booking-models';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 import { HorizontalScrollHint } from '@/components/ui/HorizontalScrollHint';
+import type { DashboardStatColor } from '@/components/dashboard/dashboard-stat-types';
+import { PageHeader } from '@/components/ui/dashboard/PageHeader';
+import { TabBar } from '@/components/ui/dashboard/TabBar';
+import { SectionCard } from '@/components/ui/dashboard/SectionCard';
+import { Pill } from '@/components/ui/dashboard/Pill';
+import { StatTile } from '@/components/ui/dashboard/StatTile';
+import { EmptyState } from '@/components/ui/dashboard/EmptyState';
 
 interface Report1 {
   total_bookings_created: number;
@@ -89,7 +96,8 @@ interface ReportsData {
   client_summary?: ClientSummary | null;
 }
 
-const COLORS = ['#4E6B78', '#059669', '#f59e0b', '#ef4444', '#8b5cf6', '#6b7280'];
+/** Brand-aligned chart segments: brand-600, brand-400, emerald-500, amber-500, slate. */
+const COLORS = ['#4E6B78', '#6B8A9A', '#059669', '#f59e0b', '#d97706', '#64748b'];
 
 function last7Days(): { from: string; to: string } {
   const to = new Date();
@@ -119,6 +127,15 @@ function formatBookingSourceLabel(source: string): string {
     booking_page: 'Booking page',
   };
   return map[source] ?? source;
+}
+
+function reportMetricColor(accent?: string): DashboardStatColor {
+  if (!accent) return 'slate';
+  if (accent === 'teal') return 'brand';
+  if (accent === 'emerald') return 'emerald';
+  if (accent === 'amber') return 'amber';
+  if (accent === 'red') return 'amber';
+  return 'slate';
 }
 
 /** Merge raw event source keys onto display labels (matches pie + CSV). */
@@ -328,11 +345,20 @@ export function ReportsView({ bookingModel, terminology, venueId }: ReportsViewP
     ]);
   }, [data, terminology]);
 
+  const reportTabs = useMemo(
+    () =>
+      [
+        { id: 'overview' as const, label: 'Overview' },
+        { id: 'clients' as const, label: `${terminology.client}s` },
+      ] as const,
+    [terminology.client],
+  );
+
   if (isLoading && !data) {
     return (
       <div className="space-y-5">
         {[...Array(4)].map((_, i) => (
-          <div key={i} className="h-48 animate-pulse rounded-xl border border-slate-200 bg-white shadow-sm" />
+          <div key={i} className="h-48 animate-pulse rounded-2xl border border-slate-200 bg-white shadow-sm shadow-slate-900/5" />
         ))}
       </div>
     );
@@ -340,10 +366,19 @@ export function ReportsView({ bookingModel, terminology, venueId }: ReportsViewP
 
   if (error) {
     return (
-      <div className="rounded-xl border border-slate-200 bg-white p-12 text-center">
-        <p className="text-red-600">{error}</p>
-        <button type="button" onClick={() => void mutate()} className="mt-3 text-sm font-medium text-brand-600 hover:text-brand-700">Retry</button>
-      </div>
+      <EmptyState
+        title="Could not load reports"
+        description={error}
+        action={
+          <button
+            type="button"
+            onClick={() => void mutate()}
+            className="text-sm font-semibold text-brand-600 hover:text-brand-700"
+          >
+            Retry
+          </button>
+        }
+      />
     );
   }
 
@@ -406,72 +441,61 @@ export function ReportsView({ bookingModel, terminology, venueId }: ReportsViewP
         <div
           role="status"
           aria-live="polite"
-          className={`rounded-xl border px-4 py-3 text-sm ${
+          className={`flex flex-wrap items-center gap-2 rounded-2xl border px-4 py-3 text-sm ${
             exportFlash.variant === 'success'
               ? 'border-emerald-200 bg-emerald-50 text-emerald-900'
               : 'border-amber-200 bg-amber-50 text-amber-900'
           }`}
         >
-          {exportFlash.message}
+          <Pill variant={exportFlash.variant === 'success' ? 'success' : 'warning'} size="sm" dot>
+            {exportFlash.variant === 'success' ? 'Export' : 'Notice'}
+          </Pill>
+          <span>{exportFlash.message}</span>
         </div>
       )}
 
-      <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex w-full max-w-md rounded-xl border border-slate-200 bg-white p-1 shadow-sm sm:w-max">
-          <button
-            type="button"
-            onClick={() => setActiveTab('overview')}
-            className={`flex-1 rounded-lg px-4 py-2 text-sm font-medium transition-colors sm:flex-none ${
-              activeTab === 'overview'
-                ? 'bg-brand-600 text-white shadow-sm'
-                : 'text-slate-600 hover:bg-slate-50'
-            }`}
-          >
-            Overview
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab('clients')}
-            className={`flex-1 rounded-lg px-4 py-2 text-sm font-medium transition-colors sm:flex-none ${
-              activeTab === 'clients'
-                ? 'bg-brand-600 text-white shadow-sm'
-                : 'text-slate-600 hover:bg-slate-50'
-            }`}
-          >
-            {terminology.client}s
-          </button>
-        </div>
-      </div>
+      <PageHeader
+        eyebrow="Insights"
+        title="Reports"
+        subtitle={
+          isAppointment
+            ? 'Appointment analytics for your team, services, and channels. Figures use the selected date range unless noted.'
+            : 'Covers, deposits, and guest trends for your venue. Figures use the selected date range unless noted.'
+        }
+        actions={<TabBar tabs={reportTabs} value={activeTab} onChange={setActiveTab} />}
+      />
 
-      {/* Date range controls */}
-      <div className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
-        <label className="flex items-center gap-2 text-sm">
-          <span className="font-medium text-slate-600">From</span>
-          <input
-            type="date"
-            value={range.from}
-            onChange={(e) => setRange((r) => ({ ...r, from: e.target.value }))}
-            className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm"
-          />
-        </label>
-        <label className="flex items-center gap-2 text-sm">
-          <span className="font-medium text-slate-600">To</span>
-          <input
-            type="date"
-            value={range.to}
-            onChange={(e) => setRange((r) => ({ ...r, to: e.target.value }))}
-            className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm"
-          />
-        </label>
-        <button
-          type="button"
-          onClick={applyRange}
-          disabled={isValidating}
-          className="rounded-lg bg-brand-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
-        >
-          {isValidating ? 'Loading...' : 'Apply'}
-        </button>
-      </div>
+      <SectionCard elevated>
+        <SectionCard.Header eyebrow="Range" title="Date range" />
+        <SectionCard.Body className="flex flex-wrap items-center gap-3">
+          <label className="flex items-center gap-2 text-sm">
+            <span className="font-medium text-slate-600">From</span>
+            <input
+              type="date"
+              value={range.from}
+              onChange={(e) => setRange((r) => ({ ...r, from: e.target.value }))}
+              className="rounded-xl border border-slate-200 px-3 py-2 text-sm shadow-sm"
+            />
+          </label>
+          <label className="flex items-center gap-2 text-sm">
+            <span className="font-medium text-slate-600">To</span>
+            <input
+              type="date"
+              value={range.to}
+              onChange={(e) => setRange((r) => ({ ...r, to: e.target.value }))}
+              className="rounded-xl border border-slate-200 px-3 py-2 text-sm shadow-sm"
+            />
+          </label>
+          <button
+            type="button"
+            onClick={applyRange}
+            disabled={isValidating}
+            className="rounded-xl bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 disabled:opacity-50"
+          >
+            {isValidating ? 'Loading...' : 'Apply'}
+          </button>
+        </SectionCard.Body>
+      </SectionCard>
 
       {activeTab === 'clients' && data ? (
         <ClientsSection
@@ -514,28 +538,28 @@ export function ReportsView({ bookingModel, terminology, venueId }: ReportsViewP
               </p>
             )}
             <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-3">
-              <MetricCard
+              <StatTile
                 label={isAppointment ? `${bookingWord}s created` : `Total ${bookingWord.toLowerCase()}s`}
                 value={String(r1.total_bookings_created)}
-                accent="teal"
+                color={reportMetricColor('teal')}
               />
-              <MetricCard
+              <StatTile
                 label={
                   isAppointment
                     ? `${client} places booked`
                     : 'Covers booked'
                 }
                 value={String(r1.covers_booked)}
-                accent="teal"
+                color={reportMetricColor('teal')}
               />
-              <MetricCard
+              <StatTile
                 label={
                   isAppointment
                     ? `${client}s seen (arrived / completed)`
                     : 'Covers seated'
                 }
                 value={String(r1.covers_seated)}
-                accent="emerald"
+                color={reportMetricColor('emerald')}
               />
             </div>
             <div className="grid gap-6 md:grid-cols-2">
@@ -710,7 +734,7 @@ export function ReportsView({ bookingModel, terminology, venueId }: ReportsViewP
                           tick={{ fontSize: 11 }}
                         />
                         <Tooltip formatter={(value: number) => [value, `${bookingWord}s`]} />
-                        <Bar dataKey="count" fill="#6366f1" radius={[0, 6, 6, 0]} name={`${bookingWord}s`} />
+                        <Bar dataKey="count" fill="#4E6B78" radius={[0, 6, 6, 0]} name={`${bookingWord}s`} />
                       </BarChart>
                     </ResponsiveContainer>
                   </div>
@@ -800,16 +824,22 @@ export function ReportsView({ bookingModel, terminology, venueId }: ReportsViewP
               </p>
             )}
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <MetricCard
-              label={isAppointment ? `${bookingWord}s created` : 'Total created'}
-              value={String(r3.total_bookings_created)}
-            />
-            <MetricCard
-              label={isAppointment ? `${client}-initiated` : 'Guest-initiated'}
-              value={String(r3.cancelled_guest_initiated)}
-            />
-            <MetricCard label="Auto (unpaid)" value={String(r3.cancelled_auto)} />
-            <MetricCard label="Cancellation rate" value={`${r3.cancellation_rate_pct}%`} accent={r3.cancellation_rate_pct > 10 ? 'red' : 'emerald'} />
+              <StatTile
+                label={isAppointment ? `${bookingWord}s created` : 'Total created'}
+                value={String(r3.total_bookings_created)}
+                color={reportMetricColor()}
+              />
+              <StatTile
+                label={isAppointment ? `${client}-initiated` : 'Guest-initiated'}
+                value={String(r3.cancelled_guest_initiated)}
+                color={reportMetricColor()}
+              />
+              <StatTile label="Auto (unpaid)" value={String(r3.cancelled_auto)} color={reportMetricColor()} />
+              <StatTile
+                label="Cancellation rate"
+                value={`${r3.cancellation_rate_pct}%`}
+                color={reportMetricColor(r3.cancellation_rate_pct > 10 ? 'red' : 'emerald')}
+              />
             </div>
           </>
         )}
@@ -833,9 +863,21 @@ export function ReportsView({ bookingModel, terminology, venueId }: ReportsViewP
       >
         {r4 && (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <MetricCard label="Total collected" value={`£${(r4.total_collected_pence / 100).toFixed(2)}`} accent="emerald" />
-            <MetricCard label="Total refunded" value={`£${(r4.total_refunded_pence / 100).toFixed(2)}`} accent="amber" />
-            <MetricCard label="Total forfeited" value={`£${(r4.total_forfeited_pence / 100).toFixed(2)}`} accent="red" />
+            <StatTile
+              label="Total collected"
+              value={`£${(r4.total_collected_pence / 100).toFixed(2)}`}
+              color={reportMetricColor('emerald')}
+            />
+            <StatTile
+              label="Total refunded"
+              value={`£${(r4.total_refunded_pence / 100).toFixed(2)}`}
+              color={reportMetricColor('amber')}
+            />
+            <StatTile
+              label="Total forfeited"
+              value={`£${(r4.total_forfeited_pence / 100).toFixed(2)}`}
+              color={reportMetricColor('red')}
+            />
           </div>
         )}
       </ReportSection>
@@ -923,42 +965,30 @@ function ReportSection({
   };
 
   return (
-    <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-      <div className="mb-4 flex items-center justify-between gap-3">
-        <h2 className="text-lg font-semibold text-slate-900">{title}</h2>
-        <button
-          type="button"
-          onClick={handleExportClick}
-          title={blocked ? blockedHint : 'Download this report as a CSV file'}
-          aria-label={blocked ? `Export CSV: ${blockedHint}` : 'Export CSV'}
-          className={`flex shrink-0 items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 ${
-            blocked
-              ? 'text-slate-400 hover:bg-slate-50 hover:text-slate-600'
-              : 'text-brand-600 hover:bg-brand-50 hover:text-brand-700'
-          }`}
-        >
-          <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" aria-hidden>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" />
-          </svg>
-          Export CSV
-        </button>
-      </div>
-      {children}
-    </section>
-  );
-}
-
-function MetricCard({ label, value, accent }: { label: string; value: string; accent?: string }) {
-  const colorMap: Record<string, string> = {
-    teal: 'border-l-brand-500',
-    emerald: 'border-l-emerald-500',
-    red: 'border-l-red-500',
-    amber: 'border-l-amber-500',
-  };
-  return (
-    <div className={`rounded-lg border border-slate-100 bg-slate-50/50 p-3 ${accent ? `border-l-4 ${colorMap[accent] ?? ''}` : ''}`}>
-      <p className="text-xs font-medium text-slate-500">{label}</p>
-      <p className="mt-1 text-xl font-bold text-slate-900">{value}</p>
-    </div>
+    <SectionCard elevated>
+      <SectionCard.Header
+        eyebrow="Report"
+        title={title}
+        right={
+          <button
+            type="button"
+            onClick={handleExportClick}
+            title={blocked ? blockedHint : 'Download this report as a CSV file'}
+            aria-label={blocked ? `Export CSV: ${blockedHint}` : 'Export CSV'}
+            className={`flex shrink-0 items-center gap-1.5 rounded-xl px-3 py-2 text-sm font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 ${
+              blocked
+                ? 'text-slate-400 hover:bg-slate-50 hover:text-slate-600'
+                : 'text-brand-600 hover:bg-brand-50 hover:text-brand-700'
+            }`}
+          >
+            <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" aria-hidden>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" />
+            </svg>
+            Export CSV
+          </button>
+        }
+      />
+      <SectionCard.Body>{children}</SectionCard.Body>
+    </SectionCard>
   );
 }

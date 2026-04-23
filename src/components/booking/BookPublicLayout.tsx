@@ -162,7 +162,7 @@ export function BookPublicLayout({ venue, lockedPractitioner }: BookPublicLayout
 
       {venue.opening_hours && <OpeningHoursDisplay hours={venue.opening_hours} />}
 
-      <div className="mx-auto max-w-lg px-4 py-8 pb-24">
+      <div id="booking-form-start" className="mx-auto max-w-lg scroll-mt-4 px-4 py-8 pb-24">
         <BookPublicBookingFlow venue={venue} lockedPractitioner={lockedPractitioner ?? undefined} />
       </div>
 

@@ -17,6 +17,10 @@ import { AddDiningAreaModal, type AddDiningAreaPayload } from '@/components/area
 import { EditDiningAreaModal, type EditDiningAreaPayload } from '@/components/areas/EditDiningAreaModal';
 import { ConfirmDeleteAreaModal } from '@/components/areas/ConfirmDeleteAreaModal';
 import { PublicBookingAreaModeModal } from '@/components/areas/PublicBookingAreaModeModal';
+import { PageFrame } from '@/components/ui/dashboard/PageFrame';
+import { PageHeader } from '@/components/ui/dashboard/PageHeader';
+import { TabBar } from '@/components/ui/dashboard/TabBar';
+import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 
 const BASE_TABS = [
   { key: 'services' as const, label: 'Services' },
@@ -359,7 +363,7 @@ export default function AvailabilitySettingsClient({
       }
     }
     void loadServices();
-  }, [venue?.id, selectedAreaId]);
+  }, [venue, selectedAreaId]);
 
   useEffect(() => {
     if (!venue?.id || !selectedAreaId) return;
@@ -372,49 +376,57 @@ export default function AvailabilitySettingsClient({
 
   if (!venue && !loading) {
     return (
-      <div className="p-6 lg:p-8">
+      <PageFrame>
         <p className="text-sm text-red-600">Could not load venue settings. Try again or contact support.</p>
-      </div>
+      </PageFrame>
     );
   }
 
   if (loading || !venue) {
     return (
-      <div className="flex items-center justify-center p-12">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-brand-600 border-t-transparent" />
-      </div>
+      <PageFrame>
+        <div className="flex items-center justify-center py-20">
+          <div className="h-8 w-8 animate-spin rounded-full border-2 border-brand-600 border-t-transparent" />
+        </div>
+      </PageFrame>
     );
   }
 
   return (
-    <div className="p-6 lg:p-8">
-      <div className="mb-6 flex items-start justify-between">
-        <div>
-          <h1 className="mb-1 text-xl font-bold text-slate-900">Availability Settings</h1>
-          <p className="text-sm text-slate-500">
-            Manage services, capacity, dining durations, booking rules, and table management. Venue-wide closures, amended
-            hours, and capacity blocks are under{' '}
+    <PageFrame>
+      <div className="space-y-6">
+      <PageHeader
+        eyebrow="Configuration"
+        title="Availability"
+        subtitle={
+          <>
+            Manage services, capacity, dining durations, booking rules, and table management. Venue-wide closures,
+            amended hours, and capacity blocks are under{' '}
             <Link
               href="/dashboard/settings?tab=business-hours"
-              className="font-medium text-brand-600 hover:text-brand-700 underline"
+              className="font-semibold text-brand-600 underline hover:text-brand-800"
             >
               Settings → Business Hours
             </Link>
             .
-          </p>
-        </div>
-        <Link
-          href="/dashboard/onboarding"
-          className="flex-shrink-0 rounded-lg border border-brand-200 bg-brand-50 px-4 py-2 text-sm font-medium text-brand-700 hover:bg-brand-100 transition-colors"
-        >
-          Setup Wizard
-        </Link>
-      </div>
+          </>
+        }
+        actions={
+          <Link
+            href="/dashboard/onboarding"
+            className="shrink-0 rounded-xl border border-brand-200 bg-brand-50 px-4 py-2.5 text-sm font-semibold text-brand-800 shadow-sm hover:bg-brand-100"
+          >
+            Setup wizard
+          </Link>
+        }
+      />
 
       {showAreaChrome && selectedAreaId && (
-        <div className="mb-4 space-y-2">
-        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-          <span className="text-sm font-medium text-slate-600">Dining area</span>
+        <div className="space-y-2">
+        <SectionCard>
+          <SectionCard.Header eyebrow="Dining" title="Dining area" />
+          <SectionCard.Body className="!pt-0">
+        <div className="flex flex-wrap items-center gap-3">
           <div className="flex flex-wrap gap-2">
             {activeAreas.map((a) => (
               <div
@@ -502,10 +514,12 @@ export default function AvailabilitySettingsClient({
           </div>
         </div>
         {activeAreas.length > 1 && (
-          <p className="text-xs text-slate-500">
+          <p className="mt-3 text-xs text-slate-500">
             All settings on this page are configured per dining area. Switch the area above to manage each space.
           </p>
         )}
+          </SectionCard.Body>
+        </SectionCard>
         </div>
       )}
 
@@ -542,19 +556,12 @@ export default function AvailabilitySettingsClient({
         onSaved={(mode) => onUpdate({ public_booking_area_mode: mode })}
       />
 
-      <div className="mb-6 flex gap-1 overflow-x-auto rounded-xl border border-slate-200 bg-slate-100 p-1">
-        {visibleTabs.map((tab) => (
-          <button
-            key={tab.key}
-            type="button"
-            onClick={() => setActiveTab(tab.key)}
-            className={`whitespace-nowrap rounded-lg px-4 py-2 text-sm font-medium transition-all ${
-              activeTab === tab.key ? 'bg-white text-brand-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'
-            }`}
-          >
-            {tab.label}
-          </button>
-        ))}
+      <div className="overflow-x-auto pb-1">
+        <TabBar<TabKey>
+          tabs={visibleTabs.map((tab) => ({ id: tab.key, label: tab.label }))}
+          value={activeTab}
+          onChange={setActiveTab}
+        />
       </div>
 
       {activeTab === 'services' && (
@@ -609,6 +616,7 @@ export default function AvailabilitySettingsClient({
           {toast}
         </div>
       )}
-    </div>
+      </div>
+    </PageFrame>
   );
 }

@@ -26,6 +26,7 @@ import { formatBookablePricePence } from '@/lib/booking/format-price-display';
 import { CustomerProfileNotesCard } from '@/components/booking/CustomerProfileNotesCard';
 import { GuestMessageChannelSelect } from '@/components/booking/GuestMessageChannelSelect';
 import type { GuestMessageChannel } from '@/lib/booking/guest-message-channel';
+import { Pill, type PillVariant } from '@/components/ui/dashboard/Pill';
 
 export interface DetailPractitionerOption {
   id: string;
@@ -139,14 +140,24 @@ function prefetchToDetailRecord(p: AppointmentDetailPrefetch): BookingDetailReco
   };
 }
 
-const STATUS_STYLES: Record<string, string> = {
-  Pending: 'bg-orange-100 text-orange-900 ring-1 ring-orange-200/80',
-  Confirmed: 'bg-blue-100 text-blue-900 ring-1 ring-blue-200/80',
-  Seated: 'bg-violet-100 text-violet-900 ring-1 ring-violet-200/80',
-  Completed: 'bg-emerald-100 text-emerald-900 ring-1 ring-emerald-200/80',
-  'No-Show': 'bg-red-100 text-red-900 ring-1 ring-red-200/70',
-  Cancelled: 'bg-slate-100 text-slate-500 ring-1 ring-slate-200/80',
-};
+function appointmentDetailStatusVariant(status: string): PillVariant {
+  switch (status) {
+    case 'Pending':
+      return 'warning';
+    case 'Confirmed':
+      return 'success';
+    case 'Seated':
+      return 'brand';
+    case 'Completed':
+      return 'success';
+    case 'No-Show':
+      return 'danger';
+    case 'Cancelled':
+      return 'neutral';
+    default:
+      return 'neutral';
+  }
+}
 
 function inferredForDetail(d: BookingDetailRecord): BookingModel {
   return d.inferred_booking_model ?? inferBookingRowModel(d);
@@ -469,7 +480,7 @@ export function AppointmentDetailSheet({
   return (
     <>
       <div
-        className="fixed inset-0 z-50 bg-black/40 lg:bg-black/20"
+        className="fixed inset-0 z-50 bg-slate-900/30 backdrop-blur-[1px] lg:bg-slate-900/20"
         aria-hidden
         onClick={onClose}
       />
@@ -477,10 +488,10 @@ export function AppointmentDetailSheet({
         role="dialog"
         aria-modal="true"
         aria-labelledby="appointment-detail-title"
-        className="fixed inset-x-0 bottom-0 z-50 max-h-[90dvh] overflow-y-auto rounded-t-2xl border border-slate-200 bg-white shadow-2xl motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom motion-safe:duration-200 lg:inset-y-0 lg:right-0 lg:left-auto lg:max-h-none lg:w-full lg:max-w-md lg:rounded-none lg:rounded-l-2xl lg:border-l lg:border-t-0 lg:border-r-0 lg:border-b-0 lg:motion-safe:slide-in-from-right"
+        className="fixed inset-x-0 bottom-0 z-50 max-h-[90dvh] overflow-y-auto rounded-t-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-900/15 ring-1 ring-slate-100 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom motion-safe:duration-200 lg:inset-y-0 lg:right-0 lg:left-auto lg:max-h-none lg:w-full lg:max-w-md lg:rounded-none lg:rounded-l-2xl lg:border-l lg:border-t-0 lg:border-r-0 lg:border-b-0 lg:motion-safe:slide-in-from-right"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-100 bg-white px-4 py-3 lg:px-5">
+        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-100 bg-slate-50/60 px-4 py-3 backdrop-blur lg:px-5">
           <div className="min-w-0">
             <h2 id="appointment-detail-title" className="text-lg font-semibold text-slate-900">
               {isCde ? 'Booking' : 'Appointment'}
@@ -535,16 +546,12 @@ export function AppointmentDetailSheet({
               <div>
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="text-xl font-semibold text-slate-900">{detail.guest?.name ?? 'Guest'}</span>
-                  <span
-                    className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${
-                      STATUS_STYLES[detail.status] ?? 'bg-slate-100 text-slate-700 ring-1 ring-slate-200'
-                    }`}
-                  >
+                  <Pill variant={appointmentDetailStatusVariant(detail.status)} size="sm" dot>
                     {bookingStatusDisplayLabel(
                       detail.status,
                       isTableReservationBooking(detail),
                     )}
-                  </span>
+                  </Pill>
                   {isApptStyle &&
                     arrived &&
                     detail.status !== 'Seated' &&

@@ -19,7 +19,7 @@ function baseBooking(over: Partial<BookingEmailData>): BookingEmailData {
 }
 
 describe('renderCommunicationEmail booking_confirmation', () => {
-  it('includes price in HTML card and pay-at-venue copy when no online payment', () => {
+  it('puts price and pay-at-venue copy in the detail card only, not the intro', () => {
     const out = renderCommunicationEmail({
       lane: 'appointments_other',
       messageKey: 'booking_confirmation',
@@ -34,9 +34,12 @@ describe('renderCommunicationEmail booking_confirmation', () => {
     });
     expect(out?.html).toContain('£45.00');
     expect(out?.html).not.toContain('(pay at venue)');
-    expect(out?.html).toMatch(/Total price £45\.00\. Pay at the venue/i);
-    expect(out?.text).toContain('Price: £45.00');
-    expect(out?.text).toMatch(/Total price £45\.00\. Pay at the venue/i);
+    expect(out?.html).not.toMatch(/Total price £45\.00\. Pay at the venue/i);
+    expect(out?.html).toMatch(/Due at the venue/i);
+    expect(out?.text).toContain('Price and payment:');
+    expect(out?.text).toContain('£45.00');
+    expect(out?.text).toMatch(/Due at the venue/i);
+    expect(out?.text).not.toMatch(/Total price £45\.00\. Pay at the venue/i);
   });
 
   it('shows paid in full when deposit_status is Paid and amount meets total', () => {
@@ -57,6 +60,45 @@ describe('renderCommunicationEmail booking_confirmation', () => {
     expect(out?.text).toMatch(/Paid in full online/);
   });
 
+  it('shows full-refund deadline in the card when paid online and refund_cutoff is set', () => {
+    const out = renderCommunicationEmail({
+      lane: 'appointments_other',
+      messageKey: 'booking_confirmation',
+      booking: baseBooking({
+        email_variant: 'appointment',
+        appointment_service_name: 'Workshop',
+        booking_total_price_pence: 5000,
+        deposit_amount_pence: 5000,
+        deposit_status: 'Paid',
+        refund_cutoff: '2026-12-20T18:00:00.000Z',
+      }),
+      venue,
+    });
+    expect(out?.html).toMatch(/Cancellation:.*Full refund if you cancel before/i);
+    expect(out?.text).toMatch(/Full refund if you cancel before/i);
+  });
+
+  it('shows per-seat and total for multi-seat class bookings', () => {
+    const out = renderCommunicationEmail({
+      lane: 'appointments_other',
+      messageKey: 'booking_confirmation',
+      booking: baseBooking({
+        email_variant: 'appointment',
+        booking_model: 'class_session',
+        appointment_service_name: 'Yoga',
+        party_size: 2,
+        booking_unit_price_pence: 1000,
+        booking_price_quantity: 2,
+        booking_total_price_pence: 2000,
+        appointment_price_display: '£20.00',
+        deposit_status: 'Not Required',
+      }),
+      venue,
+    });
+    expect(out?.html).toMatch(/£10\.00 each × 2/i);
+    expect(out?.html).toMatch(/Total: £20\.00/i);
+  });
+
   it('shows deposit + balance when partially paid online', () => {
     const out = renderCommunicationEmail({
       lane: 'appointments_other',
@@ -71,8 +113,8 @@ describe('renderCommunicationEmail booking_confirmation', () => {
       }),
       venue,
     });
-    expect(out?.html).toContain('Deposit paid online');
-    expect(out?.html).toMatch(/Balance due at the venue: £30\.00/i);
+    expect(out?.html).toMatch(/Deposit of £20\.00 paid online/i);
+    expect(out?.html).toMatch(/£30\.00 due at the venue/i);
   });
 
   it('shows Free when there is no charge and no deposit paid', () => {
@@ -88,8 +130,8 @@ describe('renderCommunicationEmail booking_confirmation', () => {
       venue,
     });
     expect(out?.html).toContain('>Free</span>');
-    expect(out?.html).toContain('There is no charge for this booking');
-    expect(out?.text).toContain('Price: Free');
-    expect(out?.text).toContain('There is no charge for this booking');
+    expect(out?.html).not.toContain('There is no charge for this booking');
+    expect(out?.text).toContain('Price and payment:');
+    expect(out?.text).toContain('Free');
   });
 });

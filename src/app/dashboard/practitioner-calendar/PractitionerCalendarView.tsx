@@ -69,6 +69,7 @@ import { WeekScheduleCdeStrip } from './WeekScheduleCdeStrip';
 import { CalendarColumnsFilter } from './CalendarColumnsFilter';
 import { MonthScheduleGrid } from './MonthScheduleGrid';
 import { PractitionerCalendarToolbar } from './PractitionerCalendarToolbar';
+import { EmptyState } from '@/components/ui/dashboard/EmptyState';
 
 interface Practitioner {
   id: string;
@@ -414,7 +415,6 @@ function countBookingRightColumnActions(b: Booking, graceMinutes: number): numbe
 
   if (b.status === 'Completed') return n + 1;
 
-  const arrived = Boolean(b.client_arrived_at);
   const canNoShow =
     b.status === 'Confirmed' && canMarkNoShowForSlot(b.booking_date, b.booking_time, graceMinutes);
 
@@ -763,7 +763,10 @@ type DraggableHandleProps = {
 function DragBookingPreview({ booking }: { booking: Booking }) {
   const p = bookingCalendarBlockStyle(booking);
   return (
-    <div className="rounded-lg border border-solid px-2 py-1 text-xs shadow-xl" style={bookingBlockCardStyle(p)}>
+    <div
+      className="rounded-xl border-2 border-dashed border-brand-200/90 bg-white/95 px-2.5 py-1.5 text-xs font-semibold text-slate-800 shadow-2xl shadow-slate-900/15 ring-1 ring-brand-100/70"
+      style={{ borderLeftWidth: 4, borderLeftStyle: 'solid', borderLeftColor: p.accent }}
+    >
       {booking.guest_name}
     </div>
   );
@@ -1523,6 +1526,26 @@ export function PractitionerCalendarView({
     return minutesToTime(mins);
   });
 
+  const [calendarClockTick, setCalendarClockTick] = useState(0);
+  useEffect(() => {
+    const id = window.setInterval(() => setCalendarClockTick((n) => n + 1), 60_000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  /** Horizontal "now" indicator for day view when browsing today's date. */
+  const dayViewNowLineTop = useMemo(() => {
+    if (viewMode !== 'day') return null;
+    void calendarClockTick;
+    const t = new Date();
+    const iso = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
+    if (date !== iso) return null;
+    const nowMins = t.getHours() * 60 + t.getMinutes() + t.getSeconds() / 60;
+    const offset = nowMins - startHour * 60;
+    const gridMins = TOTAL_SLOTS * SLOT_MINUTES;
+    if (offset < 0 || offset > gridMins) return null;
+    return (offset / SLOT_MINUTES) * SLOT_HEIGHT;
+  }, [viewMode, date, startHour, TOTAL_SLOTS, calendarClockTick]);
+
   const bookingsMatchingFilters = useMemo(() => {
     return bookings.filter((b) => {
       if (calendarFilterIds !== null) {
@@ -1720,10 +1743,10 @@ export function PractitionerCalendarView({
                     <span className="font-semibold text-slate-900">{activeToolbarBookings.length}</span> on grid
                   </span>
                   <span className="hidden sm:inline text-slate-500">
-                    <span className="font-semibold text-blue-600">{confirmedCount}</span> confirmed
+                    <span className="font-semibold text-brand-600">{confirmedCount}</span> confirmed
                   </span>
                   <span className="hidden sm:inline text-slate-500">
-                    <span className="font-semibold text-green-600">{completedCount}</span> completed
+                    <span className="font-semibold text-emerald-600">{completedCount}</span> completed
                   </span>
                 </div>
                 {viewMode !== 'day' && (
@@ -1752,12 +1775,15 @@ export function PractitionerCalendarView({
 
       {loading ? (
         <div className="flex min-h-[40vh] items-center justify-center">
-          <div className="h-8 w-8 animate-spin rounded-full border-4 border-blue-600 border-t-transparent" />
+          <div className="h-8 w-8 animate-spin rounded-full border-4 border-brand-600 border-t-transparent" />
         </div>
       ) : filteredPractitioners.length === 0 ? (
-        <div className="flex min-h-[40vh] items-center justify-center">
-          <div className="rounded-xl border border-slate-200 bg-white p-12 text-center">
-            <p className="text-slate-500">No calendars configured yet. Add them in Calendar availability.</p>
+        <div className="flex min-h-[40vh] items-center justify-center px-4">
+          <div className="w-full max-w-md">
+            <EmptyState
+              title="No calendars yet"
+              description="Add team calendars in Calendar availability to see appointments on the grid."
+            />
           </div>
         </div>
       ) : viewMode === 'month' ? (
@@ -1775,23 +1801,32 @@ export function PractitionerCalendarView({
           }}
         />
       ) : viewMode === 'week' ? (
-        <div className="w-full rounded-xl border border-slate-200 bg-white">
+        <div className="w-full rounded-2xl border border-slate-200 bg-white shadow-sm shadow-slate-900/5">
           <div className="min-w-[720px]">
             <table className="w-full border-collapse text-sm">
               <thead>
-                <tr className="sticky top-0 z-20 border-b border-slate-200 bg-slate-50 shadow-sm">
-                  <th className="sticky left-0 top-0 z-30 bg-slate-50 px-3 py-2 text-left font-semibold text-slate-700">
+                <tr className="sticky top-0 z-20 border-b border-slate-200 bg-slate-50/90 shadow-sm">
+                  <th className="sticky left-0 top-0 z-30 bg-slate-50/95 px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                     Team
                   </th>
-                  {weekDays.map((d) => (
-                    <th
-                      key={d}
-                      className="sticky top-0 z-20 bg-slate-50 px-2 py-2 text-center font-semibold text-slate-700"
-                    >
-                      <div>{WEEK_SHORT[new Date(`${d}T12:00:00`).getDay()]}</div>
-                      <div className="text-xs font-normal text-slate-500">{d.slice(8, 10)}</div>
-                    </th>
-                  ))}
+                  {weekDays.map((d) => {
+                    const isToday = d === new Date().toISOString().slice(0, 10);
+                    return (
+                      <th
+                        key={d}
+                        className={`sticky top-0 z-20 px-2 py-2 text-center ${
+                          isToday ? 'bg-brand-50/80' : 'bg-slate-50/90'
+                        }`}
+                      >
+                        <div className={`text-[11px] font-semibold uppercase tracking-wide ${isToday ? 'text-brand-700' : 'text-slate-500'}`}>
+                          {WEEK_SHORT[new Date(`${d}T12:00:00`).getDay()]}
+                        </div>
+                        <div className={`text-sm font-bold tabular-nums ${isToday ? 'text-brand-700' : 'text-slate-800'}`}>
+                          {d.slice(8, 10)}
+                        </div>
+                      </th>
+                    );
+                  })}
                 </tr>
               </thead>
               <tbody>
@@ -1929,7 +1964,7 @@ export function PractitionerCalendarView({
           <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
             <div
               ref={scrollRef}
-              className="min-w-0 w-full touch-manipulation rounded-xl border border-slate-200 bg-white motion-safe:scroll-smooth"
+              className="min-w-0 w-full touch-manipulation rounded-2xl border border-slate-200 bg-white shadow-sm shadow-slate-900/5 motion-safe:scroll-smooth"
             onTouchStart={(e) => {
               touchX.current = e.touches[0].clientX;
               const main = scrollRef.current?.closest('main');
@@ -1962,7 +1997,21 @@ export function PractitionerCalendarView({
               scrollSnapshotAtTouch.current = null;
             }}
           >
-            <div className="flex min-w-[600px]">
+            <div className="relative flex min-w-[600px]">
+              {dayViewNowLineTop != null ? (
+                <div
+                  className="pointer-events-none absolute left-0 right-0 z-[25]"
+                  style={{ top: 52 + dayViewNowLineTop }}
+                  aria-hidden
+                >
+                  <div className="flex items-center">
+                    <div className="flex w-16 shrink-0 justify-center">
+                      <span className="h-2 w-2 rounded-full bg-brand-600 shadow-sm ring-2 ring-white" />
+                    </div>
+                    <div className="h-px flex-1 bg-gradient-to-r from-brand-500/70 via-brand-400/50 to-transparent" />
+                  </div>
+                </div>
+              ) : null}
               <div className="w-16 flex-shrink-0 border-r border-slate-200 bg-slate-50">
                 <div
                   className="min-h-[52px] rounded-tl-xl border-b border-slate-200 bg-slate-50"
@@ -1973,7 +2022,7 @@ export function PractitionerCalendarView({
                     i % 4 === 0 ? (
                       <div
                         key={t}
-                        className="absolute left-0 w-full pr-2 text-right text-xs text-slate-400"
+                        className="absolute left-0 w-full pr-2 text-right text-[11px] font-semibold tabular-nums text-slate-500"
                         style={{ top: i === 0 ? 0 : i * SLOT_HEIGHT - 6 }}
                       >
                         {t}
@@ -2253,7 +2302,7 @@ export function PractitionerCalendarView({
                             <DraggableBookingShell key={b.id} booking={b} top={top} height={height} canDrag={canDrag}>
                               {(handle) => (
                                 <div
-                                  className={`flex h-full min-h-0 flex-row items-stretch overflow-hidden rounded-lg border border-solid shadow-sm transition-shadow hover:shadow-md ${
+                                  className={`flex h-full min-h-0 flex-row items-stretch overflow-hidden rounded-xl border border-solid shadow-sm transition-shadow hover:shadow-md ${
                                     flash ? 'motion-safe:animate-pulse ring-2 ring-brand-400/60' : ''
                                   }`}
                                   style={bookingBlockCardStyle(palette)}
@@ -2347,7 +2396,7 @@ export function PractitionerCalendarView({
                           <DraggableBookingShell key={first.id} booking={first} top={top} height={height} canDrag={false}>
                             {() => (
                               <div
-                                className={`flex h-full min-h-0 flex-row items-stretch overflow-hidden rounded-lg border border-solid shadow-sm transition-shadow hover:shadow-md ${
+                                className={`flex h-full min-h-0 flex-row items-stretch overflow-hidden rounded-xl border border-solid shadow-sm transition-shadow hover:shadow-md ${
                                   flash ? 'motion-safe:animate-pulse ring-2 ring-brand-400/60' : ''
                                 }`}
                                 style={bookingBlockCardStyle(palette)}

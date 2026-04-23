@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation';
 import { getDashboardStaff } from '@/lib/venue-auth';
 import { TableGridView } from './TableGridView';
 import { ToastProvider } from '@/components/ui/Toast';
+import { PageFrame } from '@/components/ui/dashboard/PageFrame';
 import type { BookingModel } from '@/types/booking-models';
 import { normalizeEnabledModels } from '@/lib/booking/enabled-models';
 
@@ -31,14 +32,14 @@ export default async function TableGridPage() {
 
   return (
     <ToastProvider>
-      <div className="p-2 md:p-4 lg:p-6">
+      <PageFrame maxWidthClass="max-w-[1600px]" className="px-2 py-4 sm:px-4 sm:py-5 lg:px-6">
         <TableGridView
           venueId={staff.venue_id}
           currency={currency}
           bookingModel={bookingModel}
           enabledModels={enabledModels}
         />
-      </div>
+      </PageFrame>
     </ToastProvider>
   );
 }

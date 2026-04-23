@@ -12,11 +12,9 @@ import {
 } from '@/lib/emails/templates/base-template';
 import { buildGoogleCalendarAddUrlForBooking } from '@/lib/emails/calendar-links';
 import {
-  bookingConfirmationPaymentParagraphs,
-  bookingConfirmationPaymentTextLines,
   bookingConfirmationSmsPriceSuffix,
+  confirmationStructuredPriceText,
   formatMoneyOrNull,
-  priceDisplayForConfirmationCard,
 } from './booking-confirmation-pricing';
 import type {
   CommunicationLane,
@@ -170,14 +168,10 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
 
   switch (opts.messageKey) {
     case 'booking_confirmation': {
-      const priceLineText = appointment
-        ? (() => {
-            const line = priceDisplayForConfirmationCard(opts.booking);
-            return line ? `Price: ${line}` : null;
-          })()
-        : null;
-      const paymentHtml = appointment ? bookingConfirmationPaymentParagraphs(opts.booking) : [];
-      const paymentText = appointment ? bookingConfirmationPaymentTextLines(opts.booking) : [];
+      const structuredPrice = appointment ? confirmationStructuredPriceText(opts.booking) : null;
+      const structuredTextLines = structuredPrice
+        ? ['Price and payment:', ...structuredPrice.split('\n')]
+        : [];
       return {
         subject: appointment
           ? `Your appointment at ${opts.venue.name} is confirmed`
@@ -190,7 +184,6 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
               ? 'Your appointment is confirmed. Here are the details:'
               : 'Your table is booked. Here are the details:',
           ),
-          ...paymentHtml,
           opts.cancellationPolicy ? htmlRaw(`<strong>Cancellation policy:</strong> ${escapeHtml(opts.cancellationPolicy)}`) : '',
           opts.preAppointmentInstructions && appointment
             ? htmlRaw(`<strong>Before your appointment:</strong><br/>${escapeHtml(opts.preAppointmentInstructions)}`)
@@ -206,8 +199,7 @@ function buildMainContentEmail(opts: CommunicationRenderOptions): {
           `Date: ${date}`,
           `Time: ${time}`,
           appointment ? opts.durationText ? `Duration: ${opts.durationText}` : null : `Guests: ${partySize}`,
-          priceLineText,
-          ...paymentText,
+          ...structuredTextLines,
           opts.cancellationPolicy ? `Cancellation policy: ${opts.cancellationPolicy}` : null,
           opts.preAppointmentInstructions && appointment
             ? `Before your appointment: ${opts.preAppointmentInstructions}`
@@ -549,7 +541,7 @@ export function renderCommunicationEmail(
 
   const priceForCard =
     opts.messageKey === 'booking_confirmation' && isAppointmentLane(opts.lane)
-      ? priceDisplayForConfirmationCard(opts.booking)
+      ? confirmationStructuredPriceText(opts.booking)
       : null;
 
   const html = renderBaseTemplate({

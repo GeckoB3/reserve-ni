@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { BookingModel } from '@/types/booking-models';
 import type { StaffMember } from '../types';
 import { isLightPlanTier } from '@/lib/tier-enforcement';
+import { SectionCard } from '@/components/ui/dashboard/SectionCard';
+import { Pill } from '@/components/ui/dashboard/Pill';
 
 interface StaffSectionProps {
   venueId: string;
@@ -436,27 +438,33 @@ export function StaffSection({
 
   if (loading) {
     return (
-      <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-        <div className="flex items-center gap-3">
+      <SectionCard elevated>
+        <SectionCard.Body className="flex items-center gap-3 py-8">
           <div className="h-5 w-5 animate-spin rounded-full border-2 border-brand-600 border-t-transparent" />
           <span className="text-sm text-slate-500">Loading staff settings...</span>
-        </div>
-      </section>
+        </SectionCard.Body>
+      </SectionCard>
     );
   }
 
   return (
     <div className="space-y-6">
       {/* My Account */}
-      <section className="rounded-xl border border-slate-200 bg-white shadow-sm">
-        <div className="border-b border-slate-100 px-6 py-4">
-          <h2 className="text-base font-semibold text-slate-900">My Account</h2>
-          <p className="mt-0.5 text-sm text-slate-500">Manage your own password and account security.</p>
-        </div>
-        <div className="px-6 py-4 space-y-4">
-          {passwordSuccess && (
-            <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-4 py-2.5 text-sm text-emerald-700">{passwordSuccess}</div>
-          )}
+      <SectionCard elevated>
+        <SectionCard.Header
+          eyebrow="Account"
+          title="My account"
+          description="Manage your own password and account security."
+        />
+        <SectionCard.Body className="space-y-4">
+          {passwordSuccess ? (
+            <div className="flex flex-wrap items-center gap-2 rounded-xl border border-emerald-200/80 bg-emerald-50/70 px-3 py-2.5 text-sm text-emerald-950">
+              <Pill variant="success" size="sm" dot>
+                Saved
+              </Pill>
+              <span>{passwordSuccess}</span>
+            </div>
+          ) : null}
 
           {!showPasswordForm ? (
             <button
@@ -504,35 +512,34 @@ export function StaffSection({
               </div>
             </form>
           )}
-        </div>
-      </section>
+        </SectionCard.Body>
+      </SectionCard>
 
       {/* Staff Members */}
-      <section className="rounded-xl border border-slate-200 bg-white shadow-sm">
-        <div className="border-b border-slate-100 px-6 py-4 flex items-center justify-between">
-          <div>
-            <h2 className="text-base font-semibold text-slate-900">Staff Members</h2>
-            <p className="mt-0.5 text-sm text-slate-500">
-              {isAdmin ? 'Manage team members, roles, and access.' : 'View your team members.'}
-            </p>
-          </div>
-          {isAdmin && !lightPlanStaffLimitReached && (
-            <button
-              type="button"
-              onClick={() => {
-                setShowCreateForm(!showCreateForm);
-                setCreateError(null);
-                setCreateSuccess(null);
-              }}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-brand-700"
-            >
-              <PlusIcon className="h-4 w-4" />
-              Add User
-            </button>
-          )}
-        </div>
+      <SectionCard elevated>
+        <SectionCard.Header
+          eyebrow="Team"
+          title="Staff members"
+          description={isAdmin ? 'Manage team members, roles, and access.' : 'View your team members.'}
+          right={
+            isAdmin && !lightPlanStaffLimitReached ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setShowCreateForm(!showCreateForm);
+                  setCreateError(null);
+                  setCreateSuccess(null);
+                }}
+                className="inline-flex items-center gap-1.5 rounded-xl bg-brand-600 px-3.5 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-700"
+              >
+                <PlusIcon className="h-4 w-4" />
+                Add User
+              </button>
+            ) : undefined
+          }
+        />
 
-        <div className="px-6 py-4 space-y-4">
+        <SectionCard.Body className="space-y-4">
           {isAdmin && lightPlanStaffLimitReached && (
             <div className="rounded-lg border border-amber-200 bg-amber-50/90 px-4 py-3 text-sm text-amber-950">
               Appointments Light includes <strong>one team login</strong>. To invite more people, upgrade to the full
@@ -854,8 +861,8 @@ export function StaffSection({
               </p>
             )}
           </div>
-        </div>
-      </section>
+        </SectionCard.Body>
+      </SectionCard>
 
       {/* Admin Reset Password Modal */}
       {resetTarget && (
@@ -915,12 +922,13 @@ export function StaffSection({
 
       {/* Session & Security Settings (Admin only) */}
       {isAdmin && (
-        <section className="rounded-xl border border-slate-200 bg-white shadow-sm">
-          <div className="border-b border-slate-100 px-6 py-4">
-            <h2 className="text-base font-semibold text-slate-900">Security Settings</h2>
-            <p className="mt-0.5 text-sm text-slate-500">Configure session timeouts and security policies for all staff.</p>
-          </div>
-          <div className="px-6 py-4 space-y-5">
+        <SectionCard elevated>
+          <SectionCard.Header
+            eyebrow="Security"
+            title="Security settings"
+            description="Configure session timeouts and security policies for all staff."
+          />
+          <SectionCard.Body className="space-y-5">
             {/* Session Timeout */}
             <div>
               <label className="mb-1 block text-sm font-medium text-slate-700">Auto-Logout Timer</label>
@@ -950,7 +958,11 @@ export function StaffSection({
                 >
                   {savingTimeout ? 'Saving...' : 'Save'}
                 </button>
-                {timeoutSaved && <span className="text-sm text-emerald-600">Saved</span>}
+                {timeoutSaved ? (
+                  <Pill variant="success" size="sm" dot>
+                    Saved
+                  </Pill>
+                ) : null}
               </div>
               {sessionTimeout !== null && sessionTimeout > 0 && (
                 <p className="mt-2 text-xs text-slate-500">
@@ -958,8 +970,8 @@ export function StaffSection({
                 </p>
               )}
             </div>
-          </div>
-        </section>
+          </SectionCard.Body>
+        </SectionCard>
       )}
     </div>
   );

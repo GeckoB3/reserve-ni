@@ -5,6 +5,8 @@ import { FloorPlanEditor } from '@/app/dashboard/settings/floor-plan/FloorPlanEd
 import { TableList } from '@/app/dashboard/settings/tables/TableList';
 import { TableCombinationsPage } from '@/app/dashboard/settings/tables/TableCombinationsPage';
 import type { TableCombination, VenueTable } from '@/types/table-management';
+import { SectionCard } from '@/components/ui/dashboard/SectionCard';
+import { TabBar } from '@/components/ui/dashboard/TabBar';
 
 export type FloorPlanEditorTabKey = 'layout' | 'tables' | 'combinations';
 
@@ -92,39 +94,32 @@ export function FloorPlanEditorTabs({
   }, [advancedTableManagement]);
 
   return (
-    <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-      {!hideHeading && (
-        <>
-          <h2 className="mb-1 text-lg font-semibold text-slate-900">Floor plan &amp; tables</h2>
-          <p className="mb-4 text-sm text-slate-500">
-            {advancedTableManagement
+    <SectionCard>
+      {!hideHeading ? (
+        <SectionCard.Header
+          title="Floor plan & tables"
+          description={
+            advancedTableManagement
               ? 'Layout changes are saved automatically as you make them.'
-              : 'Optional: define tables for staff seating notes on the Day Sheet. This does not change how many guests can book online.'}
-          </p>
-        </>
-      )}
+              : 'Optional: define tables for staff seating notes on the Day Sheet. This does not change how many guests can book online.'
+          }
+        />
+      ) : null}
 
-      <div className="mb-4 overflow-x-auto">
-        <div className="flex w-max gap-2">
-          {visibleTabKeys.map((nextTab) => (
-            <button
-              key={nextTab}
-              type="button"
-              onClick={() => onTabChange(nextTab)}
-              className={`rounded-lg px-3 py-1.5 text-sm font-medium ${
-                activeTab === nextTab
-                  ? 'bg-brand-600 text-white'
-                  : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
-              }`}
-            >
-              {nextTab[0]!.toUpperCase() + nextTab.slice(1)}
-            </button>
-          ))}
-        </div>
+      <SectionCard.Body className={hideHeading ? '!pt-5' : '!pt-0'}>
+      <div className="mb-4 overflow-x-auto pb-1">
+        <TabBar<FloorPlanEditorTabKey>
+          tabs={visibleTabKeys.map((k) => ({
+            id: k,
+            label: k[0]!.toUpperCase() + k.slice(1),
+          }))}
+          value={activeTab}
+          onChange={onTabChange}
+        />
       </div>
 
-      <div className="rounded-lg border border-slate-100 bg-slate-50/80 px-3 py-2">
-        <p className="text-xs font-medium uppercase tracking-wide text-slate-500">{tabLabel}</p>
+      <div className="rounded-xl border border-slate-100 bg-slate-50/80 px-3 py-2">
+        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{tabLabel}</p>
       </div>
 
       <div className="mt-4">
@@ -173,6 +168,7 @@ export function FloorPlanEditorTabs({
           </div>
         )}
       </div>
-    </section>
+      </SectionCard.Body>
+    </SectionCard>
   );
 }

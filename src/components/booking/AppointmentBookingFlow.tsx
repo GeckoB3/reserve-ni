@@ -238,6 +238,8 @@ export function AppointmentBookingFlow({
   const [calendarCache, setCalendarCache] = useState<Map<string, Set<string>>>(() => new Map());
   const calendarCacheRef = useRef(calendarCache);
   calendarCacheRef.current = calendarCache;
+  const calendarMonthRef = useRef(calendarMonth);
+  calendarMonthRef.current = calendarMonth;
 
   const containerRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -368,6 +370,73 @@ export function AppointmentBookingFlow({
     [bookingAudience, venue.id],
   );
 
+  /** Best-effort month prefetch with a small concurrency cap to avoid hammering the API/DB. */
+  const prefetchCalendarTasks = useCallback(
+    async (
+      tasks: Array<{ practitionerId: string; serviceId: string }>,
+      year: number,
+      month: number,
+      options?: { signal?: AbortSignal; concurrency?: number },
+    ) => {
+      const concurrency = options?.concurrency ?? 4;
+      const signal = options?.signal;
+      const pending = tasks.filter((t) => {
+        const key = appointmentCalendarCacheKey(t.practitionerId, t.serviceId, year, month);
+        return !calendarCacheRef.current.has(key);
+      });
+      if (pending.length === 0) return;
+
+      const queue = pending.slice();
+      async function worker() {
+        while (queue.length > 0) {
+          if (signal?.aborted) return;
+          const t = queue.shift();
+          if (!t) return;
+          const key = appointmentCalendarCacheKey(t.practitionerId, t.serviceId, year, month);
+          if (calendarCacheRef.current.has(key)) continue;
+          try {
+            const nextSet = await fetchAppointmentCalendarMonth({
+              practitionerId: t.practitionerId,
+              serviceId: t.serviceId,
+              year,
+              month,
+              signal,
+            });
+            if (signal?.aborted) return;
+            setCalendarCache((prev) => {
+              if (prev.has(key)) return prev;
+              const next = new Map(prev);
+              next.set(key, nextSet);
+              return next;
+            });
+          } catch (e) {
+            if (signal?.aborted || (e instanceof Error && e.name === 'AbortError')) return;
+            /* best-effort */
+          }
+        }
+      }
+      const nWorkers = Math.min(concurrency, pending.length);
+      await Promise.all(Array.from({ length: nWorkers }, () => worker()));
+    },
+    [fetchAppointmentCalendarMonth],
+  );
+
+  /** Start loading month grids as soon as a service is chosen (before the slot step mounts). */
+  const queuePrefetchForServicePractitioners = useCallback(
+    (serviceId: string) => {
+      const { year, month } = calendarMonthRef.current;
+      const tasks: Array<{ practitionerId: string; serviceId: string }> = [];
+      for (const p of catalogStaff) {
+        if (p.services.some((s) => s.id === serviceId)) {
+          tasks.push({ practitionerId: p.id, serviceId });
+        }
+      }
+      if (tasks.length === 0) return;
+      void prefetchCalendarTasks(tasks, year, month, { concurrency: 4 });
+    },
+    [catalogStaff, prefetchCalendarTasks],
+  );
+
   useEffect(() => {
     if (step !== 'slot' && step !== 'group_slot') return;
     const isGroup = step === 'group_slot';
@@ -418,29 +487,7 @@ export function AppointmentBookingFlow({
     if (tasks.length === 0) return;
 
     const ac = new AbortController();
-    for (const t of tasks) {
-      const key = appointmentCalendarCacheKey(t.practitionerId, t.serviceId, year, month);
-      if (calendarCacheRef.current.has(key)) continue;
-      void (async () => {
-        try {
-          const nextSet = await fetchAppointmentCalendarMonth({
-            practitionerId: t.practitionerId,
-            serviceId: t.serviceId,
-            year,
-            month,
-            signal: ac.signal,
-          });
-          setCalendarCache((prev) => {
-            if (prev.has(key)) return prev;
-            const next = new Map(prev);
-            next.set(key, nextSet);
-            return next;
-          });
-        } catch {
-          /* best-effort prefetch */
-        }
-      })();
-    }
+    void prefetchCalendarTasks(tasks, year, month, { signal: ac.signal, concurrency: 4 });
     return () => ac.abort();
   }, [
     step,
@@ -451,7 +498,7 @@ export function AppointmentBookingFlow({
     catalogStaff,
     calendarMonth.year,
     calendarMonth.month,
-    fetchAppointmentCalendarMonth,
+    prefetchCalendarTasks,
   ]);
 
   /**
@@ -565,6 +612,39 @@ export function AppointmentBookingFlow({
     }
     return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
   }, [catalogStaff]);
+
+  const onlyListedServiceId = useMemo(() => {
+    if (servicesWithFromPrice.length !== 1) return null;
+    return servicesWithFromPrice[0]?.id ?? null;
+  }, [servicesWithFromPrice]);
+
+  /**
+   * Single-service venues: warm the calendar cache while the user reads the service step (one batch
+   * of throttled requests, same as practitioner-step prefetch).
+   */
+  useEffect(() => {
+    if (step !== 'service' || catalogLoading || isLockedPractitionerFlow || !onlyListedServiceId) return;
+    const { year, month } = calendarMonth;
+    const tasks: Array<{ practitionerId: string; serviceId: string }> = [];
+    for (const p of catalogStaff) {
+      if (p.services.some((s) => s.id === onlyListedServiceId)) {
+        tasks.push({ practitionerId: p.id, serviceId: onlyListedServiceId });
+      }
+    }
+    if (tasks.length === 0) return;
+    const ac = new AbortController();
+    void prefetchCalendarTasks(tasks, year, month, { signal: ac.signal, concurrency: 4 });
+    return () => ac.abort();
+  }, [
+    step,
+    catalogLoading,
+    isLockedPractitionerFlow,
+    onlyListedServiceId,
+    catalogStaff,
+    calendarMonth.year,
+    calendarMonth.month,
+    prefetchCalendarTasks,
+  ]);
 
   const practitionersForSelectedService = useMemo(() => {
     if (!selectedServiceId) return [];
@@ -1205,7 +1285,16 @@ export function AppointmentBookingFlow({
           ) : (
             <div className="space-y-2">
               {servicesWithFromPrice.map((svc) => (
-                <button key={svc.id} type="button" onClick={() => { setSelectedServiceId(svc.id); setStep(isLockedPractitionerFlow ? 'slot' : 'practitioner'); }} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3.5 text-left shadow-sm transition-all hover:border-brand-300 hover:shadow-md active:scale-[0.99]">
+                <button
+                  key={svc.id}
+                  type="button"
+                  onClick={() => {
+                    queuePrefetchForServicePractitioners(svc.id);
+                    setSelectedServiceId(svc.id);
+                    setStep(isLockedPractitionerFlow ? 'slot' : 'practitioner');
+                  }}
+                  className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3.5 text-left shadow-sm transition-all hover:border-brand-300 hover:shadow-md active:scale-[0.99]"
+                >
                   <div className="flex items-center justify-between gap-3">
                     <div className="min-w-0">
                       <div className="font-medium text-slate-900">{svc.name}</div>
@@ -1802,7 +1891,15 @@ export function AppointmentBookingFlow({
           ) : (
             <div className="space-y-2">
               {servicesWithFromPrice.map((svc) => (
-                <button key={svc.id} onClick={() => { setGroupServiceId(svc.id); setStep('group_practitioner'); }} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3.5 text-left shadow-sm transition-all hover:border-brand-300 hover:shadow-md active:scale-[0.99]">
+                <button
+                  key={svc.id}
+                  onClick={() => {
+                    queuePrefetchForServicePractitioners(svc.id);
+                    setGroupServiceId(svc.id);
+                    setStep('group_practitioner');
+                  }}
+                  className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3.5 text-left shadow-sm transition-all hover:border-brand-300 hover:shadow-md active:scale-[0.99]"
+                >
                   <div className="flex items-center justify-between gap-3">
                     <div className="min-w-0">
                       <div className="font-medium text-slate-900">{svc.name}</div>

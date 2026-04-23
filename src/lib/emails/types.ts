@@ -22,6 +22,13 @@ export interface GroupAppointmentLine {
   price_display?: string | null;
 }
 
+/** Event ticket line for confirmation email price breakdown. */
+export interface BookingTicketPriceLine {
+  label?: string | null;
+  quantity: number;
+  unit_price_pence: number;
+}
+
 export interface BookingEmailData {
   id: string;
   guest_name: string;
@@ -58,6 +65,17 @@ export interface BookingEmailData {
    * Optional; enriched from DB when not set by the booking API.
    */
   booking_total_price_pence?: number | null;
+  /**
+   * Per-seat or per-ticket unit price (e.g. class price per person). Used with
+   * `booking_price_quantity` or `party_size` to show "£X each × n" in confirmations.
+   */
+  booking_unit_price_pence?: number | null;
+  /**
+   * Quantity for unit price breakdown (e.g. class seats). Defaults to `party_size` in templates when omitted.
+   */
+  booking_price_quantity?: number | null;
+  /** Event bookings: one entry per ticket type from `booking_ticket_lines`. */
+  booking_ticket_price_lines?: BookingTicketPriceLine[];
   /** Model B group: one row per person/treatment (omit for single appointment). */
   group_appointments?: GroupAppointmentLine[];
   /**

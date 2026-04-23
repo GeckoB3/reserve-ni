@@ -11,6 +11,7 @@ import { normalizeToE164 } from '@/lib/phone/e164';
 import { isValidWebsiteUrlInput } from '@/lib/urls/website-url';
 import { buildAddress, parseAddress } from '@/lib/venue/address-format';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
+import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 
 const profileSchema = z.object({
   name: z.string().min(1, 'Name is required').max(200),
@@ -152,7 +153,7 @@ export function VenueProfileSection({ venue, onUpdate, isAdmin, bookingModel = '
       kitchen_email: updated.kitchen_email ?? null,
       timezone: updated.timezone ?? venue.timezone,
     });
-  }, [onUpdate, venue.timezone]);
+  }, [onUpdate, setValue, venue.timezone]);
 
   const onCoverChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -184,9 +185,12 @@ export function VenueProfileSection({ venue, onUpdate, isAdmin, bookingModel = '
   }, [isAdmin, onUpdate]);
 
   return (
-    <section className="rounded-lg border border-neutral-200 bg-white p-6 shadow-sm">
-      <h2 className="mb-4 text-lg font-semibold text-neutral-900">{isAppointment ? 'Business profile' : 'Venue profile'}</h2>
-
+    <SectionCard elevated>
+      <SectionCard.Header
+        eyebrow="Venue"
+        title={isAppointment ? 'Business profile' : 'Venue profile'}
+      />
+      <SectionCard.Body>
       <div className="mb-6">
         <span className="block text-sm font-medium text-neutral-700 mb-1">Cover photo</span>
         {venue.cover_photo_url ? (
@@ -333,6 +337,7 @@ export function VenueProfileSection({ venue, onUpdate, isAdmin, bookingModel = '
           </button>
         )}
       </form>
-    </section>
+      </SectionCard.Body>
+    </SectionCard>
   );
 }

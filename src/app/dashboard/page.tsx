@@ -5,6 +5,13 @@ import Link from 'next/link';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { SetupChecklist } from './SetupChecklist';
 import { DashboardStatCard } from '@/components/dashboard/DashboardStatCard';
+import { EmptyState } from '@/components/ui/dashboard/EmptyState';
+import { PageFrame } from '@/components/ui/dashboard/PageFrame';
+import { PageHeader } from '@/components/ui/dashboard/PageHeader';
+import { Pill } from '@/components/ui/dashboard/Pill';
+import { ScheduleRow } from '@/components/ui/dashboard/ScheduleRow';
+import { SectionCard } from '@/components/ui/dashboard/SectionCard';
+import { StackedList } from '@/components/ui/dashboard/StackedList';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 import {
   activeModelsToLegacyEnabledModels,
@@ -76,36 +83,6 @@ function getLoadBarColor(pct: number): string {
   return 'bg-brand-500';
 }
 
-function getStatusBadge(status: string) {
-  switch (status) {
-    case 'Confirmed':
-      return 'bg-emerald-50 text-emerald-700 ring-emerald-600/20';
-    case 'Seated':
-      return 'bg-blue-50 text-blue-700 ring-blue-600/20';
-    case 'Pending':
-      return 'bg-amber-50 text-amber-700 ring-amber-600/20';
-    default:
-      return 'bg-slate-50 text-slate-600 ring-slate-500/20';
-  }
-}
-
-function getDepositBadge(status: string) {
-  switch (status) {
-    case 'Paid':
-      return 'bg-emerald-50 text-emerald-700';
-    case 'Pending':
-      return 'bg-amber-50 text-amber-700';
-    case 'Waived':
-      return 'bg-blue-50 text-blue-700';
-    case 'Refunded':
-      return 'bg-violet-50 text-violet-700';
-    case 'Not Required':
-      return 'bg-slate-50 text-slate-500';
-    default:
-      return 'bg-slate-50 text-slate-400';
-  }
-}
-
 function formatGreeting(): string {
   const hour = new Date().getHours();
   if (hour < 12) return 'Good morning';
@@ -120,6 +97,23 @@ function formatTodayDate(): string {
     month: 'long',
     year: 'numeric',
   }).format(new Date());
+}
+
+function formatWeekday(): string {
+  return new Intl.DateTimeFormat('en-GB', { weekday: 'long' }).format(new Date());
+}
+
+function stripClassForBookingStatus(status: string): string {
+  switch (status) {
+    case 'Confirmed':
+      return 'bg-emerald-600';
+    case 'Pending':
+      return 'bg-amber-500';
+    case 'Seated':
+      return 'bg-brand-600';
+    default:
+      return 'bg-slate-300';
+  }
 }
 
 export default function DashboardHomePage() {
@@ -195,72 +189,89 @@ export default function DashboardHomePage() {
   const fillPct = n(t.peak_fill_percent);
   const hasCap = t.concurrent_cap != null;
   const cap = t.concurrent_cap;
+  const forecastSpark = data.forecast.map((f) => (isAppointment ? f.bookings : f.covers));
 
   return (
-    <div className="p-5 lg:p-8 space-y-6 max-w-[1400px]">
-      {/* Header */}
-      <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight text-slate-900">{formatGreeting()}</h1>
-          <p className="mt-0.5 text-sm text-slate-500">{formatTodayDate()}</p>
-        </div>
-        <div className="flex gap-2 mt-2 sm:mt-0">
-          <Link
-            href={scheduleHref}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50"
-          >
-            <svg className="h-4 w-4 text-slate-400" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5" />
-            </svg>
-            {calendarEligible ? 'Calendar' : 'Day sheet'}
-          </Link>
-          <Link
-            href="/dashboard/bookings"
-            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50"
-          >
-            <svg className="h-4 w-4 text-slate-400" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 6.75h12M8.25 12h12m-12 5.25h12M3.75 6.75h.007v.008H3.75V6.75Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0ZM3.75 12h.007v.008H3.75V12Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm-.375 5.25h.007v.008H3.75v-.008Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z" />
-            </svg>
-            {isAppointment ? 'All appointments' : 'All bookings'}
-          </Link>
-        </div>
-      </div>
-
-      <SetupChecklist />
-
-      {/* Key Metrics */}
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <DashboardStatCard
-          label={isAppointment ? 'Appointments today' : 'Covers today'}
-          value={isAppointment ? bookings : covers}
-          color="blue"
-          subValue={isAppointment
-            ? (bookings > 0 ? `${confirmed} confirmed` : 'no appointments yet')
-            : (bookings > 0 ? `across ${bookings} booking${bookings !== 1 ? 's' : ''}` : 'no bookings yet')
+    <PageFrame>
+      <div className="space-y-8">
+        <PageHeader
+          eyebrow={formatWeekday()}
+          title={formatGreeting()}
+          subtitle={formatTodayDate()}
+          actions={
+            <>
+              <Link
+                href={scheduleHref}
+                className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-800 shadow-sm transition-colors hover:border-brand-200 hover:bg-brand-50/40"
+              >
+                <svg className="h-4 w-4 text-brand-500" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5" />
+                </svg>
+                {calendarEligible ? 'Calendar' : 'Day sheet'}
+              </Link>
+              <Link
+                href="/dashboard/bookings"
+                className="inline-flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white shadow-md shadow-brand-600/25 transition-colors hover:bg-brand-700"
+              >
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 6.75h12M8.25 12h12m-12 5.25h12M3.75 6.75h.007v.008H3.75V6.75Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0ZM3.75 12h.007v.008H3.75V12Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm-.375 5.25h.007v.008H3.75v-.008Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z" />
+                </svg>
+                {isAppointment ? 'All appointments' : 'All bookings'}
+              </Link>
+            </>
           }
         />
-        <DashboardStatCard
-          label="Confirmed"
-          value={confirmed}
-          color="emerald"
-          subValue={
-            (pending > 0 || seated > 0)
-              ? [seated > 0 ? `${seated} seated` : '', pending > 0 ? `${pending} pending` : ''].filter(Boolean).join(', ')
-              : undefined
-          }
-        />
-        <DashboardStatCard
-          label="Deposit revenue"
-          value={`£${revenue.toFixed(2)}`}
-          color="emerald"
-        />
-        <DashboardStatCard
-          label="Next up"
-          value={t.next_booking ? t.next_booking.time : '-'}
-          color="amber"
-          subValue={t.next_booking ? (isAppointment ? 'next appointment' : `party of ${t.next_booking.party_size}`) : (isAppointment ? 'no upcoming appointments' : 'no upcoming bookings')}
-        />
-      </div>
+
+        <SetupChecklist />
+
+        <div className="grid gap-8 lg:grid-cols-3">
+          <div className="space-y-8 lg:col-span-2">
+            {/* Key Metrics */}
+            <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-4">
+              <DashboardStatCard
+                label={isAppointment ? 'Appointments today' : 'Covers today'}
+                value={isAppointment ? bookings : covers}
+                color="brand"
+                sparklineValues={forecastSpark}
+                subValue={
+                  isAppointment
+                    ? bookings > 0
+                      ? `${confirmed} confirmed`
+                      : 'no appointments yet'
+                    : bookings > 0
+                      ? `across ${bookings} booking${bookings !== 1 ? 's' : ''}`
+                      : 'no bookings yet'
+                }
+              />
+              <DashboardStatCard
+                label="Confirmed"
+                value={confirmed}
+                color="emerald"
+                sparklineValues={forecastSpark}
+                subValue={
+                  pending > 0 || seated > 0
+                    ? [seated > 0 ? `${seated} seated` : '', pending > 0 ? `${pending} pending` : '']
+                        .filter(Boolean)
+                        .join(', ')
+                    : undefined
+                }
+              />
+              <DashboardStatCard label="Deposit revenue" value={`£${revenue.toFixed(2)}`} color="emerald" />
+              <DashboardStatCard
+                label="Next up"
+                value={t.next_booking ? t.next_booking.time : '-'}
+                color="amber"
+                subValue={
+                  t.next_booking
+                    ? isAppointment
+                      ? 'next appointment'
+                      : `party of ${t.next_booking.party_size}`
+                    : isAppointment
+                      ? 'no upcoming appointments'
+                      : 'no upcoming bookings'
+                }
+              />
+            </div>
 
       {data.today_by_booking_model && Object.keys(data.today_by_booking_model).length > 0 && (
         <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -424,7 +435,7 @@ export default function DashboardHomePage() {
         </div>}
 
         {/* Forecast chart */}
-        <div className="rounded-xl border border-slate-200 bg-white p-5">
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <h2 className="text-sm font-semibold text-slate-700">{isAppointment ? '7-day appointments' : '7-day covers'}</h2>
           <p className="mb-4 mt-1 text-xs text-slate-400">{isAppointment ? 'Total appointments booked each day.' : 'Total covers booked each day.'}</p>
           <div className="h-52">
@@ -453,87 +464,148 @@ export default function DashboardHomePage() {
                   formatter={(value: number) => [isAppointment ? `${value} appointments` : `${value} covers`, isAppointment ? 'Appointments' : 'Covers']}
                   cursor={{ fill: '#f8fafc' }}
                 />
-                <Bar dataKey={isAppointment ? 'bookings' : 'covers'} fill="#6366f1" radius={[6, 6, 0, 0]} maxBarSize={48} />
+                <Bar dataKey={isAppointment ? 'bookings' : 'covers'} fill="#4E6B78" radius={[8, 8, 0, 0]} maxBarSize={44} />
               </BarChart>
             </ResponsiveContainer>
           </div>
         </div>
       </div>
-
-      {/* Today's Bookings */}
-      <div className="rounded-xl border border-slate-200 bg-white">
-        <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
-          <h2 className="text-sm font-semibold text-slate-700">{isAppointment ? "Today's appointments" : "Today's bookings"}</h2>
-          <Link
-            href={isAppointment ? '/dashboard/bookings' : scheduleHref}
-            className="text-xs font-medium text-brand-600 hover:text-brand-700 transition-colors"
-          >
-            {isAppointment ? 'View all' : calendarEligible ? 'View calendar' : 'View day sheet'} &rarr;
-          </Link>
+          </div>
+          <aside className="space-y-4 lg:col-span-1">
+            <SectionCard elevated className="border-slate-200/90">
+              <SectionCard.Header eyebrow="Pulse" title="Today's snapshot" />
+              <SectionCard.Body className="space-y-4">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm text-slate-600">Pending confirmations</span>
+                  <span className="text-xl font-bold tabular-nums text-slate-900">{pending}</span>
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm text-slate-600">Seated</span>
+                  <span className="text-xl font-bold tabular-nums text-slate-900">{seated}</span>
+                </div>
+                <div className="rounded-xl border border-slate-100 bg-slate-50/90 px-3 py-2.5 text-xs leading-relaxed text-slate-600">
+                  Automated confirmations and reminders follow your venue rules. Fine-tune messaging under Settings
+                  when you are ready.
+                </div>
+              </SectionCard.Body>
+            </SectionCard>
+          </aside>
         </div>
 
-        {data.recent_bookings.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-12 text-center">
-            <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-slate-100">
-              <svg className="h-5 w-5 text-slate-400" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5m-9-6h.008v.008H12v-.008ZM12 15h.008v.008H12V15Zm0 2.25h.008v.008H12v-.008ZM9.75 15h.008v.008H9.75V15Zm0 2.25h.008v.008H9.75v-.008ZM7.5 15h.008v.008H7.5V15Zm0 2.25h.008v.008H7.5v-.008Zm6.75-4.5h.008v.008h-.008v-.008Zm0 2.25h.008v.008h-.008V15Zm0 2.25h.008v.008h-.008v-.008Zm2.25-4.5h.008v.008H16.5v-.008Zm0 2.25h.008v.008H16.5V15Z" />
-              </svg>
-            </div>
-            <p className="text-sm font-medium text-slate-600">No {isAppointment ? 'appointments' : 'bookings'} today</p>
-            <p className="mt-1 text-xs text-slate-400">{isAppointment ? 'Appointments' : 'Bookings'} will appear here as they come in.</p>
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-slate-100 bg-slate-50/60">
-                  <th className="whitespace-nowrap px-5 py-2.5 text-left text-xs font-medium text-slate-500">Time</th>
-                  <th className="whitespace-nowrap px-5 py-2.5 text-left text-xs font-medium text-slate-500">{isAppointment ? 'Client' : 'Guest'}</th>
-                  {!isAppointment && <th className="whitespace-nowrap px-5 py-2.5 text-left text-xs font-medium text-slate-500">Covers</th>}
-                  {showTypeColumn && (
-                    <th className="whitespace-nowrap px-5 py-2.5 text-left text-xs font-medium text-slate-500">Type</th>
-                  )}
-                  <th className="whitespace-nowrap px-5 py-2.5 text-left text-xs font-medium text-slate-500">Status</th>
-                  <th className="whitespace-nowrap px-5 py-2.5 text-left text-xs font-medium text-slate-500">Deposit</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-50">
-                {data.recent_bookings.map((b) => (
-                  <tr key={b.id} className="transition-colors hover:bg-slate-50/50">
-                    <td className="whitespace-nowrap px-5 py-3 font-medium tabular-nums text-slate-800">{b.time}</td>
-                    <td className="max-w-[180px] truncate px-5 py-3 text-slate-700" title={b.guest_name}>{b.guest_name}</td>
-                    {!isAppointment && <td className="whitespace-nowrap px-5 py-3 tabular-nums text-slate-600">{b.party_size}</td>}
-                    {showTypeColumn && (
-                      <td className="whitespace-nowrap px-5 py-3 text-xs text-slate-600">{b.kind_label ?? '-'}</td>
-                    )}
-                    <td className="whitespace-nowrap px-5 py-3">
-                      <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset ${getStatusBadge(b.status)}`}>
-                        {bookingStatusDisplayLabel(b.status, !isAppointment)}
-                      </span>
-                    </td>
-                    <td className="whitespace-nowrap px-5 py-3">
-                      <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${getDepositBadge(b.deposit_status)}`}>
-                        {b.deposit_status}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-
-        {data.recent_bookings.length > 0 && bookings > 10 && (
-          <div className="border-t border-slate-100 px-5 py-3 text-center">
-            <Link
-              href="/dashboard/bookings"
-              className="text-xs font-medium text-brand-600 hover:text-brand-700 transition-colors"
-            >
-              {bookings - 10} more {isAppointment ? 'appointment' : 'booking'}{bookings - 10 !== 1 ? 's' : ''} - view all &rarr;
-            </Link>
-          </div>
-        )}
+        {/* Today's Bookings */}
+        <SectionCard elevated>
+          <SectionCard.Header
+            eyebrow="Diary"
+            title={isAppointment ? "Today's appointments" : "Today's bookings"}
+            right={
+              <Link
+                href={isAppointment ? '/dashboard/bookings' : scheduleHref}
+                className="text-xs font-semibold text-brand-600 hover:text-brand-800"
+              >
+                {isAppointment ? 'View all' : calendarEligible ? 'View calendar' : 'View day sheet'} &rarr;
+              </Link>
+            }
+          />
+          <SectionCard.Body className="!px-0 !pb-0 sm:!px-0">
+            {data.recent_bookings.length === 0 ? (
+              <div className="px-5 pb-8">
+                <EmptyState
+                  title={`No ${isAppointment ? 'appointments' : 'bookings'} today`}
+                  description={`${isAppointment ? 'Appointments' : 'Bookings'} will appear here as they come in.`}
+                />
+              </div>
+            ) : (
+              <StackedList
+                items={data.recent_bookings}
+                keyExtractor={(b) => b.id}
+                renderDesktopRow={(b) => (
+                  <ScheduleRow
+                    timeLabel={b.time}
+                    title={b.guest_name}
+                    subtitle={
+                      [
+                        !isAppointment ? `${b.party_size} covers` : '',
+                        showTypeColumn ? (b.kind_label ?? '') : '',
+                      ]
+                        .filter(Boolean)
+                        .join(' · ') || undefined
+                    }
+                    stripClassName={stripClassForBookingStatus(b.status)}
+                    trailing={
+                      <div className="flex flex-wrap items-center justify-end gap-1">
+                        <Pill
+                          variant={
+                            b.status === 'Confirmed'
+                              ? 'success'
+                              : b.status === 'Pending'
+                                ? 'warning'
+                                : b.status === 'Seated'
+                                  ? 'brand'
+                                  : 'neutral'
+                          }
+                          size="sm"
+                        >
+                          {bookingStatusDisplayLabel(b.status, !isAppointment)}
+                        </Pill>
+                        <Pill variant="neutral" size="sm">
+                          {b.deposit_status}
+                        </Pill>
+                      </div>
+                    }
+                  />
+                )}
+                renderMobileCard={(b) => (
+                  <ScheduleRow
+                    timeLabel={b.time}
+                    title={b.guest_name}
+                    subtitle={
+                      [
+                        !isAppointment ? `${b.party_size} covers` : '',
+                        showTypeColumn ? (b.kind_label ?? '') : '',
+                      ]
+                        .filter(Boolean)
+                        .join(' · ') || undefined
+                    }
+                    stripClassName={stripClassForBookingStatus(b.status)}
+                    trailing={
+                      <div className="flex flex-wrap gap-1">
+                        <Pill
+                          variant={
+                            b.status === 'Confirmed'
+                              ? 'success'
+                              : b.status === 'Pending'
+                                ? 'warning'
+                                : b.status === 'Seated'
+                                  ? 'brand'
+                                  : 'neutral'
+                          }
+                          size="sm"
+                        >
+                          {bookingStatusDisplayLabel(b.status, !isAppointment)}
+                        </Pill>
+                        <Pill variant="neutral" size="sm">
+                          {b.deposit_status}
+                        </Pill>
+                      </div>
+                    }
+                  />
+                )}
+              />
+            )}
+          </SectionCard.Body>
+          {data.recent_bookings.length > 0 && bookings > 10 ? (
+            <SectionCard.Footer className="text-center">
+              <Link
+                href="/dashboard/bookings"
+                className="text-xs font-semibold text-brand-600 hover:text-brand-800"
+              >
+                {bookings - 10} more {isAppointment ? 'appointment' : 'booking'}
+                {bookings - 10 !== 1 ? 's' : ''}, view all &rarr;
+              </Link>
+            </SectionCard.Footer>
+          ) : null}
+        </SectionCard>
       </div>
-    </div>
+    </PageFrame>
   );
 }

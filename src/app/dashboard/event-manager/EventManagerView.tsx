@@ -10,6 +10,11 @@ import { downloadCsvFile, escapeCsvCell } from './event-manager-utils';
 import { canAddCalendarColumn, useCalendarEntitlement } from '@/hooks/use-calendar-entitlement';
 import { isLightPlanTier } from '@/lib/tier-enforcement';
 import { NumericInput } from '@/components/ui/NumericInput';
+import { PageHeader } from '@/components/ui/dashboard/PageHeader';
+import { SectionCard } from '@/components/ui/dashboard/SectionCard';
+import { Pill, type PillVariant } from '@/components/ui/dashboard/Pill';
+import { EmptyState } from '@/components/ui/dashboard/EmptyState';
+import { StackedList } from '@/components/ui/dashboard/StackedList';
 
 interface TicketType {
   id: string;
@@ -101,6 +106,14 @@ function parseCustomDatesFromText(text: string): string[] {
     if (/^\d{4}-\d{2}-\d{2}$/.test(p)) set.add(p);
   }
   return [...set].sort();
+}
+
+function attendeeStatusVariant(status: string): PillVariant {
+  const s = status.toLowerCase();
+  if (s.includes('cancel')) return 'danger';
+  if (s.includes('confirm') || s.includes('paid') || s.includes('complete')) return 'success';
+  if (s.includes('pending') || s.includes('hold')) return 'warning';
+  return 'neutral';
 }
 
 const BLANK_EVENT: EventFormState = {
@@ -669,43 +682,47 @@ export function EventManagerView({
   };
 
   return (
-    <div>
-      <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <h1 className="text-2xl font-semibold text-slate-900">Event Manager</h1>
-        <div className="flex flex-wrap items-center gap-2">
-          <input
-            type="search"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search events…"
-            className="min-w-[180px] rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
-            aria-label="Search events"
-          />
-          {publicBookingUrl.includes('/book/') && (
-            <button
-              type="button"
-              onClick={() => void copyPublicBookingLink()}
-              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-            >
-              Copy booking link
-            </button>
-          )}
-          {(isAdmin || linkedPractitionerIds.length > 0) && (
-            <button
-              type="button"
-              onClick={() => {
-                setEditingEventId(null);
-                setEventForm({ ...BLANK_EVENT });
-                setEventError(null);
-                setShowEventForm(true);
-              }}
-              className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700"
-            >
-              + Create event
-            </button>
-          )}
-        </div>
-      </div>
+    <div className="space-y-4">
+      <PageHeader
+        eyebrow="Events"
+        title="Event manager"
+        subtitle="Create ticketed experiences, manage capacity, and review attendees."
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              type="search"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search events…"
+              className="min-w-[180px] rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
+              aria-label="Search events"
+            />
+            {publicBookingUrl.includes('/book/') ? (
+              <button
+                type="button"
+                onClick={() => void copyPublicBookingLink()}
+                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
+              >
+                Copy booking link
+              </button>
+            ) : null}
+            {(isAdmin || linkedPractitionerIds.length > 0) ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setEditingEventId(null);
+                  setEventForm({ ...BLANK_EVENT });
+                  setEventError(null);
+                  setShowEventForm(true);
+                }}
+                className="rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-700"
+              >
+                + Create event
+              </button>
+            ) : null}
+          </div>
+        }
+      />
 
       {!isAdmin && (
         <p className="mb-4 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
@@ -744,9 +761,10 @@ export function EventManagerView({
 
       {/* Create / edit event form */}
       {showEventForm && (
-        <div className="mb-6 rounded-xl border border-slate-200 bg-white shadow-sm">
-          <div className="space-y-3 border-b border-slate-100 px-5 py-4">
-            <h2 className="font-semibold text-slate-800">{editingEventId ? 'Edit event' : 'Create event'}</h2>
+        <SectionCard elevated>
+          <SectionCard.Header title={editingEventId ? 'Edit event' : 'Create event'} />
+          <SectionCard.Body className="space-y-4">
+          <div className="space-y-3 border-b border-slate-100 pb-4">
             {isAdmin && !editingEventId && (
               <div className="rounded-lg border border-blue-100 bg-blue-50/90 px-3 py-2.5 text-xs text-slate-700">
                 <p className="font-semibold text-slate-900">Who can manage this event later</p>
@@ -775,7 +793,7 @@ export function EventManagerView({
               </p>
             )}
           </div>
-          <div className="px-5 py-4 space-y-4">
+          <div className="space-y-4">
             {!editingEventId && (
               <div className="rounded-lg border border-slate-100 bg-slate-50/80 p-3">
                 <p className="mb-2 text-xs font-medium text-slate-700">Schedule</p>
@@ -1218,7 +1236,8 @@ export function EventManagerView({
               </button>
             </div>
           </div>
-        </div>
+          </SectionCard.Body>
+        </SectionCard>
       )}
 
       {loading ? (
@@ -1228,18 +1247,20 @@ export function EventManagerView({
           ))}
         </div>
       ) : events.length === 0 ? (
-        <div className="rounded-xl border border-slate-200 bg-white p-12 text-center">
-          <p className="text-slate-500">
-            No events created yet.
-            {(isAdmin || linkedPractitionerIds.length > 0) ? ' Use "Create event" above to add your first event.' : ''}
-          </p>
-        </div>
+        <EmptyState
+          title="No events yet"
+          description={
+            isAdmin || linkedPractitionerIds.length > 0
+              ? 'Use "Create event" in the header to add your first ticketed experience.'
+              : 'Ask an admin to link your account to a calendar before you can create events.'
+          }
+        />
       ) : (
         <div className="space-y-6">
           {upcoming.length > 0 && (
-            <section>
-              <h2 className="mb-3 text-lg font-medium text-slate-700">Upcoming</h2>
-              <div className="space-y-3">
+            <SectionCard>
+              <SectionCard.Header eyebrow="Upcoming" />
+              <SectionCard.Body className="!pt-4 space-y-3">
                 {upcoming.map((event) => (
                   <EventCard
                     key={event.id}
@@ -1255,13 +1276,13 @@ export function EventManagerView({
                     onDelete={() => void handleDeleteEvent(event.id)}
                   />
                 ))}
-              </div>
-            </section>
+              </SectionCard.Body>
+            </SectionCard>
           )}
           {past.length > 0 && (
-            <section>
-              <h2 className="mb-3 text-lg font-medium text-slate-400">Past</h2>
-              <div className="space-y-3 opacity-60">
+            <SectionCard className="opacity-90">
+              <SectionCard.Header eyebrow="Past" />
+              <SectionCard.Body className="!pt-4 space-y-3">
                 {past.map((event) => (
                   <EventCard
                     key={event.id}
@@ -1277,15 +1298,15 @@ export function EventManagerView({
                     onDelete={() => void handleDeleteEvent(event.id)}
                   />
                 ))}
-              </div>
-            </section>
+              </SectionCard.Body>
+            </SectionCard>
           )}
         </div>
       )}
 
       {showAddCalendarModal && isAdmin && (
         <div
-          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4"
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/25 p-4 backdrop-blur-[2px]"
           onClick={() => {
             if (addCalendarSubmitting) return;
             setShowAddCalendarModal(false);
@@ -1296,7 +1317,7 @@ export function EventManagerView({
             role="dialog"
             aria-modal="true"
             aria-labelledby="add-calendar-modal-title"
-            className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-6 shadow-xl"
+            className="w-full max-w-md rounded-2xl border border-slate-200/80 bg-white p-6 shadow-2xl shadow-slate-900/15 ring-1 ring-slate-100"
             onClick={(e) => e.stopPropagation()}
           >
             <h2 id="add-calendar-modal-title" className="mb-1 text-lg font-semibold text-slate-900">
@@ -1356,159 +1377,209 @@ export function EventManagerView({
       )}
 
       {selectedId && (
-        <div className="mt-8 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-          {detailLoading && <p className="text-sm text-slate-500">Loading details…</p>}
+        <SectionCard elevated className="mt-8">
+          {detailLoading && (
+            <SectionCard.Body>
+              <p className="text-sm text-slate-500">Loading details…</p>
+            </SectionCard.Body>
+          )}
           {detailError && (
-            <div className="mb-3 flex flex-wrap items-center gap-2">
-              <p className="text-sm text-red-600">{detailError}</p>
-              <button
-                type="button"
-                onClick={() => selectedId && void loadDetail(selectedId)}
-                className="rounded-md border border-slate-200 px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
-              >
-                Retry
-              </button>
-            </div>
+            <SectionCard.Body>
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="text-sm text-red-600">{detailError}</p>
+                <button
+                  type="button"
+                  onClick={() => selectedId && void loadDetail(selectedId)}
+                  className="rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
+                >
+                  Retry
+                </button>
+              </div>
+            </SectionCard.Body>
           )}
           {!detailLoading && detail && (
             <>
-              <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <h3 className="text-lg font-semibold text-slate-900">{detail.name}</h3>
-                  <p className="text-sm text-slate-500">
-                    {detail.event_date} · {detail.start_time.slice(0, 5)} – {detail.end_time.slice(0, 5)} ·{' '}
-                    {detail.capacity} capacity
-                  </p>
-                  {!detail.is_active && (
-                    <span className="mt-2 inline-block rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-800">
-                      Cancelled / inactive
-                    </span>
-                  )}
-                  {!isAdmin &&
+              <SectionCard.Header
+                eyebrow="Event detail"
+                title={detail.name}
+                description={
+                  <>
+                    <p className="text-sm text-slate-600">
+                      {detail.event_date} · {detail.start_time.slice(0, 5)} – {detail.end_time.slice(0, 5)} ·{' '}
+                      {detail.capacity} capacity
+                    </p>
+                    {!detail.is_active ? (
+                      <span className="mt-2 inline-block">
+                        <Pill variant="warning" size="sm">
+                          Cancelled / inactive
+                        </Pill>
+                      </span>
+                    ) : null}
+                    {!isAdmin &&
                     detail.is_active &&
                     detail.calendar_id !== null &&
-                    linkedPractitionerIds.includes(detail.calendar_id) && (
-                    <p className="mt-2 max-w-md text-xs text-slate-500">
-                      Cancelling an event and notifying guests is limited to venue admins. You can still edit or
-                      delete this event when allowed.
-                    </p>
-                  )}
-                </div>
-                {(isAdmin ||
-                  (detail.calendar_id !== null && linkedPractitionerIds.includes(detail.calendar_id))) && (
-                  <div className="flex flex-wrap gap-2">
+                    linkedPractitionerIds.includes(detail.calendar_id) ? (
+                      <p className="mt-3 max-w-md text-xs text-slate-500">
+                        Cancelling an event and notifying guests is limited to venue admins. You can still edit or
+                        delete this event when allowed.
+                      </p>
+                    ) : null}
+                  </>
+                }
+                right={
+                  isAdmin || (detail.calendar_id !== null && linkedPractitionerIds.includes(detail.calendar_id)) ? (
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleEditEvent(detail)}
+                        className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
+                      >
+                        Edit event
+                      </button>
+                      {isAdmin && detail.is_active ? (
+                        <button
+                          type="button"
+                          onClick={() => void handleCancelEvent()}
+                          disabled={cancelLoading}
+                          className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-800 shadow-sm hover:bg-red-100 disabled:opacity-50"
+                        >
+                          {cancelLoading ? 'Cancelling…' : 'Cancel event & notify guests'}
+                        </button>
+                      ) : null}
+                      {(isAdmin ||
+                        (detail.calendar_id !== null &&
+                          linkedPractitionerIds.includes(detail.calendar_id))) ? (
+                        <button
+                          type="button"
+                          onClick={() => void handleDeleteEvent(detail.id)}
+                          className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700 shadow-sm hover:bg-red-100"
+                        >
+                          Delete event
+                        </button>
+                      ) : null}
+                    </div>
+                  ) : null
+                }
+              />
+
+              <SectionCard.Body className="space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-500">Attendees</p>
+                  {attendees.length > 0 ? (
                     <button
                       type="button"
-                      onClick={() => handleEditEvent(detail)}
-                      className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                      onClick={() => exportAttendeesCsv()}
+                      className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
                     >
-                      Edit event
+                      Export CSV
                     </button>
-                    {isAdmin && detail.is_active && (
-                      <button
-                        type="button"
-                        onClick={() => void handleCancelEvent()}
-                        disabled={cancelLoading}
-                        className="rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-sm font-medium text-red-800 hover:bg-red-100 disabled:opacity-50"
-                      >
-                        {cancelLoading ? 'Cancelling…' : 'Cancel event & notify guests'}
-                      </button>
-                    )}
-                    {(isAdmin ||
-                      (detail.calendar_id !== null &&
-                        linkedPractitionerIds.includes(detail.calendar_id))) && (
-                      <button
-                        type="button"
-                        onClick={() => void handleDeleteEvent(detail.id)}
-                        className="rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-100"
-                      >
-                        Delete event
-                      </button>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                <h4 className="text-sm font-medium text-slate-700">Attendees</h4>
-                {attendees.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => exportAttendeesCsv()}
-                    className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
-                  >
-                    Export CSV
-                  </button>
-                )}
-              </div>
-              {attendees.length === 0 ? (
-                <p className="text-sm text-slate-500">No bookings for this event.</p>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="min-w-full text-left text-sm">
-                    <thead>
-                      <tr className="border-b border-slate-200 text-slate-500">
-                        <th className="py-2 pr-3 font-medium">Guest</th>
-                        <th className="py-2 pr-3 font-medium">Contact</th>
-                        <th className="py-2 pr-3 font-medium">Tickets</th>
-                        <th className="py-2 pr-3 font-medium">Qty</th>
-                        <th className="py-2 pr-3 font-medium">Status</th>
-                        <th className="py-2 pr-3 font-medium">Deposit</th>
-                        <th className="py-2 pr-3 font-medium">Checked in</th>
-                        <th className="py-2 font-medium">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {attendees.map((a) => (
-                        <tr key={a.booking_id} className="border-b border-slate-100">
-                          <td className="py-2 pr-3 text-slate-800">{a.guest_name ?? '-'}</td>
-                          <td className="py-2 pr-3 text-slate-600">
-                            <div className="max-w-[200px] truncate">{a.guest_email ?? '-'}</div>
-                            <div className="text-xs text-slate-500">{a.guest_phone ?? ''}</div>
-                          </td>
-                          <td className="py-2 pr-3 text-xs text-slate-600">
-                            {(a.ticket_lines ?? []).length > 0
-                              ? (a.ticket_lines ?? []).map((l) => `${l.label} ×${l.quantity}`).join(', ')
-                              : '-'}
-                          </td>
-                          <td className="py-2 pr-3">{a.party_size}</td>
-                          <td className="py-2 pr-3">{a.status}</td>
-                          <td className="py-2 pr-3">
-                            {a.deposit_amount_pence != null ? formatPrice(a.deposit_amount_pence) : '-'}
-                            {a.deposit_status ? (
-                              <span className="ml-1 text-xs text-slate-500">({a.deposit_status})</span>
-                            ) : null}
-                          </td>
-                          <td className="py-2 pr-3 text-slate-600">
-                            {a.checked_in_at ? new Date(a.checked_in_at).toLocaleString('en-GB') : '-'}
-                          </td>
-                          <td className="py-2">
-                            {a.status !== 'Cancelled' && (
-                              <button
-                                type="button"
-                                disabled={checkInBusy[a.booking_id]}
-                                onClick={() =>
-                                  void handleToggleCheckIn(a.booking_id, !a.checked_in_at)
-                                }
-                                className="rounded-md border border-slate-200 px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-                              >
-                                {checkInBusy[a.booking_id]
-                                  ? '…'
-                                  : a.checked_in_at
-                                    ? 'Clear check-in'
-                                    : 'Check in'}
-                              </button>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                  ) : null}
                 </div>
-              )}
+                {attendees.length === 0 ? (
+                  <EmptyState
+                    title="No bookings for this event"
+                    description="When guests book tickets, they will appear in this list."
+                  />
+                ) : (
+                  <StackedList
+                    flush
+                    items={attendees}
+                    keyExtractor={(a) => a.booking_id}
+                    renderDesktopRow={(a) => (
+                      <div className="grid grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)_minmax(0,1fr)_auto_auto_auto_auto_auto] items-start gap-3 px-2 py-3 text-sm">
+                        <div className="min-w-0 font-medium text-slate-900">{a.guest_name ?? '—'}</div>
+                        <div className="min-w-0 text-slate-600">
+                          <div className="max-w-[200px] truncate text-xs">{a.guest_email ?? '—'}</div>
+                          <div className="text-[11px] text-slate-500">{a.guest_phone ?? ''}</div>
+                        </div>
+                        <div className="min-w-0 text-xs text-slate-600">
+                          {(a.ticket_lines ?? []).length > 0
+                            ? (a.ticket_lines ?? []).map((l) => `${l.label} ×${l.quantity}`).join(', ')
+                            : '—'}
+                        </div>
+                        <div className="tabular-nums text-slate-800">{a.party_size}</div>
+                        <div>
+                          <Pill variant={attendeeStatusVariant(a.status)} size="sm">
+                            {a.status}
+                          </Pill>
+                        </div>
+                        <div className="text-xs text-slate-600">
+                          {a.deposit_amount_pence != null ? formatPrice(a.deposit_amount_pence) : '—'}
+                          {a.deposit_status ? (
+                            <span className="ml-1 text-[11px] text-slate-500">({a.deposit_status})</span>
+                          ) : null}
+                        </div>
+                        <div className="text-xs text-slate-600">
+                          {a.checked_in_at ? new Date(a.checked_in_at).toLocaleString('en-GB') : '—'}
+                        </div>
+                        <div className="flex justify-end">
+                          {a.status !== 'Cancelled' ? (
+                            <button
+                              type="button"
+                              disabled={checkInBusy[a.booking_id]}
+                              onClick={() => void handleToggleCheckIn(a.booking_id, !a.checked_in_at)}
+                              className="rounded-lg border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-50"
+                            >
+                              {checkInBusy[a.booking_id]
+                                ? '…'
+                                : a.checked_in_at
+                                  ? 'Clear check-in'
+                                  : 'Check in'}
+                            </button>
+                          ) : null}
+                        </div>
+                      </div>
+                    )}
+                    renderMobileCard={(a) => (
+                      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm shadow-slate-900/5">
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <p className="font-semibold text-slate-900">{a.guest_name ?? '—'}</p>
+                            <p className="text-xs text-slate-500">{a.guest_email ?? '—'}</p>
+                            {a.guest_phone ? <p className="text-xs text-slate-500">{a.guest_phone}</p> : null}
+                          </div>
+                          <Pill variant={attendeeStatusVariant(a.status)} size="sm">
+                            {a.status}
+                          </Pill>
+                        </div>
+                        <p className="mt-2 text-xs text-slate-600">
+                          Tickets:{' '}
+                          {(a.ticket_lines ?? []).length > 0
+                            ? (a.ticket_lines ?? []).map((l) => `${l.label} ×${l.quantity}`).join(', ')
+                            : '—'}{' '}
+                          · Qty {a.party_size}
+                        </p>
+                        <p className="mt-1 text-xs text-slate-600">
+                          Deposit:{' '}
+                          {a.deposit_amount_pence != null ? formatPrice(a.deposit_amount_pence) : '—'}
+                          {a.deposit_status ? ` (${a.deposit_status})` : ''}
+                        </p>
+                        <p className="mt-1 text-xs text-slate-600">
+                          Checked in:{' '}
+                          {a.checked_in_at ? new Date(a.checked_in_at).toLocaleString('en-GB') : '—'}
+                        </p>
+                        {a.status !== 'Cancelled' ? (
+                          <button
+                            type="button"
+                            disabled={checkInBusy[a.booking_id]}
+                            onClick={() => void handleToggleCheckIn(a.booking_id, !a.checked_in_at)}
+                            className="mt-3 w-full rounded-xl border border-slate-200 py-2 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-50"
+                          >
+                            {checkInBusy[a.booking_id]
+                              ? '…'
+                              : a.checked_in_at
+                                ? 'Clear check-in'
+                                : 'Check in'}
+                          </button>
+                        ) : null}
+                      </div>
+                    )}
+                  />
+                )}
+              </SectionCard.Body>
             </>
           )}
-        </div>
+        </SectionCard>
       )}
     </div>
   );
@@ -1533,8 +1604,8 @@ function EventCard({
 }) {
   return (
     <div
-      className={`rounded-xl border shadow-sm transition-colors ${
-        selected ? 'border-slate-900 bg-slate-50' : 'border-slate-200 bg-white'
+      className={`rounded-2xl border bg-white shadow-sm shadow-slate-900/5 transition-[box-shadow,background-color,border-color] ${
+        selected ? 'border-brand-300 ring-2 ring-brand-200' : 'border-slate-200'
       }`}
     >
       <button
@@ -1553,19 +1624,25 @@ function EventCard({
             )}
           </div>
           <div className="text-right text-sm">
-            <div className="font-medium text-slate-700">{event.capacity} capacity</div>
-            {!event.is_active && (
-              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-500">Inactive</span>
-            )}
+            <Pill variant="neutral" size="sm" className="tabular-nums">
+              {event.capacity} cap
+            </Pill>
+            {!event.is_active ? (
+              <div className="mt-2 flex justify-end">
+                <Pill variant="warning" size="sm">
+                  Inactive
+                </Pill>
+              </div>
+            ) : null}
           </div>
         </div>
         {event.ticket_types.length > 0 && (
           <div className="mt-3 flex flex-wrap gap-2">
             {event.ticket_types.map((tt) => (
-              <span key={tt.id} className="rounded-full bg-slate-50 px-3 py-1 text-xs text-slate-600">
+              <Pill key={tt.id} variant="brand" size="sm">
                 {tt.name}: {formatPrice(tt.price_pence)}
-                {tt.capacity && ` (${tt.capacity} max)`}
-              </span>
+                {tt.capacity ? ` (${tt.capacity} max)` : ''}
+              </Pill>
             ))}
           </div>
         )}

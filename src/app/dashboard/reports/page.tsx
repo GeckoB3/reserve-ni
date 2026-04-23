@@ -4,9 +4,11 @@ import { ReportsView } from './ReportsView';
 import { getDashboardStaff } from '@/lib/venue-auth';
 import type { BookingModel, VenueTerminology } from '@/types/booking-models';
 import { DEFAULT_TERMINOLOGY } from '@/types/booking-models';
-import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { getSmsUsageDisplayForVenue } from '@/lib/billing/sms-usage-display';
+import { PageFrame } from '@/components/ui/dashboard/PageFrame';
+import { SectionCard } from '@/components/ui/dashboard/SectionCard';
+import { Pill } from '@/components/ui/dashboard/Pill';
 
 function mergeVenueTerminology(model: BookingModel, raw: unknown): VenueTerminology {
   const base = DEFAULT_TERMINOLOGY[model];
@@ -33,11 +35,13 @@ export default async function ReportsPage() {
 
   if (!venueId) {
     return (
-      <div className="flex items-center justify-center p-12">
-        <div className="rounded-xl border border-slate-200 bg-white p-8 text-center shadow-sm">
-          <p className="text-slate-500">No venue linked to your account.</p>
-        </div>
-      </div>
+      <PageFrame maxWidthClass="max-w-lg">
+        <SectionCard elevated>
+          <SectionCard.Body className="py-10 text-center">
+            <p className="text-slate-600">No venue linked to your account.</p>
+          </SectionCard.Body>
+        </SectionCard>
+      </PageFrame>
     );
   }
 
@@ -58,27 +62,13 @@ export default async function ReportsPage() {
   const smsUsage = await getSmsUsageDisplayForVenue(admin, venueId);
 
   return (
-    <div className="p-4 md:p-6 lg:p-8">
-      <div className="mx-auto max-w-5xl">
-        <div className="mb-6">
-          <h1 className="text-2xl font-semibold text-slate-900">Reports</h1>
-          {isUnifiedSchedulingVenue(bookingModel) ? (
-            <p className="mt-1 text-sm text-slate-500">
-              Appointment analytics for your team, services, and channels. Figures use the selected date range
-              unless noted.
-            </p>
-          ) : (
-            <p className="mt-1 text-sm text-slate-500">
-              Covers, deposits, and guest trends for your venue. Figures use the selected date range unless
-              noted.
-            </p>
-          )}
-        </div>
-        {smsUsage && (
-          <div className="mb-6 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">SMS this month</p>
-            <div className="mt-2 flex flex-wrap items-center gap-3">
-              <div className="h-2 flex-1 min-w-[100px] max-w-sm overflow-hidden rounded-full bg-slate-100">
+    <PageFrame maxWidthClass="max-w-5xl" className="space-y-6">
+      {smsUsage ? (
+        <SectionCard elevated>
+          <SectionCard.Header eyebrow="Usage" title="SMS this month" />
+          <SectionCard.Body className="space-y-3">
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="h-2 min-w-[100px] flex-1 max-w-sm overflow-hidden rounded-full bg-slate-100">
                 <div
                   className="h-full rounded-full bg-brand-500"
                   style={{
@@ -98,16 +88,21 @@ export default async function ReportsPage() {
                 <span className="text-slate-500"> ({smsUsage.remaining} left)</span>
               </p>
             </div>
-            {smsUsage.overage_count > 0 && (
-              <p className="mt-2 text-xs text-amber-800">
-                {smsUsage.overage_count} over included allowance - ≈ £{(smsUsage.overage_amount_pence / 100).toFixed(2)}{' '}
-                at 5p each (billed at month end)
-              </p>
-            )}
-          </div>
-        )}
-        <ReportsView bookingModel={bookingModel} terminology={terminology} venueId={venueId} />
-      </div>
-    </div>
+            {smsUsage.overage_count > 0 ? (
+              <div className="flex flex-wrap items-start gap-2 rounded-xl border border-amber-200/80 bg-amber-50/60 px-3 py-2.5 text-sm text-amber-950">
+                <Pill variant="warning" size="sm" dot>
+                  Overage
+                </Pill>
+                <span>
+                  {smsUsage.overage_count} over included allowance — ≈ £
+                  {(smsUsage.overage_amount_pence / 100).toFixed(2)} at 5p each (billed at month end)
+                </span>
+              </div>
+            ) : null}
+          </SectionCard.Body>
+        </SectionCard>
+      ) : null}
+      <ReportsView bookingModel={bookingModel} terminology={terminology} venueId={venueId} />
+    </PageFrame>
   );
 }

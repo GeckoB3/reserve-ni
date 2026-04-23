@@ -1,5 +1,9 @@
 import type { BookingEmailData } from '@/lib/emails/types';
 import {
+  formatRefundDeadlineIso,
+  isDepositRefundAvailableAt,
+} from '@/lib/booking/cancellation-deadline';
+import {
   escapeHtml,
   formatDepositAmount,
 } from '@/lib/emails/templates/base-template';
@@ -60,150 +64,212 @@ export function isFreeBookingDisplay(booking: BookingEmailData): boolean {
   return false;
 }
 
-/** Single line for the email detail card "Price" row (non–group bookings). */
-export function priceDisplayForConfirmationCard(booking: BookingEmailData): string | null {
-  if (booking.group_appointments && booking.group_appointments.length > 0) return null;
+function sumGroupAppointmentPricesPence(booking: BookingEmailData): number | null {
+  const lines = booking.group_appointments;
+  if (!lines?.length) return null;
+  let sum = 0;
+  let any = false;
+  for (const g of lines) {
+    const p = parseFirstGbpPence(g.price_display ?? undefined);
+    if (p != null) {
+      sum += p;
+      any = true;
+    }
+  }
+  return any ? sum : null;
+}
 
-  if (isFreeBookingDisplay(booking)) return 'Free';
+function singleBookingPriceLines(booking: BookingEmailData): string[] {
+  const lines: string[] = [];
+  const tickets = booking.booking_ticket_price_lines;
+  if (tickets?.length) {
+    let computedTotal = 0;
+    for (const t of tickets) {
+      const unit = formatMoneyOrNull(t.unit_price_pence);
+      const subtotal = t.quantity * t.unit_price_pence;
+      computedTotal += subtotal;
+      const subFmt = formatMoneyOrNull(subtotal);
+      const rawLabel = (t.label?.trim() || 'Tickets').replace(/:\s*$/, '');
+      if (unit && subFmt) {
+        if (t.quantity === 1) {
+          lines.push(`${rawLabel}: ${unit}`);
+        } else {
+          lines.push(`${rawLabel}: ${unit} × ${t.quantity} = ${subFmt}`);
+        }
+      }
+    }
+    if (tickets.length > 1) {
+      const tf = formatMoneyOrNull(computedTotal);
+      if (tf) lines.push(`Total: ${tf}`);
+    }
+    return lines;
+  }
+
+  const qty =
+    typeof booking.booking_price_quantity === 'number' && booking.booking_price_quantity > 0
+      ? booking.booking_price_quantity
+      : booking.party_size;
+  const unitP = booking.booking_unit_price_pence;
+  const totalPence = booking.booking_total_price_pence ?? inferredTotalPricePence(booking);
+  if (
+    typeof unitP === 'number' &&
+    unitP > 0 &&
+    qty > 1 &&
+    totalPence != null &&
+    totalPence > 0 &&
+    unitP * qty === totalPence
+  ) {
+    const uf = formatMoneyOrNull(unitP);
+    const tf = formatMoneyOrNull(totalPence);
+    if (uf && tf) {
+      lines.push(`${uf} each × ${qty}`);
+      lines.push(`Total: ${tf}`);
+      return lines;
+    }
+  }
 
   const normalized = normalizePriceDisplayForCard(booking.appointment_price_display);
-  if (normalized) return normalized;
+  if (normalized) {
+    lines.push(normalized);
+    return lines;
+  }
+  if (totalPence != null && totalPence > 0) {
+    const tf = formatMoneyOrNull(totalPence);
+    if (tf) lines.push(tf);
+  }
+  return lines;
+}
 
-  const inf = inferredTotalPricePence(booking);
-  if (inf != null && inf > 0) return formatMoneyOrNull(inf);
+function groupBookingPriceLines(booking: BookingEmailData): string[] {
+  const lines: string[] = [];
+  const total =
+    booking.booking_total_price_pence != null && booking.booking_total_price_pence > 0
+      ? booking.booking_total_price_pence
+      : sumGroupAppointmentPricesPence(booking);
+  if (total != null && total > 0) {
+    const tf = formatMoneyOrNull(total);
+    if (tf) lines.push(`Total: ${tf}`);
+  }
+  return lines;
+}
 
-  const raw = booking.appointment_price_display?.trim();
-  if (raw && !/£/.test(raw)) return raw;
+function paymentStatusLine(booking: BookingEmailData): string | null {
+  const ds = (booking.deposit_status ?? '').toLowerCase();
+  const paidPence = booking.deposit_amount_pence;
+  const totalPence = booking.booking_total_price_pence ?? null;
+  const inferredTotal =
+    totalPence != null && totalPence > 0
+      ? totalPence
+      : parseFirstGbpPence(booking.appointment_price_display);
+  const hasPositivePrice = inferredTotal != null && inferredTotal > 0;
+  const paidOnline = ds === 'paid' && typeof paidPence === 'number' && paidPence > 0;
+
+  if (paidOnline) {
+    const amt = formatMoneyOrNull(paidPence);
+    if (!amt) return null;
+    if (totalPence != null && totalPence > 0 && paidPence >= totalPence) {
+      return `Payment: Paid in full online (${amt}).`;
+    }
+    if (totalPence != null && totalPence > 0 && paidPence < totalPence) {
+      const bal = formatMoneyOrNull(totalPence - paidPence);
+      return bal
+        ? `Payment: Deposit of ${amt} paid online; ${bal} due at the venue.`
+        : `Payment: Deposit of ${amt} paid online; balance due at the venue.`;
+    }
+    return `Payment: ${amt} received online.`;
+  }
+
+  if (ds === 'pending' && typeof paidPence === 'number' && paidPence > 0) {
+    const dep = formatMoneyOrNull(paidPence);
+    const totalFmt =
+      totalPence != null && totalPence > 0
+        ? formatMoneyOrNull(totalPence)
+        : hasPositivePrice && inferredTotal != null
+          ? formatMoneyOrNull(inferredTotal)
+          : null;
+    const head = dep
+      ? `Payment: A deposit of ${dep} is required. You will receive payment details in a separate message.`
+      : `Payment: A deposit is required. You will receive payment details in a separate message.`;
+    return totalFmt ? `${head} Total for this booking: ${totalFmt}.` : head;
+  }
+
+  if (hasPositivePrice) {
+    return 'Payment: Due at the venue.';
+  }
+
+  if (isFreeBookingDisplay(booking)) {
+    return null;
+  }
 
   return null;
 }
 
-export function bookingConfirmationPaymentParagraphs(booking: BookingEmailData): string[] {
+function refundPolicyLine(booking: BookingEmailData): string | null {
   const ds = (booking.deposit_status ?? '').toLowerCase();
-  const paidPence = booking.deposit_amount_pence;
-  const totalPence = booking.booking_total_price_pence ?? null;
-  const inferredTotal =
-    totalPence != null && totalPence > 0
-      ? totalPence
-      : parseFirstGbpPence(booking.appointment_price_display);
+  const paidPence = booking.deposit_amount_pence ?? 0;
+  if (ds !== 'paid' || paidPence <= 0 || !booking.refund_cutoff) return null;
 
-  const hasPositivePrice = inferredTotal != null && inferredTotal > 0;
-  const paidOnline = ds === 'paid' && typeof paidPence === 'number' && paidPence > 0;
+  const fmt = formatRefundDeadlineIso(booking.refund_cutoff);
+  const refundable = isDepositRefundAvailableAt(booking.refund_cutoff);
+  const totalPence = booking.booking_total_price_pence ?? inferredTotalPricePence(booking);
+  const fullPayment =
+    totalPence != null && totalPence > 0 ? paidPence >= totalPence : false;
 
-  if (paidOnline) {
-    const amt = formatMoneyOrNull(paidPence);
-    if (!amt) return [];
-    if (totalPence != null && totalPence > 0 && paidPence >= totalPence) {
-      const totalFmt = formatMoneyOrNull(totalPence);
-      return [
-        htmlParagraph(
-          totalFmt
-            ? `Paid in full online (${amt} — total ${totalFmt}).`
-            : `Paid in full online (${amt}).`,
-        ),
-      ];
+  if (!refundable) {
+    return fullPayment
+      ? "Cancellation: The deadline to cancel for a full refund has passed under the venue's policy."
+      : "Cancellation: The deadline to cancel for a deposit refund has passed under the venue's policy.";
+  }
+  if (fullPayment) {
+    return `Cancellation: Full refund if you cancel before ${fmt}. No refund after that or for no-shows.`;
+  }
+  return `Cancellation: Your deposit is fully refundable if you cancel before ${fmt}. After that, the deposit is non-refundable.`;
+}
+
+/**
+ * Multi-line text for the confirmation detail card ("Price and payment" row) and plain-text summaries.
+ * Avoids duplicating amounts in the email intro; use {@link bookingConfirmationPaymentParagraphs} only for
+ * non-card contexts (it returns nothing when this covers the booking).
+ */
+export function confirmationStructuredPriceText(booking: BookingEmailData): string | null {
+  const lines: string[] = [];
+
+  if (booking.group_appointments?.length) {
+    if (isFreeBookingDisplay(booking)) {
+      lines.push('Free');
+    } else {
+      lines.push(...groupBookingPriceLines(booking));
     }
-    if (totalPence != null && totalPence > 0 && paidPence < totalPence) {
-      const bal = formatMoneyOrNull(totalPence - paidPence);
-      return [
-        htmlParagraph(
-          `Deposit paid online (${amt}). Balance due at the venue${bal ? `: ${bal}` : ''}.`,
-        ),
-      ];
-    }
-    return [htmlParagraph(`Payment received online (${amt}).`)];
+  } else if (isFreeBookingDisplay(booking)) {
+    lines.push('Free');
+  } else {
+    lines.push(...singleBookingPriceLines(booking));
   }
 
-  if (ds === 'pending' && typeof paidPence === 'number' && paidPence > 0) {
-    const dep = formatMoneyOrNull(paidPence);
-    const parts: string[] = [
-      dep
-        ? `A deposit of ${dep} is required to confirm this booking. You will receive payment details in a separate message.`
-        : 'A deposit is required to confirm this booking. You will receive payment details in a separate message.',
-    ];
-    const totalFmt =
-      totalPence != null && totalPence > 0
-        ? formatMoneyOrNull(totalPence)
-        : hasPositivePrice && inferredTotal != null
-          ? formatMoneyOrNull(inferredTotal)
-          : null;
-    if (totalFmt) {
-      parts.push(`Total price ${totalFmt}.`);
-    }
-    return [htmlParagraph(parts.join(' '))];
-  }
+  const pay = paymentStatusLine(booking);
+  if (pay) lines.push(pay);
 
-  if (hasPositivePrice && !paidOnline) {
-    const totalFmt = inferredTotal != null ? formatMoneyOrNull(inferredTotal) : null;
-    const line = totalFmt
-      ? `Total price ${totalFmt}. Pay at the venue.`
-      : 'Payment is due at the venue.';
-    return [htmlParagraph(line)];
-  }
+  const ref = refundPolicyLine(booking);
+  if (ref) lines.push(ref);
 
-  if (isFreeBookingDisplay(booking)) {
-    return [htmlParagraph('There is no charge for this booking.')];
-  }
+  if (lines.length === 0) return null;
+  return lines.join('\n');
+}
 
+/**
+ * @deprecated Use {@link confirmationStructuredPriceText}. Kept for narrow call sites that only need a single-line amount.
+ */
+export function priceDisplayForConfirmationCard(booking: BookingEmailData): string | null {
+  return confirmationStructuredPriceText(booking);
+}
+
+export function bookingConfirmationPaymentParagraphs(booking: BookingEmailData): string[] {
+  void booking;
   return [];
 }
 
 export function bookingConfirmationPaymentTextLines(booking: BookingEmailData): string[] {
-  const ds = (booking.deposit_status ?? '').toLowerCase();
-  const paidPence = booking.deposit_amount_pence;
-  const totalPence = booking.booking_total_price_pence ?? null;
-  const inferredTotal =
-    totalPence != null && totalPence > 0
-      ? totalPence
-      : parseFirstGbpPence(booking.appointment_price_display);
-
-  const hasPositivePrice = inferredTotal != null && inferredTotal > 0;
-  const paidOnline = ds === 'paid' && typeof paidPence === 'number' && paidPence > 0;
-
-  if (paidOnline) {
-    const amt = formatMoneyOrNull(paidPence);
-    if (!amt) return [];
-    if (totalPence != null && totalPence > 0 && paidPence >= totalPence) {
-      const totalFmt = formatMoneyOrNull(totalPence);
-      return [
-        totalFmt
-          ? `Paid in full online (${amt} — total ${totalFmt}).`
-          : `Paid in full online (${amt}).`,
-      ];
-    }
-    if (totalPence != null && totalPence > 0 && paidPence < totalPence) {
-      const bal = formatMoneyOrNull(totalPence - paidPence);
-      return [
-        `Deposit paid online (${amt}). Balance due at the venue${bal ? `: ${bal}` : ''}.`,
-      ];
-    }
-    return [`Payment received online (${amt}).`];
-  }
-
-  if (ds === 'pending' && typeof paidPence === 'number' && paidPence > 0) {
-    const dep = formatMoneyOrNull(paidPence);
-    const totalFmt =
-      totalPence != null && totalPence > 0
-        ? formatMoneyOrNull(totalPence)
-        : hasPositivePrice && inferredTotal != null
-          ? formatMoneyOrNull(inferredTotal)
-          : null;
-    const head =
-      dep != null
-        ? `A deposit of ${dep} is required. You will receive payment details in a separate message.`
-        : 'A deposit is required. You will receive payment details in a separate message.';
-    return totalFmt ? [head, `Total price ${totalFmt}.`] : [head];
-  }
-
-  if (hasPositivePrice && !paidOnline) {
-    const totalFmt = inferredTotal != null ? formatMoneyOrNull(inferredTotal) : null;
-    return totalFmt ? [`Total price ${totalFmt}. Pay at the venue.`] : ['Payment is due at the venue.'];
-  }
-
-  if (isFreeBookingDisplay(booking)) {
-    return ['There is no charge for this booking.'];
-  }
-
+  void booking;
   return [];
 }
 
@@ -232,7 +298,7 @@ export function bookingConfirmationSmsPriceSuffix(booking: BookingEmailData): st
     }
     if (totalPence != null && totalPence > 0 && paidPence < totalPence) {
       const bal = formatMoneyOrNull(totalPence - paidPence);
-      return bal ? ` Paid ${amt} online; ${bal} at venue.` : ` Paid ${amt} online; balance at venue.`;
+      return bal ? ` Deposit ${amt} paid online; ${bal} at venue.` : ` Deposit ${amt} paid online; balance at venue.`;
     }
     return ` Paid ${amt} online.`;
   }

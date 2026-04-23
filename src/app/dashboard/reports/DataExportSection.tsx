@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 
 export interface DataExportSectionProps {
   /** Shown after successful download or when export is blocked (e.g. API error). */
@@ -62,11 +63,12 @@ export function DataExportSection({
   }
 
   return (
-    <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-      <div className="mb-4">
-        <h2 className="text-base font-semibold text-slate-900">Export your data</h2>
-        <p className="mt-1 text-sm text-slate-500">
-          {isAppointment ? (
+    <SectionCard elevated>
+      <SectionCard.Header
+        eyebrow="Data"
+        title="Export your data"
+        description={
+          isAppointment ? (
             <>
               Download a full CSV of all {bookingWord.toLowerCase()}s or your {clientLabel.toLowerCase()} records.
               Exports cover your whole venue (not limited to the date range above). You are entitled to your data at
@@ -77,16 +79,15 @@ export function DataExportSection({
               Download a full CSV export of your bookings or guest records. Exports include all records for your
               venue (not limited to the date range above). You are entitled to your data at any time.
             </>
-          )}
-        </p>
-      </div>
-
-      <div className="flex flex-wrap gap-3">
+          )
+        }
+      />
+      <SectionCard.Body className="flex flex-wrap gap-3">
         <button
           type="button"
           onClick={() => void handleDownload('bookings')}
           disabled={downloading !== null}
-          className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-50"
+          className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition-colors hover:bg-slate-50 disabled:opacity-50"
         >
           {downloading === 'bookings' ? (
             <div className="h-4 w-4 animate-spin rounded-full border-2 border-slate-400 border-t-transparent" />
@@ -100,7 +101,7 @@ export function DataExportSection({
           type="button"
           onClick={() => void handleDownload('guests')}
           disabled={downloading !== null}
-          className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-50"
+          className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition-colors hover:bg-slate-50 disabled:opacity-50"
         >
           {downloading === 'guests' ? (
             <div className="h-4 w-4 animate-spin rounded-full border-2 border-slate-400 border-t-transparent" />
@@ -109,12 +110,11 @@ export function DataExportSection({
           )}
           Export {isAppointment ? `${clientLabel.toLowerCase()} list` : 'guest list'}
         </button>
-      </div>
-
-      <p className="mt-3 text-xs text-slate-400">
-        Files are generated in real time from your venue&apos;s data.
-      </p>
-    </section>
+      </SectionCard.Body>
+      <SectionCard.Footer>
+        <p className="text-xs text-slate-500">Files are generated in real time from your venue&apos;s data.</p>
+      </SectionCard.Footer>
+    </SectionCard>
   );
 }
 

@@ -23,6 +23,10 @@ import { getCalendarGridBounds } from '@/lib/venue-calendar-bounds';
 import { isBookingTimeInHourRange } from '@/lib/booking-time-window';
 import type { OpeningHours } from '@/types/availability';
 import type { VenueArea } from '@/types/areas';
+import { PageHeader } from '@/components/ui/dashboard/PageHeader';
+import { SectionCard } from '@/components/ui/dashboard/SectionCard';
+import { Pill } from '@/components/ui/dashboard/Pill';
+import { EmptyState } from '@/components/ui/dashboard/EmptyState';
 
 function formatDateInput(d: Date): string {
   const y = d.getFullYear();
@@ -1215,9 +1219,16 @@ export function TableGridView({
 
   return (
     <div className="flex flex-col gap-2 md:gap-3 lg:gap-4">
+      {gridData ? (
+        <PageHeader
+          eyebrow="Operations"
+          title="Table grid"
+          subtitle="Assign bookings to tables, manage blocks, and follow live updates for the service."
+        />
+      ) : null}
       {gridData && (
         <ViewToolbar
-          title="Table grid"
+          title=""
           summary={viewToolbarSummary ?? gridData.summary}
           date={date}
           onDateChange={setDate}
@@ -1315,11 +1326,11 @@ export function TableGridView({
                   <option key={s.id} value={s.id}>{s.name}</option>
                 ))}
               </select>
-              {serviceId && (
-                <span className="inline-flex items-center rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-[10px] font-medium text-violet-800 sm:px-2.5 sm:py-1 sm:text-xs">
+              {serviceId ? (
+                <Pill variant="brand" size="sm">
                   Filtered
-                </span>
-              )}
+                </Pill>
+              ) : null}
               {zones.length > 0 && (
                 <select
                   value={zoneFilter ?? ''}
@@ -1388,49 +1399,37 @@ export function TableGridView({
         </ViewToolbar>
       )}
       {showLegend && (
-        <div className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-xs font-medium text-slate-600 shadow-sm">
-          <span className="inline-flex items-center gap-1.5">
-            <span className="h-2 w-2 rounded-full bg-amber-500" />
+        <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm shadow-slate-900/5">
+          <Pill variant="warning" size="sm" dot>
             Pending
-          </span>
-          <span className="inline-flex items-center gap-1.5">
-            <span className="h-2 w-2 rounded-full bg-emerald-500" />
+          </Pill>
+          <Pill variant="success" size="sm" dot>
             Confirmed
-          </span>
-          <span className="inline-flex items-center gap-1.5">
-            <span className="h-2 w-2 rounded-full bg-brand-600" />
+          </Pill>
+          <Pill variant="brand" size="sm" dot>
             Seated
-          </span>
-          <span className="inline-flex items-center gap-1.5">
-            <span className="h-2 w-2 rounded-full bg-red-500" />
+          </Pill>
+          <Pill variant="danger" size="sm" dot>
             No-Show
-          </span>
-          <span className="inline-flex items-center gap-1.5">
-            <span className="h-2 w-2 rounded-sm bg-slate-300" />
+          </Pill>
+          <Pill variant="neutral" size="sm" dot>
             Blocked
-          </span>
+          </Pill>
         </div>
       )}
 
-      <div className="relative w-full rounded-xl border border-slate-200 bg-white shadow-sm">
-        <>
+      <SectionCard elevated className="relative w-full">
+        <SectionCard.Body className="p-0">
         {loading ? (
           <div className="flex min-h-[40vh] items-center justify-center">
             <div className="h-8 w-8 animate-spin rounded-full border-2 border-slate-300 border-t-brand-600" />
           </div>
         ) : gridData && gridData.tables.length === 0 ? (
-          <div className="flex min-h-[40vh] flex-col items-center justify-center gap-3 text-center">
-            <div className="flex h-14 w-14 items-center justify-center rounded-full bg-slate-100">
-              <svg className="h-7 w-7 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6z" />
-              </svg>
-            </div>
-            <div>
-              <p className="text-sm font-medium text-slate-700">No active tables configured</p>
-              <p className="mt-1 text-xs text-slate-500">
-                Add and activate tables in Tables settings to use the grid.
-              </p>
-            </div>
+          <div className="min-h-[40vh] px-4 py-10">
+            <EmptyState
+              title="No active tables configured"
+              description="Add and activate tables in Tables settings to use the grid."
+            />
           </div>
         ) : gridData ? (
           <TimelineGrid
@@ -1507,8 +1506,8 @@ export function TableGridView({
             </div>
           </div>
         )}
-        </>
-      </div>
+        </SectionCard.Body>
+      </SectionCard>
 
       {showUndoToast && undoStack.length > 0 && (
         <UndoToast
@@ -1533,7 +1532,7 @@ export function TableGridView({
         <>
           <div className="fixed inset-0 z-40" onClick={() => setCellContext(null)} />
           <div
-            className="fixed z-50 w-56 rounded-xl border border-slate-200 bg-white p-2 shadow-xl"
+            className="fixed z-50 w-56 rounded-2xl border border-slate-200/80 bg-white p-2 shadow-xl shadow-slate-900/15 ring-1 ring-slate-100"
             style={{ left: cellContext.x, top: cellContext.y }}
           >
             <p className="px-2 py-1 text-[11px] font-semibold text-slate-800">Slot actions</p>
@@ -1583,8 +1582,8 @@ export function TableGridView({
         </div>
       )}
       {activeBlockId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
-          <div className="w-full max-w-sm rounded-xl bg-white p-5 shadow-2xl">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/25 p-4 backdrop-blur-[2px]">
+          <div className="w-full max-w-sm rounded-2xl border border-slate-200/80 bg-white p-5 shadow-2xl shadow-slate-900/15 ring-1 ring-slate-100">
             {(() => {
               const block = blockDetails.find((item) => item.id === activeBlockId);
               const tableName = gridData?.tables.find((table) => table.id === block?.table_id)?.name ?? block?.table_id ?? 'Unknown';
@@ -1645,8 +1644,8 @@ export function TableGridView({
         </div>
       )}
       {rescheduleDialog && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
-          <div className="w-full max-w-sm rounded-xl bg-white p-5 shadow-2xl">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/25 p-4 backdrop-blur-[2px]">
+          <div className="w-full max-w-sm rounded-2xl border border-slate-200/80 bg-white p-5 shadow-2xl shadow-slate-900/15 ring-1 ring-slate-100">
             <h3 className="text-base font-semibold text-slate-900">Reschedule Booking</h3>
             <p className="mt-1 text-xs text-slate-500">Pick a new start time.</p>
             <input
@@ -1711,8 +1710,8 @@ export function TableGridView({
         />
       )}
       {blockForm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
-          <div className="w-full max-w-md rounded-xl bg-white p-5 shadow-2xl">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/25 p-4 backdrop-blur-[2px]">
+          <div className="w-full max-w-md rounded-2xl border border-slate-200/80 bg-white p-5 shadow-2xl shadow-slate-900/15 ring-1 ring-slate-100">
             <h3 className="text-base font-semibold text-slate-900">{blockForm.id ? 'Edit Table Block' : 'Block Table'}</h3>
             <div className="mt-4 space-y-3">
               <input

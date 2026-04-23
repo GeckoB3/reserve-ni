@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { isPlatformSuperuser } from '@/lib/platform-auth';
 import { DashboardShell } from './DashboardShell';
+import { Pill } from '@/components/ui/dashboard/Pill';
 import { SessionTimeoutGuard } from '@/components/SessionTimeoutGuard';
 import { DashboardSWRProvider } from '@/components/providers/DashboardSWRProvider';
 import {
@@ -92,7 +93,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   }
 
   return (
-    <div className="flex h-[100dvh] max-h-[100dvh] overflow-hidden bg-slate-50">
+    <div className="flex h-[100dvh] max-h-[100dvh] overflow-hidden bg-slate-100">
       <DashboardShell
         initialTableManagementEnabled={tableManagementEnabled}
         sidebarRest={{
@@ -107,16 +108,22 @@ export default async function DashboardLayout({ children }: { children: React.Re
           venueTerminology,
         }}
       >
-      <main className="min-h-0 flex-1 overflow-y-auto pt-[calc(3.5rem+env(safe-area-inset-top,0px))] lg:pt-0">
+      <main className="min-h-0 flex-1 overflow-y-auto bg-slate-100/80 pt-[calc(3.5rem+env(safe-area-inset-top,0px))] lg:pt-0">
         {planStatus === 'cancelling' && (
-          <div className="border-b border-amber-200 bg-amber-50 px-6 py-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="text-sm text-amber-900">
-                Your subscription is set to end at the close of this billing period. You can keep full access until then, or resume billing below.
-              </p>
+          <div className="border-b border-amber-200/80 bg-gradient-to-r from-amber-50 via-white to-amber-50/30 px-4 py-3 sm:px-6">
+            <div className="mx-auto flex max-w-[1400px] flex-wrap items-center justify-between gap-3">
+              <div className="flex min-w-0 flex-1 items-start gap-2">
+                <Pill variant="warning" size="sm">
+                  Cancelling
+                </Pill>
+                <p className="text-sm text-amber-950">
+                  Your subscription is set to end at the close of this billing period. You can keep full access until
+                  then, or resume billing below.
+                </p>
+              </div>
               <a
                 href="/dashboard/settings?tab=plan"
-                className="shrink-0 rounded-lg bg-amber-700 px-4 py-1.5 text-xs font-semibold text-white hover:bg-amber-800"
+                className="shrink-0 rounded-xl bg-amber-800 px-4 py-2 text-xs font-semibold text-white shadow-sm hover:bg-amber-900"
               >
                 Manage plan
               </a>
@@ -124,14 +131,19 @@ export default async function DashboardLayout({ children }: { children: React.Re
           </div>
         )}
         {planStatus === 'cancelled' && (
-          <div className="border-b border-amber-200 bg-amber-50 px-6 py-3">
-            <div className="flex items-center justify-between">
-              <p className="text-sm text-amber-800">
-                Your subscription has been cancelled. Resubscribe to continue using all features.
-              </p>
+          <div className="border-b border-amber-200/80 bg-gradient-to-r from-amber-50 via-white to-amber-50/30 px-4 py-3 sm:px-6">
+            <div className="mx-auto flex max-w-[1400px] flex-wrap items-center justify-between gap-3">
+              <div className="flex min-w-0 flex-1 items-start gap-2">
+                <Pill variant="warning" size="sm">
+                  Cancelled
+                </Pill>
+                <p className="text-sm text-amber-950">
+                  Your subscription has been cancelled. Resubscribe to continue using all features.
+                </p>
+              </div>
               <a
                 href="/dashboard/settings?tab=plan"
-                className="rounded-lg bg-amber-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-amber-700"
+                className="shrink-0 rounded-xl bg-amber-700 px-4 py-2 text-xs font-semibold text-white shadow-sm hover:bg-amber-800"
               >
                 Resubscribe
               </a>
@@ -139,16 +151,21 @@ export default async function DashboardLayout({ children }: { children: React.Re
           </div>
         )}
         {planStatus === 'past_due' && (
-          <div className="border-b border-red-200 bg-red-50 px-6 py-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="text-sm text-red-800">
-                {pricingTier === 'light'
-                  ? `Your free period has ended. Add a payment method to continue using Reserve NI at £${APPOINTMENTS_LIGHT_PRICE}/month. Your public booking page is paused until billing is active.`
-                  : 'Your last payment failed. Please update your payment method to avoid service interruption.'}
-              </p>
+          <div className="border-b border-rose-200/80 bg-gradient-to-r from-rose-50 via-white to-rose-50/30 px-4 py-3 sm:px-6">
+            <div className="mx-auto flex max-w-[1400px] flex-wrap items-center justify-between gap-3">
+              <div className="flex min-w-0 flex-1 items-start gap-2">
+                <Pill variant="danger" size="sm">
+                  Billing
+                </Pill>
+                <p className="text-sm text-rose-950">
+                  {pricingTier === 'light'
+                    ? `Your free period has ended. Add a payment method to continue using Reserve NI at £${APPOINTMENTS_LIGHT_PRICE}/month. Your public booking page is paused until billing is active.`
+                    : 'Your last payment failed. Please update your payment method to avoid service interruption.'}
+                </p>
+              </div>
               <a
                 href="/dashboard/settings?tab=plan"
-                className="shrink-0 rounded-lg bg-red-700 px-4 py-1.5 text-xs font-semibold text-white hover:bg-red-800"
+                className="shrink-0 rounded-xl bg-rose-700 px-4 py-2 text-xs font-semibold text-white shadow-sm hover:bg-rose-800"
               >
                 {pricingTier === 'light' ? 'Add payment method' : 'Update billing'}
               </a>

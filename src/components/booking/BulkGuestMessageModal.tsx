@@ -21,7 +21,7 @@ export function BulkGuestMessageModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-0 sm:items-center sm:p-4"
+      className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/30 p-0 backdrop-blur-[2px] sm:items-center sm:p-4"
       role="presentation"
       onClick={() => !sending && onClose()}
     >
@@ -29,7 +29,7 @@ export function BulkGuestMessageModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby="bulk-guest-msg-title"
-        className="max-h-[min(90vh,100dvh)] w-full max-w-md overflow-y-auto rounded-t-2xl bg-white px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-6 shadow-2xl sm:rounded-2xl sm:pb-6"
+        className="max-h-[min(90vh,100dvh)] w-full max-w-md overflow-y-auto rounded-t-2xl border border-slate-200/80 bg-white px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-6 shadow-2xl shadow-slate-900/15 ring-1 ring-slate-100 sm:rounded-2xl sm:pb-6"
         onClick={(e) => e.stopPropagation()}
       >
         <h3 id="bulk-guest-msg-title" className="text-lg font-semibold text-slate-900">

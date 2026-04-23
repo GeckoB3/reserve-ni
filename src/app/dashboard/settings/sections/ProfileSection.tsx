@@ -2,6 +2,8 @@
 
 import { useState } from 'react';
 import { createClient } from '@/lib/supabase/browser';
+import { SectionCard } from '@/components/ui/dashboard/SectionCard';
+import { Pill } from '@/components/ui/dashboard/Pill';
 
 export function ProfileSection() {
   const [password, setPassword] = useState('');
@@ -39,12 +41,14 @@ export function ProfileSection() {
   }
 
   return (
-    <section className="rounded-lg border border-neutral-200 bg-white p-6">
-      <h2 className="text-lg font-semibold text-neutral-900">Your account</h2>
-      <p className="mt-1 text-sm text-neutral-600">
-        Set or change your password. You will stay signed in. Use it to sign in with email and password on the login page.
-      </p>
-      <form onSubmit={handleSubmit} className="mt-4 max-w-xs space-y-3">
+    <SectionCard elevated>
+      <SectionCard.Header
+        eyebrow="Security"
+        title="Your account"
+        description="Set or change your password. You will stay signed in. Use it to sign in with email and password on the login page."
+      />
+      <SectionCard.Body>
+      <form onSubmit={handleSubmit} className="max-w-xs space-y-3">
         <label htmlFor="profile-password" className="block text-sm font-medium text-neutral-700">
           New password
         </label>
@@ -72,7 +76,14 @@ export function ProfileSection() {
           className="w-full rounded border border-neutral-300 px-3 py-2 text-sm"
         />
         {error && <p className="text-sm text-red-600">{error}</p>}
-        {success && <p className="text-sm text-green-600">Password updated.</p>}
+        {success ? (
+          <div className="flex flex-wrap items-center gap-2">
+            <Pill variant="success" size="sm" dot>
+              Saved
+            </Pill>
+            <span className="text-sm text-emerald-800">Password updated.</span>
+          </div>
+        ) : null}
         <button
           type="submit"
           disabled={loading || !password || !confirm}
@@ -81,6 +92,7 @@ export function ProfileSection() {
           {loading ? 'Updating…' : 'Set / change password'}
         </button>
       </form>
-    </section>
+      </SectionCard.Body>
+    </SectionCard>
   );
 }

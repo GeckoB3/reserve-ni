@@ -2,7 +2,8 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Pill } from '@/components/ui/dashboard/Pill';
 import { createClient } from '@/lib/supabase/browser';
 
 import { mergeModelNavEntries } from '@/lib/booking/enabled-models';
@@ -81,9 +82,19 @@ export interface DashboardSidebarProps {
 
 const ADMIN_ONLY_HREFS = new Set(['/dashboard/reports', '/dashboard/settings']);
 
+function NavLeadingDot({ active }: { active: boolean }) {
+  return (
+    <span
+      className={`h-1.5 w-1.5 shrink-0 rounded-full ${active ? 'bg-brand-600' : 'bg-slate-300 opacity-0 transition-opacity group-hover:opacity-100'}`}
+      aria-hidden
+    />
+  );
+}
+
 export function DashboardSidebar({
   email,
   staffName,
+  venueName,
   venueSlug,
   tableManagementEnabled,
   pricingTier = 'appointments',
@@ -95,6 +106,48 @@ export function DashboardSidebar({
   const pathname = usePathname();
   const router = useRouter();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const asideRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    if (!mobileOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMobileOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [mobileOpen]);
+
+  useEffect(() => {
+    if (!mobileOpen) return;
+    const aside = asideRef.current;
+    if (!aside) return;
+    const nodes = aside.querySelectorAll<HTMLElement>(
+      'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    );
+    const list = [...nodes];
+    if (list.length === 0) return;
+    const first = list[0];
+    const last = list[list.length - 1];
+    const t = window.setTimeout(() => first.focus(), 0);
+
+    const onTab = (e: KeyboardEvent) => {
+      if (e.key !== 'Tab' || list.length === 0) return;
+      if (e.shiftKey) {
+        if (document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        }
+      } else if (document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    aside.addEventListener('keydown', onTab);
+    return () => {
+      window.clearTimeout(t);
+      aside.removeEventListener('keydown', onTab);
+    };
+  }, [mobileOpen]);
 
   /** Restaurant / Founding / legacy Business — matches table-management and SMS tier checks. */
   const isRestaurantPlanTier = isRestaurantTableProductTier(pricingTier);
@@ -222,7 +275,7 @@ export function DashboardSidebar({
   return (
     <>
       {/* Mobile top bar */}
-      <div className="lg:hidden fixed top-0 left-0 right-0 z-40 flex items-center justify-between border-b border-slate-200 bg-white px-4 py-3 pt-[calc(0.75rem+env(safe-area-inset-top,0px))]">
+      <div className="fixed top-0 right-0 left-0 z-40 flex items-center justify-between border-b border-slate-200/80 bg-white/95 px-4 py-3 pt-[calc(0.75rem+env(safe-area-inset-top,0px))] backdrop-blur-md lg:hidden">
         <div className="flex items-center gap-3">
           <img src="/Logo.png" alt="Reserve NI" className="h-7 w-auto" />
         </div>
@@ -235,25 +288,34 @@ export function DashboardSidebar({
         </button>
       </div>
 
-      {/* Mobile overlay */}
-      {mobileOpen && (
-        <div className="lg:hidden fixed inset-0 z-30 bg-black/20 backdrop-blur-sm" onClick={() => setMobileOpen(false)} />
-      )}
+      {/* Mobile overlay: button for a11y + keyboard */}
+      {mobileOpen ? (
+        <button
+          type="button"
+          className="fixed inset-0 z-30 bg-slate-900/25 backdrop-blur-[2px] lg:hidden"
+          aria-label="Close menu"
+          onClick={() => setMobileOpen(false)}
+        />
+      ) : null}
 
       {/* Sidebar */}
-      <aside className={`
-        fixed top-0 left-0 z-40 flex h-[100dvh] w-64 flex-col border-r border-slate-200 bg-white
+      <aside
+        ref={asideRef}
+        className={`
+        fixed top-0 left-0 z-40 flex h-[100dvh] w-64 flex-col border-r border-slate-200/80 bg-slate-50/95 shadow-sm backdrop-blur-md
         transition-transform duration-200 ease-in-out
         ${mobileOpen ? 'translate-x-0' : '-translate-x-full'}
         lg:h-full lg:min-h-0 lg:translate-x-0 lg:static lg:self-stretch lg:z-auto
-      `}>
+      `}
+      >
         {/* Brand */}
-        <div className="border-b border-slate-100 px-5 py-4">
+        <div className="border-b border-slate-100/80 bg-white/80 px-5 py-4">
           <img src="/Logo.png" alt="Reserve NI" className="h-8 w-auto" />
         </div>
 
         {/* Nav links */}
-        <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-1">
+        <p className="px-4 pt-4 text-[10px] font-semibold uppercase tracking-widest text-slate-500">Workspace</p>
+        <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-2 pb-4">
           {navItemsWithImport.map((item) => {
             if (item.href === '/dashboard/bookings' && !showTableManagementNav) {
               if (isRestaurantTablePrimary) {
@@ -264,12 +326,13 @@ export function DashboardSidebar({
                     <Link
                       href="/dashboard/day-sheet"
                       onClick={() => setMobileOpen(false)}
-                      className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
+                      className={`group flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors ${
                         daySheetActive
-                          ? 'bg-brand-50 text-brand-700'
-                          : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                          ? 'bg-white text-brand-800 shadow-sm ring-1 ring-slate-100'
+                          : 'text-slate-600 hover:bg-white/70 hover:text-slate-900'
                       }`}
                     >
+                      <NavLeadingDot active={daySheetActive} />
                       <ClipboardIcon
                         className={`h-5 w-5 flex-shrink-0 ${daySheetActive ? 'text-brand-600' : 'text-slate-400'}`}
                       />
@@ -279,13 +342,14 @@ export function DashboardSidebar({
                       href={item.href}
                       onClick={() => setMobileOpen(false)}
                       className={`
-                      flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors
+                      group flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors
                       ${isActive(item.href)
-                        ? 'bg-brand-50 text-brand-700'
-                        : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                        ? 'bg-white text-brand-800 shadow-sm ring-1 ring-slate-100'
+                        : 'text-slate-600 hover:bg-white/70 hover:text-slate-900'
                       }
                     `}
                     >
+                      <NavLeadingDot active={isActive(item.href)} />
                       <item.icon className={`h-5 w-5 flex-shrink-0 ${isActive(item.href) ? 'text-brand-600' : 'text-slate-400'}`} />
                       {item.label}
                     </Link>
@@ -302,10 +366,11 @@ export function DashboardSidebar({
                     href={item.href}
                     onClick={() => setMobileOpen(false)}
                     className={`
-                      flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors
-                      ${active ? 'bg-brand-50 text-brand-700' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'}
+                      group flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors
+                      ${active ? 'bg-white text-brand-800 shadow-sm ring-1 ring-slate-100' : 'text-slate-600 hover:bg-white/70 hover:text-slate-900'}
                     `}
                   >
+                    <NavLeadingDot active={active} />
                     <item.icon className={`h-5 w-5 flex-shrink-0 ${active ? 'text-brand-600' : 'text-slate-400'}`} />
                     {item.label}
                   </Link>
@@ -321,25 +386,27 @@ export function DashboardSidebar({
                     href={item.href}
                     onClick={() => setMobileOpen(false)}
                     className={`
-                      flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors
+                      group flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors
                       ${isActive(item.href)
-                        ? 'bg-brand-50 text-brand-700'
-                        : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                        ? 'bg-white text-brand-800 shadow-sm ring-1 ring-slate-100'
+                        : 'text-slate-600 hover:bg-white/70 hover:text-slate-900'
                       }
                     `}
                   >
+                    <NavLeadingDot active={isActive(item.href)} />
                     <item.icon className={`h-5 w-5 flex-shrink-0 ${isActive(item.href) ? 'text-brand-600' : 'text-slate-400'}`} />
                     {item.label}
                   </Link>
                   <Link
                     href={calendarEligible ? '/dashboard/calendar' : '/dashboard/day-sheet'}
                     onClick={() => setMobileOpen(false)}
-                    className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
+                    className={`group flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors ${
                       scheduleActive
-                        ? 'bg-brand-50 text-brand-700'
-                        : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                        ? 'bg-white text-brand-800 shadow-sm ring-1 ring-slate-100'
+                        : 'text-slate-600 hover:bg-white/70 hover:text-slate-900'
                     }`}
                   >
+                    <NavLeadingDot active={scheduleActive} />
                     {calendarEligible ? (
                       <CalendarIcon className={`h-5 w-5 flex-shrink-0 ${scheduleActive ? 'text-brand-600' : 'text-slate-400'}`} />
                     ) : (
@@ -359,37 +426,40 @@ export function DashboardSidebar({
                     href={item.href}
                     onClick={() => setMobileOpen(false)}
                     className={`
-                      flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors
+                      group flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors
                       ${reservationsActive
-                        ? 'bg-brand-50 text-brand-700'
-                        : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                        ? 'bg-white text-brand-800 shadow-sm ring-1 ring-slate-100'
+                        : 'text-slate-600 hover:bg-white/70 hover:text-slate-900'
                       }
                     `}
                   >
+                    <NavLeadingDot active={reservationsActive} />
                     <item.icon className={`h-5 w-5 flex-shrink-0 ${reservationsActive ? 'text-brand-600' : 'text-slate-400'}`} />
                     {item.label}
                   </Link>
                   <Link
                     href="/dashboard/table-grid"
                     onClick={() => setMobileOpen(false)}
-                    className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
+                    className={`group flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors ${
                       pathname.startsWith('/dashboard/table-grid')
-                        ? 'bg-brand-50 text-brand-700'
-                        : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                        ? 'bg-white text-brand-800 shadow-sm ring-1 ring-slate-100'
+                        : 'text-slate-600 hover:bg-white/70 hover:text-slate-900'
                     }`}
                   >
+                    <NavLeadingDot active={pathname.startsWith('/dashboard/table-grid')} />
                     <TableGridIcon className={`h-5 w-5 flex-shrink-0 ${pathname.startsWith('/dashboard/table-grid') ? 'text-brand-600' : 'text-slate-400'}`} />
                     Table Grid
                   </Link>
                   <Link
                     href="/dashboard/floor-plan"
                     onClick={() => setMobileOpen(false)}
-                    className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
+                    className={`group flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors ${
                       pathname.startsWith('/dashboard/floor-plan')
-                        ? 'bg-brand-50 text-brand-700'
-                        : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                        ? 'bg-white text-brand-800 shadow-sm ring-1 ring-slate-100'
+                        : 'text-slate-600 hover:bg-white/70 hover:text-slate-900'
                     }`}
                   >
+                    <NavLeadingDot active={pathname.startsWith('/dashboard/floor-plan')} />
                     <MapIcon className={`h-5 w-5 flex-shrink-0 ${pathname.startsWith('/dashboard/floor-plan') ? 'text-brand-600' : 'text-slate-400'}`} />
                     Floor Plan
                   </Link>
@@ -404,13 +474,14 @@ export function DashboardSidebar({
                 href={item.href}
                 onClick={() => setMobileOpen(false)}
                 className={`
-                  flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors
+                  group flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors
                   ${active
-                    ? 'bg-brand-50 text-brand-700'
-                    : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                    ? 'bg-white text-brand-800 shadow-sm ring-1 ring-slate-100'
+                    : 'text-slate-600 hover:bg-white/70 hover:text-slate-900'
                   }
                 `}
               >
+                <NavLeadingDot active={active} />
                 <item.icon className={`h-5 w-5 flex-shrink-0 ${active ? 'text-brand-600' : 'text-slate-400'}`} />
                 {item.label}
               </Link>
@@ -424,8 +495,9 @@ export function DashboardSidebar({
               target="_blank"
               rel="noopener noreferrer"
               onClick={() => setMobileOpen(false)}
-              className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition-colors"
+              className="group flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-600 transition-colors hover:bg-white/70 hover:text-slate-900"
             >
+              <NavLeadingDot active={false} />
               <ExternalLinkIcon className="h-5 w-5 flex-shrink-0 text-slate-400" />
               Your Booking Page
             </a>
@@ -437,31 +509,45 @@ export function DashboardSidebar({
           <Link
             href="/dashboard/support"
             onClick={() => setMobileOpen(false)}
-            className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
+            className={`group flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors ${
               pathname.startsWith('/dashboard/support')
-                ? 'bg-brand-50 text-brand-700'
-                : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                ? 'bg-white text-brand-800 shadow-sm ring-1 ring-slate-100'
+                : 'text-slate-600 hover:bg-white/70 hover:text-slate-900'
             }`}
           >
+            <NavLeadingDot active={pathname.startsWith('/dashboard/support')} />
             <SupportIcon className={`h-5 w-5 flex-shrink-0 ${pathname.startsWith('/dashboard/support') ? 'text-brand-600' : 'text-slate-400'}`} />
             Support
           </Link>
         </div>
 
         {/* Footer */}
-        <div className="border-t border-slate-100 px-4 py-4 pb-[max(1rem,env(safe-area-inset-bottom,0px))] space-y-3">
-          <div className="flex items-center gap-3">
-            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-brand-100 text-xs font-medium text-brand-700">
-              {(staffName ?? email).charAt(0).toUpperCase()}
+        <div className="space-y-3 border-t border-slate-100/80 bg-white/60 px-3 py-4 pb-[max(1rem,env(safe-area-inset-bottom,0px))]">
+          <div className="rounded-xl border border-slate-100 bg-white p-3 shadow-sm">
+            <div className="flex items-center gap-3">
+              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-brand-100 text-xs font-semibold text-brand-800 ring-2 ring-white">
+                {(staffName ?? email).charAt(0).toUpperCase()}
+              </div>
+              <div className="min-w-0 flex-1">
+                {venueName ? (
+                  <p className="truncate text-xs font-semibold text-slate-900" title={venueName}>
+                    {venueName}
+                  </p>
+                ) : null}
+                {staffName ? <p className="truncate text-xs font-medium text-slate-700">{staffName}</p> : null}
+                <p className="truncate text-[11px] text-slate-500">{email}</p>
+              </div>
             </div>
-            <div className="min-w-0 flex-1">
-              {staffName && <p className="text-xs font-medium text-slate-700 truncate">{staffName}</p>}
-              <p className="text-xs text-slate-400 truncate">{email}</p>
+            <div className="mt-2 flex flex-wrap items-center gap-1.5">
+              <Pill variant="neutral" size="sm">
+                {pricingTier.replace(/_/g, ' ')}
+              </Pill>
             </div>
           </div>
           <button
+            type="button"
             onClick={handleSignOut}
-            className="w-full rounded-lg border border-slate-200 px-3 py-2 text-xs font-medium text-slate-500 hover:bg-slate-50 hover:text-slate-700"
+            className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs font-semibold text-slate-600 shadow-sm hover:bg-slate-50 hover:text-slate-900"
           >
             Sign out
           </button>

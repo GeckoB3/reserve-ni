@@ -7,6 +7,12 @@ import { canAddCalendarColumn, useCalendarEntitlement } from '@/hooks/use-calend
 import { isLightPlanTier } from '@/lib/tier-enforcement';
 import { ResourceExceptionsCalendar } from './ResourceExceptionsCalendar';
 import { NumericInput } from '@/components/ui/NumericInput';
+import { PageHeader } from '@/components/ui/dashboard/PageHeader';
+import { SectionCard } from '@/components/ui/dashboard/SectionCard';
+import { Pill, type PillVariant } from '@/components/ui/dashboard/Pill';
+import { EmptyState } from '@/components/ui/dashboard/EmptyState';
+import { StatTile } from '@/components/ui/dashboard/StatTile';
+import { ScheduleRow } from '@/components/ui/dashboard/ScheduleRow';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -76,14 +82,21 @@ const MIN_BOOKING_MAX = 480;
 const MAX_BOOKING_MIN = 15;
 const MAX_BOOKING_MAX = 1440;
 
-const STATUS_COLOURS: Record<string, string> = {
-  Confirmed: 'bg-blue-50 text-blue-800 border-blue-200',
-  Pending: 'bg-orange-50 text-orange-900 border-orange-200',
-  Seated: 'bg-violet-50 text-violet-900 border-violet-200',
-  Completed: 'bg-emerald-50 text-emerald-900 border-emerald-200',
-  'No-Show': 'bg-red-50 text-red-800 border-red-200',
-  Cancelled: 'bg-slate-50 text-slate-500 border-slate-200',
-};
+function resourceBookingStatusVariant(status: string): PillVariant {
+  const s = status.toLowerCase();
+  if (s.includes('cancel')) return 'danger';
+  if (s.includes('confirm') || s.includes('complete')) return 'success';
+  if (s.includes('pending')) return 'warning';
+  return 'neutral';
+}
+
+function bookingScheduleStripClass(status: string): string {
+  const s = status.toLowerCase();
+  if (s.includes('cancel')) return 'bg-slate-300';
+  if (s.includes('pending')) return 'bg-amber-500';
+  if (s.includes('confirm')) return 'bg-brand-600';
+  return 'bg-slate-400';
+}
 
 function defaultWeekHours(): WeekHours {
   const h: WeekHours = {};
@@ -608,64 +621,69 @@ export function ResourceTimelineView({
   const canManageResources = isAdmin || linkedPractitionerIds.length > 0;
 
   const pageChrome = (
-    <>
-      <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <h1 className="text-2xl font-semibold text-slate-900">Resources</h1>
-        {canManageResources && (
-          <button
-            type="button"
-            onClick={openCreate}
-            className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700"
-          >
-            + Add resource
-          </button>
-        )}
-      </div>
+    <div className="space-y-4">
+      <PageHeader
+        eyebrow="Resources"
+        title="Resource timeline"
+        subtitle="Manage bookable assets, weekly hours, and upcoming reservations tied to team calendar columns."
+        actions={
+          canManageResources ? (
+            <button
+              type="button"
+              onClick={openCreate}
+              className="rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-700"
+            >
+              + Add resource
+            </button>
+          ) : null
+        }
+      />
 
-      <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50/80 px-4 py-3 text-sm text-slate-600">
-        <p>
-          Resource bookings and free slots appear on the team calendar column you choose under Show on calendar when
-          editing a resource.{' '}
-          <Link href="/dashboard/calendar" className="font-medium text-brand-600 underline hover:text-brand-700">
-            Open dashboard calendar
-          </Link>
-          {' · '}
-          <Link
-            href="/dashboard/calendar-availability?tab=calendars"
-            className="font-medium text-brand-600 underline hover:text-brand-700"
-          >
-            Calendar availability
-          </Link>
-        </p>
-      </div>
+      <SectionCard>
+        <SectionCard.Body className="!py-3 text-sm text-slate-600">
+          <p>
+            Resource bookings and free slots appear on the team calendar column you choose under Show on calendar when
+            editing a resource.{' '}
+            <Link href="/dashboard/calendar" className="font-semibold text-brand-600 underline hover:text-brand-800">
+              Open dashboard calendar
+            </Link>
+            {' · '}
+            <Link
+              href="/dashboard/calendar-availability?tab=calendars"
+              className="font-semibold text-brand-600 underline hover:text-brand-800"
+            >
+              Calendar availability
+            </Link>
+          </p>
+        </SectionCard.Body>
+      </SectionCard>
 
-      {!isAdmin && (
-        <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50/80 px-4 py-3 text-sm text-slate-600">
-          {linkedPractitionerIds.length === 0
-            ? 'Your account is not linked to a calendar yet. Ask an admin to assign at least one calendar before you can create, edit, or delete resources.'
-            : 'You can create, edit, or delete resources when they are shown on a calendar column you control (choose under Show on calendar). Admins can assign any column.'}
-        </div>
-      )}
-    </>
+      {!isAdmin ? (
+        <SectionCard>
+          <SectionCard.Body className="!py-3 text-sm text-slate-600">
+            {linkedPractitionerIds.length === 0
+              ? 'Your account is not linked to a calendar yet. Ask an admin to assign at least one calendar before you can create, edit, or delete resources.'
+              : 'You can create, edit, or delete resources when they are shown on a calendar column you control (choose under Show on calendar). Admins can assign any column.'}
+          </SectionCard.Body>
+        </SectionCard>
+      ) : null}
+    </div>
   );
 
   if (loading) {
     return (
-      <div>
+      <div className="space-y-6">
         {pageChrome}
         <div className="flex min-h-0 flex-col gap-6 lg:flex-row lg:items-start">
           <div className="w-full shrink-0 lg:w-72 xl:w-80">
-            <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-              <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
-                <div className="h-4 w-28 animate-pulse rounded bg-slate-100" />
-                <div className="h-8 w-16 animate-pulse rounded-lg bg-slate-100" />
-              </div>
-              <div className="space-y-3 p-4">
+            <SectionCard>
+              <SectionCard.Header eyebrow="Resources" title="All resources" />
+              <SectionCard.Body className="space-y-3">
                 {[1, 2, 3, 4, 5, 6].map((i) => (
                   <div key={i} className="h-14 animate-pulse rounded-lg bg-slate-100" />
                 ))}
-              </div>
-            </div>
+              </SectionCard.Body>
+            </SectionCard>
           </div>
           <div className="min-w-0 flex-1 space-y-4">
             <div className="h-40 animate-pulse rounded-xl bg-slate-100" />
@@ -677,41 +695,56 @@ export function ResourceTimelineView({
   }
 
   return (
-    <div>
+    <div className="space-y-6">
       {pageChrome}
       <div className="flex min-h-0 flex-col gap-6 lg:flex-row lg:items-start">
       {/* ─── Sidebar: resource list ─── */}
       <div className="w-full shrink-0 lg:w-72 xl:w-80">
-        <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
-          <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
-            <h2 className="text-sm font-semibold text-slate-900">All resources</h2>
-            {canManageResources && (
-              <button type="button" onClick={openCreate} className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-brand-700 transition-colors">
-                + Add
-              </button>
-            )}
-          </div>
-          {resources.length === 0 ? (
-            <div className="px-4 py-8 text-center">
-              <svg className="mx-auto h-10 w-10 text-slate-300" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5M10 11.25h4M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z" />
-              </svg>
-              <p className="mt-2 text-sm text-slate-500">No resources yet.</p>
-              {canManageResources && (
-                <button type="button" onClick={openCreate} className="mt-3 text-sm font-medium text-brand-600 hover:text-brand-800">
-                  Create your first resource
+        <SectionCard>
+          <SectionCard.Header
+            eyebrow="Directory"
+            title="All resources"
+            right={
+              canManageResources ? (
+                <button
+                  type="button"
+                  onClick={openCreate}
+                  className="rounded-xl bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-brand-700"
+                >
+                  + Add
                 </button>
-              )}
-            </div>
+              ) : null
+            }
+          />
+          {resources.length === 0 ? (
+            <SectionCard.Body className="!py-8">
+              <EmptyState
+                title="No resources yet"
+                description="Create courts, rooms, or equipment your guests can book in fixed slots."
+                action={
+                  canManageResources ? (
+                    <button
+                      type="button"
+                      onClick={openCreate}
+                      className="text-sm font-semibold text-brand-600 hover:text-brand-800"
+                    >
+                      Create your first resource
+                    </button>
+                  ) : undefined
+                }
+              />
+            </SectionCard.Body>
           ) : (
-            <ul className="divide-y divide-slate-50">
+            <ul className="divide-y divide-slate-100">
               {resources.map((r) => (
                 <li key={r.id}>
                   <button
                     type="button"
                     onClick={() => { setSelectedId(r.id); setShowForm(false); }}
                     className={`flex w-full items-center gap-3 px-4 py-3 text-left transition-colors ${
-                      selectedId === r.id && !showForm ? 'bg-brand-50' : 'hover:bg-slate-50'
+                      selectedId === r.id && !showForm
+                        ? 'bg-brand-50/40 ring-1 ring-inset ring-brand-200'
+                        : 'hover:bg-slate-50'
                     }`}
                   >
                     <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${r.is_active ? 'bg-emerald-500' : 'bg-slate-300'}`} />
@@ -729,7 +762,7 @@ export function ResourceTimelineView({
               ))}
             </ul>
           )}
-        </div>
+        </SectionCard>
         {!isAdmin && (
           <p className="mt-3 text-xs text-slate-500">Permission rules are explained in the note above.</p>
         )}
@@ -763,8 +796,9 @@ export function ResourceTimelineView({
         )}
         {showForm ? (
           /* ── Create / Edit form ── */
-          <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-            <h2 className="text-lg font-semibold text-slate-900">{editingId ? 'Edit resource' : 'New resource'}</h2>
+          <SectionCard elevated>
+            <SectionCard.Header title={editingId ? 'Edit resource' : 'New resource'} />
+            <SectionCard.Body className="space-y-4">
             {isAdmin && !editingId && (
               <div className="mt-3 rounded-lg border border-blue-100 bg-blue-50/90 px-3 py-2.5 text-xs text-slate-700">
                 <p className="font-semibold text-slate-900">Calendar assignment and permissions</p>
@@ -1226,47 +1260,73 @@ export function ResourceTimelineView({
                 Cancel
               </button>
             </div>
-          </div>
+            </SectionCard.Body>
+          </SectionCard>
         ) : selected ? (
           /* ── Selected resource detail ── */
           <div className="space-y-4">
-            {/* Header */}
-            <div className="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-              <div>
-                <div className="flex items-center gap-2">
-                  <h2 className="text-lg font-semibold text-slate-900">{selected.name}</h2>
-                  <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${selected.is_active ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
-                    {selected.is_active ? 'Active' : 'Inactive'}
-                  </span>
-                </div>
-                {selected.resource_type && <p className="mt-0.5 text-sm text-slate-500">{selected.resource_type}</p>}
-              </div>
-              {(isAdmin ||
-                (selected.display_on_calendar_id !== null &&
-                  linkedPractitionerIds.includes(selected.display_on_calendar_id))) && (
-                <div className="flex gap-2">
-                  <button type="button" onClick={() => openEdit(selected)} className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 transition-colors">
-                    Edit
-                  </button>
-                  <button type="button" onClick={() => void handleDelete(selected.id)} className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 transition-colors">
-                    Delete
-                  </button>
-                </div>
-              )}
+            <SectionCard elevated>
+              <SectionCard.Header
+                eyebrow="Resource detail"
+                title={selected.name}
+                description={
+                  selected.resource_type ? (
+                    <p className="text-sm text-slate-600">{selected.resource_type}</p>
+                  ) : undefined
+                }
+                right={
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Pill variant={selected.is_active ? 'success' : 'neutral'} size="sm">
+                      {selected.is_active ? 'Active' : 'Inactive'}
+                    </Pill>
+                    {(isAdmin ||
+                      (selected.display_on_calendar_id !== null &&
+                        linkedPractitionerIds.includes(selected.display_on_calendar_id))) ? (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => openEdit(selected)}
+                          className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
+                        >
+                          Edit
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void handleDelete(selected.id)}
+                          className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700 shadow-sm hover:bg-red-100"
+                        >
+                          Delete
+                        </button>
+                      </>
+                    ) : null}
+                  </div>
+                }
+              />
+            </SectionCard>
+
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+              <StatTile
+                label="Slot interval"
+                value={formatDuration(selected.slot_interval_minutes)}
+                color="brand"
+              />
+              <StatTile label="Min booking" value={formatDuration(selected.min_booking_minutes)} color="violet" />
+              <StatTile label="Max booking" value={formatDuration(selected.max_booking_minutes)} color="emerald" />
+              <StatTile
+                label="Price / slot"
+                value={selected.price_per_slot_pence != null ? formatPrice(selected.price_per_slot_pence) : 'Free'}
+                color="amber"
+              />
+              <StatTile
+                label="Guest payment"
+                value={resourcePaymentSummary(selected, formatPrice)}
+                color="slate"
+              />
             </div>
 
-            {/* Info cards */}
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              <InfoCard label="Slot interval" value={formatDuration(selected.slot_interval_minutes)} />
-              <InfoCard label="Min booking" value={formatDuration(selected.min_booking_minutes)} />
-              <InfoCard label="Max booking" value={formatDuration(selected.max_booking_minutes)} />
-              <InfoCard label="Price / slot" value={selected.price_per_slot_pence != null ? formatPrice(selected.price_per_slot_pence) : 'Free'} />
-              <InfoCard label="Guest payment" value={resourcePaymentSummary(selected, formatPrice)} />
-            </div>
-
-            {/* Availability */}
-            <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-              <h3 className="text-sm font-semibold text-slate-900">Weekly availability</h3>
+            <SectionCard>
+              <SectionCard.Header title="Weekly availability" />
+              <SectionCard.Body className="!pt-0">
               <div className="mt-3 space-y-1.5">
                 {DAY_LABELS.map((d) => {
                   const ranges = selected.availability_hours?.[d.key];
@@ -1298,12 +1358,13 @@ export function ResourceTimelineView({
                   </ul>
                 </>
               )}
-            </div>
+              </SectionCard.Body>
+            </SectionCard>
 
-            {/* Bookings list */}
-            <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <h3 className="text-sm font-semibold text-slate-900">Bookings</h3>
+            <SectionCard>
+              <SectionCard.Header
+                title="Bookings"
+                right={
                 <div className="flex items-center gap-1.5">
                   <button
                     type="button"
@@ -1333,53 +1394,63 @@ export function ResourceTimelineView({
                     Today
                   </button>
                 </div>
-              </div>
+                }
+              />
+              <SectionCard.Body className="!pt-0">
               {bookingsLoading ? (
                 <div className="mt-4 h-8 animate-pulse rounded bg-slate-100" />
               ) : bookings.length === 0 ? (
-                <p className="mt-4 text-center text-sm text-slate-400">No bookings on this date.</p>
+                <EmptyState
+                  title="No bookings on this date"
+                  description="Try another day using the arrows or date picker above."
+                />
               ) : (
                 <ul className="mt-3 space-y-2">
                   {bookings.map((b) => {
                     const payLine = resourceBookingPaymentLine(b, formatPrice);
+                    const timeLabel = b.booking_time.slice(0, 5);
+                    const subtitle = [
+                      b.booking_end_time ? `Until ${b.booking_end_time.slice(0, 5)}` : '',
+                      payLine ?? '',
+                    ]
+                      .filter(Boolean)
+                      .join(' · ');
                     return (
-                    <li key={b.id} className={`flex flex-col gap-1 rounded-lg border px-3 py-2 sm:flex-row sm:items-center sm:justify-between ${STATUS_COLOURS[b.status] ?? 'bg-white text-slate-900 border-slate-200'}`}>
-                      <div className="min-w-0">
-                        <span className="text-sm font-medium">{b.guest_name}</span>
-                        <span className="ml-2 text-xs opacity-75">
-                          {b.booking_time}{b.booking_end_time ? ` \u2013 ${b.booking_end_time}` : ''}
-                        </span>
-                        {payLine ? <div className="mt-0.5 text-[11px] opacity-90">{payLine}</div> : null}
-                      </div>
-                      <span className="shrink-0 text-xs font-medium">{b.status}</span>
-                    </li>
+                      <li key={b.id}>
+                        <ScheduleRow
+                          timeLabel={timeLabel}
+                          title={b.guest_name}
+                          subtitle={subtitle || undefined}
+                          stripClassName={bookingScheduleStripClass(b.status)}
+                          trailing={
+                            <Pill variant={resourceBookingStatusVariant(b.status)} size="sm">
+                              {b.status}
+                            </Pill>
+                          }
+                        />
+                      </li>
                     );
                   })}
                 </ul>
               )}
-            </div>
+              </SectionCard.Body>
+            </SectionCard>
           </div>
         ) : (
           /* ── Empty state ── */
-          <div className="flex min-h-[30vh] items-center justify-center rounded-xl border border-dashed border-slate-200 bg-white">
-            <div className="text-center">
-              <p className="text-sm text-slate-500">
-                {resources.length > 0 ? 'Select a resource from the list.' : 'Create a resource to get started.'}
-              </p>
-            </div>
+          <div className="flex min-h-[30vh] items-center justify-center">
+            <EmptyState
+              title={resources.length > 0 ? 'Select a resource' : 'Create a resource'}
+              description={
+                resources.length > 0
+                  ? 'Choose a resource from the list to view availability and bookings.'
+                  : 'Add your first bookable resource to start taking slot reservations.'
+              }
+            />
           </div>
         )}
       </div>
       </div>
-    </div>
-  );
-}
-
-function InfoCard({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
-      <p className="text-xs font-medium text-slate-500">{label}</p>
-      <p className="mt-0.5 text-sm font-semibold text-slate-900">{value}</p>
     </div>
   );
 }

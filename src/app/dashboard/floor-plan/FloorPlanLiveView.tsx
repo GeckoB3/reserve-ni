@@ -25,6 +25,9 @@ import {
   FLOOR_PLAN_DEFAULT_LAYOUT_HEIGHT,
   FLOOR_PLAN_DEFAULT_LAYOUT_WIDTH,
 } from '@/lib/floor-plan/fit-view';
+import { PageHeader } from '@/components/ui/dashboard/PageHeader';
+import { SectionCard } from '@/components/ui/dashboard/SectionCard';
+import { EmptyState } from '@/components/ui/dashboard/EmptyState';
 
 const LiveFloorCanvas = dynamic(() => import('./LiveFloorCanvas'), { ssr: false });
 
@@ -737,50 +740,54 @@ export function FloorPlanLiveView({
   // --- Render ---
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-16">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-slate-300 border-t-brand-600" />
-      </div>
+      <SectionCard elevated>
+        <SectionCard.Body className="flex items-center justify-center py-16">
+          <div className="h-8 w-8 animate-spin rounded-full border-2 border-slate-300 border-t-brand-600" />
+        </SectionCard.Body>
+      </SectionCard>
     );
   }
 
   if (tables.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center py-16 text-center">
-        <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-slate-100">
-          <svg className="h-8 w-8 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6z" />
-          </svg>
-        </div>
-        <h3 className="text-lg font-medium text-slate-900">No Active Tables</h3>
-        <p className="mt-2 max-w-sm text-sm text-slate-500">Add tables first to start using the live floor plan.</p>
-      </div>
+      <SectionCard elevated>
+        <SectionCard.Body className="py-10">
+          <EmptyState
+            title="No active tables"
+            description="Add tables first to start using the live floor plan."
+          />
+        </SectionCard.Body>
+      </SectionCard>
     );
   }
 
   const hasPositions = tables.some((t) => t.position_x != null && t.position_y != null);
   if (!hasPositions) {
     return (
-      <div className="flex flex-col items-center justify-center py-16 text-center">
-        <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-slate-100">
-          <svg className="h-8 w-8 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M9 6.75V15m6-6v8.25m.503 3.498l4.875-2.437c.381-.19.622-.58.622-1.006V4.82c0-.836-.88-1.38-1.628-1.006l-3.869 1.934c-.317.159-.69.159-1.006 0L9.503 3.252a1.125 1.125 0 00-1.006 0L3.622 5.689C3.24 5.88 3 6.27 3 6.695V19.18c0 .836.88 1.38 1.628 1.006l3.869-1.934c.317-.159.69-.159 1.006 0l4.994 2.497c.317.158.69.158 1.006 0z" />
-          </svg>
-        </div>
-        <h3 className="text-lg font-medium text-slate-900">No Floor Plan Set Up</h3>
-        <p className="mt-2 max-w-sm text-sm text-slate-500">Arrange your tables on the floor plan editor first.</p>
-        {isAdmin ? (
-          <p className="mt-4 text-xs text-slate-500">Use Edit Layout to arrange your tables.</p>
-        ) : (
-          <p className="mt-4 text-xs text-slate-500">Ask an admin to set up your floor plan.</p>
-        )}
-      </div>
+      <SectionCard elevated>
+        <SectionCard.Body className="py-10">
+          <EmptyState
+            title="No floor plan layout"
+            description={
+              isAdmin
+                ? 'Use Edit Layout in Dining Availability to arrange your tables on the canvas.'
+                : 'Ask an admin to set up your floor plan in Dining Availability.'
+            }
+          />
+        </SectionCard.Body>
+      </SectionCard>
     );
   }
 
   return (
     <div className="flex h-[calc(100dvh-72px)] flex-col space-y-2 md:h-[calc(100dvh-100px)] md:space-y-3 lg:h-[calc(100dvh-120px)]">
-      <ViewToolbar
+      <PageHeader
+        eyebrow="Operations"
         title="Live floor"
+        subtitle="Tap tables to see status, drag to reassign when available, and scrub the timeline to preview the room."
+      />
+      <ViewToolbar
+        title=""
         summary={summaryData}
         date={selectedDate}
         onDateChange={setSelectedDate}
@@ -844,7 +851,7 @@ export function FloorPlanLiveView({
       </ViewToolbar>
 
       {/* Canvas area */}
-      <div className="relative min-h-0 min-w-0 flex-1 overflow-hidden rounded-xl border border-slate-200 bg-slate-50 shadow-sm">
+      <div className="relative min-h-0 min-w-0 flex-1 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 shadow-sm shadow-slate-900/5">
         {reassignMode && (
           <div className="absolute left-2 right-2 top-2 z-30 flex items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-2 py-1.5 text-[11px] text-amber-900 shadow-sm sm:left-4 sm:right-4 sm:top-4 sm:px-4 sm:py-2 sm:text-xs">
             <span>Tap a highlighted table to move <strong>{reassignMode.guestName}</strong></span>
@@ -869,7 +876,7 @@ export function FloorPlanLiveView({
 
       {/* Table detail bottom sheet */}
       {selectedTable && !detailBookingId && (
-        <div className="fixed bottom-0 left-0 right-0 z-40 mx-auto max-h-[60vh] max-w-lg overflow-y-auto rounded-t-2xl border border-slate-200 bg-white p-3 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-2xl sm:p-4 lg:bottom-6 lg:left-auto lg:right-6 lg:max-h-[calc(100vh-12rem)] lg:max-w-sm lg:rounded-2xl lg:p-5">
+        <div className="fixed bottom-0 left-0 right-0 z-40 mx-auto max-h-[60vh] max-w-lg overflow-y-auto rounded-t-2xl border-t border-slate-200 bg-white p-3 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-2xl shadow-slate-900/15 sm:p-4 lg:bottom-6 lg:left-auto lg:right-6 lg:max-h-[calc(100vh-12rem)] lg:max-w-sm lg:rounded-2xl lg:border lg:p-5">
           <div className="mx-auto mb-2 h-1 w-10 rounded-full bg-slate-300 lg:hidden" />
           <div className="flex items-center justify-between">
             <div>
@@ -1036,14 +1043,14 @@ export function FloorPlanLiveView({
       {/* Block table - start time + duration */}
       {floorBlockModal && (
         <div
-          className="fixed inset-0 z-[60] flex items-end justify-center bg-black/30 p-4 backdrop-blur-sm sm:items-center"
+          className="fixed inset-0 z-[60] flex items-end justify-center bg-slate-900/25 p-4 backdrop-blur-[2px] sm:items-center"
           onClick={() => !floorBlockSaving && setFloorBlockModal(null)}
           role="presentation"
         >
           <div
             role="dialog"
             aria-labelledby="floor-block-title"
-            className="w-full max-w-md rounded-2xl bg-white p-5 shadow-2xl"
+            className="w-full max-w-md rounded-2xl border border-slate-200/80 bg-white p-5 shadow-2xl shadow-slate-900/15 ring-1 ring-slate-100"
             onClick={(e) => e.stopPropagation()}
           >
             <h3 id="floor-block-title" className="text-base font-semibold text-slate-900">

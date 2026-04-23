@@ -11,11 +11,7 @@ import {
   formatTime,
   formatDepositAmount,
 } from "./base-template";
-import {
-  bookingConfirmationPaymentParagraphs,
-  bookingConfirmationPaymentTextLines,
-  priceDisplayForConfirmationCard,
-} from "@/lib/communications/booking-confirmation-pricing";
+import { confirmationStructuredPriceText } from "@/lib/communications/booking-confirmation-pricing";
 import { buildGoogleCalendarAddUrlForBooking } from "@/lib/emails/calendar-links";
 
 /** Non-table detail block: appointments (B/USE) or C/D/E with labels. */
@@ -96,7 +92,7 @@ export function renderBookingConfirmation(
   );
 
   let depositHtml: string | null = null;
-  if (depositPaid) {
+  if (depositPaid && !appt) {
     depositHtml = buildDepositCallout(
       formatDepositAmount(booking.deposit_amount_pence!),
       booking.refund_cutoff ?? null,
@@ -105,9 +101,7 @@ export function renderBookingConfirmation(
 
   let mainContent: string;
   mainContent = confirmationIntroLine(booking);
-  if (appt) {
-    mainContent += bookingConfirmationPaymentParagraphs(booking).join("");
-  } else if (depositPending) {
+  if (!appt && depositPending) {
     mainContent += `<p style="margin:0 0 12px 0">A deposit of £${formatDepositAmount(booking.deposit_amount_pence!)} is required. You\'ll receive a separate message with payment details shortly.</p>`;
   }
 
@@ -141,7 +135,7 @@ export function renderBookingConfirmation(
     emailVariant: appt ? "appointment" : "table",
     practitionerName: booking.practitioner_name ?? null,
     serviceName: booking.appointment_service_name ?? null,
-    priceDisplay: priceDisplayForConfirmationCard(booking),
+    priceDisplay: confirmationStructuredPriceText(booking),
     groupAppointments: booking.group_appointments,
     ctaLabel,
     ctaUrl: ctaUrl ?? null,
@@ -166,7 +160,10 @@ export function renderBookingConfirmation(
           `* ${g.person_label}: ${formatDate(g.booking_date)} at ${formatTime(g.booking_time)}. ${g.service_name} with ${g.practitioner_name}${g.price_display ? ` (${g.price_display})` : ""}`,
         );
       }
-      textParts.push(...bookingConfirmationPaymentTextLines(booking));
+      const structuredGroup = confirmationStructuredPriceText(booking);
+      if (structuredGroup) {
+        textParts.push("Price and payment:", ...structuredGroup.split("\n"));
+      }
       textParts.push("");
     } else {
       textParts.push(`Date: ${date}`, `Time: ${time}`);
@@ -183,9 +180,10 @@ export function renderBookingConfirmation(
         if (booking.practitioner_name)
           textParts.push(`With: ${booking.practitioner_name}`);
       }
-      const priceLine = priceDisplayForConfirmationCard(booking);
-      if (priceLine) textParts.push(`Price: ${priceLine}`);
-      textParts.push(...bookingConfirmationPaymentTextLines(booking));
+      const structured = confirmationStructuredPriceText(booking);
+      if (structured) {
+        textParts.push("Price and payment:", ...structured.split("\n"));
+      }
       textParts.push("");
     }
   } else {
@@ -206,7 +204,7 @@ export function renderBookingConfirmation(
       `Notes: ${(booking.special_requests ?? booking.dietary_notes)!}`,
     );
   }
-  if (depositPaid) {
+  if (depositPaid && !appt) {
     textParts.push(
       "",
       `Deposit paid: £${formatDepositAmount(booking.deposit_amount_pence!)}`,

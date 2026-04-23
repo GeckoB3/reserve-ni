@@ -7,6 +7,7 @@ import { useCallback, useMemo } from 'react';
 import type { VenueSettings, BookingRulesSettings } from '../types';
 import { useNumericField } from '@/hooks/useNumericField';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
+import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 
 const restaurantSchema = z.object({
   min_party_size: z.number().int().min(1).max(20),
@@ -74,9 +75,10 @@ export function BookingRulesSection({
 
   const { register, handleSubmit, formState: { errors, isSubmitting } } = restaurantForm;
   return (
-    <section className="rounded-lg border border-neutral-200 bg-white p-6 shadow-sm">
-      <h2 className="mb-4 text-lg font-semibold text-neutral-900">Booking rules</h2>
-      <form onSubmit={handleSubmit(onRestaurantSubmit)} className="space-y-4 max-w-md">
+    <SectionCard elevated>
+      <SectionCard.Header eyebrow="Bookings" title="Booking rules" />
+      <SectionCard.Body>
+      <form onSubmit={handleSubmit(onRestaurantSubmit)} className="max-w-md space-y-4">
         <div>
           <label htmlFor="min_party_size" className="block text-sm font-medium text-neutral-700 mb-1">Minimum party size</label>
           <input id="min_party_size" {...int.inputProps} min={1} max={20} {...register('min_party_size', int.registerOptions)} disabled={!isAdmin} className="w-full rounded border border-neutral-300 px-3 py-2 disabled:bg-neutral-50" />
@@ -103,6 +105,7 @@ export function BookingRulesSection({
           </button>
         )}
       </form>
-    </section>
+      </SectionCard.Body>
+    </SectionCard>
   );
 }

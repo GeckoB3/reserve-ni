@@ -8,6 +8,7 @@ import {
   ResourceExceptionsCalendar,
   type ExceptionDayValue,
 } from '@/app/dashboard/resource-timeline/ResourceExceptionsCalendar';
+import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 
 type BlockType = 'closed' | 'amended_hours' | 'reduced_capacity' | 'special_event';
 
@@ -368,11 +369,11 @@ function UnifiedBlocksEditor({ venue }: { venue: VenueSettings }) {
 
   if (loading) {
     return (
-      <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-        <div className="flex items-center justify-center py-8">
+      <SectionCard elevated>
+        <SectionCard.Body className="flex items-center justify-center py-12">
           <div className="h-6 w-6 animate-spin rounded-full border-2 border-brand-600 border-t-transparent" />
-        </div>
-      </section>
+        </SectionCard.Body>
+      </SectionCard>
     );
   }
 

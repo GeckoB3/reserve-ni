@@ -127,6 +127,8 @@ describe('enrichBookingEmailForComms', () => {
     expect(out.appointment_service_name).toBe('Vinyasa Flow');
     expect(out.booking_total_price_pence).toBe(2400);
     expect(out.appointment_price_display).toBe('£24.00');
+    expect(out.booking_unit_price_pence).toBe(1200);
+    expect(out.booking_price_quantity).toBe(2);
   });
 
   it('adds resource name and host calendar name for resource_booking rows', async () => {

@@ -7,6 +7,9 @@ import { buildCsvFromRows, downloadCsvString } from '@/lib/appointments-csv';
 import type { BookingModel, VenueTerminology } from '@/types/booking-models';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 import { HorizontalScrollHint } from '@/components/ui/HorizontalScrollHint';
+import { SectionCard } from '@/components/ui/dashboard/SectionCard';
+import { StatTile } from '@/components/ui/dashboard/StatTile';
+import { EmptyState } from '@/components/ui/dashboard/EmptyState';
 
 export interface ClientSummary {
   identified_clients_total: number;
@@ -73,12 +76,6 @@ const SORT_OPTIONS: Array<{ value: string; label: string }> = [
   { value: 'visit_count_desc', label: 'Most visits' },
   { value: 'created_desc', label: 'Recently added' },
 ];
-
-const TAG_PILL = ['bg-sky-100 text-sky-800', 'bg-violet-100 text-violet-800', 'bg-amber-100 text-amber-900'];
-
-function tagPillClass(i: number): string {
-  return TAG_PILL[i % TAG_PILL.length] ?? TAG_PILL[0]!;
-}
 
 export interface ClientsSectionProps {
   venueId: string;
@@ -315,18 +312,44 @@ export function ClientsSection({
   };
 
   return (
-    <div className="space-y-6">
+    <SectionCard elevated>
+      <SectionCard.Header
+        eyebrow="CRM"
+        title={`${clientWord} directory`}
+        description={rangeLabel}
+        right={
+          <a
+            href="/api/venue/export?type=guests"
+            className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
+          >
+            Export CSV
+          </a>
+        }
+      />
+      <SectionCard.Body className="space-y-6">
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <MetricStripCard
+        <StatTile
           label={`Known ${clientLower}s (all-time)`}
           value={String(summary.identified_clients_total)}
+          color="slate"
         />
-        <MetricStripCard label="New this period" value={String(summary.new_clients_in_period)} hint={rangeLabel} />
-        <MetricStripCard label="Returning this period" value={String(summary.returning_clients_in_period)} hint={rangeLabel} />
-        <MetricStripCard
+        <StatTile
+          label="New this period"
+          value={String(summary.new_clients_in_period)}
+          color="emerald"
+          subValue={rangeLabel}
+        />
+        <StatTile
+          label="Returning this period"
+          value={String(summary.returning_clients_in_period)}
+          color="brand"
+          subValue={rangeLabel}
+        />
+        <StatTile
           label={isAppointment ? `Anonymous ${bookingWord.toLowerCase()}s (period)` : 'Anonymous visits (period)'}
           value={String(summary.anonymous_visits_in_period)}
-          hint={rangeLabel}
+          color="amber"
+          subValue={rangeLabel}
         />
       </div>
       {summary.anonymous_visits_in_period > 0 && (
@@ -335,17 +358,7 @@ export function ClientsSection({
         </p>
       )}
 
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <h2 className="text-lg font-semibold text-slate-900">{clientWord} directory</h2>
-        <a
-          href="/api/venue/export?type=guests"
-          className="inline-flex items-center justify-center rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-        >
-          Export CSV
-        </a>
-      </div>
-
-      <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:flex-row sm:flex-wrap sm:items-end">
+      <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-slate-50/40 p-4 sm:flex-row sm:flex-wrap sm:items-end">
         <div className="min-w-0 flex-1">
           <label htmlFor="clients-search" className="mb-1 block text-xs font-medium text-slate-500">
             Search
@@ -403,7 +416,7 @@ export function ClientsSection({
       </div>
 
       {venueTags.length > 0 && (
-        <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-3">
+        <div className="rounded-2xl border border-slate-200 bg-slate-50/60 p-3">
           <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Filter by tags</p>
           <div className="flex flex-wrap gap-2">
             {venueTags.map((t) => (
@@ -431,15 +444,13 @@ export function ClientsSection({
       {loading ? (
         <p className="text-sm text-slate-500">Loading…</p>
       ) : guests.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-slate-200 bg-white p-10 text-center text-sm text-slate-600">
-          {emptyCopy}
-        </div>
+        <EmptyState title={`No matching ${clientLower}s`} description={emptyCopy} />
       ) : (
         <>
           <HorizontalScrollHint />
-          <div className="touch-pan-x overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
+          <div className="touch-pan-x overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm shadow-slate-900/5">
             <table className="w-full min-w-[720px] text-sm">
-              <thead className="border-b border-slate-100 bg-slate-50">
+              <thead className="border-b border-slate-100 bg-slate-50/60">
                 <tr>
                   <th className="px-3 py-2 text-left text-xs font-medium text-slate-500">{clientWord}</th>
                   <th className="px-3 py-2 text-left text-xs font-medium text-slate-500">Email</th>
@@ -622,7 +633,7 @@ export function ClientsSection({
                 type="button"
                 disabled={page <= 0}
                 onClick={() => setPage((p) => Math.max(0, p - 1))}
-                className="rounded-lg border border-slate-200 px-3 py-1 disabled:opacity-50"
+                className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium shadow-sm disabled:opacity-50"
               >
                 Previous
               </button>
@@ -630,7 +641,7 @@ export function ClientsSection({
                 type="button"
                 disabled={page >= totalPages - 1}
                 onClick={() => setPage((p) => p + 1)}
-                className="rounded-lg border border-slate-200 px-3 py-1 disabled:opacity-50"
+                className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium shadow-sm disabled:opacity-50"
               >
                 Next
               </button>
@@ -638,25 +649,8 @@ export function ClientsSection({
           </div>
         </>
       )}
-    </div>
-  );
-}
-
-function MetricStripCard({
-  label,
-  value,
-  hint,
-}: {
-  label: string;
-  value: string;
-  hint?: string;
-}) {
-  return (
-    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-      <p className="text-xs font-medium text-slate-500">{label}</p>
-      <p className="mt-1 text-2xl font-semibold tabular-nums text-slate-900">{value}</p>
-      {hint && <p className="mt-1 text-[11px] text-slate-400">{hint}</p>}
-    </div>
+      </SectionCard.Body>
+    </SectionCard>
   );
 }
 

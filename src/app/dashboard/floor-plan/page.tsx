@@ -4,6 +4,7 @@ import { getDashboardStaff } from '@/lib/venue-auth';
 import { UnifiedFloorPlanView } from './UnifiedFloorPlanView';
 import type { BookingModel } from '@/types/booking-models';
 import { normalizeEnabledModels } from '@/lib/booking/enabled-models';
+import { PageFrame } from '@/components/ui/dashboard/PageFrame';
 
 export default async function FloorPlanPage() {
   const supabase = await createClient();
@@ -29,7 +30,7 @@ export default async function FloorPlanPage() {
   );
 
   return (
-    <div className="p-2 md:p-4 lg:p-6">
+    <PageFrame maxWidthClass="max-w-[1600px]" className="px-2 py-4 sm:px-4 sm:py-5 lg:px-6">
       <UnifiedFloorPlanView
         isAdmin={staff.role === 'admin'}
         venueId={staff.venue_id}
@@ -37,6 +38,6 @@ export default async function FloorPlanPage() {
         bookingModel={bookingModel}
         enabledModels={enabledModels}
       />
-    </div>
+    </PageFrame>
   );
 }

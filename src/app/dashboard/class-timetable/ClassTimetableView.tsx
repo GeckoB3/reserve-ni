@@ -9,6 +9,11 @@ import { ClassTimetableReadOnlyCalendar } from './ClassTimetableReadOnlyCalendar
 import { canAddCalendarColumn, useCalendarEntitlement } from '@/hooks/use-calendar-entitlement';
 import { isLightPlanTier } from '@/lib/tier-enforcement';
 import { NumericInput } from '@/components/ui/NumericInput';
+import { PageHeader } from '@/components/ui/dashboard/PageHeader';
+import { SectionCard } from '@/components/ui/dashboard/SectionCard';
+import { StatTile } from '@/components/ui/dashboard/StatTile';
+import { Pill } from '@/components/ui/dashboard/Pill';
+import { EmptyState } from '@/components/ui/dashboard/EmptyState';
 
 interface PractitionerOption {
   id: string;
@@ -750,23 +755,27 @@ export function ClassTimetableView({
   };
 
   return (
-    <div>
-      <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50/80 px-4 py-3 text-sm text-slate-600">
-        <p>
-          Scheduled classes appear on the{' '}
-          <Link href="/dashboard/calendar" className="font-medium text-brand-600 underline hover:text-brand-700">
-            dashboard calendar
-          </Link>{' '}
-          with bookings and capacity. Use the Schedule classes button in{' '}
-          <span className="font-medium text-slate-700">Scheduled sessions</span> below to add or change sessions.
-        </p>
-      </div>
+    <div className="space-y-4">
+      <SectionCard>
+        <SectionCard.Body className="text-sm text-slate-600">
+          <p>
+            Scheduled classes appear on the{' '}
+            <Link href="/dashboard/calendar" className="font-medium text-brand-600 underline hover:text-brand-700">
+              dashboard calendar
+            </Link>{' '}
+            with bookings and capacity. Use the Schedule classes button in{' '}
+            <span className="font-medium text-slate-700">Scheduled sessions</span> below to add or change sessions.
+          </p>
+        </SectionCard.Body>
+      </SectionCard>
       {!isAdmin && (
-        <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50/80 px-4 py-3 text-sm text-slate-600">
-          {linkedPractitionerIds.length === 0
-            ? 'Your account is not linked to a calendar yet. Ask an admin to assign at least one calendar before managing class sessions.'
-            : 'You can view all class types. You can create, edit, or delete class types and recurring schedule rows when the class is on a calendar you control. You can schedule, edit, or remove sessions the same way. Cancelling a class with guest notifications remains admin-only.'}
-        </div>
+        <SectionCard>
+          <SectionCard.Body className="text-sm text-slate-600">
+            {linkedPractitionerIds.length === 0
+              ? 'Your account is not linked to a calendar yet. Ask an admin to assign at least one calendar before managing class sessions.'
+              : 'You can view all class types. You can create, edit, or delete class types and recurring schedule rows when the class is on a calendar you control. You can schedule, edit, or remove sessions the same way. Cancelling a class with guest notifications remains admin-only.'}
+          </SectionCard.Body>
+        </SectionCard>
       )}
 
       {notice && (
@@ -788,72 +797,68 @@ export function ClassTimetableView({
         </div>
       )}
 
-      <div className="mb-6 flex items-center justify-between">
-        <h1 className="text-2xl font-semibold text-slate-900">Class Timetable</h1>
-        {(isAdmin || linkedPractitionerIds.length > 0) && (
-          <button
-            type="button"
-            onClick={() => {
-              setEditingClassTypeId(null);
-              setClassTypeForm({ ...BLANK_CT });
-              setClassTypeError(null);
-              setShowClassTypeForm(true);
-            }}
-            className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700"
-          >
-            + Add class type
-          </button>
-        )}
-      </div>
+      <PageHeader
+        eyebrow="Classes"
+        title="Class timetable"
+        subtitle="Define class types, recurring patterns, and upcoming sessions for your venue."
+        actions={
+          (isAdmin || linkedPractitionerIds.length > 0) ? (
+            <button
+              type="button"
+              onClick={() => {
+                setEditingClassTypeId(null);
+                setClassTypeForm({ ...BLANK_CT });
+                setClassTypeError(null);
+                setShowClassTypeForm(true);
+              }}
+              className="rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-700"
+            >
+              + Add class type
+            </button>
+          ) : undefined
+        }
+      />
 
       {!loading && classTypes.length > 0 && (
-        <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
-            <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Active class types</p>
-            <p className="mt-1 text-2xl font-semibold text-slate-900">{stats.activeClassTypes}</p>
-          </div>
-          <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
-            <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Sessions (next 7 days)</p>
-            <p className="mt-1 text-2xl font-semibold text-slate-900">{stats.sessionsNext7Days}</p>
-          </div>
-          <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
-            <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Upcoming sessions</p>
-            <p className="mt-1 text-2xl font-semibold text-slate-900">{stats.upcomingSessions}</p>
-          </div>
-          <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
-            <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Booked spots (all upcoming)</p>
-            <p className="mt-1 text-2xl font-semibold text-slate-900">{stats.totalBookedSpots}</p>
-          </div>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <StatTile label="Active class types" value={stats.activeClassTypes} color="slate" />
+          <StatTile label="Sessions (next 7 days)" value={stats.sessionsNext7Days} color="brand" />
+          <StatTile label="Upcoming sessions" value={stats.upcomingSessions} color="emerald" />
+          <StatTile label="Booked spots (all upcoming)" value={stats.totalBookedSpots} color="amber" />
         </div>
       )}
 
-      <div className="mb-6 rounded-xl border border-slate-200 bg-white shadow-sm">
-          <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
-            <h2 className="text-sm font-semibold text-slate-700">Class types</h2>
-          </div>
-
+      <SectionCard elevated>
+          <SectionCard.Header eyebrow="Catalogue" title="Class types" />
+          <SectionCard.Body className="p-0">
           {loading ? (
             <div className="m-4 h-12 animate-pulse rounded bg-slate-100" />
           ) : classTypes.length === 0 && !showClassTypeForm ? (
-            <p className="px-5 py-4 text-sm text-slate-500">
-              No class types yet.
-              {(isAdmin || linkedPractitionerIds.length > 0) ? (
-                <>
-                  {' '}
-                  <button
-                    type="button"
-                    className="text-brand-600 underline hover:text-brand-700"
-                    onClick={() => {
-                      setClassTypeForm({ ...BLANK_CT });
-                      setClassTypeError(null);
-                      setShowClassTypeForm(true);
-                    }}
-                  >
-                    Add one to get started.
-                  </button>
-                </>
-              ) : null}
-            </p>
+            <div className="px-5 py-8">
+              <EmptyState
+                title="No class types yet"
+                description={
+                  isAdmin || linkedPractitionerIds.length > 0
+                    ? 'Create your first class type to start scheduling sessions and taking bookings.'
+                    : 'Your venue has not published any class types yet.'
+                }
+                action={
+                  isAdmin || linkedPractitionerIds.length > 0 ? (
+                    <button
+                      type="button"
+                      className="rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-700"
+                      onClick={() => {
+                        setClassTypeForm({ ...BLANK_CT });
+                        setClassTypeError(null);
+                        setShowClassTypeForm(true);
+                      }}
+                    >
+                      Add class type
+                    </button>
+                  ) : undefined
+                }
+              />
+            </div>
           ) : (
             <div className="divide-y divide-slate-50">
               {classTypes.map((ct) => {
@@ -874,9 +879,11 @@ export function ClassTimetableView({
                             ? ' · Full payment online'
                             : ' · No online payment'}
                       </span>
-                      {!ct.is_active && (
-                        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-500">Inactive</span>
-                      )}
+                      {!ct.is_active ? (
+                        <Pill variant="neutral" size="sm">
+                          Inactive
+                        </Pill>
+                      ) : null}
                       <div className="ml-auto flex gap-2">
                         {(isAdmin || staffManagesClassType(ct)) && (
                         <button
@@ -1287,7 +1294,8 @@ export function ClassTimetableView({
               </div>
             </div>
           )}
-        </div>
+          </SectionCard.Body>
+      </SectionCard>
 
       {loading ? (
         <div className="h-96 animate-pulse rounded-xl bg-slate-100" />
@@ -1328,56 +1336,70 @@ export function ClassTimetableView({
 
           {instances.length > 0 && (
             <section>
-              <h2 className="mb-3 text-lg font-medium text-slate-700">All upcoming instances</h2>
-              <div className="space-y-2">
-                {instances.slice(0, 80).map((inst) => {
-                  const ct = typeMap.get(inst.class_type_id);
-                  const cap = inst.capacity_override ?? ct?.capacity ?? 0;
-                  const booked = inst.booked_spots ?? 0;
-                  return (
-                    <div
-                      key={inst.id}
-                      className={`flex w-full flex-wrap items-center justify-between gap-2 rounded-lg border px-4 py-3 text-left text-sm shadow-sm transition-colors ${
-                        selectedId === inst.id ? 'border-slate-900 bg-slate-50' : 'border-slate-200 bg-white hover:border-slate-300'
-                      }`}
-                    >
-                      <button
-                        type="button"
-                        onClick={() => setSelectedId(selectedId === inst.id ? null : inst.id)}
-                        className="flex flex-1 items-center gap-3 text-left"
+              <SectionCard>
+                <SectionCard.Header eyebrow="Schedule" title="All upcoming instances" />
+                <SectionCard.Body className="space-y-2">
+                  {instances.slice(0, 80).map((inst) => {
+                    const ct = typeMap.get(inst.class_type_id);
+                    const cap = inst.capacity_override ?? ct?.capacity ?? 0;
+                    const booked = inst.booked_spots ?? 0;
+                    return (
+                      <div
+                        key={inst.id}
+                        className={`flex w-full flex-wrap items-center justify-between gap-2 rounded-xl border px-4 py-3 text-left text-sm shadow-sm transition-colors ${
+                          selectedId === inst.id
+                            ? 'border-brand-200 bg-brand-50/40 ring-1 ring-brand-200'
+                            : 'border-slate-100 bg-white hover:border-brand-200/80 hover:bg-slate-50/80'
+                        }`}
                       >
-                        <div className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: ct?.colour ?? '#94a3b8' }} />
-                        <span className="font-medium text-slate-900">{ct?.name}</span>
-                        <span className="text-slate-500">
-                          {inst.instance_date} at {inst.start_time.slice(0, 5)} · {booked}/{cap} booked
-                        </span>
-                        {inst.is_cancelled && (
-                          <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs text-red-700">Cancelled</span>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedId(selectedId === inst.id ? null : inst.id)}
+                          className="flex min-w-0 flex-1 items-center gap-3 text-left"
+                        >
+                          <span
+                            className="h-10 w-1.5 shrink-0 rounded-full"
+                            style={{ backgroundColor: ct?.colour ?? '#4E6B78' }}
+                          />
+                          <span className="w-14 shrink-0 text-xs font-bold tabular-nums text-slate-900 sm:text-sm">
+                            {inst.start_time.slice(0, 5)}
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-sm font-semibold text-slate-900">{ct?.name}</span>
+                            <span className="block truncate text-xs text-slate-500">
+                              {inst.instance_date} · {booked}/{cap} booked
+                            </span>
+                          </span>
+                          {inst.is_cancelled ? (
+                            <Pill variant="danger" size="sm">
+                              Cancelled
+                            </Pill>
+                          ) : null}
+                        </button>
+                        {(isAdmin || staffManagesClassType(ct)) && (
+                          <span className="flex gap-3">
+                            <button
+                              type="button"
+                              onClick={() => openEditInstance(inst)}
+                              className="text-xs font-semibold text-brand-600 hover:text-brand-800"
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void handleDeleteInstance(inst)}
+                              disabled={instanceDeletingId === inst.id}
+                              className="text-xs font-semibold text-red-600 hover:text-red-800 disabled:opacity-50"
+                            >
+                              {instanceDeletingId === inst.id ? 'Removing…' : 'Remove'}
+                            </button>
+                          </span>
                         )}
-                      </button>
-                      {(isAdmin || staffManagesClassType(ct)) && (
-                        <span className="flex gap-3">
-                          <button
-                            type="button"
-                            onClick={() => openEditInstance(inst)}
-                            className="text-xs font-medium text-brand-600 hover:text-brand-800"
-                          >
-                            Edit
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => void handleDeleteInstance(inst)}
-                            disabled={instanceDeletingId === inst.id}
-                            className="text-xs font-medium text-red-600 hover:text-red-800 disabled:opacity-50"
-                          >
-                            {instanceDeletingId === inst.id ? 'Removing…' : 'Remove'}
-                          </button>
-                        </span>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
+                      </div>
+                    );
+                  })}
+                </SectionCard.Body>
+              </SectionCard>
             </section>
           )}
         </div>

@@ -16,6 +16,26 @@ import type { BookingModel } from '@/types/booking-models';
 import { bookingStatusDisplayLabel } from '@/lib/booking/infer-booking-row-model';
 import { GuestMessageChannelSelect } from '@/components/booking/GuestMessageChannelSelect';
 import type { GuestMessageChannel } from '@/lib/booking/guest-message-channel';
+import { Pill, type PillVariant } from '@/components/ui/dashboard/Pill';
+
+function detailStatusPillVariant(status: string): PillVariant {
+  switch (status) {
+    case 'Pending':
+      return 'warning';
+    case 'Confirmed':
+      return 'success';
+    case 'Seated':
+      return 'brand';
+    case 'Completed':
+      return 'neutral';
+    case 'No-Show':
+      return 'danger';
+    case 'Cancelled':
+      return 'neutral';
+    default:
+      return 'neutral';
+  }
+}
 
 interface Guest {
   id: string;
@@ -541,6 +561,7 @@ export function BookingDetailPanel({
     load,
     onUpdated,
     notesVariant,
+    guestPhoneDefaultCountry,
   ]);
 
   const runDepositAction = useCallback(async (action: 'send_payment_link' | 'waive' | 'record_cash' | 'refund') => {
@@ -566,12 +587,15 @@ export function BookingDetailPanel({
 
   if (!displayDetail) {
     return (
-      <div className="fixed inset-0 z-50 flex justify-end bg-black/20 backdrop-blur-sm" onClick={onClose}>
+      <div
+        className="fixed inset-0 z-50 flex justify-end bg-slate-900/25 backdrop-blur-[2px]"
+        onClick={onClose}
+      >
         <div
           role="dialog"
           aria-modal="true"
           aria-label="Booking detail panel"
-          className="flex w-full max-w-sm flex-col border-l border-slate-200 bg-white shadow-2xl lg:rounded-l-2xl"
+          className="flex w-full max-w-sm flex-col border-l border-slate-200/80 bg-white shadow-2xl shadow-slate-900/15 ring-1 ring-slate-100 lg:rounded-l-2xl"
           onClick={(e) => e.stopPropagation()}
         >
           <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
@@ -621,12 +645,15 @@ export function BookingDetailPanel({
   const durationMinutes = Math.max(15, timeToMinutes(endTime) - timeToMinutes(startTime));
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-black/20 backdrop-blur-sm" onClick={onClose}>
+    <div
+      className="fixed inset-0 z-50 flex justify-end bg-slate-900/25 backdrop-blur-[2px]"
+      onClick={onClose}
+    >
       <div
         role="dialog"
         aria-modal="true"
         aria-label="Booking detail panel"
-        className="w-full max-w-sm overflow-y-auto bg-white shadow-2xl lg:rounded-l-2xl"
+        className="w-full max-w-sm overflow-y-auto border-l border-slate-200/80 bg-white shadow-2xl shadow-slate-900/15 ring-1 ring-slate-100 lg:rounded-l-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header - compact */}
@@ -635,23 +662,9 @@ export function BookingDetailPanel({
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
                 <h2 className="truncate text-base font-semibold text-slate-900">{d.guest?.name ?? 'Booking'}</h2>
-                <span
-                  className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                    d.status === 'Pending'
-                      ? 'bg-amber-100 text-amber-800'
-                      : d.status === 'Confirmed'
-                        ? 'bg-teal-100 text-teal-800'
-                        : d.status === 'Seated'
-                          ? 'bg-blue-100 text-blue-800'
-                          : d.status === 'Completed'
-                            ? 'bg-slate-100 text-slate-700'
-                            : d.status === 'No-Show'
-                              ? 'bg-red-100 text-red-800'
-                              : 'bg-slate-100 text-slate-600'
-                  }`}
-                >
+                <Pill variant={detailStatusPillVariant(d.status)} size="sm" dot className="shrink-0">
                   {bookingStatusDisplayLabel(d.status, bookingStyleIsTable)}
-                </span>
+                </Pill>
                 {loading && optimisticDetail != null && (
                   <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-500">
                     <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-brand-500" />

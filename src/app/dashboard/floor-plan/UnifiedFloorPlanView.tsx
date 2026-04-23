@@ -1,7 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { TabBar } from '@/components/ui/dashboard/TabBar';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { FloorPlanLiveView } from './FloorPlanLiveView';
 import type { BookingModel } from '@/types/booking-models';
@@ -94,34 +95,17 @@ export function UnifiedFloorPlanView({
       ? `/dashboard/availability?tab=table&fp=layout&area=${encodeURIComponent(effectiveDiningAreaId)}`
       : '/dashboard/availability?tab=table&fp=layout';
 
+  const areaTabs = useMemo(
+    () => diningAreas.filter((a) => a.is_active).map((a) => ({ id: a.id, label: a.name })),
+    [diningAreas],
+  );
+
   return (
     <div className="space-y-2 sm:space-y-3">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        {showDiningAreaChrome && effectiveDiningAreaId && (
-          <div className="flex flex-wrap gap-1.5">
-            {diningAreas
-              .filter((a) => a.is_active)
-              .map((a) => (
-                <button
-                  key={a.id}
-                  type="button"
-                  onClick={() => setDiningAreaFilter(a.id)}
-                  className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
-                    effectiveDiningAreaId === a.id
-                      ? 'border-brand-500 bg-brand-50 text-brand-800'
-                      : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
-                  }`}
-                >
-                  <span
-                    className="h-2 w-2 shrink-0 rounded-full"
-                    style={{ backgroundColor: a.colour || '#94a3b8' }}
-                    aria-hidden
-                  />
-                  {a.name}
-                </button>
-              ))}
-          </div>
-        )}
+        {showDiningAreaChrome && effectiveDiningAreaId ? (
+          <TabBar tabs={areaTabs} value={effectiveDiningAreaId} onChange={setDiningAreaFilter} />
+        ) : null}
         <div
           className={`flex items-center ${showDiningAreaChrome ? 'sm:justify-end' : ''} ${!showDiningAreaChrome && !isAdmin ? 'hidden' : ''}`}
         >

@@ -1115,7 +1115,7 @@ export function TimelineGrid({
         <>
           <div className="fixed inset-0 z-40" onClick={() => setContextMenu(null)} />
           <div
-            className="fixed z-50 rounded-xl border border-slate-200 bg-white py-1 shadow-xl"
+            className="fixed z-50 rounded-2xl border border-slate-200/80 bg-white py-1 shadow-xl shadow-slate-900/15 ring-1 ring-slate-100"
             style={{ left: contextMenu.x, top: contextMenu.y, minWidth: 200 }}
           >
             <div className="border-b border-slate-100 px-3 py-2">
@@ -1252,13 +1252,13 @@ export function TimelineGrid({
       {confirmDialog && (
         <>
           <div
-            className="fixed inset-0 z-[60] bg-black/20"
+            className="fixed inset-0 z-[60] bg-slate-900/25 backdrop-blur-[2px]"
             onClick={() => {
               confirmDialog.resolve(false);
               setConfirmDialog(null);
             }}
           />
-          <div className="fixed left-1/2 top-1/2 z-[61] w-full max-w-xs -translate-x-1/2 -translate-y-1/2 rounded-xl bg-white p-4 shadow-2xl">
+          <div className="fixed left-1/2 top-1/2 z-[61] w-full max-w-xs -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-slate-200/80 bg-white p-4 shadow-2xl shadow-slate-900/15 ring-1 ring-slate-100">
             <p className="text-sm text-slate-800">{confirmDialog.message}</p>
             <div className="mt-4 flex justify-end gap-2">
               <button

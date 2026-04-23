@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import type { VenueSettings } from '../types';
 import { useDashboardTableManagementNavSync } from '@/app/dashboard/DashboardShell';
+import { SectionCard } from '@/components/ui/dashboard/SectionCard';
+import { Pill } from '@/components/ui/dashboard/Pill';
 
 interface Props {
   venue: VenueSettings;
@@ -166,19 +168,16 @@ export function TableManagementSection({ venue, onUpdate, isAdmin }: Props) {
   const advanced = venue.table_management_enabled;
 
   return (
-    <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+    <SectionCard elevated>
+      <SectionCard.Header eyebrow="Operations" title="Table management" />
+      <SectionCard.Body>
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div className="min-w-0 flex-1">
-          <h2 className="text-base font-semibold text-slate-900">Table Management</h2>
-          <p className="mt-2 flex flex-wrap items-center gap-2">
-            <span className="text-xs font-medium text-slate-500">Current mode</span>
-            <span
-              className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${
-                advanced ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-700'
-              }`}
-            >
+          <p className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Current mode</span>
+            <Pill variant={advanced ? 'success' : 'neutral'} size="sm" dot>
               {advanced ? 'Advanced table management' : 'Simple covers mode'}
-            </span>
+            </Pill>
           </p>
           <p className="mt-2 text-sm text-slate-600">
             {advanced
@@ -296,13 +295,9 @@ export function TableManagementSection({ venue, onUpdate, isAdmin }: Props) {
             <span className="text-[11px] font-medium text-slate-400 lg:hidden">Advanced</span>
             <div className="flex items-center gap-2">
               <span className="hidden text-[11px] font-medium text-slate-400 lg:inline">Advanced</span>
-              <span
-                className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
-                  advanced ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'
-                }`}
-              >
+              <Pill variant={advanced ? 'success' : 'neutral'} size="sm">
                 {advanced ? 'On' : 'Off'}
-              </span>
+              </Pill>
               <button
                 type="button"
                 onClick={handleToggle}
@@ -389,6 +384,7 @@ export function TableManagementSection({ venue, onUpdate, isAdmin }: Props) {
       {previewLoading && (
         <p className="mt-3 text-xs text-slate-500">Checking upcoming unassigned bookings...</p>
       )}
-    </section>
+      </SectionCard.Body>
+    </SectionCard>
   );
 }

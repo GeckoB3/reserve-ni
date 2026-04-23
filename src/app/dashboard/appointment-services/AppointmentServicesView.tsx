@@ -29,6 +29,10 @@ import { StaffServiceOverrideModal } from './StaffServiceOverrideModal';
 import { canAddCalendarColumn, useCalendarEntitlement } from '@/hooks/use-calendar-entitlement';
 import { isLightPlanTier } from '@/lib/tier-enforcement';
 import { NumericInput } from '@/components/ui/NumericInput';
+import { PageHeader } from '@/components/ui/dashboard/PageHeader';
+import { SectionCard } from '@/components/ui/dashboard/SectionCard';
+import { Pill } from '@/components/ui/dashboard/Pill';
+import { EmptyState } from '@/components/ui/dashboard/EmptyState';
 
 interface Service {
   id: string;
@@ -611,28 +615,32 @@ export function AppointmentServicesView({
   }
 
   return (
-    <div>
-      <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold text-slate-900">Services</h1>
-          {!isAdmin && (
-            <p className="mt-1 text-sm text-slate-500">
-              {linkedPractitionerIds.length === 0
-                ? 'Ask an admin to assign you to a calendar in Team settings before you can add services or manage offers.'
-                : 'You can add services and link them only to calendars you control. Venue-wide details apply to every calendar that offers the service. Use Availability → Services to toggle which services each column offers. When permitted, use Edit your settings for calendar-only overrides.'}
-            </p>
-          )}
-        </div>
-        {(isAdmin || linkedPractitionerIds.length > 0) && (
-          <button
-            onClick={openCreate}
-            className="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 transition-colors"
-          >
-            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path d="M12 5v14m-7-7h14"/></svg>
-            Add Service
-          </button>
-        )}
-      </div>
+    <div className="space-y-4">
+      <PageHeader
+        eyebrow="Appointments"
+        title="Services"
+        subtitle={
+          !isAdmin
+            ? linkedPractitionerIds.length === 0
+              ? 'Ask an admin to assign you to a calendar in Team settings before you can add services or manage offers.'
+              : 'Add services and link them only to calendars you control. Use Availability → Services to toggle which columns offer each service.'
+            : 'Define what guests can book, pricing, buffers, and online payment rules.'
+        }
+        actions={
+          isAdmin || linkedPractitionerIds.length > 0 ? (
+            <button
+              type="button"
+              onClick={openCreate}
+              className="inline-flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-700"
+            >
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path d="M12 5v14m-7-7h14" />
+              </svg>
+              Add service
+            </button>
+          ) : null
+        }
+      />
 
       {!showModal && error && (
         <div className="mb-4 rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700 flex items-center justify-between">
@@ -648,25 +656,33 @@ export function AppointmentServicesView({
           ))}
         </div>
       ) : services.length === 0 ? (
-        <div className="rounded-xl border border-slate-200 bg-white p-12 text-center">
-          <p className="mb-4 text-slate-500">No services configured yet.</p>
-          {(isAdmin || linkedPractitionerIds.length > 0) && (
-            <button
-              onClick={openCreate}
-              className="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700"
-            >
-              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path d="M12 5v14m-7-7h14"/></svg>
-              Add your first service
-            </button>
-          )}
-        </div>
+        <EmptyState
+          title="No services yet"
+          description="Create your catalogue of bookable services with duration, pricing, and optional deposits."
+          action={
+            isAdmin || linkedPractitionerIds.length > 0 ? (
+              <button
+                type="button"
+                onClick={openCreate}
+                className="inline-flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-700"
+              >
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path d="M12 5v14m-7-7h14" />
+                </svg>
+                Add your first service
+              </button>
+            ) : undefined
+          }
+        />
       ) : !isAdmin && linkedPractitionerIds.length === 0 ? (
-        <div className="rounded-xl border border-amber-200 bg-amber-50/80 p-8 text-center">
-          <p className="text-sm text-amber-950">
-            Your account is not linked to a calendar yet. Ask an admin to connect your user account to a calendar in
-            Availability → Team, then return here.
-          </p>
-        </div>
+        <SectionCard className="border-amber-200 bg-amber-50/50">
+          <SectionCard.Body className="py-8 text-center">
+            <p className="text-sm text-amber-950">
+              Your account is not linked to a calendar yet. Ask an admin to connect your user account to a calendar in
+              Availability → Team, then return here.
+            </p>
+          </SectionCard.Body>
+        </SectionCard>
       ) : (
         <div className="space-y-3">
           {visibleServices.map((svc) => {
@@ -678,57 +694,77 @@ export function AppointmentServicesView({
                 : undefined,
             );
             return (
-              <div
-                key={svc.id}
-                className={`rounded-xl border bg-white px-5 py-4 shadow-sm transition-colors ${
-                  svc.is_active ? 'border-slate-200' : 'border-slate-200 bg-slate-50 opacity-60'
-                }`}
-              >
-                <div className="flex items-start justify-between gap-4">
-                  <div className="flex items-start gap-3 min-w-0">
-                    <div
-                      className="mt-1 h-3 w-3 flex-shrink-0 rounded-full"
-                      style={{ backgroundColor: display.colour }}
-                    />
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="font-medium text-slate-900">{display.name}</span>
-                        {!svc.is_active && (
-                          <span className="rounded-full bg-slate-200 px-2 py-0.5 text-xs text-slate-500">
-                            Inactive
-                          </span>
-                        )}
-                      </div>
-                      {display.description && (
-                        <p className="mt-0.5 text-sm text-slate-500 line-clamp-2">{display.description}</p>
-                      )}
-                      <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-slate-600">
-                        <span>{formatDuration(display.duration_minutes)}</span>
-                        {display.buffer_minutes > 0 && (
-                          <span className="text-slate-400">+{display.buffer_minutes}min buffer</span>
-                        )}
-                        <span className="font-medium">{formatPrice(display.price_pence)}</span>
-                        {(() => {
-                          const pr =
-                            display.payment_requirement ??
-                            (display.deposit_pence != null && display.deposit_pence > 0 ? 'deposit' : 'none');
-                          if (pr === 'full_payment') {
-                            return <span className="font-medium text-emerald-700">Full payment online</span>;
-                          }
-                          if (pr === 'deposit' && display.deposit_pence != null && display.deposit_pence > 0) {
-                            return (
-                              <span className="text-slate-400">{formatPrice(display.deposit_pence)} deposit</span>
-                            );
-                          }
-                          return <span className="text-slate-400">No online payment</span>;
-                        })()}
-                      </div>
+              <SectionCard key={svc.id} className={!svc.is_active ? 'opacity-75' : ''}>
+                <SectionCard.Header
+                  title={display.name}
+                  description={
+                    display.description ? (
+                      <p className="text-sm text-slate-600 line-clamp-2">{display.description}</p>
+                    ) : undefined
+                  }
+                  right={
+                    <div className="flex flex-wrap items-center justify-end gap-2">
+                      <span
+                        className="h-3 w-3 shrink-0 rounded-full ring-1 ring-slate-200/80"
+                        style={{ backgroundColor: display.colour }}
+                        aria-hidden
+                      />
+                      <Pill variant="neutral" size="sm">
+                        {formatDuration(display.duration_minutes)}
+                      </Pill>
+                      {!svc.is_active ? (
+                        <Pill variant="warning" size="sm">
+                          Inactive
+                        </Pill>
+                      ) : null}
+                    </div>
+                  }
+                />
+                <SectionCard.Body className="!pt-0">
+                  <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="min-w-0 flex-1 space-y-3">
+                  <div className="flex flex-wrap items-center gap-2 text-sm text-slate-600">
+                    {display.buffer_minutes > 0 ? (
+                      <Pill variant="neutral" size="sm">
+                        +{display.buffer_minutes}min buffer
+                      </Pill>
+                    ) : null}
+                    <Pill variant="brand" size="sm">
+                      {formatPrice(display.price_pence)}
+                    </Pill>
+                    {(() => {
+                      const pr =
+                        display.payment_requirement ??
+                        (display.deposit_pence != null && display.deposit_pence > 0 ? 'deposit' : 'none');
+                      if (pr === 'full_payment') {
+                        return (
+                          <Pill variant="success" size="sm">
+                            Full payment online
+                          </Pill>
+                        );
+                      }
+                      if (pr === 'deposit' && display.deposit_pence != null && display.deposit_pence > 0) {
+                        return (
+                          <Pill variant="neutral" size="sm">
+                            {formatPrice(display.deposit_pence)} deposit
+                          </Pill>
+                        );
+                      }
+                      return (
+                        <Pill variant="neutral" size="sm">
+                          No online payment
+                        </Pill>
+                      );
+                    })()}
+                  </div>
                       {!isAdmin &&
                         linkedPractitionerIds.length > 0 &&
                         (
                           <div className="mt-3 space-y-2">
-                            <div className="rounded-lg border border-slate-200 bg-slate-50/70 p-3">
-                              <p className="mb-2 text-xs font-medium text-slate-700">Offer on your calendars</p>
+                            <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-3 shadow-sm shadow-slate-900/5">
+                              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                                Offer on your calendars
+                              </p>
                               <div className="space-y-2">
                                 {linkedPractitionerIds.map((calendarId) => {
                                   const calendar = practitioners.find((p) => p.id === calendarId);
@@ -773,29 +809,24 @@ export function AppointmentServicesView({
                             const isSelf = Boolean(
                               !isAdmin && linkedPractitionerIds.includes(lp.id),
                             );
-                            const chipClass = isAdmin
-                              ? 'inline-block rounded-full bg-brand-50 px-2 py-0.5 text-xs text-brand-800'
-                              : isSelf
-                                ? 'inline-block rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-900 ring-1 ring-emerald-200/80'
-                                : 'inline-block rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600';
+                            const variant = isAdmin ? 'brand' : isSelf ? 'success' : 'neutral';
                             return (
-                              <span key={lp.id} className={chipClass}>
+                              <Pill key={lp.id} variant={variant} size="sm">
                                 {lp.name}
-                                {!isAdmin && linkedPractitionerIds.length > 0 && (
+                                {!isAdmin && linkedPractitionerIds.length > 0 ? (
                                   <span className="ml-1 font-normal text-slate-500">
                                     {linkedPractitionerIds.includes(lp.id) ? '(your calendar)' : '(view only)'}
                                   </span>
-                                )}
-                              </span>
+                                ) : null}
+                              </Pill>
                             );
                           })}
                         </div>
                       )}
                     </div>
-                  </div>
 
                   {(isAdmin || linkedPractitionerIds.length > 0) && (
-                    <div className="flex flex-shrink-0 items-center gap-1">
+                    <div className="flex flex-shrink-0 items-center gap-1 sm:pt-1">
                       <button
                         onClick={() => openEdit(svc)}
                         className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
@@ -831,8 +862,9 @@ export function AppointmentServicesView({
                       )}
                     </div>
                   )}
-                </div>
-              </div>
+                  </div>
+                </SectionCard.Body>
+              </SectionCard>
             );
           })}
         </div>
@@ -840,8 +872,13 @@ export function AppointmentServicesView({
 
       {/* Create / Edit Modal */}
       {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div role="dialog" aria-modal="true" aria-labelledby="service-modal-title" className="w-full max-w-4xl rounded-2xl bg-white p-6 shadow-xl max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/25 p-4 backdrop-blur-[2px]">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="service-modal-title"
+            className="max-h-[90vh] w-full max-w-4xl overflow-y-auto rounded-2xl border border-slate-200/80 bg-white p-6 shadow-2xl shadow-slate-900/15 ring-1 ring-slate-100"
+          >
             <div className="mb-5 flex items-center justify-between">
               <h2 id="service-modal-title" className="text-lg font-semibold text-slate-900">
                 {editingId ? 'Edit Service' : 'Add Service'}
@@ -928,8 +965,9 @@ export function AppointmentServicesView({
               </div>
 
               {/* Online payment at booking */}
-              <div className="rounded-lg border border-slate-200 p-4 space-y-3">
-                <p className="text-sm font-medium text-slate-800">Online payment when booking</p>
+              <SectionCard>
+                <SectionCard.Header title="Online payment when booking" />
+                <SectionCard.Body className="!pt-0 space-y-3">
                 <div className="space-y-2">
                   <label className="flex cursor-pointer items-start gap-2 text-sm text-slate-700">
                     <input
@@ -989,7 +1027,8 @@ export function AppointmentServicesView({
                     form.payment_requirement === 'deposit' || form.payment_requirement === 'full_payment'
                   }
                 />
-              </div>
+                </SectionCard.Body>
+              </SectionCard>
 
               {/* Online guest booking rules */}
               <div className="rounded-lg border border-slate-200 p-4 space-y-3">
@@ -1313,7 +1352,7 @@ export function AppointmentServicesView({
 
       {showAddCalendarModal && isAdmin && (
         <div
-          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4"
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/25 p-4 backdrop-blur-[2px]"
           onClick={() => {
             if (creatingCalendar) return;
             setShowAddCalendarModal(false);
@@ -1324,7 +1363,7 @@ export function AppointmentServicesView({
             role="dialog"
             aria-modal="true"
             aria-labelledby="appointment-add-calendar-title"
-            className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-6 shadow-xl"
+            className="w-full max-w-md rounded-2xl border border-slate-200/80 bg-white p-6 shadow-2xl shadow-slate-900/15 ring-1 ring-slate-100"
             onClick={(e) => e.stopPropagation()}
           >
             <h2 id="appointment-add-calendar-title" className="mb-1 text-lg font-semibold text-slate-900">

@@ -21,6 +21,9 @@ import {
 } from '@/lib/table-management/booking-status';
 import { useToast } from '@/components/ui/Toast';
 import { DashboardStatCard } from '@/components/dashboard/DashboardStatCard';
+import { PageFrame } from '@/components/ui/dashboard/PageFrame';
+import { PageHeader } from '@/components/ui/dashboard/PageHeader';
+import { EmptyState as DashboardEmptyState } from '@/components/ui/dashboard/EmptyState';
 import type { BookingModel } from '@/types/booking-models';
 import { BOOKING_MODEL_ORDER } from '@/lib/booking/enabled-models';
 import {
@@ -1103,7 +1106,13 @@ export function BookingsDashboard({
   }, [filteredBookings, from, to]);
 
   return (
-    <div className="space-y-5">
+    <PageFrame>
+      <PageHeader
+        eyebrow="Operations"
+        title="Bookings"
+        subtitle="Filter by date, status, and area. Expand any row for full guest details and actions."
+      />
+      <div className="space-y-6">
       {realtimeConnected === false && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
           Updates may be delayed. Reconnecting&hellip;
@@ -1271,8 +1280,8 @@ export function BookingsDashboard({
         </div>
       )}
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <DashboardStatCard label="Bookings" value={stats.total} color="blue" />
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:gap-4">
+        <DashboardStatCard label="Bookings" value={stats.total} color="brand" />
         <DashboardStatCard label="Total covers" value={stats.totalCovers} color="violet" />
         <DashboardStatCard label="Confirmed" value={stats.confirmed} color="emerald" />
         <DashboardStatCard label="Pending" value={stats.pending} color="amber" />
@@ -1367,7 +1376,19 @@ export function BookingsDashboard({
       {loading ? (
         <LoadingSkeleton />
       ) : filteredBookings.length === 0 ? (
-        <EmptyState />
+        <DashboardEmptyState
+          title="No reservations for this period"
+          description="Try another date range, clear filters, or take your first booking."
+          action={
+            <button
+              type="button"
+              onClick={() => setNewBookingOpen(true)}
+              className="inline-flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-brand-700"
+            >
+              New booking
+            </button>
+          }
+        />
       ) : viewMode === 'day' ? (
         <BookingsAccordionList
           bookings={filteredBookings}
@@ -1569,7 +1590,8 @@ export function BookingsDashboard({
           </div>
         </div>
       )}
-    </div>
+      </div>
+    </PageFrame>
   );
 }
 
@@ -1666,8 +1688,8 @@ function BookingsAccordionList({
 }) {
   const allSelected = bookings.length > 0 && bookings.every((b) => selectedIds.includes(b.id));
   return (
-    <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-      <div className="border-b border-slate-100 bg-slate-50/70 px-3 py-2.5 sm:px-4">
+    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm shadow-slate-900/5">
+      <div className="border-b border-slate-100 bg-slate-50/60 px-3 py-2.5 sm:px-4">
         <div className="flex items-center justify-between">
           <label className="inline-flex items-center gap-2 text-xs font-medium text-slate-600">
             <input
@@ -1869,7 +1891,7 @@ function BookingsAccordionList({
 
 function LoadingSkeleton() {
   return (
-    <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm shadow-slate-900/5">
       <div className="divide-y divide-slate-100">
         {[...Array(5)].map((_, i) => (
           <div key={i} className="flex items-center gap-4 px-5 py-4">
@@ -1880,19 +1902,6 @@ function LoadingSkeleton() {
             <div className="h-5 w-20 animate-pulse rounded-full bg-slate-100" />
           </div>
         ))}
-      </div>
-    </div>
-  );
-}
-
-function EmptyState() {
-  return (
-    <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-      <div className="flex flex-col items-center justify-center py-16 text-slate-400">
-        <svg className="mb-3 h-10 w-10" fill="none" viewBox="0 0 24 24" strokeWidth={1} stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5" />
-        </svg>
-        <p className="text-sm font-medium">No reservations for this period</p>
       </div>
     </div>
   );

@@ -3,6 +3,7 @@
 import { useCallback, useState } from 'react';
 import type { VenueSettings, AvailabilityConfigSettings, FixedIntervalsSettings, NamedSittingsSettings, NamedSittingSettings } from '../types';
 import { NumericInput } from '@/components/ui/NumericInput';
+import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 
 const DAYS = [
   { key: '0', label: 'Sun' },
@@ -104,9 +105,9 @@ export function AvailabilityConfigSection({ venue, onUpdate, isAdmin }: Availabi
   }, [local, updateNamedSittings]);
 
   return (
-    <section className="rounded-lg border border-neutral-200 bg-white p-6 shadow-sm">
-      <h2 className="mb-4 text-lg font-semibold text-neutral-900">Availability config</h2>
-
+    <SectionCard elevated>
+      <SectionCard.Header eyebrow="Capacity" title="Availability config" />
+      <SectionCard.Body>
       {isAdmin && (
         <div className="mb-4 flex gap-4">
           <label className="flex items-center gap-2">
@@ -268,6 +269,7 @@ export function AvailabilityConfigSection({ venue, onUpdate, isAdmin }: Availabi
           {saving ? 'Saving…' : 'Save availability config'}
         </button>
       )}
-    </section>
+      </SectionCard.Body>
+    </SectionCard>
   );
 }

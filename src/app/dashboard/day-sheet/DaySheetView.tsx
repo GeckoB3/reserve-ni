@@ -38,6 +38,7 @@ import { HorizontalScrollHint } from '@/components/ui/HorizontalScrollHint';
 import { GuestMessageChannelSelect } from '@/components/booking/GuestMessageChannelSelect';
 import type { GuestMessageChannel } from '@/lib/booking/guest-message-channel';
 import { CalendarDateTimePicker } from '@/components/calendar/CalendarDateTimePicker';
+import { EmptyState } from '@/components/ui/dashboard/EmptyState';
 import { getCalendarGridBounds } from '@/lib/venue-calendar-bounds';
 import { isBookingTimeInHourRange } from '@/lib/booking-time-window';
 import type { OpeningHours } from '@/types/availability';
@@ -393,8 +394,14 @@ function TimelineBreakdown({ periods, date }: { periods: DaySheetPeriod[]; date:
 
 function ConfirmDialog({ state, onClose }: { state: ConfirmState; onClose: () => void }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm p-4" onClick={onClose}>
-      <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/30 p-4 backdrop-blur-[2px]"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-sm rounded-2xl border border-slate-200/80 bg-white p-6 shadow-2xl shadow-slate-900/15 ring-1 ring-slate-100"
+        onClick={(e) => e.stopPropagation()}
+      >
         <h3 className="text-base font-semibold text-slate-900">{state.title}</h3>
         <p className="mt-2 text-sm text-slate-600">{state.message}</p>
         <div className="mt-5 flex gap-3">
@@ -443,8 +450,14 @@ function SendMessageDialog({ bookingId, onClose, onSent }: { bookingId: string; 
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm p-4" onClick={onClose}>
-      <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/30 p-4 backdrop-blur-[2px]"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-md rounded-2xl border border-slate-200/80 bg-white p-6 shadow-2xl shadow-slate-900/15 ring-1 ring-slate-100"
+        onClick={(e) => e.stopPropagation()}
+      >
         <h3 className="text-base font-semibold text-slate-900">Send Message to Guest</h3>
         <label htmlFor="day-sheet-msg-channel" className="mt-3 block text-xs font-medium text-slate-600">
           Channel
@@ -553,8 +566,14 @@ function EditBookingModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm p-4 overflow-y-auto" onClick={onClose}>
-      <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl my-8" onClick={(e) => e.stopPropagation()}>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-900/30 p-4 backdrop-blur-[2px]"
+      onClick={onClose}
+    >
+      <div
+        className="my-8 w-full max-w-lg rounded-2xl border border-slate-200/80 bg-white p-6 shadow-2xl shadow-slate-900/15 ring-1 ring-slate-100"
+        onClick={(e) => e.stopPropagation()}
+      >
         <h3 className="text-base font-semibold text-slate-900">Edit Booking</h3>
         <div className="mt-4 space-y-4">
           {/* Date / Time / Party Size via availability-aware component */}
@@ -1122,10 +1141,21 @@ export function DaySheetView({
 
   if (!data) {
     return (
-      <div className="rounded-xl border border-slate-200 bg-white p-12 text-center">
-        <p className="text-slate-500">Unable to load day sheet.</p>
-        <button type="button" onClick={() => { setLoading(true); void fetchDaySheet(); }} className="mt-3 text-sm font-medium text-brand-600 hover:text-brand-700">Retry</button>
-      </div>
+      <EmptyState
+        title="Unable to load day sheet"
+        action={
+          <button
+            type="button"
+            onClick={() => {
+              setLoading(true);
+              void fetchDaySheet();
+            }}
+            className="text-sm font-medium text-brand-600 hover:text-brand-700"
+          >
+            Retry
+          </button>
+        }
+      />
     );
   }
 
@@ -1134,8 +1164,8 @@ export function DaySheetView({
       {/* Row 1 - matches table grid / live floor (Operations + primary actions) */}
       <div className="flex flex-col gap-3 print:hidden sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
-          <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Operations</p>
-          <h1 className="truncate text-lg font-semibold text-slate-900 sm:text-xl">Day sheet</h1>
+          <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-500">Operations</p>
+          <h1 className="truncate text-xl font-bold tracking-tight text-slate-900 sm:text-2xl">Day sheet</h1>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <button
@@ -1396,7 +1426,7 @@ export function DaySheetView({
 
       {/* ── Dietary Summary ── */}
       {data.dietary_summary.length > 0 && (
-        <div className="rounded-xl border border-slate-200 bg-white shadow-sm print:shadow-none print:border-slate-300">
+        <div className="rounded-2xl border border-slate-200 bg-white shadow-sm shadow-slate-900/5 print:border-slate-300 print:shadow-none">
           <button
             type="button"
             onClick={() => setDietaryOpen((o) => !o)}
@@ -1450,17 +1480,28 @@ export function DaySheetView({
 
       {/* ── Service Period Groups ── */}
       {filteredPeriods.length === 0 && data.periods.length === 0 ? (
-        <div className="flex flex-col items-center justify-center rounded-xl border border-slate-200 bg-white py-16 text-slate-400">
-          <svg className="mb-3 h-10 w-10" fill="none" viewBox="0 0 24 24" strokeWidth={1} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5" /></svg>
-          <p className="text-sm font-medium">No bookings for {formatDateFull(date)}</p>
-          <p className="mt-1 text-xs text-slate-400">Add a booking or check a different date.</p>
-        </div>
+        <EmptyState
+          title={`No bookings for ${formatDateFull(date)}`}
+          description="Add a booking or choose another date."
+          action={
+            <button
+              type="button"
+              onClick={() => setShowNewBooking(true)}
+              className="inline-flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-brand-700"
+            >
+              New booking
+            </button>
+          }
+        />
       ) : (
         <div className="space-y-4">
           {filteredPeriods.map((period) => (
-            <div key={period.key} className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm print:shadow-none print:break-inside-avoid">
+            <div
+              key={period.key}
+              className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm shadow-slate-900/5 print:break-inside-avoid print:shadow-none"
+            >
               {/* Period header */}
-              <div className="border-b border-slate-100 bg-slate-50/80 px-4 py-3 print:bg-slate-100">
+              <div className="border-b border-slate-100 bg-slate-50/60 px-4 py-3 print:bg-slate-100">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
                     <span className="text-sm font-semibold text-slate-800">{period.label}</span>
@@ -1574,7 +1615,7 @@ export function DaySheetView({
 
                           {/* Table badge */}
                           {b.status === 'Seated' && b.table_assignments && b.table_assignments.length > 0 && (
-                            <span className="rounded bg-indigo-50 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-700 print:hidden">
+                            <span className="rounded-full border border-indigo-200 bg-indigo-50/90 px-2 py-0.5 text-[10px] font-semibold text-indigo-800 shadow-sm print:hidden">
                               {b.table_assignments.length === 1
                                 ? `Table ${b.table_assignments[0]!.name}`
                                 : `Tables ${b.table_assignments.map((t) => t.name).join(', ')}`}
@@ -2187,6 +2228,8 @@ export function DaySheetView({
           }
           .daysheet-root { padding: 0 !important; max-width: 100% !important; }
           .daysheet-root > * { break-inside: avoid; }
+          .daysheet-root h1 { font-size: 16pt; letter-spacing: -0.02em; }
+          .daysheet-root { color: #0f172a; }
           @page { margin: 1.5cm; size: A4 portrait; }
           @page :first { margin-top: 1cm; }
         }

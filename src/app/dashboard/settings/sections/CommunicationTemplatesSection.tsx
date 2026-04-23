@@ -13,6 +13,7 @@ import {
 } from "@/lib/communications/policies";
 import { isRestaurantCommsTier } from "@/lib/tier-enforcement";
 import { NumericInput } from "@/components/ui/NumericInput";
+import { SectionCard } from "@/components/ui/dashboard/SectionCard";
 
 interface CommunicationTemplatesSectionProps {
   venue: { id: string };
@@ -381,43 +382,35 @@ export function CommunicationTemplatesSection({
 
   if (loading) {
     return (
-      <section className="rounded-xl border border-slate-200 bg-white p-8 shadow-sm">
-        <div className="flex items-center gap-3">
+      <SectionCard elevated>
+        <SectionCard.Body className="flex items-center gap-3 py-10">
           <div className="h-5 w-5 animate-spin rounded-full border-2 border-brand-600 border-t-transparent" />
-          <span className="text-sm text-slate-500">
-            Loading communication settings...
-          </span>
-        </div>
-      </section>
+          <span className="text-sm text-slate-500">Loading communication settings...</span>
+        </SectionCard.Body>
+      </SectionCard>
     );
   }
 
   if (!policies || availableLanes.length === 0) {
     return (
-      <section className="rounded-xl border border-slate-200 bg-white p-8 shadow-sm">
-        <p className="text-sm text-slate-500">
-          Communication settings are not available for this venue.
-        </p>
-      </section>
+      <SectionCard elevated>
+        <SectionCard.Body className="py-8">
+          <p className="text-sm text-slate-500">Communication settings are not available for this venue.</p>
+        </SectionCard.Body>
+      </SectionCard>
     );
   }
 
   const lanePolicies = policies[activeLane];
 
   return (
-    <section className="space-y-6" aria-labelledby="guest-comms-main-heading">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0">
-          <h2
-            id="guest-comms-main-heading"
-            className="text-lg font-semibold text-slate-900"
-          >
-            Guest communications
-          </h2>
-        </div>
-        <SaveIndicator status={saveStatus} />
-      </div>
-
+    <SectionCard elevated>
+      <SectionCard.Header
+        eyebrow="Communications"
+        title="Guest communications"
+        right={<SaveIndicator status={saveStatus} />}
+      />
+      <SectionCard.Body className="space-y-6">
       {pricingTier === "light" && !hasStripeSubscription && (
         <div className="rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-950">
           <p className="font-medium">SMS on Appointments Light</p>
@@ -488,7 +481,8 @@ export function CommunicationTemplatesSection({
           onClose={() => setPreviewState(null)}
         />
       )}
-    </section>
+      </SectionCard.Body>
+    </SectionCard>
   );
 }
 

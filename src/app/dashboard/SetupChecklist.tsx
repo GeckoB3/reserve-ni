@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import type { SetupStatus } from '@/app/api/venue/setup-status/route';
+import { Pill } from '@/components/ui/dashboard/Pill';
+import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import type { BookingModel } from '@/types/booking-models';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 
@@ -237,62 +239,66 @@ export function SetupChecklist() {
   const progressPct = Math.round((completedCount / totalCount) * 100);
 
   return (
-    <div className="mb-6 overflow-hidden rounded-xl border border-brand-100 bg-white shadow-sm">
-      <div className="flex items-center justify-between gap-4 border-b border-slate-100 px-5 py-4">
-        <div className="flex-1">
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-semibold text-slate-900">
-              {status.onboarding_completed ? 'What’s next' : 'Get your venue ready'} — {completedCount}/
-              {totalCount} complete
-            </span>
-            <span className="rounded-full bg-brand-100 px-2 py-0.5 text-xs font-medium text-brand-700">
-              {progressPct}%
-            </span>
-          </div>
-          {status.onboarding_completed ? (
-            <p className="mt-1 text-xs text-slate-500">
-              Showing only what still needs attention (steps you finished in onboarding are not listed again).
-            </p>
-          ) : (
-            <p className="mt-1 text-xs text-slate-500">Outstanding tasks to get your venue live for guests.</p>
-          )}
-          <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
+    <div className="mb-6">
+      <SectionCard className="border-brand-200/70">
+        <SectionCard.Header
+          eyebrow="Setup"
+          title={
+            status.onboarding_completed
+              ? `What's next (${completedCount}/${totalCount})`
+              : `Get your venue ready (${completedCount}/${totalCount})`
+          }
+          description={
+            status.onboarding_completed
+              ? 'Showing only what still needs attention (steps you finished in onboarding are not listed again).'
+              : 'Outstanding tasks to get your venue live for guests.'
+          }
+          right={
+            <div className="flex items-center gap-2">
+              <Pill variant="brand" size="sm">
+                {progressPct}%
+              </Pill>
+              <button
+                type="button"
+                onClick={dismiss}
+                className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                aria-label="Dismiss setup checklist"
+              >
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+          }
+        />
+        <SectionCard.Body className="!pt-0">
+          <div className="mb-4 h-2 w-full overflow-hidden rounded-full bg-slate-100">
             <div
-              className="h-full rounded-full bg-brand-500 transition-all duration-500"
+              className="h-full rounded-full bg-gradient-to-r from-brand-500 to-brand-700 transition-all duration-500"
               style={{ width: `${progressPct}%` }}
             />
           </div>
-        </div>
-        <button
-          onClick={dismiss}
-          className="flex-shrink-0 rounded p-1 text-slate-400 hover:bg-slate-50 hover:text-slate-600"
-          aria-label="Dismiss setup checklist"
-        >
-          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
-          </svg>
-        </button>
-      </div>
-
-      <ul className="divide-y divide-slate-50">
-        {incompleteSteps.map((step) => (
-          <li key={step.key} className="flex items-center gap-4 px-5 py-3">
-            <div className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full border-2 border-slate-200 bg-white">
-              <div className="h-2 w-2 rounded-full bg-slate-300" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium text-slate-800">{step.label}</p>
-              <p className="text-xs text-slate-500">{step.description}</p>
-            </div>
-            <Link
-              href={step.href}
-              className="flex-shrink-0 rounded-lg border border-brand-200 bg-brand-50 px-3 py-1 text-xs font-medium text-brand-700 transition-colors hover:bg-brand-100"
-            >
-              {step.actionLabel}
-            </Link>
-          </li>
-        ))}
-      </ul>
+          <ul className="divide-y divide-slate-100 rounded-xl border border-slate-100 bg-slate-50/40">
+            {incompleteSteps.map((step) => (
+              <li key={step.key} className="flex items-center gap-4 px-4 py-3.5 sm:px-5">
+                <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full border-2 border-dashed border-slate-200 bg-white">
+                  <div className="h-2 w-2 rounded-full bg-slate-300" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold text-slate-900">{step.label}</p>
+                  <p className="mt-0.5 text-xs leading-relaxed text-slate-600">{step.description}</p>
+                </div>
+                <Link
+                  href={step.href}
+                  className="flex-shrink-0 rounded-xl border border-brand-200 bg-brand-50 px-3 py-2 text-xs font-semibold text-brand-800 shadow-sm transition-colors hover:bg-brand-100"
+                >
+                  {step.actionLabel}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </SectionCard.Body>
+      </SectionCard>
     </div>
   );
 }

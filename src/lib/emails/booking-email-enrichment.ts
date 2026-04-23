@@ -4,7 +4,11 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { BookingEmailData, GroupAppointmentLine } from '@/lib/emails/types';
+import type {
+  BookingEmailData,
+  BookingTicketPriceLine,
+  GroupAppointmentLine,
+} from '@/lib/emails/types';
 import { formatDepositAmount } from '@/lib/emails/templates/base-template';
 import { getResourceBookingEmailLabels } from '@/lib/booking/resource-booking-email-labels';
 
@@ -254,14 +258,20 @@ export async function enrichBookingEmailForSecondaryModels(
 
     const { data: ticketLines } = await supabase
       .from('booking_ticket_lines')
-      .select('quantity, unit_price_pence')
+      .select('quantity, unit_price_pence, label')
       .eq('booking_id', bookingId);
 
     let totalPence = 0;
+    const ticketPriceLines: BookingTicketPriceLine[] = [];
     for (const line of ticketLines ?? []) {
       const q = (line as { quantity?: number }).quantity ?? 0;
       const unit = (line as { unit_price_pence?: number }).unit_price_pence ?? 0;
       totalPence += q * unit;
+      ticketPriceLines.push({
+        label: (line as { label?: string }).label ?? null,
+        quantity: q,
+        unit_price_pence: unit,
+      });
     }
 
     return {
@@ -278,6 +288,7 @@ export async function enrichBookingEmailForSecondaryModels(
           : totalPence > 0
             ? totalPence
             : null,
+      ...(ticketPriceLines.length > 0 ? { booking_ticket_price_lines: ticketPriceLines } : {}),
     };
   }
 
@@ -297,6 +308,8 @@ export async function enrichBookingEmailForSecondaryModels(
       const party = typeof r.party_size === 'number' && r.party_size > 0 ? r.party_size : 1;
       const unitP = ct?.price_pence ?? null;
       const totalPence = unitP != null ? unitP * party : null;
+      const showUnitBreakdown =
+        unitP != null && unitP > 0 && party > 1 && totalPence != null && totalPence > 0;
       return {
         ...base,
         email_variant: 'appointment',
@@ -311,6 +324,9 @@ export async function enrichBookingEmailForSecondaryModels(
             : totalPence != null && totalPence > 0
               ? totalPence
               : null,
+        ...(showUnitBreakdown
+          ? { booking_unit_price_pence: unitP, booking_price_quantity: party }
+          : {}),
       };
     }
   }

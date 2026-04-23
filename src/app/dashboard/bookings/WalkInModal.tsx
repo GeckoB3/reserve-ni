@@ -283,7 +283,7 @@ export function WalkInModal({
         role="dialog"
         aria-modal="true"
         aria-label="Add walk-in booking"
-        className={`w-full rounded-2xl bg-white p-6 shadow-2xl ${
+        className={`w-full rounded-2xl border border-slate-200/80 bg-white p-6 shadow-2xl shadow-slate-900/15 ring-1 ring-slate-100 ${
           embedded ? 'mx-auto' : 'my-8'
         } ${advancedMode ? 'max-w-2xl' : embedded ? 'max-w-lg' : 'max-w-sm'}`}
         onClick={(e) => e.stopPropagation()}
@@ -471,17 +471,17 @@ export function WalkInModal({
             <div>
               <p className="mb-1.5 text-sm font-medium text-slate-700">Table assignment</p>
 
-              <div className="mb-2 inline-flex rounded-lg border border-slate-200 bg-white p-0.5">
+              <div className="mb-2 inline-flex rounded-2xl border border-slate-200 bg-slate-50/80 p-1 shadow-inner ring-1 ring-slate-100/80">
                 <button
                   type="button"
                   onClick={() => {
                     setTableAssignMode('suggested');
                     setManualTableIds([]);
                   }}
-                  className={`rounded-md px-3 py-1.5 text-xs font-medium transition-all duration-150 ${
+                  className={`rounded-xl px-3 py-1.5 text-xs font-semibold transition-all duration-150 ${
                     tableAssignMode === 'suggested'
-                      ? 'bg-brand-600 text-white shadow-sm'
-                      : 'text-slate-600 hover:bg-slate-50'
+                      ? 'bg-white text-slate-900 shadow-sm ring-1 ring-brand-200/80'
+                      : 'text-slate-600 hover:bg-white/70'
                   }`}
                 >
                   Suggested
@@ -494,10 +494,10 @@ export function WalkInModal({
                       setManualTableIds(selectedSuggestion.table_ids);
                     }
                   }}
-                  className={`rounded-md px-3 py-1.5 text-xs font-medium transition-all duration-150 ${
+                  className={`rounded-xl px-3 py-1.5 text-xs font-semibold transition-all duration-150 ${
                     tableAssignMode === 'floor'
-                      ? 'bg-brand-600 text-white shadow-sm'
-                      : 'text-slate-600 hover:bg-slate-50'
+                      ? 'bg-white text-slate-900 shadow-sm ring-1 ring-brand-200/80'
+                      : 'text-slate-600 hover:bg-white/70'
                   }`}
                 >
                   Floor plan
@@ -692,7 +692,7 @@ export function WalkInModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/20 p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-900/30 p-4 backdrop-blur-[2px]"
       onClick={onClose}
     >
       {inner}

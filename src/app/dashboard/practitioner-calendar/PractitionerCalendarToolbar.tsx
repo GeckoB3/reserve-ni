@@ -2,6 +2,7 @@
 
 import type { ReactNode } from 'react';
 import { CalendarDateTimePicker } from '@/components/calendar/CalendarDateTimePicker';
+import { Pill } from '@/components/ui/dashboard/Pill';
 
 export type CalendarToolbarViewMode = 'day' | 'week' | 'month';
 
@@ -93,12 +94,15 @@ export function PractitionerCalendarToolbar({
   const showTodayBadge = isPeriodContainingToday(viewMode, date, weekStart, monthAnchor);
 
   return (
-    <div className="space-y-3">
-      <h1 className="text-xl font-semibold tracking-tight text-slate-900 sm:text-2xl">Calendar</h1>
+    <div className="space-y-4">
+      <div>
+        <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-500">Schedule</p>
+        <h1 className="mt-0.5 text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">Calendar</h1>
+      </div>
 
       <div className="flex w-full flex-wrap items-center gap-x-3 gap-y-2">
         <div className="shrink-0 overflow-x-auto">
-          <div className="flex w-max rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
+          <div className="flex w-max rounded-2xl border border-slate-200 bg-slate-50/80 p-1 shadow-inner ring-1 ring-slate-100/80">
             {(['day', 'week', 'month'] as const).map((m) => (
               <button
                 key={m}
@@ -106,8 +110,10 @@ export function PractitionerCalendarToolbar({
                 aria-label={`${m} schedule view`}
                 aria-pressed={viewMode === m}
                 onClick={() => onViewModeChange(m)}
-                className={`rounded-lg px-3 py-2 text-sm font-medium capitalize transition-all sm:px-4 ${
-                  viewMode === m ? 'bg-brand-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50'
+                className={`rounded-xl px-3 py-2 text-sm font-semibold capitalize transition-all sm:px-4 ${
+                  viewMode === m
+                    ? 'bg-white text-slate-900 shadow-sm ring-1 ring-brand-200/80'
+                    : 'text-slate-600 hover:bg-white/70'
                 }`}
               >
                 {m}
@@ -120,7 +126,7 @@ export function PractitionerCalendarToolbar({
 
       {/* Day view: full date/time picker with scrollable strip */}
       {viewMode === 'day' && (
-        <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+        <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm shadow-slate-900/5">
           <CalendarDateTimePicker
             date={date}
             onDateChange={onDateChange}
@@ -133,11 +139,11 @@ export function PractitionerCalendarToolbar({
 
       {/* Week / month view: classic chevron period nav */}
       {viewMode !== 'day' && (
-        <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-3 shadow-sm sm:px-4">
+        <div className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-3 py-3 shadow-sm shadow-slate-900/5 sm:px-4">
           <button
             type="button"
             onClick={() => onNavigateDay(-1)}
-            className="rounded-lg p-2 text-slate-400 hover:bg-slate-50 hover:text-slate-600"
+            className="rounded-xl p-2 text-slate-400 transition-colors hover:bg-slate-50 hover:text-slate-600"
             aria-label="Previous period"
           >
             <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden>
@@ -145,13 +151,19 @@ export function PractitionerCalendarToolbar({
             </svg>
           </button>
           <div className="min-w-0 flex-1 px-2 text-center">
-            <h2 className="truncate text-sm font-semibold text-slate-900 sm:text-base">{periodLabel}</h2>
-            {showTodayBadge && <span className="text-xs font-medium text-brand-600">Today</span>}
+            <h2 className="truncate text-sm font-bold text-slate-900 sm:text-base">{periodLabel}</h2>
+            {showTodayBadge ? (
+              <div className="mt-1 flex justify-center">
+                <Pill variant="brand" size="sm" dot>
+                  Today
+                </Pill>
+              </div>
+            ) : null}
           </div>
           <button
             type="button"
             onClick={() => onNavigateDay(1)}
-            className="rounded-lg p-2 text-slate-400 hover:bg-slate-50 hover:text-slate-600"
+            className="rounded-xl p-2 text-slate-400 transition-colors hover:bg-slate-50 hover:text-slate-600"
             aria-label="Next period"
           >
             <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden>

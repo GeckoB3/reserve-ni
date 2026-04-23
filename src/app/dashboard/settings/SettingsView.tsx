@@ -34,6 +34,10 @@ import {
 import { normalizeEnabledModels } from '@/lib/booking/enabled-models';
 import type { BookingModel } from '@/types/booking-models';
 import { isRestaurantTableProductTier } from '@/lib/tier-enforcement';
+import { PageHeader } from '@/components/ui/dashboard/PageHeader';
+import { TabBar } from '@/components/ui/dashboard/TabBar';
+import { SectionCard } from '@/components/ui/dashboard/SectionCard';
+import { Pill } from '@/components/ui/dashboard/Pill';
 
 interface SettingsViewProps {
   initialVenue: VenueSettings | null;
@@ -306,9 +310,29 @@ function PlanSection({
   const isRestaurantTier = tier === 'restaurant';
   const smsIncludedMonthly = computeSmsMonthlyAllowance(tier, null);
 
+  const tierPillVariant: 'success' | 'brand' | 'neutral' =
+    tier === 'founding' ? 'success' : isRestaurantTier ? 'brand' : 'neutral';
+  const planPillVariant: 'success' | 'danger' | 'warning' | 'neutral' = billingActive
+    ? 'success'
+    : planStatus === 'past_due'
+      ? 'danger'
+      : planStatus === 'cancelling'
+        ? 'warning'
+        : 'neutral';
+  const planPillLabel = billingActive
+    ? 'Active'
+    : planStatus === 'past_due'
+      ? 'Payment due'
+      : planStatus === 'cancelling'
+        ? 'Cancelling'
+        : planStatus === 'cancelled'
+          ? 'Cancelled'
+          : planStatus;
+
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm space-y-4">
-      <h2 className="text-base font-semibold text-slate-900">Your Plan</h2>
+    <SectionCard elevated>
+      <SectionCard.Header eyebrow="Billing" title="Your plan" />
+      <SectionCard.Body className="space-y-4">
       <p className="text-xs text-slate-600 leading-relaxed">
         {!isLight ? (
           planStatus === 'past_due' ? (
@@ -378,46 +402,19 @@ function PlanSection({
           </>
         )}
       </p>
-      {planSuccess && (
-        <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
-          {planSuccess}
+      {planSuccess ? (
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-emerald-200/80 bg-emerald-50/70 px-3 py-2.5 text-sm text-emerald-950">
+          <Pill variant="success" size="sm" dot>
+            Update
+          </Pill>
+          <span>{planSuccess}</span>
         </div>
-      )}
-      <div className="flex items-center gap-3">
-        <span
-          className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${
-            tier === 'founding'
-              ? 'bg-emerald-100 text-emerald-700'
-              : isRestaurantTier
-                ? 'bg-brand-100 text-brand-700'
-                : tier === 'light'
-                  ? 'bg-sky-100 text-sky-800'
-                  : 'bg-slate-100 text-slate-700'
-          }`}
-        >
-          {tierLabel}
-        </span>
-        <span
-          className={`text-xs font-medium ${
-            billingActive
-              ? 'text-green-600'
-              : planStatus === 'past_due'
-                ? 'text-red-600'
-                : planStatus === 'cancelling'
-                  ? 'text-amber-700'
-                  : 'text-amber-600'
-          }`}
-        >
-          {billingActive
-            ? 'Active'
-            : planStatus === 'past_due'
-              ? 'Payment due'
-              : planStatus === 'cancelling'
-                ? 'Cancelling'
-                : planStatus === 'cancelled'
-                  ? 'Cancelled'
-                  : planStatus}
-        </span>
+      ) : null}
+      <div className="flex flex-wrap items-center gap-2">
+        <Pill variant={tierPillVariant}>{tierLabel}</Pill>
+        <Pill variant={planPillVariant} size="sm" dot>
+          {planPillLabel}
+        </Pill>
       </div>
       {periodEndLabel && billingActive && !isCancelling && hasStripeSub && (
         <p className="text-xs text-slate-500">Current billing period ends on {periodEndLabel}.</p>
@@ -611,7 +608,8 @@ function PlanSection({
           </button>
         )}
       </div>
-    </div>
+      </SectionCard.Body>
+    </SectionCard>
   );
 }
 
@@ -633,6 +631,10 @@ export function SettingsView({
   const visibleTabs = useMemo(
     () => (isAdmin ? [...TABS] : TABS.filter((x) => x.key !== 'data-import')),
     [isAdmin],
+  );
+  const tabBarTabs = useMemo(
+    (): { id: TabKey; label: string }[] => visibleTabs.map((t) => ({ id: t.key, label: t.label })),
+    [visibleTabs],
   );
   const [activeTab, setActiveTab] = useState<TabKey>(() => resolveInitialTab(initialTab, isAdmin));
   const [planBannerDismissed, setPlanBannerDismissed] = useState(false);
@@ -728,48 +730,43 @@ export function SettingsView({
 
   if (!venue) {
     return (
-      <div className="flex items-center justify-center rounded-xl border border-slate-200 bg-white p-12">
-        <div className="h-6 w-6 animate-spin rounded-full border-2 border-brand-600 border-t-transparent" />
-      </div>
+      <SectionCard elevated>
+        <SectionCard.Body className="flex min-h-[180px] items-center justify-center py-16">
+          <div className="h-6 w-6 animate-spin rounded-full border-2 border-brand-600 border-t-transparent" />
+        </SectionCard.Body>
+      </SectionCard>
     );
   }
 
   return (
     <div className="space-y-6">
+      <header className="space-y-4">
+        <PageHeader eyebrow="Account" title="Settings" />
+        <div className="overflow-x-auto pb-0.5">
+          <TabBar tabs={tabBarTabs} value={activeTab} onChange={setActiveTab} />
+        </div>
+      </header>
       {showPlanCheckoutBanner && (
-        <div className="flex items-start justify-between gap-3 rounded-xl border border-brand-200 bg-brand-50 px-4 py-3 text-sm text-brand-900 shadow-sm">
-          <p className="min-w-0 flex-1">{planBannerMessage}</p>
+        <div className="flex items-start justify-between gap-3 rounded-2xl border border-brand-200/80 bg-brand-50/80 px-4 py-3 text-sm text-brand-950 shadow-sm shadow-slate-900/5">
+          <div className="flex min-w-0 flex-1 items-start gap-2">
+            <Pill variant="brand" size="sm" dot>
+              Checkout
+            </Pill>
+            <p className="min-w-0 flex-1 leading-relaxed">{planBannerMessage}</p>
+          </div>
           <button
             type="button"
             onClick={() => {
               setPlanBannerDismissed(true);
               router.replace('/dashboard/settings?tab=plan', { scroll: false });
             }}
-            className="flex-shrink-0 rounded-lg px-2 py-1 text-xs font-medium text-brand-800 hover:bg-brand-100"
+            className="shrink-0 rounded-xl px-2 py-1 text-xs font-semibold text-brand-800 hover:bg-brand-100"
           >
             Dismiss
           </button>
         </div>
       )}
-      {/* Tab navigation */}
-      <div className="flex gap-1 overflow-x-auto rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
-        {visibleTabs.map((tab) => (
-          <button
-            key={tab.key}
-            type="button"
-            onClick={() => setActiveTab(tab.key)}
-            className={`whitespace-nowrap rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
-              activeTab === tab.key
-                ? 'bg-brand-600 text-white shadow-sm'
-                : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
-            }`}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
 
-      {/* Tab content */}
       <div className="space-y-6">
         {activeTab === 'profile' && (
           <>
@@ -787,19 +784,21 @@ export function SettingsView({
             <VenueProfileSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} bookingModel={bookingModel} />
             <BookingTypesSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} />
             {showRestaurantTableProfileSections && !isAppointment && (
-              <div className="rounded-lg border border-slate-200 bg-slate-50/80 p-4 text-sm text-slate-700">
-                <p className="font-medium text-slate-900">Table management and dining availability</p>
-                <p className="mt-1 text-slate-600">
-                  Floor plan, table combinations, legacy availability, and related deposit options are under{' '}
-                  <Link
-                    href="/dashboard/availability?tab=table"
-                    className="font-medium text-brand-600 hover:text-brand-700 underline"
-                  >
-                    Dining Availability → Table Management
-                  </Link>
-                  .
-                </p>
-              </div>
+              <SectionCard>
+                <SectionCard.Body className="space-y-2 text-sm text-slate-700">
+                  <p className="text-base font-semibold text-slate-900">Table management and dining availability</p>
+                  <p>
+                    Floor plan, table combinations, legacy availability, and related deposit options are under{' '}
+                    <Link
+                      href="/dashboard/availability?tab=table"
+                      className="font-medium text-brand-600 underline hover:text-brand-700"
+                    >
+                      Dining Availability → Table Management
+                    </Link>
+                    .
+                  </p>
+                </SectionCard.Body>
+              </SectionCard>
             )}
             {isAppointment && (
               <BookingRulesSection
@@ -809,16 +808,28 @@ export function SettingsView({
                 bookingModel={bookingModel}
               />
             )}
-            <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-              <h2 className="text-base font-semibold text-slate-900">Booking Widget & QR Code</h2>
-              <p className="mt-1 text-sm text-slate-500">Get embed code and a printable QR code for your booking page.</p>
-              <Link href="/dashboard/settings/widget" className="mt-3 inline-flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700">
-                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
-                </svg>
-                Open Widget Settings
-              </Link>
-            </div>
+            <SectionCard elevated>
+              <SectionCard.Header
+                eyebrow="Embeds"
+                title="Booking widget & QR code"
+                description="Get embed code and a printable QR code for your booking page."
+              />
+              <SectionCard.Body>
+                <Link
+                  href="/dashboard/settings/widget"
+                  className="inline-flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-700"
+                >
+                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25"
+                    />
+                  </svg>
+                  Open Widget Settings
+                </Link>
+              </SectionCard.Body>
+            </SectionCard>
           </>
         )}
         {activeTab === 'business-hours' && (
@@ -860,19 +871,21 @@ export function SettingsView({
           />
         )}
         {activeTab === 'data-import' && isAdmin && (
-          <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm space-y-3">
-            <h2 className="text-base font-semibold text-slate-900">Data import</h2>
-            <p className="text-sm text-slate-600">
-              Import clients and bookings from CSV exports (Fresha, Booksy, Vagaro, ResDiary, and more). The tool runs
-              column mapping, validation, and a reversible import with a 24-hour undo window.
-            </p>
-            <Link
-              href="/dashboard/import"
-              className="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700"
-            >
-              Open Data Import
-            </Link>
-          </div>
+          <SectionCard elevated>
+            <SectionCard.Header
+              eyebrow="Operations"
+              title="Data import"
+              description="Import clients and bookings from CSV exports (Fresha, Booksy, Vagaro, ResDiary, and more). The tool runs column mapping, validation, and a reversible import with a 24-hour undo window."
+            />
+            <SectionCard.Body>
+              <Link
+                href="/dashboard/import"
+                className="inline-flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-700"
+              >
+                Open Data Import
+              </Link>
+            </SectionCard.Body>
+          </SectionCard>
         )}
       </div>
     </div>

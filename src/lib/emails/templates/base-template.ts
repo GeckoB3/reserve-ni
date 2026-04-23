@@ -18,6 +18,14 @@ export function escapeHtml(text: string): string {
     .replace(/"/g, "&quot;");
 }
 
+/** Escape each line and join with `<br/>` for multi-line detail card values. */
+export function escapeHtmlMultiline(text: string): string {
+  return text
+    .split("\n")
+    .map((line) => escapeHtml(line))
+    .join("<br/>");
+}
+
 interface BaseTemplateOptions {
   venueName: string;
   venueLogoUrl?: string | null;
@@ -93,7 +101,11 @@ export function buildBookingDetailsCard(opts: {
         `</td></tr>`
       );
     });
-    return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color:${GREY_BG};border:1px solid #E5E5E5;border-radius:8px;margin:16px 0"><tr><td style="padding:16px">${header}${tableRows.join("")}</td></tr></table>`;
+    const summaryRow =
+      opts.priceDisplay?.trim() ?
+        `<tr><td style="padding:12px 0 0 0;border-top:1px solid #e5e5e5;font-size:14px;color:#0f172a;font-weight:500;line-height:1.5">${escapeHtmlMultiline(opts.priceDisplay.trim())}</td></tr>`
+      : "";
+    return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color:${GREY_BG};border:1px solid #E5E5E5;border-radius:8px;margin:16px 0"><tr><td style="padding:16px">${header}${tableRows.join("")}${summaryRow}</td></tr></table>`;
   }
 
   if (variant === "appointment") {
@@ -119,7 +131,7 @@ export function buildBookingDetailsCard(opts: {
     }
     if (opts.priceDisplay) {
       rows.push(
-        `<tr><td style="padding:8px 0;border-bottom:1px solid #e2e8f0"><span style="display:block;font-size:11px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:0.04em">Price</span><span style="display:block;margin-top:4px;font-size:15px;color:#0f172a;font-weight:500">${escapeHtml(opts.priceDisplay)}</span></td></tr>`,
+        `<tr><td style="padding:8px 0;border-bottom:1px solid #e2e8f0"><span style="display:block;font-size:11px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:0.04em">Price and payment</span><span style="display:block;margin-top:4px;font-size:15px;color:#0f172a;font-weight:500;line-height:1.45">${escapeHtmlMultiline(opts.priceDisplay)}</span></td></tr>`,
       );
     }
     if (opts.partySize && opts.partySize > 1) {

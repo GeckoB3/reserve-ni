@@ -4,6 +4,7 @@ import { useCallback, useState } from 'react';
 import type { VenueSettings, OpeningHoursSettings, OpeningHoursDaySettings } from '../types';
 import { BusinessClosuresSection } from './BusinessClosuresSection';
 import { OpeningHoursControl } from '@/components/scheduling/OpeningHoursControl';
+import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 
 const DAYS: { key: string; label: string }[] = [
   { key: '0', label: 'Sunday' },
@@ -66,10 +67,9 @@ export function OpeningHoursSection({ venue, onUpdate, isAdmin, bookingModel }: 
   }, [local, onUpdate]);
 
   return (
-    <section className="rounded-lg border border-neutral-200 bg-white p-6 shadow-sm">
-      <h2 className="mb-4 text-lg font-semibold text-neutral-900">Opening hours</h2>
-      <p className="mb-4 text-sm text-neutral-600">Set your business opening hours</p>
-
+    <SectionCard elevated>
+      <SectionCard.Header eyebrow="Hours" title="Opening hours" description="Set your business opening hours." />
+      <SectionCard.Body>
       <OpeningHoursControl value={local} onChange={setLocal} disabled={!isAdmin} />
 
       {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
@@ -80,6 +80,7 @@ export function OpeningHoursSection({ venue, onUpdate, isAdmin, bookingModel }: 
       )}
 
       <BusinessClosuresSection bookingModel={bookingModel} venue={venue} isAdmin={isAdmin} onUpdate={onUpdate} />
-    </section>
+      </SectionCard.Body>
+    </SectionCard>
   );
 }

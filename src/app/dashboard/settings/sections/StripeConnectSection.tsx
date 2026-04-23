@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 
 interface StripeConnectSectionProps {
   stripeAccountId: string | null;
@@ -153,10 +154,9 @@ export function StripeConnectSection({
   }, [stripeAccountLinkPaths]);
 
   return (
-    <section className="rounded-lg border border-neutral-200 bg-white p-6 shadow-sm">
-      {!hideSectionTitle ? (
-        <h2 className="mb-4 text-lg font-semibold text-neutral-900">Stripe payments</h2>
-      ) : null}
+    <SectionCard elevated>
+      {!hideSectionTitle ? <SectionCard.Header eyebrow="Payments" title="Stripe payments" /> : null}
+      <SectionCard.Body>
 
       {state.kind === 'loading' && (
         <div className="animate-pulse space-y-2">
@@ -276,6 +276,7 @@ export function StripeConnectSection({
           </button>
         </div>
       )}
-    </section>
+      </SectionCard.Body>
+    </SectionCard>
   );
 }

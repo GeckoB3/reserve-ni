@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { PhoneWithCountryField } from '@/components/phone/PhoneWithCountryField';
 import { normalizeToE164 } from '@/lib/phone/e164';
+import { SectionCard } from '@/components/ui/dashboard/SectionCard';
+import { Pill } from '@/components/ui/dashboard/Pill';
 
 interface StaffProfileRow {
   id: string;
@@ -140,45 +142,50 @@ export function StaffPersonalSettingsSection() {
 
   if (loading) {
     return (
-      <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-        <div className="flex items-center gap-3">
+      <SectionCard elevated>
+        <SectionCard.Body className="flex items-center gap-3 py-8">
           <div className="h-5 w-5 animate-spin rounded-full border-2 border-brand-600 border-t-transparent" />
           <span className="text-sm text-slate-500">Loading your account…</span>
-        </div>
-      </section>
+        </SectionCard.Body>
+      </SectionCard>
     );
   }
 
   if (loadError || !profile) {
     return (
-      <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-        <p className="text-sm text-red-600">{loadError ?? 'Could not load profile.'}</p>
-        <button
-          type="button"
-          onClick={() => void load()}
-          className="mt-3 rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-        >
-          Try again
-        </button>
-      </section>
+      <SectionCard elevated>
+        <SectionCard.Body className="space-y-3">
+          <p className="text-sm text-red-600">{loadError ?? 'Could not load profile.'}</p>
+          <button
+            type="button"
+            onClick={() => void load()}
+            className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
+          >
+            Try again
+          </button>
+        </SectionCard.Body>
+      </SectionCard>
     );
   }
 
   return (
     <div className="space-y-6">
-      <section className="rounded-xl border border-slate-200 bg-white shadow-sm">
-        <div className="border-b border-slate-100 px-6 py-4">
-          <h2 className="text-base font-semibold text-slate-900">Your profile</h2>
-          <p className="mt-0.5 text-sm text-slate-500">
-            Update how you appear in the dashboard, your sign-in email, and your contact number.
-          </p>
-        </div>
-        <form onSubmit={onSaveProfile} className="space-y-4 px-6 py-4">
-          {profileSuccess && (
-            <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm text-emerald-700">
-              {profileSuccess}
+      <SectionCard elevated>
+        <SectionCard.Header
+          eyebrow="Account"
+          title="Your profile"
+          description="Update how you appear in the dashboard, your sign-in email, and your contact number."
+        />
+        <SectionCard.Body>
+        <form onSubmit={onSaveProfile} className="space-y-4">
+          {profileSuccess ? (
+            <div className="flex flex-wrap items-center gap-2 rounded-xl border border-emerald-200/80 bg-emerald-50/70 px-3 py-2.5 text-sm text-emerald-950">
+              <Pill variant="success" size="sm" dot>
+                Saved
+              </Pill>
+              <span>{profileSuccess}</span>
             </div>
-          )}
+          ) : null}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div className="sm:col-span-2">
               <label htmlFor="staff-display-name" className="mb-1 block text-sm font-medium text-slate-700">
@@ -231,19 +238,21 @@ export function StaffPersonalSettingsSection() {
             {savingProfile ? 'Saving…' : 'Save profile'}
           </button>
         </form>
-      </section>
+        </SectionCard.Body>
+      </SectionCard>
 
-      <section className="rounded-xl border border-slate-200 bg-white shadow-sm">
-        <div className="border-b border-slate-100 px-6 py-4">
-          <h2 className="text-base font-semibold text-slate-900">Password</h2>
-          <p className="mt-0.5 text-sm text-slate-500">Change the password you use to sign in.</p>
-        </div>
-        <form onSubmit={onChangePassword} className="max-w-md space-y-3 px-6 py-4">
-          {passwordSuccess && (
-            <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm text-emerald-700">
-              {passwordSuccess}
+      <SectionCard elevated>
+        <SectionCard.Header eyebrow="Security" title="Password" description="Change the password you use to sign in." />
+        <SectionCard.Body>
+        <form onSubmit={onChangePassword} className="max-w-md space-y-3">
+          {passwordSuccess ? (
+            <div className="flex flex-wrap items-center gap-2 rounded-xl border border-emerald-200/80 bg-emerald-50/70 px-3 py-2.5 text-sm text-emerald-950">
+              <Pill variant="success" size="sm" dot>
+                Saved
+              </Pill>
+              <span>{passwordSuccess}</span>
             </div>
-          )}
+          ) : null}
           <div>
             <label htmlFor="staff-new-pw" className="mb-1 block text-sm font-medium text-slate-700">
               New password
@@ -283,7 +292,8 @@ export function StaffPersonalSettingsSection() {
             {changingPassword ? 'Updating…' : 'Update password'}
           </button>
         </form>
-      </section>
+        </SectionCard.Body>
+      </SectionCard>
     </div>
   );
 }

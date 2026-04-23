@@ -15,6 +15,9 @@ import { parseVenueOpeningExceptions } from '@/types/venue-opening-exceptions';
 import type { VenueSettings } from './types';
 import { backfillVenueEmailIfEmptyFromStaff } from '@/lib/venue-contact-email';
 import { venueHasStripePaymentMethodForSms } from '@/lib/stripe/venue-customer-payment';
+import { PageFrame } from '@/components/ui/dashboard/PageFrame';
+import { PageHeader } from '@/components/ui/dashboard/PageHeader';
+import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 
 export default async function SettingsPage({
   searchParams,
@@ -38,26 +41,27 @@ export default async function SettingsPage({
   const venueId = staff.venue_id;
   if (!venueId || !staff.id) {
     return (
-      <div className="flex items-center justify-center p-12">
-        <div className="rounded-xl border border-slate-200 bg-white p-8 text-center shadow-sm">
-          <p className="text-slate-500">No venue linked to your account.</p>
-        </div>
-      </div>
+      <PageFrame maxWidthClass="max-w-lg">
+        <SectionCard elevated>
+          <SectionCard.Body className="py-10 text-center">
+            <p className="text-slate-600">No venue linked to your account.</p>
+          </SectionCard.Body>
+        </SectionCard>
+      </PageFrame>
     );
   }
 
   /** Staff users (all booking models): personal account only, not venue-wide configuration. */
   if (staff.role === 'staff') {
     return (
-      <div className="p-4 md:p-6 lg:p-8">
-        <div className="mx-auto max-w-3xl">
-          <h1 className="mb-2 text-2xl font-semibold text-slate-900">Account settings</h1>
-          <p className="mb-6 text-sm text-slate-500">
-            Update your name, email, phone, and password. Other venue settings are managed by an administrator.
-          </p>
-          <StaffPersonalSettingsSection />
-        </div>
-      </div>
+      <PageFrame maxWidthClass="max-w-3xl" className="space-y-6">
+        <PageHeader
+          eyebrow="Account"
+          title="Account settings"
+          subtitle="Update your name, email, phone, and password. Other venue settings are managed by an administrator."
+        />
+        <StaffPersonalSettingsSection />
+      </PageFrame>
     );
   }
 
@@ -215,10 +219,8 @@ export default async function SettingsPage({
   }
 
   return (
-    <div className="p-4 md:p-6 lg:p-8">
-      <div className="mx-auto max-w-3xl">
-        <h1 className="mb-6 text-2xl font-semibold text-slate-900">Settings</h1>
-        <SettingsView
+    <PageFrame maxWidthClass="max-w-3xl">
+      <SettingsView
           initialVenue={
             venue
               ? { ...venue, sms_messages_sent_this_month: smsMessagesSentThisMonth }
@@ -232,7 +234,6 @@ export default async function SettingsPage({
           smsCountUsesStripePeriod={smsCountUsesStripePeriod}
           initialLightHasPaymentMethod={initialLightHasPaymentMethod}
         />
-      </div>
-    </div>
+    </PageFrame>
   );
 }
