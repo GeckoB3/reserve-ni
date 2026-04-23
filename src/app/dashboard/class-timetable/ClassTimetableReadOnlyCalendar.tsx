@@ -2,14 +2,11 @@
 
 import { useMemo, useState, type CSSProperties } from 'react';
 import { monthGrid, ymd } from '@/lib/calendar/month-grid';
+import type { ClassScheduleClassType } from './ClassScheduleModal';
 
 const WEEK_HEADER = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
-export interface ReadOnlyCalendarClassType {
-  id: string;
-  name: string;
-  colour: string;
-}
+export type ReadOnlyCalendarClassType = Pick<ClassScheduleClassType, 'id' | 'name' | 'colour'>;
 
 export interface ReadOnlyCalendarInstance {
   id: string;

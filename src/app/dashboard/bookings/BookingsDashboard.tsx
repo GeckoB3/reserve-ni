@@ -319,7 +319,7 @@ export function BookingsDashboard({
         if (cancelled || !j?.areas) return;
         setDiningAreas(j.areas as typeof diningAreas);
       })
-      .catch(() => {});
+      .catch((e) => console.error('[BookingsDashboard] /api/venue/areas preload failed:', e));
     return () => {
       cancelled = true;
     };
@@ -385,7 +385,7 @@ export function BookingsDashboard({
         const tz = v.timezone;
         if (typeof tz === 'string' && tz.trim() !== '') setVenueTimezone(tz.trim());
       })
-      .catch(() => {});
+      .catch((e) => console.error('[BookingsDashboard] /api/venue preload failed:', e));
     return () => {
       cancelled = true;
     };

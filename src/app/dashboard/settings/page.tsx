@@ -15,6 +15,8 @@ import { parseVenueOpeningExceptions } from '@/types/venue-opening-exceptions';
 import type { VenueSettings } from './types';
 import { backfillVenueEmailIfEmptyFromStaff } from '@/lib/venue-contact-email';
 import { venueHasStripePaymentMethodForSms } from '@/lib/stripe/venue-customer-payment';
+import { normalizePublicBaseUrl } from '@/lib/public-base-url';
+import { Suspense } from 'react';
 import { PageFrame } from '@/components/ui/dashboard/PageFrame';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
@@ -218,9 +220,20 @@ export default async function SettingsPage({
     initialLightHasPaymentMethod = await venueHasStripePaymentMethodForSms(venueId);
   }
 
+  const publicBaseUrl = normalizePublicBaseUrl(process.env.NEXT_PUBLIC_BASE_URL);
+
   return (
-    <PageFrame maxWidthClass="max-w-3xl">
-      <SettingsView
+    <PageFrame maxWidthClass="max-w-5xl">
+      <Suspense
+        fallback={
+          <SectionCard elevated>
+            <SectionCard.Body className="flex min-h-[200px] items-center justify-center py-16">
+              <div className="h-7 w-7 animate-spin rounded-full border-2 border-brand-600 border-t-transparent" />
+            </SectionCard.Body>
+          </SectionCard>
+        }
+      >
+        <SettingsView
           initialVenue={
             venue
               ? { ...venue, sms_messages_sent_this_month: smsMessagesSentThisMonth }
@@ -233,7 +246,9 @@ export default async function SettingsPage({
           bookingModel={bookingModel}
           smsCountUsesStripePeriod={smsCountUsesStripePeriod}
           initialLightHasPaymentMethod={initialLightHasPaymentMethod}
+          publicBaseUrl={publicBaseUrl}
         />
+      </Suspense>
     </PageFrame>
   );
 }

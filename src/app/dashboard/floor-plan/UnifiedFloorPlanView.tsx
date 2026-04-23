@@ -38,7 +38,7 @@ export function UnifiedFloorPlanView({
         if (cancelled || !j?.areas) return;
         setDiningAreas(j.areas as VenueArea[]);
       })
-      .catch(() => {});
+      .catch((e) => console.error('[UnifiedFloorPlanView] /api/venue/areas preload failed:', e));
     return () => {
       cancelled = true;
     };

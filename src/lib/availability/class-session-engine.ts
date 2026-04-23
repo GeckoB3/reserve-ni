@@ -21,9 +21,7 @@ import {
   venueWideBlocksQueryForRange,
 } from '@/lib/availability/venue-wide-blocks-fetch';
 
-// ---------------------------------------------------------------------------
 // Types
-// ---------------------------------------------------------------------------
 
 /** Public / online booking: class start must be at or after reference time + min_notice_hours (venue-local wall time). */
 export interface GuestClassBookingWindow {
@@ -135,9 +133,7 @@ export function isClassInstanceBookableForGuest(
   return startMs >= earliestBookableStartMs;
 }
 
-// ---------------------------------------------------------------------------
 // Core engine
-// ---------------------------------------------------------------------------
 
 /**
  * Class sessions are *explicitly scheduled* by staff, so the venue's weekly `opening_hours`
@@ -256,9 +252,7 @@ export function computeClassAvailability(input: ClassEngineInput): ClassAvailabi
   return results;
 }
 
-// ---------------------------------------------------------------------------
 // Offerings (multi-day): group bookable slots by class type for class-first UIs
-// ---------------------------------------------------------------------------
 
 export interface ClassOfferingSummary {
   class_type_id: string;
@@ -304,9 +298,7 @@ export function buildClassOfferingSummaries(slots: ClassAvailabilitySlot[]): Cla
   return out;
 }
 
-// ---------------------------------------------------------------------------
 // Fetcher
-// ---------------------------------------------------------------------------
 
 export async function fetchClassInput(params: {
   supabase: SupabaseClient;

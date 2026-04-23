@@ -13,6 +13,7 @@ import { PageHeader } from '@/components/ui/dashboard/PageHeader';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { StatTile } from '@/components/ui/dashboard/StatTile';
 import { Pill } from '@/components/ui/dashboard/Pill';
+import { currencySymbolFromCode } from '@/lib/money/currency-symbol';
 import { EmptyState } from '@/components/ui/dashboard/EmptyState';
 
 interface PractitionerOption {
@@ -146,7 +147,7 @@ export function ClassTimetableView({
   currency?: string;
   stripeConnected?: boolean;
 }) {
-  const sym = currency === 'EUR' ? '€' : '£';
+  const sym = currencySymbolFromCode(currency);
   function formatPrice(pence: number): string {
     return `${sym}${(pence / 100).toFixed(2)}`;
   }

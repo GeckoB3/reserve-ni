@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { sanitizeAuthNextPath } from './safe-auth-redirect';
+import { sanitizeAuthNextPath, sanitizeMagicLinkNextPath } from './safe-auth-redirect';
 
 describe('sanitizeAuthNextPath', () => {
   it('allows internal paths', () => {
@@ -11,5 +11,20 @@ describe('sanitizeAuthNextPath', () => {
     expect(sanitizeAuthNextPath('//evil.com')).toBe('/dashboard');
     expect(sanitizeAuthNextPath('https://evil.com')).toBe('/dashboard');
     expect(sanitizeAuthNextPath(null)).toBe('/dashboard');
+  });
+});
+
+describe('sanitizeMagicLinkNextPath', () => {
+  it('allows callback and dashboard targets', () => {
+    expect(sanitizeMagicLinkNextPath('/auth/callback')).toBe('/auth/callback');
+    expect(sanitizeMagicLinkNextPath('/auth/callback?next=%2Fdashboard')).toBe('/auth/callback?next=%2Fdashboard');
+    expect(sanitizeMagicLinkNextPath('/dashboard')).toBe('/dashboard');
+    expect(sanitizeMagicLinkNextPath('/dashboard/reports')).toBe('/dashboard/reports');
+  });
+
+  it('rejects non-allowlisted paths', () => {
+    expect(sanitizeMagicLinkNextPath('/api/venue/export')).toBe('/auth/callback');
+    expect(sanitizeMagicLinkNextPath('/help')).toBe('/auth/callback');
+    expect(sanitizeMagicLinkNextPath('//evil.com')).toBe('/auth/callback');
   });
 });

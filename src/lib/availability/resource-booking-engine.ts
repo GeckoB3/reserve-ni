@@ -80,7 +80,7 @@ const DAY_NAMES = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const;
 
 /** Statuses that consume resource capacity (must match bookings query in fetchResourceInput). */
 export const RESOURCE_BOOKING_CAPACITY_STATUSES = ['Booked', 'Confirmed', 'Pending', 'Seated'] as const;
-const CAPACITY_CONSUMING_STATUSES = RESOURCE_BOOKING_CAPACITY_STATUSES as unknown as string[];
+const CAPACITY_CONSUMING_STATUSES: readonly string[] = RESOURCE_BOOKING_CAPACITY_STATUSES;
 
 function dayKeyForDate(dateStr: string): string {
   const [y, m, d] = dateStr.split('-').map(Number);

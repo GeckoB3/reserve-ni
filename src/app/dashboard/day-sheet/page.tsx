@@ -7,7 +7,11 @@ import { getSupabaseAdminClient } from '@/lib/supabase';
 import { ToastProvider } from '@/components/ui/Toast';
 import type { BookingModel } from '@/types/booking-models';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
-import { normalizeEnabledModels } from '@/lib/booking/enabled-models';
+import {
+  activeModelsToLegacyEnabledModels,
+  getDefaultBookingModelFromActive,
+  resolveActiveBookingModels,
+} from '@/lib/booking/active-models';
 
 export default async function DaySheetPage() {
   const supabase = await createClient();
@@ -30,7 +34,7 @@ export default async function DaySheetPage() {
   const admin = getSupabaseAdminClient();
   const { data: venue } = await admin
     .from('venues')
-    .select('table_management_enabled, booking_model, currency, enabled_models')
+    .select('table_management_enabled, booking_model, currency, enabled_models, active_booking_models, pricing_tier')
     .eq('id', venueId)
     .single();
 
@@ -38,11 +42,17 @@ export default async function DaySheetPage() {
     redirect('/dashboard/floor-plan');
   }
 
-  const bookingModel = (venue?.booking_model as BookingModel) ?? 'table_reservation';
-  const enabledModels = normalizeEnabledModels(
-    (venue as { enabled_models?: unknown } | null)?.enabled_models,
-    bookingModel,
+  const activeModels = resolveActiveBookingModels({
+    pricingTier: (venue as { pricing_tier?: string | null } | null)?.pricing_tier,
+    bookingModel: venue?.booking_model as BookingModel | undefined,
+    enabledModels: (venue as { enabled_models?: unknown } | null)?.enabled_models,
+    activeBookingModels: (venue as { active_booking_models?: unknown } | null)?.active_booking_models,
+  });
+  const bookingModel = getDefaultBookingModelFromActive(
+    activeModels,
+    (venue?.booking_model as BookingModel) ?? 'table_reservation',
   );
+  const enabledModels = activeModelsToLegacyEnabledModels(activeModels, bookingModel);
 
   if (isUnifiedSchedulingVenue(bookingModel)) {
     redirect('/dashboard/calendar');

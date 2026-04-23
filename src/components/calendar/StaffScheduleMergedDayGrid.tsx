@@ -41,7 +41,7 @@ export function StaffScheduleMergedDayGrid({ date, bookingModel, enabledModels }
         const tz = v?.timezone;
         if (typeof tz === 'string' && tz.trim() !== '') setVenueTimezone(tz.trim());
       })
-      .catch(() => {});
+      .catch((e) => console.error('[StaffScheduleMergedDayGrid] /api/venue preload failed:', e));
   }, []);
 
   useEffect(() => {

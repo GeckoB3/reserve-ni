@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useMemo, useState } from 'react';
 import { detectOverlaps, formatOverlapWarning } from '@/lib/service-overlap';
@@ -14,20 +14,17 @@ export interface VenueServiceRow {
   sort_order: number;
 }
 
-/** @deprecated Use VenueServiceRow */
-type Service = VenueServiceRow;
-
 const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 interface Props {
-  services: Service[];
-  setServices: (s: Service[]) => void;
+  services: VenueServiceRow[];
+  setServices: (s: VenueServiceRow[]) => void;
   showToast: (msg: string) => void;
   /** Dining area for new services (multi-area restaurants). */
   areaId?: string | null;
 }
 
-const emptyService = (): Omit<Service, 'id'> => ({
+const emptyService = (): Omit<VenueServiceRow, 'id'> => ({
   name: '',
   days_of_week: [1, 2, 3, 4, 5, 6],
   start_time: '12:00',
@@ -38,9 +35,9 @@ const emptyService = (): Omit<Service, 'id'> => ({
 });
 
 export function ServicesTab({ services, setServices, showToast, areaId }: Props) {
-  const [editing, setEditing] = useState<Service | null>(null);
+  const [editing, setEditing] = useState<VenueServiceRow | null>(null);
   const [creating, setCreating] = useState(false);
-  const [draft, setDraft] = useState<Omit<Service, 'id'>>(emptyService());
+  const [draft, setDraft] = useState<Omit<VenueServiceRow, 'id'>>(emptyService());
   const [saving, setSaving] = useState(false);
 
   async function handleCreate() {
@@ -72,7 +69,7 @@ export function ServicesTab({ services, setServices, showToast, areaId }: Props)
     }
   }
 
-  async function handleUpdate(service: Service) {
+  async function handleUpdate(service: VenueServiceRow) {
     setSaving(true);
     try {
       const res = await fetch('/api/venue/services', {
@@ -112,12 +109,12 @@ export function ServicesTab({ services, setServices, showToast, areaId }: Props)
     }
   }
 
-  async function handleToggleActive(service: Service) {
+  async function handleToggleActive(service: VenueServiceRow) {
     const updated = { ...service, is_active: !service.is_active };
     await handleUpdate(updated);
   }
 
-  function handleDuplicate(service: Service) {
+  function handleDuplicate(service: VenueServiceRow) {
     setDraft({
       name: `${service.name} (copy)`,
       days_of_week: [...service.days_of_week],
@@ -136,7 +133,7 @@ export function ServicesTab({ services, setServices, showToast, areaId }: Props)
       effective = effective.map(s => s.id === editing.id ? editing : s);
     }
     if (creating && draft.name.trim()) {
-      effective = [...effective, { ...draft, id: '__draft__' } as Service];
+      effective = [...effective, { ...draft, id: '__draft__' } as VenueServiceRow];
     }
     return detectOverlaps(effective);
   }, [services, editing, creating, draft]);
@@ -145,7 +142,7 @@ export function ServicesTab({ services, setServices, showToast, areaId }: Props)
     return days.includes(day) ? days.filter((d) => d !== day) : [...days, day].sort();
   }
 
-  function renderForm(data: Omit<Service, 'id'>, onChange: (d: Omit<Service, 'id'>) => void) {
+  function renderForm(data: Omit<VenueServiceRow, 'id'>, onChange: (d: Omit<VenueServiceRow, 'id'>) => void) {
     return (
       <div className="space-y-4">
         <div>
@@ -201,7 +198,7 @@ export function ServicesTab({ services, setServices, showToast, areaId }: Props)
         <div key={service.id} className="rounded-xl border border-slate-200 bg-white p-5">
           {editing?.id === service.id ? (
             <div className="space-y-4">
-              {renderForm(editing, (d) => setEditing({ ...editing, ...d } as Service))}
+              {renderForm(editing, (d) => setEditing({ ...editing, ...d } as VenueServiceRow))}
               <div className="flex gap-2">
                 <button onClick={() => handleUpdate(editing)} disabled={saving} className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50">
                   {saving ? 'Saving...' : 'Save'}

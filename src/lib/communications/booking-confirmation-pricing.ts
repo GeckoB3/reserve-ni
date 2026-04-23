@@ -249,13 +249,6 @@ export function confirmationStructuredPriceText(booking: BookingEmailData): stri
   return lines.join('\n');
 }
 
-/**
- * @deprecated Use {@link confirmationStructuredPriceText}. Kept for narrow call sites that only need a single-line amount.
- */
-export function priceDisplayForConfirmationCard(booking: BookingEmailData): string | null {
-  return confirmationStructuredPriceText(booking);
-}
-
 export function bookingConfirmationPaymentParagraphs(booking: BookingEmailData): string[] {
   void booking;
   return [];

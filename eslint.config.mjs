@@ -28,10 +28,7 @@ const eslintConfig = defineConfig([
   },
   // React Compiler cannot memoize react-hook-form watch(); behaviour is still correct.
   {
-    files: [
-      "src/app/dashboard/settings/sections/BookingRulesSection.tsx",
-      "src/app/dashboard/settings/sections/DepositConfigSection.tsx",
-    ],
+    files: ["src/app/dashboard/settings/sections/BookingRulesSection.tsx"],
     rules: {
       "react-hooks/incompatible-library": "off",
     },

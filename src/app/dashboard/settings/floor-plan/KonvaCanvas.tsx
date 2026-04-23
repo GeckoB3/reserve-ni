@@ -12,9 +12,7 @@ import TableShape from '@/components/floor-plan/TableShape';
 import { computeFitFullLayoutToViewport } from '@/lib/floor-plan/fit-view';
 import { computeGlobalUnifiedLabelFonts } from '@/lib/floor-plan/table-label-fonts';
 
-// ---------------------------------------------------------------------------
 // Constants & helpers
-// ---------------------------------------------------------------------------
 
 /** Logical floor size is at least this wide (px) so 50+ tables can be placed comfortably. */
 const MIN_LAYOUT_WIDTH = 2600;
@@ -141,9 +139,7 @@ function computeLayoutSizeFromDelta(
   };
 }
 
-// ---------------------------------------------------------------------------
 // Component props
-// ---------------------------------------------------------------------------
 
 interface CombinationLink {
   id: string;
@@ -204,9 +200,7 @@ interface Props {
   onAltDragDuplicate?: (tableId: string) => void;
 }
 
-// ---------------------------------------------------------------------------
 // Component
-// ---------------------------------------------------------------------------
 
 export default function KonvaCanvas({
   tables, selectedId, selectedIds, onSelect, onMultiSelect, onMove, onResize, onRotate,

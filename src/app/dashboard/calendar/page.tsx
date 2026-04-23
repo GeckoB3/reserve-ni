@@ -4,8 +4,12 @@ import { getDashboardStaff, getStaffManagedCalendarIds } from '@/lib/venue-auth'
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { ToastProvider } from '@/components/ui/Toast';
 import { PractitionerCalendarView } from '../practitioner-calendar/PractitionerCalendarView';
-import { normalizeEnabledModels } from '@/lib/booking/enabled-models';
 import type { BookingModel } from '@/types/booking-models';
+import {
+  activeModelsToLegacyEnabledModels,
+  getDefaultBookingModelFromActive,
+  resolveActiveBookingModels,
+} from '@/lib/booking/active-models';
 import {
   isPractitionerScheduleCalendar,
   isVenueScheduleCalendarEligible,
@@ -33,15 +37,21 @@ export default async function CalendarPage() {
   const admin = getSupabaseAdminClient();
   const { data: venue } = await admin
     .from('venues')
-    .select('currency, booking_model, enabled_models')
+    .select('currency, booking_model, enabled_models, active_booking_models, pricing_tier')
     .eq('id', staff.venue_id)
     .single();
   const currency = (venue?.currency as string) ?? 'GBP';
-  const bookingModel = ((venue?.booking_model as string) ?? 'table_reservation') as BookingModel;
-  const enabledModels = normalizeEnabledModels(
-    (venue as { enabled_models?: unknown } | null)?.enabled_models,
-    bookingModel,
+  const activeModels = resolveActiveBookingModels({
+    pricingTier: (venue as { pricing_tier?: string | null } | null)?.pricing_tier,
+    bookingModel: venue?.booking_model as BookingModel | undefined,
+    enabledModels: (venue as { enabled_models?: unknown } | null)?.enabled_models,
+    activeBookingModels: (venue as { active_booking_models?: unknown } | null)?.active_booking_models,
+  });
+  const bookingModel = getDefaultBookingModelFromActive(
+    activeModels,
+    ((venue?.booking_model as string) ?? 'table_reservation') as BookingModel,
   );
+  const enabledModels = activeModelsToLegacyEnabledModels(activeModels, bookingModel);
 
   if (!isVenueScheduleCalendarEligible(bookingModel, enabledModels)) {
     redirect('/dashboard');

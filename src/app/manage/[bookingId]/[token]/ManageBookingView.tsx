@@ -119,7 +119,7 @@ export function ManageBookingView({ bookingId, token, hmac }: { bookingId: strin
   const handleModifySaved = useCallback(() => {
     setShowModify(false);
     setModifySuccess(true);
-    fetchDetails().catch(() => {});
+    fetchDetails().catch((e) => console.error('[ManageBookingView] post-modify refresh failed:', e));
     setTimeout(() => setModifySuccess(false), 4000);
   }, [fetchDetails]);
 

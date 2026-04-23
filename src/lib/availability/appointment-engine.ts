@@ -26,9 +26,7 @@ import { blocksToVenueOpeningExceptions } from '@/lib/availability/venue-excepti
 import { intersectEffectiveRangesWithServiceCustom, parseCustomWorkingHoursFromDb } from '@/lib/service-custom-availability';
 import { fetchScheduledSessionBlocksForCalendar } from '@/lib/availability/calendar-session-blocks';
 
-// ---------------------------------------------------------------------------
 // Types
-// ---------------------------------------------------------------------------
 
 export interface PhantomBooking {
   practitioner_id: string;
@@ -148,9 +146,7 @@ export interface AppointmentAvailabilityResult {
   }>;
 }
 
-// ---------------------------------------------------------------------------
 // Helpers
-// ---------------------------------------------------------------------------
 
 const DAY_NAMES = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const;
 
@@ -373,9 +369,7 @@ export function getOfferedAppointmentServicesForPractitioner(
     .filter(Boolean) as AppointmentService[];
 }
 
-// ---------------------------------------------------------------------------
 // Core engine
-// ---------------------------------------------------------------------------
 
 export function computeAppointmentAvailability(input: AppointmentEngineInput, nowMinutes?: number): AppointmentAvailabilityResult {
   const {
@@ -629,9 +623,7 @@ export function validateExactAppointmentStart(
   return { ok: true };
 }
 
-// ---------------------------------------------------------------------------
 // Fetcher
-// ---------------------------------------------------------------------------
 
 export async function fetchAppointmentInput(params: {
   supabase: SupabaseClient;

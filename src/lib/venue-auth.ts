@@ -24,6 +24,25 @@ export interface VenueStaff {
   db: SupabaseClient;
 }
 
+type StaffLookupRow = {
+  id: string;
+  venue_id: string;
+  email?: string | null;
+  role: 'admin' | 'staff';
+};
+
+function resolveUniqueStaffRow(rows: StaffLookupRow[], context: string): StaffLookupRow | null {
+  if (rows.length === 0) return null;
+  const uniqueVenueIds = new Set(rows.map((r) => r.venue_id));
+  if (uniqueVenueIds.size > 1) {
+    console.error(`[${context}] Ambiguous staff membership for email (multiple venues). Refusing implicit venue selection.`, {
+      venueIds: [...uniqueVenueIds],
+    });
+    return null;
+  }
+  return rows[0] ?? null;
+}
+
 /**
  * Get the current user's staff record for their first venue.
  * Returns null if not authenticated or not a staff member.
@@ -42,20 +61,21 @@ export async function getVenueStaff(supabase: SupabaseClient): Promise<VenueStaf
     .from('staff')
     .select('id, venue_id, email, role')
     .ilike('email', normalised)
-    .limit(1);
+    .order('id', { ascending: true })
+    .limit(10);
 
   if (error) {
     console.error('[getVenueStaff] staff lookup failed:', error.message, { email: normalised });
     return null;
   }
 
-  const row = rows?.[0];
+  const row = resolveUniqueStaffRow((rows ?? []) as StaffLookupRow[], 'getVenueStaff');
   if (!row) return null;
 
   return {
     id: row.id,
     venue_id: row.venue_id,
-    email: row.email,
+    email: row.email ?? normalised,
     role: row.role as 'admin' | 'staff',
     db: admin,
   };
@@ -77,14 +97,15 @@ export async function getDashboardStaff(
     .from('staff')
     .select('id, venue_id, role')
     .ilike('email', normalised)
-    .limit(1);
+    .order('id', { ascending: true })
+    .limit(10);
 
   if (error) {
     console.error('[getDashboardStaff] staff lookup failed:', error.message, { email: normalised });
     return { id: null, email: normalised, venue_id: null, role: null, db: admin };
   }
 
-  const row = rows?.[0];
+  const row = resolveUniqueStaffRow((rows ?? []) as StaffLookupRow[], 'getDashboardStaff');
   return {
     id: row?.id ?? null,
     email: normalised,

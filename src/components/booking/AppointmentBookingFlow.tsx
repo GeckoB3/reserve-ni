@@ -12,6 +12,7 @@ import {
   isDepositRefundAvailableAt,
 } from '@/lib/booking/cancellation-deadline';
 import { defaultPhoneCountryForVenueCurrency } from '@/lib/phone/default-country';
+import { currencySymbolFromCode } from '@/lib/money/currency-symbol';
 import { getVenueLocalDateTimeForBooking } from '@/lib/venue/venue-local-clock';
 import { minutesToTime, timeToMinutes } from '@/lib/availability';
 import { MultiServiceSummaryCard } from './MultiServiceSummaryCard';
@@ -654,7 +655,7 @@ export function AppointmentBookingFlow({
     return catalogStaff.filter((p) => p.services.some((s) => s.id === groupServiceId));
   }, [catalogStaff, groupServiceId]);
 
-  const sym = venue.currency === 'EUR' ? '€' : '£';
+  const sym = currencySymbolFromCode(venue.currency);
 
   function onlineChargeFromCatalogOffer(offer: {
     price_pence: number | null;

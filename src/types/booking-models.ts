@@ -3,9 +3,7 @@
  * Model A (table_reservation) types live in availability.ts / table-management.ts.
  */
 
-// ---------------------------------------------------------------------------
 // Booking model enum
-// ---------------------------------------------------------------------------
 
 export type BookingModel =
   | 'table_reservation'
@@ -15,9 +13,7 @@ export type BookingModel =
   | 'class_session'
   | 'resource_booking';
 
-// ---------------------------------------------------------------------------
 // Terminology
-// ---------------------------------------------------------------------------
 
 export interface VenueTerminology {
   client: string;   // Guest / Client / Patient / Member / Booker
@@ -36,9 +32,7 @@ export const DEFAULT_TERMINOLOGY: Record<BookingModel, VenueTerminology> = {
   resource_booking:         { client: 'Booker', booking: 'Booking',      staff: 'Manager', area: 'Area' },
 };
 
-// ---------------------------------------------------------------------------
 // Working hours (shared by practitioners & resources)
-// ---------------------------------------------------------------------------
 
 export interface TimeRange {
   start: string; // "HH:mm"
@@ -73,9 +67,7 @@ export interface ServiceCustomScheduleV2 {
 /** Stored JSON in `custom_working_hours`: legacy weekly map or versioned rule list. */
 export type ServiceCustomScheduleStored = WorkingHours | ServiceCustomScheduleV2;
 
-// ---------------------------------------------------------------------------
 // Model B: Practitioner appointment
-// ---------------------------------------------------------------------------
 
 /** Stored as Postgres enum `class_payment_requirement` (shared with classes / resources). */
 export type ClassPaymentRequirement = 'none' | 'deposit' | 'full_payment';
@@ -182,9 +174,7 @@ export interface PractitionerService {
   custom_colour?: string | null;
 }
 
-// ---------------------------------------------------------------------------
 // Model C: Event / experience ticket
-// ---------------------------------------------------------------------------
 
 export interface ExperienceEvent {
   id: string;
@@ -218,9 +208,7 @@ export interface EventTicketType {
   sort_order: number;
 }
 
-// ---------------------------------------------------------------------------
 // Model D: Class / group session
-// ---------------------------------------------------------------------------
 
 export interface ClassType {
   id: string;
@@ -274,9 +262,7 @@ export interface ClassInstance {
   created_at: string;
 }
 
-// ---------------------------------------------------------------------------
 // Model E: Resource / facility
-// ---------------------------------------------------------------------------
 
 /** Per-date override for resource opening hours (`venue_resources.availability_exceptions`). */
 export type ResourceAvailabilityException = { closed: true } | { periods: Array<{ start: string; end: string }> };
@@ -319,9 +305,7 @@ export interface VenueResource {
   } | null;
 }
 
-// ---------------------------------------------------------------------------
 // Booking ticket lines (for events and classes)
-// ---------------------------------------------------------------------------
 
 export interface BookingTicketLine {
   id: string;

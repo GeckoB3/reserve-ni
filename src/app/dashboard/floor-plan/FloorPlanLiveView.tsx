@@ -148,7 +148,7 @@ export function FloorPlanLiveView({
         const tz = v.timezone;
         if (typeof tz === 'string' && tz.trim() !== '') setVenueTimezone(tz.trim());
       })
-      .catch(() => {});
+      .catch((e) => console.error('[FloorPlanLiveView] /api/venue preload failed:', e));
     return () => {
       cancelled = true;
     };

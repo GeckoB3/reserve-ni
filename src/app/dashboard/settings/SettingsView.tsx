@@ -11,7 +11,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import type { VenueSettings } from './types';
 import { ProfileSection } from './sections/ProfileSection';
 import { VenueProfileSection } from './sections/VenueProfileSection';
@@ -19,7 +19,6 @@ import { OpeningHoursSection } from './sections/OpeningHoursSection';
 import { StaffSection } from './sections/StaffSection';
 import { CommunicationTemplatesSection } from './sections/CommunicationTemplatesSection';
 import { StripeConnectSection } from './sections/StripeConnectSection';
-import { BookingRulesSection } from './sections/BookingRulesSection';
 import { BookingTypesSection } from './sections/BookingTypesSection';
 import { StaffPersonalSettingsSection } from './sections/StaffPersonalSettingsSection';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
@@ -39,6 +38,10 @@ import { PageHeader } from '@/components/ui/dashboard/PageHeader';
 import { TabBar } from '@/components/ui/dashboard/TabBar';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { Pill } from '@/components/ui/dashboard/Pill';
+import { SettingsSaveProvider } from './SettingsSaveContext';
+import { SettingsSaveStrip } from './SettingsSaveStrip';
+import { SettingsProfileGroup } from './SettingsProfileGroup';
+import { WidgetSection } from './widget/WidgetSection';
 
 interface SettingsViewProps {
   initialVenue: VenueSettings | null;
@@ -52,16 +55,46 @@ interface SettingsViewProps {
   smsCountUsesStripePeriod?: boolean;
   /** Server: Stripe customer has invoice default payment method (Light plan). */
   initialLightHasPaymentMethod?: boolean;
+  /** Normalized origin for embed / QR links (from `NEXT_PUBLIC_BASE_URL`). */
+  publicBaseUrl: string;
 }
 
 const TABS = [
-  { key: 'profile', label: 'Profile' },
-  { key: 'business-hours', label: 'Business Hours' },
-  { key: 'plan', label: 'Plan' },
-  { key: 'payments', label: 'Payments' },
-  { key: 'comms', label: 'Communications' },
-  { key: 'staff', label: 'Staff' },
-  { key: 'data-import', label: 'Data Import' },
+  {
+    key: 'profile',
+    label: 'Profile',
+    description: 'Your account, venue details, booking models, and embeds for your public page.',
+  },
+  {
+    key: 'business-hours',
+    label: 'Business hours',
+    description: 'Weekly opening hours and one-off closures or exceptions.',
+  },
+  {
+    key: 'plan',
+    label: 'Plan',
+    description: 'Subscription tier, SMS allowance, upgrades, and cancellations.',
+  },
+  {
+    key: 'payments',
+    label: 'Payments',
+    description: 'Stripe Connect for taking card payments from guests.',
+  },
+  {
+    key: 'comms',
+    label: 'Communications',
+    description: 'Email and SMS templates, timing, and guest notification policies.',
+  },
+  {
+    key: 'staff',
+    label: 'Staff',
+    description: 'Team logins, roles, calendar access, and session security.',
+  },
+  {
+    key: 'data-import',
+    label: 'Data import',
+    description: 'CSV imports for clients and bookings with validation and undo.',
+  },
 ] as const;
 
 type TabKey = typeof TABS[number]['key'];
@@ -524,7 +557,7 @@ function PlanSection({
   );
 }
 
-export function SettingsView({
+function SettingsViewInner({
   initialVenue,
   isAdmin,
   initialTab,
@@ -533,8 +566,11 @@ export function SettingsView({
   bookingModel = 'table_reservation',
   smsCountUsesStripePeriod = false,
   initialLightHasPaymentMethod,
+  publicBaseUrl,
 }: SettingsViewProps) {
   const router = useRouter();
+  const pathname = usePathname() ?? '/dashboard/settings';
+  const searchParams = useSearchParams();
   const isAppointment = isUnifiedSchedulingVenue(bookingModel);
   const [venue, setVenue] = useState<VenueSettings | null>(initialVenue);
   const showRestaurantTableProfileSections =
@@ -544,11 +580,25 @@ export function SettingsView({
     [isAdmin],
   );
   const tabBarTabs = useMemo(
-    (): { id: TabKey; label: string }[] => visibleTabs.map((t) => ({ id: t.key, label: t.label })),
+    (): { id: TabKey; label: string; description?: string }[] =>
+      visibleTabs.map((t) => ({ id: t.key, label: t.label, description: t.description })),
     [visibleTabs],
   );
-  const [activeTab, setActiveTab] = useState<TabKey>(() => resolveInitialTab(initialTab, isAdmin));
+  const activeTab = useMemo(
+    () => resolveInitialTab(searchParams.get('tab') ?? initialTab, isAdmin),
+    [searchParams, initialTab, isAdmin],
+  );
   const [planBannerDismissed, setPlanBannerDismissed] = useState(false);
+
+  const replaceWithTab = useCallback(
+    (tab: TabKey) => {
+      const p = new URLSearchParams(searchParams.toString());
+      p.set('tab', tab);
+      const qs = p.toString();
+      router.replace(qs ? `${pathname}?${qs}` : `${pathname}?tab=${tab}`, { scroll: false });
+    },
+    [router, pathname, searchParams],
+  );
 
   useEffect(() => {
     setVenue(initialVenue);
@@ -593,37 +643,52 @@ export function SettingsView({
   }, [venue?.id, venue?.pricing_tier]);
 
   useEffect(() => {
-    if (!isAdmin && (activeTab === 'staff' || activeTab === 'data-import')) {
-      setActiveTab('profile');
+    if (!isAdmin) {
+      const raw = searchParams.get('tab');
+      if (raw === 'staff' || raw === 'data-import') {
+        replaceWithTab('profile');
+      }
     }
-  }, [isAdmin, activeTab]);
+  }, [isAdmin, searchParams, replaceWithTab]);
 
   useEffect(() => {
     if (activeTab !== 'profile') return;
     const timer = window.setTimeout(() => {
-      if (typeof window === 'undefined' || window.location.hash !== '#additional-booking-types') return;
-      document.getElementById('additional-booking-types')?.scrollIntoView({
-        behavior: 'smooth',
-        block: 'start',
-      });
+      if (typeof window === 'undefined') return;
+      const hash = window.location.hash;
+      if (hash === '#additional-booking-types') {
+        document.getElementById('additional-booking-types')?.scrollIntoView({
+          behavior: 'smooth',
+          block: 'start',
+        });
+      } else if (hash === '#booking-widget') {
+        document.getElementById('booking-widget')?.scrollIntoView({
+          behavior: 'smooth',
+          block: 'start',
+        });
+      }
     }, 150);
     return () => window.clearTimeout(timer);
   }, [activeTab]);
 
   useEffect(() => {
     if (!planCheckoutReturn) return;
-    setActiveTab('plan');
     setPlanBannerDismissed(false);
+    if (typeof window !== 'undefined') {
+      const p = new URLSearchParams(window.location.search);
+      p.set('tab', 'plan');
+      router.replace(`${pathname}?${p.toString()}`, { scroll: false });
+    }
     const delays = [400, 2500, 5000];
     const timeouts = delays.map((ms) => setTimeout(() => router.refresh(), ms));
     const cleanUrl = setTimeout(() => {
-      router.replace('/dashboard/settings?tab=plan', { scroll: false });
+      router.replace(`${pathname}?tab=plan`, { scroll: false });
     }, 5200);
     return () => {
       timeouts.forEach(clearTimeout);
       clearTimeout(cleanUrl);
     };
-  }, [planCheckoutReturn, router]);
+  }, [planCheckoutReturn, router, pathname]);
 
   const onUpdate = useCallback((patch: Partial<VenueSettings>) => {
     setVenue((v) => (v ? { ...v, ...patch } : null));
@@ -650,11 +715,18 @@ export function SettingsView({
   }
 
   return (
-    <div className="space-y-6">
-      <header className="space-y-4">
-        <PageHeader eyebrow="Account" title="Settings" />
-        <div className="overflow-x-auto pb-0.5">
-          <TabBar tabs={tabBarTabs} value={activeTab} onChange={setActiveTab} />
+    <div className="space-y-8">
+      <header className="space-y-5">
+        <PageHeader
+          eyebrow="Venue"
+          title="Settings"
+          subtitle="Manage your venue profile, hours, billing, payments, communications, and team. Simple fields save automatically; hours, staff invites, and Stripe actions use explicit saves."
+        />
+        <div className="space-y-3">
+          <div className="overflow-x-auto pb-0.5">
+            <TabBar tabs={tabBarTabs} value={activeTab} onChange={(id) => replaceWithTab(id)} />
+          </div>
+          <SettingsSaveStrip />
         </div>
       </header>
       {showPlanCheckoutBanner && (
@@ -669,7 +741,7 @@ export function SettingsView({
             type="button"
             onClick={() => {
               setPlanBannerDismissed(true);
-              router.replace('/dashboard/settings?tab=plan', { scroll: false });
+              router.replace(`${pathname}?tab=plan`, { scroll: false });
             }}
             className="inline-flex min-h-10 shrink-0 items-center justify-center rounded-xl px-4 py-2 text-sm font-semibold text-brand-800 hover:bg-brand-100 sm:px-3 sm:py-2 sm:text-xs"
           >
@@ -678,70 +750,85 @@ export function SettingsView({
         </div>
       )}
 
-      <div className="space-y-6">
+      <div className="space-y-10">
         {activeTab === 'profile' && (
-          <>
+          <div className="space-y-10">
             {isAppointment && isAdmin ? (
-              <div className="space-y-4">
-                <p className="text-sm text-slate-500">
-                  <span className="font-medium text-slate-700">Your login:</span> display name, sign-in email, phone, and
-                  password apply to you. Business details in the sections below apply to your venue and public booking page.
-                </p>
+              <SettingsProfileGroup
+                eyebrow="Your account"
+                title="Personal details & security"
+                description="Your display name, sign-in email, phone, and password apply only to your login. Venue-wide options are in the sections below."
+              >
                 <StaffPersonalSettingsSection />
-              </div>
+              </SettingsProfileGroup>
             ) : (
-              <ProfileSection />
+              <SettingsProfileGroup
+                eyebrow="Your account"
+                title="Personal profile"
+                description="How you appear in the dashboard. Contact your administrator to change venue-wide settings."
+              >
+                <ProfileSection />
+              </SettingsProfileGroup>
             )}
-            <VenueProfileSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} bookingModel={bookingModel} />
-            <BookingTypesSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} />
+
+            <SettingsProfileGroup
+              eyebrow="Business identity"
+              title="Venue profile & public details"
+              description="Business name, booking URL slug, address, contact channels, and cover image. These power your public booking page and guest communications."
+            >
+              <VenueProfileSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} bookingModel={bookingModel} />
+            </SettingsProfileGroup>
+
+            <SettingsProfileGroup
+              id="additional-booking-types"
+              eyebrow="Booking types"
+              title="Models on your public page"
+              description="Choose which booking experiences are active for guests and which tools appear in your dashboard."
+            >
+              <BookingTypesSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} />
+            </SettingsProfileGroup>
+
             {showRestaurantTableProfileSections && !isAppointment && (
-              <SectionCard>
-                <SectionCard.Body className="space-y-2 text-sm text-slate-700">
-                  <p className="text-base font-semibold text-slate-900">Table management and dining availability</p>
-                  <p>
-                    Floor plan, table combinations, legacy availability, and related deposit options are under{' '}
-                    <Link
-                      href="/dashboard/availability?tab=table"
-                      className="font-medium text-brand-600 underline hover:text-brand-700"
-                    >
-                      Dining Availability → Table Management
-                    </Link>
-                    .
-                  </p>
+              <SettingsProfileGroup
+                eyebrow="Dining"
+                title="Table management & availability"
+                description="Floor plan, table combinations, and related deposit options for restaurant service."
+              >
+                <SectionCard elevated>
+                  <SectionCard.Body className="space-y-2 text-sm text-slate-700">
+                    <p>
+                      Floor plan, table combinations, legacy availability, and related deposit options are under{' '}
+                      <Link
+                        href="/dashboard/availability?tab=table"
+                        className="font-medium text-brand-600 underline hover:text-brand-700"
+                      >
+                        Dining Availability → Table Management
+                      </Link>
+                      .
+                    </p>
+                  </SectionCard.Body>
+                </SectionCard>
+              </SettingsProfileGroup>
+            )}
+
+            <SettingsProfileGroup
+              id="booking-widget"
+              eyebrow="Public booking page"
+              title="Widget, embed & QR"
+              description="Share your booking page on your website with a snippet or printable QR code."
+            >
+              <SectionCard elevated>
+                <SectionCard.Header
+                  eyebrow="Embeds"
+                  title="Booking widget & QR code"
+                  description="Copy the iframe snippet for your site and download a QR code that opens your public booking page."
+                />
+                <SectionCard.Body className="pt-0">
+                  <WidgetSection venueName={venue.name ?? 'Venue'} venueSlug={venue.slug} baseUrl={publicBaseUrl} />
                 </SectionCard.Body>
               </SectionCard>
-            )}
-            {isAppointment && (
-              <BookingRulesSection
-                venue={venue}
-                onUpdate={onUpdate}
-                isAdmin={isAdmin}
-                bookingModel={bookingModel}
-              />
-            )}
-            <SectionCard elevated>
-              <SectionCard.Header
-                eyebrow="Embeds"
-                title="Booking widget & QR code"
-                description="Get embed code and a printable QR code for your booking page."
-              />
-              <SectionCard.Body>
-                <Link
-                  href="/dashboard/settings/widget"
-                  className="inline-flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-700"
-                >
-                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25"
-                    />
-                  </svg>
-                  Open Widget Settings
-                </Link>
-              </SectionCard.Body>
-            </SectionCard>
-          </>
+            </SettingsProfileGroup>
+          </div>
         )}
         {activeTab === 'business-hours' && (
           <OpeningHoursSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} bookingModel={bookingModel ?? 'table_reservation'} />
@@ -799,5 +886,13 @@ export function SettingsView({
         )}
       </div>
     </div>
+  );
+}
+
+export function SettingsView(props: SettingsViewProps) {
+  return (
+    <SettingsSaveProvider>
+      <SettingsViewInner {...props} />
+    </SettingsSaveProvider>
   );
 }

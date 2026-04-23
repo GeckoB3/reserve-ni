@@ -10,6 +10,7 @@ import { isCdeBookingRow } from '@/lib/booking/cde-booking';
 import { runUnifiedSchedulingComms, runSecondaryModelScheduledComms } from '@/lib/cron/unified-scheduling-comms';
 import { getVenueCommunicationPolicies } from '@/lib/communications/policies';
 import { sendPolicyMessage } from '@/lib/communications/outbound';
+import type { CronGuestInfo as GuestInfo, CronBookingRow as BookingRow } from '@/lib/cron/comms-types';
 
 export async function GET(request: NextRequest) {
   const denied = requireCronAuthorisation(request);
@@ -90,32 +91,6 @@ function localDateStr(date: Date): string {
 
 function bookingLocalMs(bookingDate: string, bookingTime: string): number {
   return new Date(`${bookingDate}T${bookingTime}`).getTime();
-}
-
-interface GuestInfo {
-  name: string | null;
-  email: string | null;
-  phone: string | null;
-}
-
-interface BookingRow {
-  id: string;
-  venue_id: string;
-  guest_id: string;
-  guest_email: string | null;
-  booking_date: string;
-  booking_time: string;
-  party_size: number;
-  special_requests: string | null;
-  dietary_notes: string | null;
-  deposit_amount_pence: number | null;
-  deposit_status: string | null;
-  cancellation_deadline: string | null;
-  status: string;
-  experience_event_id: string | null;
-  class_instance_id: string | null;
-  resource_id: string | null;
-  guest: GuestInfo | null;
 }
 
 const BOOKING_SELECT =

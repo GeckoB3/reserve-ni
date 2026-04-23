@@ -218,13 +218,8 @@ export interface BookingNotesEditablePanelProps {
   onSaved: () => void;
   /** When true, values are visible but editing is blocked (e.g. booking detail still loading). */
   disabled?: boolean;
-  /**
-   * Which note fields to show. `cde` maps guest-facing copy to `special_requests` (booking notes from the guest flow).
-   * If omitted, falls back to `isAppointment` (deprecated).
-   */
+  /** Which note fields to show. `cde` maps guest-facing copy to `special_requests` (booking notes from the guest flow). */
   notesVariant?: BookingNotesVariant;
-  /** @deprecated Use `notesVariant="cde"` instead. */
-  isAppointment?: boolean;
 }
 
 export function BookingNotesEditablePanel({
@@ -234,11 +229,9 @@ export function BookingNotesEditablePanel({
   staffNotes,
   onSaved,
   disabled = false,
-  notesVariant: notesVariantProp,
-  isAppointment = false,
+  notesVariant = 'table',
 }: BookingNotesEditablePanelProps) {
-  const variant: BookingNotesVariant = notesVariantProp ?? (isAppointment ? 'cde' : 'table');
-  const isCde = variant === 'cde';
+  const isCde = notesVariant === 'cde';
 
   return (
     <div

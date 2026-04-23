@@ -1,8 +1,10 @@
+import type { PlanTier } from '@/types/plan-tier';
+
 /** Stored on the auth user while signup is in progress (before a venue exists). */
 export const SIGNUP_PENDING_PLAN_KEY = 'signup_pending_plan';
 export const SIGNUP_PENDING_BUSINESS_TYPE_KEY = 'signup_pending_business_type';
 
-export type SignupPendingPlan = 'appointments' | 'plus' | 'light' | 'restaurant' | 'founding';
+export type SignupPendingPlan = PlanTier;
 
 /**
  * True when the user has progressed far enough in the funnel to show the order summary / payment step.

@@ -28,6 +28,40 @@ if (!webhookSecret) {
   console.warn('STRIPE_ONBOARDING_WEBHOOK_SECRET is not set; subscription webhook verification will fail');
 }
 
+const PRICE_TIER_ENV_KEYS: Array<{ envKey: string; tier: 'appointments' | 'plus' | 'restaurant' | 'light' }> = [
+  { envKey: 'STRIPE_APPOINTMENTS_PRO_PRICE_ID', tier: 'appointments' },
+  { envKey: 'STRIPE_STANDARD_PRICE_ID', tier: 'appointments' },
+  { envKey: 'STRIPE_APPOINTMENTS_PLUS_PRICE_ID', tier: 'plus' },
+  { envKey: 'STRIPE_PLUS_PRICE_ID', tier: 'plus' },
+  { envKey: 'STRIPE_RESTAURANT_PRICE_ID', tier: 'restaurant' },
+  { envKey: 'STRIPE_FOUNDING_PRICE_ID', tier: 'restaurant' },
+  { envKey: 'STRIPE_LIGHT_PRICE_ID', tier: 'light' },
+];
+
+function buildPriceToTierMapping(): Record<string, 'appointments' | 'plus' | 'restaurant' | 'light'> {
+  const out: Record<string, 'appointments' | 'plus' | 'restaurant' | 'light'> = {};
+  for (const { envKey, tier } of PRICE_TIER_ENV_KEYS) {
+    const id = process.env[envKey]?.trim();
+    if (id) out[id] = tier;
+  }
+  return out;
+}
+
+function mapSubscriptionStatusToPlanStatus(
+  subscription: Stripe.Subscription,
+): 'active' | 'trialing' | 'past_due' | 'cancelled' | 'cancelling' {
+  const st = subscription.status;
+  if (subscriptionCancelAtPeriodEnd(subscription)) return 'cancelling';
+  if (st === 'trialing') return 'trialing';
+  if (st === 'active') return 'active';
+  if (st === 'past_due') return 'past_due';
+  if (st === 'canceled' || st === 'unpaid' || st === 'incomplete_expired' || st === 'paused') {
+    return 'cancelled';
+  }
+  if (st === 'incomplete') return 'past_due';
+  return 'past_due';
+}
+
 export async function POST(request: NextRequest) {
   let event: Stripe.Event;
 
@@ -49,14 +83,8 @@ export async function POST(request: NextRequest) {
 
   const supabase = getSupabaseAdminClient();
 
-  // Idempotency check
-  const { data: existing } = await supabase
-    .from('webhook_events')
-    .select('id')
-    .eq('stripe_event_id', event.id)
-    .maybeSingle();
-
-  if (existing) {
+  const claimed = await claimWebhookEvent(supabase, event.id, event.type);
+  if (!claimed) {
     return NextResponse.json({ received: true });
   }
 
@@ -111,16 +139,44 @@ export async function POST(request: NextRequest) {
         console.log(`[Subscription webhook] Unhandled event type: ${event.type}`);
     }
 
-    await supabase.from('webhook_events').insert({
-      stripe_event_id: event.id,
-      event_type: event.type,
-    });
+    await recordProcessed(supabase, event.id, event.type);
 
     return NextResponse.json({ received: true });
   } catch (err) {
     console.error('[Subscription webhook] Processing failed:', event.id, event.type, err);
     return NextResponse.json({ error: 'Processing failed' }, { status: 500 });
   }
+}
+
+async function recordProcessed(
+  supabase: ReturnType<typeof getSupabaseAdminClient>,
+  stripeEventId: string,
+  eventType: string
+): Promise<void> {
+  await supabase
+    .from('webhook_events')
+    .upsert({
+      stripe_event_id: stripeEventId,
+      event_type: eventType,
+    }, { onConflict: 'stripe_event_id', ignoreDuplicates: true });
+}
+
+async function claimWebhookEvent(
+  supabase: ReturnType<typeof getSupabaseAdminClient>,
+  stripeEventId: string,
+  eventType: string,
+): Promise<boolean> {
+  const { error } = await supabase
+    .from('webhook_events')
+    .insert({ stripe_event_id: stripeEventId, event_type: eventType });
+  if (!error) return true;
+
+  const code = (error as { code?: string }).code;
+  if (code === '23505' || code === '409') {
+    return false;
+  }
+  console.error('[Subscription webhook] Failed to claim event idempotency lock:', error);
+  throw error;
 }
 
 async function handleCheckoutCompleted(
@@ -224,13 +280,13 @@ async function handleCheckoutCompleted(
   const { data: userData } = await supabase.auth.admin.getUserById(supabaseUserId);
   const userEmail = userData?.user?.email;
   if (userEmail) {
-    const { data: existingStaff } = await supabase
+    const { count: existingStaffCount } = await supabase
       .from('staff')
-      .select('venue_id')
+      .select('*', { count: 'exact', head: true })
       .ilike('email', userEmail.toLowerCase().trim())
       .limit(1);
 
-    if (existingStaff && existingStaff.length > 0) {
+    if ((existingStaffCount ?? 0) > 0) {
       console.log('[Subscription webhook] Staff record already exists for', userEmail);
       return;
     }
@@ -346,34 +402,19 @@ async function handleSubscriptionUpdated(
     : typeof mainItem?.price === 'string'
       ? mainItem.price
       : undefined;
-  const priceToTier: Record<string, string> = {};
-  const addMapping = (envKey: string, tier: string) => {
-    const id = process.env[envKey]?.trim();
-    if (id) priceToTier[id] = tier;
-  };
-  addMapping('STRIPE_APPOINTMENTS_PRO_PRICE_ID', 'appointments');
-  addMapping('STRIPE_APPOINTMENTS_PLUS_PRICE_ID', 'plus');
-  addMapping('STRIPE_RESTAURANT_PRICE_ID', 'restaurant');
-  addMapping('STRIPE_LIGHT_PRICE_ID', 'light');
+  const priceToTier = buildPriceToTierMapping();
   if (priceId && priceToTier[priceId]) {
     updates.pricing_tier = priceToTier[priceId];
     updates.calendar_count = null;
+  } else if (priceId) {
+    console.warn('[Subscription webhook] Unknown subscription price id; tier not updated', {
+      subscriptionId: subscription.id,
+      customerId,
+      priceId,
+    });
   }
 
-  const st = subscription.status;
-  if (st === 'canceled' || st === 'unpaid') {
-    updates.plan_status = 'cancelled';
-  } else if (st === 'past_due') {
-    updates.plan_status = 'past_due';
-  } else if (subscriptionCancelAtPeriodEnd(subscriptionRaw)) {
-    updates.plan_status = 'cancelling';
-  } else if (st === 'trialing') {
-    updates.plan_status = 'trialing';
-  } else if (st === 'active') {
-    updates.plan_status = 'active';
-  } else {
-    updates.plan_status = 'active';
-  }
+  updates.plan_status = mapSubscriptionStatusToPlanStatus(subscription);
 
   const { data: venueRows } = await supabase.from('venues').select('id').eq('stripe_customer_id', customerId);
   await supabase.from('venues').update(updates).eq('stripe_customer_id', customerId);

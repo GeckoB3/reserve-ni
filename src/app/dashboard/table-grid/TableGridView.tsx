@@ -193,7 +193,7 @@ export function TableGridView({
         if (cancelled || !j?.areas) return;
         setDiningAreas(j.areas as VenueArea[]);
       })
-      .catch(() => {});
+      .catch((e) => console.error('[TableGridView] /api/venue/areas preload failed:', e));
     return () => {
       cancelled = true;
     };
@@ -317,7 +317,7 @@ export function TableGridView({
         const tz = v.timezone;
         if (typeof tz === 'string' && tz.trim() !== '') setVenueTimezone(tz.trim());
       })
-      .catch(() => {});
+      .catch((e) => console.error('[TableGridView] /api/venue preload failed:', e));
     return () => {
       cancelled = true;
     };
@@ -441,7 +441,7 @@ export function TableGridView({
           setCombinationThreshold(data.settings?.combination_threshold ?? 80);
         }
       })
-      .catch(() => {});
+      .catch((e) => console.error('[TableGridView] /api/venue/tables preload failed:', e));
   }, [bookingModel, diningAreaId]);
   useEffect(() => { fetchServices(); }, [fetchServices]);
   useEffect(() => { fetchGrid(); }, [fetchGrid]);

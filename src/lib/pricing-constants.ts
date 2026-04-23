@@ -1,9 +1,6 @@
 /** Appointments Pro plan: flat monthly price (GBP). */
 export const APPOINTMENTS_PRO_PRICE = 79;
 
-/** @deprecated Use APPOINTMENTS_PRO_PRICE — same value (Pro tier in Stripe). */
-export const APPOINTMENTS_PRICE = APPOINTMENTS_PRO_PRICE;
-
 /** Appointments Plus plan: flat monthly price (GBP). */
 export const APPOINTMENTS_PLUS_PRICE = 35;
 

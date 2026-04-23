@@ -67,20 +67,44 @@ export function OpeningHoursSection({ venue, onUpdate, isAdmin, bookingModel }: 
   }, [local, onUpdate]);
 
   return (
-    <SectionCard elevated>
-      <SectionCard.Header eyebrow="Hours" title="Opening hours" description="Set your business opening hours." />
-      <SectionCard.Body>
-      <OpeningHoursControl value={local} onChange={setLocal} disabled={!isAdmin} />
+    <div className="space-y-6">
+      <SectionCard elevated>
+        <SectionCard.Header
+          eyebrow="Hours"
+          title="Weekly opening hours"
+          description="Set the hours you are normally open each day. This is used for availability and guest messaging — review carefully before publishing."
+        />
+        <SectionCard.Body className="space-y-4">
+          <OpeningHoursControl value={local} onChange={setLocal} disabled={!isAdmin} />
+          {error && <p className="text-sm text-red-600">{error}</p>}
+          {isAdmin && (
+            <div className="sticky bottom-0 z-10 -mx-4 border-t border-slate-100 bg-white/95 px-4 py-4 backdrop-blur-sm sm:-mx-6 sm:px-6">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-xs text-slate-500">Opening hours are saved explicitly so you can review the full week.</p>
+                <button
+                  type="button"
+                  onClick={() => void save()}
+                  disabled={saving}
+                  className="inline-flex min-h-10 items-center justify-center rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-slate-800 disabled:opacity-50"
+                >
+                  {saving ? 'Saving…' : 'Save opening hours'}
+                </button>
+              </div>
+            </div>
+          )}
+        </SectionCard.Body>
+      </SectionCard>
 
-      {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
-      {isAdmin && (
-        <button type="button" onClick={save} disabled={saving} className="mt-4 rounded bg-neutral-900 px-4 py-2 text-sm font-medium text-white hover:bg-neutral-800 disabled:opacity-50">
-          {saving ? 'Saving…' : 'Save opening hours'}
-        </button>
-      )}
-
-      <BusinessClosuresSection bookingModel={bookingModel} venue={venue} isAdmin={isAdmin} onUpdate={onUpdate} />
-      </SectionCard.Body>
-    </SectionCard>
+      <SectionCard elevated>
+        <SectionCard.Header
+          eyebrow="Exceptions"
+          title="Closures & special days"
+          description="Add bank holidays, private events, or other dates when you are closed or on different hours."
+        />
+        <SectionCard.Body>
+          <BusinessClosuresSection bookingModel={bookingModel} venue={venue} isAdmin={isAdmin} onUpdate={onUpdate} />
+        </SectionCard.Body>
+      </SectionCard>
+    </div>
   );
 }

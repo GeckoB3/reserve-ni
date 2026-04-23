@@ -42,13 +42,8 @@ export async function POST(request: NextRequest) {
 
   const supabase = getSupabaseAdminClient();
 
-  const { data: existing } = await supabase
-    .from('webhook_events')
-    .select('id')
-    .eq('stripe_event_id', event.id)
-    .maybeSingle();
-
-  if (existing) {
+  const claimed = await claimWebhookEvent(supabase, event.id, event.type);
+  if (!claimed) {
     return NextResponse.json({ received: true });
   }
 
@@ -239,20 +234,28 @@ export async function POST(request: NextRequest) {
         }
       }
       if (paymentIntentId) {
-        const { data: booking } = await supabase
+        const { data: bookings, error: bookingsErr } = await supabase
           .from('bookings')
           .select('id, deposit_status')
           .eq('stripe_payment_intent_id', paymentIntentId)
-          .single();
+          .limit(200);
 
-        if (booking && booking.deposit_status !== 'Refunded') {
+        if (bookingsErr) {
+          console.error('[Stripe webhook] Failed to load bookings for refunded payment intent:', bookingsErr);
+        }
+
+        const refundableIds = (bookings ?? [])
+          .filter((b) => b.deposit_status !== 'Refunded')
+          .map((b) => b.id);
+
+        if (refundableIds.length > 0) {
           await supabase
             .from('bookings')
             .update({
               deposit_status: 'Refunded',
               updated_at: new Date().toISOString(),
             })
-            .eq('id', booking.id);
+            .in('id', refundableIds);
         }
       }
     }
@@ -270,8 +273,28 @@ async function recordProcessed(
   stripeEventId: string,
   eventType: string
 ): Promise<void> {
-  await supabase.from('webhook_events').insert({
+  await supabase
+    .from('webhook_events')
+    .upsert({
     stripe_event_id: stripeEventId,
     event_type: eventType,
-  });
+  }, { onConflict: 'stripe_event_id', ignoreDuplicates: true });
+}
+
+async function claimWebhookEvent(
+  supabase: ReturnType<typeof getSupabaseAdminClient>,
+  stripeEventId: string,
+  eventType: string,
+): Promise<boolean> {
+  const { error } = await supabase
+    .from('webhook_events')
+    .insert({ stripe_event_id: stripeEventId, event_type: eventType });
+  if (!error) return true;
+
+  const code = (error as { code?: string }).code;
+  if (code === '23505' || code === '409') {
+    return false;
+  }
+  console.error('[Stripe webhook] Failed to claim event idempotency lock:', error);
+  throw error;
 }

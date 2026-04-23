@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { defaultNewUnifiedCalendarWorkingHours } from '@/lib/availability/practitioner-defaults';
+import { currencySymbolFromCode } from '@/lib/money/currency-symbol';
 import { mergeAppointmentServiceWithPractitionerLink } from '@/lib/appointments/merge-service-with-overrides';
 import {
   isServiceCustomScheduleEmpty,
@@ -178,7 +179,7 @@ export function AppointmentServicesView({
   /** Venue has `stripe_connected_account_id` — required for online deposits / full payment. */
   stripeConnected?: boolean;
 }) {
-  const sym = currency === 'EUR' ? '€' : '£';
+  const sym = currencySymbolFromCode(currency);
 
   function formatPrice(pence: number | null): string {
     return formatPricePenceForServiceCatalog(pence, sym);

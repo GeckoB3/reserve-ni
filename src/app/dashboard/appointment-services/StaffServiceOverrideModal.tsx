@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { mergeAppointmentServiceWithPractitionerLink } from '@/lib/appointments/merge-service-with-overrides';
 import type { AppointmentService, PractitionerService } from '@/types/booking-models';
 import { NumericInput } from '@/components/ui/NumericInput';
+import { currencySymbolFromCode } from '@/lib/money/currency-symbol';
 
 const COLOUR_OPTIONS = [
   '#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6',
@@ -70,7 +71,7 @@ export function StaffServiceOverrideModal({
   selectedCalendarId,
   onSelectedCalendarChange,
 }: Props) {
-  const sym = currency === 'EUR' ? '€' : '£';
+  const sym = currencySymbolFromCode(currency);
 
   const base = service as AppointmentService;
   const merged = useMemo(

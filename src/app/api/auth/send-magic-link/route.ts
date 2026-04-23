@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { sendEmail } from '@/lib/emails/send-email';
 import { getStaffAuthBaseUrl } from '@/lib/staff-invite-redirect';
+import { sanitizeMagicLinkNextPath } from '@/lib/safe-auth-redirect';
 import { z } from 'zod';
 
 const schema = z.object({
@@ -34,7 +35,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid request' }, { status: 400 });
     }
 
-    const { email, next: nextPath = '/auth/callback' } = parsed.data;
+    const { email, next } = parsed.data;
+    const nextPath = sanitizeMagicLinkNextPath(next);
     const normalisedEmail = email.trim().toLowerCase();
 
     if (!process.env.SENDGRID_API_KEY?.trim()) {

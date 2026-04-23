@@ -60,7 +60,15 @@ export default function SignupBookingModelsPage() {
         if (!venue) {
           throw new Error('Missing venue');
         }
-        if (venue.pricing_tier !== 'appointments' && venue.pricing_tier !== 'light') {
+        // Redirect non-appointments-SKU tiers (restaurant, founding, etc.) directly to onboarding.
+        // 'appointments', 'light', and 'plus' all use the unified appointments wizard and must go
+        // through this model-selection step before /onboarding can proceed (otherwise /onboarding
+        // detects no active_booking_models and bounces them back here, creating an infinite loop).
+        if (
+          venue.pricing_tier !== 'appointments' &&
+          venue.pricing_tier !== 'light' &&
+          venue.pricing_tier !== 'plus'
+        ) {
           router.replace('/onboarding');
           return;
         }

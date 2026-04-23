@@ -11,6 +11,7 @@ import { ResourceCalendarMonth, todayYmdLocal } from './ResourceCalendarMonth';
 import { slotIntervalDurationLabel } from '@/lib/booking/slot-interval-label';
 import { formatResourcePricePerSlotLine } from '@/lib/booking/format-price-display';
 import { resourceDurationCandidatesMinutes } from '@/lib/availability/resource-booking-engine';
+import { currencySymbolFromCode } from '@/lib/money/currency-symbol';
 import {
   type BookingFlowAudience,
   resourceOptionsUrl,
@@ -325,7 +326,7 @@ export function ResourceBookingFlow({
   }, [cancellationPolicy, resourceRefundNoticeHours]);
 
   const resourcePriceSummary = useMemo(() => {
-    const sym = venue.currency === 'EUR' ? '€' : '£';
+    const sym = currencySymbolFromCode(venue.currency);
     if (totalPricePence <= 0) {
       return { primary: 'Free', secondary: null as string | null };
     }
@@ -520,7 +521,7 @@ export function ResourceBookingFlow({
                       <span className="font-medium text-brand-600">
                         {formatResourcePricePerSlotLine(
                           r.price_per_slot_pence,
-                          venue.currency === 'EUR' ? '€' : '£',
+                          currencySymbolFromCode(venue.currency),
                           slotIntervalDurationLabel(r.slot_interval_minutes),
                         )}
                       </span>
@@ -712,7 +713,7 @@ export function ResourceBookingFlow({
               appointmentChargeLabel={payReq === 'full_payment' ? 'full_payment' : 'deposit'}
               payAtVenueBalancePence={payReq === 'none' && totalPricePence > 0 ? totalPricePence : null}
               payAtVenuePaymentRequirement={payReq === 'none' ? 'none' : undefined}
-              currencySymbol={venue.currency === 'EUR' ? '€' : '£'}
+              currencySymbol={currencySymbolFromCode(venue.currency)}
               refundNoticeHours={resourceRefundNoticeHours}
               phoneDefaultCountry={phoneDefaultCountry}
               audience={detailsAudience}

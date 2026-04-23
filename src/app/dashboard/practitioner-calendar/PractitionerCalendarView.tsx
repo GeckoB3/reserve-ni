@@ -25,7 +25,6 @@ import {
 } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
 import { createClient } from '@/lib/supabase/browser';
-// ResourceCalendarGrid removed — resources are now calendar columns
 import { ResourceSlotBookingForm } from '@/components/booking/ResourceSlotBookingForm';
 import { CalendarStaffBookingModal } from '@/app/dashboard/practitioner-calendar/CalendarStaffBookingModal';
 import {
@@ -808,7 +807,6 @@ export function PractitionerCalendarView({
   venueId,
   currency = 'GBP',
   defaultPractitionerFilter = 'all',
-  linkedPractitionerId = null,
   linkedPractitionerIds,
   bookingModel = 'unified_scheduling',
   enabledModels = [],
@@ -816,8 +814,6 @@ export function PractitionerCalendarView({
   venueId: string;
   currency?: string;
   defaultPractitionerFilter?: 'all' | string;
-  /** @deprecated Prefer linkedPractitionerIds — kept for compatibility */
-  linkedPractitionerId?: string | null;
   /** Bookable calendars this staff user manages (unified scheduling). */
   linkedPractitionerIds?: string[];
   /** Primary bookable model (for merged schedule feeds §4.2). */
@@ -826,11 +822,10 @@ export function PractitionerCalendarView({
   enabledModels?: BookingModel[];
 }) {
   const { addToast } = useToast();
-  const myCalendarIds = useMemo(() => {
-    if (linkedPractitionerIds && linkedPractitionerIds.length > 0) return linkedPractitionerIds;
-    if (linkedPractitionerId) return [linkedPractitionerId];
-    return [];
-  }, [linkedPractitionerIds, linkedPractitionerId]);
+  const myCalendarIds = useMemo(
+    () => linkedPractitionerIds ?? [],
+    [linkedPractitionerIds],
+  );
   const [viewMode, setViewMode] = useState<ViewMode>('day');
   const [date, setDate] = useState(() => {
     const now = new Date();

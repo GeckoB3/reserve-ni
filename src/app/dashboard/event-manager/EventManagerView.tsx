@@ -13,6 +13,7 @@ import { NumericInput } from '@/components/ui/NumericInput';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { Pill, type PillVariant } from '@/components/ui/dashboard/Pill';
+import { currencySymbolFromCode } from '@/lib/money/currency-symbol';
 import { EmptyState } from '@/components/ui/dashboard/EmptyState';
 import { StackedList } from '@/components/ui/dashboard/StackedList';
 
@@ -153,7 +154,7 @@ export function EventManagerView({
   stripeConnected?: boolean;
 }) {
   const { addToast } = useToast();
-  const sym = currency === 'EUR' ? '€' : '£';
+  const sym = currencySymbolFromCode(currency);
 
   function formatPrice(pence: number): string {
     return `${sym}${(pence / 100).toFixed(2)}`;
@@ -193,7 +194,10 @@ export function EventManagerView({
             .filter((p) => isAdmin || linkedPractitionerIds.includes(p.id)),
         );
       })
-      .catch(() => setTeamCalendars([]));
+      .catch((e) => {
+        console.error('[EventManagerView] /api/venue/practitioners load failed:', e);
+        setTeamCalendars([]);
+      });
     return () => {
       cancelled = true;
     };

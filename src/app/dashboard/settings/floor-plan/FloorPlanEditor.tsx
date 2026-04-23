@@ -17,9 +17,7 @@ import { NumericInput } from '@/components/ui/NumericInput';
 
 const KonvaCanvas = dynamic(() => import('./KonvaCanvas'), { ssr: false });
 
-// ---------------------------------------------------------------------------
 // Constants
-// ---------------------------------------------------------------------------
 
 /** Keyboard nudge step in layout % (~1 px on a 2600px wide canvas). Shift = 10×. */
 const NUDGE_STEP_PCT = 0.2;
@@ -31,9 +29,7 @@ const HISTORY_DEDUP_MS = 350;
 /** Grid step (in % of layout) for snap-to-grid and optional move snapping. */
 const GRID_STEP_PCT = 2;
 
-// ---------------------------------------------------------------------------
 // Types
-// ---------------------------------------------------------------------------
 
 interface CombinationLink {
   id: string;
@@ -76,9 +72,7 @@ const SHAPE_OPTIONS: { shape: TableShape; label: string }[] = [
   { shape: 'polygon', label: 'Custom' },
 ];
 
-// ---------------------------------------------------------------------------
 // Main component
-// ---------------------------------------------------------------------------
 
 export function FloorPlanEditor({ className, embedded = false, onLayoutSaved, diningAreaId }: Props) {
   const areaQs = diningAreaId ? `?area_id=${encodeURIComponent(diningAreaId)}` : '';
@@ -2474,9 +2468,7 @@ export function FloorPlanEditor({ className, embedded = false, onLayoutSaved, di
   );
 }
 
-// ---------------------------------------------------------------------------
 // Small sub-components
-// ---------------------------------------------------------------------------
 
 /** Numeric layout-size input that only commits on Enter / blur — avoids resize
  * thrash while typing multi-digit values like 2400. */

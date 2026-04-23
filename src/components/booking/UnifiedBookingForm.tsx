@@ -150,7 +150,7 @@ export function UnifiedBookingForm({
       .then((data: { currency?: string }) => {
         if (!cancelled && data?.currency) setVenueCurrencyResolved(data.currency);
       })
-      .catch(() => {});
+      .catch((e) => console.error('[UnifiedBookingForm] /api/venue preload failed:', e));
     return () => {
       cancelled = true;
     };

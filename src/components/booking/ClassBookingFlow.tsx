@@ -53,9 +53,7 @@ interface ClassSlot {
 
 type Step = 'pick-class' | 'pick-date' | 'summary' | 'details' | 'payment' | 'confirmation';
 
-function symForCurrency(currency: string): string {
-  return currency === 'EUR' ? '€' : '£';
-}
+import { currencySymbolFromCode as symForCurrency } from '@/lib/money/currency-symbol';
 
 function paymentSummaryLines(
   slot: ClassSlot,

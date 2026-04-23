@@ -2,10 +2,6 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { planCalendarLimit, planStaffLimit } from '@/lib/plan-limits';
 
-export function lightPlanCalendarLimit(): number {
-  return planCalendarLimit('light');
-}
-
 /**
  * Active bookable calendar columns for the venue (`unified_calendars`).
  */
@@ -55,11 +51,6 @@ export async function assertCalendarSlotAvailable(venueId: string): Promise<{
   };
 }
 
-/** @deprecated Use assertCalendarSlotAvailable */
-export async function assertLightPlanCalendarSlotAvailable(venueId: string) {
-  return assertCalendarSlotAvailable(venueId);
-}
-
 /**
  * Before adding a staff row: enforce per-tier staff cap (Light: 1, Plus: 5, else unlimited).
  * For Light, invite is blocked once there is already one staff (owner).
@@ -94,10 +85,4 @@ export async function assertStaffSlotAvailable(venueId: string): Promise<{
     return { allowed: true, staffCount, limit };
   }
   return { allowed: staffCount < limit, staffCount, limit };
-}
-
-/** @deprecated Use assertStaffSlotAvailable */
-export async function assertLightPlanSingleStaffOnly(venueId: string) {
-  const r = await assertStaffSlotAvailable(venueId);
-  return { allowed: r.allowed, staffCount: r.staffCount };
 }

@@ -43,7 +43,8 @@ export async function GET() {
       try {
         const sub = await stripe.subscriptions.retrieve(subId);
         stripe_subscription_status = sub.status;
-      } catch {
+      } catch (e) {
+        console.warn('[venue/light-plan/status] stripe.subscriptions.retrieve failed', { subId, e });
         stripe_subscription_status = null;
       }
     }

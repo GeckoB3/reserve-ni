@@ -38,7 +38,7 @@ export function StaffScheduleHub({ bookingModel, enabledModels }: Props) {
         const tz = v?.timezone;
         if (typeof tz === 'string' && tz.trim() !== '') setVenueTimezone(tz.trim());
       })
-      .catch(() => {});
+      .catch((e) => console.error('[StaffScheduleHub] /api/venue preload failed:', e));
   }, []);
 
   const { startHour: derivedStart, endHour: derivedEnd } = useMemo(

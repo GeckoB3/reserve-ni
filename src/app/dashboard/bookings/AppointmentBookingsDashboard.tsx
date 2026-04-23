@@ -13,6 +13,7 @@ import { DashboardStatCard } from '@/components/dashboard/DashboardStatCard';
 import { PageFrame } from '@/components/ui/dashboard/PageFrame';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
 import { EmptyState } from '@/components/ui/dashboard/EmptyState';
+import { currencySymbolFromCode } from '@/lib/money/currency-symbol';
 import { useToast } from '@/components/ui/Toast';
 import { buildCsvFromRows, downloadCsvString, formatMoneyPence } from '@/lib/appointments-csv';
 import { BOOKING_MUTABLE_STATUSES } from '@/lib/table-management/constants';
@@ -288,7 +289,6 @@ export function AppointmentBookingsDashboard({
   enabledModels = [],
   defaultPractitionerFilter = 'all',
   linkedPractitionerIds = [],
-  linkedPractitionerId = null,
 }: {
   venueId: string;
   currency?: string;
@@ -298,16 +298,10 @@ export function AppointmentBookingsDashboard({
   defaultPractitionerFilter?: 'all' | string;
   /** Bookable calendars this staff user manages. */
   linkedPractitionerIds?: string[];
-  /** @deprecated Prefer linkedPractitionerIds */
-  linkedPractitionerId?: string | null;
 }) {
   const { addToast } = useToast();
-  const myCalendarIds = useMemo(() => {
-    if (linkedPractitionerIds.length > 0) return linkedPractitionerIds;
-    if (linkedPractitionerId) return [linkedPractitionerId];
-    return [];
-  }, [linkedPractitionerIds, linkedPractitionerId]);
-  const sym = currency === 'EUR' ? '€' : '£';
+  const myCalendarIds = useMemo(() => linkedPractitionerIds, [linkedPractitionerIds]);
+  const sym = currencySymbolFromCode(currency);
   const [viewMode, setViewMode] = useState<ViewMode>('day');
   const [anchorDate, setAnchorDate] = useState(todayISO);
   const [customFrom, setCustomFrom] = useState(todayISO);
@@ -532,7 +526,7 @@ export function AppointmentBookingsDashboard({
         const tz = v.timezone;
         if (typeof tz === 'string' && tz.trim() !== '') setVenueTimezone(tz.trim());
       })
-      .catch(() => {});
+      .catch((e) => console.error('[AppointmentBookingsDashboard] /api/venue preload failed:', e));
     return () => {
       cancelled = true;
     };

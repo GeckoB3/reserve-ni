@@ -1,16 +1,20 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { VenueSettings } from '../types';
 import type { BookingModel } from '@/types/booking-models';
 import { normalizeEnabledModels } from '@/lib/booking/enabled-models';
 import {
+  activeModelsToLegacyEnabledModels,
   appointmentPlanDefaultModels,
+  getDefaultBookingModelFromActive,
   resolveActiveBookingModels,
 } from '@/lib/booking/active-models';
 import { isAppointmentPlanTier } from '@/lib/tier-enforcement';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
+import { useSettingsSave } from '../SettingsSaveContext';
+import { useDashboardBookingModelsNavSync } from '@/app/dashboard/DashboardShell';
 
 const APPOINTMENTS_PLAN_MODELS: Array<{
   model: Extract<BookingModel, 'unified_scheduling' | 'event_ticket' | 'class_session' | 'resource_booking'>;
@@ -52,6 +56,9 @@ interface Props {
 
 export function BookingTypesSection({ venue, onUpdate, isAdmin }: Props) {
   const router = useRouter();
+  const { report } = useSettingsSave();
+  const bookingNavSync = useDashboardBookingModelsNavSync();
+  const lastAutosaveKey = useRef<string | null>(null);
   const primary = (venue.booking_model as BookingModel) ?? 'table_reservation';
   const appointmentsPlan = isAppointmentPlanTier(venue.pricing_tier ?? null);
   const deriveDraft = useCallback(
@@ -70,17 +77,9 @@ export function BookingTypesSection({ venue, onUpdate, isAdmin }: Props) {
   const [saving, setSaving] = useState(false);
   const [setupNavigating, setSetupNavigating] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [saveSuccess, setSaveSuccess] = useState(false);
-
   useEffect(() => {
     setDraft(deriveDraft());
   }, [deriveDraft]);
-
-  useEffect(() => {
-    if (!saveSuccess) return;
-    const t = setTimeout(() => setSaveSuccess(false), 2500);
-    return () => clearTimeout(t);
-  }, [saveSuccess]);
 
   const toggle = useCallback((m: (typeof APPOINTMENTS_PLAN_MODELS)[number]['model']) => {
     setDraft((prev) => {
@@ -113,9 +112,11 @@ export function BookingTypesSection({ venue, onUpdate, isAdmin }: Props) {
         setError((json as { error?: string }).error ?? 'Save failed');
         return false;
       }
+      const nextActive = (json as { active_booking_models?: BookingModel[] }).active_booking_models;
+      const nextEnabled = (json as { enabled_models?: BookingModel[] }).enabled_models ?? normalizedEnabled;
       onUpdate({
-        active_booking_models: (json as { active_booking_models?: BookingModel[] }).active_booking_models,
-        enabled_models: (json as { enabled_models?: BookingModel[] }).enabled_models ?? normalizedEnabled,
+        active_booking_models: nextActive,
+        enabled_models: nextEnabled,
       });
       setDraft(
         appointmentsPlan
@@ -127,29 +128,64 @@ export function BookingTypesSection({ venue, onUpdate, isAdmin }: Props) {
             })
           : normalizeEnabledModels((json as { enabled_models?: unknown }).enabled_models, primary),
       );
+
+      const mergedVenue = {
+        ...venue,
+        active_booking_models: nextActive ?? venue.active_booking_models,
+        enabled_models: nextEnabled,
+      };
+      const activeModels = resolveActiveBookingModels({
+        pricingTier: mergedVenue.pricing_tier,
+        bookingModel: mergedVenue.booking_model,
+        enabledModels: mergedVenue.enabled_models,
+        activeBookingModels: mergedVenue.active_booking_models,
+      });
+      const navPrimary = getDefaultBookingModelFromActive(
+        activeModels,
+        (mergedVenue.booking_model as BookingModel) ?? 'table_reservation',
+      );
+      const navSecondaries = activeModelsToLegacyEnabledModels(activeModels, navPrimary);
+      bookingNavSync?.setNavBookingSurface({ bookingModel: navPrimary, enabledModels: navSecondaries });
+
       return true;
     } catch {
       setError('Save failed');
       return false;
     }
-  }, [appointmentsPlan, draft, isAdmin, onUpdate, primary, venue.pricing_tier]);
+  }, [appointmentsPlan, bookingNavSync, draft, isAdmin, onUpdate, primary, venue]);
 
-  const save = useCallback(async () => {
-    setSaving(true);
-    setError(null);
-    setSaveSuccess(false);
-    try {
-      const ok = await persistDraft();
-      if (ok) {
-        await router.refresh();
-        setSaveSuccess(true);
-      }
-    } catch {
-      setError('Save failed');
-    } finally {
-      setSaving(false);
+  useEffect(() => {
+    if (!isAdmin) return;
+    if (!dirty) {
+      lastAutosaveKey.current = null;
+      return;
     }
-  }, [persistDraft, router]);
+    const key = JSON.stringify([...draft].sort());
+    const timer = window.setTimeout(() => {
+      if (lastAutosaveKey.current === key) return;
+      void (async () => {
+        setSaving(true);
+        setError(null);
+        report({ status: 'saving' });
+        try {
+          const ok = await persistDraft();
+          lastAutosaveKey.current = key;
+          if (ok) {
+            report({ status: 'saved', message: 'Booking types saved.' });
+          } else {
+            report({ status: 'error', message: 'Could not save booking types.' });
+          }
+        } catch {
+          lastAutosaveKey.current = key;
+          setError('Save failed');
+          report({ status: 'error', message: 'Save failed' });
+        } finally {
+          setSaving(false);
+        }
+      })();
+    }, 550);
+    return () => window.clearTimeout(timer);
+  }, [dirty, draft, isAdmin, persistDraft, report]);
 
   const handleSetUp = useCallback(
     async (href: string) => {
@@ -160,7 +196,6 @@ export function BookingTypesSection({ venue, onUpdate, isAdmin }: Props) {
           const ok = await persistDraft();
           if (!ok) return;
         }
-        await router.refresh();
         router.push(href);
       } finally {
         setSetupNavigating(false);
@@ -192,7 +227,7 @@ export function BookingTypesSection({ venue, onUpdate, isAdmin }: Props) {
   );
 
   return (
-    <div id="additional-booking-types" className="scroll-mt-24">
+    <div className="scroll-mt-24">
       <SectionCard elevated>
         <SectionCard.Header
           eyebrow="Models"
@@ -237,22 +272,9 @@ export function BookingTypesSection({ venue, onUpdate, isAdmin }: Props) {
       {error && (
         <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>
       )}
-      <div className="mt-4 flex flex-wrap items-center gap-3">
-        <button
-          type="button"
-          disabled={saving || !dirty}
-          onClick={() => void save()}
-          className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
-        >
-          {saving ? 'Saving…' : appointmentsPlan ? 'Save booking models' : 'Save booking types'}
-        </button>
-        {saveSuccess && (
-          <span className="text-sm font-medium text-green-700" role="status">
-            Saved
-          </span>
-        )}
-        {!dirty && !saveSuccess && <span className="text-xs text-slate-400">No unsaved changes</span>}
-      </div>
+      <p className="mt-4 text-xs text-slate-500">
+        {saving ? 'Saving…' : dirty ? 'Changes will save automatically in a moment.' : 'All booking type changes are saved.'}
+      </p>
         </SectionCard.Body>
       </SectionCard>
     </div>

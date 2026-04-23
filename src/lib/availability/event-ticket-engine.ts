@@ -21,9 +21,7 @@ import {
 import { entityBookingWindowFromRow, isGuestBookingDateAllowed } from '@/lib/booking/entity-booking-window';
 import { venueLocalDateTimeToUtcMs } from '@/lib/venue/venue-local-clock';
 
-// ---------------------------------------------------------------------------
 // Types
-// ---------------------------------------------------------------------------
 
 export interface EventEngineInput {
   date: string;
@@ -65,9 +63,7 @@ export interface EventAvailabilitySlot {
   }>;
 }
 
-// ---------------------------------------------------------------------------
 // Core engine
-// ---------------------------------------------------------------------------
 
 const CAPACITY_CONSUMING_STATUSES = ['Booked', 'Confirmed', 'Pending', 'Seated'];
 
@@ -160,9 +156,7 @@ export function computeEventAvailability(
   return results;
 }
 
-// ---------------------------------------------------------------------------
 // Fetcher
-// ---------------------------------------------------------------------------
 
 export async function fetchEventInput(params: {
   supabase: SupabaseClient;
@@ -249,9 +243,7 @@ export async function fetchEventInput(params: {
   };
 }
 
-// ---------------------------------------------------------------------------
 // Offerings (multi-day): group occurrences by series for event-first UIs
-// ---------------------------------------------------------------------------
 
 export interface EventOfferingSummary {
   series_key: string;

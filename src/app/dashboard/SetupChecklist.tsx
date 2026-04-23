@@ -216,7 +216,7 @@ export function SetupChecklist() {
             setDismissed(true);
           }
         })
-        .catch(() => {});
+        .catch((e) => console.error('[SetupChecklist] status load failed:', e));
     });
     return () => cancelAnimationFrame(id);
   }, []);

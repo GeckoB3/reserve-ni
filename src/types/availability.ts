@@ -10,9 +10,7 @@
 /** Day of week 0=Sunday, 1=Monday, ..., 6=Saturday (matches JS Date.getDay()) */
 export type DayOfWeek = 0 | 1 | 2 | 3 | 4 | 5 | 6;
 
-// ---------------------------------------------------------------------------
 // Legacy types (JSONB-based config on venues table)
-// ---------------------------------------------------------------------------
 
 /** One service period (open/close). */
 export interface OpeningHoursPeriod {
@@ -97,9 +95,7 @@ export interface AvailableSlot {
   sitting_id?: string;
 }
 
-// ---------------------------------------------------------------------------
 // Service-based types (new tables)
-// ---------------------------------------------------------------------------
 
 /** Row from venue_services table. */
 export interface VenueService {

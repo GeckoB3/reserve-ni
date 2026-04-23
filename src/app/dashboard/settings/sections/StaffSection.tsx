@@ -688,9 +688,12 @@ export function StaffSection({
           )}
 
           {/* Staff List */}
-          <div className="divide-y divide-slate-100 rounded-lg border border-slate-200">
+          <div className="space-y-3">
             {staff.map((s) => (
-              <div key={s.id} className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+              <div
+                key={s.id}
+                className="flex flex-col gap-3 rounded-xl border border-slate-200/90 bg-white px-4 py-4 shadow-sm shadow-slate-900/[0.03] sm:flex-row sm:items-center sm:justify-between"
+              >
                 <div className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
                   <div className="flex items-start gap-3 min-w-0">
                     <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-brand-50 text-sm font-semibold text-brand-700">
@@ -736,10 +739,10 @@ export function StaffSection({
                           </div>
                         )}
                       </div>
-                      {allocatablePractitioners.length === 0 ? (
-                        <p className="text-xs text-slate-500">No active bookable calendars yet.</p>
-                      ) : (
-                        <div className="max-h-52 space-y-0 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50/80 p-2">
+                    {allocatablePractitioners.length === 0 ? (
+                      <p className="text-xs text-slate-500">No active bookable calendars yet.</p>
+                    ) : (
+                        <div className="max-h-52 space-y-1 overflow-y-auto rounded-xl border border-slate-200 bg-slate-50/60 p-3">
                           {allocatablePractitioners.map((p) => {
                             const checked = assignedIdsForMember(s).includes(p.id);
                             return (

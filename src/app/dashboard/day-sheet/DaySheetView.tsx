@@ -779,7 +779,9 @@ export function DaySheetView({
         if (!res.ok) return;
         const payload = await res.json();
         setTableManagementEnabled(Boolean(payload.settings?.table_management_enabled));
-      } catch { /* noop */ }
+      } catch (e) {
+        console.error('[DaySheetView] /api/venue/tables load failed:', e);
+      }
     })();
   }, []);
 
@@ -794,7 +796,7 @@ export function DaySheetView({
         const tz = v.timezone;
         if (typeof tz === 'string' && tz.trim() !== '') setVenueTimezone(tz.trim());
       })
-      .catch(() => {});
+      .catch((e) => console.error('[DaySheetView] /api/venue preload failed:', e));
     return () => {
       cancelled = true;
     };

@@ -12,8 +12,8 @@ function SectionCardRoot({
 }) {
   return (
     <div
-      className={`overflow-hidden rounded-2xl border border-slate-200 bg-white text-slate-900 ${
-        elevated ? 'shadow-xl shadow-slate-900/10' : 'shadow-sm shadow-slate-900/5'
+      className={`overflow-hidden rounded-2xl border border-slate-200/95 bg-white text-slate-900 ${
+        elevated ? 'shadow-lg shadow-slate-900/[0.07] ring-1 ring-slate-900/[0.04]' : 'shadow-sm shadow-slate-900/[0.04]'
       } ${className}`}
     >
       {children}
@@ -34,7 +34,7 @@ function SectionCardHeader({
 }) {
   if (!eyebrow && !title && !description && !right) return null;
   return (
-    <div className="flex flex-col gap-3 border-b border-slate-100 bg-slate-50/60 px-4 py-4 sm:flex-row sm:items-start sm:justify-between sm:px-6">
+    <div className="flex flex-col gap-3 border-b border-slate-100/90 bg-gradient-to-r from-slate-50/80 to-white px-4 py-4 sm:flex-row sm:items-start sm:justify-between sm:px-6 sm:py-5">
       <div className="min-w-0">
         {eyebrow ? (
           <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-500">{eyebrow}</p>
@@ -48,7 +48,7 @@ function SectionCardHeader({
 }
 
 function SectionCardBody({ children, className = '' }: { children: ReactNode; className?: string }) {
-  return <div className={`px-4 py-4 sm:px-6 sm:py-5 ${className}`}>{children}</div>;
+  return <div className={`px-4 py-5 sm:px-6 sm:py-6 ${className}`}>{children}</div>;
 }
 
 function SectionCardDivider() {

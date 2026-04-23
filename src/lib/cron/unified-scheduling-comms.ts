@@ -7,37 +7,11 @@ import { enrichBookingEmailForAppointment } from '@/lib/emails/booking-email-enr
 import { getVenueCommunicationPolicies } from '@/lib/communications/policies';
 import { sendPolicyMessage } from '@/lib/communications/outbound';
 import { isCdeBookingRow } from '@/lib/booking/cde-booking';
+import type { CronGuestInfo as GuestInfo, CronBookingRow as BookingRow } from '@/lib/cron/comms-types';
 
 const TOLERANCE_MS = 15 * 60 * 1000;
 const BOOKING_SELECT =
   'id, venue_id, guest_id, guest_email, booking_date, booking_time, party_size, special_requests, dietary_notes, deposit_amount_pence, deposit_status, cancellation_deadline, status, experience_event_id, class_instance_id, resource_id, suppress_import_comms, guest:guests(name, email, phone)';
-
-interface GuestInfo {
-  name: string | null;
-  email: string | null;
-  phone: string | null;
-}
-
-interface BookingRow {
-  id: string;
-  venue_id: string;
-  guest_id: string;
-  guest_email: string | null;
-  suppress_import_comms?: boolean | null;
-  booking_date: string;
-  booking_time: string;
-  party_size: number;
-  special_requests: string | null;
-  dietary_notes: string | null;
-  deposit_amount_pence: number | null;
-  deposit_status: string | null;
-  cancellation_deadline: string | null;
-  status: string;
-  experience_event_id: string | null;
-  class_instance_id: string | null;
-  resource_id: string | null;
-  guest: GuestInfo | null;
-}
 
 export interface UnifiedCommsResults {
   unified_reminder_1: number;

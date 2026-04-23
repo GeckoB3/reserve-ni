@@ -3,6 +3,10 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import type { ScheduleBlockDTO } from '@/types/schedule-blocks';
+import {
+  PRACTITIONER_BOOKING_STATUS_BADGE as STATUS_BADGE,
+  formatDashboardMoneyPence as formatMoneyPence,
+} from './detail-sheet-primitives';
 
 interface ClassTypePayload {
   id: string;
@@ -33,25 +37,6 @@ interface AttendeeRow {
   guest_phone: string | null;
   checked_in_at: string | null;
 }
-
-function symForCurrency(currency: string): string {
-  return currency === 'EUR' ? '€' : '£';
-}
-
-function formatMoneyPence(pence: number | null | undefined, currency: string): string {
-  if (pence == null) return '—';
-  return `${symForCurrency(currency)}${(pence / 100).toFixed(2)}`;
-}
-
-const STATUS_BADGE: Record<string, string> = {
-  Pending: 'bg-orange-100 text-orange-900 ring-1 ring-orange-200/80',
-  Booked: 'bg-sky-100 text-sky-900 ring-1 ring-sky-200/80',
-  Confirmed: 'bg-emerald-100 text-emerald-900 ring-1 ring-emerald-200/80',
-  Seated: 'bg-violet-100 text-violet-900 ring-1 ring-violet-200/80',
-  Completed: 'bg-teal-100 text-teal-900 ring-1 ring-teal-200/80',
-  'No-Show': 'bg-red-100 text-red-900 ring-1 ring-red-200/70',
-  Cancelled: 'bg-slate-100 text-slate-500 ring-1 ring-slate-200/80',
-};
 
 interface Props {
   /** When non-null, the sheet is open. Carries the clicked schedule block for instant labels. */

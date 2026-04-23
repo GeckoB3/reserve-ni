@@ -10,6 +10,7 @@ import {
   type BookingStatus,
 } from '@/lib/table-management/booking-status';
 import { validateNoShowGracePeriod } from '@/lib/table-management/lifecycle';
+import { currencySymbolFromCode } from '@/lib/money/currency-symbol';
 import type { BookingModel, ClassPaymentRequirement } from '@/types/booking-models';
 import {
   inferBookingRowModel,
@@ -221,7 +222,7 @@ export function AppointmentDetailSheet({
   requirePractitionerBooking = true,
   prefetchedBooking = null,
 }: Props) {
-  const sym = currency === 'EUR' ? '€' : '£';
+  const sym = currencySymbolFromCode(currency);
   const [detail, setDetail] = useState<BookingDetailRecord | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);

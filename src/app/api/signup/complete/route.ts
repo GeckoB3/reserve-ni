@@ -36,8 +36,14 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Payment not completed' }, { status: 400 });
     }
 
-    // Verify this checkout session belongs to the authenticated user
-    if (session.metadata?.supabase_user_id && session.metadata.supabase_user_id !== user.id) {
+    // Verify checkout session belongs to the authenticated user.
+    const metadataUserId = session.metadata?.supabase_user_id?.trim() || null;
+    const authEmail = (user.email ?? '').trim().toLowerCase();
+    const sessionEmail =
+      (session.customer_details?.email ?? session.customer_email ?? '').trim().toLowerCase() || null;
+    const ownershipByMetadata = metadataUserId !== null && metadataUserId === user.id;
+    const ownershipByEmail = Boolean(authEmail) && sessionEmail !== null && sessionEmail === authEmail;
+    if (!ownershipByMetadata && !ownershipByEmail) {
       return NextResponse.json({ error: 'Session does not belong to this user' }, { status: 403 });
     }
 
@@ -48,7 +54,8 @@ export async function POST(request: Request) {
       .from('staff')
       .select('venue_id')
       .ilike('email', (user.email ?? '').toLowerCase().trim())
-      .limit(1);
+      .order('venue_id', { ascending: true })
+      .limit(10);
 
     if (existingStaff && existingStaff.length > 0) {
       const venueId = existingStaff[0]?.venue_id;

@@ -496,7 +496,9 @@ async function handleAppointmentAvailability(
   if (phantomsParam) {
     try {
       phantomBookings = JSON.parse(phantomsParam);
-    } catch { /* ignore invalid JSON */ }
+    } catch (e) {
+      console.warn('[booking/availability] invalid phantoms JSON ignored', { length: phantomsParam.length, e });
+    }
   }
 
   const input = await fetchAppointmentInput({ supabase, venueId, date, practitionerId, serviceId });

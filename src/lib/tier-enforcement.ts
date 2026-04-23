@@ -1,7 +1,7 @@
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { assertCalendarSlotAvailable } from '@/lib/light-plan';
 
-export type PricingTier = 'appointments' | 'plus' | 'light' | 'restaurant' | 'founding';
+export type { PlanTier as PricingTier } from '@/types/plan-tier';
 
 /** Appointments Light — sole trader tier: one calendar column, one staff login, PAYG SMS. */
 export function isLightPlanTier(pricingTier: string | null | undefined): boolean {

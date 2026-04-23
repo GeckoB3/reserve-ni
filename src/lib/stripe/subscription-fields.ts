@@ -1,29 +1,38 @@
 /**
- * Read fields from Stripe Subscription objects without relying on SDK generics
- * (some Stripe client versions type API responses as Response<T> without indexing).
+ * Read fields from Stripe Subscription objects safely. Inputs are typed as
+ * a structural subset because the Stripe SDK's `Response<T>` wrapper does
+ * not always index into resource fields directly (varies by client version).
  */
 
+interface SubscriptionFields {
+  current_period_end?: number;
+  current_period_start?: number;
+  cancel_at_period_end?: boolean;
+  status?: string;
+}
+
+function asFields(sub: unknown): SubscriptionFields | null {
+  return sub && typeof sub === 'object' ? (sub as SubscriptionFields) : null;
+}
+
 export function subscriptionPeriodEndIso(sub: unknown): string | null {
-  if (!sub || typeof sub !== 'object') return null;
-  const cpe = (sub as { current_period_end?: number }).current_period_end;
-  if (typeof cpe !== 'number') return null;
-  return new Date(cpe * 1000).toISOString();
+  const f = asFields(sub);
+  if (!f || typeof f.current_period_end !== 'number') return null;
+  return new Date(f.current_period_end * 1000).toISOString();
 }
 
 export function subscriptionPeriodStartIso(sub: unknown): string | null {
-  if (!sub || typeof sub !== 'object') return null;
-  const cps = (sub as { current_period_start?: number }).current_period_start;
-  if (typeof cps !== 'number') return null;
-  return new Date(cps * 1000).toISOString();
+  const f = asFields(sub);
+  if (!f || typeof f.current_period_start !== 'number') return null;
+  return new Date(f.current_period_start * 1000).toISOString();
 }
 
 export function subscriptionCancelAtPeriodEnd(sub: unknown): boolean {
-  if (!sub || typeof sub !== 'object') return false;
-  return Boolean((sub as { cancel_at_period_end?: boolean }).cancel_at_period_end);
+  const f = asFields(sub);
+  return Boolean(f?.cancel_at_period_end);
 }
 
 export function subscriptionStatus(sub: unknown): string | undefined {
-  if (!sub || typeof sub !== 'object') return undefined;
-  const s = (sub as { status?: string }).status;
-  return typeof s === 'string' ? s : undefined;
+  const f = asFields(sub);
+  return typeof f?.status === 'string' ? f.status : undefined;
 }

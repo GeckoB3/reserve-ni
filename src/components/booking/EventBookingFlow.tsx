@@ -60,9 +60,7 @@ interface EventInstance {
 
 type Step = 'pick-event' | 'pick-date' | 'summary' | 'details' | 'payment' | 'confirmation';
 
-function symForCurrency(currency: string): string {
-  return currency === 'EUR' ? '€' : '£';
-}
+import { currencySymbolFromCode as symForCurrency } from '@/lib/money/currency-symbol';
 
 function eventPaymentSummaryLines(
   occurrence: EventInstance,

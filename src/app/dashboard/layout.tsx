@@ -1,7 +1,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
-import { getSupabaseAdminClient } from '@/lib/supabase';
 import { isPlatformSuperuser } from '@/lib/platform-auth';
+import { getDashboardStaff } from '@/lib/venue-auth';
 import { DashboardShell } from './DashboardShell';
 import { Pill } from '@/components/ui/dashboard/Pill';
 import { SessionTimeoutGuard } from '@/components/SessionTimeoutGuard';
@@ -39,21 +39,25 @@ export default async function DashboardLayout({ children }: { children: React.Re
   let onboardingCompleted = true;
   let venueTerminology: Record<string, unknown> | null = null;
   try {
-    const admin = getSupabaseAdminClient();
-    const { data: staffRows } = await admin
-      .from('staff')
-      .select('venue_id, name, role')
-      .ilike('email', email.toLowerCase().trim())
-      .limit(1);
-    const staffRow = staffRows?.[0];
+    const staff = await getDashboardStaff(supabase);
+    const admin = staff.db;
+    const staffId = staff.id;
+    const staffRole = staff.role;
 
-    if (!staffRow?.venue_id) {
+    if (!staff.venue_id) {
       redirect('/signup/business-type');
     }
 
-    isAdmin = staffRow?.role === 'admin';
-    staffName = staffRow?.name ?? undefined;
-    venueId = staffRow?.venue_id ?? undefined;
+    isAdmin = staffRole === 'admin';
+    venueId = staff.venue_id ?? undefined;
+    if (staffId) {
+      const { data: selfRow } = await admin
+        .from('staff')
+        .select('name')
+        .eq('id', staffId)
+        .maybeSingle();
+      staffName = selfRow?.name ?? undefined;
+    }
     if (venueId) {
       const { data: venue } = await admin
         .from('venues')
@@ -109,6 +113,11 @@ export default async function DashboardLayout({ children }: { children: React.Re
         }}
       >
       <main className="dashboard-coarse-inputs min-h-0 flex-1 overflow-y-auto bg-slate-100/80 pt-[calc(3.5rem+env(safe-area-inset-top,0px))] lg:pt-0">
+        {isAdmin ? null : (
+          <div className="sr-only" aria-hidden>
+            Staff users do not have plan-management access.
+          </div>
+        )}
         {planStatus === 'cancelling' && (
           <div className="border-b border-amber-200/80 bg-gradient-to-r from-amber-50 via-white to-amber-50/30 px-4 py-3 sm:px-6">
             <div className="mx-auto flex max-w-[1400px] flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
@@ -121,12 +130,21 @@ export default async function DashboardLayout({ children }: { children: React.Re
                   then, or resume billing below.
                 </p>
               </div>
-              <a
-                href="/dashboard/settings?tab=plan"
-                className="inline-flex min-h-10 shrink-0 items-center justify-center rounded-xl bg-amber-800 px-4 py-2.5 text-center text-sm font-semibold text-white shadow-sm hover:bg-amber-900 sm:w-auto sm:py-2 sm:text-xs"
-              >
-                Manage plan
-              </a>
+              {isAdmin ? (
+                <a
+                  href="/dashboard/settings?tab=plan"
+                  className="inline-flex min-h-10 shrink-0 items-center justify-center rounded-xl bg-amber-800 px-4 py-2.5 text-center text-sm font-semibold text-white shadow-sm hover:bg-amber-900 sm:w-auto sm:py-2 sm:text-xs"
+                >
+                  Manage plan
+                </a>
+              ) : (
+                <a
+                  href="/dashboard/support"
+                  className="inline-flex min-h-10 shrink-0 items-center justify-center rounded-xl bg-amber-800 px-4 py-2.5 text-center text-sm font-semibold text-white shadow-sm hover:bg-amber-900 sm:w-auto sm:py-2 sm:text-xs"
+                >
+                  Contact admin
+                </a>
+              )}
             </div>
           </div>
         )}
@@ -141,12 +159,21 @@ export default async function DashboardLayout({ children }: { children: React.Re
                   Your subscription has been cancelled. Resubscribe to continue using all features.
                 </p>
               </div>
-              <a
-                href="/dashboard/settings?tab=plan"
-                className="inline-flex min-h-10 shrink-0 items-center justify-center rounded-xl bg-amber-700 px-4 py-2.5 text-center text-sm font-semibold text-white shadow-sm hover:bg-amber-800 sm:w-auto sm:py-2 sm:text-xs"
-              >
-                Resubscribe
-              </a>
+              {isAdmin ? (
+                <a
+                  href="/dashboard/settings?tab=plan"
+                  className="inline-flex min-h-10 shrink-0 items-center justify-center rounded-xl bg-amber-700 px-4 py-2.5 text-center text-sm font-semibold text-white shadow-sm hover:bg-amber-800 sm:w-auto sm:py-2 sm:text-xs"
+                >
+                  Resubscribe
+                </a>
+              ) : (
+                <a
+                  href="/dashboard/support"
+                  className="inline-flex min-h-10 shrink-0 items-center justify-center rounded-xl bg-amber-700 px-4 py-2.5 text-center text-sm font-semibold text-white shadow-sm hover:bg-amber-800 sm:w-auto sm:py-2 sm:text-xs"
+                >
+                  Contact admin
+                </a>
+              )}
             </div>
           </div>
         )}
@@ -163,12 +190,21 @@ export default async function DashboardLayout({ children }: { children: React.Re
                     : 'Your last payment failed. Please update your payment method to avoid service interruption.'}
                 </p>
               </div>
-              <a
-                href="/dashboard/settings?tab=plan"
-                className="inline-flex min-h-10 shrink-0 items-center justify-center rounded-xl bg-rose-700 px-4 py-2.5 text-center text-sm font-semibold text-white shadow-sm hover:bg-rose-800 sm:w-auto sm:py-2 sm:text-xs"
-              >
-                {pricingTier === 'light' ? 'Add payment method' : 'Update billing'}
-              </a>
+              {isAdmin ? (
+                <a
+                  href="/dashboard/settings?tab=plan"
+                  className="inline-flex min-h-10 shrink-0 items-center justify-center rounded-xl bg-rose-700 px-4 py-2.5 text-center text-sm font-semibold text-white shadow-sm hover:bg-rose-800 sm:w-auto sm:py-2 sm:text-xs"
+                >
+                  {pricingTier === 'light' ? 'Add payment method' : 'Update billing'}
+                </a>
+              ) : (
+                <a
+                  href="/dashboard/support"
+                  className="inline-flex min-h-10 shrink-0 items-center justify-center rounded-xl bg-rose-700 px-4 py-2.5 text-center text-sm font-semibold text-white shadow-sm hover:bg-rose-800 sm:w-auto sm:py-2 sm:text-xs"
+                >
+                  Contact admin
+                </a>
+              )}
             </div>
           </div>
         )}

@@ -342,7 +342,11 @@ export function DashboardSidebar({
       return pathname === '/dashboard/bookings';
     }
     if (href === '/dashboard/calendar') {
-      return pathname.startsWith('/dashboard/calendar') || pathname.startsWith('/dashboard/practitioner-calendar');
+      return (
+        pathname === '/dashboard/calendar' ||
+        pathname.startsWith('/dashboard/calendar/') ||
+        pathname.startsWith('/dashboard/practitioner-calendar')
+      );
     }
     return pathname.startsWith(href);
   };
@@ -532,8 +536,15 @@ export function DashboardSidebar({
           )}
         </nav>
 
-        {/* Support link */}
-        <div className="px-3 pb-1">
+        {/* Help + Support */}
+        <div className="space-y-1 px-3 pb-1">
+          <NavLinkItem
+            href="/help"
+            label="Help"
+            icon={BookOpenIcon}
+            active={pathname.startsWith('/help')}
+            onNavigate={closeMobile}
+          />
           <NavLinkItem
             href="/dashboard/support"
             label="Support"
@@ -694,6 +705,18 @@ function SupportIcon({ className }: { className?: string }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
       <path strokeLinecap="round" strokeLinejoin="round" d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 5.25h.008v.008H12v-.008Z" />
+    </svg>
+  );
+}
+
+function BookOpenIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25"
+      />
     </svg>
   );
 }

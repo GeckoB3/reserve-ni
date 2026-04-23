@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { getSupabaseAdminClient } from '@/lib/supabase';
 import type { BookingModel } from '@/types/booking-models';
 import {
   activeModelsToLegacyEnabledModels,
@@ -8,30 +7,19 @@ import {
   resolveActiveBookingModels,
 } from '@/lib/booking/active-models';
 import { isAppointmentPlanTier } from '@/lib/tier-enforcement';
+import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 
 export async function PATCH(request: Request) {
   try {
     const supabase = await createClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-
-    if (!user) {
-      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+    const staff = await getVenueStaff(supabase);
+    if (!staff) {
+      return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
     }
-
-    const admin = getSupabaseAdminClient();
-
-    const { data: staffRows } = await admin
-      .from('staff')
-      .select('venue_id, role')
-      .ilike('email', (user.email ?? '').toLowerCase().trim())
-      .limit(1);
-    const staffRow = staffRows?.[0] ?? null;
-
-    if (!staffRow?.venue_id) {
-      return NextResponse.json({ error: 'No venue found' }, { status: 404 });
+    if (!requireAdmin(staff)) {
+      return NextResponse.json({ error: 'Forbidden: admin only' }, { status: 403 });
     }
+    const admin = staff.db;
 
     const body = await request.json();
     const updates: Record<string, unknown> = {};
@@ -72,7 +60,7 @@ export async function PATCH(request: Request) {
       const { data: venueRow, error: venueErr } = await admin
         .from('venues')
         .select('booking_model, enabled_models, active_booking_models, pricing_tier')
-        .eq('id', staffRow.venue_id)
+        .eq('id', staff.venue_id)
         .single();
       if (venueErr || !venueRow) {
         return NextResponse.json({ error: 'Failed to validate booking models' }, { status: 500 });
@@ -102,7 +90,7 @@ export async function PATCH(request: Request) {
     const { error: updateError } = await admin
       .from('venues')
       .update(updates)
-      .eq('id', staffRow.venue_id);
+      .eq('id', staff.venue_id);
 
     if (updateError) {
       return NextResponse.json(
@@ -121,33 +109,18 @@ export async function PATCH(request: Request) {
 export async function GET() {
   try {
     const supabase = await createClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-
-    if (!user) {
-      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+    const staff = await getVenueStaff(supabase);
+    if (!staff) {
+      return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
     }
-
-    const admin = getSupabaseAdminClient();
-
-    const { data: staffRows } = await admin
-      .from('staff')
-      .select('venue_id, role')
-      .ilike('email', (user.email ?? '').toLowerCase().trim())
-      .limit(1);
-    const staffRow = staffRows?.[0] ?? null;
-
-    if (!staffRow?.venue_id) {
-      return NextResponse.json({ error: 'No venue found' }, { status: 404 });
-    }
+    const admin = staff.db;
 
     const { data: venue, error: venueError } = await admin
       .from('venues')
       .select(
         'id, name, slug, address, phone, booking_model, enabled_models, active_booking_models, business_type, business_category, terminology, pricing_tier, calendar_count, onboarding_step, onboarding_completed, appointments_onboarding_unified_flow, currency, stripe_connected_account_id'
       )
-      .eq('id', staffRow.venue_id)
+      .eq('id', staff.venue_id)
       .single();
 
     if (venueError || !venue) {
@@ -169,7 +142,7 @@ export async function GET() {
         booking_model: bookingModel,
         active_booking_models: activeModels,
         enabled_models: activeModelsToLegacyEnabledModels(activeModels, bookingModel),
-        is_admin: staffRow.role === 'admin',
+        is_admin: staff.role === 'admin',
       },
     });
   } catch (err) {

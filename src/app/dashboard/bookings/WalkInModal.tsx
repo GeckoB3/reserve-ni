@@ -93,7 +93,7 @@ export function WalkInModal({
         const mapped = active.map(({ id, name, colour }) => ({ id, name, colour }));
         setDiningAreas(mapped);
       })
-      .catch(() => {});
+      .catch((e) => console.error('[WalkInModal] preload failed:', e));
     return () => {
       cancelled = true;
     };
