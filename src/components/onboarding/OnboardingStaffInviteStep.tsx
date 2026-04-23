@@ -8,12 +8,30 @@ export interface StaffInviteDraft {
 interface Props {
   invites: StaffInviteDraft[];
   setInvites: (invites: StaffInviteDraft[]) => void;
+  /** Total staff currently in the database (including the owner). */
+  existingStaffCount?: number;
+  /** Max allowed staff for this plan (null = unlimited). */
+  staffLimit?: number | null;
 }
 
-export function OnboardingStaffInviteStep({ invites, setInvites }: Props) {
+export function OnboardingStaffInviteStep({ invites, setInvites, existingStaffCount, staffLimit }: Props) {
+  const hasFiniteLimit = typeof staffLimit === 'number' && staffLimit !== Infinity;
+  // Slots still available = limit - existing staff - invites already filled in (non-empty)
+  const filledInviteCount = invites.filter((i) => i.email.trim() !== '').length;
+  const usedSlots = (existingStaffCount ?? 1) + filledInviteCount;
+  const remainingSlots = hasFiniteLimit ? Math.max(0, staffLimit! - usedSlots) : Infinity;
+  const atLimit = hasFiniteLimit && remainingSlots <= 0;
+
   return (
     <div>
-      <h2 className="mb-1 text-lg font-bold text-slate-900">Invite your team</h2>
+      <div className="mb-1 flex items-center justify-between gap-2">
+        <h2 className="text-lg font-bold text-slate-900">Invite your team</h2>
+        {hasFiniteLimit && (
+          <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-600">
+            {usedSlots} / {staffLimit} users
+          </span>
+        )}
+      </div>
       <p className="mb-4 text-sm text-slate-500">
         Add any teammates who should be able to sign in alongside you. Each invite gets an email with a link to
         set their password and open the dashboard. You can add or remove users any time from{' '}
@@ -22,6 +40,13 @@ export function OnboardingStaffInviteStep({ invites, setInvites }: Props) {
         </a>
         .
       </p>
+
+      {hasFiniteLimit && (
+        <div className="mb-4 rounded-xl border border-slate-200 bg-amber-50/60 p-3 text-xs text-slate-600">
+          Your Appointments Plus plan includes up to <strong>{staffLimit} team logins</strong> (including your
+          own admin account). You&apos;re currently using {existingStaffCount ?? 1}.
+        </div>
+      )}
 
       <div className="mb-6 rounded-xl border border-slate-200 bg-slate-50/80 p-4 text-sm text-slate-700">
         <p className="mb-2 font-medium text-slate-800">Two roles to choose from</p>
@@ -36,14 +61,14 @@ export function OnboardingStaffInviteStep({ invites, setInvites }: Props) {
           </li>
         </ul>
         <p className="mt-2 text-xs text-slate-500">
-          You’re the admin by default. Tip: invite a second admin as a backup so your account isn’t a single
-          point of failure.
+          You&apos;re the admin by default. Tip: invite a second admin as a backup so your account isn&apos;t a
+          single point of failure.
         </p>
       </div>
 
       <p className="mb-3 text-xs text-slate-500">
-        Don’t have anyone to invite yet? Leave this blank and click <strong>Continue</strong>; you can invite
-        people later.
+        Don&apos;t have anyone to invite yet? Leave this blank and click <strong>Continue</strong>; you can
+        invite people later.
       </p>
 
       <div className="space-y-3">
@@ -103,14 +128,24 @@ export function OnboardingStaffInviteStep({ invites, setInvites }: Props) {
         ))}
       </div>
 
-      <button
-        type="button"
-        onClick={() => setInvites([...invites, { email: '', role: 'staff' }])}
-        className="mt-4 w-full rounded-xl border-2 border-dashed border-slate-200 py-3 text-sm font-medium text-slate-500 transition-colors hover:border-brand-300 hover:text-brand-600"
-      >
-        + Add another user
-      </button>
-
+      {atLimit ? (
+        <p className="mt-4 text-center text-xs text-slate-500">
+          You&apos;ve reached the {staffLimit}-user limit on your Appointments Plus plan. You can upgrade or
+          manage team members from{' '}
+          <a href="/dashboard/settings?tab=plan" className="font-medium text-brand-600 underline hover:text-brand-700">
+            Settings → Plan
+          </a>
+          .
+        </p>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setInvites([...invites, { email: '', role: 'staff' }])}
+          className="mt-4 w-full rounded-xl border-2 border-dashed border-slate-200 py-3 text-sm font-medium text-slate-500 transition-colors hover:border-brand-300 hover:text-brand-600"
+        >
+          + Add another user
+        </button>
+      )}
     </div>
   );
 }

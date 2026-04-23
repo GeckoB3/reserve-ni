@@ -47,12 +47,9 @@ import { TableModeStep } from './steps/restaurant/TableModeStep';
 import { TableSetupStep } from './steps/restaurant/TableSetupStep';
 import { DashboardOrientationStep } from './steps/restaurant/DashboardOrientationStep';
 import { canAddCalendarColumn, useCalendarEntitlement } from '@/hooks/use-calendar-entitlement';
+import { isAppointmentPlanTier, isPlusPlanTier } from '@/lib/tier-enforcement';
 
 type Currency = 'GBP' | 'EUR';
-
-function isAppointmentsPlanSku(tier: string | null | undefined): boolean {
-  return tier === 'appointments' || tier === 'light';
-}
 
 const CURRENCY_OPTIONS: { code: Currency; symbol: string; label: string }[] = [
   { code: 'GBP', symbol: '£', label: 'GBP (£)' },
@@ -85,6 +82,8 @@ interface VenueOnboarding {
   calendar_count: number | null;
   onboarding_step: number;
   onboarding_completed: boolean;
+  /** When true, `onboarding_step` uses the unified appointments wizard (Stripe near the end). */
+  appointments_onboarding_unified_flow?: boolean;
   currency: Currency;
   stripe_connected_account_id: string | null;
   /** True when the signed-in user is a venue admin (only admins can run Stripe Connect). */
@@ -399,6 +398,41 @@ function unifiedTeamStepLabel(terms: { staff: string }): string {
 type OnboardingStepDef = { key: string; label: string };
 
 /**
+ * Legacy layout used for Appointments Plus before unified flow: profile → Stripe → model steps → preview.
+ * Indices are remapped once when `appointments_onboarding_unified_flow` is false.
+ */
+function buildLegacyGenericNonRestaurantOnboardingSteps(
+  bookingModel: BookingModel,
+  terms: { staff: string },
+): OnboardingStepDef[] {
+  const steps: OnboardingStepDef[] = [
+    { key: 'profile', label: 'Business Profile' },
+    { key: 'stripe_onboarding', label: 'Payments (Stripe)' },
+  ];
+  switch (bookingModel) {
+    case 'practitioner_appointment':
+    case 'unified_scheduling':
+      steps.push({ key: 'team', label: unifiedTeamStepLabel(terms) });
+      steps.push({ key: 'services', label: 'Services' });
+      steps.push({ key: 'hours', label: 'Opening hours & schedules' });
+      break;
+    case 'event_ticket':
+      steps.push({ key: 'first_event', label: 'First Event' });
+      break;
+    case 'class_session':
+      steps.push({ key: 'classes', label: 'Classes & Timetable' });
+      break;
+    case 'resource_booking':
+      steps.push({ key: 'resources', label: 'Your Resources' });
+      break;
+    default:
+      break;
+  }
+  steps.push({ key: 'preview', label: 'Preview & Go Live' });
+  return steps;
+}
+
+/**
  * Every Appointments-plan booking model uses team calendar columns (`unified_calendars`) for at least one flow
  * (appointments, classes, events, resources), so per-calendar working hours belong in onboarding whenever any
  * model is enabled, not only when `unified_scheduling` is selected.
@@ -631,13 +665,13 @@ export default function OnboardingPage() {
 
   const openInlineAddCalendar = useCallback(
     (target: InlineCalendarTarget) => {
-      if (venue?.pricing_tier === 'light' && !canAddCalendar) return;
+      if (!canAddCalendar) return;
       setInlineCalendarTarget(target);
       setAddCalendarModalError(null);
       setNewCalendarName('');
       setShowAddCalendarModal(true);
     },
-    [venue?.pricing_tier, canAddCalendar],
+    [canAddCalendar],
   );
 
   const closeInlineAddCalendar = useCallback(() => {
@@ -766,28 +800,49 @@ export default function OnboardingPage() {
           return;
         }
 
-        if (isAppointmentsPlanSku(v.pricing_tier) && (!v.active_booking_models || v.active_booking_models.length === 0)) {
+        if (isAppointmentPlanTier(v.pricing_tier) && (!v.active_booking_models || v.active_booking_models.length === 0)) {
           router.push('/signup/booking-models');
           return;
         }
 
         let initialStep = v.onboarding_step;
         let initialMaxStep = v.onboarding_step;
-        if (isAppointmentsPlanSku(v.pricing_tier)) {
+        if (isAppointmentPlanTier(v.pricing_tier)) {
           const active = (v.active_booking_models ?? []).filter(isAppointmentPlanModel) as AppointmentPlanModel[];
           if (active.length > 0) {
-            const legacySteps = buildLegacyAppointmentsPlanModelSteps(active);
             const currentSteps = buildAppointmentsPlanModelSteps(active, {
               omitOtherUsersStep: v.pricing_tier === 'light',
             });
-            initialStep = migrateOnboardingStepToCurrentLayout(v.onboarding_step, legacySteps, currentSteps);
-            initialMaxStep = initialStep;
-            if (initialStep !== v.onboarding_step) {
+            const unifiedFlow = Boolean(v.appointments_onboarding_unified_flow);
+
+            if (isPlusPlanTier(v.pricing_tier) && !unifiedFlow) {
+              const genericLegacy = buildLegacyGenericNonRestaurantOnboardingSteps(v.booking_model, v.terminology);
+              initialStep = migrateOnboardingStepToCurrentLayout(
+                v.onboarding_step,
+                genericLegacy,
+                currentSteps,
+              );
+              initialMaxStep = initialStep;
+              const patch: Record<string, unknown> = { appointments_onboarding_unified_flow: true };
+              if (initialStep !== v.onboarding_step) {
+                patch.onboarding_step = initialStep;
+              }
               void fetch('/api/venue/onboarding', {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ onboarding_step: initialStep }),
+                body: JSON.stringify(patch),
               });
+            } else if (!isPlusPlanTier(v.pricing_tier)) {
+              const legacySteps = buildLegacyAppointmentsPlanModelSteps(active);
+              initialStep = migrateOnboardingStepToCurrentLayout(v.onboarding_step, legacySteps, currentSteps);
+              initialMaxStep = initialStep;
+              if (initialStep !== v.onboarding_step) {
+                void fetch('/api/venue/onboarding', {
+                  method: 'PATCH',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ onboarding_step: initialStep }),
+                });
+              }
             }
           }
         }
@@ -869,18 +924,33 @@ export default function OnboardingPage() {
     [venue?.terminology],
   );
 
-  const isAppointmentsPlanVenue = isAppointmentsPlanSku(venue?.pricing_tier);
+  const isAppointmentsPlanVenue = isAppointmentPlanTier(venue?.pricing_tier);
   const isLightPlanVenue = venue?.pricing_tier === 'light';
+
+  /**
+   * Per-plan calendar limit (Infinity for unlimited plans).
+   * Compared against the DRAFT array length so the UI blocks before any API call.
+   */
+  const calendarPlanLimit: number = entitlement?.calendar_limit ?? Infinity;
+  const calendarDraftAtLimit =
+    calendarPlanLimit !== Infinity && practitioners.length >= calendarPlanLimit;
+
+  /**
+   * Per-plan staff limit (Infinity for unlimited plans).
+   * Used both to gate the invite form and to pre-validate on submit.
+   */
+  const staffPlanLimit: number = entitlement?.staff_limit ?? Infinity;
+
   const showOnboardingInlineAddCalendar = useMemo(
-    () => !isLightPlanVenue || canAddCalendar,
-    [isLightPlanVenue, canAddCalendar],
+    () => canAddCalendar,
+    [canAddCalendar],
   );
 
   useEffect(() => {
-    if (isLightPlanVenue && entitlementLoaded && !canAddCalendar) {
+    if (entitlementLoaded && !canAddCalendar) {
       setShowAddCalendarModal(false);
     }
-  }, [isLightPlanVenue, entitlementLoaded, canAddCalendar]);
+  }, [entitlementLoaded, canAddCalendar]);
 
   const activeAppointmentsModels: AppointmentPlanModel[] = useMemo(
     () => (venue?.active_booking_models ?? []).filter(isAppointmentPlanModel),
@@ -898,7 +968,7 @@ export default function OnboardingPage() {
 
   const modelSteps = useMemo(() => {
     if (!venue) return [];
-    if (isAppointmentsPlanSku(venue.pricing_tier)) {
+    if (isAppointmentPlanTier(venue.pricing_tier)) {
       return buildAppointmentsPlanModelSteps(activeAppointmentsModels, {
         omitOtherUsersStep: venue.pricing_tier === 'light',
       });
@@ -1068,7 +1138,7 @@ export default function OnboardingPage() {
   useEffect(() => {
     if (!venue) return;
     if (currentStepKey !== 'hours' && currentStepKey !== 'opening_hours') return;
-    const isAppointmentsTier = isAppointmentsPlanSku(venue.pricing_tier);
+    const isAppointmentsTier = isAppointmentPlanTier(venue.pricing_tier);
     if (
       currentStepKey === 'hours' &&
       !isUnifiedSchedulingVenue(venue.booking_model) &&
@@ -1353,6 +1423,12 @@ export default function OnboardingPage() {
         setError(`Enter a name for each ${terms.staff.toLowerCase()}.`);
         return;
       }
+      if (calendarPlanLimit !== Infinity && practitioners.length > calendarPlanLimit) {
+        setError(
+          `Your Appointments Plus plan includes up to ${calendarPlanLimit} calendars. Please remove some before continuing.`,
+        );
+        return;
+      }
       setSaving(true);
       try {
         const listRes = await fetch('/api/venue/practitioners');
@@ -1461,6 +1537,16 @@ export default function OnboardingPage() {
         const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(invite.email);
         if (!emailOk) {
           setError(`Enter a valid email address for ${invite.email || 'each user'}.`);
+          return;
+        }
+      }
+      if (staffPlanLimit !== Infinity) {
+        const existingCount = entitlement?.active_staff ?? 1;
+        const uniqueNewInvites = [...new Set(validInvites.map((i) => i.email))].length;
+        if (existingCount + uniqueNewInvites > staffPlanLimit) {
+          setError(
+            `Your Appointments Plus plan includes up to ${staffPlanLimit} team logins (you currently have ${existingCount}). Please remove some invites to continue.`,
+          );
           return;
         }
       }
@@ -2332,6 +2418,19 @@ export default function OnboardingPage() {
                 </Link>
                 .
               </p>
+            ) : isPlusPlanTier(venue.pricing_tier) ? (
+              <p className="mb-4 text-sm text-slate-500">
+                Add a <strong>calendar column</strong> for each lane on your schedule — your Appointments
+                Plus plan includes up to <strong>5 calendar columns</strong>. You can add or remove columns
+                any time from{' '}
+                <Link
+                  href="/dashboard/calendar-availability"
+                  className="font-medium text-brand-600 underline hover:text-brand-700"
+                >
+                  Calendar availability
+                </Link>
+                .
+              </p>
             ) : (
               <p className="mb-4 text-sm text-slate-500">
                 Add a <strong>calendar column</strong> for each lane on your schedule. You can add or remove
@@ -2447,7 +2546,12 @@ export default function OnboardingPage() {
                   )}
                 </div>
               ))}
-              {!isLightPlanVenue && (
+              {isPlusPlanTier(venue.pricing_tier) && calendarPlanLimit !== Infinity && (
+                <p className="mb-2 text-right text-xs text-slate-500">
+                  {practitioners.length} / {calendarPlanLimit} calendars
+                </p>
+              )}
+              {!isLightPlanVenue && !calendarDraftAtLimit && (
                 <button
                   type="button"
                   onClick={() => setPractitioners([...practitioners, { name: '', email: '' }])}
@@ -2456,12 +2560,27 @@ export default function OnboardingPage() {
                   + Add calendar
                 </button>
               )}
+              {isPlusPlanTier(venue.pricing_tier) && calendarDraftAtLimit && (
+                <p className="mt-1 text-center text-xs text-slate-500">
+                  You&apos;ve reached the {calendarPlanLimit}-calendar limit on your Appointments Plus
+                  plan. Remove one above to add a different calendar, or upgrade from{' '}
+                  <Link href="/dashboard/settings?tab=plan" className="font-medium text-brand-600 underline hover:text-brand-700">
+                    Settings → Plan
+                  </Link>
+                  .
+                </p>
+              )}
             </div>
           </div>
         )}
 
         {currentStepKey === 'users' && (
-          <OnboardingStaffInviteStep invites={staffInvites} setInvites={setStaffInvites} />
+          <OnboardingStaffInviteStep
+            invites={staffInvites}
+            setInvites={setStaffInvites}
+            staffLimit={entitlement?.staff_limit ?? null}
+            existingStaffCount={entitlement?.active_staff}
+          />
         )}
 
         {currentStepKey === 'services' && isUnifiedSchedulingVenue(venue.booking_model) && (

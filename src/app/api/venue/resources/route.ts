@@ -15,7 +15,8 @@ import {
 } from '@/lib/booking/resource-weekly-overlap';
 import type { WorkingHours } from '@/types/booking-models';
 import { DEFAULT_ENTITY_BOOKING_WINDOW } from '@/lib/booking/entity-booking-window';
-import { assertLightPlanCalendarSlotAvailable } from '@/lib/light-plan';
+import { assertCalendarSlotAvailable } from '@/lib/light-plan';
+import { planDisplayName } from '@/lib/pricing-constants';
 import { z } from 'zod';
 
 const availabilityExceptionDaySchema = z.union([
@@ -291,13 +292,18 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const calLimit = await assertLightPlanCalendarSlotAvailable(staff.venue_id);
+    const calLimit = await assertCalendarSlotAvailable(staff.venue_id);
     if (!calLimit.allowed) {
+      const { data: vrow } = await admin
+        .from('venues')
+        .select('pricing_tier')
+        .eq('id', staff.venue_id)
+        .maybeSingle();
+      const tierLabel = planDisplayName((vrow as { pricing_tier?: string } | null)?.pricing_tier);
       return NextResponse.json(
         {
-          error:
-            'Your Appointments Light plan includes one calendar column. Upgrade to the Appointments plan to add more.',
-          code: 'LIGHT_PLAN_CALENDAR_LIMIT',
+          error: `Your ${tierLabel} plan includes up to ${calLimit.limit} calendar column(s). Upgrade to add more.`,
+          code: 'PLAN_CALENDAR_LIMIT',
         },
         { status: 403 },
       );

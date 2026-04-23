@@ -16,6 +16,7 @@ import { updateVenueSmsMonthlyAllowance } from '@/lib/billing/sms-allowance';
 import { handleLightPaymentMethodUpdateFromSetup } from '@/lib/stripe/light-past-due-payment-webhook';
 import { communicationPoliciesEmailOnlyAppointmentsLane } from '@/lib/communications/policies';
 import { defaultNotificationSettingsForLightPlan } from '@/lib/notifications/notification-settings';
+import { isAppointmentPlanTier } from '@/lib/tier-enforcement';
 
 /**
  * Configure in Stripe Dashboard: endpoint URL /api/webhooks/stripe-subscription,
@@ -285,6 +286,7 @@ async function handleCheckoutCompleted(
       calendar_count: isLight ? 1 : null,
       onboarding_step: 0,
       onboarding_completed: false,
+      appointments_onboarding_unified_flow: isAppointmentPlanTier(plan),
       ...(isLight
         ? {
             communication_policies: commPolicies as unknown as Record<string, never>,

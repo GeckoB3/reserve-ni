@@ -106,7 +106,7 @@ const howItWorks = [
     step: "1",
     title: "Set up in minutes",
     description:
-      "Add your services, your hours, your staff, and your prices. We'll help personally if you'd like us to.",
+      "Add your services, your hours, your staff, and your prices. We're here if you need any help along the way.",
   },
   {
     step: "2",
@@ -194,6 +194,10 @@ const features = [
 
 const faqs = [
   {
+    q: "Is there a discount for new customers?",
+    a: "Yes — new customers can use the code RESERVE50 at checkout to get 50% off any plan for the first 6 months. Just enter the code when you sign up and the discount will apply automatically.",
+  },
+  {
     q: "Do I need a website already?",
     a: "No. ReserveNI gives you a beautiful booking page on your own link (like reserveni.com/book/your-business). Share it on Instagram, Facebook, your Google listing or a flyer, and you're ready to take bookings without a website. If you do have a website, you can embed the widget there too.",
   },
@@ -203,7 +207,7 @@ const faqs = [
   },
   {
     q: "How long does setup take?",
-    a: "Most businesses are taking real bookings within 30 minutes. Add your services, your hours, your staff, and your booking policies, and you're live. If you'd like us to do it for you, we offer free personal onboarding for new customers in Northern Ireland.",
+    a: "Most businesses are taking real bookings within 30 minutes. Add your services, your hours, your staff, and your booking policies, and you're live. If you need any help getting set up, just get in touch — we're happy to help.",
   },
   {
     q: "What happens when I'm closed and someone wants to book?",
@@ -302,9 +306,9 @@ function Hero() {
             </span>
           </h1>
           <p className="mt-6 max-w-xl text-lg leading-relaxed text-slate-600 sm:text-xl">
-            ReserveNI is the all-in-one appointment booking platform for barbers, salons, therapists,
-            studios and every other bookable business. Let clients book online 24/7, cut no-shows with
-            deposits, and automate every reminder, so you can focus on the work.
+            The all-in-one booking platform for appointment businesses in Northern Ireland. Let clients
+            book online 24/7, cut no-shows with deposits, and automate every reminder, so you can focus
+            on the work.
           </p>
           <div className="mt-10 flex flex-col gap-3 sm:flex-row">
             <Link
@@ -322,7 +326,22 @@ function Hero() {
             </a>
           </div>
 
-          <div className="mt-8 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-slate-500">
+          <div className="mt-8 inline-flex items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3">
+            <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700">
+              <TagIcon small />
+            </span>
+            <div className="text-sm">
+              <span className="font-semibold text-emerald-800">New customer offer: </span>
+              <span className="text-emerald-700">use code </span>
+              <span className="rounded bg-emerald-700 px-1.5 py-0.5 font-mono text-xs font-bold tracking-wider text-white">
+                RESERVE50
+              </span>
+              <span className="text-emerald-700"> at checkout for </span>
+              <span className="font-semibold text-emerald-800">50% off for 6 months</span>
+            </div>
+          </div>
+
+          <div className="mt-5 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-slate-500">
             <span className="inline-flex items-center gap-2">
               <TickIcon />
               No commission on bookings
@@ -1237,11 +1256,26 @@ function ClosingCta() {
                 Ready to take your diary back?
               </h2>
               <p className="mt-5 max-w-lg text-base leading-relaxed text-white/80">
-                Start free for 3 months. Set up in under 30 minutes. If you&apos;d rather we walked you
-                through it personally, we offer free onboarding for every Northern Ireland business.
-                Just send us a note.
+                Set up in under 30 minutes. We&apos;re here to help if you need any more information or
+                assistance signing up — just send us a note and we&apos;ll get back to you.
               </p>
-              <div className="mt-8 flex flex-col gap-3 sm:flex-row">
+
+              <div className="mt-6 inline-flex items-center gap-3 rounded-xl border border-white/20 bg-white/10 px-4 py-3 backdrop-blur">
+                <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg bg-white/20 text-white">
+                  <TagIcon small />
+                </span>
+                <div className="text-sm">
+                  <span className="font-semibold text-white">New customer offer: </span>
+                  <span className="text-white/80">use code </span>
+                  <span className="rounded bg-white/20 px-1.5 py-0.5 font-mono text-xs font-bold tracking-wider text-white">
+                    RESERVE50
+                  </span>
+                  <span className="text-white/80"> for </span>
+                  <span className="font-semibold text-white">50% off for 6 months</span>
+                </div>
+              </div>
+
+              <div className="mt-6 flex flex-col gap-3 sm:flex-row">
                 <Link
                   href="/#pricing"
                   className="inline-flex h-12 items-center justify-center rounded-xl bg-white px-7 text-base font-semibold text-slate-900 shadow-lg transition-all hover:-translate-y-0.5 hover:bg-brand-50"
@@ -1257,11 +1291,7 @@ function ClosingCta() {
                 </a>
               </div>
 
-              <div className="mt-10 grid grid-cols-3 gap-6 border-t border-white/10 pt-8 text-sm text-white/70">
-                <div>
-                  <p className="text-2xl font-bold text-white">3 months</p>
-                  <p className="text-xs">free to start</p>
-                </div>
+              <div className="mt-10 grid grid-cols-2 gap-6 border-t border-white/10 pt-8 text-sm text-white/70">
                 <div>
                   <p className="text-2xl font-bold text-white">0%</p>
                   <p className="text-xs">commission on bookings</p>
@@ -1513,9 +1543,9 @@ function TrendUpIcon() {
   );
 }
 
-function TagIcon() {
+function TagIcon({ small = false }: { small?: boolean }) {
   return (
-    <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+    <svg className={small ? "h-4 w-4" : "h-6 w-6"} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
       <path
         strokeLinecap="round"
         strokeLinejoin="round"

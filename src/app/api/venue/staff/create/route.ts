@@ -4,6 +4,8 @@ import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { sendEmail } from '@/lib/emails/send-email';
 import { renderStaffWelcomeEmail } from '@/lib/emails/templates/staff-welcome-email';
+import { assertStaffSlotAvailable } from '@/lib/light-plan';
+import { planDisplayName } from '@/lib/pricing-constants';
 import { z } from 'zod';
 import { setStaffPractitionerLink, setStaffUnifiedCalendarAssignments } from '@/lib/staff-practitioner-link';
 
@@ -109,6 +111,23 @@ export async function POST(request: NextRequest) {
       process.env.NEXT_PUBLIC_BASE_URL ||
       (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : request.nextUrl.origin);
     const loginUrl = `${baseUrl.replace(/\/$/, '')}/login`;
+
+    const staffLimit = await assertStaffSlotAvailable(staff.venue_id);
+    if (!staffLimit.allowed) {
+      const { data: vrow } = await admin
+        .from('venues')
+        .select('pricing_tier')
+        .eq('id', staff.venue_id)
+        .maybeSingle();
+      const tierLabel = planDisplayName((vrow as { pricing_tier?: string } | null)?.pricing_tier);
+      return NextResponse.json(
+        {
+          error: `Your ${tierLabel} plan allows up to ${staffLimit.limit} team login(s). Upgrade to add more team members.`,
+          code: 'PLAN_STAFF_LIMIT',
+        },
+        { status: 403 },
+      );
+    }
 
     // Check if already a staff member at this venue
     const { data: existing } = await admin

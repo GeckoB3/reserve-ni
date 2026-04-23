@@ -3,7 +3,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
-import { assertLightPlanCalendarSlotAvailable } from '@/lib/light-plan';
+import { assertCalendarSlotAvailable } from '@/lib/light-plan';
+import { planDisplayName } from '@/lib/pricing-constants';
 import { z } from 'zod';
 
 const createBodySchema = z.object({
@@ -31,13 +32,18 @@ export async function POST(request: NextRequest) {
 
     const admin = getSupabaseAdminClient();
 
-    const limit = await assertLightPlanCalendarSlotAvailable(staff.venue_id);
+    const limit = await assertCalendarSlotAvailable(staff.venue_id);
     if (!limit.allowed) {
+      const { data: vrow } = await admin
+        .from('venues')
+        .select('pricing_tier')
+        .eq('id', staff.venue_id)
+        .maybeSingle();
+      const tierLabel = planDisplayName((vrow as { pricing_tier?: string } | null)?.pricing_tier);
       return NextResponse.json(
         {
-          error:
-            'Your Appointments Light plan includes one calendar column. Upgrade to the Appointments plan to add more.',
-          code: 'LIGHT_PLAN_CALENDAR_LIMIT',
+          error: `Your ${tierLabel} plan includes up to ${limit.limit} calendar column(s). Upgrade to add more.`,
+          code: 'PLAN_CALENDAR_LIMIT',
         },
         { status: 403 },
       );

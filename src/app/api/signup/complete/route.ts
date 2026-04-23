@@ -8,6 +8,7 @@ import { updateVenueSmsMonthlyAllowance } from '@/lib/billing/sms-allowance';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 import { parseNotificationSettings } from '@/lib/notifications/notification-settings';
 import { clearSignupPendingUserMetadata } from '@/lib/signup-pending-metadata';
+import { isAppointmentPlanTier } from '@/lib/tier-enforcement';
 
 export async function POST(request: Request) {
   try {
@@ -123,6 +124,7 @@ export async function POST(request: Request) {
         calendar_count: null,
         onboarding_step: 0,
         onboarding_completed: false,
+        appointments_onboarding_unified_flow: isAppointmentPlanTier(plan),
         email: ownerEmail,
       })
       .select('id')

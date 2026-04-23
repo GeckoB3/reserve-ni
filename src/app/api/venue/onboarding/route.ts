@@ -40,6 +40,10 @@ export async function PATCH(request: Request) {
       updates.onboarding_step = body.onboarding_step;
     }
 
+    if (typeof body.appointments_onboarding_unified_flow === 'boolean') {
+      updates.appointments_onboarding_unified_flow = body.appointments_onboarding_unified_flow;
+    }
+
     if (typeof body.onboarding_completed === 'boolean') {
       updates.onboarding_completed = body.onboarding_completed;
     }
@@ -141,7 +145,7 @@ export async function GET() {
     const { data: venue, error: venueError } = await admin
       .from('venues')
       .select(
-        'id, name, slug, address, phone, booking_model, enabled_models, active_booking_models, business_type, business_category, terminology, pricing_tier, calendar_count, onboarding_step, onboarding_completed, currency, stripe_connected_account_id'
+        'id, name, slug, address, phone, booking_model, enabled_models, active_booking_models, business_type, business_category, terminology, pricing_tier, calendar_count, onboarding_step, onboarding_completed, appointments_onboarding_unified_flow, currency, stripe_connected_account_id'
       )
       .eq('id', staffRow.venue_id)
       .single();
