@@ -785,6 +785,7 @@ const DroppableSlotButton = memo(function DroppableSlotButton({
       type="button"
       ref={setNodeRef}
       disabled={disabled}
+      data-calendar-pan-slot="true"
       onClick={(e) => {
         if (!disabled) onEmptyClick(e, pracId, dateStr, tlabel);
       }}
@@ -937,11 +938,94 @@ export function PractitionerCalendarView({
   const [scheduleBlocks, setScheduleBlocks] = useState<ScheduleBlockDTO[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const timelineRootRef = useRef<HTMLDivElement>(null);
-  const touchX = useRef<number | null>(null);
-  /** Snapshot when a touch starts; if scrollLeft/scrollTop move during the gesture, it was scrolling, not a day swipe. */
-  const scrollSnapshotAtTouch = useRef<{ left: number; mainScrollTop: number } | null>(null);
+  const suppressNextCalendarClick = useRef(false);
+  const mousePanRef = useRef<{
+    startX: number;
+    startY: number;
+    scrollLeft: number;
+    mainScrollTop: number;
+    main: HTMLElement | null;
+    moved: boolean;
+  } | null>(null);
+  const [mousePanning, setMousePanning] = useState(false);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 10 } }));
+
+  const handleCalendarMouseDown = useCallback((e: MouseEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return;
+    const target = e.target instanceof Element ? e.target : null;
+    const startedOnEmptySlot = Boolean(target?.closest('[data-calendar-pan-slot="true"]'));
+    const startedOnControl = Boolean(
+      target?.closest('a, button, input, select, textarea, [role="button"], [data-no-calendar-pan="true"]'),
+    );
+    if (startedOnControl && !startedOnEmptySlot) return;
+
+    const scroller = scrollRef.current;
+    if (!scroller) return;
+
+    const main = scroller.closest('main') as HTMLElement | null;
+    mousePanRef.current = {
+      startX: e.clientX,
+      startY: e.clientY,
+      scrollLeft: scroller.scrollLeft,
+      mainScrollTop: main?.scrollTop ?? 0,
+      main,
+      moved: false,
+    };
+
+    const previousCursor = document.body.style.cursor;
+    const previousUserSelect = document.body.style.userSelect;
+
+    const onMouseMove = (moveEvent: globalThis.MouseEvent) => {
+      const pan = mousePanRef.current;
+      const currentScroller = scrollRef.current;
+      if (!pan || !currentScroller) return;
+
+      const dx = moveEvent.clientX - pan.startX;
+      const dy = moveEvent.clientY - pan.startY;
+      if (!pan.moved && Math.hypot(dx, dy) > 4) {
+        pan.moved = true;
+        setMousePanning(true);
+        document.body.style.cursor = 'grabbing';
+        document.body.style.userSelect = 'none';
+      }
+      if (!pan.moved) return;
+
+      moveEvent.preventDefault();
+      currentScroller.scrollLeft = pan.scrollLeft - dx;
+      if (pan.main) {
+        pan.main.scrollTop = pan.mainScrollTop - dy;
+      }
+    };
+
+    const finishPan = () => {
+      const pan = mousePanRef.current;
+      if (pan?.moved) {
+        suppressNextCalendarClick.current = true;
+        window.setTimeout(() => {
+          suppressNextCalendarClick.current = false;
+        }, 0);
+      }
+      mousePanRef.current = null;
+      setMousePanning(false);
+      document.body.style.cursor = previousCursor;
+      document.body.style.userSelect = previousUserSelect;
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', finishPan);
+      window.removeEventListener('mouseleave', finishPan);
+    };
+
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', finishPan);
+    window.addEventListener('mouseleave', finishPan);
+  }, []);
+
+  const handleCalendarClickCapture = useCallback((e: MouseEvent<HTMLDivElement>) => {
+    if (!suppressNextCalendarClick.current) return;
+    suppressNextCalendarClick.current = false;
+    e.preventDefault();
+    e.stopPropagation();
+  }, []);
 
   const showEventsColumn = venueExposesBookingModel(bookingModel, enabledModels, 'event_ticket');
   const showClassSessions = venueExposesBookingModel(bookingModel, enabledModels, 'class_session');
@@ -2010,38 +2094,11 @@ export function PractitionerCalendarView({
           <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
             <div
               ref={scrollRef}
-              className="min-w-0 w-full touch-manipulation overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm shadow-slate-900/5 motion-safe:scroll-smooth [-webkit-overflow-scrolling:touch]"
-            onTouchStart={(e) => {
-              touchX.current = e.touches[0].clientX;
-              const main = scrollRef.current?.closest('main');
-              scrollSnapshotAtTouch.current = main
-                ? { left: main.scrollLeft, mainScrollTop: main.scrollTop }
-                : null;
-            }}
-            onTouchEnd={(e) => {
-              if (touchX.current == null) return;
-              const dx = e.changedTouches[0].clientX - touchX.current;
-              touchX.current = null;
-              const main = scrollRef.current?.closest('main');
-              const snap = scrollSnapshotAtTouch.current;
-              scrollSnapshotAtTouch.current = null;
-              if (main && snap) {
-                const movedH = Math.abs(main.scrollLeft - snap.left);
-                const movedV = Math.abs(main.scrollTop - snap.mainScrollTop);
-                const scrollMoveThreshold = 10;
-                if (movedH > scrollMoveThreshold || movedV > scrollMoveThreshold) {
-                  return;
-                }
-              }
-              if (Math.abs(dx) < 72) return;
-              clearTimeRangeOverridesForDayChange();
-              if (dx > 0) setDate((d) => addCalendarDays(d, -1));
-              else setDate((d) => addCalendarDays(d, 1));
-            }}
-            onTouchCancel={() => {
-              touchX.current = null;
-              scrollSnapshotAtTouch.current = null;
-            }}
+              className={`min-w-0 w-full touch-auto overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm shadow-slate-900/5 motion-safe:scroll-smooth [-webkit-overflow-scrolling:touch] ${
+                mousePanning ? 'cursor-grabbing' : 'cursor-grab'
+              }`}
+              onMouseDown={handleCalendarMouseDown}
+              onClickCapture={handleCalendarClickCapture}
           >
             <div className="relative flex min-w-full">
               {dayViewNowLineTop != null ? (

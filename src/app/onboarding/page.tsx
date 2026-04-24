@@ -752,7 +752,11 @@ export default function OnboardingPage() {
           const next = [...prev];
           const row = next[target.index];
           if (row) {
-            next[target.index] = { ...row, display_on_calendar_id: newId };
+            next[target.index] = {
+              ...row,
+              name: row.name.trim() ? row.name : newNameResolved,
+              display_on_calendar_id: newId,
+            };
           }
           return next;
         });

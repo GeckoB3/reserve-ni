@@ -14,6 +14,7 @@ import { EmptyState } from '@/components/ui/dashboard/EmptyState';
 import { StatTile } from '@/components/ui/dashboard/StatTile';
 import { ScheduleRow } from '@/components/ui/dashboard/ScheduleRow';
 import { Skeleton } from '@/components/ui/Skeleton';
+import { defaultNewUnifiedCalendarWorkingHours } from '@/lib/availability/practitioner-defaults';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -249,10 +250,18 @@ export function ResourceTimelineView({
   const [formCancellationHours, setFormCancellationHours] = useState(48);
   const [formAllowSameDay, setFormAllowSameDay] = useState(true);
   const [hostCalendars, setHostCalendars] = useState<Array<{ id: string; name: string }>>([]);
+  const [showInlineCalendarForm, setShowInlineCalendarForm] = useState(false);
+  const [newCalendarName, setNewCalendarName] = useState('');
+  const [creatingCalendar, setCreatingCalendar] = useState(false);
+  const [inlineCalendarError, setInlineCalendarError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const { entitlement: calendarEntitlement, entitlementLoaded } = useCalendarEntitlement(Boolean(isAdmin));
+  const {
+    entitlement: calendarEntitlement,
+    entitlementLoaded,
+    refresh: refreshCalendarEntitlement,
+  } = useCalendarEntitlement(Boolean(isAdmin));
   const canAddCalendar = canAddCalendarColumn(calendarEntitlement, entitlementLoaded);
 
   // Bookings for selected resource
@@ -296,6 +305,64 @@ export function ResourceTimelineView({
   useEffect(() => {
     void fetchHostCalendars();
   }, [fetchHostCalendars]);
+
+  const handleCreateInlineCalendar = useCallback(async () => {
+    const name = newCalendarName.trim();
+    if (!name) {
+      setInlineCalendarError('Enter a calendar name.');
+      return;
+    }
+    setCreatingCalendar(true);
+    setInlineCalendarError(null);
+    try {
+      const res = await fetch('/api/venue/practitioners', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name,
+          is_active: true,
+          working_hours: defaultNewUnifiedCalendarWorkingHours(),
+          break_times: [],
+          days_off: [],
+        }),
+      });
+      const json = (await res.json().catch(() => ({}))) as {
+        id?: string;
+        name?: string;
+        error?: string;
+        upgrade_required?: boolean;
+      };
+      if (!res.ok) {
+        if (res.status === 403 || json.upgrade_required) {
+          void refreshCalendarEntitlement();
+        }
+        setInlineCalendarError(json.error ?? 'Could not create calendar.');
+        return;
+      }
+      if (!json.id) {
+        setInlineCalendarError('Calendar was created but no id was returned. Refresh the page.');
+        return;
+      }
+
+      const created = { id: json.id, name: json.name ?? name };
+      setHostCalendars((prev) =>
+        prev.some((c) => c.id === created.id)
+          ? prev
+          : [...prev, created].sort((a, b) => a.name.localeCompare(b.name)),
+      );
+      if (!formName.trim()) {
+        setFormName(created.name);
+      }
+      setFormDisplayCalendarId(created.id);
+      setNewCalendarName('');
+      setShowInlineCalendarForm(false);
+      void refreshCalendarEntitlement();
+    } catch {
+      setInlineCalendarError('Could not create calendar.');
+    } finally {
+      setCreatingCalendar(false);
+    }
+  }, [formName, newCalendarName, refreshCalendarEntitlement]);
 
   // Fetch bookings for selected resource
   useEffect(() => {
@@ -365,6 +432,9 @@ export function ResourceTimelineView({
     setFormCancellationHours(48);
     setFormAllowSameDay(true);
     setError(null);
+    setInlineCalendarError(null);
+    setShowInlineCalendarForm(false);
+    setNewCalendarName('');
     setShowForm(true);
   }
 
@@ -392,6 +462,9 @@ export function ResourceTimelineView({
     setFormCancellationHours(r.cancellation_notice_hours ?? 48);
     setFormAllowSameDay(r.allow_same_day_booking ?? true);
     setError(null);
+    setInlineCalendarError(null);
+    setShowInlineCalendarForm(false);
+    setNewCalendarName('');
     setShowForm(true);
   }
 
@@ -883,15 +956,62 @@ export function ResourceTimelineView({
                     <p className="text-xs text-slate-500">Loading plan limits…</p>
                   ) : canAddCalendar ? (
                     <>
-                      <Link
-                        href="/dashboard/calendar-availability?tab=calendars&addCalendar=1"
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowInlineCalendarForm((v) => !v);
+                          setInlineCalendarError(null);
+                        }}
                         className="inline-flex w-full items-center justify-center rounded-lg border border-brand-200/90 bg-white px-3.5 py-2.5 text-sm font-semibold text-brand-700 shadow-sm transition-[color,background-color,border-color,box-shadow,transform] duration-150 ease-out hover:border-brand-400 hover:bg-brand-50 hover:text-brand-800 hover:shadow-md active:scale-[0.98] active:border-brand-500 active:bg-brand-100 active:shadow-inner motion-reduce:transition-colors motion-reduce:active:scale-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2"
                       >
                         Add calendar
-                      </Link>
+                      </button>
+                      {showInlineCalendarForm && (
+                        <div className="mt-3 space-y-2 rounded-lg border border-slate-200 bg-white p-3">
+                          <label className="block text-xs font-medium text-slate-600">New calendar name</label>
+                          <input
+                            type="text"
+                            value={newCalendarName}
+                            onChange={(e) => setNewCalendarName(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                void handleCreateInlineCalendar();
+                              }
+                            }}
+                            placeholder="e.g. Room 1"
+                            className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+                          />
+                          {inlineCalendarError && (
+                            <p className="text-xs text-red-600">{inlineCalendarError}</p>
+                          )}
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              onClick={() => void handleCreateInlineCalendar()}
+                              disabled={creatingCalendar}
+                              className="rounded-lg bg-brand-600 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-brand-700 disabled:opacity-50"
+                            >
+                              {creatingCalendar ? 'Creating…' : 'Create and select'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setShowInlineCalendarForm(false);
+                                setNewCalendarName('');
+                                setInlineCalendarError(null);
+                              }}
+                              disabled={creatingCalendar}
+                              className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      )}
                       <p className="mt-2 text-xs text-slate-500">
-                        Opens the same Add calendar form as the Calendars tab. When you are done, return here and refresh
-                        if your new column does not appear in the list yet.
+                        Creates a team calendar column here and selects it for this resource. You can refine its weekly
+                        hours later in Calendar availability.
                       </p>
                     </>
                   ) : calendarEntitlement && isLightPlanTier(calendarEntitlement.pricing_tier) ? (
