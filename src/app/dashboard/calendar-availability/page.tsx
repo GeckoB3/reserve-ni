@@ -11,6 +11,7 @@ import {
   resolveActiveBookingModels,
 } from '@/lib/booking/active-models';
 import { shouldShowAppointmentAvailabilitySettings } from '@/lib/booking/schedule-calendar-eligibility';
+import { AppointmentAvailabilitySkeleton } from '@/components/ui/dashboard/DashboardSkeletons';
 
 export default async function CalendarAvailabilitySettingsPage() {
   const supabase = await createClient();
@@ -51,13 +52,7 @@ export default async function CalendarAvailabilitySettingsPage() {
   return (
     <div className="p-4 md:p-6 lg:p-8">
       <div className="mx-auto max-w-4xl">
-        <Suspense
-          fallback={
-            <div className="flex items-center justify-center py-12">
-              <div className="h-8 w-8 animate-spin rounded-full border-4 border-blue-600 border-t-transparent" />
-            </div>
-          }
-        >
+        <Suspense fallback={<AppointmentAvailabilitySkeleton />}>
           <AppointmentAvailabilitySettings isAdmin={isAdmin} currentStaffId={staff.id} />
         </Suspense>
       </div>

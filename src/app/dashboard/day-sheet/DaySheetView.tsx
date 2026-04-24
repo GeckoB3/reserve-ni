@@ -42,6 +42,7 @@ import { EmptyState } from '@/components/ui/dashboard/EmptyState';
 import { getCalendarGridBounds } from '@/lib/venue-calendar-bounds';
 import { isBookingTimeInHourRange } from '@/lib/booking-time-window';
 import type { OpeningHours } from '@/types/availability';
+import { Skeleton } from '@/components/ui/Skeleton';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -1128,17 +1129,23 @@ export function DaySheetView({
   // Loading skeleton
   if (loading && !data) {
     return (
-      <div className="space-y-4">
-        <div className="h-16 animate-pulse rounded-xl bg-slate-100/80" />
-        <div className="h-14 animate-pulse rounded-xl bg-slate-100/80" />
+      <div className="space-y-4" role="status" aria-label="Loading day sheet">
+        <Skeleton.Block className="h-16" />
+        <Skeleton.Block className="h-14" />
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           {[...Array(4)].map((_, i) => (
-            <div key={i} className="h-24 animate-pulse rounded-xl bg-slate-100/80" />
+            <Skeleton.Card key={i} className="min-h-24 py-4">
+              <Skeleton.Line className="w-1/2" />
+              <Skeleton.Line className="mt-3 w-full" />
+            </Skeleton.Card>
           ))}
         </div>
-        <div className="h-14 animate-pulse rounded-xl bg-slate-100/80" />
+        <Skeleton.Block className="h-14" />
         {[...Array(2)].map((_, i) => (
-          <div key={i} className="h-16 animate-pulse rounded-xl bg-slate-100/80" />
+          <Skeleton.Card key={i} className="py-4">
+            <Skeleton.Line className="w-1/3" />
+            <Skeleton.Line className="mt-2 w-full" />
+          </Skeleton.Card>
         ))}
       </div>
     );
@@ -1994,7 +2001,10 @@ export function DaySheetView({
                                 <div className="rounded-xl border border-slate-200 bg-white p-3">
                                   <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Communications</p>
                                   {expandedComms == null ? (
-                                    <p className="text-xs text-slate-400">Loading...</p>
+                                    <div className="space-y-2" role="status" aria-label="Loading communications">
+                                      <Skeleton.Line className="h-3 w-full" />
+                                      <Skeleton.Line className="h-3 w-4/5" />
+                                    </div>
                                   ) : expandedComms.length === 0 ? (
                                     <p className="text-xs text-slate-400">No messages sent</p>
                                   ) : (

@@ -21,6 +21,8 @@ import { PageFrame } from '@/components/ui/dashboard/PageFrame';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
 import { TabBar } from '@/components/ui/dashboard/TabBar';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
+import { Skeleton } from '@/components/ui/Skeleton';
+import { DashboardGridSkeleton, DashboardTabRowSkeleton } from '@/components/ui/dashboard/DashboardSkeletons';
 
 const BASE_TABS = [
   { key: 'services' as const, label: 'Services' },
@@ -385,8 +387,20 @@ export default function AvailabilitySettingsClient({
   if (loading || !venue) {
     return (
       <PageFrame>
-        <div className="flex items-center justify-center py-20">
-          <div className="h-8 w-8 animate-spin rounded-full border-2 border-brand-600 border-t-transparent" />
+        <div className="space-y-6 py-2" role="status" aria-label="Loading availability">
+          <div className="space-y-2">
+            <Skeleton.Line className="w-32" />
+            <Skeleton.Line className="h-8 w-56 max-w-full sm:h-9 sm:w-72" />
+            <Skeleton.Line className="h-3 w-full max-w-2xl" />
+          </div>
+          <Skeleton.Block className="h-11 w-40" />
+          <DashboardTabRowSkeleton tabCount={5} />
+          <Skeleton.Card>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Skeleton.Block className="h-24" />
+              <Skeleton.Block className="h-24" />
+            </div>
+          </Skeleton.Card>
         </div>
       </PageFrame>
     );
@@ -585,8 +599,8 @@ export default function AvailabilitySettingsClient({
         <div className="space-y-6">
           <TableManagementSection venue={venue} onUpdate={onUpdate} isAdmin />
           {!areasHydrated ? (
-            <div className="flex items-center justify-center rounded-xl border border-slate-200 bg-white py-16 shadow-sm">
-              <div className="h-8 w-8 animate-spin rounded-full border-2 border-slate-300 border-t-brand-600" />
+            <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+              <DashboardGridSkeleton />
             </div>
           ) : activeAreas.length > 0 && !selectedAreaId ? (
             <p className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">

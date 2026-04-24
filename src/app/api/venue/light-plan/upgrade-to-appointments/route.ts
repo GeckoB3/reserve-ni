@@ -54,6 +54,7 @@ export async function POST() {
       customer: customerId,
       mode: 'subscription',
       allow_promotion_codes: true,
+      payment_method_collection: 'always',
       line_items: buildCheckoutLineItems(appointmentsPrice, calendarCount),
       metadata: {
         venue_id: staff.venue_id,

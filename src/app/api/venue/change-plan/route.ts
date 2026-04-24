@@ -128,6 +128,7 @@ export async function POST(request: Request) {
             customer: venue.stripe_customer_id as string,
             mode: 'subscription',
             allow_promotion_codes: true,
+            payment_method_collection: 'always',
             line_items: lineItems,
             metadata: {
               venue_id: venue.id,
@@ -157,6 +158,7 @@ export async function POST(request: Request) {
           customer: venue.stripe_customer_id as string,
           mode: 'subscription',
           allow_promotion_codes: true,
+          payment_method_collection: 'always',
           line_items: buildCheckoutLineItems(priceId, 1),
           metadata: {
             venue_id: venue.id,

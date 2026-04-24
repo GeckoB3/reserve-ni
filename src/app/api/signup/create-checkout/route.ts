@@ -197,6 +197,7 @@ export async function POST(request: Request) {
       customer: customer.id,
       mode: 'subscription',
       allow_promotion_codes: true,
+      payment_method_collection: 'always',
       line_items: lineItems,
       metadata: {
         supabase_user_id: user.id,

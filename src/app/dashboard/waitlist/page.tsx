@@ -9,6 +9,8 @@ import { StackedList } from '@/components/ui/dashboard/StackedList';
 import { ScheduleRow } from '@/components/ui/dashboard/ScheduleRow';
 import { Pill, type PillVariant } from '@/components/ui/dashboard/Pill';
 import { EmptyState } from '@/components/ui/dashboard/EmptyState';
+import { Skeleton } from '@/components/ui/Skeleton';
+import { DashboardListSkeleton, DashboardTabRowSkeleton } from '@/components/ui/dashboard/DashboardSkeletons';
 
 interface WaitlistEntry {
   id: string;
@@ -187,8 +189,14 @@ export default function WaitlistPage() {
   if (loading) {
     return (
       <PageFrame>
-        <div className="flex min-h-[40vh] items-center justify-center">
-          <div className="h-8 w-8 animate-spin rounded-full border-2 border-brand-600 border-t-transparent" />
+        <div className="space-y-6" role="status" aria-label="Loading waitlist">
+          <div className="space-y-2">
+            <Skeleton.Line className="w-28" />
+            <Skeleton.Line className="h-8 w-48 max-w-full" />
+            <Skeleton.Line className="h-3 w-full max-w-lg" />
+          </div>
+          <DashboardTabRowSkeleton tabCount={2} />
+          <DashboardListSkeleton rowCount={8} />
         </div>
       </PageFrame>
     );

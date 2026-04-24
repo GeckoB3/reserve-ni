@@ -16,6 +16,7 @@ import { updateVenueSmsMonthlyAllowance } from '@/lib/billing/sms-allowance';
 import { countUnifiedCalendarColumns } from '@/lib/light-plan';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 import { APPOINTMENTS_LIGHT_PRICE } from '@/lib/pricing-constants';
+import { setCustomerDefaultPaymentMethod } from '@/lib/stripe/setup-checkout-payment-method';
 
 /**
  * POST /api/venue/light-plan/downgrade-to-light
@@ -105,7 +106,26 @@ export async function POST() {
       return NextResponse.json({ error: 'Billing is not configured' }, { status: 500 });
     }
 
+    let inheritedPaymentMethodId: string | null = null;
     if (subscriptionId) {
+      try {
+        const currentSub = await stripe.subscriptions.retrieve(subscriptionId, {
+          expand: ['default_payment_method'],
+        });
+        const defaultPaymentMethod = currentSub.default_payment_method;
+        inheritedPaymentMethodId =
+          typeof defaultPaymentMethod === 'string'
+            ? defaultPaymentMethod
+            : defaultPaymentMethod && typeof defaultPaymentMethod === 'object'
+              ? defaultPaymentMethod.id
+              : null;
+        if (inheritedPaymentMethodId) {
+          await setCustomerDefaultPaymentMethod(customerId, inheritedPaymentMethodId);
+        }
+      } catch (e) {
+        console.warn('[downgrade-to-light] Could not inherit current subscription payment method', subscriptionId, e);
+      }
+
       try {
         await stripe.subscriptions.cancel(subscriptionId);
       } catch (e) {
@@ -118,6 +138,10 @@ export async function POST() {
       customer: customerId,
       items: [{ price: lightPrice.trim() }, { price: smsLightPrice.trim() }],
       metadata: { venue_id: staffVenueId, source: 'downgrade_from_appointments' },
+      ...(inheritedPaymentMethodId ? { default_payment_method: inheritedPaymentMethodId } : {}),
+      payment_settings: {
+        save_default_payment_method: 'on_subscription',
+      },
     });
 
     const ids = getPersistedSubscriptionItemIds(sub);

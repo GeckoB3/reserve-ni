@@ -6,6 +6,7 @@ import { PhoneWithCountryField } from '@/components/phone/PhoneWithCountryField'
 import { normalizeToE164 } from '@/lib/phone/e164';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { Pill } from '@/components/ui/dashboard/Pill';
+import { Skeleton } from '@/components/ui/Skeleton';
 
 interface StaffProfileRow {
   id: string;
@@ -18,7 +19,11 @@ interface StaffProfileRow {
 /**
  * Settings for non-admin venue staff: display name, sign-in email, phone, password.
  */
-export function StaffPersonalSettingsSection() {
+export function StaffPersonalSettingsSection({
+  onInitialLoadComplete,
+}: {
+  onInitialLoadComplete?: () => void;
+}) {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -55,8 +60,9 @@ export function StaffPersonalSettingsSection() {
       setLoadError(e instanceof Error ? e.message : 'Failed to load profile');
     } finally {
       setLoading(false);
+      onInitialLoadComplete?.();
     }
-  }, []);
+  }, [onInitialLoadComplete]);
 
   useEffect(() => {
     void load();
@@ -142,12 +148,20 @@ export function StaffPersonalSettingsSection() {
 
   if (loading) {
     return (
-      <SectionCard elevated>
-        <SectionCard.Body className="flex items-center gap-3 py-8">
-          <div className="h-5 w-5 animate-spin rounded-full border-2 border-brand-600 border-t-transparent" />
-          <span className="text-sm text-slate-500">Loading your account…</span>
-        </SectionCard.Body>
-      </SectionCard>
+      <Skeleton.Card className="p-0">
+        <div className="border-b border-slate-100/90 px-4 py-4 sm:px-6 sm:py-5">
+          <Skeleton.Line className="w-28" />
+          <Skeleton.Line className="mt-3 h-6 w-48" />
+        </div>
+        <div className="space-y-4 px-4 py-5 sm:px-6 sm:py-6">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Skeleton.Block className="h-11" />
+            <Skeleton.Block className="h-11" />
+          </div>
+          <Skeleton.Block className="h-11" />
+          <Skeleton.Block className="h-10 w-32" />
+        </div>
+      </Skeleton.Card>
     );
   }
 

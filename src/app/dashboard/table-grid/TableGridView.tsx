@@ -27,6 +27,7 @@ import { PageHeader } from '@/components/ui/dashboard/PageHeader';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { Pill } from '@/components/ui/dashboard/Pill';
 import { EmptyState } from '@/components/ui/dashboard/EmptyState';
+import { DashboardGridSkeleton } from '@/components/ui/dashboard/DashboardSkeletons';
 
 function formatDateInput(d: Date): string {
   const y = d.getFullYear();
@@ -1425,8 +1426,8 @@ export function TableGridView({
       <SectionCard elevated className="relative w-full">
         <SectionCard.Body className="p-0">
         {loading ? (
-          <div className="flex min-h-[40vh] items-center justify-center">
-            <div className="h-8 w-8 animate-spin rounded-full border-2 border-slate-300 border-t-brand-600" />
+          <div className="min-h-[40vh] p-4 sm:p-5">
+            <DashboardGridSkeleton />
           </div>
         ) : gridData && gridData.tables.length === 0 ? (
           <div className="min-h-[40vh] px-4 py-10">

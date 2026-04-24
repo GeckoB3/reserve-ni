@@ -41,6 +41,7 @@ import { isBookingTimeInHourRange } from '@/lib/booking-time-window';
 import type { OpeningHours } from '@/types/availability';
 import { BulkGuestMessageModal } from '@/components/booking/BulkGuestMessageModal';
 import type { GuestMessageChannel } from '@/lib/booking/guest-message-channel';
+import { DashboardListSkeleton } from '@/components/ui/dashboard/DashboardSkeletons';
 
 interface BookingRow {
   id: string;
@@ -1332,7 +1333,7 @@ export function BookingsDashboard({
       </div>
 
       {loading ? (
-        <LoadingSkeleton />
+        <DashboardListSkeleton rowCount={6} />
       ) : filteredBookings.length === 0 ? (
         <DashboardEmptyState
           title="No reservations for this period"
@@ -1917,20 +1918,3 @@ function BookingsAccordionList({
   );
 }
 
-function LoadingSkeleton() {
-  return (
-    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm shadow-slate-900/5">
-      <div className="divide-y divide-slate-100">
-        {[...Array(5)].map((_, i) => (
-          <div key={i} className="flex items-center gap-4 px-5 py-4">
-            <div className="h-4 w-12 animate-pulse rounded bg-slate-100" />
-            <div className="h-4 w-28 animate-pulse rounded bg-slate-100" />
-            <div className="h-4 w-8 animate-pulse rounded bg-slate-100" />
-            <div className="h-5 w-16 animate-pulse rounded-full bg-slate-100" />
-            <div className="h-5 w-20 animate-pulse rounded-full bg-slate-100" />
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}

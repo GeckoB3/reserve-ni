@@ -3,7 +3,8 @@ import type { HelpCategory } from '../types';
 export const gettingStartedCategory: HelpCategory = {
   slug: 'getting-started',
   title: 'Getting started',
-  description: 'First steps after signup: dashboard, profile, payments, and your public booking page.',
+  description:
+    'First steps after signup: dashboard, profile, Stripe, and your public booking page.',
   plan: 'all',
   articles: [
     {
@@ -14,27 +15,27 @@ export const gettingStartedCategory: HelpCategory = {
       content: `
 # Welcome to ReserveNI
 
-ReserveNI is an all-in-one booking platform for Northern Ireland hospitality and appointment businesses. You run day-to-day operations from the **dashboard**; your customers book online through your **public booking page** (and optional **website embed**).
+ReserveNI is a booking and guest management platform built for hospitality and appointment businesses in Northern Ireland. You run day-to-day work from the **dashboard**; customers book through your **public booking page** and, if you use it, a **website embed**.
 
 ## What you can do
 
-- Take **table reservations**, **appointments**, **classes**, **ticketed events**, or **resource** bookings—depending on your plan and the booking types you enable.
-- Collect **deposits and full payments** through **Stripe Connect** (money goes to your connected account).
-- Automate **email and SMS** messages (confirmations, reminders, deposit prompts, and more).
-- See **reports**, export data, and (on appointment plans) **import** clients and bookings from other systems.
+- Take **table reservations**, **appointments**, **classes**, **ticketed events**, or **resource** bookings, depending on your plan and which booking types you turn on.
+- Collect **deposits and full payments** with **Stripe Connect** (guest payments go to your connected Stripe account, not to ReserveNI).
+- Automate **email and SMS** (confirmations, reminders, deposit prompts, and more).
+- Use **reports**, **exports**, and (on appointment plans) **import** clients and bookings from other systems.
 
 ## Plans at a glance
 
-- **Restaurant** or **Founding Partner**: full **dining** and **table management** experience (floor plan, table grid, dining availability).
-- **Appointments Pro / Plus / Light**: **calendars**, **services**, and schedule tools. **Light** and **Plus** have limits on active calendars and staff accounts—see the Appointments section of this help centre.
+- **Restaurant** or **Founding Partner**: full **dining** experience, including **table management** (floor plan, table grid, dining availability).
+- **Appointments Pro, Plus, or Light**: **calendars**, **services**, and schedule tools. **Light** and **Plus** cap how many active calendars and staff accounts you can use. See **Appointments plan** in this help centre for detail.
 
 ## Where to go next
 
-1. Complete **onboarding** if you have not finished it (the app will guide you).
-2. Open **Settings** to finish **profile**, **business hours**, and **Stripe**.
-3. Use the **setup checklist** on Home to see what is still missing before you go live.
+1. Finish **onboarding** if the app still prompts you.
+2. Open **Settings** and complete **Profile**, **Business hours**, and **Payments** (Stripe Connect) if you take money online.
+3. Use the **setup checklist** on **Home** to see what is left before you go live.
 
-If you are stuck, use **Support** in the sidebar or read the **Troubleshooting** articles in this help centre.
+If you are stuck, use **Support** in the dashboard sidebar or open **Troubleshooting** in this help centre.
 `.trim(),
     },
     {
@@ -47,26 +48,26 @@ If you are stuck, use **Support** in the sidebar or read the **Troubleshooting**
 
 ## Home
 
-**Home** (\`/dashboard\`) shows today’s snapshot: bookings, alerts, and a **setup checklist** (admins) so you can see what still needs configuration before guests can book smoothly.
+**Home** (\`/dashboard\`) shows today’s snapshot: bookings, alerts, and (for admins) a **setup checklist** so you can see what still needs configuration before guests book smoothly.
 
 ## Left sidebar
 
-The sidebar lists everything you can open in the app. Which links appear depends on:
+The sidebar lists what you can open in the app. Which links appear depends on:
 
-- Your **role** (**Admin** sees Reports, Dining Availability, Data Import, and full Settings; **Staff** see a slimmer menu and **Account** instead of full Settings).
-- Your **booking model** (for example table reservations vs unified appointments).
-- Your **plan** (Restaurant/Founding vs Appointments tiers).
-- Whether **table management** is enabled (adds **Table Grid** and **Floor Plan**; **Day Sheet** may redirect when table management is on).
+- Your **role** (**Admin** sees Reports, Dining Availability, Data Import, and full **Settings**; **Staff** see a shorter menu and **Account** instead of full Settings).
+- Your **booking model** (for example table reservations only, or tables plus appointments).
+- Your **plan** (Restaurant or Founding vs Appointments tiers).
+- Whether **table management** is on (adds **Table Grid** and **Floor Plan**; **Day Sheet** may redirect when table management is on).
 
-Labels such as **Bookings** vs **Appointments** and **New Booking** vs **New Appointment** change automatically based on your enabled models and terminology.
+Labels such as **Bookings** vs **Appointments** and **New Booking** vs **New Appointment** update automatically based on what you have enabled.
 
 ## Your booking page
 
-When your venue has a **slug**, the sidebar includes **Your Booking Page**—a link to the public URL guests use to book online.
+When your venue has a **slug**, the sidebar shows **Your Booking Page**: a direct link to the public URL guests use to book online. Share that link on your site, social bios, and printed materials.
 
 ## Support
 
-Use **Support** to message the ReserveNI team from inside the app.
+Use **Support** in the dashboard to message the ReserveNI team from inside the app.
 `.trim(),
     },
     {
@@ -79,28 +80,28 @@ Use **Support** to message the ReserveNI team from inside the app.
 
 Go to **Settings → Profile** (admins).
 
-## Everyone
+## Core venue details
 
 - **Venue name** and **contact details** (phone, email, website).
-- **Address**—used on your public page and in communications.
-- **Venue slug**—this becomes your public URL (\`/book/your-slug\`). Pick something short and memorable; changing it later will break old links.
-- **Timezone**—used for reminders, availability, and “today” in the dashboard. Defaults to UK-friendly settings; adjust if you trade in Ireland with different opening patterns.
+- **Address**: shown on your public page and used in communications.
+- **Venue slug**: becomes your public URL (\`/book/your-slug\`). Choose something short and easy to spell. Changing it later breaks old links, so pick carefully.
+- **Timezone**: used for reminders, availability, and what “today” means in the dashboard. Set this to match where you actually operate (UK and Ireland are supported; adjust if your trading hours do not match the default).
 
 ## Cover and branding
 
-Upload a **cover image** where offered so your public booking page looks professional.
+Upload a **cover image** where offered so your public booking page looks professional and matches your brand.
 
 ## Restaurant venues
 
-You may also set fields such as **cuisine type**, **price band**, **kitchen email** (for operational notifications), and **no-show grace** (how long you wait before treating a late guest as a no-show in the UI—check your own policy).
+You may also set **cuisine type**, **price band**, **kitchen email** (operational notifications), and **no-show grace** (how long you wait before treating a late guest as a no-show in the UI). Align these fields with your real house policy.
 
 ## Booking types (appointments plans)
 
-On **Appointments** plans you can enable **secondary** models (events, classes, resources) from the same profile area so guests see extra tabs on your public page. Only enable what you actively sell.
+On **Appointments** plans you can enable **extra** models (events, classes, resources) from the same profile area so guests see more tabs on your public page. Only enable what you actively sell.
 
 ## Booking rules
 
-Depending on your model, **booking rules** (party sizes, notice windows, etc.) may appear under Profile or under **Dining Availability**—see the Restaurant or Appointments articles for your case.
+Depending on your model, **booking rules** (party sizes, notice windows, and similar) may sit under **Profile** or under **Dining Availability**. Use the **Restaurant plan** or **Appointments plan** articles in this help centre for your setup.
 `.trim(),
     },
     {
@@ -111,22 +112,22 @@ Depending on your model, **booking rules** (party sizes, notice windows, etc.) m
       content: `
 # Connecting Stripe to take payments
 
-There are **two** different Stripe relationships in ReserveNI:
+There are **two** separate Stripe relationships in ReserveNI. They are easy to mix up, so it helps to know both:
 
 ## 1. Your ReserveNI subscription
 
-Under **Settings → Plan** you manage your **ReserveNI plan** (billing for the product itself). That is separate from guest payments.
+Under **Settings → Plan** you pay for **ReserveNI itself** (your product subscription). That billing is separate from money your guests pay for bookings.
 
-## 2. Stripe Connect (guest money)
+## 2. Stripe Connect (guest payments)
 
-Under **Settings → Payments**, connect **Stripe Connect** so you can take **deposits** and **online payments** from guests. Onboarding is step-by-step (business details, bank account, identity verification as required by Stripe).
+Under **Settings → Payments**, connect **Stripe Connect** so you can take **deposits** and **online payments** from guests. Onboarding is step by step: business details, bank account, and identity checks if Stripe asks for them.
 
-Until Connect is **enabled**, guests may be unable to pay online even if you have turned on deposits in your rules.
+Until Connect is **ready and enabled**, guests may not be able to pay online even if you have turned on deposits in your rules.
 
 ### Tips
 
-- Use a **business** Stripe account that matches your legal entity.
-- If Connect shows **restricted** or **pending**, open the Stripe Dashboard from their links and resolve any requested information.
+- Use a **business** Stripe account that matches the legal entity that should receive guest money.
+- If Connect shows **restricted** or **pending**, open the Stripe Dashboard from the in-app links and supply anything Stripe requests.
 - Only **admins** can complete Connect; staff will see guidance to ask an admin.
 
 After Connect works, configure **deposit rules** in dining or service settings (see **Deposits** in your plan’s help section).
@@ -140,28 +141,28 @@ After Connect works, configure **deposit rules** in dining or service settings (
       content: `
 # Your public booking page and QR code
 
-Your guests book at **\`/book/{your-venue-slug}\`** (and optionally **\`/book/{slug}/{practitioner-slug}\`** for a specific calendar on appointment setups).
+Guests book at **\`/book/{your-venue-slug}\`**. On some appointment setups they can also use **\`/book/{slug}/{practitioner-slug}\`** to land on a specific calendar.
 
 ## What guests see
 
-- Your **branding**, address, phone, and **opening hours** (when configured).
-- If **online booking is paused**, they see a clear message to contact you by phone.
-- If you run **more than one booking type** (for example tables **and** events), they see **tabs** to switch between experiences.
+- Your **branding**, address, phone, and **opening hours** when those are configured.
+- If **online booking is paused**, a clear message to contact you by phone or other means.
+- If you run **more than one booking type** (for example tables **and** events), **tabs** so they can switch between experiences.
 
 ## Dining areas (tables)
 
-With **multiple dining areas**, you can control whether guests pick an area **manually** or you **merge** availability—configured where you manage dining areas and public booking mode.
+With **multiple dining areas**, you choose whether guests pick an area **themselves** or you **merge** availability in the background. Configure that where you manage dining areas and public booking mode.
 
 ## Widget and QR
 
 Under **Settings → Widget** (admin):
 
-- Copy the **iframe embed** snippet to put booking on your own website. Optional **accent** colour query string tints the experience.
-- Download a **QR code** that opens your **full booking page** (not the embed URL)—ideal for menus, posters, and reception.
+- Copy the **iframe embed** snippet to put booking on your own website. An optional **accent** colour query string tints buttons and highlights.
+- Download a **QR code** that opens your **full booking page** (not the embed URL). Use it on menus, posters, and at reception.
 
 ## Source tracking
 
-Bookings created via the embed are tracked so you can see **widget** as a source in reports.
+Bookings created through the embed are tracked so you can see **widget** as a source in reports. That helps you measure marketing and website performance.
 `.trim(),
     },
     {
@@ -175,19 +176,19 @@ Bookings created via the embed are tracked so you can see **widget** as a source
 On **Home**, admins see a **setup checklist** that tracks practical readiness:
 
 - **Profile** complete (business details, slug, imagery as required).
-- **Availability** configured so guests can see real slots.
-- **Guest booking ready**—the app checks that the combination of rules, Stripe, and catalogues is coherent enough to accept online bookings.
-- **Stripe Connect** connected when you expect online payments.
+- **Availability** configured so guests see real bookable slots.
+- **Guest booking ready**: the app checks that rules, Stripe (if needed), and your catalogue line up so online booking can work.
+- **Stripe Connect** connected when you expect guests to pay online.
 - **First booking** (optional milestone).
-- Extra flags if you use **events**, **classes**, or **resources** so those catalogues are not empty.
+- Extra prompts if you use **events**, **classes**, or **resources** so those catalogues are not empty.
 
 ## Dismissal
 
-You can dismiss the card for the current browser session once steps are complete; it also respects completion flags from the server.
+You can dismiss the card for the current browser session when steps are done; it also respects completion flags from the server.
 
-## If something stays red
+## If something stays incomplete
 
-Open each linked area (Settings, Dining Availability, Calendar Availability, Services, etc.) and fix the highlighted gap—usually missing hours, missing Connect, or no services/sittings yet.
+Open each linked area (**Settings**, **Dining Availability**, **Calendar Availability**, **Services**, and so on) and fix the highlighted gap. Typical causes are missing hours, incomplete Connect, or no services or sittings yet.
 `.trim(),
     },
   ],

@@ -9,6 +9,7 @@ import {
   isValidAxisAlignedCombinationPair,
   type CombinationTable,
 } from '@/lib/table-management/combination-engine';
+import { Skeleton } from '@/components/ui/Skeleton';
 
 interface Props {
   threshold: number;
@@ -203,8 +204,13 @@ export function AdjacencyPreview({ threshold, refreshKey = 0, diningAreaId }: Pr
 
   if (loading) {
     return (
-      <div className="mt-3 flex h-40 items-center justify-center rounded-lg border border-slate-200 bg-white">
-        <span className="text-xs text-slate-400">Loading floor plan...</span>
+      <div
+        className="mt-3 space-y-3 rounded-lg border border-slate-200 bg-white p-4"
+        role="status"
+        aria-label="Loading floor plan preview"
+      >
+        <Skeleton.Line className="w-32" />
+        <Skeleton.Block className="h-32" />
       </div>
     );
   }

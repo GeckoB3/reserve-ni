@@ -3,7 +3,8 @@ import type { HelpCategory } from '../types';
 export const settingsCategory: HelpCategory = {
   slug: 'settings',
   title: 'Settings & account',
-  description: 'Settings tabs, business hours, staff, billing, guests, and exports—shared across plans.',
+  description:
+    'Settings tabs, business hours, staff, billing, guest records, and exports. Shared across plans.',
   plan: 'all',
   articles: [
     {
@@ -18,51 +19,51 @@ export const settingsCategory: HelpCategory = {
 
 **Settings** (\`/dashboard/settings\`) includes:
 
-- **Profile** — personal login block + **venue profile** + **booking types** + contextual booking rules / widget card.
-- **Business hours** — weekly **opening hours** plus **closures / special blocks**.
-- **Plan** — subscription status, SMS usage, cancel/resume/upgrade flows.
-- **Payments** — **Stripe Connect** onboarding.
-- **Communications** — automated templates/policies.
-- **Staff** — invites and roles.
-- **Data import** — shortcut card to the import wizard.
+- **Profile**: your personal login block, **venue profile**, **booking types**, contextual booking rules, and the widget card where shown.
+- **Business hours**: weekly **opening hours** plus **closures** and special blocks.
+- **Plan**: subscription status, SMS usage, cancel, resume, and upgrade flows.
+- **Payments**: **Stripe Connect** onboarding.
+- **Communications**: automated templates and policies.
+- **Staff**: invites and roles.
+- **Data import**: shortcut into the import wizard.
 
 ## Staff (non-admin)
 
-Staff opening **Settings** only see **Account** — name, email, phone, password—no venue-wide tabs.
+Staff who open **Settings** only see **Account**: name, email, phone, and password. They do not see venue-wide tabs.
 
-## Related pages (still “settings area”)
+## Related pages (still part of setup)
 
-- **Settings → Widget** — embed + QR.
-- **Settings → Floor plan / Tables** — advanced table geometry (restaurant contexts).
+- **Settings → Widget**: embed snippet and QR code.
+- **Settings → Floor plan / Tables**: advanced table geometry for restaurant setups.
 
-Use the sidebar **Help** link (this site) when you forget which tab holds a control.
+Use the sidebar **Help** link when you forget which tab holds a control.
 `.trim(),
     },
     {
       slug: 'business-hours',
       title: 'Business hours and special closures',
-      description: 'OpeningHoursControl, closures editor, and venue exceptions.',
+      description: 'Opening hours editor, closures, and venue exceptions.',
       tags: ['hours', 'closures', 'exceptions'],
       content: `
 # Business hours & closures
 
 ## Weekly hours
 
-**Settings → Business hours** opens the **opening hours** editor. Configure open/close windows per weekday; keep times realistic for your kitchen and service model.
+**Settings → Business hours** opens the **opening hours** editor. Set open and close windows per weekday so they match real kitchen and service capacity.
 
 ## Closures & special blocks
 
-The same area includes **closures** / special-day tooling:
+The same area includes **closures** and special-day tools:
 
 - Mark days **closed**.
-- **Amended hours** (late opening, early close).
-- **Reduced capacity** or **special events** when your editor exposes those block types.
+- Set **amended hours** (late open, early close).
+- Use **reduced capacity** or **special events** when your editor offers those block types.
 
-Restaurant venues may see additional block semantics—read the inline help next to each control.
+Restaurant venues may show extra block types. Read the short help next to each control in the app.
 
 ## Venue timezone
 
-Set the **timezone** in **Profile** (venue section) so closures and reminders align with your wall clock.
+Set **timezone** in **Profile** (venue section) so closures and reminders match your wall clock.
 
 ## After changes
 
@@ -79,16 +80,16 @@ Spot-check **public availability** for today and a future bank holiday after eac
 
 ## Roles
 
-- **Admin** — full financial, communications, imports, reports, dining availability, staff invites.
-- **Staff** — day-to-day booking operations permitted by your configured UI; **no** venue-wide settings.
+- **Admin**: full access to financial settings, communications, imports, reports, dining availability, and staff invites.
+- **Staff**: day-to-day booking work the UI allows for their role. **No** venue-wide settings.
 
 ## Inviting
 
-Admins create invites from **Settings → Staff**. Staff must accept the email and set a password (flows may vary slightly by auth configuration).
+Admins create invites from **Settings → Staff**. Staff accept the email and set a password (exact steps can vary slightly with your auth setup).
 
 ## Calendar assignment
 
-Link each staff user to the **bookable calendars** they should manage so the **Appointment Calendar** filter shows the right **Mine** columns.
+Link each staff user to the **bookable calendars** they work in so **Appointment Calendar** shows the right **Mine** columns.
 
 ## Security
 
@@ -96,7 +97,7 @@ Use **session timeout** on shared tablets and **reset passwords** promptly when 
 
 ## Support escalation
 
-Staff should use **Support** or ask an admin when blocked by permissions—the UI hides buttons they cannot use rather than erroring mid-action.
+Staff should use **Support** or ask an admin when a screen is missing. The UI usually hides actions they cannot use instead of failing halfway through a task.
 `.trim(),
     },
     {
@@ -111,20 +112,20 @@ Open **Settings → Plan**.
 
 ## What you see
 
-- Current **tier** display name.
+- Current **tier** name.
 - **Subscription status** (active, trialing, past due, cancelling, cancelled).
-- **Billing period** end date from Stripe fields.
-- **SMS usage** — included allowance vs metered usage depending on tier.
+- **Billing period** end date from Stripe.
+- **SMS usage**: included allowance vs metered usage, depending on tier.
 
 ## Actions
 
 - **Cancel**, **resume**, or **resubscribe** according to your state.
-- **Light-specific** flows may include upgrade to Pro or card update prompts.
-- After Stripe checkout returns, query params such as \`?upgraded=1\` show confirmation banners—read them before navigating away.
+- **Light** may show upgrade paths or card update prompts.
+- After Stripe checkout returns, query params such as \`?upgraded=1\` can show confirmation banners. Read them before you navigate away.
 
 ## Distinction
 
-This page is **only** for your ReserveNI subscription. Guest payments remain under **Stripe Connect** in **Payments**.
+This page is **only** your ReserveNI subscription. **Guest payments** stay under **Stripe Connect** in **Payments**.
 `.trim(),
     },
     {
@@ -137,23 +138,23 @@ This page is **only** for your ReserveNI subscription. Guest payments remain und
 
 ## List & search
 
-**Reports → Clients** (or \`/dashboard/guests\` redirect) gives admins a searchable guest list with **sorting**, **tag filters**, and pagination.
+**Reports → Clients** (or \`/dashboard/guests\`) gives admins a searchable guest list with **sorting**, **tag filters**, and pagination.
 
 ## Detail
 
-Expand a guest to edit **contact fields**, maintain **tags** for segmentation, and review **cross-model booking history** (tables + appointments + events, etc., depending on your venue).
+Open a guest to edit **contact fields**, maintain **tags** for segments, and review **booking history** across models (tables, appointments, events, and so on, depending on your venue).
 
 ## From a booking
 
-Inside booking detail panels you can adjust **tags** and **internal customer notes** without leaving the operational workflow.
+Booking detail panels let you adjust **tags** and **internal customer notes** without leaving the operational flow.
 
-## API-backed behaviour
+## Responsible use
 
-Guest records track visit counts, no-show counts, and identifiability tiers—use the UI truthfully (e.g. do not mark anonymous walk-ins as full marketing consented profiles without paperwork).
+Guest records can track visits, no-shows, and how identifiable the profile is. Use the fields honestly (for example, do not mark a walk-in as fully marketing-consented without proper consent).
 
 ## Marketing compliance
 
-Only send bulk campaigns when you have legitimate interest or consent per your policies—ReserveNI provides tooling, not legal advice.
+Send bulk campaigns only when you have a lawful basis under your own policies. ReserveNI supplies tooling; it does not provide legal advice.
 `.trim(),
     },
     {
@@ -166,9 +167,9 @@ Only send bulk campaigns when you have legitimate interest or consent per your p
 
 ## Full CSV exports
 
-Within **Reports → Data export** (section on the reports page), download:
+In **Reports → Data export**, download:
 
-- **All bookings** CSV across the whole venue history handled by the export API.
+- **All bookings** CSV for the venue history the export API covers.
 - **All guests / clients** CSV for CRM or backup use.
 
 These exports are **not** limited to the charts’ date filter.
@@ -179,11 +180,11 @@ Individual charts (such as utilisation or appointment insights) include their ow
 
 ## Import session reports
 
-After **Data Import**, download the per-session **report CSV** for auditing what changed.
+After **Data Import**, download the per-session **report CSV** to audit what changed.
 
 ## Security
 
-Store downloaded CSVs securely—they contain PII and payment references depending on columns.
+Store downloaded CSVs securely. They can contain personal data and payment references depending on columns.
 `.trim(),
     },
   ],

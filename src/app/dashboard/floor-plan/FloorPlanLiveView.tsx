@@ -28,6 +28,7 @@ import {
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { EmptyState } from '@/components/ui/dashboard/EmptyState';
+import { DashboardGridSkeleton } from '@/components/ui/dashboard/DashboardSkeletons';
 
 const LiveFloorCanvas = dynamic(() => import('./LiveFloorCanvas'), { ssr: false });
 
@@ -741,8 +742,8 @@ export function FloorPlanLiveView({
   if (loading) {
     return (
       <SectionCard elevated>
-        <SectionCard.Body className="flex items-center justify-center py-16">
-          <div className="h-8 w-8 animate-spin rounded-full border-2 border-slate-300 border-t-brand-600" />
+        <SectionCard.Body className="p-4 sm:p-5">
+          <DashboardGridSkeleton />
         </SectionCard.Body>
       </SectionCard>
     );

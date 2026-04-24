@@ -28,6 +28,7 @@ import { isBookingTimeInHourRange } from '@/lib/booking-time-window';
 import type { OpeningHours } from '@/types/availability';
 import { BulkGuestMessageModal } from '@/components/booking/BulkGuestMessageModal';
 import type { GuestMessageChannel } from '@/lib/booking/guest-message-channel';
+import { Skeleton } from '@/components/ui/Skeleton';
 
 type ViewMode = 'day' | 'week' | 'month' | 'custom';
 
@@ -1822,9 +1823,17 @@ export function AppointmentBookingsDashboard({
       )}
 
       {loading ? (
-        <div className="space-y-2">
+        <div className="space-y-3" role="status" aria-label="Loading bookings">
           {[1, 2, 3, 4, 5].map((i) => (
-            <div key={i} className="h-20 animate-pulse rounded-xl bg-slate-100" />
+            <Skeleton.Card key={i} className="py-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0 flex-1 space-y-2">
+                  <Skeleton.Line className="w-40" />
+                  <Skeleton.Line className="w-56 max-w-full" />
+                </div>
+                <Skeleton.Block className="h-9 w-24 shrink-0" />
+              </div>
+            </Skeleton.Card>
           ))}
         </div>
       ) : filteredBookings.length === 0 ? (

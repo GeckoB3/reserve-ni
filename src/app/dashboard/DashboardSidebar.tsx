@@ -117,7 +117,7 @@ function NavLinkItem({
     <>
       <NavLeadingDot active={active} />
       <Icon className={iconClass} />
-      <span className="min-w-0 flex-1 truncate">{label}</span>
+      <span className="min-w-0 flex-1 whitespace-normal break-words leading-snug">{label}</span>
     </>
   );
   if (external) {

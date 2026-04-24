@@ -24,7 +24,7 @@ export function SettingsSaveStrip() {
     >
       {banner.status === 'saving' ? (
         <>
-          <span className="inline-flex h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-amber-600 border-t-transparent" />
+          <span className="inline-flex h-2.5 w-2.5 shrink-0 animate-pulse rounded-full bg-amber-600" />
           <span className="font-medium">Saving changes…</span>
         </>
       ) : null}

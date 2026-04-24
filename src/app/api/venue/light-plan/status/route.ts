@@ -2,7 +2,12 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 import { stripe } from '@/lib/stripe';
-import { stripeCustomerHasDefaultPaymentMethod } from '@/lib/stripe/venue-customer-payment';
+import { stripeSubscriptionOrCustomerHasPaymentMethod } from '@/lib/stripe/venue-customer-payment';
+import {
+  mapStripeSubscriptionToPlanStatus,
+  subscriptionPeriodEndIso,
+  subscriptionPeriodStartIso,
+} from '@/lib/stripe/subscription-fields';
 
 /**
  * GET /api/venue/light-plan/status
@@ -36,13 +41,32 @@ export async function GET() {
     const customerId = (venue as { stripe_customer_id?: string | null }).stripe_customer_id?.trim() ?? '';
     const subId = (venue as { stripe_subscription_id?: string | null }).stripe_subscription_id?.trim() ?? '';
 
-    const has_default_payment_method = customerId ? await stripeCustomerHasDefaultPaymentMethod(customerId) : false;
+    const has_default_payment_method = await stripeSubscriptionOrCustomerHasPaymentMethod({
+      customerId,
+      subscriptionId: subId,
+    });
 
     let stripe_subscription_status: string | null = null;
+    let planStatus = (venue as { plan_status?: string | null }).plan_status ?? null;
+    let periodStart =
+      (venue as { subscription_current_period_start?: string | null }).subscription_current_period_start ?? null;
+    let periodEnd =
+      (venue as { subscription_current_period_end?: string | null }).subscription_current_period_end ?? null;
     if (subId) {
       try {
         const sub = await stripe.subscriptions.retrieve(subId);
         stripe_subscription_status = sub.status;
+        planStatus = mapStripeSubscriptionToPlanStatus(sub);
+        periodStart = subscriptionPeriodStartIso(sub);
+        periodEnd = subscriptionPeriodEndIso(sub);
+        await staff.db
+          .from('venues')
+          .update({
+            plan_status: planStatus,
+            subscription_current_period_start: periodStart,
+            subscription_current_period_end: periodEnd,
+          })
+          .eq('id', staff.venue_id);
       } catch (e) {
         console.warn('[venue/light-plan/status] stripe.subscriptions.retrieve failed', { subId, e });
         stripe_subscription_status = null;
@@ -51,14 +75,12 @@ export async function GET() {
 
     return NextResponse.json({
       venue_id: staff.venue_id,
-      plan_status: (venue as { plan_status?: string | null }).plan_status ?? null,
+      plan_status: planStatus,
       stripe_subscription_id: subId || null,
       has_default_payment_method,
       stripe_subscription_status,
-      subscription_current_period_start:
-        (venue as { subscription_current_period_start?: string | null }).subscription_current_period_start ?? null,
-      subscription_current_period_end:
-        (venue as { subscription_current_period_end?: string | null }).subscription_current_period_end ?? null,
+      subscription_current_period_start: periodStart,
+      subscription_current_period_end: periodEnd,
     });
   } catch (err) {
     console.error('[light-plan/status] Error:', err);

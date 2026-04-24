@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { NumericInput } from '@/components/ui/NumericInput';
+import { AvailabilityFormTabSkeleton } from '@/components/ui/dashboard/DashboardSkeletons';
 
 interface Service { id: string; name: string; }
 interface Duration {
@@ -122,7 +123,12 @@ export function DiningDurationTab({ services, showToast, selectedAreaId }: Props
   }
 
   if (loading) {
-    return <div className="flex justify-center p-8"><div className="h-6 w-6 animate-spin rounded-full border-2 border-brand-600 border-t-transparent" /></div>;
+    return (
+      <div className="space-y-4 p-2">
+        <AvailabilityFormTabSkeleton />
+        <AvailabilityFormTabSkeleton />
+      </div>
+    );
   }
 
   return (

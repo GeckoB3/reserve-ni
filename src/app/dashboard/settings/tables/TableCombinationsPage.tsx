@@ -7,6 +7,7 @@ import { createClient } from '@/lib/supabase/browser';
 import { AdjacencyPreview } from '@/app/dashboard/settings/sections/AdjacencyPreview';
 import { NumericInput } from '@/components/ui/NumericInput';
 import { HorizontalScrollHint } from '@/components/ui/HorizontalScrollHint';
+import { FloorPlanTablesPanelSkeleton } from '@/components/ui/dashboard/DashboardSkeletons';
 import type { VenueTable, TableCombination } from '@/types/table-management';
 import type { BookingModel } from '@/types/booking-models';
 const MiniFloorPlanPicker = dynamic(() => import('@/components/floor-plan/MiniFloorPlanPicker'), {
@@ -431,7 +432,9 @@ export function TableCombinationsPage({
                 change the combination distance or layout.
               </p>
               {catalogLoading ? (
-                <p className="mt-4 text-sm text-slate-500">Loading…</p>
+                <div className="mt-4">
+                  <FloorPlanTablesPanelSkeleton />
+                </div>
               ) : autoGroups.length === 0 ? (
                 <p className="mt-4 text-sm text-slate-500">
                   No adjacent table pairs or groups found. Adjust the layout or combination threshold.

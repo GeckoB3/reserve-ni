@@ -16,7 +16,7 @@ export const troubleshootingCategory: HelpCategory = {
 
 ## “Charges not enabled”
 
-Complete every **Connect** requirement in **Settings → Payments**. Stripe often needs **identity documents** or **bank verification**—open the Stripe Dashboard using the in-app links.
+Complete every **Connect** step in **Settings → Payments**. Stripe often needs **identity documents** or **bank verification**. Open the Stripe Dashboard from the in-app links and finish any open tasks.
 
 ## Guest payments fail
 
@@ -26,11 +26,11 @@ Complete every **Connect** requirement in **Settings → Payments**. Stripe ofte
 
 ## Wrong Stripe account
 
-Connect the **legal entity** that should receive guest money—switching later requires Stripe’s disconnected/reconnected flows; ask support before forcing changes on live venues.
+Connect the **legal entity** that should receive guest money. Switching later means Stripe disconnect and reconnect flows. Ask **Support** before you force changes on a live venue.
 
 ## Plan vs Connect confusion
 
-If your **ReserveNI subscription** invoice failed, guest payments can still succeed—fix **Plan** tab first, then re-test guest checkout separately.
+If your **ReserveNI subscription** invoice failed, guest payments might still work. Fix the **Plan** tab first, then test guest checkout again in a separate step so you know which side was blocking you.
 `.trim(),
     },
     {
@@ -43,18 +43,18 @@ If your **ReserveNI subscription** invoice failed, guest payments can still succ
 
 ## Checklist
 
-1. **Template enabled?** — **Settings → Communications** lane + message card must have **SMS** ticked.
-2. **Phone present?** — Guests need valid **mobile numbers** in international format where required.
-3. **Plan restrictions** — **Light** appointments plans may block SMS until billing prerequisites are satisfied—read any red **banner** in Communications.
-4. **Allowance** — if you exhausted included SMS, purchase/allow overage per your plan rules (see Plan tab copy).
+1. **Template enabled?** In **Settings → Communications**, open the lane and message card and ensure **SMS** is ticked.
+2. **Phone present?** Guests need a valid **mobile number** in international format where the template requires it.
+3. **Plan restrictions**: **Light** appointments plans may block SMS until billing steps are done. Read any red **banner** in Communications.
+4. **Allowance**: if you used your included SMS, allow overage or top up per your plan rules (see **Plan** tab copy).
 
 ## Delivery logs
 
-Inspect booking **communication logs** (timeline) to see whether the app attempted send and what error text returned.
+Open the booking **communication** timeline to see whether the app tried to send and what error text came back.
 
 ## Still stuck
 
-Contact **Support** with approximate time, booking id, and message type so ops can trace provider logs.
+Contact **Support** with approximate time, booking id, and message type so operations can trace provider logs.
 `.trim(),
     },
     {
@@ -67,27 +67,27 @@ Contact **Support** with approximate time, booking id, and message type so ops c
 
 ## Venue vs calendars
 
-**Business hours** define when the venue is notionally open; **calendar availability** defines when each practitioner/resource can be booked. If calendars are narrower than venue hours, guests see **gaps**.
+**Business hours** say when the venue is open in principle; **calendar availability** says when each person or resource can be booked. If calendars are narrower than venue hours, guests see **gaps**.
 
 ## Services
 
-Ensure each bookable service is **linked** to a calendar column that is actually **working** that day.
+Check each bookable service is **linked** to a calendar column that is actually **working** that day.
 
 ## Buffers & duration
 
-Long **buffers** or **multi-hour** services reduce visible slots—temporarily set buffer to zero to test whether that was the cause.
+Long **buffers** or **multi-hour** services shrink visible slots. Set buffer to zero temporarily to see whether that was hiding times.
 
 ## Closures
 
-Check **closures** / **leave** blocks for the date in question.
+Look for **closures** or **leave** blocks on the date you are testing.
 
 ## Booking paused
 
-If **online booking** is paused at the venue level, the public page shows a closure message—no slots will appear regardless of hours.
+If **online booking** is paused at the venue level, the public page shows a closure message and **no slots** appear, even when hours look open.
 
 ## Engine edge cases
 
-If a single practitioner is misconfigured across **two** overlapping rules, simplify to one rule set and retest.
+If one practitioner has **two** overlapping rule sets, simplify to a single clear rule set and test again.
 `.trim(),
     },
     {
@@ -100,23 +100,23 @@ If a single practitioner is misconfigured across **two** overlapping rules, simp
 
 ## Validation fails
 
-Open the **validate** step, read each **row error**, fix the CSV, and re-upload. Common problems: wrong date formats, missing emails where required, illegal status values.
+Open the **validate** step, read each **row error**, fix the CSV, and upload again. Common problems: date formats, missing emails where required, or status values the mapper does not accept.
 
 ## Mapping
 
-Ensure columns map to the intended ReserveNI fields—double-check **phone country** and **timezone-relative** timestamps.
+Map columns to the intended ReserveNI fields. Double-check **phone country** and whether dates are **timezone-relative** the way you expect.
 
 ## Undo
 
-The **undo** window is time-limited—if it expired, you must manually correct bookings or run a compensating import (ask Support before destructive deletes).
+**Undo** is **time-limited**. If it expired, correct bookings manually or plan a compensating import. Ask **Support** before large deletes.
 
 ## Partial completion
 
-If execute ends in **failed** status, read the session summary and **report CSV**—often a subset imported successfully.
+If execute ends in **failed** status, read the session summary and **report CSV**. Often part of the file still imported.
 
 ## Support bundles
 
-Attach the **report CSV** and original sample (redacted) when contacting Support for fastest diagnosis.
+Attach the **report CSV** and a small redacted sample of the source file when you contact Support for the fastest diagnosis.
 `.trim(),
     },
     {
@@ -129,23 +129,23 @@ Attach the **report CSV** and original sample (redacted) when contacting Support
 
 ## Cannot log in
 
-Use the **password reset** flow from the login page. Check spam folders for Supabase/auth emails.
+Use **password reset** from the login page. Check spam folders for auth emails.
 
 ## Staff sees “not allowed”
 
-They may be on a **staff** role trying to open **Reports** or **Settings** tabs—only **admins** can. Ask an admin to upgrade the role if appropriate.
+They may be **staff** trying to open **Reports** or full **Settings**. Only **admins** can. Ask an admin to change the role if that is appropriate.
 
 ## Onboarding loop
 
-If the app keeps sending you to **onboarding**, complete every required step or contact Support—sometimes a **flag** or **step index** needs correction after a plan change.
+If the app keeps sending you to **onboarding**, finish every required step or contact **Support**. After a plan change, sometimes a **flag** or step index needs a correction on our side.
 
 ## Session timeout
 
-Venues with strict **session timeout** may log staff out on idle tablets—re-login is expected.
+Strict **session timeout** logs staff out on idle tablets. Signing in again is expected.
 
 ## Superuser vs venue staff
 
-Platform **superuser** routes (\`/super\`) are unrelated to day-to-day venue dashboards—do not expect venue data there unless you are internal staff.
+Platform **superuser** routes (\`/super\`) are not your venue dashboard. Do not expect venue data there unless you are internal ReserveNI staff.
 `.trim(),
     },
   ],

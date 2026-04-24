@@ -19,6 +19,7 @@ import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { Pill } from '@/components/ui/dashboard/Pill';
 import { StatTile } from '@/components/ui/dashboard/StatTile';
 import { EmptyState } from '@/components/ui/dashboard/EmptyState';
+import { DashboardChartSkeleton } from '@/components/ui/dashboard/DashboardSkeletons';
 
 interface Report1 {
   total_bookings_created: number;
@@ -355,13 +356,7 @@ export function ReportsView({ bookingModel, terminology, venueId }: ReportsViewP
   );
 
   if (isLoading && !data) {
-    return (
-      <div className="space-y-5">
-        {[...Array(4)].map((_, i) => (
-          <div key={i} className="h-48 animate-pulse rounded-2xl border border-slate-200 bg-white shadow-sm shadow-slate-900/5" />
-        ))}
-      </div>
-    );
+    return <DashboardChartSkeleton kpiCount={4} />;
   }
 
   if (error) {

@@ -7,6 +7,7 @@ import { planStaffLimit } from '@/lib/plan-limits';
 import { planDisplayName } from '@/lib/pricing-constants';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { Pill } from '@/components/ui/dashboard/Pill';
+import { Skeleton } from '@/components/ui/Skeleton';
 
 interface StaffSectionProps {
   venueId: string;
@@ -15,6 +16,7 @@ interface StaffSectionProps {
   enabledModels?: BookingModel[];
   /** When `light`, at most one staff row — hide add-user UI once the venue has a team member. */
   pricingTier?: string | null;
+  onInitialLoadComplete?: () => void;
 }
 
 interface PractitionerOption {
@@ -33,6 +35,7 @@ export function StaffSection({
   bookingModel: _bookingModel,
   enabledModels: _enabledModels = [],
   pricingTier = null,
+  onInitialLoadComplete,
 }: StaffSectionProps) {
   const [staff, setStaff] = useState<StaffMember[]>([]);
   const [loading, setLoading] = useState(true);
@@ -174,8 +177,11 @@ export function StaffSection({
 
   useEffect(() => {
     setLoading(true);
-    Promise.all([load(), loadSessionSettings(), loadPractitioners()]).finally(() => setLoading(false));
-  }, [load, loadSessionSettings, loadPractitioners]);
+    Promise.all([load(), loadSessionSettings(), loadPractitioners()]).finally(() => {
+      setLoading(false);
+      onInitialLoadComplete?.();
+    });
+  }, [load, loadSessionSettings, loadPractitioners, onInitialLoadComplete]);
 
   // Create user handler
   const onCreateUser = useCallback(async (e: React.FormEvent) => {
@@ -440,12 +446,28 @@ export function StaffSection({
 
   if (loading) {
     return (
-      <SectionCard elevated>
-        <SectionCard.Body className="flex items-center gap-3 py-8">
-          <div className="h-5 w-5 animate-spin rounded-full border-2 border-brand-600 border-t-transparent" />
-          <span className="text-sm text-slate-500">Loading staff settings...</span>
-        </SectionCard.Body>
-      </SectionCard>
+      <div className="space-y-6" role="status" aria-label="Loading staff settings">
+        <Skeleton.Card>
+          <div className="space-y-3">
+            <Skeleton.Line className="w-28" />
+            <Skeleton.Line className="h-6 w-40" />
+            <Skeleton.Block className="h-20" />
+          </div>
+        </Skeleton.Card>
+        <Skeleton.Card>
+          <div className="space-y-3">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <div key={i} className="flex items-center justify-between gap-3">
+                <div className="space-y-2">
+                  <Skeleton.Line className="w-40" />
+                  <Skeleton.Line className="w-56" />
+                </div>
+                <Skeleton.Block className="h-9 w-24" />
+              </div>
+            ))}
+          </div>
+        </Skeleton.Card>
+      </div>
     );
   }
 

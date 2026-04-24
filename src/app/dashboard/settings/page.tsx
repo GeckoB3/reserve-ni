@@ -1,6 +1,6 @@
 import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
-import { SettingsView } from './SettingsView';
+import { SettingsPageSkeleton, SettingsView } from './SettingsView';
 import { StaffPersonalSettingsSection } from './sections/StaffPersonalSettingsSection';
 import { getDashboardStaff } from '@/lib/venue-auth';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
@@ -30,6 +30,7 @@ export default async function SettingsPage({
     downgraded?: string;
     resubscribed?: string;
     card_updated?: string;
+    plan_changed?: string;
   }>;
 }) {
   const supabase = await createClient();
@@ -207,10 +208,13 @@ export default async function SettingsPage({
   }
   const sp = await searchParams;
   const { tab } = sp;
-  let planCheckoutReturn: 'upgraded' | 'downgraded' | 'resubscribed' | 'card_updated' | undefined;
+  let planCheckoutReturn: 'upgraded' | 'downgraded' | 'resubscribed' | 'card_updated' | 'plan_changed' | undefined;
   if (sp.upgraded === 'true') planCheckoutReturn = 'upgraded';
   else if (sp.downgraded === 'true') planCheckoutReturn = 'downgraded';
   else if (sp.resubscribed === 'true') planCheckoutReturn = 'resubscribed';
+  else if (sp.plan_changed === '1' || sp.plan_changed === 'true') {
+    planCheckoutReturn = 'plan_changed';
+  }
   else if (sp.card_updated === '1' || sp.card_updated === 'true') {
     planCheckoutReturn = 'card_updated';
   }
@@ -226,11 +230,7 @@ export default async function SettingsPage({
     <PageFrame maxWidthClass="max-w-5xl">
       <Suspense
         fallback={
-          <SectionCard elevated>
-            <SectionCard.Body className="flex min-h-[200px] items-center justify-center py-16">
-              <div className="h-7 w-7 animate-spin rounded-full border-2 border-brand-600 border-t-transparent" />
-            </SectionCard.Body>
-          </SectionCard>
+          <SettingsPageSkeleton />
         }
       >
         <SettingsView

@@ -8,7 +8,7 @@ import {
   ResourceExceptionsCalendar,
   type ExceptionDayValue,
 } from '@/app/dashboard/resource-timeline/ResourceExceptionsCalendar';
-import { SectionCard } from '@/components/ui/dashboard/SectionCard';
+import { Skeleton } from '@/components/ui/Skeleton';
 
 type BlockType = 'closed' | 'amended_hours' | 'reduced_capacity' | 'special_event';
 
@@ -37,6 +37,7 @@ interface BusinessClosuresSectionProps {
   venue: VenueSettings;
   isAdmin: boolean;
   onUpdate: (patch: Partial<VenueSettings>) => void;
+  onInitialLoadComplete?: () => void;
 }
 
 function pad2(n: number): string {
@@ -192,12 +193,28 @@ function draftToPayload(d: DraftState) {
   return base;
 }
 
-export function BusinessClosuresSection({ bookingModel: _bm, venue, isAdmin, onUpdate: _onUpdate }: BusinessClosuresSectionProps) {
+export function BusinessClosuresSection({
+  bookingModel: _bm,
+  venue,
+  isAdmin,
+  onUpdate: _onUpdate,
+  onInitialLoadComplete,
+}: BusinessClosuresSectionProps) {
+  useEffect(() => {
+    if (!isAdmin) onInitialLoadComplete?.();
+  }, [isAdmin, onInitialLoadComplete]);
+
   if (!isAdmin) return null;
-  return <UnifiedBlocksEditor venue={venue} />;
+  return <UnifiedBlocksEditor venue={venue} onInitialLoadComplete={onInitialLoadComplete} />;
 }
 
-function UnifiedBlocksEditor({ venue }: { venue: VenueSettings }) {
+function UnifiedBlocksEditor({
+  venue,
+  onInitialLoadComplete,
+}: {
+  venue: VenueSettings;
+  onInitialLoadComplete?: () => void;
+}) {
   const isRestaurant = isRestaurantTableProductTier(venue.pricing_tier ?? null);
 
   const [blocks, setBlocks] = useState<Block[]>([]);
@@ -230,8 +247,9 @@ function UnifiedBlocksEditor({ venue }: { venue: VenueSettings }) {
       }
     } finally {
       setLoading(false);
+      onInitialLoadComplete?.();
     }
-  }, [isRestaurant]);
+  }, [isRestaurant, onInitialLoadComplete]);
 
   useEffect(() => { reload(); }, [reload]);
 
@@ -369,11 +387,18 @@ function UnifiedBlocksEditor({ venue }: { venue: VenueSettings }) {
 
   if (loading) {
     return (
-      <SectionCard elevated>
-        <SectionCard.Body className="flex items-center justify-center py-12">
-          <div className="h-6 w-6 animate-spin rounded-full border-2 border-brand-600 border-t-transparent" />
-        </SectionCard.Body>
-      </SectionCard>
+      <Skeleton.Card className="space-y-4">
+        <Skeleton.Line className="h-6 w-64" />
+        <Skeleton.Line className="w-full max-w-xl" />
+        <div className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
+          <Skeleton.Block className="h-80" />
+          <div className="space-y-3">
+            <Skeleton.Block className="h-11" />
+            <Skeleton.Block className="h-11" />
+            <Skeleton.Block className="h-24" />
+          </div>
+        </div>
+      </Skeleton.Card>
     );
   }
 

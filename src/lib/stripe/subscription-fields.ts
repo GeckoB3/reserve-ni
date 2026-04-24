@@ -36,3 +36,18 @@ export function subscriptionStatus(sub: unknown): string | undefined {
   const f = asFields(sub);
   return typeof f?.status === 'string' ? f.status : undefined;
 }
+
+export function mapStripeSubscriptionToPlanStatus(
+  sub: unknown,
+): 'active' | 'trialing' | 'past_due' | 'cancelled' | 'cancelling' {
+  if (subscriptionCancelAtPeriodEnd(sub)) return 'cancelling';
+  const st = subscriptionStatus(sub);
+  if (st === 'trialing') return 'trialing';
+  if (st === 'active') return 'active';
+  if (st === 'past_due') return 'past_due';
+  if (st === 'canceled' || st === 'unpaid' || st === 'incomplete_expired' || st === 'paused') {
+    return 'cancelled';
+  }
+  if (st === 'incomplete') return 'past_due';
+  return 'past_due';
+}

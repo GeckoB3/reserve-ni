@@ -9,6 +9,7 @@ import { StaffLeaveCalendarPanel } from '@/app/dashboard/availability/StaffLeave
 import { BookableCalendarsPanel } from '@/app/dashboard/availability/BookableCalendarsPanel';
 import { WorkingHoursControl } from '@/components/scheduling/WorkingHoursControl';
 import { useCalendarEntitlement } from '@/hooks/use-calendar-entitlement';
+import { AppointmentAvailabilityTabPanelSkeleton } from '@/components/ui/dashboard/DashboardSkeletons';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 interface Practitioner {
@@ -779,9 +780,7 @@ export function AppointmentAvailabilitySettings({
       </div>
 
       {loading ? (
-        <div className="flex items-center justify-center py-12">
-          <div className="h-8 w-8 animate-spin rounded-full border-4 border-blue-600 border-t-transparent" />
-        </div>
+        <AppointmentAvailabilityTabPanelSkeleton />
       ) : (
         <>
           {/* ─── Team Tab (Calendars) ─── */}

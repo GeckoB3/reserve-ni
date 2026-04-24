@@ -9,6 +9,7 @@ import { ToastProvider } from '@/components/ui/Toast';
 import type { BookingModel } from '@/types/booking-models';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 import { normalizeEnabledModels } from '@/lib/booking/enabled-models';
+import { BookingsDashboardSkeleton } from '@/components/ui/dashboard/DashboardSkeletons';
 
 export default async function BookingsPage() {
   const supabase = await createClient();
@@ -60,7 +61,7 @@ export default async function BookingsPage() {
       <div className="mx-auto max-w-6xl min-w-0">
         <h1 className="mb-4 text-xl font-semibold tracking-tight text-slate-900 sm:mb-6 sm:text-2xl">{title}</h1>
         <ToastProvider>
-          <Suspense fallback={<div className="rounded-lg border border-slate-200 bg-white p-8 text-center text-sm text-slate-500">Loading bookings…</div>}>
+          <Suspense fallback={<BookingsDashboardSkeleton />}>
             {isAppointment ? (
               <AppointmentBookingsDashboard
                 venueId={venueId}

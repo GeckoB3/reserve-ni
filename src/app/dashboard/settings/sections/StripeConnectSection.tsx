@@ -13,6 +13,7 @@ interface StripeConnectSectionProps {
   stripeAccountLinkPaths?: { return: string; refresh: string };
   /** When true, omit the inner "Stripe payments" title (parent page already explains the step). */
   hideSectionTitle?: boolean;
+  onInitialLoadComplete?: () => void;
 }
 
 interface StripeStatus {
@@ -86,6 +87,7 @@ export function StripeConnectSection({
   isAdmin,
   stripeAccountLinkPaths,
   hideSectionTitle = false,
+  onInitialLoadComplete,
 }: StripeConnectSectionProps) {
   const [state, setState] = useState<ViewState>(
     stripeAccountId ? { kind: 'loading' } : { kind: 'not_connected' },
@@ -93,7 +95,10 @@ export function StripeConnectSection({
   const [redirecting, setRedirecting] = useState(false);
 
   useEffect(() => {
-    if (!stripeAccountId) return;
+    if (!stripeAccountId) {
+      onInitialLoadComplete?.();
+      return;
+    }
 
     let cancelled = false;
 
@@ -117,12 +122,14 @@ export function StripeConnectSection({
         }
       } catch {
         if (!cancelled) setState({ kind: 'error', message: 'Failed to check Stripe status' });
+      } finally {
+        if (!cancelled) onInitialLoadComplete?.();
       }
     }
 
     fetchStatus();
     return () => { cancelled = true; };
-  }, [stripeAccountId]);
+  }, [stripeAccountId, onInitialLoadComplete]);
 
   const startOnboarding = useCallback(async () => {
     setRedirecting(true);

@@ -154,19 +154,14 @@ export default function DashboardHomePage() {
               <Skeleton.Block className="h-10 w-32" />
             </div>
           </div>
-          <div className="grid gap-8 lg:grid-cols-3">
-            <div className="space-y-8 lg:col-span-2">
-              <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-4">
-                {Array.from({ length: 4 }).map((_, i) => (
-                  <Skeleton.Block key={i} className="h-24" />
-                ))}
-              </div>
-              <Skeleton.Block className="h-32" />
-              <Skeleton.Block className="h-60" />
+          <div className="space-y-8">
+            <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-4">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <Skeleton.Block key={i} className="h-24" />
+              ))}
             </div>
-            <aside className="space-y-4 lg:col-span-1">
-              <Skeleton.Block className="h-56" />
-            </aside>
+            <Skeleton.Block className="h-32" />
+            <Skeleton.Block className="h-60" />
           </div>
           <Skeleton.Block className="h-72" />
         </div>
@@ -252,8 +247,6 @@ export default function DashboardHomePage() {
 
         <SetupChecklist />
 
-        <div className="grid gap-8 lg:grid-cols-3">
-          <div className="space-y-8 lg:col-span-2">
             {/* Key Metrics */}
             <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-4">
               <DashboardStatCard
@@ -504,27 +497,6 @@ export default function DashboardHomePage() {
           </div>
         </div>
       </div>
-          </div>
-          <aside className="space-y-4 lg:col-span-1">
-            <SectionCard elevated className="border-slate-200/90">
-              <SectionCard.Header eyebrow="Pulse" title="Today's snapshot" />
-              <SectionCard.Body className="space-y-4">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-sm text-slate-600">Pending confirmations</span>
-                  <span className="text-xl font-bold tabular-nums text-slate-900">{pending}</span>
-                </div>
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-sm text-slate-600">Seated</span>
-                  <span className="text-xl font-bold tabular-nums text-slate-900">{seated}</span>
-                </div>
-                <div className="rounded-xl border border-slate-100 bg-slate-50/90 px-3 py-2.5 text-xs leading-relaxed text-slate-600">
-                  Automated confirmations and reminders follow your venue rules. Fine-tune messaging under Settings
-                  when you are ready.
-                </div>
-              </SectionCard.Body>
-            </SectionCard>
-          </aside>
-        </div>
 
         {/* Today's Bookings */}
         <SectionCard elevated>

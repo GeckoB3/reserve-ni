@@ -153,6 +153,11 @@ button, a, input, select, textarea {
   0% { background-position: -200% 0; }
   100% { background-position: 200% 0; }
 }
+@keyframes dashboard-progress {
+  0% { transform: translateX(-110%); }
+  50% { transform: translateX(80%); }
+  100% { transform: translateX(220%); }
+}
 
 @utility animate-slide-in-right {
   animation: ds-slide-in-right 180ms ease-out both;
@@ -168,11 +173,15 @@ button, a, input, select, textarea {
   background-size: 200% 100%;
   animation: ds-skeleton-shimmer 1.4s ease-in-out infinite;
 }
+@utility animate-dashboard-progress {
+  animation: dashboard-progress 1s ease-in-out infinite;
+}
 
 @media (prefers-reduced-motion: reduce) {
   .animate-slide-in-right,
   .animate-slide-in-bottom,
-  .animate-fade-in {
+  .animate-fade-in,
+  .animate-dashboard-progress {
     animation: none;
   }
   .skeleton {

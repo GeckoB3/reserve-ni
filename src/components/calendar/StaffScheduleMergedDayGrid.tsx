@@ -153,10 +153,10 @@ export function StaffScheduleMergedDayGrid({ date, bookingModel, enabledModels }
       ) : (
         <div
           ref={gridScrollRef}
-          className="w-full touch-manipulation rounded-xl border border-slate-200 bg-white"
+          className="w-full touch-manipulation overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm shadow-slate-900/5 [-webkit-overflow-scrolling:touch]"
         >
-          <div className="flex min-w-[600px]">
-            <div className="w-16 flex-shrink-0 border-r border-slate-100 bg-slate-50">
+          <div className="flex min-w-full">
+            <div className="w-14 flex-shrink-0 border-r border-slate-100 bg-slate-50 sm:w-16">
               <div className="h-10 border-b border-slate-100" />
               <div className="relative" style={{ height: totalSlots * SLOT_HEIGHT }}>
                 {timeLabels.map((t, i) =>
@@ -179,12 +179,12 @@ export function StaffScheduleMergedDayGrid({ date, bookingModel, enabledModels }
                 aria-label="Schedule columns"
               >
                 {showEvents ? (
-                  <div className="flex h-10 min-w-[180px] flex-1 items-center justify-center px-3">
+                  <div className="flex h-12 min-w-[min(16rem,calc(100vw-5.5rem))] flex-1 items-center justify-center px-3 sm:min-w-[240px]">
                     <span className="truncate text-center text-sm font-semibold text-slate-900">Events</span>
                   </div>
                 ) : null}
                 {showResources ? (
-                  <div className="flex h-10 min-w-[180px] flex-1 items-center justify-center px-3">
+                  <div className="flex h-12 min-w-[min(16rem,calc(100vw-5.5rem))] flex-1 items-center justify-center px-3 sm:min-w-[240px]">
                     <span className="truncate text-center text-sm font-semibold text-slate-900">Resources</span>
                   </div>
                 ) : null}

@@ -30,9 +30,16 @@ interface OpeningHoursSectionProps {
   onUpdate: (patch: Partial<VenueSettings>) => void;
   isAdmin: boolean;
   bookingModel: string;
+  onInitialLoadComplete?: () => void;
 }
 
-export function OpeningHoursSection({ venue, onUpdate, isAdmin, bookingModel }: OpeningHoursSectionProps) {
+export function OpeningHoursSection({
+  venue,
+  onUpdate,
+  isAdmin,
+  bookingModel,
+  onInitialLoadComplete,
+}: OpeningHoursSectionProps) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -102,7 +109,13 @@ export function OpeningHoursSection({ venue, onUpdate, isAdmin, bookingModel }: 
           description="Add bank holidays, private events, or other dates when you are closed or on different hours."
         />
         <SectionCard.Body>
-          <BusinessClosuresSection bookingModel={bookingModel} venue={venue} isAdmin={isAdmin} onUpdate={onUpdate} />
+          <BusinessClosuresSection
+            bookingModel={bookingModel}
+            venue={venue}
+            isAdmin={isAdmin}
+            onUpdate={onUpdate}
+            onInitialLoadComplete={onInitialLoadComplete}
+          />
         </SectionCard.Body>
       </SectionCard>
     </div>

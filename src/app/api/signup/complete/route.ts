@@ -3,6 +3,11 @@ import { createClient } from '@/lib/supabase/server';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { stripe } from '@/lib/stripe';
 import { getPersistedSubscriptionItemIds } from '@/lib/stripe/subscription-line-items';
+import {
+  mapStripeSubscriptionToPlanStatus,
+  subscriptionPeriodEndIso,
+  subscriptionPeriodStartIso,
+} from '@/lib/stripe/subscription-fields';
 import { getBusinessConfig } from '@/lib/business-config';
 import { updateVenueSmsMonthlyAllowance } from '@/lib/billing/sms-allowance';
 import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
@@ -95,12 +100,18 @@ export async function POST(request: Request) {
 
     let mainSubscriptionItemId: string | null = null;
     let smsSubscriptionItemId: string | null = null;
+    let periodStartIso: string | null = null;
+    let periodEndIso: string | null = null;
+    let planStatus: 'active' | 'trialing' | 'past_due' | 'cancelled' | 'cancelling' = 'active';
     if (subscriptionId) {
       try {
         const subFull = await stripe.subscriptions.retrieve(subscriptionId);
         const ids = getPersistedSubscriptionItemIds(subFull);
         mainSubscriptionItemId = ids.mainSubscriptionItemId;
         smsSubscriptionItemId = ids.smsSubscriptionItemId;
+        periodStartIso = subscriptionPeriodStartIso(subFull);
+        periodEndIso = subscriptionPeriodEndIso(subFull);
+        planStatus = mapStripeSubscriptionToPlanStatus(subFull);
       } catch (e) {
         console.warn('[signup/complete] Could not load subscription items:', e);
       }
@@ -123,11 +134,13 @@ export async function POST(request: Request) {
         business_category: config.category,
         terminology: config.terms,
         pricing_tier: plan,
-        plan_status: 'active',
+        plan_status: planStatus,
         stripe_customer_id: session.customer as string,
         stripe_subscription_id: subscriptionId,
         stripe_subscription_item_id: mainSubscriptionItemId,
         stripe_sms_subscription_item_id: smsSubscriptionItemId,
+        subscription_current_period_start: periodStartIso,
+        subscription_current_period_end: periodEndIso,
         calendar_count: null,
         onboarding_step: 0,
         onboarding_completed: false,

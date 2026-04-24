@@ -14,6 +14,7 @@ import { reshapePolygonVertexAtLocalPosition } from '@/lib/floor-plan/polygon-ve
 import type { LayoutResizeAnchor } from '@/app/dashboard/settings/floor-plan/KonvaCanvas';
 import Link from 'next/link';
 import { NumericInput } from '@/components/ui/NumericInput';
+import { DashboardGridSkeleton } from '@/components/ui/dashboard/DashboardSkeletons';
 
 const KonvaCanvas = dynamic(() => import('./KonvaCanvas'), { ssr: false });
 
@@ -1621,8 +1622,8 @@ export function FloorPlanEditor({ className, embedded = false, onLayoutSaved, di
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-16">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-slate-300 border-t-brand-600" />
+      <div className="px-2 py-4 sm:px-4" role="status" aria-label="Loading floor plan">
+        <DashboardGridSkeleton />
       </div>
     );
   }

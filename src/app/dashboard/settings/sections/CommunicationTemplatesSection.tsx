@@ -14,6 +14,7 @@ import {
 import { isRestaurantCommsTier } from "@/lib/tier-enforcement";
 import { NumericInput } from "@/components/ui/NumericInput";
 import { SectionCard } from "@/components/ui/dashboard/SectionCard";
+import { Skeleton } from "@/components/ui/Skeleton";
 
 interface CommunicationTemplatesSectionProps {
   venue: { id: string };
@@ -26,6 +27,7 @@ interface CommunicationTemplatesSectionProps {
   onUpdate?: (patch: Record<string, unknown>) => void;
   /** Stripe subscription present — Plan checkout completed; hide Light SMS “add a card” banner. */
   hasStripeSubscription?: boolean;
+  onInitialLoadComplete?: () => void;
 }
 
 const MESSAGE_CARDS: Array<{
@@ -152,6 +154,7 @@ export function CommunicationTemplatesSection({
   bookingModel,
   enabledModels = [],
   hasStripeSubscription = false,
+  onInitialLoadComplete,
 }: CommunicationTemplatesSectionProps) {
   const primary =
     (bookingModel as BookingModel | undefined) ?? "table_reservation";
@@ -217,12 +220,15 @@ export function CommunicationTemplatesSection({
       .catch((error) => {
         console.error("Failed to load communication policies:", error);
         if (!cancelled) setLoading(false);
+      })
+      .finally(() => {
+        if (!cancelled) onInitialLoadComplete?.();
       });
 
     return () => {
       cancelled = true;
     };
-  }, [venue.id]);
+  }, [venue.id, onInitialLoadComplete]);
 
   const flushNow = useCallback(async () => {
     if (debounceRef.current) {
@@ -382,12 +388,18 @@ export function CommunicationTemplatesSection({
 
   if (loading) {
     return (
-      <SectionCard elevated>
-        <SectionCard.Body className="flex items-center gap-3 py-10">
-          <div className="h-5 w-5 animate-spin rounded-full border-2 border-brand-600 border-t-transparent" />
-          <span className="text-sm text-slate-500">Loading communication settings...</span>
-        </SectionCard.Body>
-      </SectionCard>
+      <Skeleton.Card className="p-0">
+        <div className="border-b border-slate-100/90 px-4 py-4 sm:px-6 sm:py-5">
+          <Skeleton.Line className="w-32" />
+          <Skeleton.Line className="mt-3 h-6 w-56" />
+          <Skeleton.Line className="mt-3 w-full max-w-xl" />
+        </div>
+        <div className="space-y-4 px-4 py-5 sm:px-6 sm:py-6">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Skeleton.Block key={i} className="h-20" />
+          ))}
+        </div>
+      </Skeleton.Card>
     );
   }
 
@@ -499,7 +511,7 @@ function SaveIndicator({
     >
       {status === "saving" && (
         <span className="flex items-center gap-1.5 text-xs font-medium text-slate-500">
-          <span className="h-3 w-3 animate-spin rounded-full border-2 border-slate-300 border-t-slate-500" />
+          <span className="h-2 w-2 animate-pulse rounded-full bg-slate-400" />
           Saving…
         </span>
       )}
@@ -778,8 +790,11 @@ function PreviewModal({
         </div>
         <div className="max-h-[70vh] overflow-y-auto p-6">
           {state.loading ? (
-            <div className="flex items-center justify-center py-12">
-              <div className="h-6 w-6 animate-spin rounded-full border-2 border-brand-600 border-t-transparent" />
+            <div className="space-y-3 py-4" role="status" aria-label="Loading preview">
+              <Skeleton.Line className="h-5 w-40" />
+              <Skeleton.Block className="h-32" />
+              <Skeleton.Line className="w-full" />
+              <Skeleton.Line className="w-4/5" />
             </div>
           ) : isSms ? (
             <div className="mx-auto max-w-sm rounded-2xl border border-emerald-200 bg-emerald-50 p-4">

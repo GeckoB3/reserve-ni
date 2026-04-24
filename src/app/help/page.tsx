@@ -23,8 +23,8 @@ export default function HelpHomePage() {
       <div className="mb-8">
         <h1 className="text-3xl font-bold tracking-tight text-slate-900">How can we help?</h1>
         <p className="mt-2 max-w-2xl text-base text-slate-600">
-          Guides for ReserveNI — your dashboard, dining and tables, appointments and calendars, settings, and fixes for
-          common issues.
+          Step-by-step guides for running your venue on ReserveNI: dashboard basics, restaurant tables and dining setup,
+          appointment calendars and services, settings, billing, and fixes for common problems.
         </p>
       </div>
 

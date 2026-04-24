@@ -810,10 +810,7 @@ export function BookableCalendarsPanel({
           )}
           {reorderSaving && (
             <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50/90 px-4 py-3 text-sm text-slate-700 ring-1 ring-slate-100">
-              <span
-                className="h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-slate-300 border-t-brand-600"
-                aria-hidden
-              />
+              <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-brand-600" aria-hidden />
               Saving column order…
             </div>
           )}

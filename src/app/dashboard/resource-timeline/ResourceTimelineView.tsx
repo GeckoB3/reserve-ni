@@ -13,6 +13,7 @@ import { Pill, type PillVariant } from '@/components/ui/dashboard/Pill';
 import { EmptyState } from '@/components/ui/dashboard/EmptyState';
 import { StatTile } from '@/components/ui/dashboard/StatTile';
 import { ScheduleRow } from '@/components/ui/dashboard/ScheduleRow';
+import { Skeleton } from '@/components/ui/Skeleton';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -682,14 +683,20 @@ export function ResourceTimelineView({
               <SectionCard.Header eyebrow="Resources" title="All resources" />
               <SectionCard.Body className="space-y-3">
                 {[1, 2, 3, 4, 5, 6].map((i) => (
-                  <div key={i} className="h-14 animate-pulse rounded-lg bg-slate-100" />
+                  <Skeleton.Block key={i} className="h-14" />
                 ))}
               </SectionCard.Body>
             </SectionCard>
           </div>
           <div className="min-w-0 flex-1 space-y-4">
-            <div className="h-40 animate-pulse rounded-xl bg-slate-100" />
-            <div className="h-32 animate-pulse rounded-xl bg-slate-100" />
+            <Skeleton.Card>
+              <Skeleton.Line className="w-1/3" />
+              <Skeleton.Block className="mt-3 h-32" />
+            </Skeleton.Card>
+            <Skeleton.Card>
+              <Skeleton.Line className="w-24" />
+              <Skeleton.Block className="mt-3 h-28" />
+            </Skeleton.Card>
           </div>
         </div>
       </div>
@@ -1273,7 +1280,7 @@ export function ResourceTimelineView({
                 title={selected.name}
                 description={
                   selected.resource_type ? (
-                    <p className="text-sm text-slate-600">{selected.resource_type}</p>
+                    <span>{selected.resource_type}</span>
                   ) : undefined
                 }
                 right={
@@ -1400,7 +1407,11 @@ export function ResourceTimelineView({
               />
               <SectionCard.Body className="!pt-0">
               {bookingsLoading ? (
-                <div className="mt-4 h-8 animate-pulse rounded bg-slate-100" />
+                <div className="mt-4 space-y-2" role="status" aria-label="Loading bookings">
+                  <Skeleton.Line className="w-full" />
+                  <Skeleton.Line className="w-4/5" />
+                  <Skeleton.Line className="w-3/5" />
+                </div>
               ) : bookings.length === 0 ? (
                 <EmptyState
                   title="No bookings on this date"

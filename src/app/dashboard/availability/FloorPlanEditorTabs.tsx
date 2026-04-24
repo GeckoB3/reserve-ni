@@ -7,6 +7,7 @@ import { TableCombinationsPage } from '@/app/dashboard/settings/tables/TableComb
 import type { TableCombination, VenueTable } from '@/types/table-management';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { TabBar } from '@/components/ui/dashboard/TabBar';
+import { FloorPlanTablesPanelSkeleton } from '@/components/ui/dashboard/DashboardSkeletons';
 
 export type FloorPlanEditorTabKey = 'layout' | 'tables' | 'combinations';
 
@@ -130,9 +131,7 @@ export function FloorPlanEditorTabs({
         {activeTab === 'tables' && (
           <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
             {loading ? (
-              <div className="flex items-center justify-center py-10">
-                <div className="h-8 w-8 animate-spin rounded-full border-2 border-slate-300 border-t-brand-600" />
-              </div>
+              <FloorPlanTablesPanelSkeleton />
             ) : (
               <TableList
                 tables={tables}
@@ -149,9 +148,7 @@ export function FloorPlanEditorTabs({
         {activeTab === 'combinations' && advancedTableManagement && (
           <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
             {loading ? (
-              <div className="flex items-center justify-center py-10">
-                <div className="h-8 w-8 animate-spin rounded-full border-2 border-slate-300 border-t-brand-600" />
-              </div>
+              <FloorPlanTablesPanelSkeleton />
             ) : (
               <TableCombinationsPage
                 combinations={combinations}

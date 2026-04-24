@@ -4,6 +4,7 @@ import { stripe } from '@/lib/stripe';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { getBusinessConfig } from '@/lib/business-config';
 import {
+  mapStripeSubscriptionToPlanStatus,
   subscriptionCancelAtPeriodEnd,
   subscriptionPeriodEndIso,
   subscriptionPeriodStartIso,
@@ -45,21 +46,6 @@ function buildPriceToTierMapping(): Record<string, 'appointments' | 'plus' | 're
     if (id) out[id] = tier;
   }
   return out;
-}
-
-function mapSubscriptionStatusToPlanStatus(
-  subscription: Stripe.Subscription,
-): 'active' | 'trialing' | 'past_due' | 'cancelled' | 'cancelling' {
-  const st = subscription.status;
-  if (subscriptionCancelAtPeriodEnd(subscription)) return 'cancelling';
-  if (st === 'trialing') return 'trialing';
-  if (st === 'active') return 'active';
-  if (st === 'past_due') return 'past_due';
-  if (st === 'canceled' || st === 'unpaid' || st === 'incomplete_expired' || st === 'paused') {
-    return 'cancelled';
-  }
-  if (st === 'incomplete') return 'past_due';
-  return 'past_due';
 }
 
 export async function POST(request: NextRequest) {
@@ -216,7 +202,7 @@ async function handleCheckoutCompleted(
     let smsSubscriptionItemId: string | null = null;
     let periodEndIso: string | null = null;
     let periodStartIso: string | null = null;
-    let cancelAtPeriodEnd = false;
+    let newPlanStatus: 'active' | 'trialing' | 'past_due' | 'cancelled' | 'cancelling' = 'active';
     if (subscriptionId) {
       try {
         const sub = await stripe.subscriptions.retrieve(subscriptionId);
@@ -225,7 +211,7 @@ async function handleCheckoutCompleted(
         smsSubscriptionItemId = ids.smsSubscriptionItemId;
         periodEndIso = subscriptionPeriodEndIso(sub);
         periodStartIso = subscriptionPeriodStartIso(sub);
-        cancelAtPeriodEnd = subscriptionCancelAtPeriodEnd(sub);
+        newPlanStatus = mapStripeSubscriptionToPlanStatus(sub);
       } catch {
         console.warn('[Subscription webhook] Could not retrieve new subscription item');
       }
@@ -237,12 +223,12 @@ async function handleCheckoutCompleted(
       stripe_sms_subscription_item_id: smsSubscriptionItemId,
       subscription_current_period_start: periodStartIso,
       subscription_current_period_end: periodEndIso,
-      plan_status: cancelAtPeriodEnd ? 'cancelling' : 'active',
+      plan_status: newPlanStatus,
     };
     if (newPlan) {
       changePlanUpdates.pricing_tier = newPlan;
     }
-    changePlanUpdates.calendar_count = null;
+    changePlanUpdates.calendar_count = newPlan === 'light' ? 1 : null;
 
     await supabase
       .from('venues')
@@ -414,7 +400,7 @@ async function handleSubscriptionUpdated(
     });
   }
 
-  updates.plan_status = mapSubscriptionStatusToPlanStatus(subscription);
+  updates.plan_status = mapStripeSubscriptionToPlanStatus(subscription);
 
   const { data: venueRows } = await supabase.from('venues').select('id').eq('stripe_customer_id', customerId);
   await supabase.from('venues').update(updates).eq('stripe_customer_id', customerId);
@@ -461,13 +447,19 @@ async function handleSubscriptionDeleted(
    */
   const { data: rows } = await supabase
     .from('venues')
-    .select('id, stripe_subscription_id')
+    .select('id, stripe_subscription_id, subscription_current_period_start, subscription_current_period_end')
     .eq('stripe_customer_id', customerId);
 
   for (const row of rows ?? []) {
     const vid = (row as { id?: string }).id;
     const stored = (row as { stripe_subscription_id?: string | null }).stripe_subscription_id;
     if (!vid || stored !== deletedId) continue;
+    const existingPeriodStart = (row as { subscription_current_period_start?: string | null })
+      .subscription_current_period_start;
+    const existingPeriodEnd = (row as { subscription_current_period_end?: string | null })
+      .subscription_current_period_end;
+    const periodStartIso = subscriptionPeriodStartIso(subscription) ?? existingPeriodStart ?? null;
+    const periodEndIso = subscriptionPeriodEndIso(subscription) ?? existingPeriodEnd ?? null;
 
     await supabase
       .from('venues')
@@ -476,8 +468,8 @@ async function handleSubscriptionDeleted(
         stripe_subscription_id: null,
         stripe_subscription_item_id: null,
         stripe_sms_subscription_item_id: null,
-        subscription_current_period_start: null,
-        subscription_current_period_end: null,
+        subscription_current_period_start: periodStartIso,
+        subscription_current_period_end: periodEndIso,
       })
       .eq('id', vid);
   }

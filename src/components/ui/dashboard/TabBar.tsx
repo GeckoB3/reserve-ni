@@ -1,12 +1,16 @@
 'use client';
 
+import { Skeleton } from '@/components/ui/Skeleton';
+
 export function TabBar<T extends string>({
   tabs,
   value,
+  pendingValue,
   onChange,
 }: {
   tabs: readonly { id: T; label: string; description?: string }[];
   value: T;
+  pendingValue?: T | null;
   onChange: (id: T) => void;
 }) {
   const active = tabs.find((t) => t.id === value);
@@ -22,12 +26,14 @@ export function TabBar<T extends string>({
         >
           {tabs.map((t) => {
             const isActive = t.id === value;
+            const isPending = pendingValue === t.id;
             return (
               <button
                 key={t.id}
                 type="button"
                 role="tab"
                 aria-selected={isActive}
+                aria-busy={isPending || undefined}
                 aria-current={isActive ? 'page' : undefined}
                 title={t.description}
                 onClick={() => onChange(t.id)}
@@ -37,7 +43,10 @@ export function TabBar<T extends string>({
                     : 'text-slate-600 hover:bg-white/70 hover:text-slate-900'
                 }`}
               >
-                <span className="block whitespace-nowrap">{t.label}</span>
+                <span className="flex items-center gap-2 whitespace-nowrap">
+                  {isPending ? <Skeleton.Line className="h-2.5 w-7 shrink-0" /> : null}
+                  {t.label}
+                </span>
               </button>
             );
           })}

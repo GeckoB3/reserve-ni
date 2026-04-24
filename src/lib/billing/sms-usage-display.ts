@@ -9,12 +9,18 @@ function billingMonthFirstDayUtcYmd(): string {
   return `${y}-${m}-01`;
 }
 
+export type SmsUsageBillingMode = 'light_metered' | 'bundle_allowance';
+
 export interface SmsUsageDisplay {
   messages_sent: number;
   messages_included: number;
   remaining: number;
   overage_count: number;
   overage_amount_pence: number;
+  /** Light: every SMS is metered; other tiers: SMS beyond included allowance. */
+  billing_mode: SmsUsageBillingMode;
+  /** GBP per billable SMS for this venue (0.08 Light, 0.06 overage on other plans). */
+  billable_unit_gbp: number;
 }
 
 /**
@@ -64,6 +70,8 @@ export async function getSmsUsageDisplayForVenue(
       remaining: 0,
       overage_count: sent,
       overage_amount_pence: overagePenceLight,
+      billing_mode: 'light_metered',
+      billable_unit_gbp: SMS_LIGHT_GBP_PER_MESSAGE,
     };
   }
 
@@ -77,5 +85,7 @@ export async function getSmsUsageDisplayForVenue(
     remaining,
     overage_count: overageCount,
     overage_amount_pence: overagePence,
+    billing_mode: 'bundle_allowance',
+    billable_unit_gbp: SMS_OVERAGE_GBP_PER_MESSAGE,
   };
 }

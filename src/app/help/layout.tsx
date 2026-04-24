@@ -4,7 +4,7 @@ import { HelpLayoutShell } from '@/components/help/HelpLayoutShell';
 export const metadata: Metadata = {
   title: 'Help',
   description:
-    'ReserveNI product documentation and troubleshooting — restaurants, appointments, settings, and common issues.',
+    'ReserveNI help: restaurant and appointment booking, settings, Stripe, communications, reports, and troubleshooting.',
 };
 
 export default function HelpLayout({ children }: { children: React.ReactNode }) {

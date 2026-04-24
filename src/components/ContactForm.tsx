@@ -148,7 +148,7 @@ export default function ContactForm() {
 
       <div>
         <label htmlFor="contact-restaurant" className={labelClass}>
-          Restaurant Name
+          Business Name
         </label>
         <input
           id="contact-restaurant"

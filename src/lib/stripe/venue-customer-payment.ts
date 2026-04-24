@@ -26,6 +26,46 @@ export async function stripeCustomerHasDefaultPaymentMethod(customerId: string):
   }
 }
 
+function hasPaymentMethodValue(value: unknown): boolean {
+  if (typeof value === 'string') return value.length > 0;
+  return Boolean(value && typeof value === 'object');
+}
+
+/**
+ * True when the active subscription or its customer has a payment method that Stripe can use for recurring invoices.
+ * Checkout-created subscriptions often store the card on the subscription rather than the customer invoice defaults.
+ */
+export async function stripeSubscriptionOrCustomerHasPaymentMethod({
+  customerId,
+  subscriptionId,
+}: {
+  customerId?: string | null;
+  subscriptionId?: string | null;
+}): Promise<boolean> {
+  const subId = subscriptionId?.trim();
+  if (subId) {
+    try {
+      const subscription = await stripe.subscriptions.retrieve(subId, {
+        expand: ['default_payment_method'],
+      });
+      if (hasPaymentMethodValue(subscription.default_payment_method)) return true;
+      const customer =
+        typeof subscription.customer === 'string' ? subscription.customer : subscription.customer?.id;
+      if (customer) {
+        return stripeCustomerHasDefaultPaymentMethod(customer);
+      }
+    } catch (e) {
+      console.warn('[stripeSubscriptionOrCustomerHasPaymentMethod] subscription retrieve failed', {
+        subscriptionId: subId,
+        err: e,
+      });
+    }
+  }
+
+  const cid = customerId?.trim();
+  return cid ? stripeCustomerHasDefaultPaymentMethod(cid) : false;
+}
+
 /**
  * True when the venue's Stripe customer has a default payment method suitable for SMS billing.
  * Light plan requires a card on file before SMS sends; other tiers use existing behaviour.
@@ -34,7 +74,7 @@ export async function venueHasStripePaymentMethodForSms(venueId: string): Promis
   const admin = getSupabaseAdminClient();
   const { data: row, error } = await admin
     .from('venues')
-    .select('stripe_customer_id, pricing_tier')
+    .select('stripe_customer_id, stripe_subscription_id, pricing_tier')
     .eq('id', venueId)
     .maybeSingle();
 
@@ -51,5 +91,6 @@ export async function venueHasStripePaymentMethodForSms(venueId: string): Promis
     return false;
   }
 
-  return stripeCustomerHasDefaultPaymentMethod(customerId);
+  const subscriptionId = (row as { stripe_subscription_id?: string | null }).stripe_subscription_id;
+  return stripeSubscriptionOrCustomerHasPaymentMethod({ customerId, subscriptionId });
 }

@@ -65,7 +65,7 @@ export function ScheduleFeedColumn({
   const dayBlocks = blocks.filter((b) => b.date === date);
 
   return (
-    <div className="min-w-[180px] flex-1 border-r border-slate-100 last:border-r-0">
+    <div className="min-w-[min(16rem,calc(100vw-5.5rem))] flex-1 border-r border-slate-100 last:border-r-0 sm:min-w-[240px]">
       {!hideHeader ? (
         <div className="sticky top-0 z-10 flex h-10 items-center justify-center border-b border-slate-100 bg-white px-3 py-2">
           <span className="truncate text-center text-sm font-semibold text-slate-900">{label}</span>
@@ -89,19 +89,19 @@ export function ScheduleFeedColumn({
               : null;
           const isClass = b.kind === 'class_session';
           const cardClass = isClass
-            ? `flex h-full min-h-0 flex-col overflow-hidden rounded-lg border shadow-sm ${CLASS_LANE_BG} ${CLASS_LANE_BORDER} px-2 py-1.5 text-left`
-            : `flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-slate-200 bg-white px-1.5 py-1 text-left shadow-sm`;
+            ? `flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border shadow-sm ring-1 ring-white/70 ${CLASS_LANE_BG} ${CLASS_LANE_BORDER} px-3 py-2 text-left transition-all hover:-translate-y-0.5 hover:shadow-xl`
+            : `flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white px-3 py-2 text-left shadow-sm ring-1 ring-white/70 transition-all hover:-translate-y-0.5 hover:shadow-xl`;
           const body = (
             <div
               className={`${cardClass} ${clickable ? 'cursor-pointer hover:brightness-[0.98]' : ''}`}
               style={{ borderLeftWidth: 3, borderLeftColor: accent }}
             >
-              <span className={`truncate text-xs font-semibold ${isClass ? CLASS_LANE_TEXT : 'text-slate-900'}`}>
+              <span className={`truncate text-[13px] font-extrabold tracking-tight ${isClass ? CLASS_LANE_TEXT : 'text-slate-900'}`}>
                 {b.title}
               </span>
               {b.kind === 'event_ticket' ? (
                 eventUptake ? (
-                  <span className="truncate text-[10px] text-slate-600">{eventUptake}</span>
+                  <span className="truncate text-[10px] font-medium text-slate-600">{eventUptake}</span>
                 ) : null
               ) : b.subtitle ? (
                 <span className={`truncate text-[10px] ${isClass ? 'text-blue-800/90' : 'text-slate-500'}`}>
@@ -113,7 +113,7 @@ export function ScheduleFeedColumn({
                   {classUptake}
                 </span>
               ) : null}
-              <span className={`text-[10px] ${isClass ? 'text-blue-700/80' : 'text-slate-400'}`}>
+                <span className={`mt-auto rounded-full bg-white/60 px-1.5 py-0.5 text-[10px] font-bold tabular-nums shadow-sm ring-1 ring-black/5 ${isClass ? 'text-blue-700/80' : 'text-slate-500'}`}>
                 {b.start_time} – {b.end_time}
               </span>
             </div>

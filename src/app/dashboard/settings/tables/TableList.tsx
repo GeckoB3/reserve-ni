@@ -372,8 +372,8 @@ export function TableList({ tables, setTables, isAdmin, onRefresh, variant = 'fu
         </p>
       )}
       {reorderSaving && (
-        <p className="text-xs text-slate-500">
-          <span className="inline-block h-3 w-3 animate-spin rounded-full border border-slate-300 border-t-brand-600 align-middle" />{' '}
+        <p className="flex items-center gap-2 text-xs text-slate-500">
+          <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-brand-600" aria-hidden />
           Saving table order…
         </p>
       )}

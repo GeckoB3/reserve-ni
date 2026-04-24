@@ -33,6 +33,7 @@ import { NumericInput } from '@/components/ui/NumericInput';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { Pill } from '@/components/ui/dashboard/Pill';
+import { DashboardCardGridSkeleton } from '@/components/ui/dashboard/DashboardSkeletons';
 import { EmptyState } from '@/components/ui/dashboard/EmptyState';
 
 interface Service {
@@ -651,11 +652,7 @@ export function AppointmentServicesView({
       )}
 
       {loading ? (
-        <div className="space-y-3">
-          {[1, 2, 3].map((i) => (
-            <div key={i} className="h-24 animate-pulse rounded-xl bg-slate-100" />
-          ))}
-        </div>
+        <DashboardCardGridSkeleton cards={3} />
       ) : services.length === 0 ? (
         <EmptyState
           title="No services yet"
@@ -700,7 +697,7 @@ export function AppointmentServicesView({
                   title={display.name}
                   description={
                     display.description ? (
-                      <p className="text-sm text-slate-600 line-clamp-2">{display.description}</p>
+                      <span className="line-clamp-2">{display.description}</span>
                     ) : undefined
                   }
                   right={

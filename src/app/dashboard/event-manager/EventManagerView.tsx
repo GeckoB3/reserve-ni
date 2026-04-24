@@ -16,6 +16,7 @@ import { Pill, type PillVariant } from '@/components/ui/dashboard/Pill';
 import { currencySymbolFromCode } from '@/lib/money/currency-symbol';
 import { EmptyState } from '@/components/ui/dashboard/EmptyState';
 import { StackedList } from '@/components/ui/dashboard/StackedList';
+import { DashboardCardGridSkeleton } from '@/components/ui/dashboard/DashboardSkeletons';
 
 interface TicketType {
   id: string;
@@ -1245,11 +1246,7 @@ export function EventManagerView({
       )}
 
       {loading ? (
-        <div className="space-y-4">
-          {[1, 2].map((i) => (
-            <div key={i} className="h-32 animate-pulse rounded-xl bg-slate-100" />
-          ))}
-        </div>
+        <DashboardCardGridSkeleton cards={2} />
       ) : events.length === 0 ? (
         <EmptyState
           title="No events yet"
@@ -1408,10 +1405,10 @@ export function EventManagerView({
                 title={detail.name}
                 description={
                   <>
-                    <p className="text-sm text-slate-600">
+                    <span className="block">
                       {detail.event_date} · {detail.start_time.slice(0, 5)} – {detail.end_time.slice(0, 5)} ·{' '}
                       {detail.capacity} capacity
-                    </p>
+                    </span>
                     {!detail.is_active ? (
                       <span className="mt-2 inline-block">
                         <Pill variant="warning" size="sm">
@@ -1423,10 +1420,10 @@ export function EventManagerView({
                     detail.is_active &&
                     detail.calendar_id !== null &&
                     linkedPractitionerIds.includes(detail.calendar_id) ? (
-                      <p className="mt-3 max-w-md text-xs text-slate-500">
+                      <span className="mt-3 block max-w-md text-xs text-slate-500">
                         Cancelling an event and notifying guests is limited to venue admins. You can still edit or
                         delete this event when allowed.
-                      </p>
+                      </span>
                     ) : null}
                   </>
                 }

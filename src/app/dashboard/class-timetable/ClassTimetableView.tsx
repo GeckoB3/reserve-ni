@@ -15,6 +15,7 @@ import { StatTile } from '@/components/ui/dashboard/StatTile';
 import { Pill } from '@/components/ui/dashboard/Pill';
 import { currencySymbolFromCode } from '@/lib/money/currency-symbol';
 import { EmptyState } from '@/components/ui/dashboard/EmptyState';
+import { Skeleton } from '@/components/ui/Skeleton';
 
 interface PractitionerOption {
   id: string;
@@ -833,7 +834,10 @@ export function ClassTimetableView({
           <SectionCard.Header eyebrow="Catalogue" title="Class types" />
           <SectionCard.Body className="p-0">
           {loading ? (
-            <div className="m-4 h-12 animate-pulse rounded bg-slate-100" />
+            <div className="m-4 space-y-2" role="status" aria-label="Loading class types">
+              <Skeleton.Line className="h-4 w-48" />
+              <Skeleton.Line className="w-full max-w-md" />
+            </div>
           ) : classTypes.length === 0 && !showClassTypeForm ? (
             <div className="px-5 py-8">
               <EmptyState
@@ -1299,7 +1303,18 @@ export function ClassTimetableView({
       </SectionCard>
 
       {loading ? (
-        <div className="h-96 animate-pulse rounded-xl bg-slate-100" />
+        <Skeleton.Card className="min-h-[28rem]">
+          <div className="grid gap-3 sm:grid-cols-7">
+            {Array.from({ length: 7 }).map((_, i) => (
+              <Skeleton.Line key={i} className="h-8" />
+            ))}
+          </div>
+          <div className="mt-4 grid grid-cols-7 gap-2">
+            {Array.from({ length: 28 }).map((_, i) => (
+              <Skeleton.Block key={i} className="aspect-square min-h-[40px]" />
+            ))}
+          </div>
+        </Skeleton.Card>
       ) : classTypes.length === 0 ? (
         !isAdmin && (
           <div className="rounded-xl border border-slate-200 bg-white p-12 text-center">

@@ -67,38 +67,68 @@ export default async function ReportsPage() {
         <SectionCard elevated>
           <SectionCard.Header eyebrow="Usage" title="SMS this month" />
           <SectionCard.Body className="space-y-3">
-            <div className="flex flex-wrap items-center gap-3">
-              <div className="h-2 min-w-[100px] flex-1 max-w-sm overflow-hidden rounded-full bg-slate-100">
-                <div
-                  className="h-full rounded-full bg-brand-500"
-                  style={{
-                    width: `${Math.min(
-                      100,
-                      smsUsage.messages_included > 0
-                        ? (smsUsage.messages_sent / smsUsage.messages_included) * 100
-                        : 0,
-                    )}%`,
-                  }}
-                />
-              </div>
-              <p className="text-sm text-slate-700">
-                <span className="font-semibold text-slate-900">{smsUsage.messages_sent}</span>
-                {' / '}
-                {smsUsage.messages_included} included
-                <span className="text-slate-500"> ({smsUsage.remaining} left)</span>
-              </p>
-            </div>
-            {smsUsage.overage_count > 0 ? (
-              <div className="flex flex-wrap items-start gap-2 rounded-xl border border-amber-200/80 bg-amber-50/60 px-3 py-2.5 text-sm text-amber-950">
-                <Pill variant="warning" size="sm" dot>
-                  Overage
-                </Pill>
-                <span>
-                  {smsUsage.overage_count} over included allowance — ≈ £
-                  {(smsUsage.overage_amount_pence / 100).toFixed(2)} at 5p each (billed at month end)
-                </span>
-              </div>
-            ) : null}
+            {smsUsage.billing_mode === 'light_metered' ? (
+              <>
+                <p className="text-sm text-slate-700">
+                  <span className="font-semibold text-slate-900">{smsUsage.messages_sent}</span>
+                  {' SMS sent this month'}
+                </p>
+                <p className="text-xs leading-relaxed text-slate-600">
+                  On Appointments Light there is no included SMS bundle. Each message is billed at £
+                  {smsUsage.billable_unit_gbp.toFixed(2)}. Usage is recorded through the month and charged by Stripe on
+                  the same invoice as your monthly subscription.
+                </p>
+                {smsUsage.messages_sent > 0 ? (
+                  <div className="flex flex-wrap items-start gap-2 rounded-xl border border-slate-200/90 bg-slate-50/80 px-3 py-2.5 text-sm text-slate-800">
+                    <Pill variant="neutral" size="sm" dot>
+                      Estimated this month
+                    </Pill>
+                    <span>
+                      About £{(smsUsage.overage_amount_pence / 100).toFixed(2)} for {smsUsage.messages_sent}{' '}
+                      {smsUsage.messages_sent === 1 ? 'message' : 'messages'} at £{smsUsage.billable_unit_gbp.toFixed(2)}{' '}
+                      each (before invoice). Final amounts appear on your Stripe subscription invoice at period end.
+                    </span>
+                  </div>
+                ) : null}
+              </>
+            ) : (
+              <>
+                <div className="flex flex-wrap items-center gap-3">
+                  <div className="h-2 min-w-[100px] flex-1 max-w-sm overflow-hidden rounded-full bg-slate-100">
+                    <div
+                      className="h-full rounded-full bg-brand-500"
+                      style={{
+                        width: `${Math.min(
+                          100,
+                          smsUsage.messages_included > 0
+                            ? (smsUsage.messages_sent / smsUsage.messages_included) * 100
+                            : 0,
+                        )}%`,
+                      }}
+                    />
+                  </div>
+                  <p className="text-sm text-slate-700">
+                    <span className="font-semibold text-slate-900">{smsUsage.messages_sent}</span>
+                    {' / '}
+                    {smsUsage.messages_included} included
+                    <span className="text-slate-500"> ({smsUsage.remaining} left)</span>
+                  </p>
+                </div>
+                {smsUsage.overage_count > 0 ? (
+                  <div className="flex flex-wrap items-start gap-2 rounded-xl border border-amber-200/80 bg-amber-50/60 px-3 py-2.5 text-sm text-amber-950">
+                    <Pill variant="warning" size="sm" dot>
+                      Overage
+                    </Pill>
+                    <span>
+                      {smsUsage.overage_count} SMS beyond your included allowance — about £
+                      {(smsUsage.overage_amount_pence / 100).toFixed(2)} at £{smsUsage.billable_unit_gbp.toFixed(2)} each.
+                      Overage is tallied through the month and charged by Stripe once per month on the same invoice as
+                      your subscription.
+                    </span>
+                  </div>
+                ) : null}
+              </>
+            )}
           </SectionCard.Body>
         </SectionCard>
       ) : null}

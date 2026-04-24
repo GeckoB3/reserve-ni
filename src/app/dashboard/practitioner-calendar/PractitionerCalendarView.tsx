@@ -34,6 +34,7 @@ import {
 import { ClassInstanceDetailSheet } from '@/components/practitioner-calendar/ClassInstanceDetailSheet';
 import { EventInstanceDetailSheet } from '@/components/practitioner-calendar/EventInstanceDetailSheet';
 import { useToast } from '@/components/ui/Toast';
+import { DashboardCalendarSkeleton } from '@/components/ui/dashboard/DashboardSkeletons';
 import { getCalendarGridBounds } from '@/lib/venue-calendar-bounds';
 import { canMarkNoShowForSlot, type BookingStatus } from '@/lib/table-management/booking-status';
 import type { OpeningHours } from '@/types/availability';
@@ -259,12 +260,14 @@ const BOOKING_PALETTE_CANCELLED: BookingBlockPalette = {
 function bookingBlockCardStyle(p: BookingBlockPalette): CSSProperties {
   return {
     backgroundColor: p.bg,
+    backgroundImage: `linear-gradient(135deg, ${p.bg} 0%, #ffffff 145%)`,
     color: p.text,
     borderTopColor: p.border,
     borderRightColor: p.border,
     borderBottomColor: p.border,
     borderLeftWidth: 3,
     borderLeftColor: p.accent,
+    boxShadow: '0 12px 28px rgba(15, 23, 42, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.72)',
   };
 }
 
@@ -286,6 +289,25 @@ function bookingCalendarBlockStyle(b: Booking): BookingBlockPalette {
     return BOOKING_PALETTE_BOOKED;
   }
   return BOOKING_PALETTE_BOOKED;
+}
+
+function calendarStatusLabel(b: Booking): string {
+  if (isArrivedWaitingDisplay(b)) return 'Arrived';
+  return bookingStatusDisplayLabel(b.status, isTableReservationBooking(b));
+}
+
+function CalendarBookingStatusBadge({ b }: { b: Booking }) {
+  const p = bookingCalendarBlockStyle(b);
+  return (
+    <span
+      className="inline-flex max-w-full items-center gap-1 rounded-full bg-white/80 px-2 py-0.5 text-[10px] font-bold leading-tight shadow-sm ring-1 ring-black/5 backdrop-blur-sm"
+      style={{ color: p.text }}
+      title={calendarStatusLabel(b)}
+    >
+      <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: p.accent }} aria-hidden />
+      <span className="truncate">{calendarStatusLabel(b)}</span>
+    </span>
+  );
 }
 
 function timeToMinutes(t: string): number {
@@ -395,6 +417,30 @@ function BookingBlockPills({ b }: { b: Booking }) {
   );
 }
 
+function BookingMetaLine({
+  serviceName,
+  resourceName,
+  start,
+  end,
+  showService = true,
+}: {
+  serviceName?: string | null;
+  resourceName?: string | null;
+  start: string;
+  end: string;
+  showService?: boolean;
+}) {
+  return (
+    <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] font-medium text-slate-600/90">
+      <span className="rounded-full bg-white/60 px-1.5 py-0.5 font-bold tabular-nums text-slate-700 shadow-sm ring-1 ring-black/5">
+        {start}–{end}
+      </span>
+      {resourceName ? <span className="truncate">{resourceName}</span> : null}
+      {showService && serviceName ? <span className="truncate">{serviceName}</span> : null}
+    </div>
+  );
+}
+
 /** Right-column py-1 (4px + 4px) + gap-0.5 between buttons (2px each). */
 const BOOKING_RIGHT_COL_PAD_Y = 8;
 const BOOKING_RIGHT_GAP_PX = 2;
@@ -433,13 +479,13 @@ function bookingRightColumnCompactStyle(
       compact: false,
       fontSizePx: 10,
       baseClass:
-        'inline-flex w-full min-w-0 min-h-0 shrink items-center justify-center whitespace-normal break-words px-1.5 py-1 text-center text-[10px] leading-snug [overflow-wrap:anywhere]',
+      'inline-flex w-full min-w-0 min-h-0 shrink items-center justify-center whitespace-normal break-words px-2 py-1.5 text-center text-[10px] leading-snug [overflow-wrap:anywhere]',
     };
   }
   const gapTotal = actionCount > 1 ? (actionCount - 1) * BOOKING_RIGHT_GAP_PX : 0;
   const available = blockHeightPx - BOOKING_RIGHT_COL_PAD_Y - gapTotal;
   const perButton = available / actionCount;
-  const comfortableMinPx = 26;
+  const comfortableMinPx = 30;
   const compact = perButton < comfortableMinPx;
   const fontSizePx = Math.round(Math.max(7, Math.min(10, perButton * 0.38)));
   if (!compact) {
@@ -447,14 +493,14 @@ function bookingRightColumnCompactStyle(
       compact: false,
       fontSizePx: 10,
       baseClass:
-        'inline-flex w-full min-w-0 min-h-0 shrink items-center justify-center whitespace-normal break-words px-1.5 py-1 text-center text-[10px] leading-snug [overflow-wrap:anywhere]',
+        'inline-flex w-full min-w-0 min-h-0 shrink items-center justify-center whitespace-normal break-words px-2 py-1.5 text-center text-[10px] leading-snug [overflow-wrap:anywhere]',
     };
   }
   return {
     compact: true,
     fontSizePx,
     baseClass:
-      'flex min-h-0 min-w-0 flex-1 basis-0 flex-col items-center justify-center gap-0 overflow-hidden whitespace-normal break-words px-1 py-px text-center [overflow-wrap:anywhere]',
+      'flex min-h-0 min-w-0 flex-1 basis-0 flex-col items-center justify-center gap-0 overflow-hidden whitespace-normal break-words px-1.5 py-0.5 text-center [overflow-wrap:anywhere]',
   };
 }
 
@@ -502,7 +548,7 @@ function CalendarBookingRightColumnActions({
           disabled={busy}
           style={textStyle}
           onClick={() => onStaffAttendance(b.id, true)}
-          className={`${baseClass} rounded border border-[#0D9488] bg-[#F0FDFA] font-semibold text-[#134E4A] hover:bg-[#CCFBF1] disabled:opacity-50`}
+          className={`${baseClass} rounded-lg border border-[#0D9488] bg-[#F0FDFA] font-semibold text-[#134E4A] shadow-sm transition hover:bg-[#CCFBF1] disabled:opacity-50`}
           title="Confirm booking attendance"
         >
           Confirm Booking
@@ -514,7 +560,7 @@ function CalendarBookingRightColumnActions({
           disabled={busy}
           style={textStyle}
           onClick={() => onStaffAttendance(b.id, false)}
-          className={`${baseClass} rounded border border-slate-200 bg-white font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50`}
+          className={`${baseClass} rounded-lg border border-slate-200 bg-white font-medium text-slate-600 shadow-sm transition hover:bg-slate-50 disabled:opacity-50`}
           title="Cancel staff attendance confirmation"
         >
           Cancel confirmation
@@ -526,7 +572,7 @@ function CalendarBookingRightColumnActions({
           disabled={busy}
           style={textStyle}
           onClick={() => onStatus(b.id, 'Seated')}
-          className={`${baseClass} rounded bg-amber-50 font-medium text-amber-900 ring-1 ring-amber-200/80 hover:bg-amber-100 disabled:opacity-50`}
+        className={`${baseClass} rounded-lg bg-amber-50 font-medium text-amber-900 shadow-sm ring-1 ring-amber-200/80 transition hover:bg-amber-100 disabled:opacity-50`}
         >
           Reopen
         </button>
@@ -541,7 +587,7 @@ function CalendarBookingRightColumnActions({
                   disabled={busy}
                   style={textStyle}
                   onClick={() => onArrived(b.id, true)}
-                  className={`${baseClass} rounded border-2 border-[#F59E0B] bg-[#F59E0B]/20 font-semibold text-amber-950 shadow-sm hover:bg-[#F59E0B]/30 disabled:opacity-50`}
+                  className={`${baseClass} rounded-lg border-2 border-[#F59E0B] bg-[#F59E0B]/20 font-semibold text-amber-950 shadow-sm transition hover:bg-[#F59E0B]/30 disabled:opacity-50`}
                 >
                   Arrived
                 </button>
@@ -551,7 +597,7 @@ function CalendarBookingRightColumnActions({
                   disabled={busy}
                   style={textStyle}
                   onClick={() => onArrived(b.id, false)}
-                  className={`${baseClass} rounded border border-slate-200 bg-white font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50`}
+                  className={`${baseClass} rounded-lg border border-slate-200 bg-white font-medium text-slate-600 shadow-sm transition hover:bg-slate-50 disabled:opacity-50`}
                 >
                   Clear
                 </button>
@@ -564,7 +610,7 @@ function CalendarBookingRightColumnActions({
               disabled={busy}
               style={textStyle}
               onClick={() => onStatus(b.id, 'Booked')}
-              className={`${baseClass} rounded bg-brand-600 font-medium text-white hover:bg-brand-700 disabled:opacity-50`}
+              className={`${baseClass} rounded-lg bg-brand-600 font-semibold text-white shadow-sm shadow-brand-900/20 transition hover:bg-brand-700 disabled:opacity-50`}
             >
               Confirm
             </button>
@@ -575,7 +621,7 @@ function CalendarBookingRightColumnActions({
               disabled={busy}
               style={textStyle}
               onClick={() => onStatus(b.id, 'Seated')}
-              className={`${baseClass} rounded bg-brand-600 font-medium text-white hover:bg-brand-700 disabled:opacity-50`}
+              className={`${baseClass} rounded-lg bg-brand-600 font-semibold text-white shadow-sm shadow-brand-900/20 transition hover:bg-brand-700 disabled:opacity-50`}
             >
               Start
             </button>
@@ -587,7 +633,7 @@ function CalendarBookingRightColumnActions({
                 disabled={busy}
                 style={textStyle}
                 onClick={() => onStatus(b.id, 'Booked')}
-                className={`${baseClass} rounded border border-slate-300 bg-white font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50`}
+                className={`${baseClass} rounded-lg border border-slate-300 bg-white font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:opacity-50`}
                 title="If you started by mistake, go back to booked (and waiting if they were marked arrived)"
               >
                 Undo start
@@ -597,7 +643,7 @@ function CalendarBookingRightColumnActions({
                 disabled={busy}
                 style={textStyle}
                 onClick={() => onStatus(b.id, 'Completed')}
-                className={`${baseClass} rounded bg-[#22C55E] font-medium text-white hover:bg-[#16A34A] disabled:opacity-50`}
+                className={`${baseClass} rounded-lg bg-[#22C55E] font-semibold text-white shadow-sm shadow-emerald-900/20 transition hover:bg-[#16A34A] disabled:opacity-50`}
               >
                 Complete
               </button>
@@ -609,7 +655,7 @@ function CalendarBookingRightColumnActions({
               disabled={busy}
               style={textStyle}
               onClick={() => onStatus(b.id, 'No-Show')}
-              className={`${baseClass} rounded text-slate-500 hover:bg-red-50 hover:text-red-600 disabled:opacity-50`}
+              className={`${baseClass} rounded-lg text-slate-500 transition hover:bg-red-50 hover:text-red-600 disabled:opacity-50`}
             >
               No show
             </button>
@@ -643,7 +689,7 @@ function CalendarBookingRightColumn({
 
   return (
     <div
-      className="flex h-full min-h-0 w-[5.75rem] min-w-[5.75rem] max-w-[5.75rem] shrink-0 flex-col self-stretch overflow-hidden py-1 pl-1 pr-0.5"
+      className="flex h-full min-h-0 w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] shrink-0 flex-col self-stretch overflow-hidden py-1.5 pl-1.5 pr-1"
       onPointerDown={(e) => e.stopPropagation()}
     >
       <div
@@ -1661,7 +1707,7 @@ export function PractitionerCalendarView({
   }, [detailBookingId, bookings]);
 
   return (
-    <div className="flex flex-col">
+    <div className="flex min-w-[320px] flex-col">
       <div className="flex-shrink-0 space-y-3 pb-3">
         <PractitionerCalendarToolbar
           viewMode={viewMode}
@@ -1767,8 +1813,8 @@ export function PractitionerCalendarView({
       )}
 
       {loading ? (
-        <div className="flex min-h-[40vh] items-center justify-center">
-          <div className="h-8 w-8 animate-spin rounded-full border-4 border-brand-600 border-t-transparent" />
+        <div className="min-h-[40vh] py-2">
+          <DashboardCalendarSkeleton />
         </div>
       ) : filteredPractitioners.length === 0 ? (
         <div className="flex min-h-[40vh] items-center justify-center px-4">
@@ -1797,7 +1843,7 @@ export function PractitionerCalendarView({
         <div className="w-full rounded-2xl border border-slate-200 bg-white shadow-sm shadow-slate-900/5">
           <HorizontalScrollHint />
           <div className="overflow-x-auto touch-pan-x [-webkit-overflow-scrolling:touch]">
-            <div className="min-w-[720px]">
+            <div className="min-w-[920px]">
             <table className="w-full border-collapse text-sm">
               <thead>
                 <tr className="sticky top-0 z-20 border-b border-slate-200 bg-slate-50/90 shadow-sm">
@@ -1848,13 +1894,17 @@ export function PractitionerCalendarView({
                                   key={b.id}
                                   type="button"
                                   onClick={() => openBookingDetail(b.id)}
-                                  className="rounded-md border border-solid px-2 py-1 text-left text-xs shadow-sm"
+                                  className="rounded-xl border border-solid px-2.5 py-2 text-left text-xs shadow-sm transition hover:-translate-y-0.5 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
                                   style={bookingBlockCardStyle(p)}
                                 >
-                                  <div className="truncate font-semibold">{b.guest_name}</div>
-                                  <div className="text-[10px] text-slate-500">
-                                    {b.booking_time.slice(0, 5)} ·{' '}
-                                    {bookingStatusDisplayLabel(b.status, isTableReservationBooking(b))}
+                                  <div className="flex min-w-0 items-start justify-between gap-2">
+                                    <div className="min-w-0">
+                                      <div className="truncate font-bold">{b.guest_name}</div>
+                                      <div className="mt-0.5 text-[10px] font-medium text-slate-600">
+                                        {b.booking_time.slice(0, 5)}
+                                      </div>
+                                    </div>
+                                    <CalendarBookingStatusBadge b={b} />
                                   </div>
                                 </button>
                               );
@@ -1993,7 +2043,7 @@ export function PractitionerCalendarView({
               scrollSnapshotAtTouch.current = null;
             }}
           >
-            <div className="relative flex min-w-[600px]">
+            <div className="relative flex min-w-full">
               {dayViewNowLineTop != null ? (
                 <div
                   className="pointer-events-none absolute left-0 right-0 z-[25]"
@@ -2001,14 +2051,14 @@ export function PractitionerCalendarView({
                   aria-hidden
                 >
                   <div className="flex items-center">
-                    <div className="flex w-16 shrink-0 justify-center">
+                    <div className="flex w-14 shrink-0 justify-center sm:w-16">
                       <span className="h-2 w-2 rounded-full bg-brand-600 shadow-sm ring-2 ring-white" />
                     </div>
                     <div className="h-px flex-1 bg-gradient-to-r from-brand-500/70 via-brand-400/50 to-transparent" />
                   </div>
                 </div>
               ) : null}
-              <div className="w-16 flex-shrink-0 border-r border-slate-200 bg-slate-50">
+              <div className="w-14 flex-shrink-0 border-r border-slate-200 bg-slate-50 sm:w-16">
                 <div
                   className="min-h-[52px] rounded-tl-xl border-b border-slate-200 bg-slate-50"
                   aria-hidden
@@ -2038,7 +2088,7 @@ export function PractitionerCalendarView({
                     return (
                       <div
                         key={`hdr-${prac.id}`}
-                        className="flex min-h-[52px] min-w-[180px] flex-1 flex-col items-center justify-center gap-0.5 px-2 py-1"
+                        className="flex min-h-[58px] min-w-[min(16rem,calc(100vw-5.5rem))] flex-1 flex-col items-center justify-center gap-0.5 px-3 py-1.5 sm:min-w-[240px]"
                       >
                         <span className="truncate text-center text-sm font-semibold text-slate-900" title={prac.name}>
                           {prac.name}
@@ -2057,7 +2107,7 @@ export function PractitionerCalendarView({
                   scheduleBlocks.some(
                     (b) => b.kind === 'event_ticket' && !b.calendar_id && b.status !== 'Cancelled',
                   ) ? (
-                    <div className="flex min-h-[52px] min-w-[180px] flex-1 flex-col items-center justify-center gap-0.5 px-2 py-1">
+                    <div className="flex min-h-[58px] min-w-[min(16rem,calc(100vw-5.5rem))] flex-1 flex-col items-center justify-center gap-0.5 px-3 py-1.5 sm:min-w-[240px]">
                       <span className="truncate text-center text-sm font-semibold text-slate-900">
                         Events (unassigned)
                       </span>
@@ -2081,7 +2131,7 @@ export function PractitionerCalendarView({
                     bl.block_type !== 'class_session',
                 );
                 return (
-                  <div key={prac.id} className="min-w-[180px] flex-1 border-r border-slate-100 last:border-r-0">
+                  <div key={prac.id} className="min-w-[min(16rem,calc(100vw-5.5rem))] flex-1 border-r border-slate-100 last:border-r-0 sm:min-w-[240px]">
                     <div className="relative" style={{ height: TOTAL_SLOTS * SLOT_HEIGHT }}>
                       {timeLabels.map((_, i) => (
                         <div
@@ -2298,7 +2348,7 @@ export function PractitionerCalendarView({
                             <DraggableBookingShell key={b.id} booking={b} top={top} height={height} canDrag={canDrag}>
                               {(handle) => (
                                 <div
-                                  className={`flex h-full min-h-0 flex-row items-stretch overflow-hidden rounded-xl border border-solid shadow-sm transition-shadow hover:shadow-md ${
+                                  className={`group flex h-full min-h-0 flex-row items-stretch overflow-hidden rounded-2xl border border-solid shadow-sm ring-1 ring-white/70 transition-all hover:-translate-y-0.5 hover:shadow-xl hover:shadow-slate-900/12 focus-within:ring-2 focus-within:ring-brand-400/60 ${
                                     flash ? 'motion-safe:animate-pulse ring-2 ring-brand-400/60' : ''
                                   }`}
                                   style={bookingBlockCardStyle(palette)}
@@ -2306,7 +2356,7 @@ export function PractitionerCalendarView({
                                   {canDrag && handle.listeners && handle.attributes ? (
                                     <button
                                       type="button"
-                                      className="w-5 shrink-0 cursor-grab touch-none bg-black/[0.03] px-0.5 text-[10px] text-slate-400 hover:bg-black/[0.06] active:cursor-grabbing"
+                                      className="w-6 shrink-0 cursor-grab touch-none bg-black/[0.04] px-0.5 text-[10px] text-slate-400 transition hover:bg-black/[0.08] active:cursor-grabbing"
                                       aria-label="Drag to reschedule"
                                       {...handle.listeners}
                                       {...handle.attributes}
@@ -2319,10 +2369,24 @@ export function PractitionerCalendarView({
                                       <button
                                         type="button"
                                         onClick={() => openBookingDetail(b.id)}
-                                        className="min-h-0 flex-1 overflow-hidden px-1.5 py-1 text-left"
+                                        className="flex min-h-0 flex-1 flex-col justify-start overflow-hidden px-2.5 py-2 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+                                        aria-label={`Open booking details for ${b.guest_name}`}
                                       >
-                                        <div className="flex flex-wrap items-center gap-1">
-                                          <span className="truncate text-xs font-semibold">{b.guest_name}</span>
+                                        <div className="flex min-w-0 items-start justify-between gap-2">
+                                          <div className="min-w-0">
+                                            <span className="block truncate text-[13px] font-extrabold tracking-tight">{b.guest_name}</span>
+                                            {height > 42 ? (
+                                              <BookingMetaLine
+                                                resourceName={resName}
+                                                serviceName={svc?.name}
+                                                start={b.booking_time.slice(0, 5)}
+                                                end={minutesToTime(timeToMinutes(b.booking_time) + duration)}
+                                                showService={height > 60}
+                                              />
+                                            ) : null}
+                                          </div>
+                                          <div className="flex shrink-0 flex-col items-end gap-1">
+                                            <CalendarBookingStatusBadge b={b} />
                                           {arrived &&
                                             b.status !== 'Seated' &&
                                             ['Pending', 'Booked', 'Confirmed'].includes(b.status) && (
@@ -2332,21 +2396,10 @@ export function PractitionerCalendarView({
                                                 title="Waiting"
                                               />
                                             )}
-                                        </div>
-                                        {resName ? (
-                                          <div className="truncate text-[10px] font-medium text-slate-600">{resName}</div>
-                                        ) : null}
-                                        {svc && height > 36 && (
-                                          <div className="truncate text-[10px] text-slate-500">{svc.name}</div>
-                                        )}
-                                        {height > 48 && (
-                                          <div className="text-[10px] text-slate-400">
-                                            {b.booking_time.slice(0, 5)} –{' '}
-                                            {minutesToTime(timeToMinutes(b.booking_time) + duration)}
                                           </div>
-                                        )}
+                                        </div>
                                       </button>
-                                      <div className="flex shrink-0 flex-row items-end justify-start gap-1 px-1.5 pb-1 pt-0.5">
+                                      <div className="flex shrink-0 flex-row items-end justify-start gap-1 px-2.5 pb-1.5 pt-0.5">
                                         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
                                           <BookingBlockPills b={b} />
                                         </div>
@@ -2392,7 +2445,7 @@ export function PractitionerCalendarView({
                           <DraggableBookingShell key={first.id} booking={first} top={top} height={height} canDrag={false}>
                             {() => (
                               <div
-                                className={`flex h-full min-h-0 flex-row items-stretch overflow-hidden rounded-xl border border-solid shadow-sm transition-shadow hover:shadow-md ${
+                                className={`group flex h-full min-h-0 flex-row items-stretch overflow-hidden rounded-2xl border border-solid shadow-sm ring-1 ring-white/70 transition-all hover:-translate-y-0.5 hover:shadow-xl hover:shadow-slate-900/12 focus-within:ring-2 focus-within:ring-brand-400/60 ${
                                   flash ? 'motion-safe:animate-pulse ring-2 ring-brand-400/60' : ''
                                 }`}
                                 style={bookingBlockCardStyle(palette)}
@@ -2413,12 +2466,24 @@ export function PractitionerCalendarView({
                                           <button
                                             type="button"
                                             onClick={() => openBookingDetail(b.id)}
-                                            className="flex min-h-0 min-w-0 flex-1 flex-col px-1.5 py-0.5 text-left"
+                                            className="flex min-h-0 min-w-0 flex-1 flex-col px-2.5 py-1.5 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+                                            aria-label={`Open booking details for ${b.guest_name}`}
                                           >
-                                            <div className="flex flex-wrap items-center gap-1">
-                                              <span className="truncate text-xs font-semibold">
+                                            <div className="flex min-w-0 items-start justify-between gap-2">
+                                              <div className="min-w-0">
+                                              <span className="block truncate text-[13px] font-extrabold tracking-tight">
                                                 {segIdx === 0 ? b.guest_name : '\u00a0'}
                                               </span>
+                                              <BookingMetaLine
+                                                serviceName={svc?.name}
+                                                start={b.booking_time.slice(0, 5)}
+                                                end={minutesToTime(timeToMinutes(b.booking_time) + dur)}
+                                                showService
+                                              />
+                                              </div>
+                                              {segIdx === 0 ? (
+                                                <div className="flex shrink-0 flex-col items-end gap-1">
+                                                  <CalendarBookingStatusBadge b={first} />
                                               {segIdx === 0 &&
                                                 arrived &&
                                                 first.status !== 'Seated' &&
@@ -2429,16 +2494,11 @@ export function PractitionerCalendarView({
                                                     title="Waiting"
                                                   />
                                                 )}
-                                            </div>
-                                            {svc && (
-                                              <div className="truncate text-[10px] text-slate-500">{svc.name}</div>
-                                            )}
-                                            <div className="text-[10px] text-slate-400">
-                                              {b.booking_time.slice(0, 5)} –{' '}
-                                              {minutesToTime(timeToMinutes(b.booking_time) + dur)}
+                                                </div>
+                                              ) : null}
                                             </div>
                                           </button>
-                                          <div className="flex shrink-0 flex-row items-end justify-start gap-1 px-1.5 pb-0.5 pt-0.5">
+                                          <div className="flex shrink-0 flex-row items-end justify-start gap-1 px-2.5 pb-1 pt-0.5">
                                             <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
                                               <BookingBlockPills b={b} />
                                             </div>

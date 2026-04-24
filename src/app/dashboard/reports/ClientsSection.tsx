@@ -10,6 +10,7 @@ import { HorizontalScrollHint } from '@/components/ui/HorizontalScrollHint';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { StatTile } from '@/components/ui/dashboard/StatTile';
 import { EmptyState } from '@/components/ui/dashboard/EmptyState';
+import { DashboardListSkeleton } from '@/components/ui/dashboard/DashboardSkeletons';
 
 export interface ClientSummary {
   identified_clients_total: number;
@@ -442,7 +443,7 @@ export function ClientsSection({
       )}
 
       {loading ? (
-        <p className="text-sm text-slate-500">Loading…</p>
+        <DashboardListSkeleton rowCount={7} />
       ) : guests.length === 0 ? (
         <EmptyState title={`No matching ${clientLower}s`} description={emptyCopy} />
       ) : (
