@@ -15,8 +15,6 @@ import {
 } from '@/lib/booking/resource-weekly-overlap';
 import type { WorkingHours } from '@/types/booking-models';
 import { DEFAULT_ENTITY_BOOKING_WINDOW } from '@/lib/booking/entity-booking-window';
-import { assertCalendarSlotAvailable } from '@/lib/light-plan';
-import { planDisplayName } from '@/lib/pricing-constants';
 import { z } from 'zod';
 
 const availabilityExceptionDaySchema = z.union([
@@ -289,23 +287,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         { error: 'Choose a calendar column to show this resource on' },
         { status: 400 },
-      );
-    }
-
-    const calLimit = await assertCalendarSlotAvailable(staff.venue_id);
-    if (!calLimit.allowed) {
-      const { data: vrow } = await admin
-        .from('venues')
-        .select('pricing_tier')
-        .eq('id', staff.venue_id)
-        .maybeSingle();
-      const tierLabel = planDisplayName((vrow as { pricing_tier?: string } | null)?.pricing_tier);
-      return NextResponse.json(
-        {
-          error: `Your ${tierLabel} plan includes up to ${calLimit.limit} calendar column(s). Upgrade to add more.`,
-          code: 'PLAN_CALENDAR_LIMIT',
-        },
-        { status: 403 },
       );
     }
 

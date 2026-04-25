@@ -3,7 +3,9 @@ import { getSupabaseAdminClient } from '@/lib/supabase';
 import { planCalendarLimit, planStaffLimit } from '@/lib/plan-limits';
 
 /**
- * Active bookable calendar columns for the venue (`unified_calendars`).
+ * Active team calendar columns for the venue (`unified_calendars`).
+ * Resource rows also live in `unified_calendars`, but they are hosted on an existing
+ * team calendar and should not consume plan calendar slots.
  */
 export async function countUnifiedCalendarColumns(
   admin: SupabaseClient,
@@ -13,7 +15,8 @@ export async function countUnifiedCalendarColumns(
     .from('unified_calendars')
     .select('id', { count: 'exact', head: true })
     .eq('venue_id', venueId)
-    .eq('is_active', true);
+    .eq('is_active', true)
+    .neq('calendar_type', 'resource');
 
   if (error) {
     console.error('[countUnifiedCalendarColumns]', error.message, { venueId });
@@ -23,7 +26,7 @@ export async function countUnifiedCalendarColumns(
 }
 
 /**
- * Enforces per-tier active `unified_calendars` cap (Light: 1, Plus: 5, else unlimited).
+ * Enforces per-tier active team calendar cap (Light: 1, Plus: 5, else unlimited).
  */
 export async function assertCalendarSlotAvailable(venueId: string): Promise<{
   allowed: boolean;
