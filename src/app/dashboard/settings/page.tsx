@@ -16,6 +16,7 @@ import type { VenueSettings } from './types';
 import { backfillVenueEmailIfEmptyFromStaff } from '@/lib/venue-contact-email';
 import { venueHasStripePaymentMethodForSms } from '@/lib/stripe/venue-customer-payment';
 import { normalizePublicBaseUrl } from '@/lib/public-base-url';
+import { countUnifiedCalendarColumns } from '@/lib/light-plan';
 import { Suspense } from 'react';
 import { PageFrame } from '@/components/ui/dashboard/PageFrame';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
@@ -81,16 +82,22 @@ export default async function SettingsPage({
     .single();
 
   if (fullVenue) {
+    const activeCalendarCount = await countUnifiedCalendarColumns(staff.db, venueId);
     venue = {
       ...fullVenue,
+      calendar_count: activeCalendarCount,
       venue_opening_exceptions: parseVenueOpeningExceptions(
         (fullVenue as { venue_opening_exceptions?: unknown }).venue_opening_exceptions,
       ),
     };
     const pt = ((fullVenue as { pricing_tier?: string | null }).pricing_tier ?? 'appointments') as string;
-    const cc = (fullVenue as { calendar_count?: number | null }).calendar_count ?? null;
+    const cc = activeCalendarCount;
     const expectedAllowance = computeSmsMonthlyAllowance(pt, cc);
     const stored = (fullVenue as { sms_monthly_allowance?: number | null }).sms_monthly_allowance;
+    const storedCalendarCount = (fullVenue as { calendar_count?: number | null }).calendar_count ?? null;
+    if (storedCalendarCount !== activeCalendarCount && venueId) {
+      await staff.db.from('venues').update({ calendar_count: activeCalendarCount }).eq('id', venueId);
+    }
     if (stored !== expectedAllowance && venueId) {
       await updateVenueSmsMonthlyAllowance(venueId);
       venue = { ...venue, sms_monthly_allowance: expectedAllowance };

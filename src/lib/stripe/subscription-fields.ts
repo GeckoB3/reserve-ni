@@ -9,6 +9,12 @@ interface SubscriptionFields {
   current_period_start?: number;
   cancel_at_period_end?: boolean;
   status?: string;
+  items?: {
+    data?: Array<{
+      current_period_end?: number;
+      current_period_start?: number;
+    }>;
+  };
 }
 
 function asFields(sub: unknown): SubscriptionFields | null {
@@ -17,14 +23,24 @@ function asFields(sub: unknown): SubscriptionFields | null {
 
 export function subscriptionPeriodEndIso(sub: unknown): string | null {
   const f = asFields(sub);
-  if (!f || typeof f.current_period_end !== 'number') return null;
-  return new Date(f.current_period_end * 1000).toISOString();
+  if (!f) return null;
+  const periodEnd =
+    typeof f.current_period_end === 'number'
+      ? f.current_period_end
+      : f.items?.data?.find((item) => typeof item.current_period_end === 'number')?.current_period_end;
+  if (typeof periodEnd !== 'number') return null;
+  return new Date(periodEnd * 1000).toISOString();
 }
 
 export function subscriptionPeriodStartIso(sub: unknown): string | null {
   const f = asFields(sub);
-  if (!f || typeof f.current_period_start !== 'number') return null;
-  return new Date(f.current_period_start * 1000).toISOString();
+  if (!f) return null;
+  const periodStart =
+    typeof f.current_period_start === 'number'
+      ? f.current_period_start
+      : f.items?.data?.find((item) => typeof item.current_period_start === 'number')?.current_period_start;
+  if (typeof periodStart !== 'number') return null;
+  return new Date(periodStart * 1000).toISOString();
 }
 
 export function subscriptionCancelAtPeriodEnd(sub: unknown): boolean {

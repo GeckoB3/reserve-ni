@@ -13,6 +13,7 @@ import {
 } from '@/lib/stripe/subscription-fields';
 import { isAppointmentPlanTier } from '@/lib/tier-enforcement';
 import { updateVenueSmsMonthlyAllowance } from '@/lib/billing/sms-allowance';
+import { countUnifiedCalendarColumns } from '@/lib/light-plan';
 
 type AppointmentsTier = 'light' | 'plus' | 'appointments';
 
@@ -67,6 +68,7 @@ export async function GET() {
     let periodEnd =
       (venue as { subscription_current_period_end?: string | null }).subscription_current_period_end ?? null;
     let stripeSubscriptionStatus: string | null = null;
+    const activeCalendarCount = await countUnifiedCalendarColumns(staff.db, staff.venue_id);
 
     if (subId) {
       try {
@@ -91,7 +93,7 @@ export async function GET() {
             stripe_sms_subscription_item_id: ids.smsSubscriptionItemId,
             subscription_current_period_start: periodStart,
             subscription_current_period_end: periodEnd,
-            calendar_count: pricingTier === 'light' ? 1 : null,
+            calendar_count: activeCalendarCount,
           })
           .eq('id', staff.venue_id);
         await updateVenueSmsMonthlyAllowance(staff.venue_id);
@@ -99,6 +101,11 @@ export async function GET() {
         console.warn('[appointments-plan/status] stripe.subscriptions.retrieve failed', { subId, e });
       }
     }
+
+    await staff.db
+      .from('venues')
+      .update({ calendar_count: activeCalendarCount })
+      .eq('id', staff.venue_id);
 
     return NextResponse.json({
       venue_id: staff.venue_id,
@@ -108,6 +115,7 @@ export async function GET() {
       stripe_subscription_status: stripeSubscriptionStatus,
       subscription_current_period_start: periodStart,
       subscription_current_period_end: periodEnd,
+      calendar_count: activeCalendarCount,
     });
   } catch (err) {
     console.error('[appointments-plan/status] Error:', err);

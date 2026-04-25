@@ -129,6 +129,7 @@ type AppointmentsPlanStatusPayload = {
   stripe_subscription_status: string | null;
   subscription_current_period_start: string | null;
   subscription_current_period_end: string | null;
+  calendar_count?: number | null;
 };
 
 type MoneyPayload = {
@@ -903,6 +904,7 @@ function SettingsViewInner({
                   data.subscription_current_period_start ?? v.subscription_current_period_start,
                 subscription_current_period_end:
                   data.subscription_current_period_end ?? v.subscription_current_period_end,
+                calendar_count: data.calendar_count ?? v.calendar_count,
               }
             : null,
         );
