@@ -1270,6 +1270,17 @@ export default function OnboardingPage() {
     };
   }, [venue]);
 
+  /** Each step should start at the top; retained scroll position on shorter next steps felt like a jump to the bottom. */
+  useEffect(() => {
+    if (loading || !venue) return;
+    const id = window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        window.scrollTo(0, 0);
+      });
+    });
+    return () => window.cancelAnimationFrame(id);
+  }, [step, loading, venue]);
+
   async function handleNext() {
     setError(null);
 

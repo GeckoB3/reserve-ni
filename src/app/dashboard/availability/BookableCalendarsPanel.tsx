@@ -150,7 +150,7 @@ function SortableCalendarRow({
   const dragHandle = canReorder ? (
     <button
       type="button"
-      className="mt-0.5 inline-flex h-8 w-8 shrink-0 cursor-grab touch-manipulation items-center justify-center rounded-md border border-slate-200/90 bg-white text-slate-500 shadow-sm hover:bg-slate-50 hover:text-slate-700 active:cursor-grabbing"
+      className="mt-0.5 inline-flex h-8 w-8 shrink-0 cursor-grab touch-none select-none items-center justify-center rounded-md border border-slate-200/90 bg-white text-slate-500 shadow-sm hover:bg-slate-50 hover:text-slate-700 active:cursor-grabbing"
       aria-label={`Reorder ${label} on staff calendar`}
       {...attributes}
       {...listeners}
@@ -257,6 +257,20 @@ export function BookableCalendarsPanel({
       void persistCalendarOrder(nextIds, previousIds);
     },
     [canReorderCalendars, orderedIds, persistCalendarOrder],
+  );
+
+  const moveCalendarByOffset = useCallback(
+    (calendarId: string, offset: -1 | 1) => {
+      if (!canReorderCalendars || reorderSaving) return;
+      const oldIndex = orderedIds.indexOf(calendarId);
+      const newIndex = oldIndex + offset;
+      if (oldIndex < 0 || newIndex < 0 || newIndex >= orderedIds.length) return;
+      const previousIds = orderedIds;
+      const nextIds = arrayMove(orderedIds, oldIndex, newIndex);
+      setOrderedIds(nextIds);
+      void persistCalendarOrder(nextIds, previousIds);
+    },
+    [canReorderCalendars, orderedIds, persistCalendarOrder, reorderSaving],
   );
 
   const loadVenueSlug = useCallback(async () => {
@@ -407,6 +421,9 @@ export function BookableCalendarsPanel({
       venueSlug && draftNorm && !slugLiveErr
         ? `${PUBLIC_BOOK_ORIGIN}/book/${encodeURIComponent(venueSlug)}/${encodeURIComponent(draftNorm)}`
         : null;
+    const orderIndex = orderedIds.indexOf(p.id);
+    const canMoveUp = canReorderCalendars && orderIndex > 0;
+    const canMoveDown = canReorderCalendars && orderIndex >= 0 && orderIndex < orderedIds.length - 1;
 
     const chipBase = 'rounded px-1.5 py-0.5 text-[11px] font-medium leading-snug ring-1';
 
@@ -582,6 +599,28 @@ export function BookableCalendarsPanel({
             </div>
           </div>
           <div className="flex shrink-0 gap-1.5 self-end sm:self-start">
+            {canReorderCalendars && (
+              <div className="flex gap-1 sm:hidden" aria-label={`Move ${p.name} calendar`}>
+                <button
+                  type="button"
+                  onClick={() => moveCalendarByOffset(p.id, -1)}
+                  disabled={!canMoveUp || reorderSaving}
+                  className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs font-medium text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                  aria-label={`Move ${p.name} up`}
+                >
+                  Up
+                </button>
+                <button
+                  type="button"
+                  onClick={() => moveCalendarByOffset(p.id, 1)}
+                  disabled={!canMoveDown || reorderSaving}
+                  className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs font-medium text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                  aria-label={`Move ${p.name} down`}
+                >
+                  Down
+                </button>
+              </div>
+            )}
             <button
               type="button"
               onClick={() => void onEditCalendar(p)}
@@ -737,7 +776,7 @@ export function BookableCalendarsPanel({
                         staff calendar
                       </Link>{' '}
                       appear in the same order as the calendars below. When you have more than one, drag the grip icon on
-                      the left of a row to move it up or down.
+                      the left of a row, or use the move buttons on mobile, to change the order.
                     </span>
                   )}
                 </p>

@@ -1,6 +1,11 @@
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 import { isPlatformRoleInJwt } from '@/lib/platform-auth';
+import {
+  SIGNUP_PENDING_BUSINESS_TYPE_KEY,
+  SIGNUP_PENDING_PLAN_KEY,
+  isSignupPaymentReady,
+} from '@/lib/signup-pending-selection';
 
 export async function middleware(request: NextRequest) {
   let response = NextResponse.next({ request });
@@ -39,6 +44,31 @@ export async function middleware(request: NextRequest) {
   const isDashboard = pathname.startsWith('/dashboard');
   const isPlatformUI = pathname.startsWith('/super');
   const isPlatformAPI = pathname.startsWith('/api/platform');
+  const signupPlan = request.nextUrl.searchParams.get('plan');
+
+  if (pathname === '/signup/business-type' && (signupPlan === 'restaurant' || signupPlan === 'founding')) {
+    const url = request.nextUrl.clone();
+    url.pathname = '/signup/plan';
+    url.searchParams.set('plan', signupPlan);
+    return NextResponse.redirect(url);
+  }
+
+  if (
+    user &&
+    (pathname === '/signup' || pathname === '/signup/business-type' || pathname === '/signup/plan')
+  ) {
+    const meta = user.user_metadata as Record<string, unknown> | undefined;
+    const pendingPlan = meta?.[SIGNUP_PENDING_PLAN_KEY];
+    const pendingBusinessType = meta?.[SIGNUP_PENDING_BUSINESS_TYPE_KEY];
+    if (
+      isSignupPaymentReady(
+        typeof pendingPlan === 'string' ? pendingPlan : null,
+        typeof pendingBusinessType === 'string' ? pendingBusinessType : null,
+      )
+    ) {
+      return NextResponse.redirect(new URL('/signup/payment', request.url));
+    }
+  }
 
   // Unauthenticated: protect /dashboard and /super
   if (!user && (isDashboard || isPlatformUI)) {

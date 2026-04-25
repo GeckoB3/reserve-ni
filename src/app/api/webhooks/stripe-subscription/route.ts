@@ -450,6 +450,7 @@ async function handleSubscriptionDeleted(
     .select('id, stripe_subscription_id, subscription_current_period_start, subscription_current_period_end')
     .eq('stripe_customer_id', customerId);
 
+  let updatedAny = false;
   for (const row of rows ?? []) {
     const vid = (row as { id?: string }).id;
     const stored = (row as { stripe_subscription_id?: string | null }).stripe_subscription_id;
@@ -472,5 +473,27 @@ async function handleSubscriptionDeleted(
         subscription_current_period_end: periodEndIso,
       })
       .eq('id', vid);
+    updatedAny = true;
+  }
+
+  /**
+   * Fallback for desynced rows: if Stripe reports no replacement subscription for this customer,
+   * ensure the venue cannot remain active in-app due to stale subscription ids.
+   */
+  if (!updatedAny) {
+    const periodStartIso = subscriptionPeriodStartIso(subscription) ?? null;
+    const periodEndIso = subscriptionPeriodEndIso(subscription) ?? null;
+    await supabase
+      .from('venues')
+      .update({
+        plan_status: 'cancelled',
+        stripe_subscription_id: null,
+        stripe_subscription_item_id: null,
+        stripe_sms_subscription_item_id: null,
+        subscription_current_period_start: periodStartIso,
+        subscription_current_period_end: periodEndIso,
+      })
+      .eq('stripe_customer_id', customerId)
+      .neq('plan_status', 'cancelled');
   }
 }

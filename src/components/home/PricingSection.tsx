@@ -7,7 +7,6 @@ import {
   APPOINTMENTS_PLUS_PRICE,
   APPOINTMENTS_PRO_PRICE,
   RESTAURANT_PRICE,
-  FOUNDING_PARTNER_CAP,
   SMS_LIGHT_GBP_PER_MESSAGE,
   SMS_OVERAGE_GBP_PER_MESSAGE,
 } from '@/lib/pricing-constants';
@@ -158,13 +157,13 @@ export function PricingSection() {
                   Limited
                 </span>
                 <span className="rounded-full bg-white/80 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-800 ring-1 ring-emerald-200">
-                  Appointments & Restaurant
+                  50% off for six months
                 </span>
               </div>
               <p className="mt-2 text-sm font-medium text-emerald-900">
-                Free for six months - full Appointments Pro or Restaurant plan (whichever fits your business). We onboard you personally.
+                Choose any Appointments or Restaurant plan (whichever fits your business). We onboard you personally.
               </p>
-              <p className="mt-1 text-xs text-emerald-700">Only {FOUNDING_PARTNER_CAP} spots available.</p>
+              <p className="mt-1 text-xs text-emerald-700">Limited spots available.</p>
             </div>
             <a
               href="#contact"

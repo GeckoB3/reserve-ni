@@ -74,9 +74,9 @@ export async function POST(request: Request) {
           ? existingVenue.active_booking_models
           : [];
         if (
-          (existingVenue?.pricing_tier === 'appointments' || existingVenue?.pricing_tier === 'light') &&
+          isAppointmentPlanTier(existingVenue?.pricing_tier) &&
           activeModels.length === 0 &&
-          existingVenue.onboarding_completed !== true
+          existingVenue?.onboarding_completed !== true
         ) {
           await clearSignupPendingUserMetadata(admin, user.id);
           return NextResponse.json({ redirect_url: '/signup/booking-models' });
@@ -184,7 +184,7 @@ export async function POST(request: Request) {
     await clearSignupPendingUserMetadata(admin, user.id);
 
     return NextResponse.json({
-      redirect_url: plan === 'appointments' ? '/signup/booking-models' : '/onboarding',
+      redirect_url: isAppointmentPlanTier(plan) ? '/signup/booking-models' : '/onboarding',
     });
   } catch (err) {
     console.error('[signup/complete] Error:', err);

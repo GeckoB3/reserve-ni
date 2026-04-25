@@ -5,7 +5,7 @@ import ContactForm from "@/components/ContactForm";
 export const metadata: Metadata = {
   title: "ReserveNI for Appointments | Online Booking for Northern Ireland Businesses",
   description:
-    "Stop losing bookings. Let clients book online 24/7, collect deposits to cut no-shows, and automate every reminder. ReserveNI is the all-in-one appointment booking platform built for Northern Ireland.",
+    "Stop losing bookings. Let clients book online 24/7, collect deposits to cut no-shows, and automate every reminder. ReserveNI is the all-in-one booking platform built for Northern Ireland.",
   openGraph: {
     title: "ReserveNI for Appointments",
     description:
@@ -16,44 +16,50 @@ export const metadata: Metadata = {
 
 const problems = [
   {
-    title: "The phone never stops ringing",
+    title: "Missed calls become missed revenue",
     description:
-      "You're mid-appointment and the phone rings. Again. You can't answer, so the booking goes to a competitor who picked up.",
+      "When someone calls and no one answers, they rarely wait. They book with the next business that lets them lock in a slot instantly.",
     icon: PhoneOffIcon,
   },
   {
-    title: "No-shows kill your day",
+    title: "No-shows leave empty gaps",
     description:
-      "An empty slot at 2pm is lost income. Chasing confirmations by text every evening is exhausting, and still people don't turn up.",
+      "A cancelled or missed slot is pure lost income. Manual reminder chasing takes time and still does not stop all no-shows.",
     icon: GhostIcon,
   },
   {
-    title: "Double bookings and chaos",
+    title: "Manual diaries create mistakes",
     description:
-      "A paper diary, a WhatsApp group, and a notes app. Mistakes are inevitable and every one costs you trust, time, and money.",
+      "Paper notes, DMs, and messages across apps create confusion. One clash can cost trust, time, and repeat business.",
     icon: CalendarAlertIcon,
   },
   {
-    title: "You're closed, but clients aren't",
+    title: "Late-night intent goes cold",
     description:
-      "Your best clients want to book at 11pm from the sofa. If you're not open to take the booking, someone else is.",
+      "People decide to book at night and between meetings. If they cannot secure a time there and then, intent fades fast.",
     icon: MoonIcon,
   },
   {
-    title: "Admin eats your evenings",
+    title: "Deposits are hard to chase manually",
     description:
-      "Rescheduling, cancellations, client notes, reminders, deposit chasing. Hours every week on things that don't grow your business.",
+      "Collecting deposits by bank transfer or message follow-up is messy. Delays and no payment confirmations create risk before every booking.",
     icon: InboxIcon,
   },
   {
-    title: "You look smaller than you are",
+    title: "Your online presence should feel premium",
     description:
-      "Your work is world-class. But clients who book on a scrap of paper and pay in cash remember a different kind of business.",
+      "Your service can be world-class, but a clunky booking journey sends the wrong signal. First impressions start before clients arrive.",
     icon: SparklesIcon,
   },
 ];
 
 const ownerBenefits = [
+  {
+    title: "Capture bookings while you are closed",
+    description:
+      "Open your diary 24/7 so clients can book when intent is highest, even when your team is offline.",
+    icon: MoonIcon,
+  },
   {
     title: "Win back 10+ hours a week",
     description:
@@ -69,7 +75,7 @@ const ownerBenefits = [
   {
     title: "Cut no-shows automatically",
     description:
-      "Confirmations, reminders, and 'Confirm or cancel' messages go out on autopilot by email and SMS. Clients show up, or cancel in time for you to rebook.",
+      "Confirmations, reminders, and confirm-or-cancel messages go out on autopilot by email and SMS. Clients show up, or cancel in time for you to refill the slot.",
     icon: BellIcon,
   },
   {
@@ -79,7 +85,7 @@ const ownerBenefits = [
     icon: UserCardIcon,
   },
   {
-    title: "Grow faster, look bigger",
+    title: "Look professional everywhere clients find you",
     description:
       "A polished booking page, branded confirmations, and a QR code on your counter. Clients feel confident. Confidence books again.",
     icon: TrendUpIcon,
@@ -87,7 +93,7 @@ const ownerBenefits = [
   {
     title: "Fair, honest pricing",
     description:
-      "One flat subscription. No commission on bookings. No per-SMS markup after your allowance. Cancel anytime.",
+      "One flat subscription. No commission on bookings. Most plans include a monthly SMS allowance; when you go beyond it, you pay as you go at a clear, published rate. Cancel anytime.",
     icon: TagIcon,
   },
 ];
@@ -118,7 +124,7 @@ const howItWorks = [
     step: "3",
     title: "Watch the diary fill itself",
     description:
-      "New bookings appear instantly. Reminders go out automatically. You focus on the work, not the admin.",
+      "New bookings appear instantly. Reminders go out automatically. You focus on the work. ReserveNI runs the rest.",
   },
 ];
 
@@ -143,12 +149,12 @@ const useCases = [
 
 const features = [
   {
-    title: "Online booking page",
-    description: "A beautiful booking page on your own link. Works on every phone, every browser.",
-  },
-  {
     title: "Embed on your website",
     description: "Drop the ReserveNI widget into your existing site in 30 seconds. Your branding, your colours.",
+  },
+  {
+    title: "Online booking page",
+    description: "A beautiful booking page on your own link. Works on every phone, every browser.",
   },
   {
     title: "QR codes for flyers & counter",
@@ -195,19 +201,27 @@ const features = [
 const faqs = [
   {
     q: "Is there a discount for new customers?",
-    a: "Yes — new customers can use the code RESERVE50 at checkout to get 50% off any plan for the first 6 months. Just enter the code when you sign up and the discount will apply automatically.",
+    a: "Yes. New customers can use the code RESERVE50 at checkout to get 50% off any plan for the first 6 months. Just enter the code when you sign up and the discount will apply automatically.",
   },
   {
     q: "Do I need a website already?",
     a: "No. ReserveNI gives you a beautiful booking page on your own link (like reserveni.com/book/your-business). Share it on Instagram, Facebook, your Google listing or a flyer, and you're ready to take bookings without a website. If you do have a website, you can embed the widget there too.",
   },
   {
+    q: "Can I add ReserveNI to my existing website?",
+    a: "Yes. Add the booking widget to your current website in around 30 seconds. Clients can book without leaving your site, and every booking flows straight into your ReserveNI diary.",
+  },
+  {
     q: "How do deposits actually work?",
     a: "You connect your own Stripe account in a few clicks. When a client pays a deposit, the money goes directly into your account. ReserveNI never holds your funds. You control the amount and your cancellation policy. If a client no-shows, the deposit is yours.",
   },
   {
+    q: "How do SMS costs work?",
+    a: "Appointments Light has no included SMS and messages are pay as you go at 8p each. Appointments Plus and Pro include a monthly SMS allowance, then additional messages are 6p each.",
+  },
+  {
     q: "How long does setup take?",
-    a: "Most businesses are taking real bookings within 30 minutes. Add your services, your hours, your staff, and your booking policies, and you're live. If you need any help getting set up, just get in touch — we're happy to help.",
+    a: "Most businesses are taking real bookings within 30 minutes. Add your services, your hours, your staff, and your booking policies, and you're live. If you need any help getting set up, just get in touch; we're happy to help.",
   },
   {
     q: "What happens when I'm closed and someone wants to book?",
@@ -218,8 +232,8 @@ const faqs = [
     a: "The booking page is designed to be tap-tap-done on any phone, with no app, no login, and no password. Most clients who 'hate online forms' book their first appointment in under a minute. You can still add manual bookings for anyone who prefers to call.",
   },
   {
-    q: "Can I keep the clients who already book by phone?",
-    a: "Absolutely. You can add bookings manually from your dashboard in seconds, and all clients, online or phoned in, live in one client list with full history. ReserveNI replaces your diary, not your relationships.",
+    q: "Can I still take phone bookings?",
+    a: "Absolutely. Add phone bookings manually in seconds, and keep all clients in one diary with full history. ReserveNI supports your existing relationships while moving more bookings online.",
   },
 ];
 
@@ -228,6 +242,7 @@ export default function AppointmentsPlanPage() {
     <div className="min-h-screen bg-white text-slate-900">
       <Nav />
       <Hero />
+      <BookingChannelsSection />
       <ProblemSection />
       <SolutionIntro />
       <OwnerBenefitsSection />
@@ -235,7 +250,6 @@ export default function AppointmentsPlanPage() {
       <ClientBenefitsSection />
       <StatsBand />
       <HowItWorksSection />
-      <BookingChannelsSection />
       <UseCasesSection />
       <FeaturesSection />
       <FaqSection />
@@ -263,7 +277,7 @@ function Nav() {
             href="/#pricing"
             className="rounded-xl bg-brand-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700"
           >
-            Start Free
+            Get Started Now
           </Link>
         </div>
       </div>
@@ -306,9 +320,9 @@ function Hero() {
             </span>
           </h1>
           <p className="mt-6 max-w-xl text-lg leading-relaxed text-slate-600 sm:text-xl">
-            The all-in-one booking platform for appointment businesses in Northern Ireland. Let clients
-            book online 24/7, cut no-shows with deposits, and automate every reminder, so you can focus
-            on the work.
+            Every empty slot is money you will not get back. ReserveNI takes bookings 24/7, collects a
+            deposit when clients book, and sends the reminders that make them show up. Fewer no-shows.
+            More revenue where it belongs.
           </p>
           <div className="mt-10 flex flex-col gap-3 sm:flex-row">
             <Link
@@ -322,7 +336,7 @@ function Hero() {
               href="#how"
               className="inline-flex h-12 items-center justify-center rounded-xl border border-slate-200 bg-white px-6 text-base font-semibold text-slate-700 shadow-sm transition-colors hover:border-slate-300 hover:text-slate-900"
             >
-              See how it works
+              See how bookings work
             </a>
           </div>
 
@@ -331,20 +345,31 @@ function Hero() {
               <TagIcon small />
             </span>
             <div className="text-sm">
-              <span className="font-semibold text-emerald-800">New customer offer: </span>
-              <span className="text-emerald-700">use code </span>
+              <span className="font-semibold text-emerald-800">Founding Partner Offer: </span>
+              <span className="text-emerald-700">Use code </span>
               <span className="rounded bg-emerald-700 px-1.5 py-0.5 font-mono text-xs font-bold tracking-wider text-white">
                 RESERVE50
               </span>
-              <span className="text-emerald-700"> at checkout for </span>
-              <span className="font-semibold text-emerald-800">50% off for 6 months</span>
+              <span className="text-emerald-700"> at checkout for 50% off for our first 50 Northern Ireland businesses.</span>
             </div>
           </div>
 
           <div className="mt-5 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-slate-500">
             <span className="inline-flex items-center gap-2">
               <TickIcon />
-              No commission on bookings
+              Take bookings 24/7
+            </span>
+            <span className="inline-flex items-center gap-2">
+              <TickIcon />
+              Deposits protect your income
+            </span>
+            <span className="inline-flex items-center gap-2">
+              <TickIcon />
+              Confirm-or-cancel reduces no-shows
+            </span>
+            <span className="inline-flex items-center gap-2">
+              <TickIcon />
+              Website embed included
             </span>
             <span className="inline-flex items-center gap-2">
               <TickIcon />
@@ -467,13 +492,15 @@ function ProblemSection() {
             If this sounds familiar
           </span>
           <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl lg:text-5xl">
-            You&apos;re brilliant at what you do.
+            Your office is closed.
             <br className="hidden sm:block" />
-            <span className="text-slate-500">The admin around it is drowning you.</span>
+            <span className="text-slate-500">Your customers aren&apos;t.</span>
           </h2>
           <p className="mx-auto mt-5 max-w-2xl text-base leading-relaxed text-slate-600">
-            Every missed call, every no-show and every late-night text reply is time and money you&apos;ll
-            never get back. There&apos;s a better way, and it doesn&apos;t involve answering the phone.
+            People want to book at 10pm, on a Sunday, or in the five minutes between meetings. If they
+            can&apos;t lock in a time in that moment, the booking and the revenue go to whoever is
+            open online. ReserveNI turns after-hours interest into real slots, without you manning the
+            phone.
           </p>
         </div>
 
@@ -547,11 +574,11 @@ function OwnerBenefitsSection() {
             For the business owner
           </span>
           <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl lg:text-5xl">
-            More bookings. Fewer no-shows. Less admin.
+            No-shows cost real money. ReserveNI helps you keep it.
           </h2>
           <p className="mx-auto mt-5 max-w-2xl text-base leading-relaxed text-slate-600">
-            ReserveNI pays for itself the first time it saves a no-show, and then keeps paying you back
-            every week after that.
+            Deposits, reminders, and confirm-or-cancel messages work together to protect your diary and
+            reduce empty gaps. The result is steadier days and stronger revenue.
           </p>
         </div>
 
@@ -886,12 +913,12 @@ function StatsBand() {
   return (
     <section className="bg-gradient-to-br from-brand-600 via-brand-700 to-brand-800 py-16 text-white">
       <div className="mx-auto grid max-w-6xl gap-8 px-6 text-center sm:grid-cols-3">
-        <Stat value="24/7" label="online booking your business never has to staff" />
-        <Stat value="−80%" label="fewer no-shows when you take a deposit*" />
-        <Stat value="10+ hrs" label="a week back in your day on auto-reminders" />
+        <Stat value="24/7" label="online booking captures demand while you are closed" />
+        <Stat value="-80%" label="fewer no-shows when you take a deposit*" />
+        <Stat value="10+ hrs" label="saved weekly with automated reminders and confirmations" />
       </div>
       <p className="mx-auto mt-6 max-w-3xl px-6 text-center text-xs text-white/60">
-        *Typical reduction reported by appointment businesses that introduce per-booking deposits.
+        *Typical reduction reported by service businesses that introduce per-booking deposits.
       </p>
     </section>
   );
@@ -940,7 +967,7 @@ function HowItWorksSection() {
 
 function BookingChannelsSection() {
   return (
-    <section className="relative overflow-hidden bg-white py-20 sm:py-28">
+    <section className="relative overflow-hidden bg-white py-16 sm:py-24">
       <div
         className="absolute inset-0 opacity-[0.04]"
         style={{
@@ -952,29 +979,30 @@ function BookingChannelsSection() {
       <div className="relative mx-auto max-w-6xl px-6">
         <div className="mx-auto max-w-3xl text-center">
           <span className="text-xs font-semibold uppercase tracking-widest text-brand-600">
-            Three ways to take bookings
+            Be easy to book, everywhere
           </span>
           <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl lg:text-5xl">
-            Meet your clients wherever they are.
+            One booking system your clients can reach from any channel.
           </h2>
           <p className="mx-auto mt-5 max-w-2xl text-base leading-relaxed text-slate-600">
-            Every ReserveNI account gives you three ways to bring bookings in. Use one, use two, use
-            all three. They all flow into the same beautiful diary.
+            Website, social links, and QR codes all feed the same live diary. No double entry, no missed
+            messages, and no lost bookings between channels.
           </p>
         </div>
 
         <div className="mt-16 grid gap-6 lg:grid-cols-3">
           <ChannelCard
+            label="Embed on your website"
+            title="Add booking to your existing website"
+            description="Drop the ReserveNI widget into your existing website in 30 seconds. Clients book without ever leaving your site, with your branding all the way through."
+            visual={<EmbedVisual />}
+            featured
+          />
+          <ChannelCard
             label="Your own booking site"
             title="reserveni.com/book/your-business"
             description="A stunning, mobile-first booking site dedicated to your business. No website required. Use it as your main online home, or alongside your existing one."
             visual={<YourSiteVisual />}
-          />
-          <ChannelCard
-            label="Embed on your website"
-            title="Your site. Your colours. Our booking engine."
-            description="Drop the ReserveNI widget into your existing website in 30 seconds. Clients book without ever leaving your site, with your branding all the way through."
-            visual={<EmbedVisual />}
           />
           <ChannelCard
             label="Share your link anywhere"
@@ -993,14 +1021,20 @@ function ChannelCard({
   title,
   description,
   visual,
+  featured = false,
 }: {
   label: string;
   title: string;
   description: string;
   visual: React.ReactNode;
+  featured?: boolean;
 }) {
   return (
-    <div className="group relative flex flex-col overflow-hidden rounded-2xl border border-slate-100 bg-gradient-to-br from-white to-slate-50 p-6 transition-all hover:-translate-y-1 hover:border-brand-200 hover:shadow-xl hover:shadow-brand-600/5">
+    <div
+      className={`group relative flex flex-col overflow-hidden rounded-2xl border bg-gradient-to-br from-white to-slate-50 p-6 transition-all hover:-translate-y-1 hover:shadow-xl hover:shadow-brand-600/5 ${
+        featured ? "border-brand-200 ring-2 ring-brand-100/70" : "border-slate-100 hover:border-brand-200"
+      }`}
+    >
       <div className="relative flex h-44 items-center justify-center overflow-hidden rounded-xl border border-slate-100 bg-white p-4">
         {visual}
       </div>
@@ -1257,7 +1291,7 @@ function ClosingCta() {
               </h2>
               <p className="mt-5 max-w-lg text-base leading-relaxed text-white/80">
                 Set up in under 30 minutes. We&apos;re here to help if you need any more information or
-                assistance signing up — just send us a note and we&apos;ll get back to you.
+                assistance signing up; just send us a note and we&apos;ll get back to you.
               </p>
 
               <div className="mt-6 inline-flex items-center gap-3 rounded-xl border border-white/20 bg-white/10 px-4 py-3 backdrop-blur">
@@ -1265,14 +1299,20 @@ function ClosingCta() {
                   <TagIcon small />
                 </span>
                 <div className="text-sm">
-                  <span className="font-semibold text-white">New customer offer: </span>
-                  <span className="text-white/80">use code </span>
+                  <span className="font-semibold text-white">Founding Partner Offer: </span>
+                  <span className="text-white/80">Use code </span>
                   <span className="rounded bg-white/20 px-1.5 py-0.5 font-mono text-xs font-bold tracking-wider text-white">
                     RESERVE50
                   </span>
-                  <span className="text-white/80"> for </span>
-                  <span className="font-semibold text-white">50% off for 6 months</span>
+                  <span className="text-white/80"> at checkout for 50% off for our first 50 Northern Ireland businesses.</span>
                 </div>
+              </div>
+
+              <div className="mt-6 grid max-w-xl grid-cols-2 gap-3 text-xs text-white/85">
+                <div className="rounded-lg border border-white/15 bg-white/10 px-3 py-2">Set up in under 30 minutes</div>
+                <div className="rounded-lg border border-white/15 bg-white/10 px-3 py-2">No commission or booking fees</div>
+                <div className="rounded-lg border border-white/15 bg-white/10 px-3 py-2">Cancel anytime</div>
+                <div className="rounded-lg border border-white/15 bg-white/10 px-3 py-2">Local NI support</div>
               </div>
 
               <div className="mt-6 flex flex-col gap-3 sm:flex-row">
@@ -1280,7 +1320,7 @@ function ClosingCta() {
                   href="/#pricing"
                   className="inline-flex h-12 items-center justify-center rounded-xl bg-white px-7 text-base font-semibold text-slate-900 shadow-lg transition-all hover:-translate-y-0.5 hover:bg-brand-50"
                 >
-                  Start Free
+                  Get Started Now
                   <ArrowRightIcon />
                 </Link>
                 <a

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { HelpTooltip } from '@/components/dashboard/HelpTooltip';
 import { helpContent } from '@/lib/help-content';
@@ -78,6 +78,15 @@ export function RestaurantSetupWizard() {
   const [error, setError] = useState<string | null>(null);
 
   const totalSteps = 6;
+
+  useEffect(() => {
+    const id = window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        window.scrollTo(0, 0);
+      });
+    });
+    return () => window.cancelAnimationFrame(id);
+  }, [step]);
 
   const handleVenueTypeChange = useCallback((type: VenueType) => {
     setVenueType(type);

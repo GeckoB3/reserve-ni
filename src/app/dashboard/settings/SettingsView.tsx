@@ -32,6 +32,7 @@ import {
   SMS_LIGHT_GBP_PER_MESSAGE,
   SMS_OVERAGE_GBP_PER_MESSAGE,
 } from '@/lib/pricing-constants';
+import { planCalendarLimit } from '@/lib/plan-limits';
 import { normalizeEnabledModels } from '@/lib/booking/enabled-models';
 import type { BookingModel } from '@/types/booking-models';
 import { isRestaurantTableProductTier } from '@/lib/tier-enforcement';
@@ -246,25 +247,30 @@ function formatSubscriptionDateLabel(iso: string | null | undefined): string | n
   return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
 }
 
+function planPriceLabel(pricingTier: string): string {
+  if (pricingTier === 'light') return `£${APPOINTMENTS_LIGHT_PRICE}/month`;
+  if (pricingTier === 'plus') return `£${APPOINTMENTS_PLUS_PRICE}/month`;
+  if (pricingTier === 'appointments') return `£${APPOINTMENTS_PRO_PRICE}/month`;
+  if (pricingTier === 'restaurant' || pricingTier === 'founding') return `£${RESTAURANT_PRICE}/month`;
+  return `£${APPOINTMENTS_PRO_PRICE}/month`;
+}
+
 function PlanSection({
   venue,
   bookingModel,
   smsCountUsesStripePeriod = false,
   onVenueUpdate,
-  initialLightHasPaymentMethod,
 }: {
   venue: VenueSettings;
   bookingModel?: string;
   smsCountUsesStripePeriod?: boolean;
   onVenueUpdate: (patch: Partial<VenueSettings>) => void;
-  initialLightHasPaymentMethod?: boolean;
 }) {
   const [loading, setLoading] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [planSuccess, setPlanSuccess] = useState<string | null>(null);
   const [planPreviews, setPlanPreviews] = useState<Partial<Record<AppointmentsPlanTier, AppointmentsPlanPreviewPayload>>>({});
   const [selectedPlanChange, setSelectedPlanChange] = useState<AppointmentsPlanTier | null>(null);
-  const [nowMs, setNowMs] = useState<number | null>(null);
   const planSuccessLoaded = useRef(false);
 
   const tier = venue.pricing_tier ?? 'appointments';
@@ -274,29 +280,28 @@ function PlanSection({
   const appointmentsTier = isAppointmentsPlanTierValue(tier) ? tier : null;
   const isAppointmentsPlan = appointmentsTier !== null && unified;
   const currentPlanDetails = appointmentsTier ? APPOINTMENTS_PLAN_DETAILS[appointmentsTier] : null;
-  const [lightHasPaymentMethod, setLightHasPaymentMethod] = useState<boolean | null>(() =>
-    tier === 'light'
-      ? typeof initialLightHasPaymentMethod === 'boolean'
-        ? initialLightHasPaymentMethod
-        : null
-      : null,
-  );
   const tierLabel = planDisplayName(tier);
+  const planPrice = planPriceLabel(tier);
   const periodEndLabel = formatSubscriptionDateLabel(venue.subscription_current_period_end);
   const periodStartLabel = formatSubscriptionDateLabel(venue.subscription_current_period_start);
-  const periodEndTime = venue.subscription_current_period_end?.trim()
-    ? new Date(venue.subscription_current_period_end as string).getTime()
-    : NaN;
-  const periodEndInPast = nowMs !== null && Number.isFinite(periodEndTime) && periodEndTime < nowMs;
   const billingActive = planStatus === 'active' || planStatus === 'trialing';
   const isCancelling = planStatus === 'cancelling';
   const hasStripeSub = Boolean(venue.stripe_subscription_id?.trim());
-  const lightCardCheckPending = isLight && lightHasPaymentMethod === null;
-  const hasCardOnFile = isLight && lightHasPaymentMethod === true;
+  const smsUsed = venue.sms_messages_sent_this_month ?? 0;
+  const smsIncludedMonthly = computeSmsMonthlyAllowance(tier, null);
+  const smsUsagePercent =
+    !isLight && smsIncludedMonthly > 0
+      ? Math.max(0, Math.min(100, Math.round((smsUsed / smsIncludedMonthly) * 100)))
+      : null;
+  const calendarLimit = planCalendarLimit(tier);
+  const calendarUsed = typeof venue.calendar_count === 'number' ? venue.calendar_count : null;
+  const calendarUsagePercent =
+    Number.isFinite(calendarLimit) && calendarUsed !== null && calendarLimit > 0
+      ? Math.max(0, Math.min(100, Math.round((calendarUsed / calendarLimit) * 100)))
+      : null;
 
   const applyLightStatus = useCallback(
     (data: LightPlanStatusPayload) => {
-      setLightHasPaymentMethod(data.has_default_payment_method);
       onVenueUpdate({
         plan_status: data.plan_status ?? undefined,
         stripe_subscription_id: data.stripe_subscription_id,
@@ -315,22 +320,10 @@ function PlanSection({
   }, [applyLightStatus]);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => setNowMs(Date.now()), 0);
-    return () => window.clearTimeout(timer);
-  }, []);
-
-  useEffect(() => {
     if (!isLight) return;
     const t = window.setTimeout(() => void fetchLightPlanStatus(), 0);
     return () => clearTimeout(t);
   }, [isLight, fetchLightPlanStatus]);
-
-  const lightPaying = isLight && hasStripeSub && billingActive && !isCancelling;
-  const lightCancelling = isLight && isCancelling;
-  const lightCancelled = isLight && planStatus === 'cancelled';
-
-  const standardPlanCancelled = !isLight && planStatus === 'cancelled';
-  const standardPlanCancelling = !isLight && isCancelling;
 
   useEffect(() => {
     if (!isAppointmentsPlan || !appointmentsTier || !hasStripeSub || !billingActive || isCancelling) {
@@ -386,7 +379,27 @@ function PlanSection({
     }
   }, []);
 
-  async function handleAction(action: string) {
+  async function openManageBilling() {
+    setLoading(true);
+    setActionError(null);
+    try {
+      const res = await fetch('/api/billing/portal-session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const data = (await res.json()) as { url?: string; error?: string };
+      if (!res.ok || !data.url) {
+        setActionError(data.error || 'Could not open Stripe billing portal. Please try again.');
+        return;
+      }
+      window.open(data.url, '_blank', 'noopener,noreferrer');
+    } catch {
+      setActionError('Network error. Please check your connection and try again.');
+    }
+    setLoading(false);
+  }
+
+  async function handleAction(action: 'resume_subscription') {
     setLoading(true);
     setActionError(null);
     setPlanSuccess(null);
@@ -396,35 +409,6 @@ function PlanSection({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action }),
       });
-      const data = (await res.json()) as { redirect_url?: string; ok?: boolean; message?: string; error?: string };
-      if (data.redirect_url) {
-        window.location.assign(data.redirect_url);
-        return;
-      }
-      if (data.ok) {
-        if (typeof data.message === 'string' && data.message.length > 0) {
-          try {
-            sessionStorage.setItem('planSuccess', data.message);
-          } catch {
-            /* ignore */
-          }
-        }
-        window.location.reload();
-        return;
-      }
-      setActionError(data.error || 'Something went wrong. Please try again.');
-    } catch {
-      setActionError('Network error. Please check your connection and try again.');
-    }
-    setLoading(false);
-  }
-
-  async function postLightPlan(path: string) {
-    setLoading(true);
-    setActionError(null);
-    setPlanSuccess(null);
-    try {
-      const res = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' } });
       const data = (await res.json()) as { redirect_url?: string; ok?: boolean; message?: string; error?: string };
       if (data.redirect_url) {
         window.location.assign(data.redirect_url);
@@ -481,11 +465,8 @@ function PlanSection({
     setLoading(false);
   }
 
-  const isRestaurantTier = tier === 'restaurant';
-  const smsIncludedMonthly = computeSmsMonthlyAllowance(tier, null);
-
   const tierPillVariant: 'success' | 'brand' | 'neutral' =
-    tier === 'founding' ? 'success' : isRestaurantTier ? 'brand' : 'neutral';
+    tier === 'founding' ? 'success' : tier === 'restaurant' ? 'brand' : 'neutral';
   const planPillVariant: 'success' | 'danger' | 'warning' | 'neutral' = billingActive
     ? 'success'
     : planStatus === 'past_due'
@@ -512,57 +493,9 @@ function PlanSection({
     <SectionCard elevated>
       <SectionCard.Header eyebrow="Billing" title="Your plan" />
       <SectionCard.Body className="space-y-4">
-      <p className="text-xs text-slate-600 leading-relaxed">
-        {!isLight ? (
-          planStatus === 'past_due' ? (
-            <>
-              Your last payment failed. Update your payment method so Stripe can retry the invoice and restore your plan.
-            </>
-          ) : standardPlanCancelled ? (
-            <>
-              Your paid subscription is not active anymore. Use Resubscribe below when you want to return to {tierLabel}.
-            </>
-          ) : standardPlanCancelling ? (
-            <>
-              Your subscription is scheduled to end at the close of your current billing period. You keep full access as
-              normal until then; no further charges after that date.
-            </>
-          ) : (
-            <>
-              Billing runs through Stripe. If you cancel, you keep full access until the end of the period shown below; no
-              further charges after that.
-              {isRestaurantTier ? (
-                <>
-                  {' '}
-                  The Restaurant plan covers dining and table-management features for this venue.
-                </>
-              ) : null}
-              {tier === 'founding' ? (
-                <>
-                  {' '}
-                  Founding Partner pricing is shown in the note below.
-                </>
-              ) : null}
-            </>
-          )
-        ) : lightCancelled ? (
-          <>This subscription is not active. You can resubscribe below if you need the plan again.</>
-        ) : lightCancelling ? null : planStatus === 'past_due' ? (
-          <>Your last payment failed. Update your card below to restore billing and access.</>
-        ) : lightCardCheckPending ? (
-          <>Checking your Stripe billing details…</>
-        ) : lightPaying ? (
-          <>
-            You are on Appointments Light at &pound;{APPOINTMENTS_LIGHT_PRICE}/month. SMS is &pound;
-            {SMS_LIGHT_GBP_PER_MESSAGE.toFixed(2)} each (metered). If you cancel, you keep access until the billing period
-            below ends.
-          </>
-        ) : (
-          <>
-            Appointments Light: &pound;{APPOINTMENTS_LIGHT_PRICE}/month; SMS &pound;{SMS_LIGHT_GBP_PER_MESSAGE.toFixed(2)}{' '}
-            each (metered). A card on file is required for your subscription and SMS billing.
-          </>
-        )}
+      <p className="text-sm text-slate-600 leading-relaxed">
+        Manage plan changes here in ReserveNI. For billing administration (card details, invoices, receipts, billing
+        address, and cancellation), use Stripe Customer Portal.
       </p>
       {planSuccess ? (
         <div className="flex flex-wrap items-center gap-2 rounded-xl border border-emerald-200/80 bg-emerald-50/70 px-3 py-2.5 text-sm text-emerald-950">
@@ -578,90 +511,112 @@ function PlanSection({
           {planPillLabel}
         </Pill>
       </div>
-      {hasStripeSub && periodEndLabel && billingActive && !isCancelling ? (
-        <div className="rounded-xl border border-slate-200 bg-slate-50/90 px-3 py-2.5 text-sm text-slate-800">
-          <p className="font-semibold text-slate-900">Next billing</p>
-          <p className="mt-1 leading-relaxed text-slate-700">
-            Your next subscription charge is due on{' '}
-            <span className="font-semibold text-slate-900">{periodEndLabel}</span> (end of your current Stripe billing
-            period). Metered add-ons such as SMS overage are typically included on the same invoice.
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div className="rounded-xl border border-slate-200 bg-slate-50/90 px-3 py-3">
+          <p className="text-xs uppercase tracking-wide text-slate-500">Current plan</p>
+          <p className="mt-1 text-sm font-semibold text-slate-900">{tierLabel}</p>
+          <p className="text-xs text-slate-600">{planPrice}</p>
+        </div>
+        <div className="rounded-xl border border-slate-200 bg-slate-50/90 px-3 py-3">
+          <p className="text-xs uppercase tracking-wide text-slate-500">Next billing</p>
+          <p className="mt-1 text-sm font-semibold text-slate-900">{periodEndLabel ?? 'Not available yet'}</p>
+          <p className="text-xs text-slate-600">
+            {planPrice} base charge{isLight ? '; SMS usage billed separately.' : '; metered overage may be added.'}
           </p>
           {periodStartLabel ? (
-            <p className="mt-2 text-xs text-slate-500">
-              Current billing period: {periodStartLabel} – {periodEndLabel}
-            </p>
+            <p className="mt-1 text-xs text-slate-500">Current period: {periodStartLabel} – {periodEndLabel}</p>
           ) : null}
         </div>
-      ) : null}
-      {planStatus === 'cancelled' && periodEndLabel ? (
-        <div
-          className={`rounded-xl border px-3 py-2.5 text-sm ${
-            periodEndInPast
-              ? 'border-slate-200 bg-slate-50 text-slate-800'
-              : 'border-amber-200 bg-amber-50/80 text-amber-950'
-          }`}
-        >
-          <p className="font-semibold">{periodEndInPast ? 'Plan ended' : 'Plan ending'}</p>
-          <p className="mt-1 leading-relaxed">
-            {periodEndInPast ? (
-              <>
-                Your subscription access ended at the close of your last billing period (
-                <span className="font-semibold">{periodEndLabel}</span>).
-              </>
-            ) : (
-              <>
-                Your paid access is scheduled to end on <span className="font-semibold">{periodEndLabel}</span> (end of
-                the current billing period). Use Resubscribe below if you want to continue afterwards.
-              </>
-            )}
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div className="rounded-xl border border-slate-200 bg-white px-3 py-3">
+          <p className="text-xs uppercase tracking-wide text-slate-500">SMS usage</p>
+          <p className="mt-1 text-sm font-semibold text-slate-900">
+            {smsUsed}
+            {isLight ? ' sent' : ` / ${smsIncludedMonthly} included`}
           </p>
+          {isLight ? (
+            <p className="mt-2 text-xs text-slate-600">
+              Light is pay-as-you-go at £{SMS_LIGHT_GBP_PER_MESSAGE.toFixed(2)} per message.
+            </p>
+          ) : (
+            <>
+              <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-slate-100">
+                <div
+                  className="h-full rounded-full bg-brand-500"
+                  style={{ width: `${smsUsagePercent ?? 0}%` }}
+                  aria-hidden
+                />
+              </div>
+              <p className="mt-2 text-xs text-slate-600">
+                {smsUsagePercent ?? 0}% of included allowance used. Overage is £
+                {SMS_OVERAGE_GBP_PER_MESSAGE.toFixed(2)} per SMS.
+              </p>
+            </>
+          )}
+          {smsCountUsesStripePeriod ? (
+            <p className="mt-1 text-xs text-slate-500">Usage window follows your Stripe billing period.</p>
+          ) : null}
         </div>
-      ) : null}
+        <div className="rounded-xl border border-slate-200 bg-white px-3 py-3">
+          <p className="text-xs uppercase tracking-wide text-slate-500">Calendar usage</p>
+          <p className="mt-1 text-sm font-semibold text-slate-900">
+            {calendarUsed ?? 'Not available'}
+            {' / '}
+            {Number.isFinite(calendarLimit) ? calendarLimit : 'Unlimited'}
+          </p>
+          {calendarUsagePercent !== null ? (
+            <>
+              <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-slate-100">
+                <div
+                  className="h-full rounded-full bg-sky-500"
+                  style={{ width: `${calendarUsagePercent}%` }}
+                  aria-hidden
+                />
+              </div>
+              <p className="mt-2 text-xs text-slate-600">{calendarUsagePercent}% of calendar limit used.</p>
+            </>
+          ) : (
+            <p className="mt-2 text-xs text-slate-600">
+              {Number.isFinite(calendarLimit)
+                ? 'Calendar usage syncs after subscription updates.'
+                : 'Your current plan has no calendar cap.'}
+            </p>
+          )}
+        </div>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          disabled={loading}
+          onClick={() => void openManageBilling()}
+          className="rounded-lg bg-slate-900 px-4 py-2 text-xs font-semibold text-white hover:bg-slate-800 disabled:opacity-50"
+        >
+          Manage Billing
+        </button>
+        <p className="text-xs text-slate-500">Opens Stripe Customer Portal in a new tab.</p>
+      </div>
       {planStatus === 'past_due' && hasStripeSub && periodEndLabel ? (
-        <div className="rounded-xl border border-rose-200 bg-rose-50/80 px-3 py-2.5 text-sm text-rose-950">
+        <div className="rounded-xl border border-rose-200 bg-rose-50/80 px-3 py-3 text-sm text-rose-950">
           <p className="font-semibold">Payment required</p>
           <p className="mt-1 leading-relaxed">
-            Your billing period still runs until <span className="font-semibold">{periodEndLabel}</span>. Update your
-            payment method so Stripe can collect the outstanding invoice and keep your plan active.
+            Your last payment failed. Update your payment method in Stripe so invoicing can retry and keep your plan active.
           </p>
+          <button
+            type="button"
+            disabled={loading}
+            onClick={() => void openManageBilling()}
+            className="mt-3 rounded-lg bg-rose-700 px-4 py-2 text-xs font-semibold text-white hover:bg-rose-800 disabled:opacity-50"
+          >
+            Update payment method
+          </button>
         </div>
       ) : null}
       {currentPlanDetails ? (
         <p className="text-sm text-slate-600">
           {currentPlanDetails.calendars}, {currentPlanDetails.team}, {currentPlanDetails.sms}.
         </p>
-      ) : !isLight ? (
-        <p className="text-sm text-slate-600">
-          {isRestaurantTier
-            ? 'Table management, floor plan tools, and team access included for your venue (see Dining Availability and Staff).'
-            : tier === 'founding'
-              ? 'Full platform features for your venue during the founding period (see note below).'
-              : 'Unlimited calendars and team members.'}
-        </p>
       ) : null}
-      <p className="text-sm text-slate-600">
-        {isLight ? (
-          smsCountUsesStripePeriod ? (
-            <>SMS this billing period: </>
-          ) : (
-            <>SMS this calendar month: </>
-          )
-        ) : (
-          <>SMS this billing month: </>
-        )}{' '}
-        <span className="font-semibold text-slate-900">{venue.sms_messages_sent_this_month ?? 0}</span>
-        {isLight ? (
-          <>
-            {' '}
-            (pay-as-you-go; each message is reported to Stripe at &pound;{SMS_LIGHT_GBP_PER_MESSAGE.toFixed(2)}).
-          </>
-        ) : (
-          <>
-            {' '}/ {smsIncludedMonthly} included. Overage beyond your allowance is billed at &pound;
-            {SMS_OVERAGE_GBP_PER_MESSAGE.toFixed(2)} per SMS via Stripe metered billing.
-          </>
-        )}
-      </p>
       {actionError && (
         <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
           {actionError}
@@ -683,22 +638,7 @@ function PlanSection({
                 Stripe will not charge again after that.
               </>
             )}
-            {isLight ? (
-              <>
-                {' '}
-                On Appointments Light, SMS remains pay-as-you-go until then.
-              </>
-            ) : isRestaurantTier ? (
-              <>
-                {' '}
-                Restaurant features remain available until that time.
-              </>
-            ) : tier === 'founding' ? (
-              <>
-                {' '}
-                Founding Partner access continues until then.
-              </>
-            ) : null}
+            {isLight ? <> On Appointments Light, SMS remains pay-as-you-go until then.</> : null}
           </p>
           <button
             type="button"
@@ -708,51 +648,6 @@ function PlanSection({
           >
             Keep my plan
           </button>
-        </div>
-      )}
-      {tier === 'founding' && (
-        <p className="text-sm text-slate-500">
-          Founding Partner: full Restaurant plan features free during your founding period; &pound;{RESTAURANT_PRICE}/month
-          applies when the founding period ends.
-        </p>
-      )}
-      {isLight && (
-        <div className="rounded-lg border border-sky-200 bg-sky-50/80 px-3 py-3 text-sm text-sky-950 space-y-2">
-          <p className="font-medium">Billing status (Stripe)</p>
-          <ul className="list-none space-y-1.5 text-sky-900">
-            <li>
-              <span className="font-medium text-sky-950">Subscription: </span>
-              {lightCardCheckPending
-                ? 'Checking…'
-                : hasStripeSub
-                  ? String(planStatus)
-                  : 'Not linked yet — complete checkout or resubscribe if your subscription was removed.'}
-            </li>
-            <li>
-              <span className="font-medium text-sky-950">Card on file: </span>
-              {lightCardCheckPending ? 'Checking…' : hasCardOnFile ? 'Yes' : 'No'}
-            </li>
-          </ul>
-          <p className="text-xs text-sky-900/90">
-            A valid card in Stripe is required for the monthly Appointments Light fee and for incremental (pay-as-you-go)
-            SMS.
-          </p>
-          {planStatus === 'past_due' && hasStripeSub ? (
-            <p className="text-sky-900">
-              Your last payment failed. Add or replace your card so Stripe can retry the invoice and restore your booking
-              page.
-            </p>
-          ) : null}
-          {planStatus !== 'cancelled' && hasStripeSub && (!hasCardOnFile || planStatus === 'past_due') ? (
-            <button
-              type="button"
-              disabled={loading}
-              onClick={() => void postLightPlan('/api/venue/light-plan/update-payment-method')}
-              className="rounded-lg bg-sky-700 px-4 py-2 text-xs font-semibold text-white hover:bg-sky-800 disabled:opacity-50"
-            >
-              {planStatus === 'past_due' ? 'Update card in Stripe Checkout' : 'Add or update card'}
-            </button>
-          ) : null}
         </div>
       )}
       {isAppointmentsPlan && appointmentsTier && (
@@ -881,28 +776,6 @@ function PlanSection({
           ) : null}
         </div>
       )}
-      <div className="flex flex-wrap gap-2 pt-2">
-        {billingActive && tier !== 'founding' && !isCancelling && hasStripeSub && (
-          <button
-            type="button"
-            disabled={loading}
-            onClick={() => void handleAction('cancel')}
-            className="rounded-lg border border-red-200 px-4 py-2 text-xs font-semibold text-red-600 hover:bg-red-50 disabled:opacity-50"
-          >
-            Cancel plan
-          </button>
-        )}
-        {planStatus === 'cancelled' && (
-          <button
-            type="button"
-            disabled={loading}
-            onClick={() => void handleAction('resubscribe')}
-            className="rounded-lg bg-brand-600 px-4 py-2 text-xs font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
-          >
-            Resubscribe
-          </button>
-        )}
-      </div>
       </SectionCard.Body>
     </SectionCard>
   );
@@ -916,7 +789,6 @@ function SettingsViewInner({
   hasServiceConfig = false,
   bookingModel = 'table_reservation',
   smsCountUsesStripePeriod = false,
-  initialLightHasPaymentMethod,
   publicBaseUrl,
 }: SettingsViewProps) {
   const router = useRouter();
@@ -1241,12 +1113,11 @@ function SettingsViewInner({
 
         <div className={selectedTab === 'plan' ? '' : 'hidden'} aria-hidden={selectedTab !== 'plan'}>
           <PlanSection
-            key={`plan-${venue.id}-${venue.pricing_tier ?? ''}-${String(initialLightHasPaymentMethod ?? '')}`}
+            key={`plan-${venue.id}-${venue.pricing_tier ?? ''}`}
             venue={venue}
             bookingModel={bookingModel}
             smsCountUsesStripePeriod={smsCountUsesStripePeriod}
             onVenueUpdate={onUpdate}
-            initialLightHasPaymentMethod={initialLightHasPaymentMethod}
           />
         </div>
 
