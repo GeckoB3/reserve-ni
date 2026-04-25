@@ -28,7 +28,7 @@ import { StripePaymentWarning } from '@/components/dashboard/StripePaymentWarnin
 import { HelpTooltip } from '@/components/dashboard/HelpTooltip';
 import { StaffServiceOverrideModal } from './StaffServiceOverrideModal';
 import { canAddCalendarColumn, useCalendarEntitlement } from '@/hooks/use-calendar-entitlement';
-import { isLightPlanTier } from '@/lib/tier-enforcement';
+import { CalendarLimitMessage } from '@/components/dashboard/CalendarLimitMessage';
 import { NumericInput } from '@/components/ui/NumericInput';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
@@ -1198,28 +1198,12 @@ export function AppointmentServicesView({
                             Calendar availability
                           </Link>
                         </>
-                      ) : calendarEntitlement && isLightPlanTier(calendarEntitlement.pricing_tier) ? (
-                        <div className="rounded-lg border border-amber-200 bg-amber-50/90 px-4 py-3 text-sm text-amber-950">
-                          Appointments Light includes <strong className="font-semibold">one bookable calendar</strong>.
-                          To add more columns, upgrade to the full Appointments plan under{' '}
-                          <a
-                            href="/dashboard/settings?tab=plan"
-                            className="font-medium text-brand-700 underline hover:text-brand-800"
-                          >
-                            Settings → Plan
-                          </a>
-                          .
-                        </div>
                       ) : (
                         <div className="rounded-lg border border-amber-200 bg-amber-50/90 px-4 py-3 text-sm text-amber-950">
-                          You&apos;ve reached your plan&apos;s calendar limit. Visit{' '}
-                          <a
-                            href="/dashboard/settings?tab=plan"
-                            className="font-medium text-brand-700 underline hover:text-brand-800"
-                          >
-                            Settings → Plan
-                          </a>
-                          .
+                          <CalendarLimitMessage
+                            entitlement={calendarEntitlement}
+                            linkClassName="font-medium text-brand-700 underline hover:text-brand-800"
+                          />
                         </div>
                       )}
                     </div>

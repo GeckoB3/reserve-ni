@@ -48,6 +48,8 @@ import { TableSetupStep } from './steps/restaurant/TableSetupStep';
 import { DashboardOrientationStep } from './steps/restaurant/DashboardOrientationStep';
 import { canAddCalendarColumn, useCalendarEntitlement } from '@/hooks/use-calendar-entitlement';
 import { isAppointmentPlanTier, isPlusPlanTier } from '@/lib/tier-enforcement';
+import { CalendarLimitMessage } from '@/components/dashboard/CalendarLimitMessage';
+import { planDisplayName } from '@/lib/pricing-constants';
 
 type Currency = 'GBP' | 'EUR';
 
@@ -1440,7 +1442,7 @@ export default function OnboardingPage() {
       }
       if (calendarPlanLimit !== Infinity && practitioners.length > calendarPlanLimit) {
         setError(
-          `Your Appointments Plus plan includes up to ${calendarPlanLimit} calendars. Please remove some before continuing.`,
+          `Your ${planDisplayName(venue?.pricing_tier)} plan includes up to ${calendarPlanLimit} calendars. Please remove some before continuing.`,
         );
         return;
       }
@@ -1560,7 +1562,7 @@ export default function OnboardingPage() {
         const uniqueNewInvites = [...new Set(validInvites.map((i) => i.email))].length;
         if (existingCount + uniqueNewInvites > staffPlanLimit) {
           setError(
-            `Your Appointments Plus plan includes up to ${staffPlanLimit} team logins (you currently have ${existingCount}). Please remove some invites to continue.`,
+            `Your ${planDisplayName(venue?.pricing_tier)} plan includes up to ${staffPlanLimit} team logins (you currently have ${existingCount}). Please remove some invites to continue.`,
           );
           return;
         }
@@ -3014,15 +3016,10 @@ export default function OnboardingPage() {
                             </>
                           ) : (
                             <p className="mt-1 text-xs text-amber-950">
-                              Appointments Light includes <strong className="font-semibold">one bookable calendar</strong>
-                              . To add more columns, upgrade to the full Appointments plan under{' '}
-                              <Link
-                                href="/dashboard/settings?tab=plan"
-                                className="font-medium text-brand-700 underline hover:text-brand-800"
-                              >
-                                Settings → Plan
-                              </Link>
-                              .
+                              <CalendarLimitMessage
+                                entitlement={entitlement}
+                                linkClassName="font-medium text-brand-700 underline hover:text-brand-800"
+                              />
                             </p>
                           )}
                         </div>
@@ -3556,15 +3553,10 @@ export default function OnboardingPage() {
                             </>
                           ) : (
                             <p className="text-xs text-amber-950">
-                              Appointments Light includes <strong className="font-semibold">one bookable calendar</strong>
-                              . To add more columns, upgrade to the full Appointments plan under{' '}
-                              <Link
-                                href="/dashboard/settings?tab=plan"
-                                className="font-medium text-brand-700 underline hover:text-brand-800"
-                              >
-                                Settings → Plan
-                              </Link>
-                              .
+                              <CalendarLimitMessage
+                                entitlement={entitlement}
+                                linkClassName="font-medium text-brand-700 underline hover:text-brand-800"
+                              />
                             </p>
                           )}
                         </div>
@@ -3764,15 +3756,10 @@ export default function OnboardingPage() {
                           </>
                         ) : (
                           <p className="text-xs text-amber-950">
-                            Appointments Light includes <strong className="font-semibold">one bookable calendar</strong>.
-                            To add more columns, upgrade to the full Appointments plan under{' '}
-                            <Link
-                              href="/dashboard/settings?tab=plan"
-                              className="font-medium text-brand-700 underline hover:text-brand-800"
-                            >
-                              Settings → Plan
-                            </Link>
-                            .
+                            <CalendarLimitMessage
+                              entitlement={entitlement}
+                              linkClassName="font-medium text-brand-700 underline hover:text-brand-800"
+                            />
                           </p>
                         )}
                       </div>

@@ -13,6 +13,7 @@ import { checkCalendarLimit } from '@/lib/tier-enforcement';
 import { defaultNewUnifiedCalendarWorkingHours } from '@/lib/availability/practitioner-defaults';
 import { venueUsesUnifiedAppointmentServiceData } from '@/lib/booking/uses-unified-appointment-data';
 import { ensureUnifiedMirrorForPractitionerId } from '@/lib/class-instances/instructor-calendar-block';
+import { planDisplayName } from '@/lib/pricing-constants';
 import { z } from 'zod';
 
 /** Map unified_calendars rows to the practitioner shape expected by dashboard + booking UI. */
@@ -269,11 +270,22 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid request', details: parsed.error.flatten() }, { status: 400 });
     }
 
+    const admin = getSupabaseAdminClient();
     const limitCheck = await checkCalendarLimit(staff.venue_id, 'practitioners');
     if (!limitCheck.allowed) {
+      const { data: venue } = await admin
+        .from('venues')
+        .select('pricing_tier')
+        .eq('id', staff.venue_id)
+        .maybeSingle();
+      const planName = planDisplayName((venue as { pricing_tier?: string | null } | null)?.pricing_tier);
+      const limit = limitCheck.limit ?? 0;
+      const calendarLabel = `bookable calendar${limit === 1 ? '' : 's'}`;
       return NextResponse.json(
         {
-          error: 'Calendar limit reached',
+          error:
+            `Your ${planName} plan includes up to ${limit} ${calendarLabel}. ` +
+            'Deactivate an existing calendar or upgrade under Settings > Plan to add more.',
           current: limitCheck.current,
           limit: limitCheck.limit,
           upgrade_required: true,
@@ -282,7 +294,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const admin = getSupabaseAdminClient();
     const bookingModel = await getVenueBookingModel(admin, staff.venue_id);
     const useUnifiedListForCreate = await checkVenueUsesUnifiedCalendarList(admin, staff.venue_id, bookingModel);
     const { slug: rawSlug, ...createRest } = parsed.data;

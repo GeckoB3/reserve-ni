@@ -13,7 +13,7 @@ import {
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { normalizePublicBaseUrl, publicBaseUrlHost } from '@/lib/public-base-url';
-import { isLightPlanTier, isPlusPlanTier } from '@/lib/tier-enforcement';
+import { CalendarLimitMessage } from '@/components/dashboard/CalendarLimitMessage';
 const PUBLIC_BOOK_ORIGIN = normalizePublicBaseUrl(process.env.NEXT_PUBLIC_BASE_URL);
 const PUBLIC_BOOK_HOST = publicBaseUrlHost(PUBLIC_BOOK_ORIGIN);
 
@@ -801,43 +801,10 @@ export function BookableCalendarsPanel({
                 <AlertIcon className="h-5 w-5" />
               </span>
               <p>
-                {isLightPlanTier(entitlement.pricing_tier) ? (
-                  <>
-                    Appointments Light includes <strong className="font-semibold">one bookable calendar</strong>. To add
-                    more columns, upgrade to Appointments Pro under{' '}
-                    <a
-                      href="/dashboard/settings?tab=plan"
-                      className="font-semibold text-amber-950 underline underline-offset-2"
-                    >
-                      Settings → Plan
-                    </a>
-                    .
-                  </>
-                ) : isPlusPlanTier(entitlement.pricing_tier) ? (
-                  <>
-                    Appointments Plus includes <strong className="font-semibold">up to five bookable calendars</strong>.
-                    To add more, upgrade to Appointments Pro under{' '}
-                    <a
-                      href="/dashboard/settings?tab=plan"
-                      className="font-semibold text-amber-950 underline underline-offset-2"
-                    >
-                      Settings → Plan
-                    </a>
-                    .
-                  </>
-                ) : (
-                  <>
-                    You&apos;ve reached your plan&apos;s calendar limit
-                    {entitlement.calendar_limit != null ? ` (${entitlement.calendar_limit})` : ''}. Visit{' '}
-                    <a
-                      href="/dashboard/settings?tab=plan"
-                      className="font-semibold text-amber-950 underline underline-offset-2"
-                    >
-                      Settings → Plan
-                    </a>
-                    .
-                  </>
-                )}
+                <CalendarLimitMessage
+                  entitlement={entitlement}
+                  linkClassName="font-semibold text-amber-950 underline underline-offset-2"
+                />
               </p>
             </div>
           )}
@@ -871,33 +838,10 @@ export function BookableCalendarsPanel({
                     finish setup in <span className="font-medium text-slate-800">onboarding</span>.
                   </>
                 ) : (
-                  <>
-                    {isLightPlanTier(entitlement?.pricing_tier) ? (
-                      <>
-                        Appointments Light includes one bookable calendar. To add columns, upgrade under{' '}
-                        <a href="/dashboard/settings?tab=plan" className="font-medium text-brand-700 underline">
-                          Settings → Plan
-                        </a>
-                        .
-                      </>
-                    ) : isPlusPlanTier(entitlement?.pricing_tier) ? (
-                      <>
-                        Appointments Plus includes up to five calendars. To add more, upgrade under{' '}
-                        <a href="/dashboard/settings?tab=plan" className="font-medium text-brand-700 underline">
-                          Settings → Plan
-                        </a>
-                        .
-                      </>
-                    ) : (
-                      <>
-                        Add calendars during onboarding, or raise your limit under{' '}
-                        <a href="/dashboard/settings?tab=plan" className="font-medium text-brand-700 underline">
-                          Plan
-                        </a>
-                        .
-                      </>
-                    )}
-                  </>
+                  <CalendarLimitMessage
+                    entitlement={entitlement}
+                    linkClassName="font-medium text-brand-700 underline"
+                  />
                 )}
               </p>
             </div>

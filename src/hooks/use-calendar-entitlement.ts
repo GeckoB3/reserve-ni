@@ -18,14 +18,15 @@ export interface CalendarEntitlement {
 
 /**
  * After `entitlementLoaded` is true: finite tiers use `can_add_practitioner`; unlimited tiers may add freely.
- * Before load: returns false so finite tiers do not briefly show "Add calendar".
+ * Before load, or when entitlement cannot be loaded: returns false so the UI does not offer calendar creation
+ * without knowing the venue's plan limit.
  */
 export function canAddCalendarColumn(
   entitlement: CalendarEntitlement | null,
   entitlementLoaded: boolean,
 ): boolean {
   if (!entitlementLoaded) return false;
-  if (!entitlement) return true;
+  if (!entitlement) return false;
   if (entitlement.unlimited) return true;
   return entitlement.can_add_practitioner;
 }
@@ -42,11 +43,14 @@ export function useCalendarEntitlement(enabled: boolean) {
     }
     try {
       const res = await fetch('/api/venue/calendar-entitlement');
-      if (!res.ok) return;
+      if (!res.ok) {
+        setEntitlement(null);
+        return;
+      }
       const data = (await res.json()) as CalendarEntitlement;
       setEntitlement(data);
     } catch {
-      // non-blocking
+      setEntitlement(null);
     } finally {
       setEntitlementLoaded(true);
     }
