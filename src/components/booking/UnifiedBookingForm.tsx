@@ -7,6 +7,7 @@ import { PhoneWithCountryField } from '@/components/phone/PhoneWithCountryField'
 import { normalizeToE164 } from '@/lib/phone/e164';
 import { defaultPhoneCountryForVenueCurrency } from '@/lib/phone/default-country';
 import MiniFloorPlanPicker, { type MiniFloorTableRow } from '@/components/floor-plan/MiniFloorPlanPicker';
+import { useDashboardVenueBootstrap } from '@/components/providers/DashboardVenueBootstrapProvider';
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 function toDateStr(d: Date): string {
@@ -74,6 +75,7 @@ export function UnifiedBookingForm({
   onCreated,
   onClose,
 }: UnifiedBookingFormProps) {
+  const venueBootstrap = useDashboardVenueBootstrap();
   const { addToast } = useToast();
   const [venueCurrencyResolved, setVenueCurrencyResolved] = useState<string | null>(venueCurrencyProp ?? null);
   const [date, setDate] = useState(initialDate ?? new Date().toISOString().slice(0, 10));
@@ -144,6 +146,10 @@ export function UnifiedBookingForm({
       setVenueCurrencyResolved(venueCurrencyProp);
       return;
     }
+    if (venueBootstrap?.currency) {
+      setVenueCurrencyResolved(venueBootstrap.currency);
+      return;
+    }
     let cancelled = false;
     void fetch('/api/venue')
       .then((r) => r.json())
@@ -154,24 +160,49 @@ export function UnifiedBookingForm({
     return () => {
       cancelled = true;
     };
-  }, [venueCurrencyProp]);
+  }, [venueCurrencyProp, venueBootstrap?.currency]);
 
   useEffect(() => {
     let cancelled = false;
+
+    const applyAreasPayload = (
+      v: Record<string, unknown>,
+      a: { areas?: Array<{ id: string; name: string; colour: string; is_active: boolean }> },
+    ) => {
+      if (cancelled) return;
+      setPublicBookingAreaMode(v.public_booking_area_mode === 'manual' ? 'manual' : 'auto');
+      const active = (a.areas ?? []).filter((x) => x.is_active);
+      const mapped = active.map(({ id, name, colour }) => ({ id, name, colour }));
+      setDiningAreas(mapped);
+      if (mapped.length > 1 && v.public_booking_area_mode === 'manual') {
+        setStaffAreaId((prev) => prev ?? mapped[0]!.id);
+      }
+      setTableBookingPrefsReady(true);
+    };
+
+    if (venueBootstrap) {
+      void fetch('/api/venue/areas')
+        .then((r) => (r.ok ? r.json() : { areas: [] }))
+        .then((a) => {
+          applyAreasPayload(
+            { public_booking_area_mode: venueBootstrap.publicBookingAreaMode },
+            a as { areas?: Array<{ id: string; name: string; colour: string; is_active: boolean }> },
+          );
+        })
+        .catch(() => {
+          if (!cancelled) setTableBookingPrefsReady(true);
+        });
+      return () => {
+        cancelled = true;
+      };
+    }
+
     void Promise.all([
       fetch('/api/venue').then((r) => r.json()),
       fetch('/api/venue/areas').then((r) => (r.ok ? r.json() : { areas: [] })),
     ])
       .then(([v, a]: [Record<string, unknown>, { areas?: Array<{ id: string; name: string; colour: string; is_active: boolean }> }]) => {
-        if (cancelled) return;
-        setPublicBookingAreaMode(v.public_booking_area_mode === 'manual' ? 'manual' : 'auto');
-        const active = (a.areas ?? []).filter((x) => x.is_active);
-        const mapped = active.map(({ id, name, colour }) => ({ id, name, colour }));
-        setDiningAreas(mapped);
-        if (mapped.length > 1 && v.public_booking_area_mode === 'manual') {
-          setStaffAreaId((prev) => prev ?? mapped[0]!.id);
-        }
-        setTableBookingPrefsReady(true);
+        applyAreasPayload(v, a);
       })
       .catch(() => {
         if (!cancelled) setTableBookingPrefsReady(true);
@@ -179,7 +210,7 @@ export function UnifiedBookingForm({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [venueBootstrap]);
 
   useEffect(() => {
     if (diningAreas.length === 0) return;

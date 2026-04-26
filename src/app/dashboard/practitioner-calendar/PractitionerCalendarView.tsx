@@ -321,6 +321,14 @@ function minutesToTime(m: number): string {
   return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
 }
 
+/** Human-readable length for a same-day block (start → end). */
+function formatBlockDurationLabel(totalMins: number): string {
+  if (totalMins < 60) return `${totalMins} min`;
+  const h = Math.floor(totalMins / 60);
+  const m = totalMins % 60;
+  return m > 0 ? `${h}h ${m}m` : `${h}h`;
+}
+
 function startOfMonth(date: string): string {
   return `${date.slice(0, 7)}-01`;
 }
@@ -1915,6 +1923,8 @@ export function PractitionerCalendarView({
           monthCells={monthCells}
           monthDayScheduleCounts={monthDayScheduleCounts}
           showMergedFeeds={showMergedFeeds}
+          openingHours={openingHours}
+          venueTimezone={venueTimezone}
           onSelectDay={(cell) => {
             clearTimeRangeOverridesForDayChange();
             setDate(cell);
@@ -2683,6 +2693,22 @@ export function PractitionerCalendarView({
               {blockModal.dateStr} · {blockModal.startTime} – {blockModal.endTime}
               {blockModal.blockId ? ' (start time is fixed; adjust end time below)' : ''}
             </p>
+            {(() => {
+              const durationMins = timeToMinutes(blockModal.endTime) - timeToMinutes(blockModal.startTime);
+              if (durationMins <= 0) {
+                return (
+                  <p className="mt-2 text-xs font-medium text-amber-800" role="status">
+                    Choose an end time after {blockModal.startTime} to set a duration.
+                  </p>
+                );
+              }
+              return (
+                <p className="mt-2 text-sm text-slate-600" role="status">
+                  <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Duration </span>
+                  <span className="font-semibold tabular-nums text-slate-900">{formatBlockDurationLabel(durationMins)}</span>
+                </p>
+              );
+            })()}
             <div className="mt-4 space-y-3">
               <div>
                 <label className="text-xs font-medium text-slate-600">End time</label>

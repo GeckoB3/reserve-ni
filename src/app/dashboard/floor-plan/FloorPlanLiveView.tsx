@@ -29,6 +29,7 @@ import { PageHeader } from '@/components/ui/dashboard/PageHeader';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { EmptyState } from '@/components/ui/dashboard/EmptyState';
 import { DashboardGridSkeleton } from '@/components/ui/dashboard/DashboardSkeletons';
+import { useDashboardVenueBootstrap } from '@/components/providers/DashboardVenueBootstrapProvider';
 
 const LiveFloorCanvas = dynamic(() => import('./LiveFloorCanvas'), { ssr: false });
 
@@ -84,6 +85,7 @@ export function FloorPlanLiveView({
   /** Scope tables, grid, and combinations to this dining area (multi-area venues). */
   diningAreaId?: string | null;
 }) {
+  const venueBootstrap = useDashboardVenueBootstrap();
   const { addToast } = useToast();
   const [tables, setTables] = useState<VenueTable[]>([]);
   const [gridData, setGridData] = useState<TableGridData | null>(null);
@@ -140,6 +142,11 @@ export function FloorPlanLiveView({
   }, [selectedTime]);
 
   useEffect(() => {
+    if (venueBootstrap) {
+      setOpeningHours(venueBootstrap.openingHours);
+      setVenueTimezone(venueBootstrap.timezone);
+      return;
+    }
     let cancelled = false;
     void fetch('/api/venue')
       .then((res) => (res.ok ? res.json() : null))
@@ -153,7 +160,7 @@ export function FloorPlanLiveView({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [venueBootstrap]);
 
   useEffect(() => {
     setStartHourOverride(null);

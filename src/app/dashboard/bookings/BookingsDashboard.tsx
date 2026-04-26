@@ -42,6 +42,7 @@ import type { OpeningHours } from '@/types/availability';
 import { BulkGuestMessageModal } from '@/components/booking/BulkGuestMessageModal';
 import type { GuestMessageChannel } from '@/lib/booking/guest-message-channel';
 import { DashboardListSkeleton } from '@/components/ui/dashboard/DashboardSkeletons';
+import { useDashboardVenueBootstrap } from '@/components/providers/DashboardVenueBootstrapProvider';
 
 interface BookingRow {
   id: string;
@@ -213,6 +214,7 @@ export function BookingsDashboard({
   enabledModels?: BookingModel[];
 }) {
   const { addToast } = useToast();
+  const venueBootstrap = useDashboardVenueBootstrap();
   const [viewMode, setViewMode] = useState<ViewMode>('day');
   const [anchorDate, setAnchorDate] = useState(todayISO);
   const [customFrom, setCustomFrom] = useState(todayISO);
@@ -377,6 +379,12 @@ export function BookingsDashboard({
   }, [searchParams, router]);
 
   useEffect(() => {
+    if (venueBootstrap) {
+      if (venueBootstrap.openingHours) setOpeningHours(venueBootstrap.openingHours);
+      setVenueTimezone(venueBootstrap.timezone);
+      setNoShowGraceMinutes(venueBootstrap.noShowGraceMinutes);
+      return;
+    }
     let cancelled = false;
     void fetch('/api/venue')
       .then((res) => (res.ok ? res.json() : null))
@@ -390,7 +398,7 @@ export function BookingsDashboard({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [venueBootstrap]);
 
   const fetchModeData = useCallback(async () => {
     try {
@@ -583,6 +591,21 @@ export function BookingsDashboard({
       setDetailLoadingIds((prev) => prev.filter((id) => id !== bookingId));
     }
   }, [detailById, detailLoadingIds]);
+
+  const prefetchBookingDetail = useCallback(
+    (bookingId: string) => {
+      if (detailById[bookingId]) return;
+      if (detailLoadingIds.includes(bookingId)) return;
+      void fetch(`/api/venue/bookings/${bookingId}`)
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data) => {
+          if (!data) return;
+          setDetailById((prev) => (prev[bookingId] ? prev : { ...prev, [bookingId]: data as BookingDetailLite }));
+        })
+        .catch(() => {});
+    },
+    [detailById, detailLoadingIds],
+  );
 
   const toggleExpand = useCallback((bookingId: string) => {
     setExpandedIds((prev) => {
@@ -1373,6 +1396,7 @@ export function BookingsDashboard({
           confirmAttendanceLoadingId={confirmAttendanceLoadingId}
           onConfirmBookingAttendance={confirmBookingAttendance}
           onCancelStaffAttendanceConfirmation={cancelStaffAttendanceConfirmation}
+          onPrefetchBookingDetail={prefetchBookingDetail}
         />
       ) : (
         <div className="space-y-4">
@@ -1411,6 +1435,7 @@ export function BookingsDashboard({
                 confirmAttendanceLoadingId={confirmAttendanceLoadingId}
                 onConfirmBookingAttendance={confirmBookingAttendance}
                 onCancelStaffAttendanceConfirmation={cancelStaffAttendanceConfirmation}
+                onPrefetchBookingDetail={prefetchBookingDetail}
               />
             </div>
           ))}
@@ -1701,6 +1726,7 @@ function BookingsAccordionList({
   confirmAttendanceLoadingId,
   onConfirmBookingAttendance,
   onCancelStaffAttendanceConfirmation,
+  onPrefetchBookingDetail,
 }: {
   bookings: BookingRow[];
   selectedIds: string[];
@@ -1725,6 +1751,7 @@ function BookingsAccordionList({
   confirmAttendanceLoadingId: string | null;
   onConfirmBookingAttendance: (bookingId: string) => void;
   onCancelStaffAttendanceConfirmation: (bookingId: string) => void;
+  onPrefetchBookingDetail?: (bookingId: string) => void;
 }) {
   const allSelected = bookings.length > 0 && bookings.every((b) => selectedIds.includes(b.id));
   return (
@@ -1761,6 +1788,9 @@ function BookingsAccordionList({
               aria-expanded={expanded}
               aria-controls={`booking-expand-${booking.id}`}
               onClick={() => onToggleExpand(booking.id)}
+              onPointerEnter={() => {
+                onPrefetchBookingDetail?.(booking.id);
+              }}
               onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggleExpand(booking.id); } }}
               className={`cursor-pointer border-l-[3px] py-3 pl-3 pr-3 transition-colors sm:pl-4 sm:pr-4 ${statusBorderClass(booking.status)} ${expanded ? 'bg-brand-50/20' : 'hover:bg-slate-50/50'}`}
             >

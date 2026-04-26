@@ -2,6 +2,8 @@
 
 import { useMemo } from 'react';
 import type { MonthDayScheduleCounts } from '@/lib/calendar/schedule-blocks-grouping';
+import type { OpeningHours } from '@/types/availability';
+import { getVenueBusinessDayStatus } from '@/lib/venue-calendar-bounds';
 
 const WEEK_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
@@ -10,6 +12,9 @@ interface Props {
   monthCells: string[];
   monthDayScheduleCounts: Record<string, MonthDayScheduleCounts>;
   showMergedFeeds: boolean;
+  /** Venue business hours (Settings); used for Open/Closed on days with no bookings. */
+  openingHours: OpeningHours | null;
+  venueTimezone: string;
   onSelectDay: (isoDate: string) => void;
 }
 
@@ -21,6 +26,8 @@ export function MonthScheduleGrid({
   monthCells,
   monthDayScheduleCounts,
   showMergedFeeds,
+  openingHours,
+  venueTimezone,
   onSelectDay,
 }: Props) {
   const todayIso = new Date().toISOString().slice(0, 10);
@@ -56,9 +63,9 @@ export function MonthScheduleGrid({
             daySummary.class_session +
             daySummary.resource_booking;
           const intensity = total === 0 ? 0 : Math.min(1, total / maxTotalForIntensity);
-          const tip = [
+          const bookingTip = [
             daySummary.appointments > 0
-              ? `${daySummary.appointments} team appointment(s) (practitioner / unified)`
+              ? `${daySummary.appointments} team appointment${daySummary.appointments === 1 ? '' : 's'}`
               : null,
             daySummary.event_ticket > 0 ? `${daySummary.event_ticket} event(s)` : null,
             daySummary.class_session > 0 ? `${daySummary.class_session} class(es)` : null,
@@ -66,11 +73,14 @@ export function MonthScheduleGrid({
           ]
             .filter(Boolean)
             .join(' · ');
+          const businessStatus = getVenueBusinessDayStatus(cell, openingHours, venueTimezone);
+          const businessLabel = businessStatus === 'closed' ? 'Closed' : 'Open';
+          const tip = bookingTip ? `${bookingTip} · ${businessLabel}` : businessLabel;
           return (
             <button
               key={cell}
               type="button"
-              title={tip || undefined}
+              title={tip}
               onClick={() => onSelectDay(cell)}
               className={`group flex min-h-[96px] flex-col items-start justify-between gap-2 rounded-2xl border p-2.5 text-left text-sm shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 ${
                 inMonth ? 'border-slate-200 bg-white hover:bg-slate-50' : 'border-transparent bg-slate-50/50 text-slate-400'
@@ -99,7 +109,7 @@ export function MonthScheduleGrid({
                   {daySummary.appointments > 0 ? (
                     <span
                       className="h-2 w-5 rounded-full bg-brand-500 shadow-sm"
-                      title="Team appointments (practitioner / unified)"
+                      title="Team appointments"
                     />
                   ) : null}
                   {showMergedFeeds && daySummary.event_ticket > 0 ? (
@@ -113,7 +123,13 @@ export function MonthScheduleGrid({
                   ) : null}
                 </div>
               ) : (
-                <span className="text-[10px] font-medium text-slate-400">Open</span>
+                <span
+                  className={`text-[10px] font-medium ${
+                    businessStatus === 'closed' ? 'text-slate-600' : 'text-slate-400'
+                  }`}
+                >
+                  {businessLabel}
+                </span>
               )}
             </button>
           );

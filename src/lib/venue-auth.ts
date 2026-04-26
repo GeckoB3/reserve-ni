@@ -8,12 +8,28 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { getStaffManagedCalendarIds, staffManagesCalendar } from '@/lib/staff-calendar-access';
+import { isPlatformSuperuser } from '@/lib/platform-auth';
+import {
+  fetchActiveSupportSession,
+  fetchStaffRowForSupport,
+  superuserDisplayNameFromUser,
+} from '@/lib/support-session-core';
+import { getSupportSessionCookieIdFromCookies } from '@/lib/support-session-server';
 
 export { getStaffManagedCalendarIds, staffManagesCalendar };
 export const NO_ASSIGNED_CALENDARS_ERROR =
   'No calendars are assigned to your account. Ask an admin to assign at least one calendar.';
 export const OUTSIDE_ASSIGNED_CALENDARS_ERROR =
   'You can only manage calendars assigned to your account.';
+
+/** Present when a platform superuser is acting as venue staff via an active support session. */
+export interface ActiveSupportSessionContext {
+  sessionId: string;
+  superuserDisplayName: string;
+  superuserEmail: string;
+  expiresAt: string;
+  reason: string;
+}
 
 export interface VenueStaff {
   id: string;
@@ -22,6 +38,8 @@ export interface VenueStaff {
   role: 'admin' | 'staff';
   /** Admin client for data queries - bypasses RLS, safe to use after auth. */
   db: SupabaseClient;
+  /** Set only for superuser support sign-in-as flows. */
+  support?: ActiveSupportSessionContext;
 }
 
 type StaffLookupRow = {
@@ -56,6 +74,34 @@ export async function getVenueStaff(supabase: SupabaseClient): Promise<VenueStaf
   if (!user?.email) return null;
 
   const admin = getSupabaseAdminClient();
+
+  if (isPlatformSuperuser(user)) {
+    const cookieSessionId = await getSupportSessionCookieIdFromCookies();
+    if (cookieSessionId) {
+      const session = await fetchActiveSupportSession(admin, cookieSessionId, user.id);
+      if (session) {
+        const staffRow = await fetchStaffRowForSupport(admin, session.apparent_staff_id, session.venue_id);
+        if (staffRow) {
+          return {
+            id: staffRow.id,
+            venue_id: staffRow.venue_id,
+            email: staffRow.email,
+            role: staffRow.role,
+            db: admin,
+            support: {
+              sessionId: session.id,
+              superuserDisplayName:
+                session.superuser_display_name?.trim() || superuserDisplayNameFromUser(user),
+              superuserEmail: session.superuser_email,
+              expiresAt: session.expires_at,
+              reason: session.reason,
+            },
+          };
+        }
+      }
+    }
+  }
+
   const normalised = user.email.toLowerCase().trim();
   const { data: rows, error } = await admin
     .from('staff')
@@ -87,10 +133,44 @@ export async function getVenueStaff(supabase: SupabaseClient): Promise<VenueStaf
  */
 export async function getDashboardStaff(
   supabase: SupabaseClient
-): Promise<{ id: string | null; email: string; venue_id: string | null; role: 'admin' | 'staff' | null; db: SupabaseClient }> {
+): Promise<{
+  id: string | null;
+  email: string;
+  venue_id: string | null;
+  role: 'admin' | 'staff' | null;
+  db: SupabaseClient;
+  support?: ActiveSupportSessionContext;
+}> {
   const admin = getSupabaseAdminClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user?.email) return { id: null, email: '', venue_id: null, role: null, db: admin };
+
+  if (isPlatformSuperuser(user)) {
+    const cookieSessionId = await getSupportSessionCookieIdFromCookies();
+    if (cookieSessionId) {
+      const session = await fetchActiveSupportSession(admin, cookieSessionId, user.id);
+      if (session) {
+        const staffRow = await fetchStaffRowForSupport(admin, session.apparent_staff_id, session.venue_id);
+        if (staffRow) {
+          return {
+            id: staffRow.id,
+            email: staffRow.email,
+            venue_id: staffRow.venue_id,
+            role: staffRow.role,
+            db: admin,
+            support: {
+              sessionId: session.id,
+              superuserDisplayName:
+                session.superuser_display_name?.trim() || superuserDisplayNameFromUser(user),
+              superuserEmail: session.superuser_email,
+              expiresAt: session.expires_at,
+              reason: session.reason,
+            },
+          };
+        }
+      }
+    }
+  }
 
   const normalised = user.email.toLowerCase().trim();
   const { data: rows, error } = await admin

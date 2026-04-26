@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import type { SetupStatus } from '@/app/api/venue/setup-status/route';
+import type { SetupStatus } from '@/lib/venue/compute-setup-status';
 import { Pill } from '@/components/ui/dashboard/Pill';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import type { BookingModel } from '@/types/booking-models';
@@ -191,11 +191,41 @@ function getSteps(status: SetupStatus): Step[] {
   return base;
 }
 
-export function SetupChecklist() {
-  const [status, setStatus] = useState<SetupStatus | null>(null);
+export function SetupChecklist({
+  setupStatusFromServer,
+  disableClientSetupFetch = false,
+}: {
+  /** When provided with `disableClientSetupFetch`, skip the client fetch (dashboard home server path). */
+  setupStatusFromServer?: SetupStatus | null;
+  disableClientSetupFetch?: boolean;
+}) {
+  const [status, setStatus] = useState<SetupStatus | null>(() =>
+    disableClientSetupFetch ? setupStatusFromServer ?? null : null,
+  );
   const [dismissed, setDismissed] = useState(false);
 
   useEffect(() => {
+    if (disableClientSetupFetch) {
+      queueMicrotask(() => {
+        const data = setupStatusFromServer;
+        if (!data) {
+          setDismissed(true);
+          return;
+        }
+        const key = 'setup_checklist_dismissed';
+        if (sessionStorage.getItem(key) === '1') {
+          setDismissed(true);
+          return;
+        }
+        setStatus(data);
+        if (isSetupComplete(data)) {
+          sessionStorage.setItem(key, '1');
+          setDismissed(true);
+        }
+      });
+      return;
+    }
+
     const key = 'setup_checklist_dismissed';
     const id = requestAnimationFrame(() => {
       if (sessionStorage.getItem(key) === '1') {
@@ -219,7 +249,7 @@ export function SetupChecklist() {
         .catch((e) => console.error('[SetupChecklist] status load failed:', e));
     });
     return () => cancelAnimationFrame(id);
-  }, []);
+  }, [disableClientSetupFetch, setupStatusFromServer]);
 
   const steps = useMemo(() => (status ? getSteps(status) : []), [status]);
 

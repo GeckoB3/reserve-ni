@@ -8,7 +8,7 @@ import { createClient } from '@/lib/supabase/browser';
 
 import { mergeModelNavEntries } from '@/lib/booking/enabled-models';
 import type { BookingModel } from '@/types/booking-models';
-import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
+import { isAppointmentDashboardExperience } from '@/lib/booking/unified-scheduling';
 import {
   isVenueScheduleCalendarEligible,
   shouldShowAppointmentAvailabilitySettings,
@@ -107,6 +107,7 @@ function NavLinkItem({
   onNavigate: () => void;
   external?: boolean;
 }) {
+  const router = useRouter();
   const className = `group flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors ${
     active
       ? 'bg-white text-brand-800 shadow-sm ring-1 ring-slate-100'
@@ -138,6 +139,9 @@ function NavLinkItem({
     <Link
       href={href}
       onClick={onNavigate}
+      onPointerEnter={() => {
+        void router.prefetch(href);
+      }}
       aria-current={active ? 'page' : undefined}
       className={className}
     >
@@ -237,7 +241,7 @@ export function DashboardSidebar({
   const navItems = useMemo(() => {
     const isTableReservation = bookingModel === 'table_reservation';
     const isRestaurantTablePrimaryInner = isTableReservation && isRestaurantPlanTier;
-    const isAppointment = isUnifiedSchedulingVenue(bookingModel);
+    const isAppointment = isAppointmentDashboardExperience(pricingTier, bookingModel, enabledModels);
     /** Dining covers / Model A — restaurant SKU only (not Appointments or Standard tier). */
     const showDiningAvailability = isTableReservation && isRestaurantPlanTier;
     const showCalendarAvailability = shouldShowAppointmentAvailabilitySettings(bookingModel, enabledModels);
@@ -309,7 +313,7 @@ export function DashboardSidebar({
     }
 
     return items;
-  }, [isAdmin, bookingModel, enabledModels, isRestaurantPlanTier, calendarEligible]);
+  }, [isAdmin, bookingModel, enabledModels, isRestaurantPlanTier, calendarEligible, pricingTier]);
 
   const navItemsWithImport = useMemo(() => {
     if (!isAdmin) return navItems;

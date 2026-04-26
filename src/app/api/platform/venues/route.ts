@@ -30,7 +30,7 @@ export async function GET(req: NextRequest) {
   let query = admin
     .from('venues')
     .select(
-      `id, name, slug, email, phone, pricing_tier, plan_status,
+      `id, name, slug, email, phone, pricing_tier, plan_status, billing_access_source,
        stripe_customer_id, stripe_subscription_id,
        subscription_current_period_end, booking_model,
        created_at, onboarding_completed,

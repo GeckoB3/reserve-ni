@@ -50,6 +50,8 @@ import { canAddCalendarColumn, useCalendarEntitlement } from '@/hooks/use-calend
 import { isAppointmentPlanTier, isPlusPlanTier } from '@/lib/tier-enforcement';
 import { CalendarLimitMessage } from '@/components/dashboard/CalendarLimitMessage';
 import { planDisplayName } from '@/lib/pricing-constants';
+import { isValidWebsiteUrlInput } from '@/lib/urls/website-url';
+import { HelpTooltip } from '@/components/dashboard/HelpTooltip';
 
 type Currency = 'GBP' | 'EUR';
 
@@ -74,6 +76,8 @@ interface VenueOnboarding {
   slug: string;
   address: string | null;
   phone: string | null;
+  email: string | null;
+  website_url: string | null;
   booking_model: BookingModel;
   active_booking_models?: BookingModel[] | null;
   /** Secondary C/D/E models; onboarding wizard stays primary-first - full setup for add-ons is on the dashboard checklist. */
@@ -443,7 +447,7 @@ function appointmentsPlanNeedsCalendarAvailabilityStep(activeModels: Appointment
   return activeModels.length > 0;
 }
 
-/** Appointments plan: calendars → calendar hours → staff → model setup → Stripe → review. */
+/** Appointments plan: calendars → calendar hours → optional staff invites → model setup → Stripe → review. */
 function buildAppointmentsPlanModelSteps(
   activeModels: AppointmentPlanModel[],
   options?: { omitOtherUsersStep?: boolean },
@@ -552,6 +556,11 @@ export default function OnboardingPage() {
   const [loading, setLoading] = useState(true);
   const [step, setStep] = useState(0);
   const [maxCompletedStep, setMaxCompletedStep] = useState(0);
+  const stripeReturnStatusRef = useRef<string | null | undefined>(undefined);
+  const handledStripeReturnRef = useRef(false);
+  if (stripeReturnStatusRef.current === undefined && typeof window !== 'undefined') {
+    stripeReturnStatusRef.current = new URLSearchParams(window.location.search).get('stripe');
+  }
   /** Step index the user navigated back to; forces save on Continue instead of skipping persistence. */
   const [revisitedStepIndex, setRevisitedStepIndex] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
@@ -569,6 +578,8 @@ export default function OnboardingPage() {
   const [addressTown, setAddressTown] = useState('');
   const [addressPostcode, setAddressPostcode] = useState('');
   const [phone, setPhone] = useState('');
+  const [businessEmail, setBusinessEmail] = useState('');
+  const [businessWebsiteUrl, setBusinessWebsiteUrl] = useState('');
   const [currency, setCurrency] = useState<Currency>('GBP');
 
   // Model B: Practitioners + services
@@ -799,6 +810,8 @@ export default function OnboardingPage() {
         setAddressTown(parsed.town);
         setAddressPostcode(parsed.postcode);
         setPhone(v.phone ?? '');
+        setBusinessEmail(v.email ?? '');
+        setBusinessWebsiteUrl(v.website_url ?? '');
         setCurrency(v.currency ?? 'GBP');
 
         if (v.onboarding_completed) {
@@ -821,11 +834,13 @@ export default function OnboardingPage() {
             });
             const unifiedFlow = Boolean(v.appointments_onboarding_unified_flow);
 
-            if (isPlusPlanTier(v.pricing_tier) && !unifiedFlow) {
-              const genericLegacy = buildLegacyGenericNonRestaurantOnboardingSteps(v.booking_model, v.terminology);
+            if (!unifiedFlow) {
+              const legacySteps = isPlusPlanTier(v.pricing_tier)
+                ? buildLegacyGenericNonRestaurantOnboardingSteps(v.booking_model, v.terminology)
+                : buildLegacyAppointmentsPlanModelSteps(active);
               initialStep = migrateOnboardingStepToCurrentLayout(
                 v.onboarding_step,
-                genericLegacy,
+                legacySteps,
                 currentSteps,
               );
               initialMaxStep = initialStep;
@@ -838,17 +853,6 @@ export default function OnboardingPage() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(patch),
               });
-            } else if (!isPlusPlanTier(v.pricing_tier)) {
-              const legacySteps = buildLegacyAppointmentsPlanModelSteps(active);
-              initialStep = migrateOnboardingStepToCurrentLayout(v.onboarding_step, legacySteps, currentSteps);
-              initialMaxStep = initialStep;
-              if (initialStep !== v.onboarding_step) {
-                void fetch('/api/venue/onboarding', {
-                  method: 'PATCH',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ onboarding_step: initialStep }),
-                });
-              }
             }
           }
         }
@@ -875,8 +879,8 @@ export default function OnboardingPage() {
           setServices([createEmptyAppointmentServiceDraft()]);
         }
 
-        // Model B: merge existing practitioners (retry / refresh after partial save).
-        // All plans now have unlimited calendars; start from one row, add as many as needed.
+        // Model B: merge existing calendars (retry / refresh after partial save).
+        // Appointments Light is capped at one calendar; higher tiers can add more.
         if (isUnifiedSchedulingVenue(v.booking_model)) {
           try {
             const prRes = await fetch('/api/venue/practitioners');
@@ -889,8 +893,9 @@ export default function OnboardingPage() {
               if (sorted.length === 0) {
                 setPractitioners([{ name: '', email: '' }]);
               } else {
+                const visibleCalendars = v.pricing_tier === 'light' ? sorted.slice(0, 1) : sorted;
                 setPractitioners(
-                  sorted.map((row) => ({
+                  visibleCalendars.map((row) => ({
                     name: row.name ?? '',
                     email: row.email?.trim() ? row.email : '',
                   })),
@@ -1029,6 +1034,28 @@ export default function OnboardingPage() {
 
   const currentStepKey = modelSteps[step]?.key ?? 'profile';
   const totalSteps = modelSteps.length;
+
+  useEffect(() => {
+    if (handledStripeReturnRef.current) return;
+    if (loading || !venue || venue.onboarding_completed || modelSteps.length === 0) return;
+    if (stripeReturnStatusRef.current !== 'success') return;
+
+    const stripeIndex = modelSteps.findIndex((s) => s.key === 'stripe_onboarding');
+    if (stripeIndex < 0) {
+      handledStripeReturnRef.current = true;
+      return;
+    }
+
+    const nextStep = Math.min(stripeIndex + 1, modelSteps.length - 1);
+    handledStripeReturnRef.current = true;
+    setStep(nextStep);
+    setMaxCompletedStep((prev) => Math.max(prev, nextStep));
+    void fetch('/api/venue/onboarding', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ onboarding_step: nextStep }),
+    });
+  }, [loading, modelSteps, step, venue]);
 
   const rosterIds = useMemo(() => rosterList.map((r) => r.id), [rosterList]);
 
@@ -1349,6 +1376,16 @@ export default function OnboardingPage() {
         setError('Please enter street, town or city, and postcode for your business address.');
         return;
       }
+      const email = businessEmail.trim();
+      if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        setError('Enter a valid business email address, or leave it blank.');
+        return;
+      }
+      const websiteUrl = businessWebsiteUrl.trim();
+      if (websiteUrl && !isValidWebsiteUrlInput(websiteUrl)) {
+        setError('Enter a valid business website URL, or leave it blank.');
+        return;
+      }
       const combinedAddress = buildAddress({
         name: addressName.trim(),
         street,
@@ -1371,6 +1408,8 @@ export default function OnboardingPage() {
             name: name.trim(),
             address: combinedAddress,
             phone: phone.trim(),
+            email,
+            website_url: websiteUrl,
             slug: finalSlug,
             currency,
             onboarding_step: nextStep,
@@ -1384,6 +1423,8 @@ export default function OnboardingPage() {
                 name: name.trim(),
                 address: combinedAddress,
                 phone: phone.trim(),
+                email: email || null,
+                website_url: websiteUrl || null,
                 slug: finalSlug,
                 currency,
               }
@@ -2305,6 +2346,41 @@ export default function OnboardingPage() {
                   className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
                 />
               </div>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div>
+                  <label className="mb-1.5 block text-sm font-medium text-slate-700">
+                    Business email <span className="font-normal text-slate-400">(optional)</span>
+                  </label>
+                  <input
+                    type="email"
+                    value={businessEmail}
+                    onChange={(e) => setBusinessEmail(e.target.value)}
+                    placeholder="hello@example.com"
+                    autoComplete="email"
+                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
+                  />
+                  <p className="mt-1 text-xs text-slate-500">
+                    Used as the venue contact and reply-to address for guest emails.
+                  </p>
+                </div>
+                <div>
+                  <label className="mb-1.5 block text-sm font-medium text-slate-700">
+                    Business website <span className="font-normal text-slate-400">(optional)</span>
+                  </label>
+                  <input
+                    type="text"
+                    inputMode="url"
+                    value={businessWebsiteUrl}
+                    onChange={(e) => setBusinessWebsiteUrl(e.target.value)}
+                    placeholder="example.com or https://example.com"
+                    autoComplete="url"
+                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
+                  />
+                  <p className="mt-1 text-xs text-slate-500">
+                    Shown on your public booking page when set.
+                  </p>
+                </div>
+              </div>
               <div>
                 <label className="mb-1.5 block text-sm font-medium text-slate-700">
                   Currency
@@ -2427,9 +2503,9 @@ export default function OnboardingPage() {
             </h2>
             {isLightPlanVenue ? (
               <p className="mb-4 text-sm text-slate-500">
-                Your plan includes one bookable calendar. Give it a name (usually your name or business name), and
-                you’ll set its working hours next. Need more calendars or to invite staff? Upgrade to full
-                Appointments under{' '}
+                Appointments Light is limited to one bookable calendar and one user. Give your calendar a name
+                (usually your name or business name), and you’ll set its working hours next. Need more calendars or
+                team logins? Upgrade under{' '}
                 <Link href="/dashboard/settings?tab=plan" className="font-medium text-brand-600 underline hover:text-brand-700">
                   Settings → Plan
                 </Link>
@@ -2567,6 +2643,13 @@ export default function OnboardingPage() {
                 <p className="mb-2 text-right text-xs text-slate-500">
                   {practitioners.length} / {calendarPlanLimit} calendars
                 </p>
+              )}
+              {isLightPlanVenue && (
+                <div className="rounded-xl border border-amber-200 bg-amber-50/70 px-4 py-3 text-sm text-amber-950">
+                  Appointments Light includes <strong>1 calendar</strong>, so additional calendars cannot be
+                  created during onboarding. You can upgrade later if you need separate calendars for extra staff,
+                  rooms, or resources.
+                </div>
               )}
               {!isLightPlanVenue && !calendarDraftAtLimit && (
                 <button
@@ -3663,30 +3746,39 @@ export default function OnboardingPage() {
             <div className="space-y-4">
               {resources.map((r, i) => (
                 <div key={i} className="rounded-xl border border-slate-200 p-4 space-y-4">
-                  <div className="flex items-center justify-between gap-2">
-                    <input
-                      type="text"
-                      value={r.name}
-                      onChange={(e) => {
-                        const updated = [...resources];
-                        updated[i] = { ...r, name: e.target.value };
-                        setResources(updated);
-                      }}
-                      placeholder="Resource name (e.g. Court 1, Studio A)"
-                      className="min-w-0 flex-1 border-0 bg-transparent p-0 text-sm font-medium text-slate-900 focus:ring-0"
-                    />
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                      <label className="mb-1 block text-xs font-medium text-slate-600">Resource name *</label>
+                      <input
+                        type="text"
+                        value={r.name}
+                        onChange={(e) => {
+                          const updated = [...resources];
+                          updated[i] = { ...r, name: e.target.value };
+                          setResources(updated);
+                        }}
+                        placeholder="e.g. Court 1, Studio A"
+                        className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+                      />
+                    </div>
                     {resources.length > 1 && (
                       <button
                         type="button"
                         onClick={() => setResources(resources.filter((_, j) => j !== i))}
-                        className="shrink-0 text-xs text-slate-400 hover:text-red-500"
+                        className="mt-7 shrink-0 text-xs text-slate-400 hover:text-red-500"
                       >
                         Remove
                       </button>
                     )}
                   </div>
                   <div>
-                    <label className="mb-1 block text-xs font-medium text-slate-600">Type (optional)</label>
+                    <label className="mb-1 flex items-center gap-1.5 text-xs font-medium text-slate-600">
+                      Type (optional)
+                      <HelpTooltip
+                        icon="?"
+                        content="Choose a suggested type from the list or type your own label. This is shown to guests as extra context, but it does not change availability, price, or booking rules."
+                      />
+                    </label>
                     <input
                       type="text"
                       value={r.resource_type}

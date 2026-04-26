@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { getVenueStaff } from '@/lib/venue-auth';
+import { getVenueStaff, OUTSIDE_ASSIGNED_CALENDARS_ERROR, staffManagesCalendar } from '@/lib/venue-auth';
 import { z } from 'zod';
 
 const isoDate = /^\d{4}-\d{2}-\d{2}$/;
 const hm = /^([01]?\d|2[0-3]):[0-5]\d$/;
 
+/** `practitioner_id` is the staff-column id from the calendar UI: legacy `practitioners.id` or `unified_calendars.id`. */
 const createSchema = z.object({
   practitioner_id: z.string().uuid(),
   block_date: z.string().regex(isoDate),
@@ -139,43 +140,92 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid request', details: parsed.error.flatten() }, { status: 400 });
     }
 
-    const { practitioner_id, block_date, start_time, end_time, reason } = parsed.data;
+    const { practitioner_id: columnId, block_date, start_time, end_time, reason } = parsed.data;
 
-    const { data: prac, error: pracErr } = await staff.db
+    const { data: prac } = await staff.db
       .from('practitioners')
       .select('id')
-      .eq('id', practitioner_id)
+      .eq('id', columnId)
       .eq('venue_id', staff.venue_id)
-      .single();
+      .maybeSingle();
 
-    if (pracErr || !prac) {
-      return NextResponse.json({ error: 'Practitioner not found' }, { status: 400 });
+    if (prac?.id) {
+      const { data: inserted, error: insErr } = await staff.db
+        .from('practitioner_calendar_blocks')
+        .insert({
+          venue_id: staff.venue_id,
+          practitioner_id: columnId,
+          block_date,
+          start_time: toPgTime(start_time),
+          end_time: toPgTime(end_time),
+          reason: reason?.trim() || null,
+          created_by: staff.id,
+        })
+        .select('id, practitioner_id, block_date, start_time, end_time, reason, created_at')
+        .single();
+
+      if (insErr || !inserted) {
+        console.error('POST practitioner-calendar-blocks:', insErr);
+        return NextResponse.json({ error: 'Failed to create block' }, { status: 500 });
+      }
+
+      return NextResponse.json({
+        block: {
+          ...inserted,
+          start_time: String(inserted.start_time).slice(0, 5),
+          end_time: String(inserted.end_time).slice(0, 5),
+        },
+      });
+    }
+
+    const { data: calendar } = await staff.db
+      .from('unified_calendars')
+      .select('id')
+      .eq('id', columnId)
+      .eq('venue_id', staff.venue_id)
+      .maybeSingle();
+
+    if (!calendar?.id) {
+      return NextResponse.json({ error: 'Calendar or practitioner not found' }, { status: 400 });
+    }
+
+    if (staff.role === 'staff') {
+      const allowed = await staffManagesCalendar(staff.db, staff.venue_id, staff.id, columnId);
+      if (!allowed) {
+        return NextResponse.json({ error: OUTSIDE_ASSIGNED_CALENDARS_ERROR }, { status: 403 });
+      }
     }
 
     const { data: inserted, error: insErr } = await staff.db
-      .from('practitioner_calendar_blocks')
+      .from('calendar_blocks')
       .insert({
         venue_id: staff.venue_id,
-        practitioner_id,
+        calendar_id: columnId,
         block_date,
         start_time: toPgTime(start_time),
         end_time: toPgTime(end_time),
         reason: reason?.trim() || null,
+        block_type: 'manual',
         created_by: staff.id,
       })
-      .select('id, practitioner_id, block_date, start_time, end_time, reason, created_at')
+      .select('id, calendar_id, block_date, start_time, end_time, reason, created_at')
       .single();
 
     if (insErr || !inserted) {
-      console.error('POST practitioner-calendar-blocks:', insErr);
+      console.error('POST practitioner-calendar-blocks (calendar_blocks):', insErr);
       return NextResponse.json({ error: 'Failed to create block' }, { status: 500 });
     }
 
     return NextResponse.json({
       block: {
-        ...inserted,
+        id: inserted.id,
+        practitioner_id: null,
+        calendar_id: inserted.calendar_id,
+        block_date: inserted.block_date,
         start_time: String(inserted.start_time).slice(0, 5),
         end_time: String(inserted.end_time).slice(0, 5),
+        reason: inserted.reason,
+        created_at: inserted.created_at,
       },
     });
   } catch (err) {

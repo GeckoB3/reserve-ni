@@ -10,7 +10,7 @@ import {
 import { DataExportSection } from './DataExportSection';
 import { ClientsSection, type ClientSummary } from './ClientsSection';
 import type { BookingModel, VenueTerminology } from '@/types/booking-models';
-import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
+import { isAppointmentDashboardExperience, isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 import { HorizontalScrollHint } from '@/components/ui/HorizontalScrollHint';
 import type { DashboardStatColor } from '@/components/dashboard/dashboard-stat-types';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
@@ -79,6 +79,8 @@ interface ReportsData {
   from: string;
   to: string;
   booking_model?: BookingModel;
+  pricing_tier?: string | null;
+  enabled_models?: BookingModel[];
   table_management_enabled?: boolean;
   report1_booking_summary: Report1 | null;
   report2_no_show_series: Report2Row[];
@@ -161,9 +163,11 @@ export interface ReportsViewProps {
   bookingModel: BookingModel;
   terminology: VenueTerminology;
   venueId: string;
+  /** Fallback before SWR resolves (matches `venues.pricing_tier`). */
+  pricingTier?: string | null;
 }
 
-export function ReportsView({ bookingModel, terminology, venueId }: ReportsViewProps) {
+export function ReportsView({ bookingModel, terminology, venueId, pricingTier = null }: ReportsViewProps) {
   const searchParams = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
@@ -182,6 +186,19 @@ export function ReportsView({ bookingModel, terminology, venueId }: ReportsViewP
     keepPreviousData: true,
   });
   const error = swrError ? (swrError instanceof Error ? swrError.message : 'Error') : null;
+  const resolvedBookingModel = useMemo(
+    () => (data?.booking_model as BookingModel | undefined) ?? bookingModel,
+    [data?.booking_model, bookingModel],
+  );
+  const appointmentDashboardExperience = useMemo(
+    () =>
+      isAppointmentDashboardExperience(
+        (data?.pricing_tier as string | null | undefined) ?? pricingTier ?? null,
+        resolvedBookingModel,
+        data?.enabled_models ?? null,
+      ),
+    [data?.pricing_tier, data?.enabled_models, pricingTier, resolvedBookingModel],
+  );
   const [exportFlash, setExportFlash] = useState<ExportFlash | null>(null);
   const activeTab = searchParams.get('tab') === 'clients' ? 'clients' : 'overview';
 
@@ -241,7 +258,11 @@ export function ReportsView({ bookingModel, terminology, venueId }: ReportsViewP
     if (!data?.report1_booking_summary) return;
     const r = data.report1_booking_summary;
     const model = (data.booking_model as BookingModel | undefined) ?? bookingModel;
-    const appt = isUnifiedSchedulingVenue(model);
+    const appt = isAppointmentDashboardExperience(
+      (data.pricing_tier as string | null | undefined) ?? pricingTier ?? null,
+      model,
+      data.enabled_models ?? null,
+    );
     downloadCsv(`report1-booking-summary-${data.from}-${data.to}.csv`, [
       ['Metric', 'Value'],
       [
@@ -265,12 +286,16 @@ export function ReportsView({ bookingModel, terminology, venueId }: ReportsViewP
       ['By status', ''],
       ...Object.entries(r.by_status).map(([k, v]) => [k, String(v)]),
     ]);
-  }, [data, bookingModel, terminology]);
+  }, [data, bookingModel, terminology, pricingTier]);
 
   const exportReport2 = useCallback(() => {
     if (!data?.report2_no_show_series?.length) return;
     const model = (data.booking_model as BookingModel | undefined) ?? bookingModel;
-    const appt = isUnifiedSchedulingVenue(model);
+    const appt = isAppointmentDashboardExperience(
+      (data.pricing_tier as string | null | undefined) ?? pricingTier ?? null,
+      model,
+      data.enabled_models ?? null,
+    );
     const headerRow = appt
       ? ['Date', 'No-shows', 'Attended or no-show (count)', 'Rate %']
       : ['Date', 'No-shows', 'Denominator', 'Rate %'];
@@ -278,13 +303,17 @@ export function ReportsView({ bookingModel, terminology, venueId }: ReportsViewP
       headerRow,
       ...data.report2_no_show_series.map((row) => [row.period_start, String(row.no_show_count), String(row.confirmed_at_time_count), String(row.rate_pct)]),
     ]);
-  }, [data, bookingModel]);
+  }, [data, bookingModel, pricingTier]);
 
   const exportReport3 = useCallback(() => {
     if (!data?.report3_cancellation) return;
     const r = data.report3_cancellation;
     const model = (data.booking_model as BookingModel | undefined) ?? bookingModel;
-    const appt = isUnifiedSchedulingVenue(model);
+    const appt = isAppointmentDashboardExperience(
+      (data.pricing_tier as string | null | undefined) ?? pricingTier ?? null,
+      model,
+      data.enabled_models ?? null,
+    );
     downloadCsv(`report3-cancellation-${data.from}-${data.to}.csv`, [
       ['Metric', 'Value'],
       [
@@ -300,7 +329,7 @@ export function ReportsView({ bookingModel, terminology, venueId }: ReportsViewP
       ['Cancelled (auto)', String(r.cancelled_auto)],
       ['Cancellation rate %', String(r.cancellation_rate_pct)],
     ]);
-  }, [data, bookingModel, terminology]);
+  }, [data, bookingModel, terminology, pricingTier]);
 
   const exportReport4 = useCallback(() => {
     if (!data?.report4_deposit) return;
@@ -390,9 +419,6 @@ export function ReportsView({ bookingModel, terminology, venueId }: ReportsViewP
     covers: row.covers,
   }));
 
-  const resolvedBookingModel =
-    (data?.booking_model as BookingModel | undefined) ?? bookingModel;
-  const isAppointment = isUnifiedSchedulingVenue(resolvedBookingModel);
   const client = terminology.client;
   const clientLower = client.toLowerCase();
   const bookingWord = terminology.booking;
@@ -453,7 +479,7 @@ export function ReportsView({ bookingModel, terminology, venueId }: ReportsViewP
         eyebrow="Insights"
         title="Reports"
         subtitle={
-          isAppointment
+          appointmentDashboardExperience
             ? 'Appointment analytics for your team, services, and channels. Figures use the selected date range unless noted.'
             : 'Covers, deposits, and guest trends for your venue. Figures use the selected date range unless noted.'
         }
@@ -497,6 +523,7 @@ export function ReportsView({ bookingModel, terminology, venueId }: ReportsViewP
           venueId={venueId}
           terminology={terminology}
           bookingModel={resolvedBookingModel}
+          appointmentDashboardExperience={appointmentDashboardExperience}
           clientSummary={data.client_summary ?? null}
           rangeLabel={`${data.from} → ${data.to}`}
           onReportsRefresh={() => void mutate()}
@@ -507,25 +534,25 @@ export function ReportsView({ bookingModel, terminology, venueId }: ReportsViewP
         <>
       {/* Report 1 */}
       <ReportSection
-        title={isAppointment ? 'Appointment activity' : 'Booking summary'}
+        title={appointmentDashboardExperience ? 'Appointment activity' : 'Booking summary'}
         onExport={exportReport1}
         exportBlocked={!r1}
         exportBlockedMessage={
-          isAppointment
+          appointmentDashboardExperience
             ? 'There is no appointment activity to export for this period.'
             : 'There is no booking summary to export for this period.'
         }
         onExportSuccess={() =>
           notifyExport(
             'success',
-            `${isAppointment ? 'Appointment activity' : 'Booking summary'} CSV download started - check your downloads folder.`,
+            `${appointmentDashboardExperience ? 'Appointment activity' : 'Booking summary'} CSV download started - check your downloads folder.`,
           )
         }
         onExportBlocked={(msg) => notifyExport('notice', msg)}
       >
         {r1 && (
           <>
-            {isAppointment && (
+            {appointmentDashboardExperience && (
               <p className="mb-4 text-sm text-slate-500">
                 Headcount comes from party size on each {bookingWord.toLowerCase()}: the middle figure is total{' '}
                 <strong>{clientLower} places</strong> booked in range (each person in a group counts once). The
@@ -534,13 +561,13 @@ export function ReportsView({ bookingModel, terminology, venueId }: ReportsViewP
             )}
             <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-3">
               <StatTile
-                label={isAppointment ? `${bookingWord}s created` : `Total ${bookingWord.toLowerCase()}s`}
+                label={appointmentDashboardExperience ? `${bookingWord}s created` : `Total ${bookingWord.toLowerCase()}s`}
                 value={String(r1.total_bookings_created)}
                 color={reportMetricColor('teal')}
               />
               <StatTile
                 label={
-                  isAppointment
+                  appointmentDashboardExperience
                     ? `${client} places booked`
                     : 'Covers booked'
                 }
@@ -549,7 +576,7 @@ export function ReportsView({ bookingModel, terminology, venueId }: ReportsViewP
               />
               <StatTile
                 label={
-                  isAppointment
+                  appointmentDashboardExperience
                     ? `${client}s seen (arrived / completed)`
                     : 'Covers seated'
                 }
@@ -560,7 +587,7 @@ export function ReportsView({ bookingModel, terminology, venueId }: ReportsViewP
             <div className="grid gap-6 md:grid-cols-2">
               <div className="h-64">
                 <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">
-                  {isAppointment ? 'How they booked (when created)' : 'By source (when created)'}
+                  {appointmentDashboardExperience ? 'How they booked (when created)' : 'By source (when created)'}
                 </p>
                 {sourcePieData.length > 0 ? (
                   <ResponsiveContainer width="100%" height="100%">
@@ -576,7 +603,7 @@ export function ReportsView({ bookingModel, terminology, venueId }: ReportsViewP
               </div>
               <div className="h-64">
                 <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">
-                  {isAppointment ? 'Appointment status (latest)' : 'By status (latest)'}
+                  {appointmentDashboardExperience ? 'Appointment status (latest)' : 'By status (latest)'}
                 </p>
                 {statusBarData.length > 0 ? (
                   <ResponsiveContainer width="100%" height="100%">
@@ -661,7 +688,7 @@ export function ReportsView({ bookingModel, terminology, venueId }: ReportsViewP
         )}
       </ReportSection>
 
-      {isAppointment && (
+      {appointmentDashboardExperience && (
         <ReportSection
           title="Team, services & channels"
           onExport={exportReport7}
@@ -777,7 +804,7 @@ export function ReportsView({ bookingModel, terminology, venueId }: ReportsViewP
         onExportSuccess={() => notifyExport('success', 'No-show rate CSV download started - check your downloads folder.')}
         onExportBlocked={(msg) => notifyExport('notice', msg)}
       >
-        {isAppointment && (
+        {appointmentDashboardExperience && (
           <p className="mb-3 text-sm text-slate-500">
             {client}s who confirmed an online {bookingWord.toLowerCase()} but did not attend (walk-ins excluded from
             the denominator). Use this to track reliability and follow-up.
@@ -812,7 +839,7 @@ export function ReportsView({ bookingModel, terminology, venueId }: ReportsViewP
       >
         {r3 && (
           <>
-            {isAppointment && (
+            {appointmentDashboardExperience && (
               <p className="mb-3 text-sm text-slate-500">
                 Auto (unpaid) counts {bookingWord.toLowerCase()}s that moved from Pending to Cancelled - for example
                 when a required deposit was not completed in time.
@@ -820,12 +847,12 @@ export function ReportsView({ bookingModel, terminology, venueId }: ReportsViewP
             )}
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
               <StatTile
-                label={isAppointment ? `${bookingWord}s created` : 'Total created'}
+                label={appointmentDashboardExperience ? `${bookingWord}s created` : 'Total created'}
                 value={String(r3.total_bookings_created)}
                 color={reportMetricColor()}
               />
               <StatTile
-                label={isAppointment ? `${client}-initiated` : 'Guest-initiated'}
+                label={appointmentDashboardExperience ? `${client}-initiated` : 'Guest-initiated'}
                 value={String(r3.cancelled_guest_initiated)}
                 color={reportMetricColor()}
               />
@@ -842,16 +869,16 @@ export function ReportsView({ bookingModel, terminology, venueId }: ReportsViewP
 
       {/* Report 4 */}
       <ReportSection
-        title={isAppointment ? 'Payments & deposits' : 'Deposit summary'}
+        title={appointmentDashboardExperience ? 'Payments & deposits' : 'Deposit summary'}
         onExport={exportReport4}
         exportBlocked={!r4}
         exportBlockedMessage={
-          isAppointment ? 'There is no payment summary to export for this period.' : 'There is no deposit summary to export for this period.'
+          appointmentDashboardExperience ? 'There is no payment summary to export for this period.' : 'There is no deposit summary to export for this period.'
         }
         onExportSuccess={() =>
           notifyExport(
             'success',
-            `${isAppointment ? 'Payment' : 'Deposit'} summary CSV download started - check your downloads folder.`,
+            `${appointmentDashboardExperience ? 'Payment' : 'Deposit'} summary CSV download started - check your downloads folder.`,
           )
         }
         onExportBlocked={(msg) => notifyExport('notice', msg)}
@@ -877,7 +904,7 @@ export function ReportsView({ bookingModel, terminology, venueId }: ReportsViewP
         )}
       </ReportSection>
 
-      {!isAppointment && data?.table_management_enabled && (
+      {!isUnifiedSchedulingVenue(resolvedBookingModel) && data?.table_management_enabled && (
         <ReportSection
           title="Table utilisation"
           onExport={exportReport5}
@@ -920,7 +947,7 @@ export function ReportsView({ bookingModel, terminology, venueId }: ReportsViewP
 
       <DataExportSection
         onExportFlash={notifyExport}
-        isAppointment={isAppointment}
+        isAppointment={appointmentDashboardExperience}
         clientLabel={client}
         bookingWord={bookingWord}
       />

@@ -95,6 +95,10 @@ function timeStr(t: string): string {
 
 const ACTIVE_STATUSES = ['Pending', 'Booked', 'Confirmed', 'Seated'];
 
+/** Narrow select for day-sheet list (avoid `*` payload). */
+const DAY_SHEET_BOOKING_SELECT =
+  'id, booking_time, estimated_end_time, party_size, status, source, deposit_status, deposit_amount_pence, dietary_notes, special_requests, internal_notes, occasion, guest_id, created_at, booking_date, experience_event_id, class_instance_id, resource_id, event_session_id, calendar_id, service_item_id, practitioner_id, appointment_service_id, guest_attendance_confirmed_at, staff_attendance_confirmed_at, service_id, area_id';
+
 /**
  * GET /api/venue/day-sheet?date=YYYY-MM-DD
  * Returns comprehensive day sheet data: periods with capacity, extended booking data,
@@ -138,7 +142,7 @@ export async function GET(request: NextRequest) {
 
     let bookingQuery = staff.db
       .from('bookings')
-      .select('*')
+      .select(DAY_SHEET_BOOKING_SELECT)
       .eq('venue_id', staff.venue_id)
       .eq('booking_date', dateStr);
     if (areaParam) {
@@ -331,15 +335,21 @@ export async function GET(request: NextRequest) {
         }
       }
 
-      for (const area of engineAreas) {
-        const engineInput = await fetchEngineInput({
-          supabase: staff.db,
-          venueId: staff.venue_id,
-          date: dateStr,
-          partySize: 1,
-          areaId: area.id,
-        });
-        const serviceResults = computeAvailability(engineInput);
+      const perAreaEngine = await Promise.all(
+        engineAreas.map(async (area) => {
+          const engineInput = await fetchEngineInput({
+            supabase: staff.db,
+            venueId: staff.venue_id,
+            date: dateStr,
+            partySize: 1,
+            areaId: area.id,
+          });
+          const serviceResults = computeAvailability(engineInput);
+          return { area, engineInput, serviceResults };
+        }),
+      );
+
+      for (const { area, engineInput, serviceResults } of perAreaEngine) {
         if (serviceDurationMin == null && engineInput.durations.length > 0) {
           serviceDurationMin = engineInput.durations[0]!.duration_minutes;
         }

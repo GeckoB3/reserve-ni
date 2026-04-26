@@ -521,9 +521,8 @@ export function ClassScheduleModal({
                 Schedule classes
               </h2>
               <p className="mt-2 text-sm leading-relaxed text-slate-600">
-                Plan every class in one view. Colours match each class type. Pick which class you are adding to below -
-                then use the calendar or <span className="font-medium text-slate-800">Schedule classes</span> to add
-                one-off, weekly, or every-N-day sessions.
+                Pick a class type, then tap a day in the month grid to schedule. Use the side panel to choose one-off,
+                weekly repeat, or every few days.
               </p>
             </div>
           </div>
@@ -541,8 +540,73 @@ export function ClassScheduleModal({
 
         <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
           <div className="min-h-0 flex-1 overflow-y-auto border-b border-slate-200/80 p-4 sm:p-5 lg:border-b-0 lg:border-r lg:border-slate-200/80">
-            <p className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-slate-400">Month view</p>
-            <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200/80 bg-slate-50/50 px-2 py-1.5">
+            <div>
+              <label className="mb-1.5 block text-sm font-semibold text-slate-900">Class type</label>
+              <p className="mb-2 text-xs text-slate-500">Switch when you need to place sessions for a different template.</p>
+              <div
+                className="grid max-h-[min(36vh,13rem)] grid-cols-1 gap-1.5 overflow-y-auto pr-0.5 sm:grid-cols-2 lg:grid-cols-3"
+                role="radiogroup"
+                aria-label="Class type to schedule"
+              >
+                {classTypes.map((ct) => {
+                  const selected = selectedClassTypeId === ct.id;
+                  return (
+                    <button
+                      key={ct.id}
+                      type="button"
+                      role="radio"
+                      aria-checked={selected}
+                      title={`${ct.name} (up to ${ct.capacity} guests per session)`}
+                      onClick={() => setSelectedClassTypeId(ct.id)}
+                      className={`relative flex min-h-[2.75rem] w-full items-center gap-1.5 rounded-lg border px-2 py-1.5 text-left transition-colors ${
+                        selected
+                          ? 'border-brand-500 bg-brand-50/60 shadow-sm ring-1 ring-brand-500/25'
+                          : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50/80'
+                      }`}
+                    >
+                      <span
+                        className="h-2 w-2 shrink-0 rounded-full ring-1 ring-black/5"
+                        style={{ backgroundColor: ct.colour }}
+                        aria-hidden
+                      />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-xs font-medium leading-tight text-slate-900">{ct.name}</span>
+                        <span className="mt-px block truncate text-[10px] leading-tight text-slate-500">
+                          Max <span className="font-medium text-slate-600">{ct.capacity}</span> guests
+                        </span>
+                      </span>
+                      {selected ? (
+                        <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-brand-600 text-white">
+                          <svg className="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                          </svg>
+                        </span>
+                      ) : (
+                        <span className="h-4 w-4 shrink-0 rounded-full border border-slate-200 bg-white" aria-hidden />
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {selectedClass ? (
+              <div className="mt-4 flex items-center gap-3 rounded-xl border border-slate-200/90 bg-white px-3 py-2.5 shadow-sm">
+                <span
+                  className="h-9 w-1.5 shrink-0 rounded-full"
+                  style={{ backgroundColor: selectedClass.colour }}
+                  aria-hidden
+                />
+                <div className="min-w-0 flex-1">
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Scheduling for</p>
+                  <p className="truncate text-sm font-semibold text-slate-900">{selectedClass.name}</p>
+                  <p className="text-xs text-slate-500">Up to {selectedClass.capacity} guests per session</p>
+                </div>
+              </div>
+            ) : null}
+
+            <p className="mb-3 mt-5 text-[11px] font-semibold uppercase tracking-wider text-slate-400">Month view</p>
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200/80 bg-slate-50/50 px-2 py-1.5">
               <div className="flex flex-1 items-center justify-center gap-0.5 sm:justify-start">
                 <button
                   type="button"
@@ -591,63 +655,6 @@ export function ClassScheduleModal({
               </button>
             </div>
 
-            <div className="mb-4">
-              <label className="mb-1.5 block text-sm font-semibold text-slate-900">Which class are you adding to?</label>
-              <div
-                className="grid max-h-[min(40vh,14rem)] grid-cols-2 gap-1.5 overflow-y-auto pr-0.5 sm:grid-cols-3 lg:grid-cols-4"
-                role="radiogroup"
-                aria-label="Class to add sessions and rules for"
-              >
-                {classTypes.map((ct) => {
-                  const selected = selectedClassTypeId === ct.id;
-                  return (
-                    <button
-                      key={ct.id}
-                      type="button"
-                      role="radio"
-                      aria-checked={selected}
-                      title={`${ct.name} — up to ${ct.capacity} guests per session`}
-                      onClick={() => setSelectedClassTypeId(ct.id)}
-                      className={`relative flex min-h-0 w-full items-center gap-1.5 rounded-lg border px-2 py-1.5 text-left transition-colors ${
-                        selected
-                          ? 'border-brand-500 bg-brand-50/60 shadow-sm ring-1 ring-brand-500/25'
-                          : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50/80'
-                      }`}
-                    >
-                      <span
-                        className="h-2 w-2 shrink-0 rounded-full ring-1 ring-black/5"
-                        style={{ backgroundColor: ct.colour }}
-                        aria-hidden
-                      />
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-xs font-medium leading-tight text-slate-900">{ct.name}</span>
-                        <span className="mt-px block truncate text-[10px] leading-tight text-slate-500">
-                          Max <span className="font-medium text-slate-600">{ct.capacity}</span> guests
-                        </span>
-                      </span>
-                      {selected ? (
-                        <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-brand-600 text-white">
-                          <svg className="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                          </svg>
-                        </span>
-                      ) : (
-                        <span
-                          className="h-4 w-4 shrink-0 rounded-full border border-slate-200 bg-white"
-                          aria-hidden
-                        />
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            <p className="mb-3 text-[11px] text-slate-500">
-              <span className="font-medium text-slate-600">Tip:</span> each class has its own colour on the calendar - same
-              as the bar on the cards above.
-            </p>
-
             <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
               <div className="grid grid-cols-7 border-b border-slate-200 bg-slate-100/80 text-center text-[11px] font-bold uppercase tracking-wide text-slate-600">
                 {WEEK_HEADER.map((d) => (
@@ -659,7 +666,7 @@ export function ClassScheduleModal({
               <div className="grid grid-cols-7 gap-px bg-slate-200 p-px">
                 {grid.map((day, i) => {
                   if (day == null) {
-                    return <div key={`e-${i}`} className="min-h-[6.25rem] bg-slate-50/50" />;
+                    return <div key={`e-${i}`} className="min-h-[5.5rem] bg-slate-50/50 sm:min-h-[6.25rem]" />;
                   }
                   const iso = ymd(viewYear, viewMonth, day);
                   const dayInst = byDate.get(iso) ?? [];
@@ -669,11 +676,13 @@ export function ClassScheduleModal({
                   return (
                     <div
                       key={iso}
-                      className={`group relative flex min-h-[6.25rem] flex-col bg-white p-1.5 ${
+                      className={`relative flex min-h-[5.5rem] cursor-pointer flex-col bg-white p-1.5 sm:min-h-[6.25rem] ${
                         isToday ? 'ring-1 ring-inset ring-brand-400/70' : ''
-                      } ${isSheet ? 'bg-brand-50/50 ring-2 ring-inset ring-brand-300' : ''}`}
+                      } ${isSheet ? 'bg-brand-50/50 ring-2 ring-inset ring-brand-300' : 'hover:bg-slate-50/90'}`}
+                      title="Click to schedule on this day"
+                      onClick={() => openScheduleSheet(iso)}
                     >
-                      <div className="flex items-start justify-between gap-0.5">
+                      <div className="flex items-start">
                         <span
                           className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-sm font-medium ${
                             isToday ? 'bg-brand-600 text-white' : 'text-slate-800'
@@ -681,17 +690,6 @@ export function ClassScheduleModal({
                         >
                           {day}
                         </span>
-                        <button
-                          type="button"
-                          title="Schedule on this day"
-                          className="rounded p-0.5 text-slate-400 opacity-0 transition-opacity hover:bg-slate-100 hover:text-brand-600 group-hover:opacity-100"
-                          onClick={() => openScheduleSheet(iso)}
-                        >
-                          <span className="sr-only">Schedule</span>
-                          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                          </svg>
-                        </button>
                       </div>
                       <div className="mt-0.5 flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto overflow-x-hidden">
                         {dayInst.map((inst) => {
@@ -701,7 +699,8 @@ export function ClassScheduleModal({
                           return (
                           <div
                             key={inst.id}
-                            className={`flex min-w-0 items-center gap-0.5 rounded px-0.5 py-0.5 text-[10px] font-medium ring-1 ring-inset ring-slate-200/80 ${
+                            onClick={(e) => e.stopPropagation()}
+                            className={`flex min-w-0 items-center gap-0.5 rounded px-0.5 py-0.5 text-[11px] font-medium ring-1 ring-inset ring-slate-200/80 ${
                               inst.is_cancelled ? 'bg-slate-100 text-slate-500' : 'bg-white text-slate-800'
                             }`}
                             style={{ borderLeftWidth: 3, borderLeftColor: accent }}
@@ -747,15 +746,19 @@ export function ClassScheduleModal({
                 })}
               </div>
             </div>
+            <p className="mt-3 text-[11px] text-slate-500">
+              <span className="font-medium text-slate-600">Tip:</span> each class keeps its colour on the grid; match
+              it to the summary bar.
+            </p>
+
             <div className="mt-4 rounded-xl border border-slate-200/80 bg-slate-50/80 px-3 py-2.5 text-xs leading-relaxed text-slate-600">
-              <span className="font-semibold text-slate-700">How to use this calendar:</span> hover a day and click{' '}
-              <span className="font-mono font-medium text-slate-800">+</span> to add a session for the class you selected
-              above. Click any session block to edit; use{' '}
-              <span className="font-mono font-medium text-slate-800">×</span> to remove a slot.
+              <span className="font-semibold text-slate-700">Calendar:</span> tap anywhere in a day cell to open the
+              scheduler. Tap a session to edit; use{' '}
+              <span className="font-mono font-medium text-slate-800">×</span> on a chip to remove it.
             </div>
           </div>
 
-          <div className="flex w-full shrink-0 flex-col border-t border-slate-200/80 bg-gradient-to-b from-slate-50/90 to-slate-50 lg:w-[min(26rem,100%)] lg:border-l lg:border-t-0">
+          <div className="flex w-full shrink-0 flex-col border-t border-slate-200/80 bg-gradient-to-b from-slate-50/90 to-slate-50 lg:w-[min(28rem,100%)] lg:border-l lg:border-t-0">
             {scheduleFormError && (
               <div
                 className="border-b border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-800"
@@ -794,9 +797,9 @@ export function ClassScheduleModal({
                 <div className="flex gap-1 border-b border-slate-200/80 bg-slate-100/50 px-2 py-2">
                   {(
                     [
-                      ['single', 'One session', 'Single date'],
-                      ['weekly', 'Weekly', 'Repeating'],
-                      ['interval_days', 'Every N days', 'Series'],
+                      ['single', 'One-off session', 'Single date'],
+                      ['weekly', 'Weekly repeat', 'Same weekday'],
+                      ['interval_days', 'Every few days', 'Spaced dates'],
                     ] as const
                   ).map(([k, label, hint]) => (
                     <button
@@ -850,9 +853,9 @@ export function ClassScheduleModal({
                   {mode === 'weekly' && (
                     <div className="space-y-3">
                       <p className="text-xs text-slate-600">
-                        Creates bookable sessions on <span className="font-medium text-slate-800">{DAY_LABELS_FULL[dowFromIso(sheetIso)]}s</span>{' '}
-                        every {intervalWeeks === 1 ? 'week' : `${intervalWeeks} weeks`}. The day comes from the date you
-                        picked on the calendar (or today if you used Schedule classes).
+                        Adds sessions on <span className="font-medium text-slate-800">{DAY_LABELS_FULL[dowFromIso(sheetIso)]}s</span>{' '}
+                        every {intervalWeeks === 1 ? 'week' : `${intervalWeeks} weeks`}. The weekday comes from the day
+                        you picked on the calendar (or from Today when you start from the side panel).
                       </p>
                       <div>
                         <label className="mb-1 block text-xs font-medium text-slate-600">Start time</label>
@@ -1038,12 +1041,10 @@ export function ClassScheduleModal({
                     </button>
                   </div>
                   <p className="mt-2 text-xs leading-relaxed text-slate-600">
-                    Select a class on the left, then add sessions by clicking the{' '}
-                    <span className="font-mono font-medium text-slate-800">+</span> on a day in the calendar, or use{' '}
-                    <span className="font-medium text-slate-800">Schedule classes</span>-both open the same form (this
-                    button starts from today&apos;s date). Below, sessions are soonest first; edit or remove them here.
+                    Tap a day in the calendar to pick a date, or start from today with the button above. Both open this
+                    same form. List is soonest first.
                   </p>
-                  <ul className="mt-2 max-h-48 space-y-1.5 overflow-y-auto text-xs">
+                  <ul className="mt-2 max-h-64 space-y-1.5 overflow-y-auto text-xs">
                     {upcomingAllSorted.slice(0, 40).map((inst) => {
                       const ctUp = classTypeById.get(inst.class_type_id);
                       return (
@@ -1086,7 +1087,7 @@ export function ClassScheduleModal({
                     })}
                     {upcomingAllSorted.length === 0 && (
                       <li className="rounded-lg border border-dashed border-slate-200 bg-white/60 px-3 py-4 text-center text-xs text-slate-500">
-                        No future sessions yet. Add dates from the calendar or use Schedule classes.
+                        No future sessions yet. Tap a day in the calendar, or use the button above to start from today.
                       </li>
                     )}
                     {upcomingAllSorted.length > 40 && (

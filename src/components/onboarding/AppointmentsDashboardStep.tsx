@@ -137,9 +137,9 @@ export function AppointmentsDashboardStep({
         <p className="mb-1 font-medium text-slate-800">A few things to know</p>
         <ul className="list-inside list-disc space-y-1.5">
           <li>
-            Every booking made by a guest, by you, or by{' '}
-            {isLightPlan ? 'someone on your team' : 'another user'} appears on the calendar and in Bookings
-            automatically.
+            {isLightPlan
+              ? 'Every booking made by a guest or by you appears on the calendar and in Bookings automatically.'
+              : 'Every booking made by a guest, by you, or by another user appears on the calendar and in Bookings automatically.'}
           </li>
           <li>
             You can share your public booking page URL on your website, Instagram bio, or Google Business

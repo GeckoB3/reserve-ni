@@ -1,0 +1,70 @@
+import { sendEmail } from '@/lib/emails/send-email';
+import { normalizePublicBaseUrl } from '@/lib/public-base-url';
+
+/**
+ * Notify venue admins when a platform support session starts (impersonation / sign-in-as).
+ */
+export async function sendSupportSessionStartedEmails(params: {
+  toEmails: string[];
+  venueName: string;
+  superuserDisplayName: string;
+  apparentStaffLabel: string;
+  reason: string;
+  expiresAtIso: string;
+}): Promise<void> {
+  const baseUrl = normalizePublicBaseUrl(process.env.NEXT_PUBLIC_BASE_URL);
+  const activityUrl = `${baseUrl.replace(/\/$/, '')}/dashboard/settings?tab=support-access`;
+
+  const expires = new Date(params.expiresAtIso).toLocaleString('en-GB', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+    timeZone: 'Europe/London',
+  });
+
+  const subject = `Reserve NI support is accessing your account (${params.venueName})`;
+
+  for (const to of params.toEmails) {
+    if (!to.trim()) continue;
+    const html = `
+      <p>Hello,</p>
+      <p><strong>${escapeHtml(params.superuserDisplayName)}</strong> from Reserve NI support has started a
+      time-limited support session on your venue account, acting as <strong>${escapeHtml(params.apparentStaffLabel)}</strong>.</p>
+      <p><strong>Reason recorded:</strong> ${escapeHtml(params.reason)}</p>
+      <p>This session is set to expire around <strong>${escapeHtml(expires)}</strong> (Europe/London).</p>
+      <p>You can review support activity in your dashboard under
+      <a href="${activityUrl}">Settings → Support access</a>.</p>
+      <p>If you did not expect this, contact us immediately at
+      <a href="mailto:support@reserveni.com">support@reserveni.com</a>.</p>
+      <p>— Reserve NI</p>
+    `.trim();
+
+    const text = [
+      `Reserve NI support (${params.superuserDisplayName}) has started a support session on your account, acting as ${params.apparentStaffLabel}.`,
+      `Reason: ${params.reason}`,
+      `Session expires around ${expires} (Europe/London).`,
+      `Review activity: ${activityUrl}`,
+      `If unexpected, contact support@reserveni.com`,
+    ].join('\n\n');
+
+    try {
+      await sendEmail({
+        to: to.trim(),
+        subject,
+        html,
+        text,
+        fromDisplayName: 'Reserve NI',
+        disableTracking: true,
+      });
+    } catch (err) {
+      console.error('[support-session-email] send failed:', err, { to });
+    }
+  }
+}
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}

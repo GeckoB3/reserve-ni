@@ -7,7 +7,7 @@ import { getDashboardStaff, getStaffManagedCalendarIds } from '@/lib/venue-auth'
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { ToastProvider } from '@/components/ui/Toast';
 import type { BookingModel } from '@/types/booking-models';
-import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
+import { isAppointmentDashboardExperience, isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 import { normalizeEnabledModels } from '@/lib/booking/enabled-models';
 import { BookingsDashboardSkeleton } from '@/components/ui/dashboard/DashboardSkeletons';
 
@@ -32,7 +32,7 @@ export default async function BookingsPage() {
   const admin = getSupabaseAdminClient();
   const { data: venue } = await admin
     .from('venues')
-    .select('booking_model, currency, enabled_models')
+    .select('booking_model, currency, enabled_models, pricing_tier')
     .eq('id', venueId)
     .single();
   const bookingModel = (venue?.booking_model as BookingModel) ?? 'table_reservation';
@@ -41,16 +41,17 @@ export default async function BookingsPage() {
     bookingModel,
   );
   const currency = (venue?.currency as string) ?? 'GBP';
-  const isAppointment = isUnifiedSchedulingVenue(bookingModel);
+  const pricingTier = (venue as { pricing_tier?: string | null } | null)?.pricing_tier;
+  const isAppointmentShell = isAppointmentDashboardExperience(pricingTier, bookingModel, enabledModels);
   const title =
-    isAppointment && enabledModels.length === 0
+    isUnifiedSchedulingVenue(bookingModel) && enabledModels.length === 0
       ? 'Appointments'
-      : isAppointment || enabledModels.length > 0
+      : isAppointmentShell || enabledModels.length > 0
         ? 'Bookings'
         : 'Reservations';
 
   const linkedPractitionerIds =
-    isAppointment && staff.role === 'staff' && staff.id
+    isAppointmentShell && staff.role === 'staff' && staff.id
       ? await getStaffManagedCalendarIds(admin, venueId, staff.id)
       : [];
   const defaultAppointmentPractitionerFilter: 'all' | string =
@@ -62,7 +63,7 @@ export default async function BookingsPage() {
         <h1 className="mb-4 text-xl font-semibold tracking-tight text-slate-900 sm:mb-6 sm:text-2xl">{title}</h1>
         <ToastProvider>
           <Suspense fallback={<BookingsDashboardSkeleton />}>
-            {isAppointment ? (
+            {isAppointmentShell ? (
               <AppointmentBookingsDashboard
                 venueId={venueId}
                 currency={currency}

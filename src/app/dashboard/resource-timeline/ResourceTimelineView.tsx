@@ -15,6 +15,7 @@ import { StatTile } from '@/components/ui/dashboard/StatTile';
 import { ScheduleRow } from '@/components/ui/dashboard/ScheduleRow';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { defaultNewUnifiedCalendarWorkingHours } from '@/lib/availability/practitioner-defaults';
+import { HelpTooltip } from '@/components/dashboard/HelpTooltip';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -907,11 +908,17 @@ export function ResourceTimelineView({
             {/* Basic info */}
             <div className="mt-4 grid gap-4 sm:grid-cols-2">
               <div>
-                <label className="mb-1 block text-xs font-medium text-slate-600">Name *</label>
+                <label className="mb-1 block text-xs font-medium text-slate-600">Resource name *</label>
                 <input type="text" value={formName} onChange={(e) => setFormName(e.target.value)} placeholder="e.g. Room 1, Studio A" className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
               </div>
               <div>
-                <label className="mb-1 block text-xs font-medium text-slate-600">Type</label>
+                <label className="mb-1 flex items-center gap-1.5 text-xs font-medium text-slate-600">
+                  Type
+                  <HelpTooltip
+                    icon="?"
+                    content="Choose one of the quick-pick types below or write your own label. This is shown to guests as extra context, but it does not change availability, price, or booking rules."
+                  />
+                </label>
                 <input
                   type="text"
                   value={formType}

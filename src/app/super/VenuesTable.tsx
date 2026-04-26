@@ -1,6 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { SuperProvisionPanel } from './SuperProvisionPanel';
+import { isSuperuserFreeBillingAccess } from '@/lib/billing/billing-access-source';
 
 interface StaffRow {
   id: string;
@@ -19,6 +21,7 @@ interface VenueRow {
   phone: string | null;
   pricing_tier: string;
   plan_status: string;
+  billing_access_source?: string | null;
   stripe_customer_id: string | null;
   stripe_subscription_id: string | null;
   subscription_current_period_end: string | null;
@@ -49,6 +52,13 @@ function tierBadge(tier: string) {
   return 'bg-slate-100 text-slate-600';
 }
 
+/** DB stores Pro as `appointments`; show a clearer label in the plan pill. */
+function tierPillLabel(tier: string): string {
+  const t = tier.toLowerCase().trim();
+  if (t === 'appointments') return 'appointments pro';
+  return tier;
+}
+
 function statusBadge(status: string) {
   const s = status.toLowerCase().trim();
   if (s === 'active') return 'bg-emerald-100 text-emerald-700';
@@ -75,6 +85,11 @@ export function VenuesTable() {
   const [tier, setTier] = useState('');
   const [status, setStatus] = useState('');
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [signInModal, setSignInModal] = useState<{
+    staffId: string;
+    venueName: string;
+    staffLabel: string;
+  } | null>(null);
 
   const fetchVenues = useCallback(async () => {
     setLoading(true);
@@ -109,6 +124,9 @@ export function VenuesTable() {
 
   return (
     <div className="rounded-xl border border-slate-200 bg-white">
+      <div className="border-b border-slate-100 px-4 pt-4">
+        <SuperProvisionPanel onCreated={() => void fetchVenues()} />
+      </div>
       {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-3 border-b border-slate-100 px-4 py-3">
         <div className="relative flex-1 min-w-[200px]">
@@ -185,6 +203,9 @@ export function VenuesTable() {
                     venue={venue}
                     expanded={expanded}
                     onToggle={() => setExpandedId(expanded ? null : venue.id)}
+                    onRequestSignInAs={(staffId, staffLabel) =>
+                      setSignInModal({ staffId, venueName: venue.name, staffLabel })
+                    }
                   />
                 );
               })
@@ -215,6 +236,98 @@ export function VenuesTable() {
           </button>
         </div>
       )}
+      {signInModal ? (
+        <SignInAsSupportModal
+          venueName={signInModal.venueName}
+          staffLabel={signInModal.staffLabel}
+          staffId={signInModal.staffId}
+          onClose={() => setSignInModal(null)}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function SignInAsSupportModal({
+  venueName,
+  staffLabel,
+  staffId,
+  onClose,
+}: {
+  venueName: string;
+  staffLabel: string;
+  staffId: string;
+  onClose: () => void;
+}) {
+  const [reason, setReason] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit() {
+    const r = reason.trim();
+    if (r.length < 3) {
+      setError('Enter a reason (at least 3 characters).');
+      return;
+    }
+    setSubmitting(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/platform/support-sessions', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ staff_id: staffId, reason: r }),
+      });
+      if (!res.ok) {
+        const j = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(j.error || 'Could not start session');
+      }
+      window.location.assign('/dashboard');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" role="dialog">
+      <div className="w-full max-w-lg rounded-xl border border-slate-200 bg-white p-6 shadow-xl">
+        <h2 className="text-lg font-semibold text-slate-900">Sign in as venue user</h2>
+        <p className="mt-2 text-sm text-slate-600">
+          You will open the venue dashboard for <strong>{venueName}</strong> with the same permissions as{' '}
+          <strong>{staffLabel}</strong>. Sessions last for 60 minutes and every mutating action is audit logged.
+        </p>
+        <label className="mt-4 block text-xs font-medium uppercase tracking-wide text-slate-500">
+          Reason (required)
+        </label>
+        <textarea
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          rows={3}
+          className="mt-1 w-full rounded-lg border border-slate-200 p-2 text-sm text-slate-800"
+          placeholder="e.g. Customer reported booking page issue, ticket #1234"
+        />
+        {error ? <p className="mt-2 text-sm text-rose-600">{error}</p> : null}
+        <div className="mt-5 flex justify-end gap-2">
+          <button
+            type="button"
+            className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            onClick={onClose}
+            disabled={submitting}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            disabled={submitting}
+            onClick={() => void submit()}
+            className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
+          >
+            {submitting ? 'Starting…' : 'Start support session'}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -223,10 +336,12 @@ function VenueRowGroup({
   venue,
   expanded,
   onToggle,
+  onRequestSignInAs,
 }: {
   venue: VenueRow;
   expanded: boolean;
   onToggle: () => void;
+  onRequestSignInAs: (staffId: string, staffLabel: string) => void;
 }) {
   const staffCount = venue.staff?.length ?? 0;
   const created = new Date(venue.created_at).toLocaleDateString('en-GB', {
@@ -261,9 +376,16 @@ function VenueRowGroup({
           <p className="text-xs text-slate-400">{venue.slug}</p>
         </td>
         <td className="px-4 py-3 hidden md:table-cell">
-          <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${tierBadge(venue.pricing_tier)}`}>
-            {venue.pricing_tier}
-          </span>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${tierBadge(venue.pricing_tier)}`}>
+              {tierPillLabel(venue.pricing_tier)}
+            </span>
+            {isSuperuserFreeBillingAccess(venue.billing_access_source) ? (
+              <span className="inline-block rounded-full bg-fuchsia-100 px-2 py-0.5 text-xs font-medium text-fuchsia-800">
+                Free
+              </span>
+            ) : null}
+          </div>
         </td>
         <td className="px-4 py-3 hidden md:table-cell">
           <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${statusBadge(venue.plan_status)}`}>
@@ -320,8 +442,13 @@ function VenueRowGroup({
               {/* Mobile tier/status badges */}
               <div className="mb-3 flex flex-wrap gap-2 md:hidden">
                 <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${tierBadge(venue.pricing_tier)}`}>
-                  {venue.pricing_tier}
+                  {tierPillLabel(venue.pricing_tier)}
                 </span>
+                {isSuperuserFreeBillingAccess(venue.billing_access_source) ? (
+                  <span className="inline-block rounded-full bg-fuchsia-100 px-2 py-0.5 text-xs font-medium text-fuchsia-800">
+                    Free
+                  </span>
+                ) : null}
                 <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${statusBadge(venue.plan_status)}`}>
                   {venue.plan_status}
                 </span>
@@ -339,6 +466,7 @@ function VenueRowGroup({
                         <th className="px-3 py-2 hidden sm:table-cell">Phone</th>
                         <th className="px-3 py-2">Role</th>
                         <th className="px-3 py-2 hidden sm:table-cell">Added</th>
+                        <th className="px-3 py-2 text-right">Support</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-50">
@@ -354,6 +482,19 @@ function VenueRowGroup({
                           </td>
                           <td className="px-3 py-2 text-slate-500 hidden sm:table-cell">
                             {new Date(s.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+                          </td>
+                          <td className="px-3 py-2 text-right">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const label = s.name?.trim() || s.email;
+                                onRequestSignInAs(s.id, label);
+                              }}
+                              className="rounded-md border border-sky-200 bg-sky-50 px-2 py-1 text-[11px] font-semibold text-sky-800 hover:bg-sky-100"
+                            >
+                              Sign in as
+                            </button>
                           </td>
                         </tr>
                       ))}

@@ -47,7 +47,7 @@ export default async function ReportsPage() {
 
   const { data: venueRow, error: venueRowError } = await staff.db
     .from('venues')
-    .select('booking_model, terminology')
+    .select('booking_model, terminology, pricing_tier')
     .eq('id', venueId)
     .single();
 
@@ -56,6 +56,7 @@ export default async function ReportsPage() {
   }
 
   const bookingModel = (venueRow?.booking_model as BookingModel | null) ?? 'table_reservation';
+  const pricingTier = (venueRow as { pricing_tier?: string | null } | null)?.pricing_tier ?? null;
   const terminology = mergeVenueTerminology(bookingModel, venueRow?.terminology);
 
   const admin = getSupabaseAdminClient();
@@ -132,7 +133,12 @@ export default async function ReportsPage() {
           </SectionCard.Body>
         </SectionCard>
       ) : null}
-      <ReportsView bookingModel={bookingModel} terminology={terminology} venueId={venueId} />
+      <ReportsView
+        bookingModel={bookingModel}
+        terminology={terminology}
+        venueId={venueId}
+        pricingTier={pricingTier}
+      />
     </PageFrame>
   );
 }

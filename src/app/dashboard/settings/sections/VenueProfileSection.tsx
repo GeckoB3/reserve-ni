@@ -10,7 +10,7 @@ import { PhoneWithCountryField } from '@/components/phone/PhoneWithCountryField'
 import { normalizeToE164 } from '@/lib/phone/e164';
 import { isValidWebsiteUrlInput } from '@/lib/urls/website-url';
 import { buildAddress, parseAddress } from '@/lib/venue/address-format';
-import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
+import { isAppointmentsProductVenue } from '@/lib/booking/unified-scheduling';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { useSettingsSave } from '../SettingsSaveContext';
 
@@ -50,6 +50,8 @@ interface VenueProfileSectionProps {
   onUpdate: (patch: Partial<VenueSettings>) => void;
   isAdmin: boolean;
   bookingModel?: string;
+  /** When set, overrides tier-derived detection (keeps profile in sync with settings shell). */
+  isAppointmentsProduct?: boolean;
 }
 
 function slugFromName(name: string): string {
@@ -87,8 +89,15 @@ function payloadFingerprint(data: ProfileForm): string {
   return JSON.stringify(buildRequestBody(data));
 }
 
-export function VenueProfileSection({ venue, onUpdate, isAdmin, bookingModel = 'table_reservation' }: VenueProfileSectionProps) {
-  const isAppointment = isUnifiedSchedulingVenue(bookingModel);
+export function VenueProfileSection({
+  venue,
+  onUpdate,
+  isAdmin,
+  bookingModel: _bookingModel = 'table_reservation',
+  isAppointmentsProduct: isAppointmentsProductProp,
+}: VenueProfileSectionProps) {
+  const isAppointmentsProduct =
+    isAppointmentsProductProp ?? isAppointmentsProductVenue(venue.pricing_tier ?? null);
   const [coverSaving, setCoverSaving] = useState(false);
   const [coverError, setCoverError] = useState<string | null>(null);
   const { integerProps } = useNumericField();
@@ -295,7 +304,7 @@ export function VenueProfileSection({ venue, onUpdate, isAdmin, bookingModel = '
     <SectionCard elevated>
       <SectionCard.Header
         eyebrow="Venue"
-        title={isAppointment ? 'Business profile' : 'Venue profile'}
+        title={isAppointmentsProduct ? 'Business profile' : 'Venue profile'}
         description={
           isAdmin
             ? 'Edits to these fields save automatically after you pause typing.'
@@ -432,7 +441,7 @@ export function VenueProfileSection({ venue, onUpdate, isAdmin, bookingModel = '
             </p>
             {errors.website_url && <p className="mt-1 text-sm text-red-600">{errors.website_url.message}</p>}
           </div>
-          {!isAppointment && (
+          {!isAppointmentsProduct && (
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div>
                 <label htmlFor="cuisine_type" className="mb-1 block text-sm font-medium text-slate-700">
@@ -453,7 +462,7 @@ export function VenueProfileSection({ venue, onUpdate, isAdmin, bookingModel = '
               </div>
             </div>
           )}
-          <div className={`grid grid-cols-1 gap-4 ${isAppointment ? '' : 'sm:grid-cols-2'}`}>
+          <div className={`grid grid-cols-1 gap-4 ${isAppointmentsProduct ? '' : 'sm:grid-cols-2'}`}>
             <div>
               <label htmlFor="no_show_grace_minutes" className="mb-1 block text-sm font-medium text-slate-700">
                 No-show grace period (minutes)
@@ -468,13 +477,13 @@ export function VenueProfileSection({ venue, onUpdate, isAdmin, bookingModel = '
                 className={inputClass}
               />
               <p className="mt-1 text-xs text-slate-500">
-                {isAppointment
+                {isAppointmentsProduct
                   ? 'How long after appointment time before staff can mark no-show (10–60 min)'
                   : 'How long after reservation time before staff can mark no-show (10–60 min)'}
               </p>
               {errors.no_show_grace_minutes && <p className="mt-1 text-sm text-red-600">{errors.no_show_grace_minutes.message}</p>}
             </div>
-            {!isAppointment && (
+            {!isAppointmentsProduct && (
               <div>
                 <label htmlFor="kitchen_email" className="mb-1 block text-sm font-medium text-slate-700">
                   Kitchen email

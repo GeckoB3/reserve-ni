@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
+import { logApiPerfIfEnabled, perfApiStart } from '@/lib/perf/api-route-timing';
 import { resolveInstructorCalendarIdForClass } from '@/lib/class-instances/instructor-calendar-block';
 import { normalizeEnabledModels, venueExposesBookingModel } from '@/lib/booking/enabled-models';
 import { inferBookingRowModel } from '@/lib/booking/infer-booking-row-model';
@@ -36,6 +37,7 @@ function classTypeFromInstanceRow(
  * still enforce `venue_id` for defence in depth (§4.6).
  */
 export async function GET(request: NextRequest) {
+  const perfStarted = perfApiStart();
   try {
     const supabase = await createClient();
     const staff = await getVenueStaff(supabase);
@@ -156,21 +158,23 @@ export async function GET(request: NextRequest) {
 
     async function ensureCalendarIdsForClassTypes(typeIds: string[]) {
       const uniq = [...new Set(typeIds)].filter(Boolean);
-      for (const tid of uniq) {
-        if (calendarIdByClassTypeId.has(tid)) continue;
-        const { data: ct } = await admin
-          .from('class_types')
-          .select('instructor_id')
-          .eq('id', tid)
-          .eq('venue_id', venueId)
-          .maybeSingle();
-        const cal = await resolveInstructorCalendarIdForClass(
-          admin,
-          venueId,
-          (ct as { instructor_id?: string | null } | null)?.instructor_id ?? null,
-        );
-        calendarIdByClassTypeId.set(tid, cal);
-      }
+      await Promise.all(
+        uniq.map(async (tid) => {
+          if (calendarIdByClassTypeId.has(tid)) return;
+          const { data: ct } = await admin
+            .from('class_types')
+            .select('instructor_id')
+            .eq('id', tid)
+            .eq('venue_id', venueId)
+            .maybeSingle();
+          const cal = await resolveInstructorCalendarIdForClass(
+            admin,
+            venueId,
+            (ct as { instructor_id?: string | null } | null)?.instructor_id ?? null,
+          );
+          calendarIdByClassTypeId.set(tid, cal);
+        }),
+      );
     }
 
     const classTypeIdsFromBookingInstances: string[] = [];
@@ -441,5 +445,7 @@ export async function GET(request: NextRequest) {
   } catch (err) {
     console.error('GET /api/venue/schedule failed:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  } finally {
+    logApiPerfIfEnabled('GET /api/venue/schedule', perfStarted);
   }
 }

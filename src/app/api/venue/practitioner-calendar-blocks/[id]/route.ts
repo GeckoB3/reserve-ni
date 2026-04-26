@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { getVenueStaff } from '@/lib/venue-auth';
+import { getVenueStaff, OUTSIDE_ASSIGNED_CALENDARS_ERROR, staffManagesCalendar } from '@/lib/venue-auth';
 import { z } from 'zod';
 
 const patchBodySchema = z.object({
@@ -36,15 +36,49 @@ export async function PATCH(
       return NextResponse.json({ error: 'Invalid request', details: parsed.error.flatten() }, { status: 400 });
     }
 
-    const { data: existing, error: fetchErr } = await staff.db
+    const { data: existingPrac, error: fetchPracErr } = await staff.db
       .from('practitioner_calendar_blocks')
       .select('id, venue_id, start_time, end_time, reason, practitioner_id, block_date')
       .eq('id', id)
       .eq('venue_id', staff.venue_id)
       .maybeSingle();
 
-    if (fetchErr || !existing) {
+    if (fetchPracErr) {
+      console.error('PATCH practitioner-calendar-blocks (practitioner lookup):', fetchPracErr);
+      return NextResponse.json({ error: 'Failed to load block' }, { status: 500 });
+    }
+
+    const { data: existingCal, error: fetchCalErr } = existingPrac
+      ? { data: null as null, error: null as null }
+      : await staff.db
+          .from('calendar_blocks')
+          .select('id, venue_id, start_time, end_time, reason, block_date, calendar_id, class_instance_id')
+          .eq('id', id)
+          .eq('venue_id', staff.venue_id)
+          .maybeSingle();
+
+    if (!existingPrac && fetchCalErr) {
+      console.error('PATCH practitioner-calendar-blocks (calendar_blocks lookup):', fetchCalErr);
+      return NextResponse.json({ error: 'Failed to load block' }, { status: 500 });
+    }
+
+    const existing = existingPrac ?? existingCal;
+    if (!existing) {
       return NextResponse.json({ error: 'Block not found' }, { status: 404 });
+    }
+
+    if (existingCal && existingCal.class_instance_id) {
+      return NextResponse.json(
+        { error: 'This block is tied to a class and cannot be edited here.' },
+        { status: 400 },
+      );
+    }
+
+    if (staff.role === 'staff' && existingCal?.calendar_id) {
+      const allowed = await staffManagesCalendar(staff.db, staff.venue_id, staff.id, existingCal.calendar_id);
+      if (!allowed) {
+        return NextResponse.json({ error: OUTSIDE_ASSIGNED_CALENDARS_ERROR }, { status: 403 });
+      }
     }
 
     const updates: Record<string, unknown> = {};
@@ -67,13 +101,8 @@ export async function PATCH(
       return NextResponse.json({ error: 'No fields to update' }, { status: 400 });
     }
 
-    const { data: updated, error } = await staff.db
-      .from('practitioner_calendar_blocks')
-      .update(updates)
-      .eq('id', id)
-      .eq('venue_id', staff.venue_id)
-      .select()
-      .single();
+    const table = existingPrac ? 'practitioner_calendar_blocks' : 'calendar_blocks';
+    const { data: updated, error } = await staff.db.from(table).update(updates).eq('id', id).eq('venue_id', staff.venue_id).select().single();
 
     if (error) {
       console.error('PATCH practitioner-calendar-blocks:', error);
@@ -101,14 +130,50 @@ export async function DELETE(
 
     const { id } = await params;
 
-    const { error } = await staff.db
+    const { data: pracRow } = await staff.db
       .from('practitioner_calendar_blocks')
-      .delete()
+      .select('id')
       .eq('id', id)
-      .eq('venue_id', staff.venue_id);
+      .eq('venue_id', staff.venue_id)
+      .maybeSingle();
 
+    if (pracRow) {
+      const { error } = await staff.db.from('practitioner_calendar_blocks').delete().eq('id', id).eq('venue_id', staff.venue_id);
+      if (error) {
+        console.error('DELETE practitioner-calendar-blocks:', error);
+        return NextResponse.json({ error: 'Failed to delete block' }, { status: 500 });
+      }
+      return NextResponse.json({ ok: true });
+    }
+
+    const { data: calRow } = await staff.db
+      .from('calendar_blocks')
+      .select('id, calendar_id, class_instance_id')
+      .eq('id', id)
+      .eq('venue_id', staff.venue_id)
+      .maybeSingle();
+
+    if (!calRow) {
+      return NextResponse.json({ error: 'Block not found' }, { status: 404 });
+    }
+
+    if (calRow.class_instance_id) {
+      return NextResponse.json(
+        { error: 'This block is tied to a class and cannot be removed here.' },
+        { status: 400 },
+      );
+    }
+
+    if (staff.role === 'staff') {
+      const allowed = await staffManagesCalendar(staff.db, staff.venue_id, staff.id, calRow.calendar_id);
+      if (!allowed) {
+        return NextResponse.json({ error: OUTSIDE_ASSIGNED_CALENDARS_ERROR }, { status: 403 });
+      }
+    }
+
+    const { error } = await staff.db.from('calendar_blocks').delete().eq('id', id).eq('venue_id', staff.venue_id);
     if (error) {
-      console.error('DELETE practitioner-calendar-blocks:', error);
+      console.error('DELETE practitioner-calendar-blocks (calendar_blocks):', error);
       return NextResponse.json({ error: 'Failed to delete block' }, { status: 500 });
     }
 

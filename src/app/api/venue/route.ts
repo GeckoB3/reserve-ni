@@ -6,7 +6,6 @@ import { normalizeToE164 } from '@/lib/phone/e164';
 import { normalizeWebsiteUrlForStorage } from '@/lib/urls/website-url';
 import {
   activeModelsToLegacyEnabledModels,
-  appointmentPlanDefaultModels,
   resolveActiveBookingModels,
 } from '@/lib/booking/active-models';
 import type { BookingModel } from '@/types/booking-models';
@@ -217,7 +216,7 @@ export async function PATCH(request: NextRequest) {
 
       if (nextActiveModels !== null) {
         if (isAppointmentPlanTier(row.pricing_tier) && nextActiveModels.length === 0) {
-          nextActiveModels = appointmentPlanDefaultModels();
+          return NextResponse.json({ error: 'At least one booking model must remain active.' }, { status: 400 });
         }
         const removed = existingActive.filter((m) => !nextActiveModels!.includes(m));
         try {

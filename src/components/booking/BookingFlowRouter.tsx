@@ -1,12 +1,40 @@
 'use client';
 
+import dynamic from 'next/dynamic';
 import type { VenuePublic } from './types';
 import type { BookingModel } from '@/types/booking-models';
-import { BookingFlow } from './BookingFlow';
-import { AppointmentBookingFlow } from './AppointmentBookingFlow';
-import { EventBookingFlow } from './EventBookingFlow';
-import { ClassBookingFlow } from './ClassBookingFlow';
-import { ResourceBookingFlow } from './ResourceBookingFlow';
+
+const BookingFlow = dynamic(() => import('./BookingFlow').then((m) => ({ default: m.BookingFlow })), {
+  loading: () => <BookingFlowRouteFallback />,
+});
+
+const AppointmentBookingFlow = dynamic(
+  () => import('./AppointmentBookingFlow').then((m) => ({ default: m.AppointmentBookingFlow })),
+  { loading: () => <BookingFlowRouteFallback /> },
+);
+
+const EventBookingFlow = dynamic(
+  () => import('./EventBookingFlow').then((m) => ({ default: m.EventBookingFlow })),
+  { loading: () => <BookingFlowRouteFallback /> },
+);
+
+const ClassBookingFlow = dynamic(
+  () => import('./ClassBookingFlow').then((m) => ({ default: m.ClassBookingFlow })),
+  { loading: () => <BookingFlowRouteFallback /> },
+);
+
+const ResourceBookingFlow = dynamic(
+  () => import('./ResourceBookingFlow').then((m) => ({ default: m.ResourceBookingFlow })),
+  { loading: () => <BookingFlowRouteFallback /> },
+);
+
+function BookingFlowRouteFallback() {
+  return (
+    <div className="flex justify-center py-12" role="status" aria-label="Loading booking">
+      <div className="h-8 w-8 animate-spin rounded-full border-2 border-brand-600 border-t-transparent" />
+    </div>
+  );
+}
 
 export interface LockedPractitionerBooking {
   id: string;
@@ -37,6 +65,8 @@ interface Props {
  * - **event_ticket / class_session / resource_booking** - legacy dedicated flows for venues
  *   still on those enum values. Engine/API support for event/class/resource under USE exists
  *   (`getUnifiedAvailableSlots`, `event_sessions`); full UI consolidation is a future cutover.
+ *
+ * Flows are code-split so embeds and public book pages only download the active model’s bundle.
  */
 export function BookingFlowRouter({
   venue,

@@ -100,3 +100,9 @@
 -- events_append_only: BEFORE UPDATE/DELETE on events → raise exception.
 -- booking_events_trigger: AFTER INSERT OR UPDATE on bookings → insert into events
 --   (booking_created on INSERT; booking_status_changed when status changes).
+
+-- =============================================================================
+-- PLATFORM SUPPORT SESSIONS (see migration 20260426180000_support_sessions_and_audit.sql)
+-- =============================================================================
+-- support_sessions — superuser sign-in-as venue context (60m default, normal selected-staff access).
+-- support_audit_events — append-only log (session lifecycle + api_mutation rows).

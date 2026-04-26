@@ -1,4 +1,6 @@
 import { getSupabaseAdminClient } from '@/lib/supabase';
+import { computeSmsMonthlyAllowance } from '@/lib/billing/sms-allowance';
+import { isSuperuserFreeBillingAccess } from '@/lib/billing/billing-access-source';
 import { isLightPlanTier } from '@/lib/tier-enforcement';
 
 function billingMonthFirstDayUtc(): string {
@@ -6,6 +8,97 @@ function billingMonthFirstDayUtc(): string {
   const y = d.getUTCFullYear();
   const m = String(d.getUTCMonth() + 1).padStart(2, '0');
   return `${y}-${m}-01`;
+}
+
+/** Pure helper: true when another counted send would exceed the inclusive cap. */
+export function wouldExceedSmsQuota(used: number, allowance: number, additionalSends = 1): boolean {
+  return used + additionalSends > allowance;
+}
+
+type VenueSmsCountRow = {
+  pricing_tier?: string | null;
+  subscription_current_period_start?: string | null;
+  subscription_current_period_end?: string | null;
+};
+
+/**
+ * SMS sends counted this month for quota checks (aligned with Settings → Plan tab).
+ */
+export async function getSmsMessagesSentThisMonthForVenue(
+  venueId: string,
+  venue: VenueSmsCountRow,
+): Promise<number> {
+  const admin = getSupabaseAdminClient();
+  const tier = String(venue.pricing_tier ?? '').toLowerCase();
+  const periodStart = venue.subscription_current_period_start?.trim();
+  const periodEnd = venue.subscription_current_period_end?.trim();
+  if (tier === 'light' && periodStart && periodEnd) {
+    const { count, error } = await admin
+      .from('sms_log')
+      .select('id', { count: 'exact', head: true })
+      .eq('venue_id', venueId)
+      .gte('sent_at', periodStart)
+      .lt('sent_at', periodEnd);
+    if (error) {
+      console.error('[getSmsMessagesSentThisMonthForVenue] sms_log count failed:', error.message, { venueId });
+      return 0;
+    }
+    return count ?? 0;
+  }
+  const bm = billingMonthFirstDayUtc();
+  const { data: smsRow, error } = await admin
+    .from('sms_usage')
+    .select('messages_sent')
+    .eq('venue_id', venueId)
+    .eq('billing_month', bm)
+    .maybeSingle();
+  if (error) {
+    console.error('[getSmsMessagesSentThisMonthForVenue] sms_usage read failed:', error.message, { venueId });
+    return 0;
+  }
+  return (smsRow as { messages_sent?: number } | null)?.messages_sent ?? 0;
+}
+
+/**
+ * For `billing_access_source = superuser_free`, block sends once included allowance is exhausted.
+ * Paid Stripe accounts keep metered overage behaviour (no pre-send block here).
+ */
+export async function assertSmsSendWithinFreeAccessQuota(opts: {
+  venueId: string;
+}): Promise<{ ok: true } | { ok: false; reason: string }> {
+  const admin = getSupabaseAdminClient();
+  const { data: venue, error } = await admin
+    .from('venues')
+    .select(
+      'billing_access_source, sms_monthly_allowance, pricing_tier, calendar_count, subscription_current_period_start, subscription_current_period_end',
+    )
+    .eq('id', opts.venueId)
+    .maybeSingle();
+  if (error || !venue) {
+    return { ok: true };
+  }
+  const row = venue as {
+    billing_access_source?: string | null;
+    sms_monthly_allowance?: number | null;
+    pricing_tier?: string | null;
+    calendar_count?: number | null;
+    subscription_current_period_start?: string | null;
+    subscription_current_period_end?: string | null;
+  };
+  if (!isSuperuserFreeBillingAccess(row.billing_access_source)) {
+    return { ok: true };
+  }
+  const tier = row.pricing_tier ?? 'appointments';
+  const allowance =
+    row.sms_monthly_allowance ?? computeSmsMonthlyAllowance(tier, row.calendar_count ?? null);
+  const used = await getSmsMessagesSentThisMonthForVenue(opts.venueId, row);
+  if (wouldExceedSmsQuota(used, allowance, 1)) {
+    return {
+      ok: false,
+      reason: `SMS allowance exhausted for this venue (${used}/${allowance} this month, free access).`,
+    };
+  }
+  return { ok: true };
 }
 
 /**

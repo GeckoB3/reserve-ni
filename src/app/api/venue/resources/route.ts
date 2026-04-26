@@ -13,6 +13,7 @@ import {
   weeklyResourceAvailabilityOverlaps,
   weeklyResourceRestrictedByHostCalendar,
 } from '@/lib/booking/resource-weekly-overlap';
+import { ensureUnifiedMirrorForPractitionerId } from '@/lib/class-instances/instructor-calendar-block';
 import type { WorkingHours } from '@/types/booking-models';
 import { DEFAULT_ENTITY_BOOKING_WINDOW } from '@/lib/booking/entity-booking-window';
 import { z } from 'zod';
@@ -148,12 +149,41 @@ async function assertResourceDisplayOnCalendarValid(
   workingHours: WorkingHours,
   excludeResourceId?: string,
 ): Promise<{ ok: true } | { ok: false; message: string }> {
-  const { data: host } = await admin
+  let { data: host } = await admin
     .from('unified_calendars')
     .select('id, calendar_type')
     .eq('id', displayOnCalendarId)
     .eq('venue_id', venueId)
     .maybeSingle();
+  if (!host) {
+    const { data: legacyHost } = await admin
+      .from('practitioners')
+      .select('id, name, staff_id, slug, working_hours, break_times, break_times_by_day, days_off, sort_order, is_active')
+      .eq('id', displayOnCalendarId)
+      .eq('venue_id', venueId)
+      .maybeSingle();
+    if (legacyHost) {
+      await ensureUnifiedMirrorForPractitionerId(admin, venueId, legacyHost as {
+        id: string;
+        name: string;
+        staff_id?: string | null;
+        slug?: string | null;
+        working_hours?: unknown;
+        break_times?: unknown;
+        break_times_by_day?: unknown;
+        days_off?: unknown;
+        sort_order?: number;
+        is_active?: boolean;
+      });
+      const retry = await admin
+        .from('unified_calendars')
+        .select('id, calendar_type')
+        .eq('id', displayOnCalendarId)
+        .eq('venue_id', venueId)
+        .maybeSingle();
+      host = retry.data;
+    }
+  }
   if (!host) {
     return { ok: false, message: 'Calendar not found' };
   }

@@ -101,6 +101,16 @@ type Notice = { kind: 'success' | 'error'; message: string };
 
 const DAY_LABELS_FULL = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
+function paymentRuleSummary(ct: ClassType, formatPrice: (pence: number) => string): string {
+  const req = ct.payment_requirement ?? 'none';
+  if (req === 'none') return 'No online payment';
+  if (req === 'full_payment') return 'Full payment online';
+  if (req === 'deposit' && ct.deposit_amount_pence != null) {
+    return `Deposit ${formatPrice(ct.deposit_amount_pence)}`;
+  }
+  return 'Deposit online';
+}
+
 const BLANK_CT = {
   name: '',
   description: '',
@@ -358,6 +368,28 @@ export function ClassTimetableView({
     void loadDetail(selectedId);
   }, [selectedId, loadDetail]);
 
+  useEffect(() => {
+    if (!showClassTypeForm) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !showAddCalendarModal) {
+        setShowClassTypeForm(false);
+        setEditingClassTypeId(null);
+        setClassTypeError(null);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [showClassTypeForm, showAddCalendarModal]);
+
+  useEffect(() => {
+    if (!showClassTypeForm) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [showClassTypeForm]);
+
   const typeMap = useMemo(() => new Map(classTypes.map((ct) => [ct.id, ct])), [classTypes]);
 
   const staffManagesClassType = useCallback(
@@ -393,6 +425,42 @@ export function ClassTimetableView({
     const totalBookedSpots = instances.reduce((sum, i) => sum + (i.booked_spots ?? 0), 0);
     return { activeClassTypes, sessionsNext7Days, upcomingSessions, totalBookedSpots };
   }, [classTypes, instances]);
+
+  const resolveCalendarColumnLabel = useCallback(
+    (ct: ClassType): string => {
+      const calId = ct.instructor_calendar_id ?? ct.instructor_id;
+      if (calId) {
+        const hit = unifiedCalendars.find((c) => c.id === calId);
+        if (hit) return hit.name;
+      }
+      const legacy = (ct.instructor_name ?? '').trim();
+      return legacy || 'Not set';
+    },
+    [unifiedCalendars],
+  );
+
+  const groupedAgendaInstances = useMemo(() => {
+    const today = new Date().toISOString().slice(0, 10);
+    const sorted = [...instances]
+      .filter((i) => i.instance_date >= today)
+      .sort(
+        (a, b) =>
+          a.instance_date.localeCompare(b.instance_date) ||
+          a.start_time.localeCompare(b.start_time) ||
+          a.class_type_id.localeCompare(b.class_type_id),
+      )
+      .slice(0, 80);
+    const groups: { date: string; items: ClassInstance[] }[] = [];
+    for (const inst of sorted) {
+      const tail = groups[groups.length - 1];
+      if (!tail || tail.date !== inst.instance_date) {
+        groups.push({ date: inst.instance_date, items: [inst] });
+      } else {
+        tail.items.push(inst);
+      }
+    }
+    return groups;
+  }, [instances]);
 
   /** Instructor id no longer in calendar/practitioner lists (deleted); keep selectable in the dropdown. */
   const orphanInstructorOption = useMemo(() => {
@@ -757,54 +825,13 @@ export function ClassTimetableView({
   };
 
   return (
-    <div className="space-y-4">
-      <SectionCard>
-        <SectionCard.Body className="text-sm text-slate-600">
-          <p>
-            Scheduled classes appear on the{' '}
-            <Link href="/dashboard/calendar" className="font-medium text-brand-600 underline hover:text-brand-700">
-              dashboard calendar
-            </Link>{' '}
-            with bookings and capacity. Use the Schedule classes button in{' '}
-            <span className="font-medium text-slate-700">Scheduled sessions</span> below to add or change sessions.
-          </p>
-        </SectionCard.Body>
-      </SectionCard>
-      {!isAdmin && (
-        <SectionCard>
-          <SectionCard.Body className="text-sm text-slate-600">
-            {linkedPractitionerIds.length === 0
-              ? 'Your account is not linked to a calendar yet. Ask an admin to assign at least one calendar before managing class sessions.'
-              : 'You can view all class types. You can create, edit, or delete class types and recurring schedule rows when the class is on a calendar you control. You can schedule, edit, or remove sessions the same way. Cancelling a class with guest notifications remains admin-only.'}
-          </SectionCard.Body>
-        </SectionCard>
-      )}
-
-      {notice && (
-        <div
-          className={`mb-4 rounded-xl border px-4 py-3 text-sm ${
-            notice.kind === 'success'
-              ? 'border-emerald-200 bg-emerald-50 text-emerald-900'
-              : 'border-red-200 bg-red-50 text-red-800'
-          }`}
-        >
-          {notice.message}
-          <button
-            type="button"
-            className="ml-3 text-xs text-slate-500 underline"
-            onClick={() => setNotice(null)}
-          >
-            Dismiss
-          </button>
-        </div>
-      )}
-
+    <div className="space-y-6">
       <PageHeader
         eyebrow="Classes"
         title="Class timetable"
-        subtitle="Define class types, recurring patterns, and upcoming sessions for your venue."
+        subtitle="Set up class types, add sessions to the calendar, then manage bookings from your roster."
         actions={
-          (isAdmin || linkedPractitionerIds.length > 0) ? (
+          isAdmin || linkedPractitionerIds.length > 0 ? (
             <button
               type="button"
               onClick={() => {
@@ -821,6 +848,25 @@ export function ClassTimetableView({
         }
       />
 
+      {notice && (
+        <div
+          className={`rounded-xl border px-4 py-3 text-sm ${
+            notice.kind === 'success'
+              ? 'border-emerald-200 bg-emerald-50 text-emerald-900'
+              : 'border-red-200 bg-red-50 text-red-800'
+          }`}
+        >
+          {notice.message}
+          <button
+            type="button"
+            className="ml-3 text-xs text-slate-500 underline"
+            onClick={() => setNotice(null)}
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
       {!loading && classTypes.length > 0 && (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <StatTile label="Active class types" value={stats.activeClassTypes} color="slate" />
@@ -830,8 +876,47 @@ export function ClassTimetableView({
         </div>
       )}
 
+      <SectionCard>
+        <SectionCard.Header eyebrow="Workflow" title="How this page works" />
+        <SectionCard.Body className="space-y-4 text-sm leading-relaxed text-slate-600">
+          <ol className="list-decimal space-y-2 pl-5 marker:font-semibold marker:text-slate-800">
+            <li>
+              <span className="font-medium text-slate-800">Add Class Type</span>: create the template guests will book,
+              including the class name, description, duration, capacity, price/payment rules, booking limits, and the
+              calendar column it belongs to. This does not add dates yet; it defines what the class is.
+            </li>
+            <li>
+              <span className="font-medium text-slate-800">Schedule Sessions</span>: open{' '}
+              <span className="font-medium text-slate-800">Schedule classes</span> to place that class type onto real
+              dates and times. You can add a single session, repeat it weekly, or create a short run every few days.
+            </li>
+            <li>
+              <span className="font-medium text-slate-800">Manage live sessions</span>: use the calendar and upcoming
+              agenda to review capacity, edit times, remove sessions, and open the roster for a specific date. These
+              scheduled sessions also appear on the{' '}
+              <Link href="/dashboard/calendar" className="font-medium text-brand-600 underline hover:text-brand-700">
+                dashboard calendar
+              </Link>{' '}
+              alongside your other bookings.
+            </li>
+          </ol>
+          {!isAdmin && (
+            <div className="rounded-lg border border-slate-100 bg-slate-50/90 px-3 py-2.5 text-xs text-slate-600">
+              <span className="font-semibold text-slate-700">Staff access:</span>{' '}
+              {linkedPractitionerIds.length === 0
+                ? 'Your account is not linked to a calendar yet. Ask an admin to assign at least one calendar before managing class sessions.'
+                : 'You can view all class types. You can create, edit, or delete types and recurring rules only on calendars you control, and schedule or remove sessions the same way. Cancelling a class with guest notifications remains admin-only.'}
+            </div>
+          )}
+        </SectionCard.Body>
+      </SectionCard>
+
       <SectionCard elevated>
-          <SectionCard.Header eyebrow="Catalogue" title="Class types" />
+          <SectionCard.Header
+            eyebrow="Catalogue"
+            title="Class types"
+            description="Templates guests book against. Session times live on the calendar below."
+          />
           <SectionCard.Body className="p-0">
           {loading ? (
             <div className="m-4 space-y-2" role="status" aria-label="Loading class types">
@@ -864,425 +949,137 @@ export function ClassTimetableView({
                 }
               />
             </div>
+          ) : classTypes.length === 0 ? (
+            <div className="px-6 py-10 text-center text-sm text-slate-600" role="status">
+              Finish your first class type in the form that opened.
+            </div>
           ) : (
-            <div className="divide-y divide-slate-50">
+            <div className="space-y-3 p-4 sm:p-5">
               {classTypes.map((ct) => {
                 const entries = timetable.filter((e) => e.class_type_id === ct.id && e.is_active);
+                const calLabel = resolveCalendarColumnLabel(ct);
                 return (
-                  <div key={ct.id} className="px-5 py-3">
-                    <div className="flex flex-wrap items-center gap-3">
-                      <div className="h-3 w-3 shrink-0 rounded-full" style={{ backgroundColor: ct.colour ?? '#94a3b8' }} />
-                      <span className="font-medium text-slate-900">{ct.name}</span>
-                      <span className="text-sm text-slate-500">{ct.duration_minutes} min · capacity {ct.capacity}</span>
-                      {ct.price_pence != null && (
-                        <span className="text-sm text-slate-500">{formatPrice(ct.price_pence)}</span>
-                      )}
-                      <span className="text-xs text-slate-500">
-                        {ct.payment_requirement === 'deposit' && ct.deposit_amount_pence != null
-                          ? ` · Deposit ${formatPrice(ct.deposit_amount_pence)} online`
-                          : ct.payment_requirement === 'full_payment'
-                            ? ' · Full payment online'
-                            : ' · No online payment'}
-                      </span>
-                      {!ct.is_active ? (
-                        <Pill variant="neutral" size="sm">
-                          Inactive
-                        </Pill>
-                      ) : null}
-                      <div className="ml-auto flex gap-2">
-                        {(isAdmin || staffManagesClassType(ct)) && (
-                        <button
-                          type="button"
-                          onClick={() => handleEditClassType(ct)}
-                          className="text-xs font-medium text-slate-600 hover:text-slate-900"
-                        >
-                          Edit
-                        </button>
+                  <div
+                    key={ct.id}
+                    className="rounded-xl border border-slate-100 bg-slate-50/40 p-4 ring-1 ring-slate-100/70 transition-colors hover:border-slate-200/90"
+                  >
+                    <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                      <div className="min-w-0 flex-1 space-y-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span
+                            className="h-3 w-3 shrink-0 rounded-full ring-1 ring-black/5"
+                            style={{ backgroundColor: ct.colour ?? '#94a3b8' }}
+                            aria-hidden
+                          />
+                          <h3 className="truncate text-sm font-semibold text-slate-900">{ct.name}</h3>
+                          {ct.is_active ? (
+                            <Pill variant="success" size="sm" dot>
+                              Active
+                            </Pill>
+                          ) : (
+                            <Pill variant="neutral" size="sm">
+                              Inactive
+                            </Pill>
+                          )}
+                        </div>
+                        <p className="flex flex-wrap gap-x-2 gap-y-0.5 text-xs text-slate-600">
+                          <span>{ct.duration_minutes} min</span>
+                          <span className="text-slate-300" aria-hidden>
+                            ·
+                          </span>
+                          <span>{ct.capacity} spots</span>
+                          {ct.price_pence != null ? (
+                            <>
+                              <span className="text-slate-300" aria-hidden>
+                                ·
+                              </span>
+                              <span>{formatPrice(ct.price_pence)}</span>
+                            </>
+                          ) : null}
+                          <span className="text-slate-300" aria-hidden>
+                            ·
+                          </span>
+                          <span>{paymentRuleSummary(ct, formatPrice)}</span>
+                          <span className="text-slate-300" aria-hidden>
+                            ·
+                          </span>
+                          <span className="text-slate-500">Column: {calLabel}</span>
+                        </p>
+                        {ct.description ? (
+                          <p className="line-clamp-2 text-xs text-slate-500">{ct.description}</p>
+                        ) : null}
+                        {entries.length > 0 && (
+                          <div className="flex flex-wrap gap-2 pt-1">
+                            {entries.map((e) => (
+                              <span
+                                key={e.id}
+                                className="flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2.5 py-0.5 text-xs text-slate-600"
+                              >
+                                {DAY_LABELS_FULL[e.day_of_week]} {e.start_time.slice(0, 5)}
+                                {(e.interval_weeks ?? 1) > 1 && (
+                                  <span className="text-slate-400"> · every {e.interval_weeks} wks</span>
+                                )}
+                                {e.recurrence_end_date && (
+                                  <span className="text-slate-400" title="Recurrence end date">
+                                    {' '}
+                                    · until {String(e.recurrence_end_date).slice(0, 10)}
+                                  </span>
+                                )}
+                                {e.total_occurrences != null && e.total_occurrences > 0 && (
+                                  <span className="text-slate-400"> · max {e.total_occurrences} sessions</span>
+                                )}
+                                {(isAdmin || staffManagesClassType(ct)) && (
+                                  <>
+                                    <button
+                                      type="button"
+                                      onClick={() => openEditTimetable(e)}
+                                      className="text-slate-500 hover:text-brand-600"
+                                      aria-label="Edit schedule entry"
+                                    >
+                                      edit
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => void handleDeleteTimetableEntry(e.id)}
+                                      className="text-slate-400 hover:text-red-500"
+                                      aria-label="Remove schedule entry"
+                                    >
+                                      ×
+                                    </button>
+                                  </>
+                                )}
+                              </span>
+                            ))}
+                          </div>
                         )}
+                      </div>
+                      <div className="flex shrink-0 flex-wrap gap-2 sm:flex-col sm:items-end">
                         {(isAdmin || staffManagesClassType(ct)) && (
-                          <button
-                            type="button"
-                            onClick={() => void handleDeleteClassType(ct.id)}
-                            className="text-xs font-medium text-red-500 hover:text-red-700"
-                          >
-                            Delete
-                          </button>
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => handleEditClassType(ct)}
+                              className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void handleDeleteClassType(ct.id)}
+                              className="rounded-lg border border-transparent px-2.5 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50"
+                            >
+                              Delete
+                            </button>
+                          </>
                         )}
                       </div>
                     </div>
-                    {ct.description ? (
-                      <p className="mt-1 pl-6 text-xs text-slate-500 line-clamp-2">{ct.description}</p>
-                    ) : null}
-
-                    {entries.length > 0 && (
-                      <div className="mt-2 flex flex-wrap gap-2 pl-6">
-                        {entries.map((e) => (
-                          <span
-                            key={e.id}
-                            className="flex items-center gap-1.5 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-0.5 text-xs text-slate-600"
-                          >
-                            {DAY_LABELS_FULL[e.day_of_week]} {e.start_time.slice(0, 5)}
-                            {(e.interval_weeks ?? 1) > 1 && (
-                              <span className="text-slate-400"> · every {e.interval_weeks} wks</span>
-                            )}
-                            {e.recurrence_end_date && (
-                              <span className="text-slate-400" title="Recurrence end date">
-                                {' '}
-                                · until {String(e.recurrence_end_date).slice(0, 10)}
-                              </span>
-                            )}
-                            {e.total_occurrences != null && e.total_occurrences > 0 && (
-                              <span className="text-slate-400"> · max {e.total_occurrences} sessions</span>
-                            )}
-                            {(isAdmin || staffManagesClassType(ct)) && (
-                              <>
-                                <button
-                                  type="button"
-                                  onClick={() => openEditTimetable(e)}
-                                  className="text-slate-500 hover:text-brand-600"
-                                  aria-label="Edit schedule entry"
-                                >
-                                  edit
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => void handleDeleteTimetableEntry(e.id)}
-                                  className="text-slate-400 hover:text-red-500"
-                                  aria-label="Remove schedule entry"
-                                >
-                                  ×
-                                </button>
-                              </>
-                            )}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-
                   </div>
                 );
               })}
             </div>
           )}
 
-          {showClassTypeForm && (isAdmin || linkedPractitionerIds.length > 0) && (
-            <div className="border-t border-slate-100 px-5 py-4">
-              <h3 className="mb-3 text-sm font-semibold text-slate-800">
-                {editingClassTypeId ? 'Edit class type' : 'New class type'}
-              </h3>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="sm:col-span-2">
-                  <label className="mb-1 block text-xs font-medium text-slate-600">Name *</label>
-                  <input
-                    type="text"
-                    value={classTypeForm.name}
-                    onChange={(e) => setClassTypeForm((f) => ({ ...f, name: e.target.value }))}
-                    placeholder="e.g. Beginner session, Open studio"
-                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
-                  />
-                </div>
-                <div className="sm:col-span-2">
-                  <label className="mb-1 block text-xs font-medium text-slate-600">Description</label>
-                  <textarea
-                    value={classTypeForm.description}
-                    onChange={(e) => setClassTypeForm((f) => ({ ...f, description: e.target.value }))}
-                    rows={3}
-                    placeholder="Shown to guests on the booking page."
-                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-slate-600">Duration (minutes)</label>
-                  <NumericInput
-                    min={5}
-                    max={480}
-                    value={classTypeForm.duration_minutes}
-                    onChange={(v) => setClassTypeForm((f) => ({ ...f, duration_minutes: v }))}
-                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-slate-600">Capacity (spots)</label>
-                  <NumericInput
-                    min={1}
-                    value={classTypeForm.capacity}
-                    onChange={(v) => setClassTypeForm((f) => ({ ...f, capacity: v }))}
-                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-slate-600">
-                    Price ({sym}) <span className="font-normal text-slate-400">optional</span>
-                  </label>
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    autoComplete="off"
-                    value={classTypeForm.price_pence}
-                    onChange={(e) => setClassTypeForm((f) => ({ ...f, price_pence: e.target.value }))}
-                    placeholder="0.00"
-                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
-                  />
-                </div>
-                <div className="sm:col-span-2">
-                  <label className="mb-2 block text-xs font-medium text-slate-600">Online payment (Stripe)</label>
-                  <div className="space-y-2">
-                    <label className="flex cursor-pointer items-start gap-2 text-sm text-slate-700">
-                      <input
-                        type="radio"
-                        name="payment_requirement"
-                        className="mt-0.5"
-                        checked={classTypeForm.payment_requirement === 'none'}
-                        onChange={() =>
-                          setClassTypeForm((f) => ({ ...f, payment_requirement: 'none', deposit_pounds: '' }))
-                        }
-                      />
-                      <span>None - pay at venue or free class</span>
-                    </label>
-                    <label className="flex cursor-pointer items-start gap-2 text-sm text-slate-700">
-                      <input
-                        type="radio"
-                        name="payment_requirement"
-                        className="mt-0.5"
-                        checked={classTypeForm.payment_requirement === 'deposit'}
-                        onChange={() => setClassTypeForm((f) => ({ ...f, payment_requirement: 'deposit' }))}
-                      />
-                      <span>Deposit per person (partial payment online)</span>
-                    </label>
-                    <label className="flex cursor-pointer items-start gap-2 text-sm text-slate-700">
-                      <input
-                        type="radio"
-                        name="payment_requirement"
-                        className="mt-0.5"
-                        checked={classTypeForm.payment_requirement === 'full_payment'}
-                        onChange={() =>
-                          setClassTypeForm((f) => ({ ...f, payment_requirement: 'full_payment', deposit_pounds: '' }))
-                        }
-                      />
-                      <span>Full payment online (per person)</span>
-                    </label>
-                  </div>
-                  {classTypeForm.payment_requirement === 'deposit' && (
-                    <div className="mt-3 max-w-xs">
-                      <label className="mb-1 block text-xs font-medium text-slate-600">Deposit amount ({sym}) *</label>
-                      <input
-                        type="text"
-                        inputMode="decimal"
-                        autoComplete="off"
-                        value={classTypeForm.deposit_pounds}
-                        onChange={(e) => setClassTypeForm((f) => ({ ...f, deposit_pounds: e.target.value }))}
-                        placeholder="e.g. 5.00"
-                        className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
-                      />
-                    </div>
-                  )}
-                  <p className="mt-2 text-xs text-slate-500">
-                    Deposit and full payment require a price per person and a connected Stripe account.
-                  </p>
-                  <StripePaymentWarning
-                    stripeConnected={stripeConnected}
-                    requiresOnlinePayment={
-                      classTypeForm.payment_requirement === 'deposit' ||
-                      classTypeForm.payment_requirement === 'full_payment'
-                    }
-                  />
-                </div>
-                <div className="sm:col-span-2 rounded-lg border border-slate-200 bg-slate-50/80 p-3">
-                  <p className="mb-2 text-xs font-medium text-slate-700">Guest booking rules</p>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <div>
-                      <label className="mb-1 block text-xs font-medium text-slate-600">Max advance (days)</label>
-                      <NumericInput
-                        min={1}
-                        max={365}
-                        value={classTypeForm.max_advance_booking_days}
-                        onChange={(v) =>
-                          setClassTypeForm((f) => ({
-                            ...f,
-                            max_advance_booking_days: v,
-                          }))
-                        }
-                        className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                      />
-                    </div>
-                    <div>
-                      <label className="mb-1 block text-xs font-medium text-slate-600">Min notice (hours)</label>
-                      <NumericInput
-                        min={0}
-                        max={168}
-                        value={classTypeForm.min_booking_notice_hours}
-                        onChange={(v) =>
-                          setClassTypeForm((f) => ({
-                            ...f,
-                            min_booking_notice_hours: v,
-                          }))
-                        }
-                        className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                      />
-                    </div>
-                    <div>
-                      <label className="mb-1 block text-xs font-medium text-slate-600">Cancellation notice (hours)</label>
-                      <NumericInput
-                        min={0}
-                        max={168}
-                        value={classTypeForm.cancellation_notice_hours}
-                        onChange={(v) =>
-                          setClassTypeForm((f) => ({
-                            ...f,
-                            cancellation_notice_hours: v,
-                          }))
-                        }
-                        className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                      />
-                    </div>
-                    <div className="flex items-end pb-1">
-                      <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
-                        <input
-                          type="checkbox"
-                          checked={classTypeForm.allow_same_day_booking}
-                          onChange={(e) =>
-                            setClassTypeForm((f) => ({ ...f, allow_same_day_booking: e.target.checked }))
-                          }
-                          className="h-4 w-4 rounded border-slate-300"
-                        />
-                        Allow same-day bookings
-                      </label>
-                    </div>
-                  </div>
-                </div>
-                <div className="sm:col-span-2">
-                  <label className="mb-1 block text-xs font-medium text-slate-600">Select Calendar *</label>
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-start">
-                    <select
-                      value={classTypeForm.instructor_staff_id}
-                      onChange={(e) =>
-                        setClassTypeForm((f) => ({ ...f, instructor_staff_id: e.target.value }))
-                      }
-                      className="w-full max-w-md rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                      required
-                    >
-                      <option value="" disabled>
-                        Choose a calendar…
-                      </option>
-                      {unifiedCalendars.length > 0 && (
-                        <optgroup label="Calendar columns">
-                          {unifiedCalendars.map((c) => (
-                            <option key={c.id} value={c.id}>
-                              {c.name}
-                            </option>
-                          ))}
-                        </optgroup>
-                      )}
-                      {orphanInstructorOption && (
-                        <option value={orphanInstructorOption.id}>{orphanInstructorOption.label}</option>
-                      )}
-                    </select>
-                    <div className="min-w-0 flex-1">
-                      <label className="mb-1 block text-xs font-medium text-slate-600">Class Instructor</label>
-                      <input
-                        type="text"
-                        value={classTypeForm.instructor_custom_name}
-                        onChange={(e) =>
-                          setClassTypeForm((f) => ({ ...f, instructor_custom_name: e.target.value }))
-                        }
-                        placeholder="Optional — shown to guests instead of calendar name"
-                        className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                      />
-                    </div>
-                  </div>
-                  <p className="mt-1 text-xs text-slate-500">
-                    The class appears on this team calendar in the schedule. If you add a class instructor name, guests
-                    see that name instead of the calendar name when booking.
-                  </p>
-                  {isAdmin && (
-                    <div className="mt-3 rounded-lg border border-slate-100 bg-slate-50/90 p-3">
-                      {!entitlementLoaded ? (
-                        <p className="text-xs text-slate-500">Loading plan limits…</p>
-                      ) : canAddCalendar ? (
-                        <>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setAddCalendarModalError(null);
-                              setNewCalendarName('');
-                              setShowAddCalendarModal(true);
-                            }}
-                            className="inline-flex w-full items-center justify-center rounded-lg border border-brand-200/90 bg-white px-3.5 py-2.5 text-sm font-semibold text-brand-700 shadow-sm transition-[color,background-color,border-color,box-shadow,transform] duration-150 ease-out hover:border-brand-400 hover:bg-brand-50 hover:text-brand-800 hover:shadow-md active:scale-[0.98] active:border-brand-500 active:bg-brand-100 active:shadow-inner motion-reduce:transition-colors motion-reduce:active:scale-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2"
-                          >
-                            Add calendar
-                          </button>
-                          <p className="mt-2 text-xs text-slate-500">
-                            Create a team calendar column here and assign it to this class immediately. For appointment
-                            links, services, and staff assignments, use{' '}
-                            <Link
-                              href="/dashboard/calendar-availability?tab=calendars"
-                              className="font-medium text-brand-700 underline hover:text-brand-800"
-                            >
-                              Calendar availability
-                            </Link>
-                            .
-                          </p>
-                        </>
-                      ) : (
-                        <p className="text-xs text-amber-950">
-                          <CalendarLimitMessage
-                            entitlement={calendarEntitlement}
-                            linkClassName="font-medium text-brand-700 underline hover:text-brand-800"
-                          />
-                        </p>
-                      )}
-                    </div>
-                  )}
-                </div>
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-slate-600">Colour</label>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="color"
-                      value={classTypeForm.colour}
-                      onChange={(e) => setClassTypeForm((f) => ({ ...f, colour: e.target.value }))}
-                      className="h-9 w-12 cursor-pointer rounded border border-slate-200 p-0.5"
-                    />
-                    <span className="text-xs text-slate-500">{classTypeForm.colour}</span>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2 pt-5">
-                  <input
-                    id="ct-active"
-                    type="checkbox"
-                    checked={classTypeForm.is_active}
-                    onChange={(e) => setClassTypeForm((f) => ({ ...f, is_active: e.target.checked }))}
-                    className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
-                  />
-                  <label htmlFor="ct-active" className="text-sm text-slate-700">Active (visible to guests)</label>
-                </div>
-              </div>
-              {classTypeError && (
-                <p className="mt-2 text-sm text-red-600">{classTypeError}</p>
-              )}
-              <div className="mt-3 flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => void handleSaveClassType()}
-                  disabled={classTypeSaving}
-                  className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
-                >
-                  {classTypeSaving ? 'Saving…' : 'Save class type'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowClassTypeForm(false);
-                    setEditingClassTypeId(null);
-                    setClassTypeError(null);
-                  }}
-                  className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          )}
           </SectionCard.Body>
       </SectionCard>
 
@@ -1334,74 +1131,97 @@ export function ClassTimetableView({
             onOpenSchedule={canOpenScheduleModal ? () => setScheduleModalOpen(true) : undefined}
           />
 
-          {instances.length > 0 && (
-            <section>
-              <SectionCard>
-                <SectionCard.Header eyebrow="Schedule" title="All upcoming instances" />
-                <SectionCard.Body className="space-y-2">
-                  {instances.slice(0, 80).map((inst) => {
-                    const ct = typeMap.get(inst.class_type_id);
-                    const cap = inst.capacity_override ?? ct?.capacity ?? 0;
-                    const booked = inst.booked_spots ?? 0;
-                    return (
-                      <div
-                        key={inst.id}
-                        className={`flex w-full flex-wrap items-center justify-between gap-2 rounded-xl border px-4 py-3 text-left text-sm shadow-sm transition-colors ${
-                          selectedId === inst.id
-                            ? 'border-brand-200 bg-brand-50/40 ring-1 ring-brand-200'
-                            : 'border-slate-100 bg-white hover:border-brand-200/80 hover:bg-slate-50/80'
-                        }`}
-                      >
-                        <button
-                          type="button"
-                          onClick={() => setSelectedId(selectedId === inst.id ? null : inst.id)}
-                          className="flex min-w-0 flex-1 items-center gap-3 text-left"
-                        >
-                          <span
-                            className="h-10 w-1.5 shrink-0 rounded-full"
-                            style={{ backgroundColor: ct?.colour ?? '#4E6B78' }}
-                          />
-                          <span className="w-14 shrink-0 text-xs font-bold tabular-nums text-slate-900 sm:text-sm">
-                            {inst.start_time.slice(0, 5)}
-                          </span>
-                          <span className="min-w-0 flex-1">
-                            <span className="block truncate text-sm font-semibold text-slate-900">{ct?.name}</span>
-                            <span className="block truncate text-xs text-slate-500">
-                              {inst.instance_date} · {booked}/{cap} booked
-                            </span>
-                          </span>
-                          {inst.is_cancelled ? (
-                            <Pill variant="danger" size="sm">
-                              Cancelled
-                            </Pill>
-                          ) : null}
-                        </button>
-                        {(isAdmin || staffManagesClassType(ct)) && (
-                          <span className="flex gap-3">
-                            <button
-                              type="button"
-                              onClick={() => openEditInstance(inst)}
-                              className="text-xs font-semibold text-brand-600 hover:text-brand-800"
+          <section>
+            <SectionCard>
+              <SectionCard.Header
+                eyebrow="Agenda"
+                title="Upcoming sessions"
+                description="Soonest first, grouped by date. Select a row to load the roster."
+              />
+              <SectionCard.Body className="space-y-5">
+                {groupedAgendaInstances.length === 0 ? (
+                  <p className="text-sm text-slate-500">
+                    No sessions from today onward. Open <span className="font-medium text-slate-700">Schedule classes</span>{' '}
+                    above to add dates.
+                  </p>
+                ) : (
+                  groupedAgendaInstances.map((g) => (
+                    <div key={g.date}>
+                      <p className="mb-2 border-b border-slate-100 pb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        {new Date(`${g.date}T12:00:00`).toLocaleDateString('en-GB', {
+                          weekday: 'short',
+                          day: 'numeric',
+                          month: 'short',
+                          year: 'numeric',
+                        })}
+                      </p>
+                      <div className="space-y-2">
+                        {g.items.map((inst) => {
+                          const ct = typeMap.get(inst.class_type_id);
+                          const cap = inst.capacity_override ?? ct?.capacity ?? 0;
+                          const booked = inst.booked_spots ?? 0;
+                          return (
+                            <div
+                              key={inst.id}
+                              className={`flex w-full flex-wrap items-center justify-between gap-2 rounded-xl border px-4 py-3 text-left text-sm shadow-sm transition-colors ${
+                                selectedId === inst.id
+                                  ? 'border-brand-200 bg-brand-50/40 ring-1 ring-brand-200'
+                                  : 'border-slate-100 bg-white hover:border-brand-200/80 hover:bg-slate-50/80'
+                              }`}
                             >
-                              Edit
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => void handleDeleteInstance(inst)}
-                              disabled={instanceDeletingId === inst.id}
-                              className="text-xs font-semibold text-red-600 hover:text-red-800 disabled:opacity-50"
-                            >
-                              {instanceDeletingId === inst.id ? 'Removing…' : 'Remove'}
-                            </button>
-                          </span>
-                        )}
+                              <button
+                                type="button"
+                                onClick={() => setSelectedId(selectedId === inst.id ? null : inst.id)}
+                                className="flex min-w-0 flex-1 items-center gap-3 text-left"
+                              >
+                                <span
+                                  className="h-10 w-1.5 shrink-0 rounded-full"
+                                  style={{ backgroundColor: ct?.colour ?? '#4E6B78' }}
+                                />
+                                <span className="w-14 shrink-0 text-xs font-bold tabular-nums text-slate-900 sm:text-sm">
+                                  {inst.start_time.slice(0, 5)}
+                                </span>
+                                <span className="min-w-0 flex-1">
+                                  <span className="block truncate text-sm font-semibold text-slate-900">{ct?.name}</span>
+                                  <span className="block truncate text-xs text-slate-500">
+                                    {booked}/{cap} booked
+                                  </span>
+                                </span>
+                                {inst.is_cancelled ? (
+                                  <Pill variant="danger" size="sm">
+                                    Cancelled
+                                  </Pill>
+                                ) : null}
+                              </button>
+                              {(isAdmin || staffManagesClassType(ct)) && (
+                                <span className="flex gap-3">
+                                  <button
+                                    type="button"
+                                    onClick={() => openEditInstance(inst)}
+                                    className="text-xs font-semibold text-brand-600 hover:text-brand-800"
+                                  >
+                                    Edit
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => void handleDeleteInstance(inst)}
+                                    disabled={instanceDeletingId === inst.id}
+                                    className="text-xs font-semibold text-red-600 hover:text-red-800 disabled:opacity-50"
+                                  >
+                                    {instanceDeletingId === inst.id ? 'Removing…' : 'Remove'}
+                                  </button>
+                                </span>
+                              )}
+                            </div>
+                          );
+                        })}
                       </div>
-                    );
-                  })}
-                </SectionCard.Body>
-              </SectionCard>
-            </section>
-          )}
+                    </div>
+                  ))
+                )}
+              </SectionCard.Body>
+            </SectionCard>
+          </section>
         </div>
       )}
 
@@ -1422,6 +1242,398 @@ export function ClassTimetableView({
           setNotice={setNotice}
           openEditInstance={openEditInstance}
         />
+      )}
+
+      {showClassTypeForm && (isAdmin || linkedPractitionerIds.length > 0) && (
+        <div
+          className="fixed inset-0 z-[55] flex items-start justify-center overflow-y-auto bg-black/50 p-4 py-8 sm:items-center sm:py-10"
+          onClick={(e) => {
+            if (e.target !== e.currentTarget || classTypeSaving) return;
+            setShowClassTypeForm(false);
+            setEditingClassTypeId(null);
+            setClassTypeError(null);
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="class-type-form-title"
+            className="my-auto w-full max-w-2xl rounded-2xl border border-slate-200 bg-white shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3 border-b border-slate-100 px-5 py-4 sm:px-6">
+              <h2 id="class-type-form-title" className="text-lg font-semibold text-slate-900">
+                {editingClassTypeId ? 'Edit class type' : 'New class type'}
+              </h2>
+              <button
+                type="button"
+                className="rounded-lg p-2 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800"
+                aria-label="Close"
+                disabled={classTypeSaving}
+                onClick={() => {
+                  setShowClassTypeForm(false);
+                  setEditingClassTypeId(null);
+                  setClassTypeError(null);
+                }}
+              >
+                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                void handleSaveClassType();
+              }}
+              className="max-h-[min(78vh,calc(100vh-5rem))] overflow-y-auto px-5 pb-5 pt-1 sm:px-6"
+            >
+              <div className="space-y-6 pb-2">
+                <section className="space-y-3">
+                  <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Basics</h3>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="sm:col-span-2">
+                      <label className="mb-1 block text-xs font-medium text-slate-600">Name *</label>
+                      <input
+                        type="text"
+                        value={classTypeForm.name}
+                        onChange={(e) => setClassTypeForm((f) => ({ ...f, name: e.target.value }))}
+                        placeholder="e.g. Beginner session, Open studio"
+                        className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+                      />
+                    </div>
+                    <div className="sm:col-span-2">
+                      <label className="mb-1 block text-xs font-medium text-slate-600">Description</label>
+                      <textarea
+                        value={classTypeForm.description}
+                        onChange={(e) => setClassTypeForm((f) => ({ ...f, description: e.target.value }))}
+                        rows={3}
+                        placeholder="Shown to guests on the booking page."
+                        className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-slate-600">Colour</label>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="color"
+                          value={classTypeForm.colour}
+                          onChange={(e) => setClassTypeForm((f) => ({ ...f, colour: e.target.value }))}
+                          className="h-9 w-12 cursor-pointer rounded border border-slate-200 p-0.5"
+                        />
+                        <span className="text-xs text-slate-500">{classTypeForm.colour}</span>
+                      </div>
+                    </div>
+                    <div className="flex items-end pb-1">
+                      <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
+                        <input
+                          id="ct-active-modal"
+                          type="checkbox"
+                          checked={classTypeForm.is_active}
+                          onChange={(e) => setClassTypeForm((f) => ({ ...f, is_active: e.target.checked }))}
+                          className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                        />
+                        <span>Active (visible to guests)</span>
+                      </label>
+                    </div>
+                  </div>
+                </section>
+
+                <section className="space-y-3 border-t border-slate-100 pt-5">
+                  <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Session defaults</h3>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-slate-600">Duration (minutes)</label>
+                      <NumericInput
+                        min={5}
+                        max={480}
+                        value={classTypeForm.duration_minutes}
+                        onChange={(v) => setClassTypeForm((f) => ({ ...f, duration_minutes: v }))}
+                        className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-slate-600">Capacity (spots)</label>
+                      <NumericInput
+                        min={1}
+                        value={classTypeForm.capacity}
+                        onChange={(v) => setClassTypeForm((f) => ({ ...f, capacity: v }))}
+                        className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+                      />
+                    </div>
+                    <div className="sm:col-span-2">
+                      <label className="mb-1 block text-xs font-medium text-slate-600">Calendar column *</label>
+                      <p className="mb-2 text-xs text-slate-500">
+                        Pick the team calendar column this class occupies in the schedule.
+                      </p>
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
+                        <select
+                          value={classTypeForm.instructor_staff_id}
+                          onChange={(e) =>
+                            setClassTypeForm((f) => ({ ...f, instructor_staff_id: e.target.value }))
+                          }
+                          className="w-full max-w-md rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                          required
+                        >
+                          <option value="" disabled>
+                            Choose a calendar…
+                          </option>
+                          {unifiedCalendars.length > 0 && (
+                            <optgroup label="Calendar columns">
+                              {unifiedCalendars.map((c) => (
+                                <option key={c.id} value={c.id}>
+                                  {c.name}
+                                </option>
+                              ))}
+                            </optgroup>
+                          )}
+                          {orphanInstructorOption && (
+                            <option value={orphanInstructorOption.id}>{orphanInstructorOption.label}</option>
+                          )}
+                        </select>
+                        <div className="min-w-0 flex-1">
+                          <label className="mb-1 block text-xs font-medium text-slate-600">
+                            Instructor label (optional)
+                          </label>
+                          <input
+                            type="text"
+                            value={classTypeForm.instructor_custom_name}
+                            onChange={(e) =>
+                              setClassTypeForm((f) => ({ ...f, instructor_custom_name: e.target.value }))
+                            }
+                            placeholder="Shown to guests instead of the calendar name"
+                            className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                          />
+                        </div>
+                      </div>
+                      {isAdmin && (
+                        <div className="mt-3 rounded-lg border border-slate-100 bg-slate-50/90 p-3">
+                          {!entitlementLoaded ? (
+                            <p className="text-xs text-slate-500">Loading plan limits…</p>
+                          ) : canAddCalendar ? (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setAddCalendarModalError(null);
+                                  setNewCalendarName('');
+                                  setShowAddCalendarModal(true);
+                                }}
+                                className="inline-flex w-full max-w-xs items-center justify-center rounded-lg border border-brand-200/90 bg-white px-3 py-2 text-xs font-semibold text-brand-700 shadow-sm transition hover:border-brand-400 hover:bg-brand-50"
+                              >
+                                Add calendar column
+                              </button>
+                              <p className="mt-2 text-xs text-slate-500">
+                                Need services or staff links? Manage columns in{' '}
+                                <Link
+                                  href="/dashboard/calendar-availability?tab=calendars"
+                                  className="font-medium text-brand-700 underline hover:text-brand-800"
+                                >
+                                  Calendar availability
+                                </Link>
+                                .
+                              </p>
+                            </>
+                          ) : (
+                            <p className="text-xs text-amber-950">
+                              <CalendarLimitMessage
+                                entitlement={calendarEntitlement}
+                                linkClassName="font-medium text-brand-700 underline hover:text-brand-800"
+                              />
+                            </p>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </section>
+
+                <section className="space-y-3 border-t border-slate-100 pt-5">
+                  <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Guest booking rules</h3>
+                  <div className="rounded-lg border border-slate-200 bg-slate-50/80 p-3">
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div>
+                        <label className="mb-1 block text-xs font-medium text-slate-600">Max advance (days)</label>
+                        <NumericInput
+                          min={1}
+                          max={365}
+                          value={classTypeForm.max_advance_booking_days}
+                          onChange={(v) =>
+                            setClassTypeForm((f) => ({
+                              ...f,
+                              max_advance_booking_days: v,
+                            }))
+                          }
+                          className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-xs font-medium text-slate-600">Min notice (hours)</label>
+                        <NumericInput
+                          min={0}
+                          max={168}
+                          value={classTypeForm.min_booking_notice_hours}
+                          onChange={(v) =>
+                            setClassTypeForm((f) => ({
+                              ...f,
+                              min_booking_notice_hours: v,
+                            }))
+                          }
+                          className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-xs font-medium text-slate-600">
+                          Cancellation notice (hours)
+                        </label>
+                        <NumericInput
+                          min={0}
+                          max={168}
+                          value={classTypeForm.cancellation_notice_hours}
+                          onChange={(v) =>
+                            setClassTypeForm((f) => ({
+                              ...f,
+                              cancellation_notice_hours: v,
+                            }))
+                          }
+                          className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                        />
+                      </div>
+                      <div className="flex items-end pb-1">
+                        <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
+                          <input
+                            type="checkbox"
+                            checked={classTypeForm.allow_same_day_booking}
+                            onChange={(e) =>
+                              setClassTypeForm((f) => ({ ...f, allow_same_day_booking: e.target.checked }))
+                            }
+                            className="h-4 w-4 rounded border-slate-300"
+                          />
+                          Allow same-day bookings
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+                </section>
+
+                <section className="space-y-3 border-t border-slate-100 pt-5">
+                  <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Price & online payment</h3>
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-slate-600">
+                      Price ({sym}) <span className="font-normal text-slate-400">optional</span>
+                    </label>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      autoComplete="off"
+                      value={classTypeForm.price_pence}
+                      onChange={(e) => setClassTypeForm((f) => ({ ...f, price_pence: e.target.value }))}
+                      placeholder="0.00"
+                      className="w-full max-w-xs rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-2 block text-xs font-medium text-slate-600">Online payment (Stripe)</label>
+                    <div className="space-y-2">
+                      <label className="flex cursor-pointer items-start gap-2 text-sm text-slate-700">
+                        <input
+                          type="radio"
+                          name="payment_requirement_modal"
+                          className="mt-0.5"
+                          checked={classTypeForm.payment_requirement === 'none'}
+                          onChange={() =>
+                            setClassTypeForm((f) => ({ ...f, payment_requirement: 'none', deposit_pounds: '' }))
+                          }
+                        />
+                        <span>None: pay at venue or free class</span>
+                      </label>
+                      <label className="flex cursor-pointer items-start gap-2 text-sm text-slate-700">
+                        <input
+                          type="radio"
+                          name="payment_requirement_modal"
+                          className="mt-0.5"
+                          checked={classTypeForm.payment_requirement === 'deposit'}
+                          onChange={() => setClassTypeForm((f) => ({ ...f, payment_requirement: 'deposit' }))}
+                        />
+                        <span>Deposit per person (partial payment online)</span>
+                      </label>
+                      <label className="flex cursor-pointer items-start gap-2 text-sm text-slate-700">
+                        <input
+                          type="radio"
+                          name="payment_requirement_modal"
+                          className="mt-0.5"
+                          checked={classTypeForm.payment_requirement === 'full_payment'}
+                          onChange={() =>
+                            setClassTypeForm((f) => ({
+                              ...f,
+                              payment_requirement: 'full_payment',
+                              deposit_pounds: '',
+                            }))
+                          }
+                        />
+                        <span>Full payment online (per person)</span>
+                      </label>
+                    </div>
+                    {classTypeForm.payment_requirement === 'deposit' && (
+                      <div className="mt-3 max-w-xs">
+                        <label className="mb-1 block text-xs font-medium text-slate-600">
+                          Deposit amount ({sym}) *
+                        </label>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          autoComplete="off"
+                          value={classTypeForm.deposit_pounds}
+                          onChange={(e) => setClassTypeForm((f) => ({ ...f, deposit_pounds: e.target.value }))}
+                          placeholder="e.g. 5.00"
+                          className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+                        />
+                      </div>
+                    )}
+                    <p className="mt-2 text-xs text-slate-500">
+                      Deposit and full payment require a price per person and a connected Stripe account.
+                    </p>
+                    <StripePaymentWarning
+                      stripeConnected={stripeConnected}
+                      requiresOnlinePayment={
+                        classTypeForm.payment_requirement === 'deposit' ||
+                        classTypeForm.payment_requirement === 'full_payment'
+                      }
+                    />
+                  </div>
+                </section>
+              </div>
+
+              {classTypeError && (
+                <p className="mt-3 text-sm text-red-600" role="alert">
+                  {classTypeError}
+                </p>
+              )}
+
+              <div className="sticky bottom-0 mt-4 flex flex-wrap gap-2 border-t border-slate-100 bg-white/95 py-4 backdrop-blur-sm">
+                <button
+                  type="submit"
+                  disabled={classTypeSaving}
+                  className="rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 disabled:opacity-50"
+                >
+                  {classTypeSaving ? 'Saving…' : 'Save class type'}
+                </button>
+                <button
+                  type="button"
+                  disabled={classTypeSaving}
+                  onClick={() => {
+                    setShowClassTypeForm(false);
+                    setEditingClassTypeId(null);
+                    setClassTypeError(null);
+                  }}
+                  className="rounded-lg border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
 
       {showAddCalendarModal && isAdmin && (

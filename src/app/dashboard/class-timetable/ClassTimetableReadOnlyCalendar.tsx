@@ -85,13 +85,17 @@ export function ClassTimetableReadOnlyCalendar({
   };
 
   return (
-    <section className="rounded-xl border border-slate-200 bg-white shadow-sm">
+    <section
+      className="rounded-xl border border-slate-200 bg-white shadow-sm"
+      role="region"
+      aria-label="Scheduled class sessions calendar"
+    >
       <div className="border-b border-slate-100 bg-gradient-to-b from-slate-50/90 to-white px-4 py-4 sm:px-5 sm:py-5">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
           <div className="min-w-0 space-y-1">
             <h2 className="text-base font-semibold tracking-tight text-slate-900">Scheduled sessions</h2>
             <p className="text-sm leading-relaxed text-slate-600">
-              Use Schedule classes to add or change sessions.
+              Primary view of dated sessions. Open Schedule classes to add or adjust times.
             </p>
           </div>
           {onOpenSchedule ? (
@@ -168,7 +172,7 @@ export function ClassTimetableReadOnlyCalendar({
           <div className="grid grid-cols-7 gap-px bg-slate-200 p-px">
             {grid.map((day, i) => {
               if (day == null) {
-                return <div key={`e-${i}`} className="min-h-[6.25rem] bg-slate-50/50" />;
+                return <div key={`e-${i}`} className="min-h-[5.5rem] bg-slate-50/50 sm:min-h-[6.25rem]" />;
               }
               const iso = ymd(viewYear, viewMonth, day);
               const dayInst = byDate.get(iso) ?? [];
@@ -177,7 +181,7 @@ export function ClassTimetableReadOnlyCalendar({
               return (
                 <div
                   key={iso}
-                  className={`group relative flex min-h-[6.25rem] flex-col bg-white p-1.5 ${
+                  className={`group relative flex min-h-[5.5rem] flex-col bg-white p-1.5 sm:min-h-[6.25rem] ${
                     isToday ? 'ring-1 ring-inset ring-brand-400/70' : ''
                   }`}
                 >
@@ -197,13 +201,13 @@ export function ClassTimetableReadOnlyCalendar({
                       const label = ctRow?.name ?? 'Class';
                       const inner = (
                         <>
-                          <span className="block truncate font-semibold leading-tight">{label}</span>
-                          <span className="block truncate text-[9px] font-normal opacity-90">
+                          <span className="block truncate text-[11px] font-semibold leading-tight">{label}</span>
+                          <span className="block truncate text-[10px] font-normal opacity-90">
                             {inst.start_time.slice(0, 5)}
                           </span>
                         </>
                       );
-                      const chipClass = `flex min-w-0 items-center rounded px-0.5 py-0.5 text-[10px] font-medium ring-1 ring-inset ring-slate-200/80 ${
+                      const chipClass = `flex min-w-0 items-center rounded px-0.5 py-0.5 text-[11px] font-medium ring-1 ring-inset ring-slate-200/80 ${
                         inst.is_cancelled ? 'bg-slate-100 text-slate-500' : 'bg-white text-slate-800'
                       }`;
                       const chipStyle: CSSProperties = {
@@ -245,6 +249,11 @@ export function ClassTimetableReadOnlyCalendar({
             })}
           </div>
         </div>
+        {instancesInMonth.length === 0 ? (
+          <p className="mt-3 rounded-lg border border-dashed border-slate-200 bg-slate-50/60 px-3 py-3 text-center text-xs text-slate-500">
+            No sessions in this month. Open Schedule classes to add dates, or move to another month.
+          </p>
+        ) : null}
       </div>
     </section>
   );

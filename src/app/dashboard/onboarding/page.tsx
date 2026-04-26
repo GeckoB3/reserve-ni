@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
 import { isPlatformSuperuser } from '@/lib/platform-auth';
+import { hasActiveVenueSupportSession } from '@/lib/support-session-server';
 import { getDashboardStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { RestaurantSetupWizard } from './RestaurantSetupWizard';
@@ -10,7 +11,10 @@ export default async function OnboardingPage() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect('/login?redirectTo=/dashboard/onboarding');
 
-  if (isPlatformSuperuser(user)) redirect('/super');
+  if (isPlatformSuperuser(user)) {
+    const allowVenueShell = await hasActiveVenueSupportSession(supabase);
+    if (!allowVenueShell) redirect('/super');
+  }
 
   const staff = await getDashboardStaff(supabase);
   if (!staff.venue_id) redirect('/dashboard');

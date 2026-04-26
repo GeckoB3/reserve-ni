@@ -8,7 +8,7 @@ export const metadata: Metadata = {
     'How Reserve NI collects, uses, and protects personal data in line with UK data protection law.',
 };
 
-const LAST_UPDATED = '16 April 2026';
+const LAST_UPDATED = '26 April 2026';
 
 export default function PrivacyPage() {
   return (
@@ -101,6 +101,20 @@ export default function PrivacyPage() {
               <p className="mt-3">
                 <strong>Website and enquiries.</strong> If you contact us via forms or email, we process what you
                 send us and technical metadata needed to deliver the message.
+              </p>
+            </section>
+
+            <section>
+              <h2 className="mb-3 text-lg font-semibold text-slate-900">Support access to venue accounts</h2>
+              <p>
+                ReserveNI support staff may access your account to help resolve issues you&apos;ve reported. Access is
+                logged, time-limited, and only used for support purposes. You will be notified by email when this
+                happens, and you can review all support activity in your settings (Settings → Support access).
+              </p>
+              <p className="mt-3">
+                We do not store full payment card numbers on our systems; card data is handled by Stripe. Support
+                sessions use the selected venue user&apos;s normal permissions, are time-limited, and any changes made
+                during the session are recorded in the same audit log.
               </p>
             </section>
 

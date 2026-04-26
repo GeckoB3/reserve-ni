@@ -21,8 +21,9 @@ import { CommunicationTemplatesSection } from './sections/CommunicationTemplates
 import { StripeConnectSection } from './sections/StripeConnectSection';
 import { BookingTypesSection } from './sections/BookingTypesSection';
 import { StaffPersonalSettingsSection } from './sections/StaffPersonalSettingsSection';
-import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
+import { isAppointmentsProductVenue } from '@/lib/booking/unified-scheduling';
 import { computeSmsMonthlyAllowance } from '@/lib/billing/sms-allowance';
+import { isSuperuserFreeBillingAccess } from '@/lib/billing/billing-access-source';
 import {
   APPOINTMENTS_LIGHT_PRICE,
   APPOINTMENTS_PLUS_PRICE,
@@ -45,6 +46,7 @@ import { SettingsSaveStrip } from './SettingsSaveStrip';
 import { SettingsProfileGroup } from './SettingsProfileGroup';
 import { WidgetSection } from './widget/WidgetSection';
 import { Skeleton } from '@/components/ui/Skeleton';
+import { SupportAccessSection } from './sections/SupportAccessSection';
 
 interface SettingsViewProps {
   initialVenue: VenueSettings | null;
@@ -98,6 +100,11 @@ const TABS = [
     label: 'Data import',
     description: 'CSV imports for clients and bookings with validation and undo.',
   },
+  {
+    key: 'support-access',
+    label: 'Support access',
+    description: 'Log of Reserve NI support sessions and actions on your venue account.',
+  },
 ] as const;
 
 type TabKey = typeof TABS[number]['key'];
@@ -108,6 +115,7 @@ function resolveInitialTab(initialTab: string | undefined, isAdmin: boolean): Ta
   if (t && TABS.some((x) => x.key === t)) {
     if (t === 'staff' && !isAdmin) return 'profile';
     if (t === 'data-import' && !isAdmin) return 'profile';
+    if (t === 'support-access' && !isAdmin) return 'profile';
     return t;
   }
   return 'profile';
@@ -186,7 +194,7 @@ function isAppointmentsPlanTierValue(tier: string): tier is AppointmentsPlanTier
   return tier === 'light' || tier === 'plus' || tier === 'appointments';
 }
 
-export function SettingsPageSkeleton({ tabCount = 7 }: { tabCount?: number }) {
+export function SettingsPageSkeleton({ tabCount = 8 }: { tabCount?: number }) {
   return (
     <div className="space-y-8" role="status" aria-label="Loading settings">
       <header className="space-y-5">
@@ -258,12 +266,10 @@ function planPriceLabel(pricingTier: string): string {
 
 function PlanSection({
   venue,
-  bookingModel,
   smsCountUsesStripePeriod = false,
   onVenueUpdate,
 }: {
   venue: VenueSettings;
-  bookingModel?: string;
   smsCountUsesStripePeriod?: boolean;
   onVenueUpdate: (patch: Partial<VenueSettings>) => void;
 }) {
@@ -276,15 +282,16 @@ function PlanSection({
 
   const tier = venue.pricing_tier ?? 'appointments';
   const planStatus = venue.plan_status ?? 'active';
+  const isFreeAccess = isSuperuserFreeBillingAccess(venue.billing_access_source);
   const isLight = tier === 'light';
-  const unified = isUnifiedSchedulingVenue(bookingModel);
   const appointmentsTier = isAppointmentsPlanTierValue(tier) ? tier : null;
-  const isAppointmentsPlan = appointmentsTier !== null && unified;
+  const isAppointmentsPlan = appointmentsTier !== null;
   const currentPlanDetails = appointmentsTier ? APPOINTMENTS_PLAN_DETAILS[appointmentsTier] : null;
   const tierLabel = planDisplayName(tier);
   const planPrice = planPriceLabel(tier);
   const periodEndLabel = formatSubscriptionDateLabel(venue.subscription_current_period_end);
   const periodStartLabel = formatSubscriptionDateLabel(venue.subscription_current_period_start);
+  const nextBillingPrimaryLabel = isFreeAccess ? 'Free Access Granted' : periodEndLabel ?? 'Not available yet';
   const billingActive = planStatus === 'active' || planStatus === 'trialing';
   const isCancelling = planStatus === 'cancelling';
   const hasStripeSub = Boolean(venue.stripe_subscription_id?.trim());
@@ -321,10 +328,10 @@ function PlanSection({
   }, [applyLightStatus]);
 
   useEffect(() => {
-    if (!isLight) return;
+    if (!isLight || isFreeAccess) return;
     const t = window.setTimeout(() => void fetchLightPlanStatus(), 0);
     return () => clearTimeout(t);
-  }, [isLight, fetchLightPlanStatus]);
+  }, [isLight, isFreeAccess, fetchLightPlanStatus]);
 
   useEffect(() => {
     if (!isAppointmentsPlan || !appointmentsTier || !hasStripeSub || !billingActive || isCancelling) {
@@ -495,8 +502,17 @@ function PlanSection({
       <SectionCard.Header eyebrow="Billing" title="Your plan" />
       <SectionCard.Body className="space-y-4">
       <p className="text-sm text-slate-600 leading-relaxed">
-        Manage plan changes here in ReserveNI. For billing administration (card details, invoices, receipts, billing
-        address, and cancellation), use Stripe Customer Portal.
+        {isFreeAccess ? (
+          <>
+            This venue has <strong className="font-medium text-slate-800">complimentary ReserveNI access</strong> (no
+            subscription billing). Plan limits and SMS caps still apply.
+          </>
+        ) : (
+          <>
+            Manage plan changes here in ReserveNI. For billing administration (card details, invoices, receipts, billing
+            address, and cancellation), use Stripe Customer Portal.
+          </>
+        )}
       </p>
       {planSuccess ? (
         <div className="flex flex-wrap items-center gap-2 rounded-xl border border-emerald-200/80 bg-emerald-50/70 px-3 py-2.5 text-sm text-emerald-950">
@@ -520,11 +536,15 @@ function PlanSection({
         </div>
         <div className="rounded-xl border border-slate-200 bg-slate-50/90 px-3 py-3">
           <p className="text-xs uppercase tracking-wide text-slate-500">Next billing</p>
-          <p className="mt-1 text-sm font-semibold text-slate-900">{periodEndLabel ?? 'Not available yet'}</p>
-          <p className="text-xs text-slate-600">
-            {planPrice} base charge{isLight ? '; SMS usage billed separately.' : '; metered overage may be added.'}
-          </p>
-          {periodStartLabel ? (
+          <p className="mt-1 text-sm font-semibold text-slate-900">{nextBillingPrimaryLabel}</p>
+          {isFreeAccess ? (
+            <p className="text-xs text-slate-600">No subscription charges. SMS is capped at your plan allowance.</p>
+          ) : (
+            <p className="text-xs text-slate-600">
+              {planPrice} base charge{isLight ? '; SMS usage billed separately.' : '; metered overage may be added.'}
+            </p>
+          )}
+          {!isFreeAccess && periodStartLabel ? (
             <p className="mt-1 text-xs text-slate-500">Current period: {periodStartLabel} – {periodEndLabel}</p>
           ) : null}
         </div>
@@ -538,7 +558,9 @@ function PlanSection({
           </p>
           {isLight ? (
             <p className="mt-2 text-xs text-slate-600">
-              Light is pay-as-you-go at £{SMS_LIGHT_GBP_PER_MESSAGE.toFixed(2)} per message.
+              {isFreeAccess
+                ? 'Free access: outbound SMS is blocked once you reach your plan allowance (0 included on Light).'
+                : `Light is pay-as-you-go at £${SMS_LIGHT_GBP_PER_MESSAGE.toFixed(2)} per message.`}
             </p>
           ) : (
             <>
@@ -550,8 +572,10 @@ function PlanSection({
                 />
               </div>
               <p className="mt-2 text-xs text-slate-600">
-                {smsUsagePercent ?? 0}% of included allowance used. Overage is £
-                {SMS_OVERAGE_GBP_PER_MESSAGE.toFixed(2)} per SMS.
+                {smsUsagePercent ?? 0}% of included allowance used.
+                {isFreeAccess
+                  ? ' Free access: no paid overage — sends stop at the cap.'
+                  : ` Overage is £${SMS_OVERAGE_GBP_PER_MESSAGE.toFixed(2)} per SMS.`}
               </p>
             </>
           )}
@@ -586,18 +610,20 @@ function PlanSection({
           )}
         </div>
       </div>
-      <div className="flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          disabled={loading}
-          onClick={() => void openManageBilling()}
-          className="rounded-lg bg-slate-900 px-4 py-2 text-xs font-semibold text-white hover:bg-slate-800 disabled:opacity-50"
-        >
-          Manage Billing
-        </button>
-        <p className="text-xs text-slate-500">Opens Stripe Customer Portal in a new tab.</p>
-      </div>
-      {planStatus === 'past_due' && hasStripeSub && periodEndLabel ? (
+      {!isFreeAccess ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            disabled={loading}
+            onClick={() => void openManageBilling()}
+            className="rounded-lg bg-slate-900 px-4 py-2 text-xs font-semibold text-white hover:bg-slate-800 disabled:opacity-50"
+          >
+            Manage Billing
+          </button>
+          <p className="text-xs text-slate-500">Opens Stripe Customer Portal in a new tab.</p>
+        </div>
+      ) : null}
+      {planStatus === 'past_due' && hasStripeSub && periodEndLabel && !isFreeAccess ? (
         <div className="rounded-xl border border-rose-200 bg-rose-50/80 px-3 py-3 text-sm text-rose-950">
           <p className="font-semibold">Payment required</p>
           <p className="mt-1 leading-relaxed">
@@ -651,7 +677,7 @@ function PlanSection({
           </button>
         </div>
       )}
-      {isAppointmentsPlan && appointmentsTier && (
+      {isAppointmentsPlan && appointmentsTier && !isFreeAccess && (
         <div className="rounded-lg border border-brand-200 bg-brand-50/80 px-3 py-3 text-sm text-brand-950">
           <p className="font-medium">Change Appointments plan</p>
           <p className="mt-1 text-brand-900">
@@ -795,14 +821,15 @@ function SettingsViewInner({
   const router = useRouter();
   const pathname = usePathname() ?? '/dashboard/settings';
   const searchParams = useSearchParams();
-  const isAppointment = isUnifiedSchedulingVenue(bookingModel);
   const [venue, setVenue] = useState<VenueSettings | null>(initialVenue);
+  const isAppointmentsProduct = isAppointmentsProductVenue(venue?.pricing_tier ?? null);
   const [selectedTab, setSelectedTab] = useState<TabKey>(() => resolveInitialTab(initialTab, isAdmin));
   const [completedWarmup, setCompletedWarmup] = useState<Set<SettingsWarmupKey>>(() => new Set());
   const showRestaurantTableProfileSections =
     isAdmin && isRestaurantTableProductTier(venue?.pricing_tier ?? null);
   const visibleTabs = useMemo(
-    () => (isAdmin ? [...TABS] : TABS.filter((x) => x.key !== 'data-import')),
+    () =>
+      isAdmin ? [...TABS] : TABS.filter((x) => x.key !== 'data-import' && x.key !== 'support-access'),
     [isAdmin],
   );
   const tabBarTabs = useMemo(
@@ -818,11 +845,11 @@ function SettingsViewInner({
   const warmupKeys = useMemo<SettingsWarmupKey[]>(() => {
     if (!venue) return [];
     const keys: SettingsWarmupKey[] = ['business-closures', 'comms'];
-    if (isAppointment && isAdmin) keys.push('profile-account');
+    if (isAppointmentsProduct && isAdmin) keys.push('profile-account');
     if (isAdmin) keys.push('staff');
     if (venue.stripe_connected_account_id) keys.push('payments');
     return keys;
-  }, [isAdmin, isAppointment, venue]);
+  }, [isAdmin, isAppointmentsProduct, venue]);
   const settingsReady = venue ? warmupKeys.every((key) => completedWarmup.has(key)) : false;
   const markWarmupComplete = useCallback((key: SettingsWarmupKey) => {
     setCompletedWarmup((current) => {
@@ -876,7 +903,7 @@ function SettingsViewInner({
 
   useEffect(() => {
     setCompletedWarmup(new Set());
-  }, [initialVenue?.id, isAdmin, bookingModel]);
+  }, [initialVenue?.id, isAdmin, bookingModel, venue?.pricing_tier]);
 
   useEffect(() => {
     setSelectedTab(activeTabFromUrl);
@@ -920,7 +947,7 @@ function SettingsViewInner({
   useEffect(() => {
     if (!isAdmin) {
       const raw = searchParams.get('tab');
-      if (raw === 'staff' || raw === 'data-import') {
+      if (raw === 'staff' || raw === 'data-import' || raw === 'support-access') {
         replaceWithTab('profile');
       }
     }
@@ -982,13 +1009,13 @@ function SettingsViewInner({
 
   if (!venue) {
     return (
-      <SettingsPageSkeleton tabCount={isAdmin ? TABS.length : TABS.length - 1} />
+      <SettingsPageSkeleton tabCount={isAdmin ? TABS.length : TABS.length - 2} />
     );
   }
 
   return (
     <>
-      {!settingsReady ? <SettingsPageSkeleton tabCount={isAdmin ? TABS.length : TABS.length - 1} /> : null}
+      {!settingsReady ? <SettingsPageSkeleton tabCount={isAdmin ? TABS.length : TABS.length - 2} /> : null}
       <div className={settingsReady ? 'space-y-8' : 'hidden'}>
       <header className="space-y-5">
         <PageHeader
@@ -1026,7 +1053,7 @@ function SettingsViewInner({
 
       <div className="space-y-10">
         <div className={selectedTab === 'profile' ? 'space-y-10' : 'hidden'} aria-hidden={selectedTab !== 'profile'}>
-          {isAppointment && isAdmin ? (
+          {isAppointmentsProduct && isAdmin ? (
             <SettingsProfileGroup
               eyebrow="Your account"
               title="Personal details & security"
@@ -1049,7 +1076,13 @@ function SettingsViewInner({
             title="Venue profile & public details"
             description="Business name, booking URL slug, address, contact channels, and cover image. These power your public booking page and guest communications."
           >
-            <VenueProfileSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} bookingModel={bookingModel} />
+            <VenueProfileSection
+              venue={venue}
+              onUpdate={onUpdate}
+              isAdmin={isAdmin}
+              bookingModel={bookingModel}
+              isAppointmentsProduct={isAppointmentsProduct}
+            />
           </SettingsProfileGroup>
 
           <SettingsProfileGroup
@@ -1061,7 +1094,7 @@ function SettingsViewInner({
             <BookingTypesSection venue={venue} onUpdate={onUpdate} isAdmin={isAdmin} />
           </SettingsProfileGroup>
 
-          {showRestaurantTableProfileSections && !isAppointment && (
+          {showRestaurantTableProfileSections && !isAppointmentsProduct && (
             <SettingsProfileGroup
               eyebrow="Dining"
               title="Table management & availability"
@@ -1117,7 +1150,6 @@ function SettingsViewInner({
           <PlanSection
             key={`plan-${venue.id}-${venue.pricing_tier ?? ''}`}
             venue={venue}
-            bookingModel={bookingModel}
             smsCountUsesStripePeriod={smsCountUsesStripePeriod}
             onVenueUpdate={onUpdate}
           />
@@ -1139,7 +1171,7 @@ function SettingsViewInner({
             bookingModel={bookingModel}
             enabledModels={normalizeEnabledModels(venue.enabled_models, (bookingModel as BookingModel) ?? 'table_reservation')}
             depositConfig={venue.deposit_config}
-            serviceEngineTable={showRestaurantTableProfileSections && !isAppointment && hasServiceConfig}
+            serviceEngineTable={showRestaurantTableProfileSections && !isAppointmentsProduct && hasServiceConfig}
             hasStripeSubscription={Boolean(venue.stripe_subscription_id?.trim())}
             onInitialLoadComplete={markCommsWarmupComplete}
           />
@@ -1175,6 +1207,15 @@ function SettingsViewInner({
                 </Link>
               </SectionCard.Body>
             </SectionCard>
+          </div>
+        ) : null}
+
+        {isAdmin ? (
+          <div
+            className={selectedTab === 'support-access' ? '' : 'hidden'}
+            aria-hidden={selectedTab !== 'support-access'}
+          >
+            <SupportAccessSection />
           </div>
         ) : null}
       </div>

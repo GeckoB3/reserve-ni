@@ -5,7 +5,8 @@ import { getVenueStaff, requireAdmin } from '@/lib/venue-auth';
 import type { BookingModel } from '@/types/booking-models';
 import { BOOKING_MODEL_ORDER } from '@/lib/booking/enabled-models';
 import { inferBookingRowModel, bookingModelShortLabel } from '@/lib/booking/infer-booking-row-model';
-import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
+import { isAppointmentDashboardExperience, isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
+import { normalizeEnabledModels } from '@/lib/booking/enabled-models';
 
 export interface ReportByBookingModelRow {
   booking_model: BookingModel;
@@ -238,7 +239,7 @@ export async function GET(request: NextRequest) {
       supabase.rpc('report_deposit_summary', { p_venue_id: staff.venue_id, p_start: pStart, p_end: pEnd }),
       staff.db
         .from('venues')
-        .select('table_management_enabled, booking_model')
+        .select('table_management_enabled, booking_model, pricing_tier, enabled_models')
         .eq('id', staff.venue_id)
         .single(),
       staff.db.rpc('report_client_summary', {
@@ -280,6 +281,12 @@ export async function GET(request: NextRequest) {
     };
 
     const bookingModel = (venueFlags?.booking_model as BookingModel | undefined) ?? 'table_reservation';
+    const pricingTier = (venueFlags as { pricing_tier?: string | null } | null)?.pricing_tier;
+    const enabledModelsNorm = normalizeEnabledModels(
+      (venueFlags as { enabled_models?: unknown } | null)?.enabled_models,
+      bookingModel,
+    );
+    const appointmentDashboard = isAppointmentDashboardExperience(pricingTier, bookingModel, enabledModelsNorm);
 
     const summaryObj = Array.isArray(summary) ? summary[0] : summary;
     const cancellationObj = Array.isArray(cancellation) ? cancellation[0] : cancellation;
@@ -331,7 +338,7 @@ export async function GET(request: NextRequest) {
     }
 
     let report7_appointment_insights: Awaited<ReturnType<typeof buildAppointmentInsights>> | null = null;
-    if (isUnifiedSchedulingVenue(bookingModel)) {
+    if (appointmentDashboard) {
       report7_appointment_insights = await buildAppointmentInsights(staff.db, staff.venue_id, from, to);
     }
 
@@ -339,6 +346,8 @@ export async function GET(request: NextRequest) {
       from,
       to,
       booking_model: bookingModel,
+      pricing_tier: pricingTier ?? null,
+      enabled_models: enabledModelsNorm,
       table_management_enabled: venueFlags?.table_management_enabled ?? false,
       report1_booking_summary: summaryObj ?? null,
       report2_no_show_series: noShowSeries ?? [],

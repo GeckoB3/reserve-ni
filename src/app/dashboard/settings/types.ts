@@ -30,6 +30,11 @@ export interface VenueSettings {
   table_management_enabled?: boolean;
   combination_threshold?: number;
   pricing_tier?: string;
+  /** `stripe` | `superuser_free` — how ReserveNI platform billing is satisfied. */
+  billing_access_source?: string | null;
+  free_access_granted_at?: string | null;
+  free_access_granted_by?: string | null;
+  free_access_reason?: string | null;
   plan_status?: string;
   /** Start of current Stripe billing period (ISO), for SMS tallies and metered billing alignment. */
   subscription_current_period_start?: string | null;

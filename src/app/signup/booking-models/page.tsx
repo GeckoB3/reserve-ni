@@ -105,8 +105,8 @@ export default function SignupBookingModelsPage() {
 
   function toggleModel(model: BookingModel) {
     setSelected((prev) => {
-      const next = prev.includes(model) ? prev.filter((item) => item !== model) : [...prev, model];
-      return next.length > 0 ? next : ['unified_scheduling'];
+      if (prev.includes(model) && prev.length === 1) return prev;
+      return prev.includes(model) ? prev.filter((item) => item !== model) : [...prev, model];
     });
   }
 

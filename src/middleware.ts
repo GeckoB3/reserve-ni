@@ -6,6 +6,27 @@ import {
   SIGNUP_PENDING_PLAN_KEY,
   isSignupPaymentReady,
 } from '@/lib/signup-pending-selection';
+import { getSupabaseAdminClient } from '@/lib/supabase';
+import { SUPPORT_SESSION_COOKIE_NAME } from '@/lib/support-session-constants';
+import {
+  fetchActiveSupportSession,
+  logSupportApiMutationFromMiddleware,
+  parseSupportSessionCookieValue,
+} from '@/lib/support-session-core';
+
+async function loadSupportSessionRow(request: NextRequest, userId: string) {
+  const raw = request.cookies.get(SUPPORT_SESSION_COOKIE_NAME)?.value;
+  const sid = parseSupportSessionCookieValue(raw);
+  if (!sid) return null;
+  return fetchActiveSupportSession(getSupabaseAdminClient(), sid, userId);
+}
+
+/** POST-only previews that do not persist venue state and should not be mutation-audited. */
+function isNonPersistingVenuePath(p: string): boolean {
+  if (p === '/api/venue/communication-preview') return true;
+  if (p === '/api/venue/appointments-plan/preview') return true;
+  return false;
+}
 
 export async function middleware(request: NextRequest) {
   let response = NextResponse.next({ request });
@@ -78,6 +99,17 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
+  const jwtSuperuser =
+    !!user &&
+    isPlatformRoleInJwt(user.app_metadata as Record<string, unknown> | undefined, user.email);
+
+  if (user && jwtSuperuser && (pathname.startsWith('/dashboard') || pathname.startsWith('/onboarding'))) {
+    const session = await loadSupportSessionRow(request, user.id);
+    if (!session) {
+      return NextResponse.redirect(new URL('/super', request.url));
+    }
+  }
+
   /** Block mutating venue APIs when subscription is past due (billing routes exempt). */
   const method = request.method.toUpperCase();
   const isVenueMutating =
@@ -95,34 +127,52 @@ export async function middleware(request: NextRequest) {
     return false;
   }
 
-  if (isVenueMutating && !isVenueBillingExemptVenuePath(pathname)) {
-    const email = (user?.email ?? '').trim();
-    if (!email) {
-      return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
-    }
-    const { data: staffRows } = await supabase
-      .from('staff')
-      .select('venue_id')
-      .ilike('email', email.toLowerCase())
-      .limit(1);
-    const vid = staffRows?.[0]?.venue_id as string | undefined;
-    if (vid) {
-      const { data: venueRow } = await supabase
-        .from('venues')
-        .select('plan_status')
-        .eq('id', vid)
-        .maybeSingle();
-      const ps = (venueRow as { plan_status?: string | null } | null)?.plan_status;
-      if (ps === 'past_due') {
-        return NextResponse.json(
-          {
-            error:
-              'Billing is past due. Add or update your payment method under Settings → Plan to continue editing.',
-            code: 'VENUE_PAST_DUE',
-          },
-          { status: 403 },
-        );
+  if (isVenueMutating) {
+    const supportSession = jwtSuperuser ? await loadSupportSessionRow(request, user.id) : null;
+
+    if (!isVenueBillingExemptVenuePath(pathname)) {
+      let vid: string | undefined = supportSession?.venue_id;
+      const email = (user?.email ?? '').trim();
+      if (!vid) {
+        if (!email) {
+          return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
+        }
+        const { data: staffRows } = await supabase
+          .from('staff')
+          .select('venue_id')
+          .ilike('email', email.toLowerCase())
+          .limit(1);
+        vid = staffRows?.[0]?.venue_id as string | undefined;
       }
+      if (vid) {
+        const { data: venueRow } = await supabase
+          .from('venues')
+          .select('plan_status, billing_access_source')
+          .eq('id', vid)
+          .maybeSingle();
+        const billingSrc = (venueRow as { billing_access_source?: string | null } | null)?.billing_access_source;
+        const isSuperuserFree =
+          (billingSrc ?? '').toLowerCase().trim() === 'superuser_free';
+        const ps = (venueRow as { plan_status?: string | null } | null)?.plan_status;
+        if (ps === 'past_due' && !isSuperuserFree) {
+          return NextResponse.json(
+            {
+              error:
+                'Billing is past due. Add or update your payment method under Settings → Plan to continue editing.',
+              code: 'VENUE_PAST_DUE',
+            },
+            { status: 403 },
+          );
+        }
+      }
+    }
+
+    if (supportSession && !isNonPersistingVenuePath(pathname)) {
+      await logSupportApiMutationFromMiddleware({
+        session: supportSession,
+        method,
+        pathname,
+      });
     }
   }
 
@@ -146,11 +196,11 @@ export async function middleware(request: NextRequest) {
     if (explicit) {
       return NextResponse.redirect(new URL(explicit, request.url));
     }
-    const isSuperuser = isPlatformRoleInJwt(
-      user.app_metadata as Record<string, unknown> | undefined,
-      user.email,
-    );
-    return NextResponse.redirect(new URL(isSuperuser ? '/super' : '/dashboard', request.url));
+    if (jwtSuperuser) {
+      const sess = await loadSupportSessionRow(request, user.id);
+      return NextResponse.redirect(new URL(sess ? '/dashboard' : '/super', request.url));
+    }
+    return NextResponse.redirect(new URL('/dashboard', request.url));
   }
 
   return response;

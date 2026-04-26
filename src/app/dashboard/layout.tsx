@@ -1,11 +1,17 @@
 import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
 import { isPlatformSuperuser } from '@/lib/platform-auth';
-import { getDashboardStaff } from '@/lib/venue-auth';
+import { getDashboardStaff, type ActiveSupportSessionContext } from '@/lib/venue-auth';
+import { hasActiveVenueSupportSession } from '@/lib/support-session-server';
 import { DashboardShell } from './DashboardShell';
 import { Pill } from '@/components/ui/dashboard/Pill';
 import { SessionTimeoutGuard } from '@/components/SessionTimeoutGuard';
 import { DashboardSWRProvider } from '@/components/providers/DashboardSWRProvider';
+import {
+  DashboardVenueBootstrapProvider,
+  type DashboardVenueBootstrapValue,
+} from '@/components/providers/DashboardVenueBootstrapProvider';
+import type { OpeningHours } from '@/types/availability';
 import {
   activeModelsToLegacyEnabledModels,
   getDefaultBookingModelFromActive,
@@ -13,6 +19,7 @@ import {
 } from '@/lib/booking/active-models';
 import type { BookingModel } from '@/types/booking-models';
 import { APPOINTMENTS_LIGHT_PRICE } from '@/lib/pricing-constants';
+import { SupportSessionControls } from '@/components/dashboard/SupportSessionControls';
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createClient();
@@ -22,10 +29,14 @@ export default async function DashboardLayout({ children }: { children: React.Re
   }
 
   if (isPlatformSuperuser(user)) {
-    redirect('/super');
+    const allowVenueShell = await hasActiveVenueSupportSession(supabase);
+    if (!allowVenueShell) {
+      redirect('/super');
+    }
   }
 
-  const email = user.email ?? '';
+  let email = user.email ?? '';
+  let supportSession: ActiveSupportSessionContext | undefined;
   let venueName: string | undefined;
   let venueSlug: string | undefined;
   let staffName: string | undefined;
@@ -38,13 +49,24 @@ export default async function DashboardLayout({ children }: { children: React.Re
   let planStatus: string = 'active';
   let onboardingCompleted = true;
   let venueTerminology: Record<string, unknown> | null = null;
+  let venueBootstrap: DashboardVenueBootstrapValue | null = null;
   try {
     const staff = await getDashboardStaff(supabase);
     const admin = staff.db;
     const staffId = staff.id;
     const staffRole = staff.role;
 
+    if (staff.support) {
+      supportSession = staff.support;
+      if (staff.email) {
+        email = staff.email;
+      }
+    }
+
     if (!staff.venue_id) {
+      if (isPlatformSuperuser(user)) {
+        redirect('/super');
+      }
       redirect('/signup/business-type');
     }
 
@@ -62,34 +84,58 @@ export default async function DashboardLayout({ children }: { children: React.Re
       const { data: venue } = await admin
         .from('venues')
         .select(
-          'name, slug, table_management_enabled, booking_model, enabled_models, active_booking_models, plan_status, onboarding_completed, pricing_tier, terminology',
+          'name, slug, table_management_enabled, booking_model, enabled_models, active_booking_models, plan_status, onboarding_completed, pricing_tier, terminology, timezone, currency, opening_hours, public_booking_area_mode, no_show_grace_minutes',
         )
         .eq('id', venueId)
         .single();
-      venueName = venue?.name ?? undefined;
-      venueSlug = venue?.slug ?? undefined;
-      tableManagementEnabled = venue?.table_management_enabled ?? false;
-      pricingTier = (venue?.pricing_tier as string) ?? 'appointments';
-      const activeModels = resolveActiveBookingModels({
-        pricingTier,
-        bookingModel: venue?.booking_model as BookingModel | undefined,
-        enabledModels: (venue as { enabled_models?: unknown } | null)?.enabled_models,
-        activeBookingModels: (venue as { active_booking_models?: unknown } | null)?.active_booking_models,
-      });
-      bookingModel = getDefaultBookingModelFromActive(
-        activeModels,
-        (venue?.booking_model as BookingModel) ?? 'table_reservation',
-      );
-      enabledModels = activeModelsToLegacyEnabledModels(activeModels, bookingModel);
-      planStatus = (venue?.plan_status as string) ?? 'active';
-      onboardingCompleted = (venue?.onboarding_completed as boolean) ?? true;
-      const rawTerms = (venue as { terminology?: unknown } | null)?.terminology;
-      venueTerminology =
-        rawTerms && typeof rawTerms === 'object' && rawTerms !== null && !Array.isArray(rawTerms)
-          ? (rawTerms as Record<string, unknown>)
-          : null;
-      if (!onboardingCompleted) {
-        redirect('/onboarding');
+      if (venue) {
+        venueName = venue.name ?? undefined;
+        venueSlug = venue.slug ?? undefined;
+        tableManagementEnabled = venue.table_management_enabled ?? false;
+        pricingTier = (venue.pricing_tier as string) ?? 'appointments';
+        const activeModels = resolveActiveBookingModels({
+          pricingTier,
+          bookingModel: venue.booking_model as BookingModel | undefined,
+          enabledModels: (venue as { enabled_models?: unknown }).enabled_models,
+          activeBookingModels: (venue as { active_booking_models?: unknown }).active_booking_models,
+        });
+        bookingModel = getDefaultBookingModelFromActive(
+          activeModels,
+          (venue.booking_model as BookingModel) ?? 'table_reservation',
+        );
+        enabledModels = activeModelsToLegacyEnabledModels(activeModels, bookingModel);
+        planStatus = (venue.plan_status as string) ?? 'active';
+        onboardingCompleted = (venue.onboarding_completed as boolean) ?? true;
+        const rawTerms = (venue as { terminology?: unknown }).terminology;
+        venueTerminology =
+          rawTerms && typeof rawTerms === 'object' && rawTerms !== null && !Array.isArray(rawTerms)
+            ? (rawTerms as Record<string, unknown>)
+            : null;
+        if (!onboardingCompleted) {
+          redirect('/onboarding');
+        }
+
+        const tzRaw = (venue as { timezone?: string | null }).timezone;
+        const tz = typeof tzRaw === 'string' && tzRaw.trim() !== '' ? tzRaw.trim() : 'Europe/London';
+        const curRaw = (venue as { currency?: string | null }).currency;
+        const currency = typeof curRaw === 'string' && curRaw.trim() !== '' ? curRaw.trim() : 'GBP';
+        const oh = (venue as { opening_hours?: unknown }).opening_hours;
+        const openingHours =
+          oh && typeof oh === 'object' && !Array.isArray(oh) ? (oh as OpeningHours) : null;
+        const pba = (venue as { public_booking_area_mode?: string | null }).public_booking_area_mode;
+        const publicBookingAreaMode = pba === 'manual' ? 'manual' : 'auto';
+        const nsg = (venue as { no_show_grace_minutes?: number | null }).no_show_grace_minutes;
+        const noShowGraceMinutes =
+          typeof nsg === 'number' && !Number.isNaN(nsg) && nsg >= 10 && nsg <= 60 ? nsg : 15;
+        venueBootstrap = {
+          timezone: tz,
+          currency,
+          openingHours,
+          publicBookingAreaMode,
+          noShowGraceMinutes,
+        };
+      } else {
+        console.error('[dashboard/layout] Venue row missing for staff venue_id', { venueId });
       }
     }
   } catch (e) {
@@ -99,7 +145,13 @@ export default async function DashboardLayout({ children }: { children: React.Re
   return (
     <div className="flex h-[100dvh] max-h-[100dvh] overflow-hidden bg-slate-100">
       <DashboardShell
+        venueId={venueId}
         initialTableManagementEnabled={tableManagementEnabled}
+        supportSessionToolbar={
+          supportSession ? (
+            <SupportSessionControls expiresAtIso={supportSession.expiresAt} />
+          ) : undefined
+        }
         sidebarRest={{
           email,
           staffName,
@@ -118,6 +170,24 @@ export default async function DashboardLayout({ children }: { children: React.Re
             Staff users do not have plan-management access.
           </div>
         )}
+        {supportSession ? (
+          <div className="border-b border-sky-300/90 bg-gradient-to-r from-sky-50 via-white to-sky-50/40 px-4 py-3 sm:px-6">
+            <div className="mx-auto flex max-w-[1400px] flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+              <div className="min-w-0">
+                <Pill variant="info" size="sm" className="mb-2 w-fit">
+                  Reserve NI support
+                </Pill>
+                <p className="text-sm font-medium text-slate-900">
+                  ReserveNI support ({supportSession.superuserDisplayName}) is currently signed in to your account
+                  for troubleshooting. They can see your data and make changes.
+                </p>
+                <p className="mt-1 text-xs text-slate-500">
+                  Session reason on file: {supportSession.reason}
+                </p>
+              </div>
+            </div>
+          </div>
+        ) : null}
         {planStatus === 'cancelling' && (
           <div className="border-b border-amber-200/80 bg-gradient-to-r from-amber-50 via-white to-amber-50/30 px-4 py-3 sm:px-6">
             <div className="mx-auto flex max-w-[1400px] flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
@@ -208,8 +278,10 @@ export default async function DashboardLayout({ children }: { children: React.Re
             </div>
           </div>
         )}
-        {venueId && <SessionTimeoutGuard venueId={venueId} />}
-        <DashboardSWRProvider>{children}</DashboardSWRProvider>
+        {venueId && !supportSession ? <SessionTimeoutGuard venueId={venueId} /> : null}
+        <DashboardVenueBootstrapProvider value={venueBootstrap}>
+          <DashboardSWRProvider>{children}</DashboardSWRProvider>
+        </DashboardVenueBootstrapProvider>
       </main>
       </DashboardShell>
     </div>

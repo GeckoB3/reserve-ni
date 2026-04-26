@@ -9,6 +9,7 @@ import { venueExposesBookingModel } from '@/lib/booking/enabled-models';
 import type { BookingModel } from '@/types/booking-models';
 import type { OpeningHours } from '@/types/availability';
 import type { ScheduleBlockDTO } from '@/types/schedule-blocks';
+import { useDashboardVenueBootstrap } from '@/components/providers/DashboardVenueBootstrapProvider';
 
 const SLOT_HEIGHT = 48;
 const SLOT_MINUTES = 15;
@@ -25,6 +26,7 @@ interface Props {
  * GET /api/venue/schedule; does not include Model A tables.
  */
 export function StaffScheduleMergedDayGrid({ date, bookingModel, enabledModels }: Props) {
+  const venueBootstrap = useDashboardVenueBootstrap();
   const router = useRouter();
   const gridScrollRef = useRef<HTMLDivElement>(null);
   const [openingHours, setOpeningHours] = useState<OpeningHours | null>(null);
@@ -34,6 +36,11 @@ export function StaffScheduleMergedDayGrid({ date, bookingModel, enabledModels }
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (venueBootstrap) {
+      setOpeningHours(venueBootstrap.openingHours);
+      setVenueTimezone(venueBootstrap.timezone);
+      return;
+    }
     void fetch('/api/venue')
       .then((r) => (r.ok ? r.json() : null))
       .then((v) => {
@@ -42,7 +49,7 @@ export function StaffScheduleMergedDayGrid({ date, bookingModel, enabledModels }
         if (typeof tz === 'string' && tz.trim() !== '') setVenueTimezone(tz.trim());
       })
       .catch((e) => console.error('[StaffScheduleMergedDayGrid] /api/venue preload failed:', e));
-  }, []);
+  }, [venueBootstrap]);
 
   useEffect(() => {
     let cancelled = false;

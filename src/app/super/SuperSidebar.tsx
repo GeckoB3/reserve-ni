@@ -16,6 +16,7 @@ export function SuperSidebar({ email }: Props) {
 
   const navItems = [
     { href: '/super', label: 'Overview' },
+    { href: '/super/support-audit', label: 'Support audit' },
   ];
 
   async function handleSignOut() {
@@ -68,7 +69,10 @@ export function SuperSidebar({ email }: Props) {
         {/* Nav */}
         <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-1">
           {navItems.map((item) => {
-            const active = pathname === item.href;
+            const active =
+              item.href === '/super'
+                ? pathname === '/super'
+                : pathname === item.href || pathname.startsWith(`${item.href}/`);
             return (
               <Link
                 key={item.href}

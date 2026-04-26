@@ -7,7 +7,6 @@ import type { BookingModel } from '@/types/booking-models';
 import { normalizeEnabledModels } from '@/lib/booking/enabled-models';
 import {
   activeModelsToLegacyEnabledModels,
-  appointmentPlanDefaultModels,
   getDefaultBookingModelFromActive,
   resolveActiveBookingModels,
 } from '@/lib/booking/active-models';
@@ -84,8 +83,8 @@ export function BookingTypesSection({ venue, onUpdate, isAdmin }: Props) {
   const toggle = useCallback((m: (typeof APPOINTMENTS_PLAN_MODELS)[number]['model']) => {
     setDraft((prev) => {
       if (appointmentsPlan) {
-        const next = prev.includes(m) ? prev.filter((x) => x !== m) : [...prev, m];
-        return next.length > 0 ? next : appointmentPlanDefaultModels();
+        if (prev.includes(m) && prev.length === 1) return prev;
+        return prev.includes(m) ? prev.filter((x) => x !== m) : [...prev, m];
       }
       return prev.includes(m) ? prev.filter((x) => x !== m) : [...prev, m];
     });

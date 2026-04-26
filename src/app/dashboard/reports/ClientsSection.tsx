@@ -5,7 +5,6 @@ import Link from 'next/link';
 import { GuestTagEditor } from '@/components/dashboard/GuestTagEditor';
 import { buildCsvFromRows, downloadCsvString } from '@/lib/appointments-csv';
 import type { BookingModel, VenueTerminology } from '@/types/booking-models';
-import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 import { HorizontalScrollHint } from '@/components/ui/HorizontalScrollHint';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
 import { StatTile } from '@/components/ui/dashboard/StatTile';
@@ -82,6 +81,8 @@ export interface ClientsSectionProps {
   venueId: string;
   terminology: VenueTerminology;
   bookingModel: BookingModel;
+  /** Aligns with reports overview: Appointments SKU or USE primary/tab — not `booking_model` alone. */
+  appointmentDashboardExperience: boolean;
   clientSummary: ClientSummary | null;
   rangeLabel: string;
   onReportsRefresh: () => void;
@@ -90,12 +91,13 @@ export interface ClientsSectionProps {
 export function ClientsSection({
   venueId,
   terminology,
-  bookingModel,
+  bookingModel: _bookingModel,
+  appointmentDashboardExperience,
   clientSummary,
   rangeLabel,
   onReportsRefresh,
 }: ClientsSectionProps) {
-  const isAppointment = isUnifiedSchedulingVenue(bookingModel);
+  const isAppointment = appointmentDashboardExperience;
   const clientWord = terminology.client;
   const clientLower = clientWord.toLowerCase();
   const bookingWord = terminology.booking;

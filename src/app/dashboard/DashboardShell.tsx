@@ -9,7 +9,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { usePathname, useSearchParams } from 'next/navigation';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { DashboardSidebar, type DashboardSidebarProps } from './DashboardSidebar';
 import type { BookingModel } from '@/types/booking-models';
 
@@ -49,16 +49,22 @@ export function useDashboardTransition() {
  * client copy so nav items (Table Grid / Floor Plan) appear or hide immediately.
  */
 export function DashboardShell({
+  venueId,
   initialTableManagementEnabled,
   sidebarRest,
+  supportSessionToolbar,
   children,
 }: {
+  venueId?: string;
   initialTableManagementEnabled: boolean;
   sidebarRest: DashboardShellSidebarRest;
+  /** Shown above main content when a platform superuser has an active venue support session. */
+  supportSessionToolbar?: ReactNode;
   children: ReactNode;
 }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const router = useRouter();
   const {
     bookingModel: serverBookingModel = 'table_reservation',
     enabledModels: serverEnabledModels = [],
@@ -122,6 +128,18 @@ export function DashboardShell({
   }, [transitionLabel]);
 
   useEffect(() => {
+    if (!venueId) return;
+    const today = new Date().toISOString().slice(0, 10);
+    router.prefetch('/dashboard/bookings');
+    router.prefetch('/dashboard/bookings/new');
+    router.prefetch('/dashboard/calendar');
+    router.prefetch('/dashboard/day-sheet');
+    void fetch(`/api/venue/bookings/list?date=${encodeURIComponent(today)}`, { credentials: 'same-origin' }).catch(
+      () => {},
+    );
+  }, [venueId, router]);
+
+  useEffect(() => {
     function onDocumentClick(event: MouseEvent) {
       if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
         return;
@@ -152,7 +170,10 @@ export function DashboardShell({
           enabledModels={enabledModels}
           tableManagementEnabled={tableManagementEnabled}
         />
-        {children}
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          {supportSessionToolbar}
+          {children}
+        </div>
       </DashboardNavSyncContext.Provider>
     </DashboardTransitionContext.Provider>
   );

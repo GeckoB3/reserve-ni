@@ -9,7 +9,7 @@ import {
   OUTSIDE_ASSIGNED_CALENDARS_ERROR,
 } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
-import { checkCalendarLimit } from '@/lib/tier-enforcement';
+import { checkCalendarLimit, isAppointmentPlanTier } from '@/lib/tier-enforcement';
 import { defaultNewUnifiedCalendarWorkingHours } from '@/lib/availability/practitioner-defaults';
 import { venueUsesUnifiedAppointmentServiceData } from '@/lib/booking/uses-unified-appointment-data';
 import { ensureUnifiedMirrorForPractitionerId } from '@/lib/class-instances/instructor-calendar-block';
@@ -41,12 +41,32 @@ function unifiedCalendarToPractitionerRow(
   };
 }
 
+interface VenueCalendarMode {
+  bookingModel: string;
+  pricingTier: string | null;
+}
+
 async function getVenueBookingModel(
   admin: ReturnType<typeof getSupabaseAdminClient>,
   venueId: string,
 ): Promise<string> {
   const { data } = await admin.from('venues').select('booking_model').eq('id', venueId).maybeSingle();
   return ((data as { booking_model?: string } | null)?.booking_model as string) ?? '';
+}
+
+async function getVenueCalendarMode(
+  admin: ReturnType<typeof getSupabaseAdminClient>,
+  venueId: string,
+): Promise<VenueCalendarMode> {
+  const { data } = await admin
+    .from('venues')
+    .select('booking_model, pricing_tier')
+    .eq('id', venueId)
+    .maybeSingle();
+  return {
+    bookingModel: ((data as { booking_model?: string } | null)?.booking_model as string) ?? '',
+    pricingTier: ((data as { pricing_tier?: string | null } | null)?.pricing_tier as string | null) ?? null,
+  };
 }
 
 /**
@@ -57,13 +77,49 @@ async function checkVenueUsesUnifiedCalendarList(
   admin: ReturnType<typeof getSupabaseAdminClient>,
   venueId: string,
   bookingModel: string,
+  pricingTier?: string | null,
 ): Promise<boolean> {
   if (bookingModel === 'unified_scheduling') return true;
+  if (isAppointmentPlanTier(pricingTier)) return true;
+  const tier =
+    pricingTier === undefined
+      ? (await getVenueCalendarMode(admin, venueId)).pricingTier
+      : pricingTier;
+  if (isAppointmentPlanTier(tier)) return true;
   const { count } = await admin
     .from('unified_calendars')
     .select('id', { count: 'exact', head: true })
     .eq('venue_id', venueId);
   return (count ?? 0) > 0;
+}
+
+async function mirrorLegacyPractitionersToUnifiedCalendars(
+  admin: ReturnType<typeof getSupabaseAdminClient>,
+  venueId: string,
+): Promise<void> {
+  const { data: legacyRows, error } = await admin
+    .from('practitioners')
+    .select('id, name, staff_id, slug, working_hours, break_times, break_times_by_day, days_off, sort_order, is_active')
+    .eq('venue_id', venueId)
+    .order('sort_order', { ascending: true });
+  if (error) {
+    console.error('mirrorLegacyPractitionersToUnifiedCalendars failed:', error);
+    return;
+  }
+  for (const row of legacyRows ?? []) {
+    await ensureUnifiedMirrorForPractitionerId(admin, venueId, row as {
+      id: string;
+      name: string;
+      staff_id?: string | null;
+      slug?: string | null;
+      working_hours?: unknown;
+      break_times?: unknown;
+      break_times_by_day?: unknown;
+      days_off?: unknown;
+      sort_order?: number;
+      is_active?: boolean;
+    });
+  }
 }
 
 /** Booking link slug uniqueness: `unified_calendars` when that table is the column source of truth, else `practitioners`. */
@@ -149,22 +205,19 @@ export async function GET(request: NextRequest) {
     const staffAssignable = request.nextUrl.searchParams.get('staff_assignable') === '1';
 
     const admin = getSupabaseAdminClient();
-    const { data: venueMeta } = await admin
-      .from('venues')
-      .select('booking_model')
-      .eq('id', staff.venue_id)
-      .maybeSingle();
-    const bookingModel = (venueMeta as { booking_model?: string } | null)?.booking_model ?? '';
+    const venueMode = await getVenueCalendarMode(admin, staff.venue_id);
+    const bookingModel = venueMode.bookingModel;
 
     /** Experience events, classes, etc. use `unified_calendars.id`. Prefer UC list whenever rows exist (mirrors share practitioner ids). */
     const useUnifiedCalendarList = await checkVenueUsesUnifiedCalendarList(
       admin,
       staff.venue_id,
       bookingModel,
+      venueMode.pricingTier,
     );
 
     if (useUnifiedCalendarList) {
-      const { data, error } = await admin
+      let { data, error } = await admin
         .from('unified_calendars')
         .select('*')
         .eq('venue_id', staff.venue_id)
@@ -173,6 +226,21 @@ export async function GET(request: NextRequest) {
       if (error) {
         console.error('GET /api/venue/practitioners (unified_calendars) failed:', error);
         return NextResponse.json({ error: 'Failed to fetch practitioners' }, { status: 500 });
+      }
+
+      if ((data ?? []).length === 0 && isAppointmentPlanTier(venueMode.pricingTier)) {
+        await mirrorLegacyPractitionersToUnifiedCalendars(admin, staff.venue_id);
+        const retry = await admin
+          .from('unified_calendars')
+          .select('*')
+          .eq('venue_id', staff.venue_id)
+          .order('sort_order', { ascending: true });
+        data = retry.data;
+        error = retry.error;
+        if (error) {
+          console.error('GET /api/venue/practitioners (unified_calendars retry) failed:', error);
+          return NextResponse.json({ error: 'Failed to fetch practitioners' }, { status: 500 });
+        }
       }
 
       const { data: assignRows, error: assignErr } = await admin
@@ -294,8 +362,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const bookingModel = await getVenueBookingModel(admin, staff.venue_id);
-    const useUnifiedListForCreate = await checkVenueUsesUnifiedCalendarList(admin, staff.venue_id, bookingModel);
+    const venueMode = await getVenueCalendarMode(admin, staff.venue_id);
+    const bookingModel = venueMode.bookingModel;
+    const useUnifiedListForCreate = await checkVenueUsesUnifiedCalendarList(
+      admin,
+      staff.venue_id,
+      bookingModel,
+      venueMode.pricingTier,
+    );
     const { slug: rawSlug, ...createRest } = parsed.data;
     const slugNorm = normalisePractitionerSlugInput(rawSlug);
     if (!slugNorm.ok) {

@@ -10,6 +10,7 @@ import type { OpeningHours } from '@/types/availability';
 import { PageFrame } from '@/components/ui/dashboard/PageFrame';
 import { PageHeader } from '@/components/ui/dashboard/PageHeader';
 import { SectionCard } from '@/components/ui/dashboard/SectionCard';
+import { useDashboardVenueBootstrap } from '@/components/providers/DashboardVenueBootstrapProvider';
 
 
 interface Props {
@@ -24,22 +25,27 @@ interface Props {
  * Merged C/D/E day grid uses GET /api/venue/schedule (same feed as unified calendar lanes).
  */
 export function StaffScheduleHub({ bookingModel, enabledModels }: Props) {
+  const venueBootstrap = useDashboardVenueBootstrap();
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
-  const [openingHours, setOpeningHours] = useState<OpeningHours | null>(null);
-  const [venueTimezone, setVenueTimezone] = useState<string>('Europe/London');
+  const [fetchedOpeningHours, setFetchedOpeningHours] = useState<OpeningHours | null>(null);
+  const [fetchedVenueTimezone, setFetchedVenueTimezone] = useState<string>('Europe/London');
   const [startHourOverride, setStartHourOverride] = useState<number | null>(null);
   const [endHourOverride, setEndHourOverride] = useState<number | null>(null);
 
+  const openingHours = venueBootstrap?.openingHours ?? fetchedOpeningHours;
+  const venueTimezone = venueBootstrap?.timezone ?? fetchedVenueTimezone;
+
   useEffect(() => {
+    if (venueBootstrap) return;
     void fetch('/api/venue')
       .then((r) => (r.ok ? r.json() : null))
       .then((v) => {
-        if (v?.opening_hours) setOpeningHours(v.opening_hours as OpeningHours);
+        if (v?.opening_hours) setFetchedOpeningHours(v.opening_hours as OpeningHours);
         const tz = v?.timezone;
-        if (typeof tz === 'string' && tz.trim() !== '') setVenueTimezone(tz.trim());
+        if (typeof tz === 'string' && tz.trim() !== '') setFetchedVenueTimezone(tz.trim());
       })
       .catch((e) => console.error('[StaffScheduleHub] /api/venue preload failed:', e));
-  }, []);
+  }, [venueBootstrap]);
 
   const { startHour: derivedStart, endHour: derivedEnd } = useMemo(
     () => getCalendarGridBounds(date, openingHours ?? undefined, 7, 21, { timeZone: venueTimezone }),

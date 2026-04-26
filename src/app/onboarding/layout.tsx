@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import { OnboardingLogoutButton } from '@/components/onboarding/OnboardingLogoutButton';
 import { isPlatformSuperuser } from '@/lib/platform-auth';
+import { hasActiveVenueSupportSession } from '@/lib/support-session-server';
 import { resolveActiveBookingModels } from '@/lib/booking/active-models';
 import { isAppointmentPlanTier } from '@/lib/tier-enforcement';
 import { getVenueStaff } from '@/lib/venue-auth';
@@ -14,7 +15,10 @@ export default async function OnboardingLayout({ children }: { children: React.R
     redirect('/login?redirectTo=/onboarding');
   }
   if (user && isPlatformSuperuser(user)) {
-    redirect('/super');
+    const allowVenueShell = await hasActiveVenueSupportSession(supabase);
+    if (!allowVenueShell) {
+      redirect('/super');
+    }
   }
   const staff = await getVenueStaff(supabase);
   if (!staff) {

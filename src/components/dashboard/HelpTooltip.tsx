@@ -6,6 +6,7 @@ import { createPortal } from 'react-dom';
 interface HelpTooltipProps {
   content: string;
   maxWidth?: number;
+  icon?: 'i' | '?';
 }
 
 interface PanelCoords {
@@ -18,7 +19,7 @@ function subscribeToNothing() {
   return () => {};
 }
 
-export function HelpTooltip({ content, maxWidth = 280 }: HelpTooltipProps) {
+export function HelpTooltip({ content, maxWidth = 280, icon = 'i' }: HelpTooltipProps) {
   const [open, setOpen] = useState(false);
   const mounted = useSyncExternalStore(subscribeToNothing, () => true, () => false);
   const [coords, setCoords] = useState<PanelCoords | null>(null);
@@ -128,16 +129,23 @@ export function HelpTooltip({ content, maxWidth = 280 }: HelpTooltipProps) {
     );
 
   return (
-    <span ref={rootRef} className="relative inline-flex align-middle">
+    <span
+      ref={rootRef}
+      className="relative inline-flex align-middle"
+      onMouseEnter={() => setOpen(true)}
+      onMouseLeave={() => setOpen(false)}
+      onFocus={() => setOpen(true)}
+      onBlur={() => setOpen(false)}
+    >
       <button
         type="button"
-        onClick={() => setOpen(!open)}
+        onClick={() => setOpen(true)}
         className="inline-flex min-h-[44px] min-w-[44px] shrink-0 touch-manipulation items-center justify-center rounded-full border-0 bg-transparent p-0 text-slate-500"
         aria-expanded={open}
         aria-label="Help"
       >
         <span className="flex h-4 w-4 items-center justify-center rounded-full bg-slate-200 text-[10px] font-bold text-slate-500 transition-colors hover:bg-brand-100 hover:text-brand-600">
-          i
+          {icon}
         </span>
       </button>
       {panel}

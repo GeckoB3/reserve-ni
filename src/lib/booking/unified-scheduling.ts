@@ -1,4 +1,5 @@
 import type { BookingModel } from '@/types/booking-models';
+import { isAppointmentPlanTier } from '@/lib/tier-enforcement';
 
 /**
  * Unified Scheduling Engine (USE): practitioner-style appointments plus events/classes/resources
@@ -7,6 +8,28 @@ import type { BookingModel } from '@/types/booking-models';
  */
 export function isUnifiedSchedulingVenue(bookingModel: BookingModel | string | null | undefined): boolean {
   return bookingModel === 'practitioner_appointment' || bookingModel === 'unified_scheduling';
+}
+
+/**
+ * Appointments Light / Plus / Pro SKU — any mix of active booking models (resources, events, USE, etc.).
+ * Prefer this over `isUnifiedSchedulingVenue(booking_model)` for product-level dashboard/settings behaviour.
+ */
+export function isAppointmentsProductVenue(pricingTier: string | null | undefined): boolean {
+  return isAppointmentPlanTier(pricingTier);
+}
+
+/**
+ * Use appointment-family dashboard/bookings/reports copy and surfaces when the venue is on an
+ * Appointments SKU, or when USE is the primary model or enabled as a secondary tab (restaurant + appointments).
+ */
+export function isAppointmentDashboardExperience(
+  pricingTier: string | null | undefined,
+  primaryBookingModel: BookingModel | string | null | undefined,
+  enabledModels?: readonly BookingModel[] | null,
+): boolean {
+  if (isAppointmentPlanTier(pricingTier)) return true;
+  if (isUnifiedSchedulingVenue(primaryBookingModel)) return true;
+  return Boolean(enabledModels?.includes('unified_scheduling'));
 }
 
 /**

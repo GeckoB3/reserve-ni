@@ -5,7 +5,7 @@ import { sendPolicyMessage } from './outbound';
 import type { MessageType, Recipient, TemplateVariables } from './types';
 import { sendEmail } from '@/lib/emails/send-email';
 import { sendSmsWithSegments } from '@/lib/emails/send-sms';
-import { recordOutboundSms } from '@/lib/sms-usage';
+import { assertSmsSendWithinFreeAccessQuota, recordOutboundSms } from '@/lib/sms-usage';
 import type { BookingModel } from '@/types/booking-models';
 
 interface LogContext {
@@ -277,6 +277,13 @@ async function sendInternalCustomMessage(
     await sendEmail({ to: recipient.email, ...rendered });
   }
   if (recipient.phone) {
+    if (ctx.venue_id) {
+      const quota = await assertSmsSendWithinFreeAccessQuota({ venueId: ctx.venue_id });
+      if (!quota.ok) {
+        console.warn('[sendInternalCustomMessage] SMS blocked:', quota.reason, { venueId: ctx.venue_id });
+        return;
+      }
+    }
     const { sid, segmentCount } = await sendSmsWithSegments(
       recipient.phone,
       `${venueName}: ${message}`,

@@ -8,7 +8,7 @@ export const metadata: Metadata = {
     'Terms and conditions for using Reserve NI, the booking and guest management platform for businesses in Northern Ireland.',
 };
 
-const LAST_UPDATED = '16 April 2026';
+const LAST_UPDATED = '26 April 2026';
 
 export default function TermsPage() {
   return (
@@ -128,6 +128,11 @@ export default function TermsPage() {
                   Privacy Policy
                 </Link>
                 ).
+              </p>
+              <p className="mt-3">
+                ReserveNI support staff may access your account to help resolve issues you&apos;ve reported. Access is
+                logged, time-limited, and only used for support purposes. You will be notified by email when this
+                happens, and you can review all support activity in your settings.
               </p>
             </section>
 

@@ -27,6 +27,41 @@ function periodsForDay(day: OpeningHours[keyof OpeningHours] | undefined): Openi
   return [];
 }
 
+/**
+ * Whether venue `opening_hours` indicate the business trades on this civil date.
+ * Weekday resolution matches `getCalendarGridBounds` (venue-local when `timeZone` is set).
+ *
+ * @returns `open` | `closed`, or `null` when opening hours are not configured (caller may default to “open”).
+ */
+export function getVenueBusinessDayStatus(
+  dateStr: string,
+  openingHours: OpeningHours | null | undefined,
+  timeZone?: string | null,
+): 'open' | 'closed' | null {
+  if (!openingHours || Object.keys(openingHours).length === 0) {
+    return null;
+  }
+  const tz = timeZone?.trim();
+  const key = tz ? String(getDayOfWeekForYmdInTimezone(dateStr, tz)) : utcWeekdayKey(dateStr);
+  const day = openingHours[key];
+  if (day && typeof day === 'object' && 'closed' in day && (day as { closed?: boolean }).closed === true) {
+    return 'closed';
+  }
+  const periods = periodsForDay(day);
+  if (periods.length === 0) {
+    return 'closed';
+  }
+  let anyValid = false;
+  for (const p of periods) {
+    if (typeof p.open !== 'string' || typeof p.close !== 'string') continue;
+    const openM = timeToMinutesHM(p.open);
+    const closeM = timeToMinutesHM(p.close);
+    if (!Number.isFinite(openM) || !Number.isFinite(closeM)) continue;
+    if (closeM > openM) anyValid = true;
+  }
+  return anyValid ? 'open' : 'closed';
+}
+
 export interface CalendarGridBoundsOptions {
   /** IANA timezone (e.g. Europe/London). When set, weekday matches Settings → Business Hours for that civil date. */
   timeZone?: string | null;
