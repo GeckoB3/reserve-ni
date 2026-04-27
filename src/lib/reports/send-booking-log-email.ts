@@ -178,9 +178,19 @@ export async function sendBookingLogEmail(params: {
 
   if (eventError) throw eventError;
 
-  const cancellationEvents = ((eventRows ?? []) as CancellationEventRow[]).filter((event) => {
+  const rawCancellationEvents = ((eventRows ?? []) as CancellationEventRow[]).filter((event) => {
     if (event.event_type === 'auto_cancelled') return true;
     return event.payload?.new_status === 'Cancelled';
+  });
+  const autoCancelledBookingIds = new Set(
+    rawCancellationEvents
+      .filter((event) => event.event_type === 'auto_cancelled')
+      .map((event) => event.booking_id)
+      .filter(Boolean),
+  );
+  const cancellationEvents = rawCancellationEvents.filter((event) => {
+    if (event.event_type === 'auto_cancelled') return true;
+    return !event.booking_id || !autoCancelledBookingIds.has(event.booking_id);
   });
 
   const cancelledIds = [...new Set(cancellationEvents.map((event) => event.booking_id).filter(Boolean))] as string[];
