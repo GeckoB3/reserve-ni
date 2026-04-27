@@ -3,6 +3,10 @@ import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
 import { resolveVenueMode } from '@/lib/venue-mode';
+import {
+  DEFAULT_RESOURCE_MIN_BOOKING_MINUTES,
+  DEFAULT_RESOURCE_SLOT_INTERVAL_MINUTES,
+} from '@/lib/booking/resource-booking-defaults';
 
 /**
  * GET /api/venue/resource-options
@@ -44,9 +48,9 @@ export async function GET() {
         id: r.id as string,
         name: r.name as string,
         resource_type: (r.resource_type as string | null) ?? null,
-        min_booking_minutes: (r.min_booking_minutes as number | null) ?? 60,
-        max_booking_minutes: (r.max_booking_minutes as number | null) ?? 120,
-        slot_interval_minutes: (r.slot_interval_minutes as number | null) ?? 30,
+        min_booking_minutes: (r.min_booking_minutes as number | null) ?? DEFAULT_RESOURCE_MIN_BOOKING_MINUTES,
+        max_booking_minutes: (r.max_booking_minutes as number | null) ?? 180,
+        slot_interval_minutes: (r.slot_interval_minutes as number | null) ?? DEFAULT_RESOURCE_SLOT_INTERVAL_MINUTES,
         price_per_slot_pence: (r.price_per_slot_pence as number | null) ?? null,
       };
     });

@@ -3,6 +3,10 @@ import { getSupabaseAdminClient } from '@/lib/supabase';
 import { resolveVenueMode } from '@/lib/venue-mode';
 import { venueExposesBookingModel } from '@/lib/booking/enabled-models';
 import { nextResponseIfPublicBookingBlockedForVenue } from '@/lib/booking/light-plan-public-block';
+import {
+  DEFAULT_RESOURCE_MIN_BOOKING_MINUTES,
+  DEFAULT_RESOURCE_SLOT_INTERVAL_MINUTES,
+} from '@/lib/booking/resource-booking-defaults';
 
 /**
  * GET /api/booking/resource-options?venue_id=uuid
@@ -45,9 +49,9 @@ export async function GET(request: NextRequest) {
         id: r.id as string,
         name: r.name as string,
         resource_type: (r.resource_type as string | null) ?? null,
-        min_booking_minutes: (r.min_booking_minutes as number | null) ?? 60,
-        max_booking_minutes: (r.max_booking_minutes as number | null) ?? 120,
-        slot_interval_minutes: (r.slot_interval_minutes as number | null) ?? 30,
+        min_booking_minutes: (r.min_booking_minutes as number | null) ?? DEFAULT_RESOURCE_MIN_BOOKING_MINUTES,
+        max_booking_minutes: (r.max_booking_minutes as number | null) ?? 180,
+        slot_interval_minutes: (r.slot_interval_minutes as number | null) ?? DEFAULT_RESOURCE_SLOT_INTERVAL_MINUTES,
         price_per_slot_pence: (r.price_per_slot_pence as number | null) ?? null,
         payment_requirement: (r.payment_requirement as string) ?? 'none',
         deposit_amount_pence: (r.deposit_amount_pence as number | null) ?? null,

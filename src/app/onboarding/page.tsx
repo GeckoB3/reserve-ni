@@ -52,6 +52,15 @@ import { CalendarLimitMessage } from '@/components/dashboard/CalendarLimitMessag
 import { planDisplayName } from '@/lib/pricing-constants';
 import { isValidWebsiteUrlInput } from '@/lib/urls/website-url';
 import { HelpTooltip } from '@/components/dashboard/HelpTooltip';
+import {
+  RESOURCE_MIN_BOOKING_HELP,
+  RESOURCE_SLOT_INTERVAL_HELP,
+} from '@/lib/help/resource-booking-tooltips';
+import {
+  DEFAULT_RESOURCE_MIN_BOOKING_MINUTES,
+  DEFAULT_RESOURCE_SLOT_INTERVAL_MINUTES,
+  syncedMinBookingMinutesFromSlot,
+} from '@/lib/booking/resource-booking-defaults';
 
 type Currency = 'GBP' | 'EUR';
 
@@ -340,6 +349,8 @@ interface ResourceDraft {
   slot_interval_minutes: number;
   min_booking_minutes: number;
   max_booking_minutes: number;
+  /** When false, shortest booking follows the start-time step (with system minimum). */
+  longer_minimum_than_slot: boolean;
   pricePerSlot: string;
   payment_requirement: ResourcePaymentRequirement;
   depositPounds: string;
@@ -370,9 +381,10 @@ function createEmptyResourceDraft(hostCalendarId: string): ResourceDraft {
     name: '',
     resource_type: '',
     display_on_calendar_id: hostCalendarId,
-    slot_interval_minutes: 60,
-    min_booking_minutes: 60,
-    max_booking_minutes: 480,
+    slot_interval_minutes: DEFAULT_RESOURCE_SLOT_INTERVAL_MINUTES,
+    min_booking_minutes: DEFAULT_RESOURCE_MIN_BOOKING_MINUTES,
+    max_booking_minutes: 180,
+    longer_minimum_than_slot: false,
     pricePerSlot: '',
     payment_requirement: 'none',
     depositPounds: '',
@@ -1975,20 +1987,31 @@ export default function OnboardingPage() {
           const slot = r.slot_interval_minutes;
           const minB = r.min_booking_minutes;
           const maxB = r.max_booking_minutes;
+          const effectiveMin = r.longer_minimum_than_slot
+            ? minB
+            : syncedMinBookingMinutesFromSlot(slot, RES_MIN_BOOK_MIN);
           if (!Number.isFinite(slot) || slot < RES_SLOT_MIN || slot > RES_SLOT_MAX) {
-            setError(`Slot interval must be between ${RES_SLOT_MIN} and ${RES_SLOT_MAX} minutes.`);
+            setError(`Start-time step must be between ${RES_SLOT_MIN} and ${RES_SLOT_MAX} minutes.`);
             return;
           }
-          if (!Number.isFinite(minB) || minB < RES_MIN_BOOK_MIN || minB > RES_MIN_BOOK_MAX) {
-            setError(`Min booking must be between ${RES_MIN_BOOK_MIN} and ${RES_MIN_BOOK_MAX} minutes.`);
-            return;
+          if (r.longer_minimum_than_slot) {
+            if (!Number.isFinite(minB) || minB < RES_MIN_BOOK_MIN || minB > RES_MIN_BOOK_MAX) {
+              setError(`Shortest booking must be between ${RES_MIN_BOOK_MIN} and ${RES_MIN_BOOK_MAX} minutes.`);
+              return;
+            }
+            if (minB < slot) {
+              setError(
+                'Shortest booking must be at least the start-time step, or turn off Advanced to match the step automatically.',
+              );
+              return;
+            }
           }
           if (!Number.isFinite(maxB) || maxB < RES_MAX_BOOK_MIN || maxB > RES_MAX_BOOK_MAX) {
             setError(`Max booking must be between ${RES_MAX_BOOK_MIN} and ${RES_MAX_BOOK_MAX} minutes.`);
             return;
           }
-          if (minB > maxB) {
-            setError('Min booking duration cannot exceed max booking duration.');
+          if (effectiveMin > maxB) {
+            setError('Shortest booking cannot be longer than the longest booking.');
             return;
           }
           const priceRaw = r.pricePerSlot.trim();
@@ -1997,7 +2020,7 @@ export default function OnboardingPage() {
             (r.payment_requirement === 'deposit' || r.payment_requirement === 'full_payment') &&
             pricePence <= 0
           ) {
-            setError('Set a price per slot before choosing deposit or full payment online.');
+            setError('Set a price for each start-time step before choosing deposit or full payment online.');
             return;
           }
           if (r.payment_requirement === 'deposit') {
@@ -2021,6 +2044,9 @@ export default function OnboardingPage() {
             const priceRaw = r.pricePerSlot.trim();
             const pricePence = priceRaw === '' ? 0 : poundsToMinor(priceRaw);
             const payReq = r.payment_requirement;
+            const effectiveMinSubmit = r.longer_minimum_than_slot
+              ? r.min_booking_minutes
+              : syncedMinBookingMinutesFromSlot(r.slot_interval_minutes, RES_MIN_BOOK_MIN);
             const depPence =
               payReq === 'deposit' && r.depositPounds.trim() !== ''
                 ? Math.round(parseFloat(r.depositPounds) * 100)
@@ -2033,7 +2059,7 @@ export default function OnboardingPage() {
                 ...(r.resource_type.trim() && { resource_type: r.resource_type.trim() }),
                 display_on_calendar_id: r.display_on_calendar_id.trim(),
                 slot_interval_minutes: r.slot_interval_minutes,
-                min_booking_minutes: r.min_booking_minutes,
+                min_booking_minutes: effectiveMinSubmit,
                 max_booking_minutes: r.max_booking_minutes,
                 ...(pricePence > 0 && { price_per_slot_pence: pricePence }),
                 payment_requirement: payReq,
@@ -3699,7 +3725,7 @@ export default function OnboardingPage() {
             </h2>
             <p className="mb-4 text-sm text-slate-600">
               A <strong>resource</strong> is anything guests rent by the slot: a tennis court, a meeting room, a
-              lane, a desk, a piece of kit. Each resource has its own weekly availability, slot length, and
+              lane, a desk, a piece of kit. Each resource has its own weekly availability, booking time grid, and
               pricing.
             </p>
             <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50/80 p-4 text-sm text-slate-700">
@@ -3710,12 +3736,12 @@ export default function OnboardingPage() {
                   label.
                 </li>
                 <li>
-                  <strong className="text-slate-800">Slot length</strong> and booking rules (min/max duration,
+                  <strong className="text-slate-800">Start-time step</strong> and booking length (shortest / longest,
                   advance notice).
                 </li>
                 <li>
-                  <strong className="text-slate-800">Pricing</strong> per slot, with optional online payment or
-                  deposit.
+                  <strong className="text-slate-800">Pricing</strong> per step of that grid, with optional online
+                  payment or deposit.
                 </li>
                 <li>
                   Which <strong className="text-slate-800">calendar column</strong> it appears on so staff see
@@ -3723,7 +3749,7 @@ export default function OnboardingPage() {
                 </li>
               </ul>
               <p className="mt-2 text-xs italic text-slate-500">
-                e.g. “Court 1, 60-min slots, £12, Mon–Sun 09:00–21:00”.
+                e.g. “Court 1, start every 60 minutes, £12 per hour, Mon–Sun 09:00–21:00”.
               </p>
             </div>
             <p className="mb-4 text-sm text-slate-500">
@@ -3857,16 +3883,28 @@ export default function OnboardingPage() {
                       </div>
                     )}
                   </div>
-                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                  <p className="text-[11px] leading-relaxed text-slate-600">
+                    Start times use a fixed step. Online price uses the same step: total = (price per step) × (length ÷
+                    step).
+                  </p>
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-2">
                     <div>
-                      <label className="mb-1 block text-[10px] font-medium text-slate-500">Slot interval (min)</label>
+                      <label className="mb-1 flex items-center gap-1 text-[10px] font-medium text-slate-500">
+                        Start times every (min)
+                        <HelpTooltip icon="?" maxWidth={320} content={RESOURCE_SLOT_INTERVAL_HELP} />
+                      </label>
                       <NumericInput
                         value={r.slot_interval_minutes}
                         onChange={(v) => {
                           const updated = [...resources];
+                          const row = updated[i]!;
+                          const nextMin = row.longer_minimum_than_slot
+                            ? row.min_booking_minutes
+                            : syncedMinBookingMinutesFromSlot(v, RES_MIN_BOOK_MIN);
                           updated[i] = {
-                            ...r,
+                            ...row,
                             slot_interval_minutes: v,
+                            min_booking_minutes: nextMin,
                           };
                           setResources(updated);
                         }}
@@ -3876,24 +3914,7 @@ export default function OnboardingPage() {
                       />
                     </div>
                     <div>
-                      <label className="mb-1 block text-[10px] font-medium text-slate-500">Min booking (min)</label>
-                      <NumericInput
-                        value={r.min_booking_minutes}
-                        onChange={(v) => {
-                          const updated = [...resources];
-                          updated[i] = {
-                            ...r,
-                            min_booking_minutes: v,
-                          };
-                          setResources(updated);
-                        }}
-                        min={RES_MIN_BOOK_MIN}
-                        max={RES_MIN_BOOK_MAX}
-                        className="w-full rounded border border-slate-200 px-2 py-1.5 text-xs"
-                      />
-                    </div>
-                    <div>
-                      <label className="mb-1 block text-[10px] font-medium text-slate-500">Max booking (min)</label>
+                      <label className="mb-1 block text-[10px] font-medium text-slate-500">Longest booking (min)</label>
                       <NumericInput
                         value={r.max_booking_minutes}
                         onChange={(v) => {
@@ -3910,10 +3931,60 @@ export default function OnboardingPage() {
                       />
                     </div>
                   </div>
+                  <div className="rounded-lg border border-slate-100 bg-slate-50/90 p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <label className="mb-1 flex items-center gap-1 text-[10px] font-medium text-slate-500">
+                        Shortest booking (min)
+                        <HelpTooltip icon="?" maxWidth={320} content={RESOURCE_MIN_BOOKING_HELP} />
+                      </label>
+                      <label className="flex cursor-pointer items-center gap-1.5 text-[10px] font-medium text-slate-600">
+                        <input
+                          type="checkbox"
+                          checked={r.longer_minimum_than_slot}
+                          onChange={(e) => {
+                            const updated = [...resources];
+                            const row = updated[i]!;
+                            const on = e.target.checked;
+                            const nextMin = on
+                              ? row.min_booking_minutes
+                              : syncedMinBookingMinutesFromSlot(row.slot_interval_minutes, RES_MIN_BOOK_MIN);
+                            updated[i] = {
+                              ...row,
+                              longer_minimum_than_slot: on,
+                              min_booking_minutes: nextMin,
+                            };
+                            setResources(updated);
+                          }}
+                          className="h-3 w-3 rounded border-slate-300 text-brand-600"
+                        />
+                        Advanced: longer minimum
+                      </label>
+                    </div>
+                    <NumericInput
+                      value={r.min_booking_minutes}
+                      onChange={(v) => {
+                        const updated = [...resources];
+                        updated[i] = {
+                          ...r,
+                          min_booking_minutes: v,
+                        };
+                        setResources(updated);
+                      }}
+                      min={RES_MIN_BOOK_MIN}
+                      max={RES_MIN_BOOK_MAX}
+                      disabled={!r.longer_minimum_than_slot}
+                      className="mt-1.5 w-full max-w-[12rem] rounded border border-slate-200 px-2 py-1.5 text-xs disabled:cursor-not-allowed disabled:bg-slate-100"
+                    />
+                    <p className="mt-1 text-[10px] text-slate-500">
+                      {r.longer_minimum_than_slot
+                        ? `At least ${RES_MIN_BOOK_MIN}–${RES_MIN_BOOK_MAX} min; must be ≥ start-time step.`
+                        : `Matches start-time step (minimum ${RES_MIN_BOOK_MIN} min).`}
+                    </p>
+                  </div>
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     <div>
                       <label className="mb-1 block text-xs font-medium text-slate-600">
-                        Price per slot ({currencySymbol(currency)})
+                        Price per {r.slot_interval_minutes}-minute step ({currencySymbol(currency)})
                       </label>
                       <div className="relative">
                         <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-400">
@@ -3933,6 +4004,7 @@ export default function OnboardingPage() {
                           className="w-full rounded-lg border border-slate-200 py-2 pl-7 pr-3 text-sm"
                         />
                       </div>
+                      <p className="mt-1 text-[10px] text-slate-500">Per step of the start-time grid above.</p>
                     </div>
                     <div>
                       <label className="mb-1 block text-xs font-medium text-slate-600">Payment</label>

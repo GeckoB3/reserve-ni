@@ -11,7 +11,10 @@ import {
   type VenueCommunicationPolicies,
   shouldShowAppointmentsOtherLane,
 } from "@/lib/communications/policies";
-import { isRestaurantCommsTier } from "@/lib/tier-enforcement";
+import {
+  isAppointmentPlanTier,
+  isRestaurantCommsTier,
+} from "@/lib/tier-enforcement";
 import { NumericInput } from "@/components/ui/NumericInput";
 import { SectionCard } from "@/components/ui/dashboard/SectionCard";
 import { Skeleton } from "@/components/ui/Skeleton";
@@ -45,6 +48,22 @@ const MESSAGE_CARDS: Array<{
     allowedChannels: ["email", "sms"],
   },
   {
+    key: "confirm_or_cancel_prompt",
+    label: "Confirm or cancel prompt",
+    description: "Ask the guest to confirm or cancel before the visit.",
+    allowedChannels: ["email", "sms"],
+    timing: "hoursBefore",
+    timingLabel: "Send hours before",
+  },
+  {
+    key: "pre_visit_reminder",
+    label: "Pre-visit reminder",
+    description: "Reminder shortly before the booking starts.",
+    allowedChannels: ["email", "sms"],
+    timing: "hoursBefore",
+    timingLabel: "Send hours before",
+  },
+  {
     key: "deposit_payment_request",
     label: "Deposit payment request",
     description: "Used when a booking needs a separate deposit payment link.",
@@ -57,25 +76,9 @@ const MESSAGE_CARDS: Array<{
     allowedChannels: ["email"],
   },
   {
-    key: "confirm_or_cancel_prompt",
-    label: "Confirm or cancel prompt",
-    description: "Ask the guest to confirm or cancel before the visit.",
-    allowedChannels: ["email", "sms"],
-    timing: "hoursBefore",
-    timingLabel: "Send hours before",
-  },
-  {
     key: "deposit_payment_reminder",
     label: "Deposit payment reminder",
     description: "Reminder for unpaid deposit bookings before they are released.",
-    allowedChannels: ["email", "sms"],
-    timing: "hoursBefore",
-    timingLabel: "Send hours before",
-  },
-  {
-    key: "pre_visit_reminder",
-    label: "Pre-visit reminder",
-    description: "Reminder shortly before the booking starts.",
     allowedChannels: ["email", "sms"],
     timing: "hoursBefore",
     timingLabel: "Send hours before",
@@ -464,14 +467,19 @@ export function CommunicationTemplatesSection({
         </div>
       )}
 
-      <div className="rounded-xl border border-slate-200 bg-slate-50/80 px-4 py-3">
-        <p className="text-sm font-medium text-slate-900">
-          {LANE_META[activeLane].label}
-        </p>
-        <p className="mt-1 text-sm text-slate-600">
-          {LANE_META[activeLane].description}
-        </p>
-      </div>
+      {!(
+        isAppointmentPlanTier(pricingTier) &&
+        activeLane === "appointments_other"
+      ) && (
+        <div className="rounded-xl border border-slate-200 bg-slate-50/80 px-4 py-3">
+          <p className="text-sm font-medium text-slate-900">
+            {LANE_META[activeLane].label}
+          </p>
+          <p className="mt-1 text-sm text-slate-600">
+            {LANE_META[activeLane].description}
+          </p>
+        </div>
+      )}
 
       <div className="space-y-4">
         {MESSAGE_CARDS.map((card) => (

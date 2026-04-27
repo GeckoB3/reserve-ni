@@ -362,6 +362,8 @@ export async function PATCH(
             .update({
               status: 'Cancelled',
               deposit_status: 'Refunded',
+              cancelled_by_staff_id: staff.id,
+              cancellation_actor_type: 'staff',
               updated_at: new Date().toISOString(),
             })
             .in('id', idsToCancel);
@@ -370,6 +372,8 @@ export async function PATCH(
             .from('bookings')
             .update({
               status: 'Cancelled',
+              cancelled_by_staff_id: staff.id,
+              cancellation_actor_type: 'staff',
               updated_at: new Date().toISOString(),
             })
             .in('id', idsToCancel);

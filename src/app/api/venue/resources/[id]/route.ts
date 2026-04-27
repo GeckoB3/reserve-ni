@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getVenueStaff } from '@/lib/venue-auth';
 import { getSupabaseAdminClient } from '@/lib/supabase';
+import {
+  DEFAULT_RESOURCE_MIN_BOOKING_MINUTES,
+  DEFAULT_RESOURCE_SLOT_INTERVAL_MINUTES,
+} from '@/lib/booking/resource-booking-defaults';
 
 /**
  * GET /api/venue/resources/[id] - single resource (venue-scoped).
@@ -42,9 +46,9 @@ export async function GET(
         venue_id: row.venue_id,
         name: row.name,
         resource_type: row.resource_type ?? null,
-        slot_interval_minutes: row.slot_interval_minutes ?? 30,
-        min_booking_minutes: row.min_booking_minutes ?? 60,
-        max_booking_minutes: row.max_booking_minutes ?? 120,
+        slot_interval_minutes: row.slot_interval_minutes ?? DEFAULT_RESOURCE_SLOT_INTERVAL_MINUTES,
+        min_booking_minutes: row.min_booking_minutes ?? DEFAULT_RESOURCE_MIN_BOOKING_MINUTES,
+        max_booking_minutes: row.max_booking_minutes ?? 180,
         price_per_slot_pence: row.price_per_slot_pence ?? null,
         payment_requirement: (row.payment_requirement as string) ?? 'none',
         deposit_amount_pence: row.deposit_amount_pence ?? null,

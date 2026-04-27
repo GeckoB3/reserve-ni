@@ -22,6 +22,10 @@ import {
 } from '@/lib/availability/venue-wide-blocks-fetch';
 import { sameDaySlotCutoffForBookingDate } from '@/lib/venue/venue-local-clock';
 import { entityBookingWindowFromRow } from '@/lib/booking/entity-booking-window';
+import {
+  DEFAULT_RESOURCE_MIN_BOOKING_MINUTES,
+  DEFAULT_RESOURCE_SLOT_INTERVAL_MINUTES,
+} from '@/lib/booking/resource-booking-defaults';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -801,9 +805,9 @@ export function mapCalendarToResource(row: Record<string, unknown>): VenueResour
     venue_id: row.venue_id as string,
     name: row.name as string,
     resource_type: (row.resource_type as string | null) ?? null,
-    min_booking_minutes: (row.min_booking_minutes as number | null) ?? 60,
-    max_booking_minutes: (row.max_booking_minutes as number | null) ?? 120,
-    slot_interval_minutes: (row.slot_interval_minutes as number | null) ?? 30,
+    min_booking_minutes: (row.min_booking_minutes as number | null) ?? DEFAULT_RESOURCE_MIN_BOOKING_MINUTES,
+    max_booking_minutes: (row.max_booking_minutes as number | null) ?? 180,
+    slot_interval_minutes: (row.slot_interval_minutes as number | null) ?? DEFAULT_RESOURCE_SLOT_INTERVAL_MINUTES,
     price_per_slot_pence: (row.price_per_slot_pence as number | null) ?? null,
     payment_requirement: payReq ?? 'none',
     deposit_amount_pence: (row.deposit_amount_pence as number | null) ?? null,

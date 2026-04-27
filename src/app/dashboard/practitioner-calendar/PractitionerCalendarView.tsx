@@ -25,7 +25,7 @@ import {
 } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
 import { createClient } from '@/lib/supabase/browser';
-import { ResourceSlotBookingForm } from '@/components/booking/ResourceSlotBookingForm';
+import { ResourceBookingFlow } from '@/components/booking/ResourceBookingFlow';
 import { CalendarStaffBookingModal } from '@/app/dashboard/practitioner-calendar/CalendarStaffBookingModal';
 import {
   AppointmentDetailSheet,
@@ -71,6 +71,8 @@ import { MonthScheduleGrid } from './MonthScheduleGrid';
 import { PractitionerCalendarToolbar } from './PractitionerCalendarToolbar';
 import { EmptyState } from '@/components/ui/dashboard/EmptyState';
 import { HorizontalScrollHint } from '@/components/ui/HorizontalScrollHint';
+import type { VenuePublic } from '@/components/booking/types';
+import { mapApiVenueToVenuePublic } from '@/lib/booking/map-api-venue-to-public';
 
 interface Practitioner {
   id: string;
@@ -920,6 +922,8 @@ export function PractitionerCalendarView({
   const [staffBookingModal, setStaffBookingModal] = useState<null | 'new' | 'walk-in'>(null);
   const [showResourceBooking, setShowResourceBooking] = useState(false);
   const [resourceBookingResourceId, setResourceBookingResourceId] = useState<string | undefined>();
+  const [resourceBookingVenue, setResourceBookingVenue] = useState<VenuePublic | null>(null);
+  const [resourceBookingVenueError, setResourceBookingVenueError] = useState<string | null>(null);
   const [prefillPractitionerId, setPrefillPractitionerId] = useState<string | undefined>();
   const [prefillTime, setPrefillTime] = useState<string | undefined>();
   const [prefillDate, setPrefillDate] = useState<string | undefined>();
@@ -1182,6 +1186,32 @@ export function PractitionerCalendarView({
   useEffect(() => {
     void fetchData();
   }, [fetchData]);
+
+  useEffect(() => {
+    if (!showResourceBooking || resourceBookingVenue) return;
+
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch('/api/venue');
+        const data = (await res.json()) as Record<string, unknown>;
+        if (!res.ok) {
+          if (!cancelled) setResourceBookingVenueError(typeof data.error === 'string' ? data.error : 'Could not load venue');
+          return;
+        }
+        if (!cancelled) {
+          setResourceBookingVenue(mapApiVenueToVenuePublic(data));
+          setResourceBookingVenueError(null);
+        }
+      } catch {
+        if (!cancelled) setResourceBookingVenueError('Could not load venue');
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [showResourceBooking, resourceBookingVenue]);
 
   const silentRefetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scheduleSilentCalendarRefetch = useCallback(() => {
@@ -2837,27 +2867,63 @@ export function PractitionerCalendarView({
           preselectedTime={prefillTime}
         />
       ) : null}
-      {resourceBookingResourceId && (
-        <ResourceSlotBookingForm
-          open={showResourceBooking}
-          onClose={() => {
+      {showResourceBooking && resourceBookingResourceId ? (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4"
+          onClick={() => {
             setShowResourceBooking(false);
             setResourceBookingResourceId(undefined);
+            setPrefillDate(undefined);
             setPrefillTime(undefined);
           }}
-          onCreated={() => {
-            setShowResourceBooking(false);
-            setResourceBookingResourceId(undefined);
-            setPrefillTime(undefined);
-            void fetchData({ silent: true });
-          }}
-          venueId={venueId}
-          currency={currency}
-          resourceId={resourceBookingResourceId}
-          preselectedDate={prefillDate ?? (viewMode === 'day' ? date : undefined)}
-          preselectedTime={prefillTime}
-        />
-      )}
+        >
+          <div
+            role="dialog"
+            aria-label="Book resource"
+            className="max-h-[min(90vh,720px)] w-full max-w-xl overflow-y-auto rounded-2xl bg-white p-5 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <h3 className="text-base font-semibold text-slate-900">Book resource</h3>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowResourceBooking(false);
+                  setResourceBookingResourceId(undefined);
+                  setPrefillDate(undefined);
+                  setPrefillTime(undefined);
+                }}
+                className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                aria-label="Close"
+              >
+                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            {resourceBookingVenueError ? (
+              <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                {resourceBookingVenueError}
+              </p>
+            ) : resourceBookingVenue ? (
+              <ResourceBookingFlow
+                key={`${resourceBookingResourceId}-${prefillDate ?? ''}-${prefillTime ?? ''}`}
+                venue={resourceBookingVenue}
+                bookingAudience="staff"
+                staffBookingSource="phone"
+                onBookingCreated={() => void fetchData({ silent: true })}
+                initialResourceId={resourceBookingResourceId}
+                initialDate={prefillDate ?? (viewMode === 'day' ? date : undefined)}
+                initialTime={prefillTime}
+              />
+            ) : (
+              <div className="flex items-center justify-center py-12">
+                <div className="h-8 w-8 animate-spin rounded-full border-2 border-brand-600 border-t-transparent" />
+              </div>
+            )}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

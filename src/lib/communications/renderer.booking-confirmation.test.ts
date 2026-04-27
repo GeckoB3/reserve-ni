@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { renderCommunicationEmail } from '@/lib/communications/renderer';
+import {
+  renderCommunicationEmail,
+  renderCommunicationSms,
+} from '@/lib/communications/renderer';
 import type { BookingEmailData } from '@/lib/emails/types';
 import type { VenueEmailData } from '@/lib/emails/types';
 
@@ -133,5 +136,48 @@ describe('renderCommunicationEmail booking_confirmation', () => {
     expect(out?.html).not.toContain('There is no charge for this booking');
     expect(out?.text).toContain('Price and payment:');
     expect(out?.text).toContain('Free');
+  });
+});
+
+describe('renderCommunicationSms confirm_or_cancel_prompt', () => {
+  it('uses one confirm-or-cancel link for table bookings', () => {
+    const link = 'https://example.com/c/signed';
+    const out = renderCommunicationSms({
+      lane: 'table',
+      messageKey: 'confirm_or_cancel_prompt',
+      booking: baseBooking({ party_size: 4 }),
+      venue,
+      confirmLink: link,
+      cancelLink: link,
+    });
+
+    expect(out?.body).toContain('https://example.com/c/signed');
+    expect(out?.body).toMatch(/Please confirm or cancel/);
+    expect(out?.body).not.toContain('Confirm:');
+    expect(out?.body).not.toContain('Cancel:');
+    expect(out?.body.match(/https:\/\/example\.com\/c\/signed/g)).toHaveLength(1);
+    expect(out!.body.length).toBeLessThanOrEqual(160);
+  });
+
+  it('uses one confirm-or-cancel link for appointment bookings', () => {
+    const link = 'https://example.com/c/signed';
+    const out = renderCommunicationSms({
+      lane: 'appointments_other',
+      messageKey: 'confirm_or_cancel_prompt',
+      booking: baseBooking({
+        appointment_service_name: 'Massage',
+        practitioner_name: 'Jo',
+      }),
+      venue,
+      confirmLink: link,
+      cancelLink: link,
+    });
+
+    expect(out?.body).toContain('https://example.com/c/signed');
+    expect(out?.body).toMatch(/Please confirm or cancel/);
+    expect(out?.body).not.toContain('Confirm:');
+    expect(out?.body).not.toContain('Cancel:');
+    expect(out?.body.match(/https:\/\/example\.com\/c\/signed/g)).toHaveLength(1);
+    expect(out!.body.length).toBeLessThanOrEqual(160);
   });
 });

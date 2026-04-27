@@ -215,7 +215,7 @@ export function ImportHub() {
       )}
 
       <p className="text-xs text-slate-500">
-        Tip: You can also open this tool from <strong>Settings → Data Import</strong>.
+        Open this tool anytime from <strong>Settings → Data Import</strong>.
       </p>
     </div>
   );

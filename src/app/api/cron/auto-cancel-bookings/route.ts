@@ -44,7 +44,12 @@ export async function POST(request: NextRequest) {
       if (!check.ok) continue;
       const { error: updateErr } = await supabase
         .from('bookings')
-        .update({ status: 'Cancelled', updated_at: new Date().toISOString() })
+        .update({
+          status: 'Cancelled',
+          cancellation_actor_type: 'system',
+          cancelled_by_staff_id: null,
+          updated_at: new Date().toISOString(),
+        })
         .eq('id', booking.id);
       if (updateErr) {
         console.error('auto-cancel update failed:', updateErr);

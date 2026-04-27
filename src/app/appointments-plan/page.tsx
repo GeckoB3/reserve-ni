@@ -1276,7 +1276,7 @@ function ClosingCta() {
   return (
     <section id="contact" className="scroll-mt-16 bg-white py-20 sm:py-28">
       <div className="mx-auto max-w-6xl px-6">
-        <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-900 via-brand-800 to-brand-900 px-6 py-14 text-white shadow-2xl sm:px-12 sm:py-16">
+        <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-900 via-brand-800 to-brand-900 px-4 py-12 text-white shadow-2xl sm:px-8 sm:py-14 md:px-12 md:py-16">
           <div
             className="absolute inset-0 opacity-30"
             style={{
@@ -1284,8 +1284,8 @@ function ClosingCta() {
                 "radial-gradient(circle at 20% 30%, rgba(78,107,120,0.8) 0%, transparent 40%), radial-gradient(circle at 85% 70%, rgba(5,150,105,0.5) 0%, transparent 45%)",
             }}
           />
-          <div className="relative grid gap-10 lg:grid-cols-2 lg:items-start">
-            <div>
+          <div className="relative grid grid-cols-1 gap-8 sm:gap-10 lg:grid-cols-2 lg:items-stretch lg:gap-12">
+            <div className="min-w-0">
               <h2 className="text-3xl font-extrabold tracking-tight sm:text-4xl lg:text-5xl">
                 Ready to take your diary back?
               </h2>
@@ -1294,11 +1294,11 @@ function ClosingCta() {
                 assistance signing up; just send us a note and we&apos;ll get back to you.
               </p>
 
-              <div className="mt-6 inline-flex items-center gap-3 rounded-xl border border-white/20 bg-white/10 px-4 py-3 backdrop-blur">
+              <div className="mt-6 flex w-full max-w-full flex-col gap-3 rounded-xl border border-white/20 bg-white/10 px-4 py-3 backdrop-blur sm:flex-row sm:items-start">
                 <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg bg-white/20 text-white">
                   <TagIcon small />
                 </span>
-                <div className="text-sm">
+                <div className="min-w-0 flex-1 text-sm">
                   <span className="font-semibold text-white">Founding Partner Offer: </span>
                   <span className="text-white/80">Use code </span>
                   <span className="rounded bg-white/20 px-1.5 py-0.5 font-mono text-xs font-bold tracking-wider text-white">
@@ -1308,7 +1308,7 @@ function ClosingCta() {
                 </div>
               </div>
 
-              <div className="mt-6 grid max-w-xl grid-cols-2 gap-3 text-xs text-white/85">
+              <div className="mt-6 grid max-w-xl grid-cols-1 gap-3 text-xs text-white/85 sm:grid-cols-2">
                 <div className="rounded-lg border border-white/15 bg-white/10 px-3 py-2">Set up in under 30 minutes</div>
                 <div className="rounded-lg border border-white/15 bg-white/10 px-3 py-2">No commission or booking fees</div>
                 <div className="rounded-lg border border-white/15 bg-white/10 px-3 py-2">Cancel anytime</div>
@@ -1343,13 +1343,13 @@ function ClosingCta() {
               </div>
             </div>
 
-            <div className="rounded-2xl bg-white p-6 text-slate-900 shadow-xl sm:p-8">
+            <div className="min-w-0 w-full max-w-full rounded-2xl bg-white p-5 text-slate-900 shadow-xl sm:p-8">
               <h3 className="text-lg font-bold">Or, tell us about your business.</h3>
               <p className="mt-1 text-sm text-slate-500">
                 We&apos;ll get back to you within one working day.
               </p>
-              <div className="mt-5">
-                <ContactForm />
+              <div className="mt-5 w-full min-w-0">
+                <ContactForm className="mx-0 w-full max-w-none" />
               </div>
             </div>
           </div>

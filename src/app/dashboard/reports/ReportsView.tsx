@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import useSWR from 'swr';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import {
@@ -97,7 +97,29 @@ interface ReportsData {
   /** Inferred from booking row FKs - same labels as full export (plan §4.3). */
   report_by_booking_model?: ReportByBookingModelRow[];
   client_summary?: ClientSummary | null;
+  booking_log_email_config?: BookingLogEmailConfig | null;
+  default_booking_log_email?: string | null;
 }
+
+interface BookingLogEmailScheduleEntry {
+  day: number;
+  time: string;
+}
+
+interface BookingLogEmailConfig {
+  enabled: boolean;
+  recipient_email: string | null;
+  schedule: BookingLogEmailScheduleEntry[];
+}
+
+const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const DEFAULT_LOG_SCHEDULE: BookingLogEmailScheduleEntry[] = [
+  { day: 1, time: '17:00' },
+  { day: 2, time: '17:00' },
+  { day: 3, time: '17:00' },
+  { day: 4, time: '17:00' },
+  { day: 5, time: '17:00' },
+];
 
 /** Brand-aligned chart segments: brand-600, brand-400, emerald-500, amber-500, slate. */
 const COLORS = ['#4E6B78', '#6B8A9A', '#059669', '#f59e0b', '#d97706', '#64748b'];
@@ -157,6 +179,14 @@ async function fetchReportsJson(url: string): Promise<ReportsData> {
   const res = await fetch(url);
   if (!res.ok) throw new Error('Failed to load');
   return res.json() as Promise<ReportsData>;
+}
+
+function normalizeLogConfig(config: BookingLogEmailConfig | null | undefined, fallbackEmail?: string | null): BookingLogEmailConfig {
+  return {
+    enabled: config?.enabled === true,
+    recipient_email: config?.recipient_email ?? fallbackEmail ?? '',
+    schedule: config?.schedule?.length ? config.schedule : DEFAULT_LOG_SCHEDULE,
+  };
 }
 
 export interface ReportsViewProps {
@@ -550,7 +580,7 @@ export function ReportsView({ bookingModel, terminology, venueId, pricingTier = 
         }
         onExportBlocked={(msg) => notifyExport('notice', msg)}
       >
-        {r1 && (
+        {r1 ? (
           <>
             {appointmentDashboardExperience && (
               <p className="mb-4 text-sm text-slate-500">
@@ -619,7 +649,18 @@ export function ReportsView({ bookingModel, terminology, venueId, pricingTier = 
               </div>
             </div>
           </>
+        ) : (
+          <p className="text-sm text-slate-400">No activity data for this range yet.</p>
         )}
+        {appointmentDashboardExperience ? (
+          <div className="mt-8">
+            <BookingLogEmailSettingsPanel
+              config={data?.booking_log_email_config ?? null}
+              defaultEmail={data?.default_booking_log_email ?? null}
+              onSaved={() => void mutate()}
+            />
+          </div>
+        ) : null}
       </ReportSection>
 
       <ReportSection
@@ -953,6 +994,168 @@ export function ReportsView({ bookingModel, terminology, venueId, pricingTier = 
       />
         </>
       )}
+    </div>
+  );
+}
+
+function BookingLogEmailSettingsPanel({
+  config,
+  defaultEmail,
+  onSaved,
+}: {
+  config: BookingLogEmailConfig | null;
+  defaultEmail: string | null;
+  onSaved: () => void;
+}) {
+  const [draft, setDraft] = useState<BookingLogEmailConfig>(() => normalizeLogConfig(config, defaultEmail));
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState<{ tone: 'success' | 'error'; text: string } | null>(null);
+
+  useEffect(() => {
+    setDraft(normalizeLogConfig(config, defaultEmail));
+  }, [config, defaultEmail]);
+
+  const setDayEnabled = (day: number, enabled: boolean) => {
+    setDraft((current) => {
+      const exists = current.schedule.some((entry) => entry.day === day);
+      if (enabled && !exists) {
+        return {
+          ...current,
+          schedule: [...current.schedule, { day, time: '17:00' }].sort((a, b) => a.day - b.day),
+        };
+      }
+      if (!enabled) {
+        return { ...current, schedule: current.schedule.filter((entry) => entry.day !== day) };
+      }
+      return current;
+    });
+  };
+
+  const setDayTime = (day: number, time: string) => {
+    setDraft((current) => ({
+      ...current,
+      schedule: current.schedule.map((entry) => (entry.day === day ? { ...entry, time } : entry)),
+    }));
+  };
+
+  const save = async () => {
+    setSaving(true);
+    setMessage(null);
+    try {
+      const payload = {
+        enabled: draft.enabled,
+        recipient_email: draft.recipient_email?.trim() ? draft.recipient_email.trim() : null,
+        schedule: draft.schedule,
+      };
+      const res = await fetch('/api/venue/reports/booking-log-email', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const data = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(data.error || 'Failed to save booking log email settings');
+      }
+      setMessage({ tone: 'success', text: 'Daily booking log settings saved.' });
+      onSaved();
+    } catch (err) {
+      setMessage({
+        tone: 'error',
+        text: err instanceof Error ? err.message : 'Failed to save booking log email settings',
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className={`mb-6 rounded-2xl border p-4 shadow-sm transition-colors ${draft.enabled ? 'border-emerald-200 bg-gradient-to-br from-emerald-50 to-white' : 'border-slate-200 bg-slate-50/60'}`}>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <div className="flex items-center gap-2.5">
+            <p className="text-sm font-semibold text-slate-900">Daily booking log email</p>
+            <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-semibold ${draft.enabled ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-600'}`}>
+              <span className={`h-1.5 w-1.5 rounded-full ${draft.enabled ? 'bg-emerald-500' : 'bg-slate-400'}`} />
+              {draft.enabled ? 'On' : 'Off'}
+            </span>
+          </div>
+          <p className="mt-1 max-w-2xl text-sm text-slate-600">Send a summary of new appointments and cancellations.</p>
+        </div>
+        <label className={`inline-flex shrink-0 cursor-pointer items-center gap-2.5 rounded-full px-3 py-2 text-sm font-semibold shadow-sm ring-1 transition-colors ${draft.enabled ? 'bg-emerald-600 text-white ring-emerald-600 hover:bg-emerald-700' : 'bg-white text-slate-700 ring-slate-200 hover:bg-slate-50'}`}>
+          <input
+            type="checkbox"
+            checked={draft.enabled}
+            onChange={(event) => setDraft((current) => ({ ...current, enabled: event.target.checked }))}
+            className="sr-only"
+          />
+          <span className={`flex h-5 w-9 items-center rounded-full transition-colors ${draft.enabled ? 'bg-white/30' : 'bg-slate-200'}`}>
+            <span className={`h-4 w-4 rounded-full bg-white shadow transition-transform ${draft.enabled ? 'translate-x-4.5' : 'translate-x-0.5'}`} />
+          </span>
+          {draft.enabled ? 'Enabled' : 'Disabled'}
+        </label>
+      </div>
+
+      <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)]">
+        <label className="block">
+          <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Send to</span>
+          <input
+            type="email"
+            value={draft.recipient_email ?? ''}
+            onChange={(event) => setDraft((current) => ({ ...current, recipient_email: event.target.value }))}
+            placeholder={defaultEmail ?? 'admin@example.com'}
+            className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm shadow-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100"
+          />
+        </label>
+
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Schedule</p>
+          <div className="mt-1 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+            {DAY_LABELS.map((label, day) => {
+              const entry = draft.schedule.find((item) => item.day === day);
+              return (
+                <div key={label} className="rounded-xl border border-slate-200 bg-white p-2 shadow-sm">
+                  <label className="flex items-center justify-between gap-2 text-sm font-medium text-slate-700">
+                    <span className="inline-flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(entry)}
+                        onChange={(event) => setDayEnabled(day, event.target.checked)}
+                        className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                      />
+                      {label}
+                    </span>
+                  </label>
+                  <input
+                    type="time"
+                    value={entry?.time ?? '17:00'}
+                    disabled={!entry}
+                    onChange={(event) => setDayTime(day, event.target.value)}
+                    className="mt-2 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm disabled:bg-slate-50 disabled:text-slate-400"
+                  />
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        {message ? (
+          <p className={`text-sm ${message.tone === 'success' ? 'text-emerald-700' : 'text-rose-700'}`}>
+            {message.text}
+          </p>
+        ) : (
+          <p className="text-xs text-slate-500">Emails are off by default and only send on selected days.</p>
+        )}
+        <button
+          type="button"
+          onClick={() => void save()}
+          disabled={saving}
+          className="inline-flex items-center justify-center rounded-xl bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 disabled:opacity-50"
+        >
+          {saving ? 'Saving...' : 'Save email settings'}
+        </button>
+      </div>
     </div>
   );
 }

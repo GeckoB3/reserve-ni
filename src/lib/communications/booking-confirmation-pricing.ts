@@ -277,24 +277,21 @@ export function bookingConfirmationSmsPriceSuffix(booking: BookingEmailData): st
     const amt = formatMoneyOrNull(paidPence);
     if (!amt) return '';
     if (totalPence != null && totalPence > 0 && paidPence >= totalPence) {
-      const totalFmt = formatMoneyOrNull(totalPence);
-      return totalFmt
-        ? ` Paid in full (${amt}, total ${totalFmt}).`
-        : ` Paid in full (${amt}).`;
+      return ` Paid in full (${amt}).`;
     }
     if (totalPence != null && totalPence > 0 && paidPence < totalPence) {
       const bal = formatMoneyOrNull(totalPence - paidPence);
-      return bal ? ` Deposit ${amt} paid online; ${bal} at venue.` : ` Deposit ${amt} paid online; balance at venue.`;
+      return bal ? ` ${amt} paid, ${bal} due at venue.` : ` ${amt} paid, balance due at venue.`;
     }
-    return ` Paid ${amt} online.`;
+    return ` ${amt} paid online.`;
   }
 
   if (ds === 'pending' && (paidPence ?? 0) > 0) {
     const dep = formatMoneyOrNull(paidPence);
     const totalFmt =
       totalPence != null && totalPence > 0 ? formatMoneyOrNull(totalPence) : null;
-    if (dep && totalFmt) return ` Deposit ${dep} required (total ${totalFmt}).`;
-    return dep ? ` Deposit ${dep} required.` : ' Deposit required.';
+    if (dep && totalFmt) return ` ${dep} deposit due (total ${totalFmt}).`;
+    return dep ? ` ${dep} deposit due.` : ' Deposit due.';
   }
 
   if (isFreeBookingDisplay(booking)) return ' Free.';
@@ -304,7 +301,7 @@ export function bookingConfirmationSmsPriceSuffix(booking: BookingEmailData): st
     (inferredTotal != null && inferredTotal > 0 ? formatMoneyOrNull(inferredTotal) : null);
 
   if (hasPositivePrice && priceShow) {
-    return ` ${priceShow}. Pay at venue.`;
+    return ` ${priceShow} at venue.`;
   }
   if (priceShow) return ` ${priceShow}.`;
 

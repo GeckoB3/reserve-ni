@@ -12,6 +12,7 @@ import { FOUNDING_PARTNER_CAP } from '@/lib/pricing-constants';
 import { getExistingVenueForUserEmail } from '@/lib/signup-existing-venue';
 import { pricingTierToSignupFamily, signupPlanToFamily, SIGNUP_PLAN_CONFLICT_MESSAGE } from '@/lib/signup-plan-family';
 import { clearSignupPendingUserMetadata } from '@/lib/signup-pending-metadata';
+import { DEFAULT_VENUE_BOOKING_LOG_EMAIL_CONFIG } from '@/lib/reports/booking-log-email-config';
 
 export async function POST(request: Request) {
   try {
@@ -104,6 +105,7 @@ export async function POST(request: Request) {
           onboarding_completed: false,
           founding_free_period_ends_at: foundingEnd.toISOString(),
           email: ownerEmail,
+          daily_booking_log_email_config: DEFAULT_VENUE_BOOKING_LOG_EMAIL_CONFIG,
         })
         .select('id')
         .single();

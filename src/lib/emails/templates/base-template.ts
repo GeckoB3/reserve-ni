@@ -320,6 +320,20 @@ export function formatDate(dateStr: string): string {
   }
 }
 
+/** Compact calendar date for SMS (e.g. "28 Apr"). */
+export function formatSmsDate(dateStr: string): string {
+  try {
+    const d = new Date(dateStr + "T00:00:00");
+    if (isNaN(d.getTime())) return dateStr;
+    return d.toLocaleDateString("en-GB", {
+      day: "numeric",
+      month: "short",
+    });
+  } catch {
+    return dateStr;
+  }
+}
+
 export function formatTime(timeStr: string): string {
   try {
     const [h, m] = timeStr.slice(0, 5).split(":").map(Number);

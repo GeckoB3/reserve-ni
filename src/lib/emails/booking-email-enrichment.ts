@@ -395,7 +395,7 @@ function resourceBookingTotalPence(params: {
     (parseInt(end.slice(0, 2), 10) * 60 + parseInt(end.slice(3, 5), 10)) -
     (parseInt(start.slice(0, 2), 10) * 60 + parseInt(start.slice(3, 5), 10));
   if (!Number.isFinite(durationMinutes) || durationMinutes <= 0) return null;
-  const interval = slotIntervalMinutes ?? 30;
+  const interval = slotIntervalMinutes ?? 15;
   const numSlots = Math.ceil(durationMinutes / interval);
   return pricePerSlotPence * numSlots;
 }

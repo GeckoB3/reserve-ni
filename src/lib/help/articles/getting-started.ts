@@ -54,7 +54,7 @@ If you are stuck, use **Support** in the dashboard sidebar or open **Troubleshoo
 
 The sidebar lists what you can open in the app. Which links appear depends on:
 
-- Your **role** (**Admin** sees Reports, Dining Availability, Data Import, and full **Settings**; **Staff** see a shorter menu and **Account** instead of full Settings).
+- Your **role** (**Admin** sees Reports, Dining Availability, and full **Settings** (including the **Data Import** tab for CSV work); **Staff** see a shorter menu and **Account** instead of full Settings).
 - Your **booking model** (for example table reservations only, or tables plus appointments).
 - Your **plan** (Restaurant or Founding vs Appointments tiers).
 - Whether **table management** is on (adds **Table Grid** and **Floor Plan**; **Day Sheet** may redirect when table management is on).

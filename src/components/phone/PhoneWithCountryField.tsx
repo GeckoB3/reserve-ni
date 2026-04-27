@@ -345,7 +345,7 @@ export function PhoneWithCountryField({
   return (
     <div className={className}>
       <div
-        className={`flex items-stretch overflow-hidden border bg-white transition-colors focus-within:ring-2 ${radius} ${disabled ? 'opacity-50' : ''} ${
+        className={`flex w-full min-w-0 items-stretch overflow-hidden border bg-white transition-colors focus-within:ring-2 ${radius} ${disabled ? 'opacity-50' : ''} ${
           combinedError
             ? 'border-red-400 focus-within:border-red-500 focus-within:ring-red-500/25'
             : 'border-slate-200 focus-within:border-brand-500 focus-within:ring-brand-500/20'

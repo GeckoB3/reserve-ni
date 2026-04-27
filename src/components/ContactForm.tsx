@@ -15,7 +15,12 @@ const initialFormData = {
   company_website: '',
 };
 
-export default function ContactForm() {
+interface ContactFormProps {
+  /** Override layout (default: centred, max-width for standalone sections). */
+  className?: string;
+}
+
+export default function ContactForm({ className }: ContactFormProps) {
   const [formData, setFormData] = useState(initialFormData);
   const [status, setStatus] = useState<Status>('idle');
   const [errorMessage, setErrorMessage] = useState('');
@@ -86,8 +91,10 @@ export default function ContactForm() {
     'w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm placeholder:text-slate-300 focus:border-brand-500 focus:ring-1 focus:ring-brand-500';
   const labelClass = 'mb-1.5 block text-sm font-medium text-slate-700';
 
+  const formClassName = ['space-y-4', className ?? 'mx-auto max-w-lg'].join(' ');
+
   return (
-    <form onSubmit={handleSubmit} className="mx-auto max-w-lg space-y-4">
+    <form onSubmit={handleSubmit} className={formClassName}>
       <input
         type="text"
         name="company_website"
@@ -139,6 +146,7 @@ export default function ContactForm() {
         </label>
         <PhoneWithCountryField
           id="contact-phone"
+          className="w-full min-w-0"
           value={formData.phone}
           onChange={(e164) => setFormData((prev) => ({ ...prev, phone: e164 }))}
           disabled={status === 'submitting'}

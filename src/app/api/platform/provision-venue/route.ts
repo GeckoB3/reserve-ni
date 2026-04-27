@@ -18,6 +18,7 @@ import { normalizePublicBaseUrl } from '@/lib/public-base-url';
 import {
   BILLING_ACCESS_SOURCE_SUPERUSER_FREE,
 } from '@/lib/billing/billing-access-source';
+import { DEFAULT_VENUE_BOOKING_LOG_EMAIL_CONFIG } from '@/lib/reports/booking-log-email-config';
 
 const provisionBodySchema = z
   .object({
@@ -126,6 +127,7 @@ export async function POST(request: Request) {
       appointments_onboarding_unified_flow: isAppointmentPlanTier(body.plan),
       email: ownerEmail,
       enabled_models: enabledModels,
+      daily_booking_log_email_config: DEFAULT_VENUE_BOOKING_LOG_EMAIL_CONFIG,
     };
 
     let authUserId: string | null = null;

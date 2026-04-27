@@ -3,7 +3,26 @@ import {
   formatRefundDeadlineIso,
   isDepositRefundAvailableAt,
 } from "@/lib/booking/cancellation-deadline";
-import { formatDate, formatTime, formatDepositAmount } from "./base-template";
+import { formatSmsDate, formatTime, formatDepositAmount } from "./base-template";
+
+const SMS_MAX = 160;
+
+function clipSmsText(s: string, max: number): string {
+  const t = s.trim();
+  if (t.length <= max) return t;
+  return `${t.slice(0, Math.max(0, max - 3))}...`;
+}
+
+function joinSmsPrefixAndUrl(prefix: string, url: string, label = "", max = SMS_MAX): string {
+  const u = url.trim();
+  const base = prefix.trim();
+  const labelledUrl = `${label}${u}`;
+  const combined = `${base} ${labelledUrl}`;
+  if (combined.length <= max) return combined;
+  const budget = max - labelledUrl.length - 1;
+  if (budget < 12) return u;
+  return `${clipSmsText(base, budget)} ${labelledUrl}`;
+}
 
 function isAppointment(booking: BookingEmailData): boolean {
   return (
@@ -22,27 +41,29 @@ export function renderDepositRequestSms(
   paymentLink: string,
   customMessage?: string | null,
 ): RenderedSms {
-  const date = formatDate(booking.booking_date);
+  const date = formatSmsDate(booking.booking_date);
   const time = formatTime(booking.booking_time);
   const amount = booking.deposit_amount_pence
     ? formatDepositAmount(booking.deposit_amount_pence)
     : "0.00";
   const appt = isAppointment(booking);
 
-  const parts: string[] = [];
-  if (customMessage) parts.push(customMessage.trim());
+  const lead = customMessage?.trim() ? `${customMessage.trim()} ` : "";
 
   const core = appt
-    ? `${venue.name}: Hi ${booking.guest_name}, your booking on ${date} at ${time} requires a deposit of £${amount}. Pay here: ${paymentLink}`
-    : `${venue.name}: Hi ${booking.guest_name}, your booking on ${date} at ${time} for ${booking.party_size} requires a deposit of £${amount}. Pay here: ${paymentLink}`;
-  parts.push(core);
+    ? `${lead}${venue.name}: £${amount} deposit needed for ${date} at ${time}.`
+    : `${lead}${venue.name}: £${amount} deposit needed for ${booking.party_size} guests on ${date} at ${time}.`;
+
+  let body = joinSmsPrefixAndUrl(core, paymentLink, "Pay: ");
+
   if (booking.refund_cutoff) {
-    parts.push(
-      isDepositRefundAvailableAt(booking.refund_cutoff)
-        ? `Refund if you cancel before ${formatRefundDeadlineIso(booking.refund_cutoff)}.`
-        : "Deposit not refundable if you cancel (refund deadline has passed).",
-    );
+    const extra = isDepositRefundAvailableAt(booking.refund_cutoff)
+      ? `Refund by ${formatRefundDeadlineIso(booking.refund_cutoff)}.`
+      : "No refund (deadline passed).";
+    if (body.length + 1 + extra.length <= SMS_MAX) {
+      body = `${body} ${extra}`;
+    }
   }
 
-  return { body: parts.join(" ") };
+  return { body: clipSmsText(body, SMS_MAX) };
 }

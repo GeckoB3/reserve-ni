@@ -2,6 +2,10 @@
 
 import { useCallback, useEffect, useState, useMemo } from 'react';
 import { NumericInput } from '@/components/ui/NumericInput';
+import {
+  DEFAULT_RESOURCE_MIN_BOOKING_MINUTES,
+  DEFAULT_RESOURCE_SLOT_INTERVAL_MINUTES,
+} from '@/lib/booking/resource-booking-defaults';
 
 interface ResourceInfo {
   id: string;
@@ -89,12 +93,12 @@ export function ResourceSlotBookingForm({
           id: r.id,
           name: r.name,
           resource_type: r.resource_type,
-          min_booking_minutes: r.min_booking_minutes ?? 60,
-          max_booking_minutes: r.max_booking_minutes ?? 120,
-          slot_interval_minutes: r.slot_interval_minutes ?? 30,
+          min_booking_minutes: r.min_booking_minutes ?? DEFAULT_RESOURCE_MIN_BOOKING_MINUTES,
+          max_booking_minutes: r.max_booking_minutes ?? 180,
+          slot_interval_minutes: r.slot_interval_minutes ?? DEFAULT_RESOURCE_SLOT_INTERVAL_MINUTES,
           price_per_slot_pence: r.price_per_slot_pence ?? null,
         });
-        setDurationMinutes(r.min_booking_minutes ?? 60);
+        setDurationMinutes(r.min_booking_minutes ?? DEFAULT_RESOURCE_MIN_BOOKING_MINUTES);
       })
       .catch(() => setError('Could not load resource details'))
       .finally(() => setLoading(false));

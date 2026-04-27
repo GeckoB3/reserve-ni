@@ -46,8 +46,6 @@ import { SettingsSaveStrip } from './SettingsSaveStrip';
 import { SettingsProfileGroup } from './SettingsProfileGroup';
 import { WidgetSection } from './widget/WidgetSection';
 import { Skeleton } from '@/components/ui/Skeleton';
-import { SupportAccessSection } from './sections/SupportAccessSection';
-
 interface SettingsViewProps {
   initialVenue: VenueSettings | null;
   isAdmin: boolean;
@@ -100,11 +98,6 @@ const TABS = [
     label: 'Data import',
     description: 'CSV imports for clients and bookings with validation and undo.',
   },
-  {
-    key: 'support-access',
-    label: 'Support access',
-    description: 'Log of Reserve NI support sessions and actions on your venue account.',
-  },
 ] as const;
 
 type TabKey = typeof TABS[number]['key'];
@@ -115,7 +108,6 @@ function resolveInitialTab(initialTab: string | undefined, isAdmin: boolean): Ta
   if (t && TABS.some((x) => x.key === t)) {
     if (t === 'staff' && !isAdmin) return 'profile';
     if (t === 'data-import' && !isAdmin) return 'profile';
-    if (t === 'support-access' && !isAdmin) return 'profile';
     return t;
   }
   return 'profile';
@@ -829,7 +821,7 @@ function SettingsViewInner({
     isAdmin && isRestaurantTableProductTier(venue?.pricing_tier ?? null);
   const visibleTabs = useMemo(
     () =>
-      isAdmin ? [...TABS] : TABS.filter((x) => x.key !== 'data-import' && x.key !== 'support-access'),
+      isAdmin ? [...TABS] : TABS.filter((x) => x.key !== 'data-import'),
     [isAdmin],
   );
   const tabBarTabs = useMemo(
@@ -947,7 +939,7 @@ function SettingsViewInner({
   useEffect(() => {
     if (!isAdmin) {
       const raw = searchParams.get('tab');
-      if (raw === 'staff' || raw === 'data-import' || raw === 'support-access') {
+      if (raw === 'staff' || raw === 'data-import') {
         replaceWithTab('profile');
       }
     }
@@ -1207,15 +1199,6 @@ function SettingsViewInner({
                 </Link>
               </SectionCard.Body>
             </SectionCard>
-          </div>
-        ) : null}
-
-        {isAdmin ? (
-          <div
-            className={selectedTab === 'support-access' ? '' : 'hidden'}
-            aria-hidden={selectedTab !== 'support-access'}
-          >
-            <SupportAccessSection />
           </div>
         ) : null}
       </div>

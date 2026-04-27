@@ -16,6 +16,10 @@ import {
 import { ensureUnifiedMirrorForPractitionerId } from '@/lib/class-instances/instructor-calendar-block';
 import type { WorkingHours } from '@/types/booking-models';
 import { DEFAULT_ENTITY_BOOKING_WINDOW } from '@/lib/booking/entity-booking-window';
+import {
+  DEFAULT_RESOURCE_MIN_BOOKING_MINUTES,
+  DEFAULT_RESOURCE_SLOT_INTERVAL_MINUTES,
+} from '@/lib/booking/resource-booking-defaults';
 import { z } from 'zod';
 
 const availabilityExceptionDaySchema = z.union([
@@ -60,7 +64,7 @@ function validateResourcePaymentFields(input: {
   const price = input.price_per_slot_pence ?? 0;
   const req = input.payment_requirement ?? 'none';
   if (price <= 0 && (req === 'deposit' || req === 'full_payment')) {
-    return 'Set a price per slot before choosing deposit or full payment online';
+    return 'Set a price for each start-time step before choosing deposit or full payment online';
   }
   if (req === 'deposit') {
     const d = input.deposit_amount_pence;
@@ -107,8 +111,8 @@ const resourceSchema = resourceFieldSchema.superRefine((data, ctx) => {
     payment_requirement: data.payment_requirement ?? 'none',
     deposit_amount_pence: data.deposit_amount_pence,
     price_per_slot_pence: data.price_per_slot_pence,
-    slot_interval_minutes: data.slot_interval_minutes ?? 30,
-    max_booking_minutes: data.max_booking_minutes ?? 120,
+    slot_interval_minutes: data.slot_interval_minutes ?? DEFAULT_RESOURCE_SLOT_INTERVAL_MINUTES,
+    max_booking_minutes: data.max_booking_minutes ?? 180,
   });
   if (err) {
     ctx.addIssue({ code: 'custom', message: err, path: ['payment_requirement'] });
@@ -118,7 +122,7 @@ const resourceSchema = resourceFieldSchema.superRefine((data, ctx) => {
 const resourcePatchSchema = resourceFieldSchema.partial();
 
 const AVAILABILITY_CALENDAR_RESTRICTS_RESOURCE_WARNING =
-  'The team calendar’s weekly hours are narrower than this resource’s availability in at least one period. Bookable slots will only appear where both overlap. Go to Dashboard → Availability (calendar weekly hours) to widen the calendar if you need more bookable time.';
+  'This resource has hours outside the selected calendar. It will only be bookable when venue, calendar, and resource hours all allow it.';
 
 async function fetchHostCalendarWorkingHours(
   admin: ReturnType<typeof getSupabaseAdminClient>,
@@ -229,9 +233,9 @@ function mapUnifiedCalendarToResource(row: Record<string, unknown>) {
     venue_id: row.venue_id,
     name: row.name,
     resource_type: row.resource_type ?? null,
-    slot_interval_minutes: row.slot_interval_minutes ?? 30,
-    min_booking_minutes: row.min_booking_minutes ?? 60,
-    max_booking_minutes: row.max_booking_minutes ?? 120,
+    slot_interval_minutes: row.slot_interval_minutes ?? DEFAULT_RESOURCE_SLOT_INTERVAL_MINUTES,
+    min_booking_minutes: row.min_booking_minutes ?? DEFAULT_RESOURCE_MIN_BOOKING_MINUTES,
+    max_booking_minutes: row.max_booking_minutes ?? 180,
     price_per_slot_pence: row.price_per_slot_pence ?? null,
     payment_requirement: (row.payment_requirement as string) ?? 'none',
     deposit_amount_pence: row.deposit_amount_pence ?? null,
@@ -355,9 +359,9 @@ export async function POST(request: NextRequest) {
       resource_type: parsed.data.resource_type ?? null,
       working_hours: parsed.data.availability_hours ?? {},
       availability_exceptions: parsed.data.availability_exceptions ?? {},
-      slot_interval_minutes: parsed.data.slot_interval_minutes ?? 30,
-      min_booking_minutes: parsed.data.min_booking_minutes ?? 60,
-      max_booking_minutes: parsed.data.max_booking_minutes ?? 120,
+      slot_interval_minutes: parsed.data.slot_interval_minutes ?? DEFAULT_RESOURCE_SLOT_INTERVAL_MINUTES,
+      min_booking_minutes: parsed.data.min_booking_minutes ?? DEFAULT_RESOURCE_MIN_BOOKING_MINUTES,
+      max_booking_minutes: parsed.data.max_booking_minutes ?? 180,
       price_per_slot_pence: parsed.data.price_per_slot_pence ?? null,
       payment_requirement: payReq,
       deposit_amount_pence: payReq === 'deposit' ? dep : null,
@@ -491,8 +495,11 @@ export async function PATCH(request: NextRequest) {
       parsed.data.deposit_amount_pence !== undefined ? parsed.data.deposit_amount_pence : (ex.deposit_amount_pence as number | null);
     const mergedPrice =
       parsed.data.price_per_slot_pence !== undefined ? parsed.data.price_per_slot_pence : (ex.price_per_slot_pence as number | null);
-    const mergedSlot = parsed.data.slot_interval_minutes ?? (ex.slot_interval_minutes as number) ?? 30;
-    const mergedMax = parsed.data.max_booking_minutes ?? (ex.max_booking_minutes as number) ?? 120;
+    const mergedSlot =
+      parsed.data.slot_interval_minutes ??
+      (ex.slot_interval_minutes as number) ??
+      DEFAULT_RESOURCE_SLOT_INTERVAL_MINUTES;
+    const mergedMax = parsed.data.max_booking_minutes ?? (ex.max_booking_minutes as number) ?? 180;
 
     const paymentErr = validateResourcePaymentFields({
       payment_requirement: mergedPaymentRequirement,

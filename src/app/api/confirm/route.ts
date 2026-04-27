@@ -483,6 +483,8 @@ export async function POST(request: NextRequest) {
           status: "Cancelled",
           deposit_status: refundSucceeded ? "Refunded" : booking.deposit_status,
           confirm_token_used_at: usedAt,
+          cancelled_by_staff_id: null,
+          cancellation_actor_type: "customer",
           updated_at: now,
         })
         .eq("id", bookingId);

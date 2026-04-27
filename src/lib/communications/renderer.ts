@@ -7,6 +7,7 @@ import type {
 import {
   escapeHtml,
   formatDate,
+  formatSmsDate,
   formatTime,
   renderBaseTemplate,
 } from '@/lib/emails/templates/base-template';
@@ -66,9 +67,47 @@ function bookingLabel(booking: BookingEmailData): string {
   return booking.appointment_service_name?.trim() || 'booking';
 }
 
-function smsManageTail(booking: BookingEmailData): string {
-  if (!booking.manage_booking_link) return '';
-  return ` Manage: ${booking.manage_booking_link}`;
+/** GSM-style single-segment target; prose is clipped before URLs when needed. */
+const SMS_CHAR_BUDGET = 160;
+
+function clipSmsText(s: string, max: number): string {
+  const t = s.trim();
+  if (t.length <= max) return t;
+  return `${t.slice(0, Math.max(0, max - 3))}...`;
+}
+
+function joinSmsPrefixAndUrl(
+  prefix: string,
+  url: string | null | undefined,
+  label = '',
+  max = SMS_CHAR_BUDGET,
+): string {
+  const u = (url ?? '').trim();
+  const base = prefix.trim();
+  if (!u) return clipSmsText(base, max);
+  const labelledUrl = `${label}${u}`;
+  const combined = `${base} ${labelledUrl}`;
+  if (combined.length <= max) return combined;
+  const budget = max - labelledUrl.length - 1;
+  if (budget < 12) return u;
+  return `${clipSmsText(base, budget)} ${labelledUrl}`;
+}
+
+function smsLeadPart(raw: string | null | undefined): string {
+  const t = raw?.trim();
+  if (!t) return '';
+  return `${t} `;
+}
+
+function venueSmsName(name: string): string {
+  return clipSmsText(name, 40);
+}
+
+function withStaffSms(booking: BookingEmailData, label: string): string {
+  const L = clipSmsText(label, 34);
+  const p = booking.practitioner_name?.trim();
+  if (!p) return L;
+  return `${L} with ${clipSmsText(p, 22)}`;
 }
 
 function emailFooterText(venue: VenueEmailData): string {
@@ -89,15 +128,16 @@ function buildTextLines(lines: Array<string | null | undefined>): string {
 export function renderCommunicationSms(
   opts: CommunicationRenderOptions,
 ): RenderedSms | null {
-  const venueName = opts.venue.name;
-  const date = formatDate(opts.booking.booking_date);
+  const vn = venueSmsName(opts.venue.name);
+  const smsDate = formatSmsDate(opts.booking.booking_date);
   const time = formatTime(opts.booking.booking_time);
-  const manage = smsManageTail(opts.booking);
   const partySize = opts.booking.party_size;
   const label = bookingLabel(opts.booking);
-  const lead = opts.smsCustomMessage?.trim();
-  const leadPart = lead ? `${lead} ` : '';
-  const refundPart = opts.refundMessage ? ` ${opts.refundMessage}` : '';
+  const leadPart = smsLeadPart(opts.smsCustomMessage);
+  const refundMsg = opts.refundMessage?.trim()
+    ? clipSmsText(opts.refundMessage.trim(), 56)
+    : '';
+  const manageUrl = opts.booking.manage_booking_link?.trim() ?? '';
 
   const body = (() => {
     switch (opts.messageKey) {
@@ -105,40 +145,70 @@ export function renderCommunicationSms(
         const payHint = isAppointmentLane(opts.lane)
           ? bookingConfirmationSmsPriceSuffix(opts.booking)
           : '';
-        return isAppointmentLane(opts.lane)
-          ? `${leadPart}${venueName}: Your ${withStaff(label, opts.booking)} is booked for ${date} at ${time}.${payHint}${manage}`.trim()
-          : `${leadPart}${venueName}: Your table is booked for ${date} at ${time} (${partySize} guests).${manage} See you there!`.trim();
+        if (isAppointmentLane(opts.lane)) {
+          const core = `${leadPart}${vn}: Confirmed: ${withStaffSms(opts.booking, label)} on ${smsDate} at ${time}.${payHint}`;
+          return joinSmsPrefixAndUrl(core, manageUrl || null, 'Manage: ');
+        }
+        const core = `${leadPart}${vn}: Booking confirmed for ${partySize} guests on ${smsDate} at ${time}.`;
+        return joinSmsPrefixAndUrl(core, manageUrl || null, 'Manage: ');
       }
-      case 'deposit_payment_request':
-        return isAppointmentLane(opts.lane)
-          ? `${leadPart}${venueName}: Please pay your deposit to confirm your ${label} on ${date} at ${time}. ${opts.paymentLink ?? ''}`.trim()
-          : `${leadPart}${venueName}: Please pay your deposit to confirm your table for ${date} at ${time} (${partySize} guests). ${opts.paymentLink ?? ''}`.trim();
-      case 'confirm_or_cancel_prompt':
-        return isAppointmentLane(opts.lane)
-          ? `${leadPart}${venueName}: Can you still make your ${withStaff(label, opts.booking)} on ${date} at ${time}? Confirm: ${opts.confirmLink ?? ''} Cancel: ${opts.cancelLink ?? ''}`.trim()
-          : `${leadPart}${venueName}: Can you still make your table for ${partySize} on ${date} at ${time}? Confirm: ${opts.confirmLink ?? ''} Cancel: ${opts.cancelLink ?? ''}`.trim();
-      case 'deposit_payment_reminder':
-        return isAppointmentLane(opts.lane)
-          ? `${leadPart}${venueName}: Reminder - please pay your deposit to secure your ${label} on ${date} at ${time}. ${opts.paymentLink ?? ''}`.trim()
-          : `${leadPart}${venueName}: Reminder - please pay your deposit to secure your table for ${date} at ${time}. ${opts.paymentLink ?? ''}`.trim();
-      case 'pre_visit_reminder':
-        return isAppointmentLane(opts.lane)
-          ? `${leadPart}${venueName}: Reminder - your ${withStaff(label, opts.booking)} is booked for ${date} at ${time}. See you soon!`.trim()
-          : `${leadPart}${venueName}: Reminder - your table for ${partySize} is booked for ${date} at ${time}. We look forward to seeing you!`.trim();
-      case 'booking_modification':
-        return isAppointmentLane(opts.lane)
-          ? `${leadPart}${venueName}: Your ${withStaff(label, opts.booking)} has been moved to ${date} at ${time}.${manage}`.trim()
-          : `${leadPart}${venueName}: Your table booking has been updated to ${date} at ${time} (${partySize} guests).${manage}`.trim();
-      case 'cancellation_confirmation':
-        return isAppointmentLane(opts.lane)
-          ? `${leadPart}${venueName}: Your ${label} on ${date} at ${time} has been cancelled.${refundPart} We hope to see you again soon.`.trim()
-          : `${leadPart}${venueName}: Your table booking for ${date} at ${time} has been cancelled.${refundPart} We hope to see you another time.`.trim();
-      case 'auto_cancel_notification':
-        return isAppointmentLane(opts.lane)
-          ? `${leadPart}${venueName}: Your ${label} on ${date} at ${time} has been cancelled as the deposit was not paid in time. You're welcome to rebook anytime.`.trim()
-          : `${leadPart}${venueName}: Your table for ${date} at ${time} has been cancelled as the deposit was not paid in time. You're welcome to rebook anytime.`.trim();
-      case 'custom_message':
-        return `${venueName}: ${opts.message ?? ''}`.trim();
+      case 'deposit_payment_request': {
+        const url = opts.paymentLink?.trim() ?? '';
+        const core = isAppointmentLane(opts.lane)
+          ? `${leadPart}${vn}: Deposit needed to confirm ${clipSmsText(label, 34)} on ${smsDate} at ${time}.`
+          : `${leadPart}${vn}: Deposit needed to confirm ${partySize} guests on ${smsDate} at ${time}.`;
+        return joinSmsPrefixAndUrl(core, url || null, 'Pay: ');
+      }
+      case 'confirm_or_cancel_prompt': {
+        const url =
+          opts.confirmLink?.trim() ||
+          opts.cancelLink?.trim() ||
+          opts.booking.confirm_cancel_link?.trim() ||
+          manageUrl ||
+          '';
+        const core = isAppointmentLane(opts.lane)
+          ? `${leadPart}${vn}: Please confirm or cancel ${withStaffSms(opts.booking, label)} on ${smsDate} at ${time}.`
+          : `${leadPart}${vn}: Please confirm or cancel your booking for ${partySize} guests on ${smsDate} at ${time}.`;
+        return url
+          ? joinSmsPrefixAndUrl(core, url)
+          : clipSmsText(`${core}.`, SMS_CHAR_BUDGET);
+      }
+      case 'deposit_payment_reminder': {
+        const url = opts.paymentLink?.trim() ?? '';
+        const core = isAppointmentLane(opts.lane)
+          ? `${leadPart}${vn}: Reminder: deposit still needed for ${clipSmsText(label, 30)} on ${smsDate} at ${time}.`
+          : `${leadPart}${vn}: Reminder: deposit still needed for ${partySize} guests on ${smsDate} at ${time}.`;
+        return joinSmsPrefixAndUrl(core, url || null, 'Pay: ');
+      }
+      case 'pre_visit_reminder': {
+        const core = isAppointmentLane(opts.lane)
+          ? `${leadPart}${vn}: Reminder: ${withStaffSms(opts.booking, label)} is on ${smsDate} at ${time}. See you soon.`
+          : `${leadPart}${vn}: Reminder: your booking for ${partySize} guests is on ${smsDate} at ${time}.`;
+        return clipSmsText(core, SMS_CHAR_BUDGET);
+      }
+      case 'booking_modification': {
+        const core = isAppointmentLane(opts.lane)
+          ? `${leadPart}${vn}: Updated booking: ${withStaffSms(opts.booking, label)} is now ${smsDate} at ${time}.`
+          : `${leadPart}${vn}: Updated booking for ${partySize} guests: ${smsDate} at ${time}.`;
+        return joinSmsPrefixAndUrl(core, manageUrl || null, 'Manage: ');
+      }
+      case 'cancellation_confirmation': {
+        const tail = refundMsg ? ` ${refundMsg}` : '';
+        const core = isAppointmentLane(opts.lane)
+          ? `${leadPart}${vn}: Cancelled: your ${clipSmsText(label, 32)} on ${smsDate} at ${time}.${tail}`
+          : `${leadPart}${vn}: Cancelled: your booking for ${partySize} guests on ${smsDate} at ${time}.${tail}`;
+        return clipSmsText(core, SMS_CHAR_BUDGET);
+      }
+      case 'auto_cancel_notification': {
+        const core = isAppointmentLane(opts.lane)
+          ? `${leadPart}${vn}: Cancelled: ${clipSmsText(label, 30)} on ${smsDate} at ${time}; deposit was not paid in time.`
+          : `${leadPart}${vn}: Cancelled: booking for ${partySize} guests on ${smsDate} at ${time}; deposit was not paid.`;
+        return clipSmsText(core, SMS_CHAR_BUDGET);
+      }
+      case 'custom_message': {
+        const msg = clipSmsText(opts.message ?? '', 130);
+        return clipSmsText(`${vn}: ${msg}`, SMS_CHAR_BUDGET);
+      }
       default:
         return null;
     }

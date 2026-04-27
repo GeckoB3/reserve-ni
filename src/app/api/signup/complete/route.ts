@@ -14,6 +14,7 @@ import { isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 import { parseNotificationSettings } from '@/lib/notifications/notification-settings';
 import { clearSignupPendingUserMetadata } from '@/lib/signup-pending-metadata';
 import { isAppointmentPlanTier } from '@/lib/tier-enforcement';
+import { DEFAULT_VENUE_BOOKING_LOG_EMAIL_CONFIG } from '@/lib/reports/booking-log-email-config';
 
 export async function POST(request: Request) {
   try {
@@ -146,6 +147,7 @@ export async function POST(request: Request) {
         onboarding_completed: false,
         appointments_onboarding_unified_flow: isAppointmentPlanTier(plan),
         email: ownerEmail,
+        daily_booking_log_email_config: DEFAULT_VENUE_BOOKING_LOG_EMAIL_CONFIG,
       })
       .select('id')
       .single();

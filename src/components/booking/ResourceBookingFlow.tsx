@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { VenuePublic, GuestDetails } from './types';
 import type { ClassPaymentRequirement } from '@/types/booking-models';
 import { defaultPhoneCountryForVenueCurrency } from '@/lib/phone/default-country';
@@ -75,6 +75,10 @@ export interface ResourceBookingFlowProps {
   /** Staff dashboard: walk-in vs phone booking source for venue API. */
   staffBookingSource?: 'phone' | 'walk-in';
   onBookingCreated?: () => void;
+  /** Staff calendar deep-link: open the standard flow with a resource already selected. */
+  initialResourceId?: string;
+  initialDate?: string;
+  initialTime?: string;
 }
 
 export function ResourceBookingFlow({
@@ -83,6 +87,9 @@ export function ResourceBookingFlow({
   bookingAudience = 'public',
   staffBookingSource = 'phone',
   onBookingCreated,
+  initialResourceId,
+  initialDate,
+  initialTime,
 }: ResourceBookingFlowProps) {
   const isStaff = bookingAudience === 'staff';
   const detailsAudience =
@@ -121,6 +128,7 @@ export function ResourceBookingFlow({
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const initialSelectionAppliedRef = useRef(false);
 
   const durationOptions = useMemo(() => {
     if (!selectedMeta) return [];
@@ -131,6 +139,31 @@ export function ResourceBookingFlow({
     if (!selectedMeta || durationOptions.length === 0) return;
     setDuration((d) => (durationOptions.includes(d) ? d : durationOptions[0]!));
   }, [selectedMeta, durationOptions]);
+
+  useEffect(() => {
+    if (initialSelectionAppliedRef.current || !initialResourceId || resourceOptions.length === 0) return;
+
+    const resource = resourceOptions.find((r) => r.id === initialResourceId);
+    if (!resource) return;
+
+    const options = resourceDurationCandidatesMinutes(resource);
+    const nextDuration = options[0] ?? resource.min_booking_minutes;
+    const initialMonthDate = initialDate ? new Date(`${initialDate}T12:00:00`) : new Date();
+    const initialStep: Step = initialDate ? 'pick_duration' : 'pick_date';
+
+    initialSelectionAppliedRef.current = true;
+    setError(null);
+    setSelectedMeta(resource);
+    setCalendarMonth({
+      year: initialMonthDate.getFullYear(),
+      month: initialMonthDate.getMonth() + 1,
+    });
+    setDate(initialDate ?? '');
+    setDuration(nextDuration);
+    setSelectedTime(null);
+    setSelectedResource(null);
+    setStep(initialStep);
+  }, [initialDate, initialResourceId, initialTime, resourceOptions]);
 
   useEffect(() => {
     let cancelled = false;

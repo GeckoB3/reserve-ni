@@ -17,7 +17,8 @@
 -- venues - core venue profile
 -- id (uuid PK), name, slug (unique), address, phone, email, cover_photo_url,
 -- opening_hours (jsonb), booking_rules (jsonb), deposit_config (jsonb),
--- availability_config (jsonb), timezone (default 'Europe/London'), created_at, updated_at
+-- availability_config (jsonb), daily_booking_log_email_config (jsonb),
+-- timezone (default 'Europe/London'), created_at, updated_at
 
 -- staff - venue staff, linked to Supabase Auth by email
 -- id (uuid PK), venue_id (FK → venues), email, name, role (staff_role), created_at
@@ -28,7 +29,8 @@
 -- bookings
 -- id (uuid PK), venue_id (FK), guest_id (FK), booking_date, booking_time, party_size,
 -- status (booking_status), source (booking_source), dietary_notes, occasion, special_requests,
--- deposit_amount_pence, deposit_status, stripe_payment_intent_id, cancellation_deadline, created_at, updated_at
+-- deposit_amount_pence, deposit_status, stripe_payment_intent_id, cancellation_deadline,
+-- created_by_staff_id, cancelled_by_staff_id, cancellation_actor_type, created_at, updated_at
 
 -- events - immutable append-only audit log; no UPDATE/DELETE
 -- id (uuid PK), venue_id (FK), booking_id (FK nullable), event_type (text), payload (jsonb), created_at

@@ -18,6 +18,7 @@ import { handleLightPaymentMethodUpdateFromSetup } from '@/lib/stripe/light-past
 import { communicationPoliciesEmailOnlyAppointmentsLane } from '@/lib/communications/policies';
 import { defaultNotificationSettingsForLightPlan } from '@/lib/notifications/notification-settings';
 import { isAppointmentPlanTier } from '@/lib/tier-enforcement';
+import { DEFAULT_VENUE_BOOKING_LOG_EMAIL_CONFIG } from '@/lib/reports/booking-log-email-config';
 
 /**
  * Configure in Stripe Dashboard: endpoint URL /api/webhooks/stripe-subscription,
@@ -329,6 +330,7 @@ async function handleCheckoutCompleted(
       onboarding_step: 0,
       onboarding_completed: false,
       appointments_onboarding_unified_flow: isAppointmentPlanTier(plan),
+      daily_booking_log_email_config: DEFAULT_VENUE_BOOKING_LOG_EMAIL_CONFIG,
       ...(isLight
         ? {
             communication_policies: commPolicies as unknown as Record<string, never>,

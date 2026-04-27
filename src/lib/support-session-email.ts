@@ -1,5 +1,4 @@
 import { sendEmail } from '@/lib/emails/send-email';
-import { normalizePublicBaseUrl } from '@/lib/public-base-url';
 
 /**
  * Notify venue admins when a platform support session starts (impersonation / sign-in-as).
@@ -12,9 +11,6 @@ export async function sendSupportSessionStartedEmails(params: {
   reason: string;
   expiresAtIso: string;
 }): Promise<void> {
-  const baseUrl = normalizePublicBaseUrl(process.env.NEXT_PUBLIC_BASE_URL);
-  const activityUrl = `${baseUrl.replace(/\/$/, '')}/dashboard/settings?tab=support-access`;
-
   const expires = new Date(params.expiresAtIso).toLocaleString('en-GB', {
     dateStyle: 'medium',
     timeStyle: 'short',
@@ -31,8 +27,6 @@ export async function sendSupportSessionStartedEmails(params: {
       time-limited support session on your venue account, acting as <strong>${escapeHtml(params.apparentStaffLabel)}</strong>.</p>
       <p><strong>Reason recorded:</strong> ${escapeHtml(params.reason)}</p>
       <p>This session is set to expire around <strong>${escapeHtml(expires)}</strong> (Europe/London).</p>
-      <p>You can review support activity in your dashboard under
-      <a href="${activityUrl}">Settings → Support access</a>.</p>
       <p>If you did not expect this, contact us immediately at
       <a href="mailto:support@reserveni.com">support@reserveni.com</a>.</p>
       <p>— Reserve NI</p>
@@ -42,7 +36,6 @@ export async function sendSupportSessionStartedEmails(params: {
       `Reserve NI support (${params.superuserDisplayName}) has started a support session on your account, acting as ${params.apparentStaffLabel}.`,
       `Reason: ${params.reason}`,
       `Session expires around ${expires} (Europe/London).`,
-      `Review activity: ${activityUrl}`,
       `If unexpected, contact support@reserveni.com`,
     ].join('\n\n');
 

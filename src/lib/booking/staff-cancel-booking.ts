@@ -133,6 +133,8 @@ export async function cancelStaffBookingWithNotify(
       .update({
         status: 'Cancelled',
         deposit_status: 'Refunded',
+        cancelled_by_staff_id: options.actorId,
+        cancellation_actor_type: options.actorId ? 'staff' : 'system',
         updated_at: new Date().toISOString(),
       })
       .in('id', idsToCancel);
@@ -141,6 +143,8 @@ export async function cancelStaffBookingWithNotify(
       .from('bookings')
       .update({
         status: 'Cancelled',
+        cancelled_by_staff_id: options.actorId,
+        cancellation_actor_type: options.actorId ? 'staff' : 'system',
         updated_at: new Date().toISOString(),
       })
       .in('id', idsToCancel);

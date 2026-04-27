@@ -75,7 +75,6 @@ export async function POST(request: NextRequest) {
           card_payments: { requested: true },
           transfers: { requested: true },
         },
-        business_type: 'company',
       });
 
       accountId = account.id;

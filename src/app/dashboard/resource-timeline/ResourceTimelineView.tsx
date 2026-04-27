@@ -16,6 +16,16 @@ import { ScheduleRow } from '@/components/ui/dashboard/ScheduleRow';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { defaultNewUnifiedCalendarWorkingHours } from '@/lib/availability/practitioner-defaults';
 import { HelpTooltip } from '@/components/dashboard/HelpTooltip';
+import {
+  RESOURCE_MIN_BOOKING_HELP,
+  RESOURCE_SLOT_INTERVAL_HELP,
+} from '@/lib/help/resource-booking-tooltips';
+import {
+  DEFAULT_RESOURCE_MIN_BOOKING_MINUTES,
+  DEFAULT_RESOURCE_SLOT_INTERVAL_MINUTES,
+  syncedMinBookingMinutesFromSlot,
+} from '@/lib/booking/resource-booking-defaults';
+import type { WorkingHours } from '@/types/booking-models';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -60,6 +70,7 @@ interface ResourceBooking {
 
 type DayHours = { enabled: boolean; start: string; end: string };
 type WeekHours = Record<string, DayHours>;
+type HostCalendar = { id: string; name: string; working_hours: WorkingHours };
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -76,6 +87,9 @@ const DAY_LABELS: Array<{ key: string; label: string }> = [
 ];
 
 const RESOURCE_TYPE_SUGGESTIONS = ['Tennis Court', 'Meeting Room', 'Studio', 'Pitch', 'Equipment', 'Desk', 'Bay', 'Lane', 'Pod'];
+const DAY_NAMES = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const;
+const RESOURCE_CALENDAR_LIMIT_WARNING =
+  'This resource has hours outside the selected calendar. It will only be bookable when venue, calendar, and resource hours all allow it.';
 
 /** Aligned with GET/POST/PATCH /api/venue/resources zod schema */
 const SLOT_INTERVAL_MIN = 5;
@@ -136,6 +150,57 @@ function weekHoursToJSON(wh: WeekHours): Record<string, Array<{ start: string; e
     }
   }
   return result;
+}
+
+function timeToMinutes(value: string): number {
+  const [h, m] = value.split(':').map(Number);
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return Number.NaN;
+  return h * 60 + m;
+}
+
+function calendarRangesForDay(
+  hours: WorkingHours,
+  dayIndex0to6: number,
+): Array<{ start: number; end: number }> {
+  const key = String(dayIndex0to6);
+  const ranges = hours[key] ?? hours[DAY_NAMES[dayIndex0to6]] ?? [];
+  return ranges
+    .map((r) => ({ start: timeToMinutes(r.start), end: timeToMinutes(r.end) }))
+    .filter((r) => Number.isFinite(r.start) && Number.isFinite(r.end) && r.end > r.start)
+    .sort((a, b) => a.start - b.start);
+}
+
+function mergedCalendarRangesForDay(
+  hours: WorkingHours,
+  dayIndex0to6: number,
+): Array<{ start: number; end: number }> {
+  const ranges = calendarRangesForDay(hours, dayIndex0to6);
+  if (ranges.length === 0) return [];
+  const merged: Array<{ start: number; end: number }> = [{ ...ranges[0]! }];
+  for (const range of ranges.slice(1)) {
+    const last = merged[merged.length - 1]!;
+    if (range.start <= last.end) {
+      last.end = Math.max(last.end, range.end);
+    } else {
+      merged.push({ ...range });
+    }
+  }
+  return merged;
+}
+
+function resourceHoursOutsideCalendar(resourceHours: WeekHours, calendarHours: WorkingHours): boolean {
+  for (const d of DAY_LABELS) {
+    const day = resourceHours[d.key]!;
+    if (!day.enabled) continue;
+    const resourceStart = timeToMinutes(day.start);
+    const resourceEnd = timeToMinutes(day.end);
+    if (!Number.isFinite(resourceStart) || !Number.isFinite(resourceEnd) || resourceEnd <= resourceStart) continue;
+    const calendarRanges = mergedCalendarRangesForDay(calendarHours, Number(d.key));
+    if (calendarRanges.length === 0) return true;
+    const fullyCovered = calendarRanges.some((range) => range.start <= resourceStart && resourceEnd <= range.end);
+    if (!fullyCovered) return true;
+  }
+  return false;
 }
 
 function formatDuration(mins: number): string {
@@ -226,14 +291,16 @@ export function ResourceTimelineView({
   // Form state
   const [formName, setFormName] = useState('');
   const [formType, setFormType] = useState('');
-  const [formSlotStr, setFormSlotStr] = useState('60');
-  const [formMinStr, setFormMinStr] = useState('60');
-  const [formMaxStr, setFormMaxStr] = useState('480');
+  const [formSlotStr, setFormSlotStr] = useState(String(DEFAULT_RESOURCE_SLOT_INTERVAL_MINUTES));
+  const [formMinStr, setFormMinStr] = useState(String(DEFAULT_RESOURCE_MIN_BOOKING_MINUTES));
+  const [formMaxStr, setFormMaxStr] = useState('180');
+  const [formAdvancedMinBooking, setFormAdvancedMinBooking] = useState(false);
   const [formPrice, setFormPrice] = useState('');
   const [formPaymentReq, setFormPaymentReq] = useState<ResourcePaymentRequirement>('none');
   const [formDeposit, setFormDeposit] = useState('');
   const [formActive, setFormActive] = useState(true);
   const [formHours, setFormHours] = useState<WeekHours>(defaultWeekHours);
+  const [formMatchCalendarHours, setFormMatchCalendarHours] = useState(false);
   const [formExceptions, setFormExceptions] = useState<Record<string, { closed: true } | { periods: Array<{ start: string; end: string }> }>>({});
   const [exceptionMonth, setExceptionMonth] = useState(() => {
     const n = new Date();
@@ -250,7 +317,7 @@ export function ResourceTimelineView({
   const [formMinNoticeHours, setFormMinNoticeHours] = useState(1);
   const [formCancellationHours, setFormCancellationHours] = useState(48);
   const [formAllowSameDay, setFormAllowSameDay] = useState(true);
-  const [hostCalendars, setHostCalendars] = useState<Array<{ id: string; name: string }>>([]);
+  const [hostCalendars, setHostCalendars] = useState<HostCalendar[]>([]);
   const [showInlineCalendarForm, setShowInlineCalendarForm] = useState(false);
   const [newCalendarName, setNewCalendarName] = useState('');
   const [creatingCalendar, setCreatingCalendar] = useState(false);
@@ -271,6 +338,23 @@ export function ResourceTimelineView({
   const [bookingsLoading, setBookingsLoading] = useState(false);
 
   const selected = useMemo(() => resources.find((r) => r.id === selectedId) ?? null, [resources, selectedId]);
+  const selectedHostCalendar = useMemo(
+    () => hostCalendars.find((c) => c.id === formDisplayCalendarId) ?? null,
+    [formDisplayCalendarId, hostCalendars],
+  );
+  const formCalendarRestrictionWarning = useMemo(
+    () =>
+      showForm && selectedHostCalendar && resourceHoursOutsideCalendar(formHours, selectedHostCalendar.working_hours)
+        ? RESOURCE_CALENDAR_LIMIT_WARNING
+        : null,
+    [formHours, selectedHostCalendar, showForm],
+  );
+
+  const formSlotMinutesParsed = useMemo(() => {
+    const n = parseInt(formSlotStr.trim(), 10);
+    if (!Number.isFinite(n) || n < SLOT_INTERVAL_MIN || n > SLOT_INTERVAL_MAX) return null;
+    return n;
+  }, [formSlotStr]);
 
   // Fetch resources
   const fetchResources = useCallback(async () => {
@@ -297,7 +381,13 @@ export function ResourceTimelineView({
         (p: { calendar_type?: string }) => p.calendar_type !== 'resource',
       ) as Array<{ id: string; name: string }>;
       const pick = isAdmin ? list : list.filter((p) => linkedPractitionerIds.includes(p.id));
-      setHostCalendars(pick.map((p) => ({ id: p.id, name: p.name })));
+      setHostCalendars(
+        pick.map((p) => ({
+          id: p.id,
+          name: p.name,
+          working_hours: (p as { working_hours?: WorkingHours }).working_hours ?? {},
+        })),
+      );
     } catch {
       /* ignore */
     }
@@ -345,7 +435,7 @@ export function ResourceTimelineView({
         return;
       }
 
-      const created = { id: json.id, name: json.name ?? name };
+      const created = { id: json.id, name: json.name ?? name, working_hours: defaultNewUnifiedCalendarWorkingHours() };
       setHostCalendars((prev) =>
         prev.some((c) => c.id === created.id)
           ? prev
@@ -364,6 +454,11 @@ export function ResourceTimelineView({
       setCreatingCalendar(false);
     }
   }, [formName, newCalendarName, refreshCalendarEntitlement]);
+
+  useEffect(() => {
+    if (!showForm || !formMatchCalendarHours || !selectedHostCalendar) return;
+    setFormHours(weekHoursFromJSON(selectedHostCalendar.working_hours));
+  }, [formMatchCalendarHours, selectedHostCalendar, showForm]);
 
   // Fetch bookings for selected resource
   useEffect(() => {
@@ -413,14 +508,16 @@ export function ResourceTimelineView({
     setEditingId(null);
     setFormName('');
     setFormType('');
-    setFormSlotStr('60');
-    setFormMinStr('60');
-    setFormMaxStr('480');
+    setFormSlotStr(String(DEFAULT_RESOURCE_SLOT_INTERVAL_MINUTES));
+    setFormMinStr(String(DEFAULT_RESOURCE_MIN_BOOKING_MINUTES));
+    setFormMaxStr('180');
+    setFormAdvancedMinBooking(false);
     setFormPrice('');
     setFormPaymentReq('none');
     setFormDeposit('');
     setFormActive(true);
     setFormHours(defaultWeekHours());
+    setFormMatchCalendarHours(false);
     setFormExceptions({});
     const n = new Date();
     setExceptionMonth({ year: n.getFullYear(), month: n.getMonth() + 1 });
@@ -446,11 +543,15 @@ export function ResourceTimelineView({
     setFormSlotStr(String(r.slot_interval_minutes));
     setFormMinStr(String(r.min_booking_minutes));
     setFormMaxStr(String(r.max_booking_minutes));
+    setFormAdvancedMinBooking(
+      r.min_booking_minutes !== syncedMinBookingMinutesFromSlot(r.slot_interval_minutes, MIN_BOOKING_MIN),
+    );
     setFormPrice(r.price_per_slot_pence != null ? (r.price_per_slot_pence / 100).toFixed(2) : '');
     setFormPaymentReq(r.payment_requirement ?? 'none');
     setFormDeposit(r.deposit_amount_pence != null ? (r.deposit_amount_pence / 100).toFixed(2) : '');
     setFormActive(r.is_active);
     setFormHours(weekHoursFromJSON(r.availability_hours));
+    setFormMatchCalendarHours(false);
     setFormExceptions(r.availability_exceptions ? { ...r.availability_exceptions } : {});
     const n = new Date();
     setExceptionMonth({ year: n.getFullYear(), month: n.getMonth() + 1 });
@@ -581,25 +682,43 @@ export function ResourceTimelineView({
     if (!formName.trim()) { setError('Resource name is required.'); return; }
 
     const formSlot = parseInt(formSlotStr.trim(), 10);
-    const formMin = parseInt(formMinStr.trim(), 10);
+    const formMinRaw = parseInt(formMinStr.trim(), 10);
     const formMax = parseInt(formMaxStr.trim(), 10);
     if (!Number.isFinite(formSlot) || formSlot < SLOT_INTERVAL_MIN || formSlot > SLOT_INTERVAL_MAX) {
-      setError(`Slot interval must be a whole number from ${SLOT_INTERVAL_MIN} to ${SLOT_INTERVAL_MAX} minutes.`);
+      setError(
+        `Start-time step must be a whole number from ${SLOT_INTERVAL_MIN} to ${SLOT_INTERVAL_MAX} minutes.`,
+      );
       return;
     }
-    if (!Number.isFinite(formMin) || formMin < MIN_BOOKING_MIN || formMin > MIN_BOOKING_MAX) {
-      setError(`Min booking must be a whole number from ${MIN_BOOKING_MIN} to ${MIN_BOOKING_MAX} minutes.`);
-      return;
+    const effectiveFormMin = formAdvancedMinBooking
+      ? formMinRaw
+      : syncedMinBookingMinutesFromSlot(formSlot, MIN_BOOKING_MIN);
+    if (formAdvancedMinBooking) {
+      if (!Number.isFinite(formMinRaw) || formMinRaw < MIN_BOOKING_MIN || formMinRaw > MIN_BOOKING_MAX) {
+        setError(
+          `Shortest booking must be a whole number from ${MIN_BOOKING_MIN} to ${MIN_BOOKING_MAX} minutes.`,
+        );
+        return;
+      }
+      if (formMinRaw < formSlot) {
+        setError(
+          'Shortest booking must be at least the start-time step, or turn off Advanced to match the step automatically.',
+        );
+        return;
+      }
     }
     if (!Number.isFinite(formMax) || formMax < MAX_BOOKING_MIN || formMax > MAX_BOOKING_MAX) {
       setError(`Max booking must be a whole number from ${MAX_BOOKING_MIN} to ${MAX_BOOKING_MAX} minutes.`);
       return;
     }
-    if (formMin > formMax) { setError('Min booking duration cannot exceed max.'); return; }
+    if (effectiveFormMin > formMax) {
+      setError('Shortest booking cannot be longer than the maximum booking.');
+      return;
+    }
 
     const pricePence = formPrice !== '' ? Math.round(parseFloat(formPrice) * 100) : 0;
     if ((formPaymentReq === 'deposit' || formPaymentReq === 'full_payment') && pricePence <= 0) {
-      setError('Set a price per slot before choosing deposit or full payment online.');
+      setError('Set a price for each start-time step before choosing deposit or full payment online.');
       return;
     }
     if (formPaymentReq === 'deposit') {
@@ -626,7 +745,7 @@ export function ResourceTimelineView({
         ...(formType.trim() && { resource_type: formType.trim() }),
         display_on_calendar_id: formDisplayCalendarId,
         slot_interval_minutes: formSlot,
-        min_booking_minutes: formMin,
+        min_booking_minutes: effectiveFormMin,
         max_booking_minutes: formMax,
         ...(formPrice !== '' && { price_per_slot_pence: pricePence }),
         payment_requirement: formPaymentReq,
@@ -1044,37 +1163,40 @@ export function ResourceTimelineView({
 
             {/* Booking rules */}
             <h3 className="mt-6 text-sm font-semibold text-slate-800">Booking rules</h3>
-            <div className="mt-2 grid gap-4 sm:grid-cols-3">
+            <p className="mt-1.5 text-xs leading-relaxed text-slate-600">
+              Start times use a fixed step. Online price uses the same step: total = (price per step) × (booking length ÷
+              step).
+            </p>
+            <div className="mt-3 grid gap-4 sm:grid-cols-2">
               <div>
-                <label className="mb-1 block text-xs font-medium text-slate-600">Slot interval (minutes)</label>
+                <label className="mb-1 flex items-center gap-1.5 text-xs font-medium text-slate-600">
+                  Start times every (minutes)
+                  <HelpTooltip icon="?" maxWidth={320} content={RESOURCE_SLOT_INTERVAL_HELP} />
+                </label>
                 <input
                   type="text"
                   inputMode="numeric"
                   autoComplete="off"
                   value={formSlotStr}
                   onChange={(e) => setFormSlotStr(e.target.value.replace(/[^0-9]/g, ''))}
+                  onBlur={() => {
+                    if (!formAdvancedMinBooking) {
+                      const slot = parseInt(formSlotStr.trim(), 10);
+                      if (Number.isFinite(slot) && slot >= SLOT_INTERVAL_MIN && slot <= SLOT_INTERVAL_MAX) {
+                        setFormMinStr(
+                          String(syncedMinBookingMinutesFromSlot(slot, MIN_BOOKING_MIN)),
+                        );
+                      }
+                    }
+                  }}
                   className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
                 />
                 <p className="mt-1 text-[11px] text-slate-500">
-                  Grid step for start times ({SLOT_INTERVAL_MIN}–{SLOT_INTERVAL_MAX} min).
+                  {SLOT_INTERVAL_MIN}–{SLOT_INTERVAL_MAX} minutes.
                 </p>
               </div>
               <div>
-                <label className="mb-1 block text-xs font-medium text-slate-600">Min booking (minutes)</label>
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  autoComplete="off"
-                  value={formMinStr}
-                  onChange={(e) => setFormMinStr(e.target.value.replace(/[^0-9]/g, ''))}
-                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
-                />
-                <p className="mt-1 text-[11px] text-slate-500">
-                  Shortest bookable length ({MIN_BOOKING_MIN}–{MIN_BOOKING_MAX} min).
-                </p>
-              </div>
-              <div>
-                <label className="mb-1 block text-xs font-medium text-slate-600">Max booking (minutes)</label>
+                <label className="mb-1 block text-xs font-medium text-slate-600">Longest booking (minutes)</label>
                 <input
                   type="text"
                   inputMode="numeric"
@@ -1084,9 +1206,53 @@ export function ResourceTimelineView({
                   className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
                 />
                 <p className="mt-1 text-[11px] text-slate-500">
-                  Longest bookable length ({MAX_BOOKING_MIN}–{MAX_BOOKING_MAX} min).
+                  {MAX_BOOKING_MIN}–{MAX_BOOKING_MAX} minutes.
                 </p>
               </div>
+            </div>
+            <div className="mt-4 rounded-lg border border-slate-100 bg-slate-50/80 p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <label className="mb-1 flex items-center gap-1.5 text-xs font-medium text-slate-600">
+                  Shortest booking (minutes)
+                  <HelpTooltip icon="?" maxWidth={320} content={RESOURCE_MIN_BOOKING_HELP} />
+                </label>
+                <label className="flex cursor-pointer items-center gap-2 text-[11px] font-medium text-slate-600">
+                  <input
+                    type="checkbox"
+                    checked={formAdvancedMinBooking}
+                    onChange={(e) => {
+                      const on = e.target.checked;
+                      setFormAdvancedMinBooking(on);
+                      if (!on) {
+                        const slot = parseInt(formSlotStr.trim(), 10);
+                        if (Number.isFinite(slot) && slot >= SLOT_INTERVAL_MIN && slot <= SLOT_INTERVAL_MAX) {
+                          setFormMinStr(
+                            String(syncedMinBookingMinutesFromSlot(slot, MIN_BOOKING_MIN)),
+                          );
+                        } else {
+                          setFormMinStr(String(DEFAULT_RESOURCE_MIN_BOOKING_MINUTES));
+                        }
+                      }
+                    }}
+                    className="h-3.5 w-3.5 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                  />
+                  Advanced: longer minimum than start-time step
+                </label>
+              </div>
+              <input
+                type="text"
+                inputMode="numeric"
+                autoComplete="off"
+                value={formMinStr}
+                disabled={!formAdvancedMinBooking}
+                onChange={(e) => setFormMinStr(e.target.value.replace(/[^0-9]/g, ''))}
+                className="mt-1.5 w-full max-w-xs rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-600"
+              />
+              <p className="mt-1 text-[11px] text-slate-500">
+                {formAdvancedMinBooking
+                  ? `${MIN_BOOKING_MIN}–${MIN_BOOKING_MAX} minutes; must be at least the start-time step.`
+                  : `Matches the start-time step (minimum ${MIN_BOOKING_MIN} minutes).`}
+              </p>
             </div>
             <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50/80 p-3">
               <p className="mb-2 text-xs font-medium text-slate-700">Guest online booking</p>
@@ -1136,8 +1302,15 @@ export function ResourceTimelineView({
             </div>
             <div className="mt-3 grid gap-4 sm:grid-cols-2">
               <div>
-                <label className="mb-1 block text-xs font-medium text-slate-600">Price per slot ({sym})</label>
+                <label className="mb-1 block text-xs font-medium text-slate-600">
+                  {formSlotMinutesParsed != null
+                    ? `Price per ${formSlotMinutesParsed}-minute step (${sym})`
+                    : `Price per start-time step (${sym})`}
+                </label>
                 <input type="text" inputMode="decimal" autoComplete="off" value={formPrice} onChange={(e) => setFormPrice(e.target.value)} placeholder="Leave blank for free" className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
+                <p className="mt-1 text-[11px] text-slate-500">
+                  Charged per step of your start-time grid (see above).
+                </p>
               </div>
               <div className="flex items-end pb-1">
                 <label className="flex items-center gap-2 text-sm text-slate-700">
@@ -1195,21 +1368,78 @@ export function ResourceTimelineView({
             </div>
 
             {/* Weekly availability */}
-            <h3 className="mt-6 text-sm font-semibold text-slate-800">Weekly availability</h3>
+            <div className="mt-6 flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-semibold text-slate-800">Weekly availability</h3>
+                <p className="mt-1 text-xs text-slate-500">
+                  Resource hours can be wider than the calendar, but guests can only book where all opening hours overlap.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  const next = !formMatchCalendarHours;
+                  setFormMatchCalendarHours(next);
+                  if (next && selectedHostCalendar) {
+                    setFormHours(weekHoursFromJSON(selectedHostCalendar.working_hours));
+                  }
+                }}
+                className={`rounded-lg border px-3 py-2 text-xs font-semibold transition-colors ${
+                  formMatchCalendarHours
+                    ? 'border-brand-300 bg-brand-50 text-brand-700 hover:bg-brand-100'
+                    : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                }`}
+              >
+                {formMatchCalendarHours
+                  ? formDisplayCalendarId
+                    ? 'Matching calendar hours'
+                    : 'Will match selected calendar'
+                  : 'Match selected calendar hours'}
+              </button>
+            </div>
+            {formCalendarRestrictionWarning && (
+              <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                {formCalendarRestrictionWarning}
+              </div>
+            )}
             <div className="mt-2 space-y-2">
               {DAY_LABELS.map((d) => {
                 const day = formHours[d.key]!;
                 return (
                   <div key={d.key} className="flex items-center gap-3 rounded-lg border border-slate-100 bg-slate-50/60 px-3 py-2">
                     <label className="flex w-24 shrink-0 items-center gap-2 text-sm">
-                      <input type="checkbox" checked={day.enabled} onChange={(e) => setFormHours((h) => ({ ...h, [d.key]: { ...h[d.key]!, enabled: e.target.checked } }))} className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500" />
+                      <input
+                        type="checkbox"
+                        checked={day.enabled}
+                        onChange={(e) => {
+                          setFormMatchCalendarHours(false);
+                          setFormHours((h) => ({ ...h, [d.key]: { ...h[d.key]!, enabled: e.target.checked } }));
+                        }}
+                        className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                      />
                       {d.label.slice(0, 3)}
                     </label>
                     {day.enabled && (
                       <div className="flex items-center gap-1.5 text-sm">
-                        <input type="time" value={day.start} onChange={(e) => setFormHours((h) => ({ ...h, [d.key]: { ...h[d.key]!, start: e.target.value } }))} className="rounded border border-slate-200 px-2 py-1 text-xs" />
+                        <input
+                          type="time"
+                          value={day.start}
+                          onChange={(e) => {
+                            setFormMatchCalendarHours(false);
+                            setFormHours((h) => ({ ...h, [d.key]: { ...h[d.key]!, start: e.target.value } }));
+                          }}
+                          className="rounded border border-slate-200 px-2 py-1 text-xs"
+                        />
                         <span className="text-slate-400">&ndash;</span>
-                        <input type="time" value={day.end} onChange={(e) => setFormHours((h) => ({ ...h, [d.key]: { ...h[d.key]!, end: e.target.value } }))} className="rounded border border-slate-200 px-2 py-1 text-xs" />
+                        <input
+                          type="time"
+                          value={day.end}
+                          onChange={(e) => {
+                            setFormMatchCalendarHours(false);
+                            setFormHours((h) => ({ ...h, [d.key]: { ...h[d.key]!, end: e.target.value } }));
+                          }}
+                          className="rounded border border-slate-200 px-2 py-1 text-xs"
+                        />
                       </div>
                     )}
                     {!day.enabled && <span className="text-xs text-slate-400">Closed</span>}
@@ -1426,14 +1656,14 @@ export function ResourceTimelineView({
 
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
               <StatTile
-                label="Slot interval"
+                label="Start-time step"
                 value={formatDuration(selected.slot_interval_minutes)}
                 color="brand"
               />
-              <StatTile label="Min booking" value={formatDuration(selected.min_booking_minutes)} color="violet" />
-              <StatTile label="Max booking" value={formatDuration(selected.max_booking_minutes)} color="emerald" />
+              <StatTile label="Shortest booking" value={formatDuration(selected.min_booking_minutes)} color="violet" />
+              <StatTile label="Longest booking" value={formatDuration(selected.max_booking_minutes)} color="emerald" />
               <StatTile
-                label="Price / slot"
+                label={`Price / ${selected.slot_interval_minutes} min`}
                 value={selected.price_per_slot_pence != null ? formatPrice(selected.price_per_slot_pence) : 'Free'}
                 color="amber"
               />

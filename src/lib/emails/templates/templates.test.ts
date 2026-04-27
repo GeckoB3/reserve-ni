@@ -120,7 +120,8 @@ describe("renderDepositRequestSms", () => {
     );
     expect(result.body).toContain("The Golden Whisk");
     expect(result.body).toContain("https://pay.link/abc");
-    expect(result.body).toContain("Jane Doe");
+    expect(result.body).toMatch(/£20\.00 dep/);
+    expect(result.body.length).toBeLessThanOrEqual(160);
   });
 
   it("prepends custom message", () => {
@@ -202,6 +203,7 @@ describe("renderDayOfReminderSms", () => {
     const result = renderDayOfReminderSms(SAMPLE_BOOKING, SAMPLE_VENUE);
     expect(result.body).toContain("The Golden Whisk");
     expect(result.body).toContain("7:30pm");
+    expect(result.body.length).toBeLessThanOrEqual(160);
   });
 });
 

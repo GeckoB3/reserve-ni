@@ -28,7 +28,7 @@ The **Restaurant** and **Founding Partner** plans unlock the full **table reserv
 
 ## Roles
 
-**Staff** do not see **Reports**, **Dining Availability**, or **Data Import** in the sidebar. They can still use bookings and floor tools you allow for their role.
+**Staff** do not see **Reports** or **Dining Availability** in the sidebar, and do not have the **Data Import** tool (admins only: **Settings → Data Import**). They can still use bookings and floor tools you allow for their role.
 
 ## Hybrid venues
 

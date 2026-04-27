@@ -47,6 +47,7 @@ import { logBookingOp } from '@/lib/observability/booking-ops-log';
 import { venueWideBlocksRejectBookingWindow } from '@/lib/availability/venue-wide-business-hours';
 import { fetchVenueOpeningHoursAndWideBlocksForDate } from '@/lib/availability/venue-wide-blocks-fetch';
 import { getResourceBookingEmailLabels } from '@/lib/booking/resource-booking-email-labels';
+import { DEFAULT_RESOURCE_SLOT_INTERVAL_MINUTES } from '@/lib/booking/resource-booking-defaults';
 import { listActiveAreasForVenue } from '@/lib/areas/resolve-default-area';
 import { isOnlineBookingBlockedForLightPastDue } from '@/lib/booking/light-plan-public-block';
 
@@ -815,7 +816,9 @@ async function handleNonTableBooking(
     if (venueWideErrRes) {
       return NextResponse.json({ error: venueWideErrRes }, { status: 400 });
     }
-    const numSlots = Math.ceil(durationMinutes / (res?.slot_interval_minutes ?? 30));
+    const numSlots = Math.ceil(
+      durationMinutes / (res?.slot_interval_minutes ?? DEFAULT_RESOURCE_SLOT_INTERVAL_MINUTES),
+    );
     const totalPricePence = (res?.price_per_slot_pence ?? 0) * numSlots;
     const payReq = res?.payment_requirement ?? 'none';
     resourcePaymentRequirement = payReq;

@@ -17,6 +17,10 @@
       "schedule": "*/30 * * * *"
     },
     {
+      "path": "/api/cron/booking-log-email",
+      "schedule": "*/15 * * * *"
+    },
+    {
       "path": "/api/cron/reconciliation",
       "schedule": "0 6 * * *"
     },

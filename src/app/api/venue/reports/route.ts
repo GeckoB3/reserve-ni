@@ -7,6 +7,7 @@ import { BOOKING_MODEL_ORDER } from '@/lib/booking/enabled-models';
 import { inferBookingRowModel, bookingModelShortLabel } from '@/lib/booking/infer-booking-row-model';
 import { isAppointmentDashboardExperience, isUnifiedSchedulingVenue } from '@/lib/booking/unified-scheduling';
 import { normalizeEnabledModels } from '@/lib/booking/enabled-models';
+import { normalizeBookingLogEmailConfig } from '@/lib/reports/booking-log-email-config';
 
 export interface ReportByBookingModelRow {
   booking_model: BookingModel;
@@ -232,6 +233,7 @@ export async function GET(request: NextRequest) {
       { data: deposit, error: e4 },
       { data: venueFlags },
       { data: clientSummaryRaw, error: eClient },
+      { data: firstAdmin },
     ] = await Promise.all([
       supabase.rpc('report_booking_summary', { p_venue_id: staff.venue_id, p_start: pStart, p_end: pEnd }),
       supabase.rpc('report_no_show_series', { p_venue_id: staff.venue_id, p_start: pStart, p_end: pEnd, p_granularity: 'day' }),
@@ -239,7 +241,7 @@ export async function GET(request: NextRequest) {
       supabase.rpc('report_deposit_summary', { p_venue_id: staff.venue_id, p_start: pStart, p_end: pEnd }),
       staff.db
         .from('venues')
-        .select('table_management_enabled, booking_model, pricing_tier, enabled_models')
+        .select('table_management_enabled, booking_model, pricing_tier, enabled_models, daily_booking_log_email_config')
         .eq('id', staff.venue_id)
         .single(),
       staff.db.rpc('report_client_summary', {
@@ -247,6 +249,14 @@ export async function GET(request: NextRequest) {
         p_from: from,
         p_to: to,
       }),
+      staff.db
+        .from('staff')
+        .select('email')
+        .eq('venue_id', staff.venue_id)
+        .eq('role', 'admin')
+        .order('created_at', { ascending: true })
+        .limit(1)
+        .maybeSingle(),
     ]);
 
     if (e1 || e2 || e3 || e4) {
@@ -285,6 +295,12 @@ export async function GET(request: NextRequest) {
     const enabledModelsNorm = normalizeEnabledModels(
       (venueFlags as { enabled_models?: unknown } | null)?.enabled_models,
       bookingModel,
+    );
+    const defaultBookingLogEmail =
+      typeof firstAdmin?.email === 'string' && firstAdmin.email.trim() ? firstAdmin.email.trim().toLowerCase() : null;
+    const bookingLogEmailConfig = normalizeBookingLogEmailConfig(
+      (venueFlags as { daily_booking_log_email_config?: unknown } | null)?.daily_booking_log_email_config,
+      defaultBookingLogEmail,
     );
     const appointmentDashboard = isAppointmentDashboardExperience(pricingTier, bookingModel, enabledModelsNorm);
 
@@ -357,6 +373,8 @@ export async function GET(request: NextRequest) {
       report7_appointment_insights: report7_appointment_insights,
       report_by_booking_model,
       client_summary,
+      booking_log_email_config: bookingLogEmailConfig,
+      default_booking_log_email: defaultBookingLogEmail,
     });
   } catch (err) {
     console.error('GET /api/venue/reports failed:', err);
