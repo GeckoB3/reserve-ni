@@ -19,10 +19,9 @@ interface Props {
 }
 
 /**
- * Schedule landing for venues that are calendar-eligible but not unified scheduling
- * (e.g. restaurant + secondary C/D/E, or primary class/event/resource without USE).
- * Does not use PractitionerCalendarView - table primaries keep Day sheet / Floor plan for Model A.
- * Merged C/D/E day grid uses GET /api/venue/schedule (same feed as unified calendar lanes).
+ * Legacy schedule hub (shortcuts + merged day grid). `/dashboard/calendar` now always uses
+ * {@link PractitionerCalendarView} for schedule-eligible venues; keep this module for any future
+ * embedded hub or reuse of the merged grid outside the main calendar route.
  */
 export function StaffScheduleHub({ bookingModel, enabledModels }: Props) {
   const venueBootstrap = useDashboardVenueBootstrap();

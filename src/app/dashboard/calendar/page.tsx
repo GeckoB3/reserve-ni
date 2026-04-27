@@ -10,11 +10,7 @@ import {
   getDefaultBookingModelFromActive,
   resolveActiveBookingModels,
 } from '@/lib/booking/active-models';
-import {
-  isPractitionerScheduleCalendar,
-  isVenueScheduleCalendarEligible,
-} from '@/lib/booking/schedule-calendar-eligibility';
-import { StaffScheduleHub } from '@/components/calendar/StaffScheduleHub';
+import { isVenueScheduleCalendarEligible } from '@/lib/booking/schedule-calendar-eligibility';
 
 export default async function CalendarPage() {
   const supabase = await createClient();
@@ -64,29 +60,22 @@ export default async function CalendarPage() {
   const defaultPractitionerFilter: 'all' | string =
     linkedPractitionerIds.length === 1 ? linkedPractitionerIds[0] : 'all';
 
-  const showPractitionerCalendar = isPractitionerScheduleCalendar(bookingModel, enabledModels);
-
   /**
-   * Unified / practitioner primaries: full `PractitionerCalendarView` (appointments + merged C/D/E lanes).
-   * Table + secondaries and other non-unified eligible venues: `StaffScheduleHub` (merged schedule API only;
-   * Model A stays on Day sheet / Floor plan - not in PractitionerCalendarView).
+   * All schedule-eligible venues use the shared appointments calendar (`PractitionerCalendarView`) with
+   * user-configured calendar columns. Table-only venues are redirected above.
    */
   return (
     <ToastProvider>
       <div className="min-h-0 min-w-0 px-3 pb-[max(1rem,env(safe-area-inset-bottom))] pt-[max(1rem,env(safe-area-inset-top))] sm:px-4 md:p-6 md:pb-8 md:pt-6 lg:p-8">
         <div className="mx-auto max-w-[1600px] min-w-0">
-          {showPractitionerCalendar ? (
-            <PractitionerCalendarView
-              venueId={staff.venue_id}
-              currency={currency}
-              defaultPractitionerFilter={defaultPractitionerFilter}
-              linkedPractitionerIds={linkedPractitionerIds}
-              bookingModel={bookingModel}
-              enabledModels={enabledModels}
-            />
-          ) : (
-            <StaffScheduleHub bookingModel={bookingModel} enabledModels={enabledModels} />
-          )}
+          <PractitionerCalendarView
+            venueId={staff.venue_id}
+            currency={currency}
+            defaultPractitionerFilter={defaultPractitionerFilter}
+            linkedPractitionerIds={linkedPractitionerIds}
+            bookingModel={bookingModel}
+            enabledModels={enabledModels}
+          />
         </div>
       </div>
     </ToastProvider>

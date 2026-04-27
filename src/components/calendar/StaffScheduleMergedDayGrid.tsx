@@ -21,9 +21,9 @@ interface Props {
 }
 
 /**
- * Merged Events / Resources day columns for non–unified-scheduling venues without class sessions
- * (e.g. table + events). Class sessions use team columns in `PractitionerCalendarView`. Uses
- * GET /api/venue/schedule; does not include Model A tables.
+ * Merged Events / Resources day columns (GET /api/venue/schedule). Used by legacy hub flows;
+ * the main `/dashboard/calendar` route uses `PractitionerCalendarView` with user calendar columns.
+ * Does not include Model A tables.
  */
 export function StaffScheduleMergedDayGrid({ date, bookingModel, enabledModels }: Props) {
   const venueBootstrap = useDashboardVenueBootstrap();

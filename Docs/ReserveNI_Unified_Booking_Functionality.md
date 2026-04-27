@@ -451,7 +451,7 @@ This sprint makes **“everything integrated”** true for staff day-to-day oper
 
 ### 4.2 Staff calendar (`/dashboard/calendar`) - Option A locked (extend `PractitionerCalendarView`)
 
-**Today:** `/dashboard/calendar` is shown when the venue is **schedule-eligible** (unified/practitioner primary, or C/D/E primary, or C/D/E in `enabled_models`); see `isVenueScheduleCalendarEligible` in code. Unified/practitioner venues use **`PractitionerCalendarView`** (appointments + merged C/D/E); table-primary venues with secondaries use **`StaffScheduleHub`** for the merged schedule feed.
+**Today:** `/dashboard/calendar` is shown when the venue is **schedule-eligible** (unified/practitioner primary, or C/D/E primary, or C/D/E in `enabled_models`); see `isVenueScheduleCalendarEligible` in code. All eligible venues use **`PractitionerCalendarView`** (shared appointments calendar with user-configured columns + merged C/D/E feeds where applicable). Table-only venues are redirected away from this route.
 
 **Decision (locked):** **Option A -** evolve **`PractitionerCalendarView`** (`src/app/dashboard/practitioner-calendar/PractitionerCalendarView.tsx` and related modules) into a broader **Schedule** experience that can **load multiple feed types** and **paint them on one timeline/grid** (practitioner slots, class instances, resource blocks, ticketed events; plus existing unified appointment data).
 
