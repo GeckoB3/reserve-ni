@@ -105,6 +105,7 @@ export default function AvailabilitySettingsClient({
   // Incremented each time the floor plan editor successfully auto-saves positions.
   // Passed to the Combinations tab so the adjacency preview and pair count refresh.
   const [layoutSaveCount, setLayoutSaveCount] = useState(0);
+  const [layoutActivationKey, setLayoutActivationKey] = useState(0);
   const handleLayoutSaved = useCallback(() => setLayoutSaveCount((n) => n + 1), []);
 
   const replaceAvailabilityUrl = useCallback(
@@ -183,6 +184,9 @@ export default function AvailabilitySettingsClient({
   const setActiveTab = useCallback(
     (key: TabKey) => {
       setActiveTabState(key);
+      if (key === 'table' && floorPlanTab === 'layout') {
+        setLayoutActivationKey((n) => n + 1);
+      }
       replaceAvailabilityUrl((next) => {
         next.set('tab', key);
         if (key === 'table') {
@@ -198,6 +202,9 @@ export default function AvailabilitySettingsClient({
   const setFloorPlanTab = useCallback(
     (key: FloorPlanEditorTabKey) => {
       setFloorPlanTabState(key);
+      if (key === 'layout') {
+        setLayoutActivationKey((n) => n + 1);
+      }
       replaceAvailabilityUrl((next) => {
         next.set('tab', 'table');
         next.set('fp', key);
@@ -666,6 +673,7 @@ export default function AvailabilitySettingsClient({
                 onLayoutSaved={handleLayoutSaved}
                 combinationThreshold={venue.combination_threshold ?? 80}
                 layoutSaveCount={layoutSaveCount}
+                layoutActivationKey={layoutActivationKey}
                 onCombinationThresholdSaved={(v) => onUpdate({ combination_threshold: v })}
                 diningAreaId={selectedAreaId}
               />

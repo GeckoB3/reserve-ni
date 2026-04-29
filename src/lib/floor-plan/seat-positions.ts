@@ -140,8 +140,12 @@ function positionsOnEdge(
 // ---------------------------------------------------------------------------
 
 /**
- * Allocate seats to each polygon edge by length, then place along each edge at
- * (i+1)/(k+1) — same interior spacing as rectangular `positionsOnEdge`.
+ * Allocate seats to polygon edges in longest-side passes.
+ *
+ * That gives custom tables predictable restaurant-style chair placement:
+ * - fewer seats than sides: use the longest sides first, one chair at each midpoint
+ * - more seats than sides: give every side one chair before the longest sides get a second
+ * - repeated passes continue the same pattern for larger tables
  */
 function polygonPerimeterSeats(
   pixelPts: { x: number; y: number }[],
@@ -156,22 +160,21 @@ function polygonPerimeterSeats(
     const b = pixelPts[(i + 1) % n]!;
     edgeLengths.push(Math.hypot(b.x - a.x, b.y - a.y));
   }
-  const totalLen = edgeLengths.reduce((s, len) => s + len, 0);
-  if (totalLen <= 0) return [];
+  if (edgeLengths.every((len) => len <= 0)) return [];
 
   const allocation = new Array<number>(n).fill(0);
-  let placed = 0;
-  for (let i = 0; i < n; i++) {
-    const seats = Math.floor(count * (edgeLengths[i]! / totalLen));
-    allocation[i] = seats;
-    placed += seats;
-  }
-  let remaining = count - placed;
-  const order = [...edgeLengths.map((len, i) => ({ len, i }))].sort((x, y) => y.len - x.len);
-  for (const { i } of order) {
-    if (remaining <= 0) break;
-    allocation[i]!++;
-    remaining--;
+  const order = edgeLengths
+    .map((len, i) => ({ len, i }))
+    .filter(({ len }) => len > 0)
+    .sort((a, b) => b.len - a.len || a.i - b.i);
+
+  let remaining = count;
+  while (remaining > 0) {
+    for (const { i } of order) {
+      if (remaining <= 0) break;
+      allocation[i]!++;
+      remaining--;
+    }
   }
 
   const seats: SeatPosition[] = [];

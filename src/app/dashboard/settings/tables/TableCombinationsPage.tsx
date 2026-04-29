@@ -53,6 +53,9 @@ interface Props {
   onCombinationThresholdSaved?: (value: number) => void;
   /** Scope auto-detected groups, overrides, and layout preview to this dining area (Availability → Table Management). */
   diningAreaId?: string | null;
+  /** Logical floor-plan dimensions from the Layout tab. */
+  layoutWidth?: number;
+  layoutHeight?: number;
 }
 
 export function TableCombinationsPage({
@@ -65,6 +68,8 @@ export function TableCombinationsPage({
   layoutSaveCount = 0,
   onCombinationThresholdSaved,
   diningAreaId = null,
+  layoutWidth,
+  layoutHeight,
 }: Props) {
   const router = useRouter();
   const [catalogLoading, setCatalogLoading] = useState(true);
@@ -244,6 +249,8 @@ export function TableCombinationsPage({
           width: t.width,
           height: t.height,
           rotation: t.rotation,
+          seat_angles: t.seat_angles ?? null,
+          polygon_points: t.polygon_points ?? null,
           is_active: t.is_active,
         })),
     [tables],
@@ -410,7 +417,7 @@ export function TableCombinationsPage({
           </div>
         )}
 
-        <div className="grid gap-6 lg:grid-cols-[1fr_min(320px,100%)]">
+        <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(300px,320px)]">
         <div className="min-w-0">
           {combinationsSubTab === 'auto' && (
             <section>
@@ -643,10 +650,10 @@ export function TableCombinationsPage({
           )}
         </div>
 
-          <aside className="sticky top-24 hidden self-start lg:block">
+          <aside className="sticky top-6 z-10 hidden self-start lg:block">
             <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Preview</p>
             <div
-              className="overflow-hidden rounded-xl border border-slate-200 bg-slate-50"
+              className="max-h-[calc(100vh-6rem)] overflow-hidden rounded-xl border border-slate-200 bg-slate-50"
               style={{ minHeight: 320 }}
             >
               <MiniFloorPlanPicker
@@ -656,6 +663,8 @@ export function TableCombinationsPage({
                 partySize={2}
                 className="min-h-[300px]"
                 previewMode
+                layoutWidth={layoutWidth}
+                layoutHeight={layoutHeight}
               />
             </div>
           </aside>

@@ -67,6 +67,7 @@ interface TableWithState {
   width: number | null;
   height: number | null;
   rotation: number | null;
+  seat_angles?: (number | null)[] | null;
   polygon_points?: { x: number; y: number }[] | null;
   service_status: string;
   booking: {
@@ -119,6 +120,8 @@ export default function LiveFloorCanvas({
   const layoutPixelH = Math.max(1, Math.round(layoutHeight));
   /** Visible container size (px). Stage is rendered at this size so all tables fit after fit-to-view. */
   const [viewport, setViewport] = useState({ w: 0, h: 0 });
+  const stageWidth = Math.max(1, viewport.w);
+  const stageHeight = Math.max(1, viewport.h);
   const [scale, setScale] = useState(1);
   const [stagePos, setStagePos] = useState({ x: 0, y: 0 });
   const baseScaleRef = useRef(1);
@@ -279,8 +282,8 @@ export default function LiveFloorCanvas({
    * positioned in `layoutPixelW`×`layoutPixelH` space — we find their AABB and scale+pan the Stage.
    */
   const fitViewToStage = useCallback(() => {
-    const vw = viewport.w;
-    const vh = viewport.h;
+    const vw = stageWidth;
+    const vh = stageHeight;
     if (vw < 1 || vh < 1 || tables.length === 0) return;
 
     let minX = Infinity;
@@ -317,7 +320,7 @@ export default function LiveFloorCanvas({
       x: vw / 2 - midX * nextScale,
       y: vh / 2 - midY * nextScale,
     });
-  }, [tables, layoutPixelW, layoutPixelH, viewport.w, viewport.h]);
+  }, [tables, layoutPixelW, layoutPixelH, stageWidth, stageHeight]);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -341,18 +344,18 @@ export default function LiveFloorCanvas({
     initialFitDone.current = false;
   }, [layoutWidth, layoutHeight]);
   useEffect(() => {
-    if (tables.length === 0 || viewport.w < 1 || viewport.h < 1) return;
+    if (tables.length === 0 || stageWidth < 1 || stageHeight < 1) return;
     if (!initialFitDone.current) {
       fitViewToStage();
       initialFitDone.current = true;
     }
-  }, [tables, viewport.w, viewport.h, fitViewToStage]);
+  }, [tables, stageWidth, stageHeight, fitViewToStage]);
 
   const zoomBy = useCallback(
     (delta: number) => {
       const newScale = Math.max(0.3, Math.min(3, scale + delta));
-      const cx = viewport.w / 2;
-      const cy = viewport.h / 2;
+      const cx = stageWidth / 2;
+      const cy = stageHeight / 2;
       const pointTo = {
         x: (cx - stagePos.x) / scale,
         y: (cy - stagePos.y) / scale,
@@ -363,7 +366,7 @@ export default function LiveFloorCanvas({
         y: cy - pointTo.y * newScale,
       });
     },
-    [scale, stagePos, viewport.w, viewport.h],
+    [scale, stagePos, stageWidth, stageHeight],
   );
 
   const isDragging = draggingBookingId != null || reassignMode != null;
@@ -452,8 +455,8 @@ export default function LiveFloorCanvas({
 
       <Stage
         ref={(node) => { stageRef.current = node; }}
-        width={viewport.w}
-        height={viewport.h}
+        width={stageWidth}
+        height={stageHeight}
         scaleX={scale}
         scaleY={scale}
         x={stagePos.x}
@@ -541,6 +544,7 @@ export default function LiveFloorCanvas({
                 canvasHeight={layoutPixelH}
                 layoutScale={scale}
                 unifiedLabelFonts={unifiedLabelFonts}
+                seatAngles={table.seat_angles}
                 onClick={() => {
                   if (isDragging && isValidTarget) {
                     if (draggingBookingId) {

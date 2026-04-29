@@ -61,6 +61,8 @@ export interface TableShapeProps {
    * inside the table so labels stay within the shape at small scales.
    */
   compactLabels?: boolean;
+  /** Hide chair markers in small/read-only previews where table geometry is the important signal. */
+  showSeats?: boolean;
   /** Whole-table opacity (e.g. drag ghost on live floor). */
   groupOpacity?: number;
   /**
@@ -227,6 +229,7 @@ export default function TableShape({
   canvasWidth,
   canvasHeight,
   compactLabels = false,
+  showSeats = true,
   groupOpacity = 1,
   layoutScale,
   overrideX,
@@ -588,6 +591,7 @@ export default function TableShape({
       )}
 
       {/* ---- Seat dots (subdued in compact picker so centred labels stay legible) ---- */}
+      {showSeats && (
       <Group opacity={compactLabels ? 0.35 : 1}>
         {seats.map((seat, i) => {
           // Apply custom angle override if provided
@@ -709,6 +713,7 @@ export default function TableShape({
           );
         })}
       </Group>
+      )}
 
       {/* ---- Labels: keep the whole two-line block upright without letting the lines drift independently ---- */}
       <Group

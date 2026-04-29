@@ -25,6 +25,8 @@ interface Props {
   combinationThreshold?: number;
   /** Incremented when the floor plan layout auto-saves; refreshes adjacency preview on the Combinations tab. */
   layoutSaveCount?: number;
+  /** Incremented by the parent when the Layout tab becomes visible, forcing Konva to recalculate from a visible container. */
+  layoutActivationKey?: number;
   /** Keeps parent venue state in sync after saving combination detection distance on the Combinations tab. */
   onCombinationThresholdSaved?: (value: number) => void;
   /** When set, load tables and combinations for this dining area only. */
@@ -40,11 +42,13 @@ export function FloorPlanEditorTabs({
   onLayoutSaved,
   combinationThreshold,
   layoutSaveCount = 0,
+  layoutActivationKey = 0,
   onCombinationThresholdSaved,
   diningAreaId,
 }: Props) {
   const [tables, setTables] = useState<VenueTable[]>([]);
   const [combinations, setCombinations] = useState<TableCombination[]>([]);
+  const [floorPlanLayout, setFloorPlanLayout] = useState<{ width: number; height: number } | null>(null);
   const [loading, setLoading] = useState(true);
   const [visitedTabs, setVisitedTabs] = useState<Set<FloorPlanEditorTabKey>>(() => new Set([activeTab]));
 
@@ -57,6 +61,12 @@ export function FloorPlanEditorTabs({
       if (tablesRes.ok) {
         const data = await tablesRes.json();
         setTables(data.tables ?? []);
+        const layout = data.floor_plan_layout as { width?: number; height?: number } | undefined;
+        setFloorPlanLayout(
+          typeof layout?.width === 'number' && typeof layout.height === 'number'
+            ? { width: layout.width, height: layout.height }
+            : null,
+        );
       }
       if (advancedTableManagement) {
         const combosRes = await fetch(`/api/venue/tables/combinations${areaQs}`);
@@ -105,7 +115,7 @@ export function FloorPlanEditorTabs({
   }, [advancedTableManagement]);
 
   return (
-    <SectionCard>
+    <SectionCard className={activeTab === 'combinations' ? '!overflow-visible' : ''}>
       {!hideHeading ? (
         <SectionCard.Header
           title="Floor plan & tables"
@@ -134,9 +144,14 @@ export function FloorPlanEditorTabs({
       </div>
 
       <div className="mt-4">
-        {visitedTabs.has('layout') && advancedTableManagement && (
-          <div className={activeTab === 'layout' ? undefined : 'hidden'}>
-            <FloorPlanEditor embedded onLayoutSaved={handleLayoutSaved} diningAreaId={diningAreaId} />
+        {activeTab === 'layout' && advancedTableManagement && (
+          <div>
+            <FloorPlanEditor
+              key={`${diningAreaId ?? 'venue'}:${layoutActivationKey}`}
+              embedded
+              onLayoutSaved={handleLayoutSaved}
+              diningAreaId={diningAreaId}
+            />
           </div>
         )}
 
@@ -175,6 +190,8 @@ export function FloorPlanEditorTabs({
                   layoutSaveCount={layoutSaveCount}
                   onCombinationThresholdSaved={onCombinationThresholdSaved}
                   diningAreaId={diningAreaId}
+                  layoutWidth={floorPlanLayout?.width}
+                  layoutHeight={floorPlanLayout?.height}
                 />
               )}
             </div>

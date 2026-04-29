@@ -5,7 +5,8 @@ import { Stage, Layer, Group, Rect } from 'react-konva';
 import type { KonvaEventObject } from 'konva/lib/Node';
 import type Konva from 'konva';
 import TableShape from '@/components/floor-plan/TableShape';
-import { getTableDimensions, tableDimensionsPercentToPixels } from '@/types/table-management';
+import { computeTableAdjacency, getTableDimensions, tableDimensionsPercentToPixels } from '@/types/table-management';
+import type { BlockedSides } from '@/types/table-management';
 import { computeGlobalUnifiedLabelFonts } from '@/lib/floor-plan/table-label-fonts';
 
 const COLOR_FREE = '#047857';
@@ -17,6 +18,16 @@ const COLOR_PREVIEW_IDLE = '#94a3b8';
 const COLOR_PREVIEW_HIGHLIGHT = '#d97706';
 
 const EMPTY_HIDDEN = new Set<string>();
+
+function blockedToHiddenSet(blocked?: BlockedSides): Set<string> {
+  if (!blocked) return EMPTY_HIDDEN;
+  const s = new Set<string>();
+  if (blocked.top) s.add('top');
+  if (blocked.right) s.add('right');
+  if (blocked.bottom) s.add('bottom');
+  if (blocked.left) s.add('left');
+  return s.size > 0 ? s : EMPTY_HIDDEN;
+}
 
 export interface MiniFloorTableRow {
   id: string;
@@ -30,6 +41,8 @@ export interface MiniFloorTableRow {
   height: number | null;
   rotation: number | null;
   is_active: boolean;
+  /** Per-seat angle overrides from the Layout tab. */
+  seat_angles?: (number | null)[] | null;
   polygon_points?: { x: number; y: number }[] | null;
   /** Dining area; used when filtering tables for multi-area venues. */
   area_id?: string | null;
@@ -50,14 +63,19 @@ export interface MiniFloorPlanPickerProps {
    * `selectedIds` still drives which tables are highlighted (shown in amber).
    */
   previewMode?: boolean;
+  /** Logical floor-plan dimensions from the Layout tab. */
+  layoutWidth?: number;
+  layoutHeight?: number;
 }
 
 function computeFit(
   tables: MiniFloorTableRow[],
-  canvasW: number,
-  canvasH: number,
+  layoutW: number,
+  layoutH: number,
+  viewportW: number,
+  viewportH: number,
 ): { scale: number; x: number; y: number } {
-  if (tables.length === 0 || canvasW < 1 || canvasH < 1) {
+  if (tables.length === 0 || layoutW < 1 || layoutH < 1 || viewportW < 1 || viewportH < 1) {
     return { scale: 1, x: 0, y: 0 };
   }
 
@@ -68,13 +86,13 @@ function computeFit(
 
   for (const t of tables) {
     const fb = getTableDimensions(t.max_covers, t.shape);
-    const cx = t.position_x != null ? (t.position_x / 100) * canvasW : canvasW / 2;
-    const cy = t.position_y != null ? (t.position_y / 100) * canvasH : canvasH / 2;
+    const cx = t.position_x != null ? (t.position_x / 100) * layoutW : layoutW / 2;
+    const cy = t.position_y != null ? (t.position_y / 100) * layoutH : layoutH / 2;
     const { w, h } = tableDimensionsPercentToPixels(
       t.width ?? fb.width,
       t.height ?? fb.height,
-      canvasW,
-      canvasH,
+      layoutW,
+      layoutH,
       t.shape,
     );
     minX = Math.min(minX, cx - w / 2);
@@ -86,14 +104,14 @@ function computeFit(
   const pad = 28;
   const bw = Math.max(1e-6, maxX - minX + pad * 2);
   const bh = Math.max(1e-6, maxY - minY + pad * 2);
-  const rawScale = Math.min(canvasW / bw, canvasH / bh, 2.5);
+  const rawScale = Math.min(viewportW / bw, viewportH / bh, 2.5);
   const scale = Number.isFinite(rawScale) && rawScale > 0 ? rawScale : 1;
   const midX = (minX + maxX) / 2;
   const midY = (minY + maxY) / 2;
   return {
     scale,
-    x: canvasW / 2 - midX * scale,
-    y: canvasH / 2 - midY * scale,
+    x: viewportW / 2 - midX * scale,
+    y: viewportH / 2 - midY * scale,
   };
 }
 
@@ -106,6 +124,8 @@ export default function MiniFloorPlanPicker({
   className = '',
   minHeight = 220,
   previewMode = false,
+  layoutWidth,
+  layoutHeight,
 }: MiniFloorPlanPickerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<Konva.Stage | null>(null);
@@ -113,6 +133,8 @@ export default function MiniFloorPlanPicker({
   /** Konva must never receive 0×0 — it triggers drawImage on invalid layer canvases. */
   const canvasW = Math.max(1, dimensions.width);
   const canvasH = Math.max(1, dimensions.height);
+  const logicalW = Math.max(1, Math.round(layoutWidth ?? canvasW));
+  const logicalH = Math.max(1, Math.round(layoutHeight ?? canvasH));
   const [fetchedTables, setFetchedTables] = useState<MiniFloorTableRow[] | null>(
     tablesProp != null ? tablesProp : null,
   );
@@ -127,13 +149,20 @@ export default function MiniFloorPlanPicker({
     const raw = tablesProp ?? fetchedTables ?? [];
     return raw.filter((t) => t.is_active).map((t) => {
       const fb = getTableDimensions(t.max_covers, t.shape);
+      if (previewMode) {
+        return {
+          ...t,
+          width: t.width ?? fb.width,
+          height: t.height ?? fb.height,
+        };
+      }
       return {
         ...t,
         width: Math.max(t.width ?? fb.width, 9),
         height: Math.max(t.height ?? fb.height, 7.5),
       };
     });
-  }, [tablesProp, fetchedTables]);
+  }, [tablesProp, fetchedTables, previewMode]);
 
   const isLoading = fetchLoading && tablesProp == null;
 
@@ -182,8 +211,8 @@ export default function MiniFloorPlanPicker({
   }, [minHeight]);
 
   const fit = useMemo(
-    () => computeFit(tables, canvasW, canvasH),
-    [tables, canvasW, canvasH],
+    () => computeFit(tables, logicalW, logicalH, canvasW, canvasH),
+    [tables, logicalW, logicalH, canvasW, canvasH],
   );
 
   useEffect(() => {
@@ -216,8 +245,8 @@ export default function MiniFloorPlanPicker({
       const { w: tw, h: th } = tableDimensionsPercentToPixels(
         table.width ?? fb.width,
         table.height ?? fb.height,
-        canvasW,
-        canvasH,
+        logicalW,
+        logicalH,
         table.shape,
       );
       const capacityText =
@@ -230,13 +259,34 @@ export default function MiniFloorPlanPicker({
         shape: table.shape,
         topLabel: table.name,
         bottomLabel: capacityText,
-        compactLabels: true,
-        layoutScale: undefined,
+        compactLabels: !previewMode,
+        layoutScale: previewMode ? scale : undefined,
         polygon_points: table.polygon_points ?? null,
       };
     });
     return computeGlobalUnifiedLabelFonts(inputs);
-  }, [tables, canvasW, canvasH]);
+  }, [tables, logicalW, logicalH, previewMode, scale]);
+
+  const adjacency = useMemo(() => {
+    const bounds = tables.map((table) => {
+      const fb = getTableDimensions(table.max_covers, table.shape);
+      const { w, h } = tableDimensionsPercentToPixels(
+        table.width ?? fb.width,
+        table.height ?? fb.height,
+        logicalW,
+        logicalH,
+        table.shape,
+      );
+      return {
+        id: table.id,
+        x: table.position_x != null ? (table.position_x / 100) * logicalW : logicalW / 2,
+        y: table.position_y != null ? (table.position_y / 100) * logicalH : logicalH / 2,
+        w,
+        h,
+      };
+    });
+    return computeTableAdjacency(bounds);
+  }, [tables, logicalW, logicalH]);
 
   const zoomBy = useCallback(
     (delta: number) => {
@@ -429,8 +479,8 @@ export default function MiniFloorPlanPicker({
               const { w, h } = tableDimensionsPercentToPixels(
                 table.width ?? fb.width,
                 table.height ?? fb.height,
-                canvasW,
-                canvasH,
+                logicalW,
+                logicalH,
                 table.shape,
               );
 
@@ -443,15 +493,18 @@ export default function MiniFloorPlanPicker({
                 <Group key={table.id} opacity={groupOpacity}>
                   <TableShape
                     table={table}
-                    hiddenSides={EMPTY_HIDDEN}
+                    hiddenSides={previewMode ? blockedToHiddenSet(adjacency.get(table.id)) : EMPTY_HIDDEN}
                     isSelected={!previewMode && isSelected && !busy}
                     isEditorMode={false}
                     statusColour={statusColour}
                     booking={null}
-                    canvasWidth={canvasW}
-                    canvasHeight={canvasH}
-                    compactLabels
+                    canvasWidth={logicalW}
+                    canvasHeight={logicalH}
+                    compactLabels={!previewMode}
+                    showSeats={!previewMode}
+                    layoutScale={previewMode ? scale : undefined}
                     unifiedLabelFonts={unifiedLabelFonts}
+                    seatAngles={table.seat_angles}
                     onClick={previewMode ? undefined : () => toggleTable(table.id)}
                     onTap={previewMode ? undefined : () => toggleTable(table.id)}
                   />
@@ -460,13 +513,13 @@ export default function MiniFloorPlanPicker({
                     <Rect
                       x={
                         (table.position_x != null
-                          ? (table.position_x / 100) * canvasW
-                          : canvasW / 2) - w / 2
+                          ? (table.position_x / 100) * logicalW
+                          : logicalW / 2) - w / 2
                       }
                       y={
                         (table.position_y != null
-                          ? (table.position_y / 100) * canvasH
-                          : canvasH / 2) - h / 2
+                          ? (table.position_y / 100) * logicalH
+                          : logicalH / 2) - h / 2
                       }
                       width={w}
                       height={h}

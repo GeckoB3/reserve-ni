@@ -2,7 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { VenueTable } from '@/types/table-management';
-import { getTableDimensions } from '@/types/table-management';
+import { getTableDimensions, tableDimensionsPercentToPixels } from '@/types/table-management';
+import {
+  FLOOR_PLAN_DEFAULT_LAYOUT_HEIGHT,
+  FLOOR_PLAN_DEFAULT_LAYOUT_WIDTH,
+} from '@/lib/floor-plan/fit-view';
 import {
   getRotatedBoundingBox,
   getBoundingBoxGap,
@@ -19,13 +23,15 @@ interface Props {
   diningAreaId?: string | null;
 }
 
-function toCombinationTable(t: VenueTable): CombinationTable {
+function toDetectionTable(t: VenueTable): CombinationTable {
   const dims = getTableDimensions(t.max_covers, t.shape);
   return {
     id: t.id,
     name: t.name,
     max_covers: t.max_covers,
     is_active: t.is_active,
+    // The backend detector currently uses the saved floor-plan percentage values directly.
+    // Keep this preview's highlight calculation on the same inputs so it matches auto-detected groups.
     position_x: t.position_x,
     position_y: t.position_y,
     width: t.width ?? dims.width,
@@ -69,12 +75,17 @@ function computeAabb(cx: number, cy: number, w: number, h: number, rotation: num
   };
 }
 
-function toTableGeom(t: VenueTable): TableGeom {
+function toTableGeom(t: VenueTable, layoutWidth: number, layoutHeight: number): TableGeom {
   const dims = getTableDimensions(t.max_covers, t.shape);
-  const w = t.width ?? dims.width;
-  const h = t.height ?? dims.height;
-  const cx = t.position_x ?? 50;
-  const cy = t.position_y ?? 50;
+  const { w, h } = tableDimensionsPercentToPixels(
+    t.width ?? dims.width,
+    t.height ?? dims.height,
+    layoutWidth,
+    layoutHeight,
+    t.shape,
+  );
+  const cx = t.position_x != null ? (t.position_x / 100) * layoutWidth : layoutWidth / 2;
+  const cy = t.position_y != null ? (t.position_y / 100) * layoutHeight : layoutHeight / 2;
   const rotation = t.rotation ?? 0;
   const polygonPoints = Array.isArray(t.polygon_points) ? t.polygon_points : null;
   return {
@@ -93,6 +104,10 @@ function toTableGeom(t: VenueTable): TableGeom {
 
 export function AdjacencyPreview({ threshold, refreshKey = 0, diningAreaId }: Props) {
   const [tables, setTables] = useState<VenueTable[]>([]);
+  const [layout, setLayout] = useState({
+    width: FLOOR_PLAN_DEFAULT_LAYOUT_WIDTH,
+    height: FLOOR_PLAN_DEFAULT_LAYOUT_HEIGHT,
+  });
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
@@ -107,6 +122,10 @@ export function AdjacencyPreview({ threshold, refreshKey = 0, diningAreaId }: Pr
       const data = await res.json();
       if (!mountedRef.current) return;
       setTables((data.tables ?? []).filter((t: VenueTable) => t.is_active));
+      const nextLayout = data.floor_plan_layout as { width?: number; height?: number } | undefined;
+      if (typeof nextLayout?.width === 'number' && typeof nextLayout.height === 'number') {
+        setLayout({ width: nextLayout.width, height: nextLayout.height });
+      }
     } catch {
       // Non-critical — diagram will show stale data
     } finally {
@@ -138,11 +157,14 @@ export function AdjacencyPreview({ threshold, refreshKey = 0, diningAreaId }: Pr
   }, [refreshKey, fetchTables]);
 
   const comboTables = useMemo(
-    () => tables.map(toCombinationTable),
+    () => tables.map(toDetectionTable),
     [tables],
   );
 
-  const geomTables = useMemo(() => tables.map(toTableGeom), [tables]);
+  const geomTables = useMemo(
+    () => tables.map((t) => toTableGeom(t, layout.width, layout.height)),
+    [tables, layout.width, layout.height],
+  );
   const geomById = useMemo(() => {
     const m = new Map<string, TableGeom>();
     for (const g of geomTables) m.set(g.id, g);
